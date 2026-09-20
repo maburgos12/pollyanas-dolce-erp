@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import FieldDoesNotExist
 from django.db import IntegrityError, models, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
@@ -27,7 +28,6 @@ class ExpedienteCedulaIMSSSchemaTests(SimpleTestCase):
         relaciones = (
             (reportes_models.ExpedienteCedulaIMSS, "aplicado_por"),
             (reportes_models.DocumentoCedulaIMSS, "expediente"),
-            (reportes_models.DetalleCedulaIMSS, "expediente"),
             (reportes_models.DetalleCedulaIMSS, "documento"),
             (reportes_models.DetalleCedulaIMSS, "empleado"),
             (reportes_models.DetalleCedulaIMSS, "sucursal"),
@@ -66,12 +66,17 @@ class ExpedienteCedulaIMSSSchemaTests(SimpleTestCase):
         self.assertIn("uniq_cedula_imss_revision", {c.name for c in expediente._meta.constraints})
         self.assertIn("uniq_cedula_imss_aplicada", {c.name for c in expediente._meta.constraints})
         self.assertIn("cedula_imss_reg_period_idx", {i.name for i in expediente._meta.indexes})
+        self.assertIn("uniq_cedula_sua_expediente", {c.name for c in documento._meta.constraints})
         self.assertIn("uniq_cedula_imss_nss", {c.name for c in detalle._meta.constraints})
-        self.assertIn("cedula_imss_emp_exp_idx", {i.name for i in detalle._meta.indexes})
+        self.assertIn("cedula_imss_emp_doc_idx", {i.name for i in detalle._meta.indexes})
 
         documento_fk = detalle._meta.get_field("documento")
         self.assertFalse(documento_fk.null)
         self.assertEqual(documento_fk.remote_field.related_name, "detalles")
+
+    def test_detalle_no_duplica_referencia_al_expediente(self):
+        with self.assertRaises(FieldDoesNotExist):
+            reportes_models.DetalleCedulaIMSS._meta.get_field("expediente")
 
 
 class ExpedienteCedulaIMSSDatabaseTests(TestCase):
@@ -102,7 +107,6 @@ class ExpedienteCedulaIMSSDatabaseTests(TestCase):
 
     def crear_detalle(self, documento, **overrides):
         datos = {
-            "expediente": documento.expediente,
             "documento": documento,
             "nss": "12345678901",
             "nombre_origen": "Persona de prueba",
@@ -144,6 +148,36 @@ class ExpedienteCedulaIMSSDatabaseTests(TestCase):
 
         with self.assertRaises(IntegrityError), transaction.atomic():
             reportes_models.DocumentoCedulaIMSS.objects.create(**datos)
+
+    def test_solo_permite_un_sua_por_expediente(self):
+        expediente = self.crear_expediente()
+        self.crear_documento_sua(expediente)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.crear_documento_sua(
+                expediente,
+                nombre_original="SUA_corregido.xlsx",
+                sha256="c" * 64,
+            )
+
+    def test_documentos_ema_y_eba_coexisten_en_el_mismo_expediente(self):
+        expediente = self.crear_expediente()
+        ema = self.crear_documento_sua(
+            expediente,
+            clase=reportes_models.DocumentoCedulaIMSS.CLASE_EMA_PDF,
+            nombre_original="EMA_agosto.pdf",
+            sha256="d" * 64,
+            mime_type="application/pdf",
+        )
+        eba = self.crear_documento_sua(
+            expediente,
+            clase=reportes_models.DocumentoCedulaIMSS.CLASE_EBA_PDF,
+            nombre_original="EBA_agosto.pdf",
+            sha256="e" * 64,
+            mime_type="application/pdf",
+        )
+
+        self.assertEqual(expediente.documentos.filter(pk__in=[ema.pk, eba.pk]).count(), 2)
 
     def test_no_permite_repetir_nss_dentro_del_mismo_documento(self):
         expediente = self.crear_expediente()

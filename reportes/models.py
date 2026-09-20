@@ -3014,6 +3014,13 @@ class DocumentoCedulaIMSS(models.Model):
     class Meta:
         verbose_name = "Documento de cédula IMSS"
         verbose_name_plural = "Documentos de cédula IMSS"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["expediente"],
+                condition=models.Q(clase="SUA_XLS"),
+                name="uniq_cedula_sua_expediente",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.nombre_original
@@ -3027,11 +3034,6 @@ class DetalleCedulaIMSS(models.Model):
         (CRUCE_SIN_CRUCE, "Sin cruce"),
     ]
 
-    expediente = models.ForeignKey(
-        ExpedienteCedulaIMSS,
-        on_delete=models.PROTECT,
-        related_name="detalles",
-    )
     documento = models.ForeignKey(
         DocumentoCedulaIMSS,
         on_delete=models.PROTECT,
@@ -3080,8 +3082,8 @@ class DetalleCedulaIMSS(models.Model):
         ]
         indexes = [
             models.Index(
-                fields=["empleado", "expediente"],
-                name="cedula_imss_emp_exp_idx",
+                fields=["empleado", "documento"],
+                name="cedula_imss_emp_doc_idx",
             ),
         ]
 
