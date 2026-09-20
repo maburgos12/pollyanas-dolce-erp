@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
@@ -11,6 +13,7 @@ from pathlib import Path
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
+from django.db.models.signals import post_save
 
 from reportes.models import DocumentoCedulaIMSS, LineaPresupuestoMensual
 from reportes.services_cedula_expediente import (
@@ -190,6 +193,42 @@ def _verificar_sha_materializado(sha256_sua, lineas: tuple[LineaPresupuestoMensu
             )
 
 
+@contextmanager
+def _capturar_blobs_creados(
+    destino: list[tuple[object, str]],
+    *,
+    shas_esperados: set[str],
+    nombres_protegidos: set[str],
+):
+    """Registra blobs al guardar Documento, antes de cualquier consulta posterior."""
+    hilo = threading.get_ident()
+    dispatch_uid = f"regularizar-cedulas-imss-{id(destino)}-{hilo}"
+
+    def registrar(sender, instance, created, **kwargs):
+        if (
+            created
+            and threading.get_ident() == hilo
+            and instance.sha256 in shas_esperados
+            and instance.archivo.name
+            and instance.archivo.name not in nombres_protegidos
+        ):
+            destino.append((instance.archivo.storage, instance.archivo.name))
+
+    post_save.connect(
+        registrar,
+        sender=DocumentoCedulaIMSS,
+        dispatch_uid=dispatch_uid,
+        weak=False,
+    )
+    try:
+        yield
+    finally:
+        post_save.disconnect(
+            sender=DocumentoCedulaIMSS,
+            dispatch_uid=dispatch_uid,
+        )
+
+
 class Command(BaseCommand):
     help = "Regulariza expedientes históricos de cédulas IMSS (dry-run por defecto)."
 
@@ -317,12 +356,20 @@ class Command(BaseCommand):
                             sha256__in=[d.sha256 for d in item.preview.documentos]
                         ).values_list("sha256", flat=True)
                     )
-                    expediente = aplicar_expediente(item.preview, usuario=None)
+                    nombres_protegidos = set(
+                        DocumentoCedulaIMSS.objects.filter(sha256__in=shas_previos).values_list(
+                            "archivo", flat=True
+                        )
+                    )
+                    with _capturar_blobs_creados(
+                        blobs_nuevos,
+                        shas_esperados={d.sha256 for d in item.preview.documentos},
+                        nombres_protegidos=nombres_protegidos,
+                    ):
+                        expediente = aplicar_expediente(item.preview, usuario=None)
                     documento_sua = expediente.documentos.get(
                         clase=DocumentoCedulaIMSS.CLASE_SUA_XLS
                     )
-                    for documento in expediente.documentos.exclude(sha256__in=shas_previos):
-                        blobs_nuevos.append((documento.archivo.storage, documento.archivo.name))
 
                     actuales = _lineas_objetivo(item.parseada)
                     LineaPresupuestoMensual.objects.filter(

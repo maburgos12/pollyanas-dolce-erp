@@ -329,6 +329,54 @@ class RegularizacionCedulasTests(TestCase):
             linea.refresh_from_db()
             self.assertNotIn("expediente_cedula_imss_id", linea.metadata)
 
+    def test_fallo_inmediato_tras_servicio_limpia_blob_nuevo_y_conserva_preexistente(self):
+        from django.db.models.query import QuerySet
+        from reportes.services_cedula_expediente import aplicar_expediente as aplicar_real
+
+        self._crear_lineas_historicas()
+        preexistente = Path(self._media.name) / "reportes/cedulas-imss/preexistente.xls"
+        preexistente.parent.mkdir(parents=True)
+        preexistente.write_bytes(b"no borrar")
+        servicio_retorno = False
+        get_real = QuerySet.get
+
+        def aplicar_y_marcar(preview, usuario):
+            nonlocal servicio_retorno
+            resultado = aplicar_real(preview, usuario)
+            servicio_retorno = True
+            return resultado
+
+        def fallar_primera_consulta_documento(queryset, *args, **kwargs):
+            if servicio_retorno and queryset.model is reportes_models.DocumentoCedulaIMSS:
+                raise RuntimeError("falla inmediata post-servicio")
+            return get_real(queryset, *args, **kwargs)
+
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.cargar_filas_xls",
+            return_value=PersistenciaExpedienteTests._filas(),
+        ), patch(
+            "reportes.management.commands.regularizar_expedientes_cedulas_imss.aplicar_expediente",
+            side_effect=aplicar_y_marcar,
+        ), patch.object(QuerySet, "get", new=fallar_primera_consulta_documento):
+            with self.assertRaisesRegex(RuntimeError, "falla inmediata post-servicio"):
+                call_command(
+                    "regularizar_expedientes_cedulas_imss",
+                    "--root",
+                    self._root.name,
+                    "--apply",
+                    stdout=StringIO(),
+                )
+
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+        self.assertFalse(reportes_models.DocumentoCedulaIMSS.objects.exists())
+        self.assertEqual(
+            [p.relative_to(self._media.name) for p in Path(self._media.name).rglob("*") if p.is_file()],
+            [Path("reportes/cedulas-imss/preexistente.xls")],
+        )
+
     def test_rechaza_root_inexistente_y_symlinks(self):
         with self.assertRaises(CommandError):
             call_command(
