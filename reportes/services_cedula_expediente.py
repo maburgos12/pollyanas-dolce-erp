@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Iterable
 
 from django.core.files.base import ContentFile
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 
 from core.audit import log_event
@@ -343,6 +343,7 @@ def _materializar_desde_detalles(
     detalles: tuple[DetallePreview, ...],
     expediente,
     documento_sua,
+    expedientes_reemplazados: set[int],
 ) -> ResultadoMaterializacion:
     totales: dict[tuple[str, int | None], Decimal] = {}
     avisos: list[str] = []
@@ -401,6 +402,31 @@ def _materializar_desde_detalles(
         linea.actualizado_en = timezone.now()
         cambios.append(linea)
         actualizadas += 1
+    claves_destino = set(destinos)
+    if expedientes_reemplazados:
+        candidatas_obsoletas = LineaPresupuestoMensual.objects.select_for_update().filter(
+            periodo__in=preview.parseada.meses,
+            fuente_real=FUENTE_SIPARE,
+        )
+        for linea in candidatas_obsoletas:
+            metadata_actual = dict(linea.metadata or {})
+            if metadata_actual.get("expediente_cedula_imss_id") not in expedientes_reemplazados:
+                continue
+            if (linea.rubro_id, linea.periodo) in claves_destino:
+                continue
+            metadata_actual["cedula_imss"] = {
+                "tipo": preview.parseada.tipo,
+                "registro_patronal": preview.parseada.registro_patronal,
+                "trabajadores": sum(d.empleado_id is not None for d in detalles),
+                "importado_en": timezone.now().isoformat(),
+            }
+            metadata_actual["expediente_cedula_imss_id"] = expediente.pk
+            metadata_actual["documento_cedula_imss_id"] = documento_sua.pk
+            linea.monto_real = Decimal("0.00")
+            linea.metadata = metadata_actual
+            linea.actualizado_en = timezone.now()
+            cambios.append(linea)
+            actualizadas += 1
     if cambios:
         LineaPresupuestoMensual.objects.bulk_update(
             cambios, ["monto_real", "fuente_real", "metadata", "actualizado_en"]
@@ -423,6 +449,16 @@ def _limpiar_blobs(blobs_guardados, *, protegidos=frozenset()) -> None:
             logger.warning("No se pudo limpiar blob de cédula IMSS: %s", nombre, exc_info=True)
 
 
+def _bloquear_familia(preview: PreviewExpediente) -> None:
+    identidad = (
+        f"{preview.parseada.tipo}|{preview.parseada.periodo.isoformat()}|"
+        f"{preview.parseada.registro_patronal}"
+    ).encode("utf-8")
+    clave = int.from_bytes(hashlib.sha256(identidad).digest()[:8], "big", signed=True)
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [clave])
+
+
 def aplicar_expediente(preview: PreviewExpediente, usuario):
     """Persiste y materializa una previsualización de forma atómica e idempotente."""
     if preview.total_detalle != preview.total_patronal:
@@ -432,6 +468,8 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
     blobs_guardados: list[tuple[object, str]] = []
     try:
         with transaction.atomic():
+            _bloquear_familia(preview)
+            aplicados_anteriores: set[int] = set()
             documento_sua = (
                 DocumentoCedulaIMSS.objects.select_for_update()
                 .filter(sha256=preview.sua.sha256, clase=DocumentoCedulaIMSS.CLASE_SUA_XLS)
@@ -442,11 +480,23 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                 expediente = ExpedienteCedulaIMSS.objects.select_for_update().get(
                     pk=documento_sua.expediente_id
                 )
-                _adjuntar_pdfs(expediente, preview, blobs_guardados)
+                evidencias_agregadas = _adjuntar_pdfs(expediente, preview, blobs_guardados)
                 if expediente.estado in {
                     ExpedienteCedulaIMSS.ESTADO_APLICADO,
                     ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO,
                 }:
+                    if evidencias_agregadas:
+                        log_event(
+                            usuario,
+                            "CEDULA_IMSS_EVIDENCIA_AGREGADA",
+                            "reportes.ExpedienteCedulaIMSS",
+                            str(expediente.pk),
+                            {
+                                "sha256": [d.sha256 for d in evidencias_agregadas],
+                                "documento_ids": [d.pk for d in evidencias_agregadas],
+                                "expediente_id": expediente.pk,
+                            },
+                        )
                     return expediente
             else:
                 revisiones = list(
@@ -457,9 +507,12 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                     )
                 )
                 revision = max((e.revision for e in revisiones), default=0) + 1
-                ExpedienteCedulaIMSS.objects.filter(
-                    pk__in=[e.pk for e in revisiones if e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO]
-                ).update(estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+                aplicados_anteriores = {
+                    e.pk for e in revisiones if e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO
+                }
+                ExpedienteCedulaIMSS.objects.filter(pk__in=aplicados_anteriores).update(
+                    estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO
+                )
                 expediente = ExpedienteCedulaIMSS.objects.create(
                     tipo=preview.parseada.tipo,
                     periodo=preview.parseada.periodo,
@@ -480,12 +533,14 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                     registro_patronal=preview.parseada.registro_patronal,
                 )
             )
-            ExpedienteCedulaIMSS.objects.filter(
-                pk__in=[
-                    e.pk for e in revisiones
-                    if e.pk != expediente.pk and e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO
-                ]
-            ).update(estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+            reemplazados = {
+                e.pk for e in revisiones
+                if e.pk != expediente.pk and e.estado == ExpedienteCedulaIMSS.ESTADO_APLICADO
+            }
+            reemplazados.update(aplicados_anteriores)
+            ExpedienteCedulaIMSS.objects.filter(pk__in=reemplazados).update(
+                estado=ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO
+            )
             detalles, duplicados = _cruzar_detalles(preview.parseada, bloquear=True)
             if duplicados:
                 raise ValueError(
@@ -495,7 +550,7 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                 documento_sua.detalles.all().delete()
             _crear_detalles(documento_sua, detalles)
             resultado = _materializar_desde_detalles(
-                preview, detalles, expediente, documento_sua
+                preview, detalles, expediente, documento_sua, reemplazados
             )
             expediente.estado = ExpedienteCedulaIMSS.ESTADO_APLICADO
             expediente.aplicado_en = timezone.now()

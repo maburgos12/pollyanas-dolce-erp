@@ -14,7 +14,6 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, close_old_connections, connection, models, transaction
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
-from django.db.models.query import QuerySet
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -546,6 +545,48 @@ class PersistenciaExpedienteTests(TestCase):
             ).exists()
         )
 
+    def test_revision_pone_en_cero_destino_anterior_ausente_sin_doble_conteo(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        anterior = aplicar_expediente(self._preview(), usuario=self.user)
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.save(update_fields=["departamento"])
+        contenido_corregido = self._sua().read() + b"movido-produccion"
+        nuevo = aplicar_expediente(
+            self._preview(archivos=[self._sua(contenido=contenido_corregido)]),
+            usuario=self.user,
+        )
+
+        administracion = reportes_models.LineaPresupuestoMensual.objects.get(
+            rubro__area=self.adm, periodo=date(2026, 8, 1)
+        )
+        produccion = reportes_models.LineaPresupuestoMensual.objects.get(
+            rubro__area=self.prod, periodo=date(2026, 8, 1)
+        )
+        nomina = reportes_models.LineaPresupuestoMensual.objects.get(
+            rubro__area=self.nom, periodo=date(2026, 8, 1)
+        )
+        self.assertEqual(administracion.monto_real, Decimal("0.00"))
+        self.assertEqual(produccion.monto_real, Decimal("150.25"))
+        self.assertEqual(nomina.monto_real, Decimal("150.25"))
+        self.assertEqual(administracion.metadata["expediente_cedula_imss_id"], nuevo.pk)
+        self.assertEqual(
+            reportes_models.LineaPresupuestoMensual.objects.filter(
+                fuente_real="AUTO:SIPARE",
+                monto_real__gt=0,
+            ).exclude(
+                rubro__area=self.nom,
+            ).aggregate(total=Sum("monto_real"))["total"],
+            Decimal("150.25"),
+        )
+        auditoria = AuditLog.objects.get(
+            action="CEDULA_IMSS_APLICADA", object_id=str(nuevo.pk)
+        )
+        self.assertEqual(auditoria.payload["lineas_actualizadas"], 3)
+        anterior.refresh_from_db()
+        self.assertEqual(anterior.estado, reportes_models.ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO)
+
     def test_sha_valido_completa_aplicacion_y_sha_aplicado_adjunta_pdf_nuevo(self):
         from reportes.services_cedula_expediente import aplicar_expediente
 
@@ -579,8 +620,21 @@ class PersistenciaExpedienteTests(TestCase):
         repetido = aplicar_expediente(con_pdf, usuario=self.user)
         self.assertEqual(repetido.pk, pendiente.pk)
         self.assertEqual(pendiente.documentos.count(), 2)
+        evento = AuditLog.objects.get(
+            action="CEDULA_IMSS_EVIDENCIA_AGREGADA", object_id=str(pendiente.pk)
+        )
+        pdf = pendiente.documentos.get(clase=reportes_models.DocumentoCedulaIMSS.CLASE_EMA_PDF)
+        self.assertEqual(evento.user, self.user)
+        self.assertEqual(evento.payload["sha256"], [pdf.sha256])
+        self.assertEqual(evento.payload["documento_ids"], [pdf.pk])
         aplicar_expediente(con_pdf, usuario=self.user)
         self.assertEqual(pendiente.documentos.count(), 2)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action="CEDULA_IMSS_EVIDENCIA_AGREGADA", object_id=str(pendiente.pk)
+            ).count(),
+            1,
+        )
 
     def test_carrera_sha_relee_ganador_despues_del_rollback_y_conserva_su_blob(self):
         from reportes.services_cedula_expediente import aplicar_expediente
@@ -792,19 +846,6 @@ class ConcurrenciaExpedienteTests(TransactionTestCase):
             preview = preparar_expediente([PersistenciaExpedienteTests._sua()], usuario=self.user)
 
         barrera = threading.Barrier(2, timeout=10)
-        primero_real = QuerySet.first
-        estado_hilo = threading.local()
-
-        def first_con_barrera(queryset):
-            if (
-                queryset.model is reportes_models.DocumentoCedulaIMSS
-                and "sha256" in str(queryset.query)
-                and not getattr(estado_hilo, "sincronizado", False)
-            ):
-                estado_hilo.sincronizado = True
-                barrera.wait()
-            return primero_real(queryset)
-
         resultados = []
         errores = []
         candado = threading.Lock()
@@ -812,6 +853,7 @@ class ConcurrenciaExpedienteTests(TransactionTestCase):
         def ejecutar():
             close_old_connections()
             try:
+                barrera.wait()
                 pk = aplicar_expediente(preview, usuario=self.user).pk
                 with candado:
                     resultados.append(pk)
@@ -821,12 +863,11 @@ class ConcurrenciaExpedienteTests(TransactionTestCase):
             finally:
                 close_old_connections()
 
-        with patch.object(QuerySet, "first", new=first_con_barrera):
-            hilos = [threading.Thread(target=ejecutar) for _ in range(2)]
-            for hilo in hilos:
-                hilo.start()
-            for hilo in hilos:
-                hilo.join(timeout=15)
+        hilos = [threading.Thread(target=ejecutar) for _ in range(2)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join(timeout=15)
 
         self.assertFalse(any(hilo.is_alive() for hilo in hilos))
         self.assertEqual(errores, [])
@@ -834,3 +875,56 @@ class ConcurrenciaExpedienteTests(TransactionTestCase):
         self.assertEqual(len(set(resultados)), 1)
         self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
         self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
+
+    def test_dos_sha_distintos_se_serializan_en_revisiones_sin_error(self):
+        from reportes.services_cedula_expediente import aplicar_expediente, preparar_expediente
+
+        previews = []
+        for sufijo in (b"revision-a", b"revision-b"):
+            archivo = PersistenciaExpedienteTests._sua(
+                contenido=PersistenciaExpedienteTests._sua().read() + sufijo
+            )
+            with patch(
+                "reportes.services_cedula_expediente.cargar_filas_xls",
+                return_value=PersistenciaExpedienteTests._filas(),
+            ):
+                previews.append(preparar_expediente([archivo], usuario=self.user))
+
+        barrera = threading.Barrier(2, timeout=10)
+        resultados = []
+        errores = []
+        candado = threading.Lock()
+
+        def ejecutar(preview):
+            close_old_connections()
+            try:
+                barrera.wait()
+                expediente = aplicar_expediente(preview, usuario=self.user)
+                with candado:
+                    resultados.append(expediente.pk)
+            except Exception as exc:
+                with candado:
+                    errores.append(exc)
+            finally:
+                close_old_connections()
+
+        hilos = [threading.Thread(target=ejecutar, args=(preview,)) for preview in previews]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join(timeout=15)
+
+        self.assertFalse(any(hilo.is_alive() for hilo in hilos))
+        self.assertEqual(errores, [])
+        self.assertEqual(len(set(resultados)), 2)
+        expedientes = list(
+            reportes_models.ExpedienteCedulaIMSS.objects.order_by("revision")
+        )
+        self.assertEqual([e.revision for e in expedientes], [1, 2])
+        self.assertEqual(
+            [e.estado for e in expedientes],
+            [
+                reportes_models.ExpedienteCedulaIMSS.ESTADO_REEMPLAZADO,
+                reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            ],
+        )
