@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from core.audit import log_event
@@ -359,6 +359,24 @@ def aplicar_expediente(preview: PreviewExpediente, usuario):
                 },
             )
         return expediente
+    except IntegrityError:
+        ganador = (
+            DocumentoCedulaIMSS.objects.filter(sha256=preview.sua.sha256)
+            .select_related("expediente")
+            .first()
+        )
+        blobs_ganadores = set()
+        if ganador is not None:
+            blobs_ganadores = set(
+                DocumentoCedulaIMSS.objects.filter(expediente_id=ganador.expediente_id)
+                .values_list("archivo", flat=True)
+            )
+        for storage, nombre in reversed(blobs_guardados):
+            if nombre not in blobs_ganadores:
+                storage.delete(nombre)
+        if ganador is not None:
+            return ganador.expediente
+        raise
     except Exception:
         for storage, nombre in reversed(blobs_guardados):
             storage.delete(nombre)

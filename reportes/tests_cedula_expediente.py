@@ -2,10 +2,12 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 import tempfile
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import FieldDoesNotExist
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, models, transaction
 from django.db.models import Sum
@@ -455,6 +457,65 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
         self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
         self.assertEqual(AuditLog.objects.filter(action="CEDULA_IMSS_APLICADA").count(), 1)
+
+    def test_carrera_sha_relee_ganador_despues_del_rollback_y_conserva_su_blob(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        preview = self._preview()
+        ganador = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo=reportes_models.ExpedienteCedulaIMSS.TIPO_MENSUAL,
+            periodo=date(2026, 7, 1),
+            registro_patronal="GANADOR",
+            estado=reportes_models.ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=preview.total_patronal,
+        )
+        documento_ganador = reportes_models.DocumentoCedulaIMSS(
+            expediente=ganador,
+            clase=reportes_models.DocumentoCedulaIMSS.CLASE_SUA_XLS,
+            nombre_original="ganador.xls",
+            sha256=preview.sua.sha256,
+            tamano=len(preview.sua.contenido),
+            mime_type="application/vnd.ms-excel",
+            total_visible=preview.total_patronal,
+        )
+        documento_ganador.archivo.save(
+            "ganador.xls", ContentFile(preview.sua.contenido), save=False
+        )
+        documento_ganador.save()
+        blob_ganador = documento_ganador.archivo.name
+
+        filtro_real = reportes_models.DocumentoCedulaIMSS.objects.filter
+        consulta_inicial_oculta = MagicMock()
+        consulta_inicial_oculta.select_related.return_value.first.return_value = None
+        consultas_sha = 0
+
+        def filtrar_con_carrera(*args, **kwargs):
+            nonlocal consultas_sha
+            if kwargs == {"sha256": preview.sua.sha256}:
+                consultas_sha += 1
+                if consultas_sha == 1:
+                    return consulta_inicial_oculta
+            return filtro_real(*args, **kwargs)
+
+        def reutilizar_nombre_ganador(field_file, name, content, save=True):
+            field_file.name = blob_ganador
+            field_file._committed = True
+
+        with patch.object(
+            reportes_models.DocumentoCedulaIMSS.objects,
+            "filter",
+            side_effect=filtrar_con_carrera,
+        ), patch(
+            "django.db.models.fields.files.FieldFile.save",
+            new=reutilizar_nombre_ganador,
+        ):
+            resultado = aplicar_expediente(preview, usuario=self.user)
+
+        self.assertEqual(resultado.pk, ganador.pk)
+        self.assertGreaterEqual(consultas_sha, 2)
+        self.assertTrue(default_storage.exists(blob_ganador))
+        self.assertEqual(reportes_models.ExpedienteCedulaIMSS.objects.count(), 1)
+        self.assertEqual(reportes_models.DocumentoCedulaIMSS.objects.count(), 1)
 
     def test_total_discordante_hace_rollback_sin_lineas_ni_archivos(self):
         from reportes.services_cedula_expediente import CedulaDiscrepante, aplicar_expediente
