@@ -2941,12 +2941,12 @@ class ExpedienteCedulaIMSS(models.Model):
         (ESTADO_DISCREPANCIA, "Discrepancia"),
     ]
 
-    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
-    periodo = models.DateField()
-    registro_patronal = models.CharField(max_length=30)
-    razon_social = models.CharField(max_length=200)
+    tipo = models.CharField(max_length=12, choices=TIPO_CHOICES)
+    periodo = models.DateField(db_index=True)
+    registro_patronal = models.CharField(max_length=20, db_index=True)
+    razon_social = models.CharField(max_length=200, blank=True, default="")
     revision = models.PositiveSmallIntegerField(default=1)
-    estado = models.CharField(max_length=14, choices=ESTADO_CHOICES, default=ESTADO_VALIDO)
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES)
     total_patronal = models.DecimalField(max_digits=14, decimal_places=2)
     trabajadores = models.PositiveIntegerField(default=0)
     cruzados = models.PositiveIntegerField(default=0)
@@ -2958,7 +2958,7 @@ class ExpedienteCedulaIMSS(models.Model):
         on_delete=models.PROTECT,
         related_name="expedientes_cedula_imss_aplicados",
     )
-    creado_en = models.DateTimeField(auto_now_add=True)
+    creado_en = models.DateTimeField(default=timezone.now)
     aplicado_en = models.DateTimeField(null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
@@ -2968,13 +2968,13 @@ class ExpedienteCedulaIMSS(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["tipo", "periodo", "registro_patronal", "revision"],
-                name="uniq_exp_ced_imss_revision",
+                name="uniq_cedula_imss_revision",
             ),
         ]
         indexes = [
             models.Index(
                 fields=["registro_patronal", "periodo"],
-                name="exp_ced_imss_reg_per_idx",
+                name="cedula_imss_reg_period_idx",
             ),
         ]
 
@@ -2987,7 +2987,7 @@ class DocumentoCedulaIMSS(models.Model):
     CLASE_EMA_PDF = "EMA_PDF"
     CLASE_EBA_PDF = "EBA_PDF"
     CLASE_CHOICES = [
-        (CLASE_SUA_XLS, "SUA Excel"),
+        (CLASE_SUA_XLS, "SUA XLS"),
         (CLASE_EMA_PDF, "EMA PDF"),
         (CLASE_EBA_PDF, "EBA PDF"),
     ]
@@ -2997,12 +2997,12 @@ class DocumentoCedulaIMSS(models.Model):
         on_delete=models.PROTECT,
         related_name="documentos",
     )
-    clase = models.CharField(max_length=8, choices=CLASE_CHOICES)
+    clase = models.CharField(max_length=12, choices=CLASE_CHOICES)
     nombre_original = models.CharField(max_length=255)
     archivo = models.FileField(upload_to="reportes/cedulas-imss/%Y/%m/")
     sha256 = models.CharField(max_length=64, unique=True)
     tamano = models.PositiveBigIntegerField()
-    mime_type = models.CharField(max_length=150)
+    mime_type = models.CharField(max_length=100)
     total_visible = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
 
@@ -3036,13 +3036,13 @@ class DetalleCedulaIMSS(models.Model):
     )
     nss = models.CharField(max_length=11, db_index=True)
     nombre_origen = models.CharField(max_length=200)
-    dias = models.DecimalField(max_digits=7, decimal_places=2)
-    sdi = models.DecimalField(max_digits=14, decimal_places=2)
+    dias = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
+    sdi = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     retiro = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
     cesantia_patronal = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
     aportacion_vivienda = models.DecimalField(max_digits=14, decimal_places=2, default=Decimal("0"))
     cuota_patronal = models.DecimalField(max_digits=14, decimal_places=2)
-    area_codigo = models.CharField(max_length=40, blank=True, default="")
+    area_codigo = models.CharField(max_length=50, blank=True, default="")
     sucursal = models.ForeignKey(
         "core.Sucursal",
         null=True,
@@ -3050,7 +3050,7 @@ class DetalleCedulaIMSS(models.Model):
         on_delete=models.PROTECT,
         related_name="detalles_cedula_imss",
     )
-    cruce_estado = models.CharField(max_length=10, choices=CRUCE_CHOICES)
+    cruce_estado = models.CharField(max_length=16, choices=CRUCE_CHOICES)
 
     class Meta:
         verbose_name = "Detalle de cédula IMSS"
@@ -3058,13 +3058,13 @@ class DetalleCedulaIMSS(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["expediente", "nss"],
-                name="uniq_det_ced_imss_nss",
+                name="uniq_cedula_imss_nss",
             ),
         ]
         indexes = [
             models.Index(
                 fields=["empleado", "expediente"],
-                name="det_ced_imss_emp_exp_idx",
+                name="cedula_imss_emp_exp_idx",
             ),
         ]
 

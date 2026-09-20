@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.db import IntegrityError, models, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
+from django.utils import timezone
 
 from reportes import models as reportes_models
 
@@ -34,6 +35,49 @@ class ExpedienteCedulaIMSSSchemaTests(SimpleTestCase):
             with self.subTest(modelo=modelo.__name__, campo=campo):
                 self.assertIs(modelo._meta.get_field(campo).remote_field.on_delete, models.PROTECT)
 
+    def test_respeta_metadatos_e_indices_del_contrato(self):
+        expediente = reportes_models.ExpedienteCedulaIMSS
+        documento = reportes_models.DocumentoCedulaIMSS
+        detalle = reportes_models.DetalleCedulaIMSS
+
+        campos = (
+            (expediente, "tipo", {"max_length": 12}),
+            (expediente, "periodo", {"db_index": True}),
+            (expediente, "registro_patronal", {"max_length": 20, "db_index": True}),
+            (expediente, "razon_social", {"blank": True, "default": ""}),
+            (expediente, "estado", {"max_length": 16, "default": models.NOT_PROVIDED}),
+            (expediente, "creado_en", {"default": timezone.now, "auto_now_add": False}),
+            (documento, "clase", {"max_length": 12}),
+            (documento, "mime_type", {"max_length": 100}),
+            (detalle, "dias", {"max_digits": 6, "default": 0}),
+            (detalle, "sdi", {"max_digits": 12, "default": 0}),
+            (detalle, "area_codigo", {"max_length": 50}),
+            (detalle, "cruce_estado", {"max_length": 16}),
+        )
+        for modelo, campo_nombre, atributos in campos:
+            campo = modelo._meta.get_field(campo_nombre)
+            for atributo, esperado in atributos.items():
+                with self.subTest(modelo=modelo.__name__, campo=campo_nombre, atributo=atributo):
+                    self.assertEqual(getattr(campo, atributo), esperado)
+
+        self.assertEqual(dict(documento.CLASE_CHOICES)[documento.CLASE_SUA_XLS], "SUA XLS")
+        self.assertEqual(
+            {constraint.name for constraint in expediente._meta.constraints},
+            {"uniq_cedula_imss_revision"},
+        )
+        self.assertEqual(
+            {index.name for index in expediente._meta.indexes},
+            {"cedula_imss_reg_period_idx"},
+        )
+        self.assertEqual(
+            {constraint.name for constraint in detalle._meta.constraints},
+            {"uniq_cedula_imss_nss"},
+        )
+        self.assertEqual(
+            {index.name for index in detalle._meta.indexes},
+            {"cedula_imss_emp_exp_idx"},
+        )
+
 
 class ExpedienteCedulaIMSSDatabaseTests(TestCase):
     def crear_expediente(self, **overrides):
@@ -42,6 +86,7 @@ class ExpedienteCedulaIMSSDatabaseTests(TestCase):
             "periodo": date(2026, 8, 1),
             "registro_patronal": "Y5467890101",
             "razon_social": "Pollyana's Dolce, S.A. de C.V.",
+            "estado": reportes_models.ExpedienteCedulaIMSS.ESTADO_VALIDO,
             "total_patronal": Decimal("1250.50"),
         }
         datos.update(overrides)
