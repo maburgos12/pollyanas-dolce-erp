@@ -30,7 +30,92 @@ from django.utils import timezone
 
 from core.models import AuditLog
 from reportes import models as reportes_models
-from rrhh.models import Empleado
+from rrhh.models import Empleado, EmpleadoBaja
+
+
+class RecuperacionFebreroTests(SimpleTestCase):
+    @staticmethod
+    def _resumen():
+        def fila(texto, columna=None, valor=None):
+            resultado = [""] * 11
+            resultado[0] = texto
+            if columna is not None:
+                resultado[columna] = valor
+            return resultado
+
+        filas = [
+            fila("Mes de Proceso: Febrero-2026"),
+            fila("Bimestre de Proceso: 01-2026"),
+            fila("Registro Patronal: E52-40157-10-0"),
+            fila("Para abono en cuenta del IMSS"),
+            fila("T O T A L", 7, 11.0),
+            fila("Para abono en cuenta individual"),
+            fila("Retiro", 5, 3.0),
+            fila("T O T A L", 7, 9.0),
+            fila("Para abono en cuenta del INFONAVIT"),
+            fila("Aportación Patronal sin crédito", 5, 7.0),
+            fila("Aportación Patronal con crédito", 5, 0.0),
+            fila("T O T A L", 7, 8.0),
+            fila("T O T A L   A   P A G A R", 7, 28.0),
+        ]
+        return filas
+
+    def test_recupera_mensual_sin_encabezado_solo_si_cuadra_con_resumen(self):
+        from reportes.services_cedula_sua_legacy import recuperar_febrero_sin_encabezado
+
+        persona = [""] * 21
+        persona[0], persona[5] = "12-12-12-1212-1", "PERSONA HISTÓRICA"
+        movimiento = [""] * 21
+        movimiento[2], movimiento[3], movimiento[18] = 28.0, 300.0, 10.0
+        pie = [""] * 21
+        pie[8], pie[10] = 10.0, 11.0
+        total = [""] * 21
+        total[7], total[11] = "Total a pagar:", 11.0
+
+        recuperada = recuperar_febrero_sin_encabezado(
+            [persona, movimiento, pie, total], self._resumen()
+        )
+
+        self.assertEqual(recuperada.parseada.periodo, date(2026, 2, 1))
+        self.assertEqual(recuperada.total_patronal, Decimal("10.00"))
+        self.assertEqual(len(recuperada.parseada.trabajadores), 1)
+
+    def test_rechaza_mensual_si_control_impreso_no_cuadra(self):
+        from reportes.services_cedula_sua_legacy import recuperar_febrero_sin_encabezado
+
+        persona = [""] * 21
+        persona[0], persona[5] = "12-12-12-1212-1", "PERSONA HISTÓRICA"
+        movimiento = [""] * 21
+        movimiento[2], movimiento[3], movimiento[18] = 28.0, 300.0, 10.0
+        pie = [""] * 21
+        pie[8], pie[10] = 12.0, 11.0
+        total = [""] * 21
+        total[7], total[11] = "Total a pagar:", 11.0
+
+        with self.assertRaisesRegex(ValueError, "control patronal"):
+            recuperar_febrero_sin_encabezado(
+                [persona, movimiento, pie, total], self._resumen()
+            )
+
+    def test_recupera_bimestral_sin_encabezado_y_coteja_componentes(self):
+        from reportes.services_cedula_sua_legacy import recuperar_febrero_sin_encabezado
+
+        persona = [""] * 20
+        persona[0], persona[5] = "12-12-12-1212-1", "PERSONA HISTÓRICA"
+        movimiento = [""] * 20
+        movimiento[2], movimiento[3] = 59.0, 300.0
+        movimiento[7], movimiento[8], movimiento[9], movimiento[11] = 3.0, 5.0, 1.0, 7.0
+        rcv = [""] * 20
+        rcv[0], rcv[1] = "Total a Pagar de RCV", 9.0
+        vivienda = [""] * 20
+        vivienda[1], vivienda[4] = "Total a Pagar de INFONAVIT", 8.0
+
+        recuperada = recuperar_febrero_sin_encabezado(
+            [persona, movimiento, rcv, vivienda], self._resumen()
+        )
+
+        self.assertEqual(recuperada.parseada.tipo, "BIMESTRAL")
+        self.assertEqual(recuperada.total_patronal, Decimal("15.00"))
 
 
 class RegularizacionCedulasTests(TestCase):
@@ -109,6 +194,55 @@ class RegularizacionCedulasTests(TestCase):
         self.assertIn("archivo", salida.getvalue())
         self.assertIn("150.25", salida.getvalue())
         self.assertIn("DRY-RUN", salida.getvalue())
+
+    def test_dry_run_asocia_comprobante_sipare_al_sua_mensual(self):
+        self._crear_lineas_historicas()
+        pago = PersistenciaExpedienteTests._pdf_texto(
+            "pago_agosto.pdf",
+            "FORMATO PARA PAGO DE CUOTAS LÍNEA DE CAPTURA SIPARE "
+            "PERÍODO SEGUROS IMSS 08-2026 E52-40157-10-0",
+        )
+        (Path(self._root.name) / pago.name).write_bytes(pago.read())
+
+        salida = StringIO()
+        self._ejecutar(stdout=salida)
+
+        self.assertIn("DRY-RUN", salida.getvalue())
+        self.assertFalse(reportes_models.ExpedienteCedulaIMSS.objects.exists())
+
+    def test_pago_sipare_combinado_se_referencia_desde_el_bimestre(self):
+        from reportes.management.commands.regularizar_expedientes_cedulas_imss import (
+            ArchivoInspeccionado, _vincular_pago_bimestral,
+        )
+
+        comun = dict(
+            periodo=date(2026, 2, 1), registro_patronal="E52-40157-10-0",
+            revision=1, estado="APLICADO", total_patronal=Decimal("100.00"),
+            aplicado_por=self.user, aplicado_en=timezone.now(),
+        )
+        mensual = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo="MENSUAL", **comun
+        )
+        bimestral = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo="BIMESTRAL", **comun
+        )
+        documento = reportes_models.DocumentoCedulaIMSS.objects.create(
+            expediente=mensual, clase="SIPARE_PDF", nombre_original="pago.pdf",
+            archivo="reportes/cedulas-imss/pago.pdf", sha256="a" * 64,
+            tamano=4, mime_type="application/pdf",
+            metadata={"periodo_bimestral": "2026-02-01"},
+        )
+        inspeccion = ArchivoInspeccionado(
+            ruta=Path("pago.pdf"), sha256="a" * 64, tamano=4,
+            clase="SIPARE_PDF", registro_patronal="E52-40157-10-0",
+            periodo=date(2026, 2, 1), periodo_bimestral=date(2026, 2, 1),
+        )
+
+        _vincular_pago_bimestral(inspeccion, mensual, bimestral)
+
+        bimestral.refresh_from_db()
+        self.assertEqual(bimestral.metadata["comprobante_sipare_documento_id"], documento.pk)
+        self.assertEqual(bimestral.metadata["comprobante_sipare_sha256"], "a" * 64)
 
     def test_dry_run_no_usa_temporales_storage_ni_escrituras_sql(self):
         self._crear_lineas_historicas()
@@ -936,6 +1070,162 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertEqual(reportes_models.DetalleCedulaIMSS.objects.count(), 0)
         self.assertEqual(list(Path(self._media.name).rglob("*")), [])
 
+    def test_preview_usa_recuperacion_historica_sin_reemplazar_archivo_original(self):
+        from reportes.services_cedula_expediente import preparar_expediente
+        from reportes.services_cedula_imss import parsear_cedula
+        from reportes.services_cedula_sua_legacy import RecuperacionSUA
+
+        filas = self._filas()
+        sin_encabezado = filas[4:]
+        sintesis = [["Período de Proceso: Agosto-2026", "Registro Patronal: E52-40157-10-0"], filas[3], *sin_encabezado]
+        recuperacion = RecuperacionSUA(sintesis, parsear_cedula(sintesis), Decimal("150.25"))
+        original = self._sua()
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=sin_encabezado,
+        ):
+            preview = preparar_expediente([original], recuperacion_sua=recuperacion)
+
+        self.assertEqual(preview.total_patronal, Decimal("150.25"))
+        self.assertEqual(preview.sua.contenido, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1xls")
+
+    def test_preview_rechaza_recuperacion_si_los_bytes_no_corresponden(self):
+        from reportes.services_cedula_expediente import preparar_expediente
+        from reportes.services_cedula_imss import parsear_cedula
+        from reportes.services_cedula_sua_legacy import RecuperacionSUA
+
+        filas = self._filas()
+        sintesis = [["Período de Proceso: Agosto-2026", "Registro Patronal: E52-40157-10-0"], filas[3], *filas[4:]]
+        recuperacion = RecuperacionSUA(sintesis, parsear_cedula(sintesis), Decimal("150.25"))
+        with patch(
+            "reportes.services_cedula_expediente.cargar_filas_xls",
+            return_value=[["otro contenido"]],
+        ):
+            with self.assertRaisesRegex(ValueError, "no coincide"):
+                preparar_expediente([self._sua()], recuperacion_sua=recuperacion)
+
+    def test_cruza_empleado_inactivo_si_su_baja_es_posterior_al_periodo(self):
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.activo = False
+        empleado.fecha_ingreso = date(2025, 1, 1)
+        empleado.save(update_fields=["activo", "fecha_ingreso"])
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            fecha_ingreso=date(2025, 1, 1),
+            fecha_baja=date(2026, 9, 3),
+        )
+
+        preview = self._preview()
+
+        self.assertEqual(preview.detalles[0].empleado_id, empleado.pk)
+        self.assertEqual(preview.detalles[0].cruce_estado, "CRUZADO")
+
+    def test_no_cruza_empleado_inactivo_cuya_baja_es_anterior_al_periodo(self):
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.activo = False
+        empleado.fecha_ingreso = date(2025, 1, 1)
+        empleado.save(update_fields=["activo", "fecha_ingreso"])
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            fecha_ingreso=date(2025, 1, 1),
+            fecha_baja=date(2026, 6, 30),
+        )
+
+        preview = self._preview()
+
+        self.assertIsNone(preview.detalles[0].empleado_id)
+        self.assertEqual(preview.detalles[0].cruce_estado, "SIN_CRUCE")
+
+    def test_reconcilia_expediente_aplicado_sin_cambiar_control_patronal(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+        from reportes.services_cedula_reconciliacion import reconciliar_cruces_aplicados
+
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.activo = False
+        empleado.fecha_ingreso = date(2025, 1, 1)
+        empleado.save(update_fields=["activo", "fecha_ingreso"])
+        expediente = aplicar_expediente(self._preview(), self.user)
+        self.assertEqual(expediente.sin_cruce, 1)
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            fecha_ingreso=date(2025, 1, 1),
+            fecha_baja=date(2026, 9, 3),
+        )
+
+        previo = reconciliar_cruces_aplicados(expediente.pk, aplicar=False, usuario=self.user)
+        expediente.refresh_from_db()
+        self.assertEqual(previo.nuevos_cruces, 1)
+        self.assertEqual(expediente.sin_cruce, 1)
+
+        aplicado = reconciliar_cruces_aplicados(expediente.pk, aplicar=True, usuario=self.user)
+
+        expediente.refresh_from_db()
+        self.assertEqual(aplicado.nuevos_cruces, 1)
+        self.assertEqual(expediente.cruzados, 1)
+        self.assertEqual(expediente.sin_cruce, 0)
+        self.assertEqual(expediente.total_patronal, Decimal("150.25"))
+        self.assertEqual(
+            reportes_models.LineaPresupuestoMensual.objects.get(
+                rubro__area=self.adm, periodo=date(2026, 8, 1)
+            ).monto_real,
+            Decimal("150.25"),
+        )
+        repetido = reconciliar_cruces_aplicados(expediente.pk, aplicar=True, usuario=self.user)
+        self.assertEqual(repetido.nuevos_cruces, 0)
+
+    def test_comando_de_cruces_es_dry_run_por_defecto(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.activo = False
+        empleado.fecha_ingreso = date(2025, 1, 1)
+        empleado.save(update_fields=["activo", "fecha_ingreso"])
+        expediente = aplicar_expediente(self._preview(), self.user)
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            fecha_ingreso=date(2025, 1, 1),
+            fecha_baja=date(2026, 9, 3),
+        )
+
+        salida = StringIO()
+        call_command(
+            "reconciliar_cruces_cedulas_imss", "--expediente", str(expediente.pk),
+            stdout=salida,
+        )
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.sin_cruce, 1)
+        self.assertIn("DRY-RUN", salida.getvalue())
+
+    def test_comando_no_aplica_parcialmente_si_otro_expediente_falla(self):
+        from reportes.services_cedula_expediente import aplicar_expediente
+
+        empleado = Empleado.objects.get(codigo="CED-001")
+        empleado.activo = False
+        empleado.fecha_ingreso = date(2025, 1, 1)
+        empleado.save(update_fields=["activo", "fecha_ingreso"])
+        expediente = aplicar_expediente(self._preview(), self.user)
+        EmpleadoBaja.objects.create(
+            empleado=empleado,
+            nombre=empleado.nombre,
+            fecha_ingreso=date(2025, 1, 1),
+            fecha_baja=date(2026, 9, 3),
+        )
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "reconciliar_cruces_cedulas_imss",
+                "--expediente", str(expediente.pk),
+                "--expediente", "999999", "--apply", stdout=StringIO(),
+            )
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.sin_cruce, 1)
+
     def test_preview_clasifica_ema_real_por_contenido_operativo(self):
         ema = self._pdf_texto(
             "PE524015710_EMA.pdf",
@@ -962,6 +1252,22 @@ class PersistenciaExpedienteTests(TestCase):
         self.assertEqual(evidencia.clase, reportes_models.DocumentoCedulaIMSS.CLASE_EBA_PDF)
         self.assertEqual(evidencia.registro_patronal, "E52-40157-10-0")
         self.assertEqual(evidencia.periodo, date(2026, 8, 1))
+
+    def test_clasificador_conserva_sipare_combinado_sin_fingir_ema_o_eba(self):
+        from reportes.services_cedula_expediente import inspeccionar_evidencia_pdf
+
+        pago = self._pdf_texto(
+            "pago_abril.pdf",
+            "FORMATO PARA PAGO DE CUOTAS LÍNEA DE CAPTURA SIPARE "
+            "BIMESTRE RCV E INFONAVIT 02-2026 "
+            "PERÍODO SEGUROS IMSS 04-2026 E52-40157-10-0",
+        )
+
+        evidencia = inspeccionar_evidencia_pdf(pago.name, pago.read())
+
+        self.assertEqual(evidencia.clase, "SIPARE_PDF")
+        self.assertEqual(evidencia.periodo, date(2026, 4, 1))
+        self.assertEqual(evidencia.periodo_bimestral, date(2026, 4, 1))
 
     def test_preview_recupera_registro_sua_separado_por_celdas_vacias(self):
         filas = self._filas()
@@ -1493,6 +1799,53 @@ class PantallaExpedienteTests(TestCase):
     def _preview_token(self, *, json=True):
         response = self._post("previsualizar", json=json)
         return response.json()["preview_token"] if json else response.context["preview_token"]
+
+    def test_bimestre_muestra_enlace_al_pago_sipare_protegido(self):
+        comun = dict(
+            periodo=date(2026, 2, 1), registro_patronal="E52-40157-10-0",
+            revision=1, estado="APLICADO", total_patronal=Decimal("100.00"),
+            aplicado_por=self.user, aplicado_en=timezone.now(),
+        )
+        mensual = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo="MENSUAL", **comun
+        )
+        bimestral = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo="BIMESTRAL", **comun
+        )
+        pago = reportes_models.DocumentoCedulaIMSS.objects.create(
+            expediente=mensual, clase="SIPARE_PDF", nombre_original="pago_febrero.pdf",
+            archivo="reportes/cedulas-imss/pago_febrero.pdf", sha256="b" * 64,
+            tamano=4, mime_type="application/pdf",
+            metadata={"periodo_bimestral": "2026-02-01"},
+        )
+        bimestral.metadata = {
+            "comprobante_sipare_documento_id": pago.pk,
+            "comprobante_sipare_sha256": pago.sha256,
+        }
+        bimestral.save(update_fields=["metadata"])
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("reportes:cedula_imss_detalle", args=[bimestral.pk])
+        )
+
+        self.assertContains(response, "pago_febrero.pdf")
+        self.assertContains(response, "Comprobante SIPARE del bimestre")
+
+    def test_detalle_regularizado_sin_usuario_capturista(self):
+        expediente = reportes_models.ExpedienteCedulaIMSS.objects.create(
+            tipo="MENSUAL", periodo=date(2026, 1, 1),
+            registro_patronal="E52-40157-10-0", revision=1,
+            estado="APLICADO", total_patronal=Decimal("100.00"),
+            aplicado_por=None, aplicado_en=timezone.now(),
+        )
+        self.client.force_login(self.user)
+
+        response = self.client.get(
+            reverse("reportes:cedula_imss_detalle", args=[expediente.pk])
+        )
+
+        self.assertContains(response, "Regularización histórica")
 
     def test_preview_no_guarda_y_aplicar_redirige_al_expediente(self):
         self.client.force_login(self.user)

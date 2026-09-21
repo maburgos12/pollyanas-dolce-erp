@@ -3004,10 +3004,12 @@ class DocumentoCedulaIMSS(models.Model):
     CLASE_SUA_XLS = "SUA_XLS"
     CLASE_EMA_PDF = "EMA_PDF"
     CLASE_EBA_PDF = "EBA_PDF"
+    CLASE_SIPARE_PDF = "SIPARE_PDF"
     CLASE_CHOICES = [
         (CLASE_SUA_XLS, "SUA XLS"),
         (CLASE_EMA_PDF, "EMA PDF"),
         (CLASE_EBA_PDF, "EBA PDF"),
+        (CLASE_SIPARE_PDF, "Comprobante de pago SIPARE PDF"),
     ]
 
     expediente = models.ForeignKey(
