@@ -263,7 +263,7 @@ class BonosVentasTests(TestCase):
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
         # Versión vigente del SW (bump 71e46ad1, estandarización UI).
-        self.assertIn("pollyanas-bonos-ventas-pwa-v18-cancelacion-visible", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v19-extra-justificado", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):

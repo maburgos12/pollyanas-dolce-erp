@@ -92,6 +92,10 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     saldo = saldo_automatico_esperado(diagnostico, registros, he)
     if saldo is None:
         return he
+    if he and he.estado == HoraExtra.ESTADO_PENDIENTE and he.ajuste_autorizacion:
+        # Preservar la decisión humana; si cambió la jornada, el autorizador
+        # verá que la evidencia caducó y deberá reevaluarla.
+        return he
     reactivar = bool(he and saldo > 0 and he.estado == HoraExtra.ESTADO_CANCELADO
         and he.notas.startswith(NOTA_EXTRA_AUTOMATICA) and he.notas.endswith(NOTA_SALDO_CUBIERTO))
     if he and he.estado != HoraExtra.ESTADO_PENDIENTE and not reactivar:

@@ -15,6 +15,10 @@ from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
 from rrhh.services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
+from rrhh.services_extra_conciliacion import (
+    contexto_hora_extra, diagnosticar_horas_extra, evidencia_ajuste_extra,
+    saldo_automatico_esperado,
+)
 
 
 ESTADOS_HORA_EXTRA_ACTIVOS = {
@@ -70,7 +74,13 @@ def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool 
     jefe_nombre = ""
     if hora_extra.jefe_directo_id:
         jefe_nombre = hora_extra.jefe_directo.get_full_name() or hora_extra.jefe_directo.username
-    puede_autorizar = _puede_autorizar_hora_extra(user, hora_extra)
+    contexto_extra = contexto_hora_extra(hora_extra) if (
+        hora_extra.asistencia_id and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE
+    ) or hora_extra.ajuste_autorizacion else None
+    puede_resolver = _puede_autorizar_hora_extra(user, hora_extra)
+    puede_autorizar = puede_resolver and (
+        contexto_extra is None or contexto_extra["puede_autorizar"]
+    )
     puede_editar = bool(puede_gestionar and hora_extra.estado in ESTADOS_HORA_EXTRA_EDITABLES)
     puede_eliminar = bool(puede_gestionar and hora_extra.estado in ESTADOS_HORA_EXTRA_ELIMINABLES)
     return {
@@ -91,8 +101,14 @@ def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool 
         "notas": hora_extra.notas,
         "creado_en": hora_extra.creado_en.isoformat(),
         "puede_autorizar": puede_autorizar,
+        "puede_rechazar": puede_resolver,
         "puede_editar": puede_editar,
         "puede_eliminar": puede_eliminar,
+        "ajuste_justificado": bool(contexto_extra and contexto_extra.get("ajuste_justificado")),
+        "saldo_detectado": contexto_extra.get("saldo_detectado") if contexto_extra else None,
+        "motivo_ajuste": (hora_extra.ajuste_autorizacion or {}).get("motivo", ""),
+        "ajuste_requiere_revision": bool(hora_extra.ajuste_autorizacion and contexto_extra and not contexto_extra["puede_autorizar"]),
+        "revision_extra": contexto_extra.get("motivo_bloqueo", "") if contexto_extra else "",
     }
 
 
@@ -139,7 +155,8 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     def _horas_extra(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
-            HoraExtra.objects.select_related("empleado__sucursal_ref", "jefe_directo", "autorizado_por")
+            HoraExtra.objects.select_related("empleado__sucursal_ref", "jefe_directo", "autorizado_por",
+                "asistencia__turno", "asistencia__empleado")
             .filter(empleado_id__in=empleado_ids)
             .order_by("-fecha", "-id")
         )
@@ -224,7 +241,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         hora_extra = self.get_object()
         identidad_destino = (hora_extra.empleado_id, hora_extra.fecha)
         destino = parse_date(str(request.data.get("fecha") or ""))
-        hora_extra, _ = bloquear_hora_extra(
+        hora_extra, registros_dia = bloquear_hora_extra(
             hora_extra.pk, jornadas_adicionales=[(hora_extra.empleado_id, destino)] if destino else [],
         )
         if (hora_extra.empleado_id, hora_extra.fecha) != identidad_destino:
@@ -273,6 +290,21 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         hora_extra.horas = horas
         hora_extra.notas = notas
         update_fields = ["fecha", "horas", "notas"]
+        if hora_extra.asistencia_id and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE:
+            # Una corrección de cantidad es una decisión humana, no un nuevo
+            # resultado del detector. Congelamos la base que vio quien editó.
+            if fecha != identidad_destino[1]:
+                hora_extra.ajuste_autorizacion = {}
+            elif "horas" in cambios:
+                diagnostico = diagnosticar_horas_extra(hora_extra.asistencia)
+                saldo = saldo_automatico_esperado(diagnostico, registros_dia, hora_extra)
+                if saldo is not None and saldo > 0 and horas != saldo:
+                    hora_extra.ajuste_autorizacion = evidencia_ajuste_extra(
+                        hora_extra, saldo, motivo_cambio, request.user.get_username(),
+                    )
+                else:
+                    hora_extra.ajuste_autorizacion = {}
+            update_fields.append("ajuste_autorizacion")
         if hora_extra.estado == HoraExtra.ESTADO_AUTORIZADO:
             calcular_monto_hora_extra(hora_extra)
             update_fields.append("monto_calculado")
