@@ -231,8 +231,13 @@ def leer_gastos_mensuales(periodo):
         if (inicio is None) != (fin is None) or (inicio and (inicio > fin or inicio.day != 1 or fin.day != 1)):
             _pendiente_destinos(resultado, fila, "Cobertura inválida o incompleta.", candidatas)
             continue
-        if not inicio and ((version and version.periodicidad_meses == 2) or any(v.periodicidad_meses == 2 for v in contratos)):
-            _pendiente_destinos(resultado, fila, "Servicio bimestral conocido sin cobertura explícita.", candidatas)
+        if not inicio and ((version and version.periodicidad_meses > 1)
+                           or any(v.periodicidad_meses > 1 for v in contratos)):
+            _pendiente_destinos(
+                resultado, fila,
+                "Servicio de ciclo multimensual conocido sin cobertura explícita.",
+                candidatas,
+            )
             continue
         inicio, fin = inicio or fuente.periodo, fin or fuente.periodo
         if not inicio <= periodo <= fin:

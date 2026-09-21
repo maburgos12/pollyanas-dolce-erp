@@ -261,7 +261,7 @@ def crear_gasto_recurrente(*, usuario, area, rubro, centro_costo, categoria_gast
                            motivo="", periodicidad_meses=1, archivo_soporte="") -> GastoRecurrente:
     _autorizar_area(usuario, area)
     periodicidad_meses = _validar_periodicidad(periodicidad_meses)
-    _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses)
+    _validar_inicio_ciclo(vigencia_inicio, periodicidad_meses)
     tipo_credito, plazo_cantidad, plazo_unidad, numero_parcialidades = _validar_clasificacion(
         area=area,
         rubro=rubro,
@@ -325,12 +325,17 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
     periodicidad_meses = _validar_periodicidad(
         actual.periodicidad_meses if periodicidad_meses is None else periodicidad_meses
     )
-    _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses)
+    _validar_inicio_ciclo(vigencia_inicio, periodicidad_meses)
     if vigencia_inicio <= actual.vigencia_inicio:
         raise ValidationError("La nueva vigencia debe ser posterior a la versión actual.")
     meses_desde_inicio = (vigencia_inicio.year - actual.vigencia_inicio.year) * 12 + vigencia_inicio.month - actual.vigencia_inicio.month
-    if actual.periodicidad_meses == 2 and (vigencia_inicio.day != 1 or meses_desde_inicio % 2):
-        raise ValidationError("La nueva vigencia no puede cortar un ciclo bimestral de la versión anterior.")
+    if actual.periodicidad_meses > 1 and (
+        vigencia_inicio.day != 1 or meses_desde_inicio % actual.periodicidad_meses
+    ):
+        raise ValidationError(
+            "La nueva vigencia no puede cortar un ciclo de "
+            f"{actual.periodicidad_meses} meses de la versión anterior."
+        )
     _validar_cobertura_sin_solapamiento(recurrente, vigencia_inicio.replace(day=1))
     tipo_credito, plazo_cantidad, plazo_unidad, numero_parcialidades = _validar_clasificacion(
         area=recurrente.area,
@@ -362,14 +367,22 @@ def editar_gasto_recurrente(*, usuario, recurrente, vigencia_inicio, monto, dia_
 
 
 def _validar_periodicidad(valor):
-    if str(valor) not in {"1", "2"}:
-        raise ValidationError("La periodicidad debe ser mensual o bimestral.")
+    permitidas = {str(v) for v in GastoRecurrenteVersion.PERIODICIDADES}
+    if str(valor) not in permitidas:
+        etiquetas = ", ".join(
+            label.lower() for _, label in GastoRecurrenteVersion.PERIODICIDAD_CHOICES
+        )
+        raise ValidationError(f"La periodicidad debe ser {etiquetas}.")
     return int(valor)
 
 
-def _validar_inicio_bimestral(vigencia_inicio, periodicidad_meses):
-    if periodicidad_meses == 2 and vigencia_inicio.day != 1:
-        raise ValidationError("La vigencia bimestral debe comenzar el primer día del mes de cobertura.")
+def _validar_inicio_ciclo(vigencia_inicio, periodicidad_meses):
+    # Un ciclo de varios meses se factura por mes completo: si arranca a media
+    # cobertura no hay forma de saber qué periodo cubre el cargo.
+    if periodicidad_meses > 1 and vigencia_inicio.day != 1:
+        raise ValidationError(
+            "Una vigencia de más de un mes debe comenzar el primer día del mes de cobertura."
+        )
 
 
 def _validar_cobertura_sin_solapamiento(recurrente, inicio, fin=None):
@@ -410,7 +423,10 @@ def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, perio
         raise ValidationError("No existe una versión vigente para el periodo solicitado.")
     meses = (periodo.year - version.vigencia_inicio.year) * 12 + periodo.month - version.vigencia_inicio.month
     if meses % version.periodicidad_meses:
-        raise ValidationError("Este mes está cubierto por el ciclo bimestral anterior; no genera otro cargo.")
+        raise ValidationError(
+            f"Este mes está cubierto por el ciclo de {version.periodicidad_meses} meses "
+            "anterior; no genera otro cargo."
+        )
     siguiente = periodo.year * 12 + periodo.month - 1 + version.periodicidad_meses - 1
     cobertura_fin = date(siguiente // 12, siguiente % 12 + 1, 1)
     _validar_cobertura_sin_solapamiento(recurrente, periodo, cobertura_fin)
