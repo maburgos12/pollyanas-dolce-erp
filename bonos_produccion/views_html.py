@@ -22,10 +22,14 @@ from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, C
 from .services_checador import sincronizar_asistencia_desde_checador
 
 
+# Cada área edita su propio importe desde la pantalla de configuración. Un área
+# que falte aquí se muestra pero no se puede capturar.
 AREA_AMOUNT_FIELDS = {
     "HORNOS": "monto_hornos",
     "PRODUCCION": "monto_area_produccion",
     "ARMADO": "monto_armado",
+    "PREPARACION": "monto_preparacion",
+    "CUARTOS_FRIOS": "monto_cuartos_frios",
     "LOGISTICA": "monto_logistica",
     "CRUCERO": "monto_crucero",
 }

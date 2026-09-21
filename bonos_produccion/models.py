@@ -17,12 +17,22 @@ AREA_PRODUCCION = "PRODUCCION"
 AREA_ARMADO = "ARMADO"
 AREA_LOGISTICA = "LOGISTICA"
 AREA_CRUCERO = "CRUCERO"
+AREA_PREPARACION = "PREPARACION"
+AREA_CUARTOS_FRIOS = "CUARTOS_FRIOS"
 
 AREAS_PRODUCCION = [
     (AREA_HORNOS, "Hornos"),
+    # El valor guardado dice PRODUCCION por historia; el área es embetunado.
     (AREA_PRODUCCION, "Embetunado"),
     (AREA_ARMADO, "Armado"),
+    # Masas, bases de pay, galletas, empanadas y betunes: lo que el catálogo de
+    # recetas llama PREPARACION.
+    (AREA_PREPARACION, "Preparación"),
+    # Resguarda inventarios de insumos preparados y producto terminado.
+    (AREA_CUARTOS_FRIOS, "Cuartos fríos"),
     (AREA_LOGISTICA, "Logística"),
+    # Marcaba a quien producía fuera de CEDIS. Ya no se asigna: se conserva
+    # porque los bonos históricos siguen apuntando a ella.
     (AREA_CRUCERO, "Crucero"),
 ]
 
@@ -42,13 +52,21 @@ def normalizar_area_produccion(value: str) -> str:
         "LOGISTICA": AREA_LOGISTICA,
         "LOGÍSTICA": AREA_LOGISTICA,
         "CRUCERO": AREA_CRUCERO,
+        "PREPARACION": AREA_PREPARACION,
+        "PREPARACIÓN": AREA_PREPARACION,
+        "PREPARACIONES": AREA_PREPARACION,
+        "CUARTOS_FRIOS": AREA_CUARTOS_FRIOS,
+        "CUARTOS FRIOS": AREA_CUARTOS_FRIOS,
+        "CUARTOS FRÍOS": AREA_CUARTOS_FRIOS,
     }
     return aliases.get(area, area)
 
 
 def area_bono_produccion_empleado(empleado: Empleado) -> str:
     puesto_operativo = (empleado.puesto_operativo or "").strip().upper()
-    if puesto_operativo in {AREA_HORNOS, AREA_ARMADO, AREA_CRUCERO}:
+    if puesto_operativo in {
+        AREA_HORNOS, AREA_ARMADO, AREA_CRUCERO, AREA_PREPARACION, AREA_CUARTOS_FRIOS,
+    }:
         return puesto_operativo
     if puesto_operativo in {"PRODUCCION", "EMBETUNADO"}:
         return AREA_PRODUCCION
@@ -86,6 +104,8 @@ class ConfigBonoPeriodo(models.Model):
     monto_armado = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
     monto_logistica = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
     monto_crucero = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("950.00"))
+    monto_preparacion = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
+    monto_cuartos_frios = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("850.00"))
     pct_produccion = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("65.00"))
     pct_asistencia = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
     pct_puntualidad = models.DecimalField(max_digits=5, decimal_places=2, default=Decimal("15.00"))
@@ -118,6 +138,8 @@ class ConfigBonoPeriodo(models.Model):
             AREA_ARMADO: self.monto_armado,
             AREA_LOGISTICA: self.monto_logistica,
             AREA_CRUCERO: self.monto_crucero,
+            AREA_PREPARACION: self.monto_preparacion,
+            AREA_CUARTOS_FRIOS: self.monto_cuartos_frios,
         }.get(normalizar_area_produccion(area), Decimal("0.00"))
 
     def get_regla_area(self, area: str) -> "ConfigBonoArea":
@@ -243,7 +265,9 @@ class ConfigBonoArea(models.Model):
             "limite_produccion": 2,
             "usa_produccion": True,
         }
-        if area == AREA_LOGISTICA:
+        # Cuartos fríos resguarda inventario: su trabajo no se mide en piezas,
+        # así que comparte las reglas de logística.
+        if area in {AREA_LOGISTICA, AREA_CUARTOS_FRIOS}:
             defaults.update(
                 {
                     "pct_produccion": Decimal("0.00"),
