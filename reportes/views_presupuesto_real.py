@@ -1125,6 +1125,21 @@ def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
         pk=pk,
     )
     documentos = list(expediente.documentos.all())
+    pago_bimestral = None
+    if expediente.tipo == ExpedienteCedulaIMSS.TIPO_BIMESTRAL:
+        referencia_pago = expediente.metadata or {}
+        documento_id = referencia_pago.get("comprobante_sipare_documento_id")
+        if documento_id:
+            candidato = DocumentoCedulaIMSS.objects.select_related("expediente").filter(
+                pk=documento_id,
+                sha256=referencia_pago.get("comprobante_sipare_sha256"),
+                clase=DocumentoCedulaIMSS.CLASE_SIPARE_PDF,
+                expediente__tipo=ExpedienteCedulaIMSS.TIPO_MENSUAL,
+                expediente__periodo=expediente.periodo,
+                expediente__registro_patronal=expediente.registro_patronal,
+            ).first()
+            if candidato and (candidato.metadata or {}).get("periodo_bimestral") == expediente.periodo.isoformat():
+                pago_bimestral = candidato
     sua = next(
         (
             documento
@@ -1156,6 +1171,7 @@ def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
             else [],
             "expediente": expediente,
             "documentos": documentos,
+            "pago_bimestral": pago_bimestral,
             "detalles": detalles,
         },
     )

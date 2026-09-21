@@ -18,6 +18,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models.signals import post_save
 
+from core.audit import log_event
 from reportes.models import DocumentoCedulaIMSS, LineaPresupuestoMensual
 from reportes.services_cedula_expediente import (
     CedulaDiscrepante,
@@ -31,6 +32,7 @@ from reportes.services_cedula_expediente import (
     preparar_expediente,
 )
 from reportes.services_cedula_imss import parsear_cedula
+from reportes.services_cedula_sua_legacy import RecuperacionSUA, recuperar_febrero_sin_encabezado
 from reportes.services_presupuesto_maestro import normalize_header_text
 
 
@@ -48,6 +50,8 @@ class ExpedienteHistorico:
     lineas: tuple[LineaPresupuestoMensual, ...]
     monto_existente: Decimal
     preview: object | None = None
+    recuperacion_sua: RecuperacionSUA | None = None
+    sha256_resumen: str = ""
 
 
 @dataclass(frozen=True)
@@ -60,6 +64,9 @@ class ArchivoInspeccionado:
     periodo: object
     parseada: object | None = None
     total_patronal: Decimal | None = None
+    periodo_bimestral: date | None = None
+    recuperacion_sua: RecuperacionSUA | None = None
+    sha256_resumen: str = ""
 
 
 @dataclass(frozen=True)
@@ -177,16 +184,38 @@ def _inspeccionar_pdf(ruta: Path, contenido: bytes, sha256: str) -> ArchivoInspe
     return ArchivoInspeccionado(
         ruta, sha256, len(contenido), evidencia.clase,
         evidencia.registro_patronal, evidencia.periodo,
+        periodo_bimestral=evidencia.periodo_bimestral,
     )
 
 
-def _inspeccionar_sua(ruta: Path, contenido: bytes, sha256: str):
+def _inspeccionar_sua(ruta: Path, contenido: bytes, sha256: str, *, root: Path | None = None):
     if not contenido.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
         raise CommandError(f"El archivo '{ruta.name}' no tiene una firma válida.")
     try:
         filas = _cargar_filas_bytes(contenido)
-        parseada = _completar_registro_patronal(parsear_cedula(filas), filas)
-        total_patronal = _extraer_total_control(filas, parseada.tipo)
+        recuperacion = None
+        sha_resumen = ""
+        try:
+            parseada = _completar_registro_patronal(parsear_cedula(filas), filas)
+            total_patronal = _extraer_total_control(filas, parseada.tipo)
+        except ValueError as exc:
+            if root is None or "No se encontró 'Período/Bimestre de Proceso" not in str(exc):
+                raise
+            resumenes = [
+                p for p in ruta.parent.iterdir()
+                if p.suffix.lower() == ".xls"
+                and normalize_header_text(p.stem).startswith("resumen liquidacion")
+            ]
+            if len(resumenes) != 1:
+                raise ValueError("La cédula sin encabezado requiere un resumen SUA único.") from exc
+            contenido_resumen, sha_resumen = _leer_archivo_seguro(resumenes[0], root)
+            if not contenido_resumen.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+                raise ValueError("El resumen SUA no tiene una firma XLS válida.")
+            recuperacion = recuperar_febrero_sin_encabezado(
+                filas, _cargar_filas_bytes(contenido_resumen)
+            )
+            parseada = recuperacion.parseada
+            total_patronal = recuperacion.total_patronal
     except (OSError, ValueError) as exc:
         raise CommandError(f"No se pudo validar {ruta.name}: {exc}") from exc
     total_detalle = sum(
@@ -200,6 +229,8 @@ def _inspeccionar_sua(ruta: Path, contenido: bytes, sha256: str):
     return ArchivoInspeccionado(
         ruta, sha256, len(contenido), "SUA_XLS", parseada.registro_patronal,
         parseada.periodo, identidad, total_patronal,
+        recuperacion_sua=recuperacion,
+        sha256_resumen=sha_resumen,
     )
 
 
@@ -207,10 +238,16 @@ def _agrupar_inspecciones(
     documentos: tuple[ArchivoInspeccionado, ...],
 ) -> tuple[tuple[ArchivoInspeccionado, tuple[ArchivoInspeccionado, ...]], ...]:
     suas = [d for d in documentos if d.clase == "SUA_XLS"]
+    if not suas:
+        raise CommandError("No se encontraron cédulas SUA .xls bajo --root.")
     pdfs = [d for d in documentos if d.clase != "SUA_XLS"]
     asociados: dict[str, list[ArchivoInspeccionado]] = {s.sha256: [] for s in suas}
     for pdf in pdfs:
-        tipo = "MENSUAL" if pdf.clase == "EMA_PDF" else "BIMESTRAL"
+        tipo = (
+            "MENSUAL"
+            if pdf.clase in {"EMA_PDF", DocumentoCedulaIMSS.CLASE_SIPARE_PDF}
+            else "BIMESTRAL"
+        )
         candidatos = [
             sua for sua in suas
             if sua.parseada.tipo == tipo
@@ -322,6 +359,43 @@ def _limpiar_blobs(blobs: list[tuple[object, str]]) -> None:
             logger.warning("No se pudo limpiar blob de backfill IMSS: %s", nombre, exc_info=True)
 
 
+def _vincular_pago_bimestral(pago: ArchivoInspeccionado, mensual, bimestral) -> None:
+    """Referencia el mismo blob protegido sin almacenarlo dos veces."""
+    if (
+        pago.clase != DocumentoCedulaIMSS.CLASE_SIPARE_PDF
+        or pago.periodo_bimestral != bimestral.periodo
+        or pago.periodo != mensual.periodo
+        or mensual.tipo != "MENSUAL"
+        or bimestral.tipo != "BIMESTRAL"
+        or _registro_normalizado(mensual.registro_patronal)
+        != _registro_normalizado(bimestral.registro_patronal)
+        or _registro_normalizado(pago.registro_patronal)
+        != _registro_normalizado(mensual.registro_patronal)
+    ):
+        raise CommandError("El pago SIPARE no coincide con ambos expedientes.")
+    documento = DocumentoCedulaIMSS.objects.filter(
+        sha256=pago.sha256,
+        expediente=mensual,
+        clase=DocumentoCedulaIMSS.CLASE_SIPARE_PDF,
+    ).first()
+    if documento is None or (documento.metadata or {}).get("periodo_bimestral") != bimestral.periodo.isoformat():
+        raise CommandError("El pago SIPARE bimestral no quedó archivado de forma válida.")
+    metadata = dict(bimestral.metadata or {})
+    anterior = metadata.get("comprobante_sipare_documento_id")
+    if anterior not in (None, documento.pk):
+        raise CommandError("El bimestre ya referencia otro comprobante SIPARE.")
+    metadata["comprobante_sipare_documento_id"] = documento.pk
+    metadata["comprobante_sipare_sha256"] = documento.sha256
+    bimestral.metadata = metadata
+    bimestral.save(update_fields=["metadata"])
+    if anterior is None:
+        log_event(
+            None, "CEDULA_IMSS_PAGO_BIMESTRAL_VINCULADO",
+            "reportes.ExpedienteCedulaIMSS", str(bimestral.pk),
+            {"documento_id": documento.pk, "sha256": documento.sha256},
+        )
+
+
 class Command(BaseCommand):
     help = "Regulariza expedientes históricos de cédulas IMSS (dry-run por defecto)."
 
@@ -335,9 +409,11 @@ class Command(BaseCommand):
         rutas = _enumerar_archivos(root)
         inspecciones = []
         for ruta in rutas:
+            if ruta.suffix.lower() == ".xls" and normalize_header_text(ruta.stem).startswith("resumen liquidacion"):
+                continue
             contenido, sha256 = _leer_archivo_seguro(ruta, root)
             if ruta.suffix.lower() == ".xls":
-                inspecciones.append(_inspeccionar_sua(ruta, contenido, sha256))
+                inspecciones.append(_inspeccionar_sua(ruta, contenido, sha256, root=root))
             else:
                 inspecciones.append(_inspeccionar_pdf(ruta, contenido, sha256))
             del contenido
@@ -372,6 +448,8 @@ class Command(BaseCommand):
                     total_patronal=total_patronal,
                     lineas=lineas,
                     monto_existente=monto_existente,
+                    recuperacion_sua=sua.recuperacion_sua,
+                    sha256_resumen=sua.sha256_resumen,
                 )
             )
 
@@ -391,6 +469,7 @@ class Command(BaseCommand):
         blobs_nuevos: list[tuple[object, str]] = []
         try:
             with transaction.atomic():
+                aplicados = {}
                 for item in preparados:
                     lecturas = []
                     for ruta, sha_esperado in [
@@ -414,7 +493,10 @@ class Command(BaseCommand):
                         for ruta, contenido in lecturas
                     ]
                     try:
-                        preview = preparar_expediente(archivos, usuario=None)
+                        preview = preparar_expediente(
+                            archivos, usuario=None,
+                            recuperacion_sua=item.recuperacion_sua,
+                        )
                     except Exception as exc:
                         raise CommandError(f"No se pudo preparar {item.ruta_sua.name}: {exc}") from exc
                     if (
@@ -484,6 +566,15 @@ class Command(BaseCommand):
                         nombres_protegidos=nombres_protegidos,
                     ):
                         expediente = aplicar_expediente(preview, usuario=None)
+                    if item.recuperacion_sua:
+                        metadata_expediente = dict(expediente.metadata or {})
+                        metadata_expediente["recuperacion_sua"] = {
+                            "motivo": "febrero_2026_sin_encabezado",
+                            "sha256_resumen": item.sha256_resumen,
+                            "sha256_sua_original": item.sha256_sua,
+                        }
+                        expediente.metadata = metadata_expediente
+                        expediente.save(update_fields=["metadata"])
                     documento_sua = expediente.documentos.get(
                         clase=DocumentoCedulaIMSS.CLASE_SUA_XLS
                     )
@@ -532,11 +623,35 @@ class Command(BaseCommand):
                         ],
                     )
                     accion = "YA_ENLAZADO" if item.sha256_sua in shas_previos else "APLICADO"
+                    aplicados[(
+                        item.parseada.tipo,
+                        item.parseada.periodo,
+                        _registro_normalizado(item.parseada.registro_patronal),
+                    )] = expediente
                     filas_salida.append(
                         f"{item.parseada.periodo:%Y-%m} | {item.ruta_sua.name} | "
                         f"{item.total_patronal:.2f} | {item.monto_existente:.2f} | {accion}"
                     )
                     del archivos, contenido, lecturas, preview
+                for sua, pdfs in grupos:
+                    if sua.parseada.tipo != "MENSUAL":
+                        continue
+                    mensual = aplicados[(
+                        "MENSUAL", sua.periodo,
+                        _registro_normalizado(sua.registro_patronal),
+                    )]
+                    for pago in pdfs:
+                        if pago.clase != DocumentoCedulaIMSS.CLASE_SIPARE_PDF or pago.periodo_bimestral is None:
+                            continue
+                        bimestral = aplicados.get((
+                            "BIMESTRAL", pago.periodo_bimestral,
+                            _registro_normalizado(pago.registro_patronal),
+                        ))
+                        if bimestral is None:
+                            raise CommandError(
+                                f"Pago SIPARE '{pago.ruta.name}' declara un bimestre sin cédula SUA."
+                            )
+                        _vincular_pago_bimestral(pago, mensual, bimestral)
         except Exception:
             _limpiar_blobs(blobs_nuevos)
             raise

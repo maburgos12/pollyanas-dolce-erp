@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import calendar
 from io import BytesIO
 import logging
 import os
@@ -65,6 +66,7 @@ class DocumentoPreview:
     total_visible: Decimal | None = None
     registro_patronal: str = ""
     periodo: date | None = None
+    periodo_bimestral: date | None = None
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,7 @@ class EvidenciaPDFInspeccionada:
     clase: str
     registro_patronal: str
     periodo: date
+    periodo_bimestral: date | None = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +147,33 @@ def inspeccionar_evidencia_pdf(nombre: str, contenido: bytes) -> EvidenciaPDFIns
     except Exception as exc:
         raise ValueError(f"El archivo '{nombre}' no es un PDF válido y parseable.") from exc
     texto_compacto = texto.replace(" ", "")
+    if "formato para pago de cuotas" in texto and "sipare" in texto:
+        registros = set(re.findall(r"[A-Z]\d{2}-\d{5}-\d{2}-\d", texto_original.upper()))
+        periodo_pago = re.search(
+            r"PER[IÍ]ODO.{0,120}?SEGUROS IMSS\s+(\d{2})-(\d{4})",
+            texto_original.upper(), re.DOTALL,
+        )
+        bimestre_pago = re.search(
+            r"BIMESTRE.{0,120}?RCV E INFONAVIT\s+(\d{2})-(\d{4})",
+            texto_original.upper(), re.DOTALL,
+        )
+        if len(registros) != 1 or periodo_pago is None:
+            raise ValueError(f"PDF SIPARE '{nombre}' sin registro/periodo inequívoco.")
+        mes, anio = int(periodo_pago.group(1)), int(periodo_pago.group(2))
+        if not 1 <= mes <= 12:
+            raise ValueError(f"Periodo inválido en PDF '{nombre}'.")
+        periodo_bimestral = None
+        if bimestre_pago:
+            numero, anio_bim = int(bimestre_pago.group(1)), int(bimestre_pago.group(2))
+            if not 1 <= numero <= 6 or anio_bim != anio or numero * 2 != mes:
+                raise ValueError(f"Bimestre discordante en PDF SIPARE '{nombre}'.")
+            periodo_bimestral = date(anio_bim, numero * 2, 1)
+        return EvidenciaPDFInspeccionada(
+            clase=DocumentoCedulaIMSS.CLASE_SIPARE_PDF,
+            registro_patronal=registros.pop(),
+            periodo=date(anio, mes, 1),
+            periodo_bimestral=periodo_bimestral,
+        )
     ema = (
         bool(re.search(r"\bema\b", texto))
         or "emision mensual anticipada" in texto
@@ -197,6 +227,7 @@ def _documento_preview(archivo) -> DocumentoPreview:
         clase = evidencia.clase
         registro_patronal = evidencia.registro_patronal
         periodo = evidencia.periodo
+        periodo_bimestral = evidencia.periodo_bimestral
     else:
         raise ValueError(f"Extensión no permitida en '{nombre}'; solo se aceptan .xls y .pdf.")
     mime = "application/vnd.ms-excel" if clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else "application/pdf"
@@ -209,6 +240,7 @@ def _documento_preview(archivo) -> DocumentoPreview:
         mime_type=mime,
         registro_patronal=registro_patronal,
         periodo=periodo,
+        periodo_bimestral=periodo_bimestral if extension == ".pdf" else None,
     )
 
 
@@ -325,12 +357,22 @@ def _cruzar_detalles(
     parseada: CedulaParseada, *, bloquear: bool = False
 ) -> tuple[tuple[DetallePreview, ...], tuple[str, ...]]:
     por_nss: dict[str, list[Empleado]] = {}
-    empleados = Empleado.objects.filter(activo=True).select_related("sucursal_ref")
+    inicio = parseada.meses[0]
+    ultimo_mes = parseada.meses[-1]
+    fin = ultimo_mes.replace(day=calendar.monthrange(ultimo_mes.year, ultimo_mes.month)[1])
+    empleados = Empleado.objects.select_related("sucursal_ref").prefetch_related("bajas_rrhh")
     if bloquear:
         empleados = empleados.select_for_update(of=("self",))
     for empleado in empleados:
         nss = _nss_digits(empleado.nss)
-        if nss:
+        # Mantener el contrato existente para personal activo. Solo el cruce
+        # histórico adicional exige una vigencia documentada por una baja.
+        vigencia_actual = empleado.activo
+        vigencia_baja = any(
+            baja.fecha_ingreso <= fin and baja.fecha_baja >= inicio
+            for baja in empleado.bajas_rrhh.all()
+        )
+        if nss and (vigencia_actual or vigencia_baja):
             por_nss.setdefault(nss, []).append(empleado)
     nss_cedula = {trabajador.nss for trabajador in parseada.trabajadores}
     duplicados = tuple(sorted(nss for nss, empleados in por_nss.items() if len(empleados) > 1 and nss in nss_cedula))
@@ -362,7 +404,9 @@ def _cruzar_detalles(
     return tuple(detalles), duplicados
 
 
-def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
+def preparar_expediente(
+    archivos: Iterable, usuario=None, *, recuperacion_sua=None
+) -> PreviewExpediente:
     """Valida y previsualiza una cédula y sus evidencias sin persistir nada."""
     documentos = tuple(_documento_preview(archivo) for archivo in archivos)
     if sum(documento.tamano for documento in documentos) > MAX_EXPEDIENTE_BYTES:
@@ -370,8 +414,16 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
     sua = [documento for documento in documentos if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS]
     if len(sua) != 1:
         raise ValueError(f"Se requiere exactamente un archivo SUA .xls; se recibieron {len(sua)}.")
-    filas = _filas_sua(sua[0])
+    filas_originales = _filas_sua(sua[0])
+    if recuperacion_sua is not None:
+        if recuperacion_sua.filas_validadas[2:] != filas_originales:
+            raise ValueError("La recuperación histórica no coincide con el XLS original.")
+        filas = recuperacion_sua.filas_validadas
+    else:
+        filas = filas_originales
     parseada = _completar_registro_patronal(parsear_cedula(filas), filas)
+    if recuperacion_sua is not None and parseada != recuperacion_sua.parseada:
+        raise ValueError("La recuperación histórica no coincide con su previsualización.")
     if not parseada.registro_patronal.strip():
         raise ValueError("El XLS no contiene un registro patronal inequívoco.")
     clase_pdf_esperada = (
@@ -384,16 +436,27 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
         if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS:
             continue
         registro_pdf = re.sub(r"[^A-Z0-9]", "", documento.registro_patronal.upper())
+        tipo_coincide = (
+            documento.clase == clase_pdf_esperada and documento.periodo == parseada.periodo
+        ) or (
+            documento.clase == DocumentoCedulaIMSS.CLASE_SIPARE_PDF and (
+                (parseada.tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL and documento.periodo == parseada.periodo)
+                or (parseada.tipo == ExpedienteCedulaIMSS.TIPO_BIMESTRAL and documento.periodo_bimestral == parseada.periodo)
+            )
+        )
         if (
-            documento.clase != clase_pdf_esperada
+            not tipo_coincide
             or registro_pdf != registro_sua
-            or documento.periodo != parseada.periodo
         ):
             raise ValueError(
                 f"El PDF '{documento.nombre_original}' no coincide con el SUA "
                 "en tipo, registro patronal o periodo."
             )
-    total_control = _extraer_total_control(filas, parseada.tipo)
+    total_control = (
+        recuperacion_sua.total_patronal
+        if recuperacion_sua is not None
+        else _extraer_total_control(filas, parseada.tipo)
+    )
     detalles, duplicados = _cruzar_detalles(parseada)
     total_detalle = sum((detalle.cuota_patronal for detalle in detalles), Decimal("0")).quantize(
         Decimal("0.01")
@@ -409,6 +472,7 @@ def preparar_expediente(archivos: Iterable, usuario=None) -> PreviewExpediente:
             total_visible=total_control if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS else None,
             registro_patronal=documento.registro_patronal,
             periodo=documento.periodo,
+            periodo_bimestral=documento.periodo_bimestral,
         )
         for documento in documentos
     )
@@ -444,6 +508,10 @@ def _guardar_documento(expediente, documento_preview, blobs_guardados):
                 "xlrd"
                 if documento_preview.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS
                 else "pdfplumber"
+            ),
+            **(
+                {"periodo_bimestral": documento_preview.periodo_bimestral.isoformat()}
+                if documento_preview.periodo_bimestral else {}
             ),
         },
     )
