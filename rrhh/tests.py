@@ -3105,7 +3105,10 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
 
         self.assertEqual(connection.vendor, "postgresql")
         jefe = User.objects.create_user(username="jefe.extra.concurrente")
-        empleado = Empleado.objects.create(nombre="Repartidor concurrencia", salario_diario=Decimal("400"))
+        jefe_empleado = Empleado.objects.create(nombre="Jefe concurrencia", usuario_erp=jefe)
+        empleado = Empleado.objects.create(
+            nombre="Repartidor concurrencia", salario_diario=Decimal("400"), jefe_directo=jefe_empleado,
+        )
         turno = Turno.objects.create(nombre="Turno concurrencia", hora_entrada=time(8), hora_salida=time(16))
         asistencia = AsistenciaEmpleado.objects.create(
             empleado=empleado, fecha=date(2026, 9, 18), turno=turno,

@@ -14,6 +14,7 @@ from rest_framework.response import Response
 from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
 from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
+from rrhh.services_horas_extra_jefatura import jefatura_hora_extra_actualizada
 from rrhh.services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 from rrhh.services_extra_conciliacion import (
     contexto_hora_extra, diagnosticar_horas_extra, evidencia_ajuste_extra,
@@ -66,6 +67,7 @@ def _puede_autorizar_hora_extra(user, hora_extra: HoraExtra) -> bool:
         user
         and getattr(user, "is_authenticated", False)
         and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE
+        and jefatura_hora_extra_actualizada(hora_extra)
         and (hora_extra.jefe_directo_id == user.id or getattr(user, "is_superuser", False))
     )
 
@@ -155,7 +157,8 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     def _horas_extra(self):
         empleado_ids = self._empleados().values_list("id", flat=True)
         qs = (
-            HoraExtra.objects.select_related("empleado__sucursal_ref", "jefe_directo", "autorizado_por",
+            HoraExtra.objects.select_related("empleado__sucursal_ref", "empleado__jefe_directo__usuario_erp",
+                "jefe_directo", "autorizado_por",
                 "asistencia__turno", "asistencia__empleado")
             .filter(empleado_id__in=empleado_ids)
             .order_by("-fecha", "-id")

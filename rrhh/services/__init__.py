@@ -14,6 +14,7 @@ from rrhh.services_extra_conciliacion import (
     NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO,
 )
 from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
+from rrhh.services_horas_extra_jefatura import actualizar_jefe_hora_extra_pendiente
 
 TIEMPO_COMIDA_MINUTOS = 35
 
@@ -89,6 +90,8 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     registros = list(HoraExtra.objects.select_for_update(of=('self',)).filter(
         empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
     he = next((r for r in registros if r.asistencia_id == asistencia.pk), None)
+    if he:
+        actualizar_jefe_hora_extra_pendiente(he)
     saldo = saldo_automatico_esperado(diagnostico, registros, he)
     if saldo is None:
         return he

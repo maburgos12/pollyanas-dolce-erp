@@ -30,6 +30,7 @@ from .serializers import (
 )
 from .services import usuario_jefe_directo_de_empleado
 from .services_horas_extra_autorizacion import resolver_hora_extra
+from .services_horas_extra_jefatura import jefatura_hora_extra_actualizada
 from .services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 from .services_prestamos import (
     aprobar_prestamo_direccion,
@@ -164,6 +165,8 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
                 status=status.HTTP_409_CONFLICT)
         self.get_object()  # Revalida también el alcance de consulta tras la espera.
         self.check_object_permissions(request, actual)
+        if not can_view_rrhh(request.user) and not jefatura_hora_extra_actualizada(actual):
+            raise PermissionDenied("La jefatura de esta detección cambió. Solicita su sincronización a RRHH.")
         serializer = self.get_serializer(actual, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         cambia_base = any(
@@ -183,18 +186,29 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         actual, _ = bloquear_hora_extra(anterior.pk)
         self.get_object()
         self.check_object_permissions(request, actual)
+        if not can_view_rrhh(request.user) and not jefatura_hora_extra_actualizada(actual):
+            raise PermissionDenied("La jefatura de esta detección cambió. Solicita su sincronización a RRHH.")
         self.perform_destroy(actual)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     def get_queryset(self):
-        qs = HoraExtra.objects.select_related("empleado", "jefe_directo", "autorizado_por")
+        qs = HoraExtra.objects.select_related(
+            "empleado__jefe_directo__usuario_erp", "jefe_directo", "autorizado_por",
+        )
         empleado = empleado_de_usuario(self.request.user)
         if can_view_rrhh(self.request.user):
             pass
-        elif empleado:
-            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user))
         else:
-            qs = qs.filter(jefe_directo=self.request.user)
+            automatica_pendiente = Q(estado=HoraExtra.ESTADO_PENDIENTE, asistencia__isnull=False)
+            candidatos = qs.filter(
+                jefe_directo=self.request.user, estado=HoraExtra.ESTADO_PENDIENTE,
+                asistencia__isnull=False,
+            )
+            if self.kwargs.get("pk"):
+                candidatos = candidatos.filter(pk=self.kwargs["pk"])
+            vigentes = [he.pk for he in candidatos if jefatura_hora_extra_actualizada(he)]
+            alcance_jefe = Q(jefe_directo=self.request.user) & (~automatica_pendiente | Q(pk__in=vigentes))
+            qs = qs.filter(Q(empleado=empleado) | alcance_jefe) if empleado else qs.filter(alcance_jefe)
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)

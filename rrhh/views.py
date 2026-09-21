@@ -69,6 +69,9 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
 from .services_extra_conciliacion import contexto_hora_extra, es_hora_extra_automatica
 from .services_horas_extra_autorizacion import resolver_hora_extra
+from .services_horas_extra_jefatura import (
+    jefatura_hora_extra_actualizada, sincronizar_jefe_horas_extra_pendientes,
+)
 from .services_extra_bloqueos import JornadaExtraConflict
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
@@ -1384,7 +1387,9 @@ def empleados(request):
                 except ValidationError as exc:
                     messages.error(request, exc.messages[0])
                     return redirect("rrhh:empleados")
-                empleado.save()
+                with transaction.atomic():
+                    empleado.save()
+                    sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
                 sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
                 asegurar_identidad_operativa_empleado(
                     empleado,
@@ -2686,11 +2691,16 @@ def horas_extra_list(request):
         return redirect(redirect_url)
 
     horas_extra = HoraExtra.objects.select_related(
-        "empleado", "jefe_directo", "autorizado_por", "asistencia__empleado", "asistencia__turno",
+        "empleado__jefe_directo__usuario_erp", "jefe_directo", "autorizado_por",
+        "asistencia__empleado", "asistencia__turno",
     ).order_by("-fecha", "empleado__nombre")
     if not can_view_rrhh(request.user):
         horas_extra = horas_extra.filter(jefe_directo=request.user)
     horas_extra = list(horas_extra)
+    for he in horas_extra:
+        he.jefatura_actualizada = jefatura_hora_extra_actualizada(he)
+    if not can_view_rrhh(request.user):
+        horas_extra = [he for he in horas_extra if he.jefatura_actualizada]
     dias_automaticos = {
         (he.empleado_id, he.fecha) for he in horas_extra if es_hora_extra_automatica(he)
     }

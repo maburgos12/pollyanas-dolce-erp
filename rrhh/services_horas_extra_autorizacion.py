@@ -6,6 +6,7 @@ from django.utils import timezone
 from .models import HoraExtra
 from .services_extra_bloqueos import bloquear_hora_extra
 from .services_extra_conciliacion import contexto_hora_extra
+from .services_horas_extra_jefatura import jefatura_hora_extra_actualizada
 
 
 @transaction.atomic
@@ -16,6 +17,8 @@ def resolver_hora_extra(hora_extra_id, action, usuario, *, permitir_superusuario
     Los adaptadores conservan su alcance de consulta y formato de respuesta.
     """
     he, registros_dia = bloquear_hora_extra(hora_extra_id)
+    if not jefatura_hora_extra_actualizada(he):
+        return he, "", "La jefatura de esta detección cambió. Sincroniza el jefe directo antes de resolverla."
     if he.jefe_directo_id != usuario.id and not (permitir_superusuario and usuario.is_superuser):
         verbo = "rechazar" if action == "rechazar" else "autorizar"
         raise PermissionDenied(f"Solo el jefe directo asignado puede {verbo} esta hora extra.")
