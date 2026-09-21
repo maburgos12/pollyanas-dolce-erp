@@ -36,7 +36,11 @@
     .ch-row-item > :first-child { grid-row: span 4; }
   }
   @media (max-width: 760px) {
-    .ch-status-strip { grid-template-columns: 1fr; }
+    .ch-status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; }
+    .ch-status-card { min-height: 0; padding: 9px 10px; }
+    .ch-status-card strong { font-size: 14px; line-height: 1.2; }
+    .ch-status-card span { font-size: 10px; line-height: 1.2; margin-top: 3px; }
+    .ch-status-card:last-child { grid-column: 1 / -1; }
     .ch-row-item { grid-template-columns: 1fr; }
     .ch-row-badges { justify-content: flex-start; }
     .ch-calculation-context { grid-template-columns: 1fr; }
