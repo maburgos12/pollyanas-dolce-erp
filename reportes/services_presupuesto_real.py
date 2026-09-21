@@ -387,10 +387,10 @@ class PresupuestoRealConsolidacionService:
             .values(
                 "empleado__departamento",
                 "empleado__sucursal_ref_id",
-                # Puesto y área operativa entran al agrupado para poder separar,
+                # Nivel y área operativa entran al agrupado para poder separar,
                 # dentro de un mismo departamento, quién es costo de fabricación
                 # y quién no. Ver reportes.clasificacion_nomina.
-                "empleado__puesto",
+                "empleado__nivel_organizacional",
                 "empleado__puesto_operativo",
             )
             .annotate(**agregados)
@@ -418,7 +418,7 @@ class PresupuestoRealConsolidacionService:
             # Sin `destino` la regla se comporta igual que siempre: toma el
             # departamento completo.
             if destino and destino_de(
-                fila["empleado__puesto"], fila["empleado__puesto_operativo"]
+                fila["empleado__nivel_organizacional"], fila["empleado__puesto_operativo"]
             ) != destino:
                 continue
             total += fila[campo] or Decimal("0")
@@ -446,7 +446,7 @@ class PresupuestoRealConsolidacionService:
                 "linea__empleado__sucursal_ref_id",
                 # Igual que el índice de nómina: permite separar por destino
                 # dentro de un mismo departamento.
-                "linea__empleado__puesto",
+                "linea__empleado__nivel_organizacional",
                 "linea__empleado__puesto_operativo",
             )
             .annotate(importe=Sum("importe"))
@@ -480,7 +480,8 @@ class PresupuestoRealConsolidacionService:
             if sucursal_id is not None and fila["linea__empleado__sucursal_ref_id"] != sucursal_id:
                 continue
             if destino and destino_de(
-                fila["linea__empleado__puesto"], fila["linea__empleado__puesto_operativo"]
+                fila["linea__empleado__nivel_organizacional"],
+                fila["linea__empleado__puesto_operativo"],
             ) != destino:
                 continue
             total += fila["importe"] or Decimal("0")
