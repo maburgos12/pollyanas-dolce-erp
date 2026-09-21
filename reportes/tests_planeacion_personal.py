@@ -204,6 +204,19 @@ class PersonnelPlanTests(TestCase):
             [ExpedienteCedulaIMSS.objects.get().pk],
         )
 
+    def test_sipare_acepta_registro_patronal_con_formato_del_documento(self, _):
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_MENSUAL,
+            periodo=date(2026, 8, 1),
+            registro_patronal='E52-40157-10-0',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('79931.51'),
+        )
+
+        agosto = build_personnel_plan()['months'][-1]
+
+        self.assertEqual(agosto['imss'], D('79931.51'))
+
     def test_sipare_bimestral_distribuye_total_una_sola_vez(self, _):
         ExpedienteCedulaIMSS.objects.create(
             tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
