@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
-from rrhh.models import Empleado, AsistenciaEmpleado, IncidenciaAsistencia, PermisoSalida
+from rrhh.models import Empleado, AsistenciaEmpleado, IncidenciaAsistencia, PermisoSalida, Turno
 from rrhh.services_reporte_asistencia import build_reporte_departamento
 
 
@@ -65,7 +65,8 @@ class ReporteDepartamentoServiceTests(TestCase):
         self.assertEqual(report['resumen']['falta_retardos'],1)
 
     def test_partial_detection_and_no_writes(self):
-        AsistenciaEmpleado.objects.create(empleado=self.employee,fecha=self.start,entrada=dt(self.start,8),salida=dt(self.start,17))
+        turno = Turno.objects.create(nombre='Jornada 8 a 16', hora_entrada=time(8), hora_salida=time(16))
+        AsistenciaEmpleado.objects.create(empleado=self.employee,fecha=self.start,turno=turno,entrada=dt(self.start,8),salida=dt(self.start,17))
         before = (AsistenciaEmpleado.objects.count(), IncidenciaAsistencia.objects.count())
         report = self.build()['reportes'][0]
         self.assertEqual(report['extra_resumen']['detectado_minutos'],60)
@@ -109,11 +110,25 @@ class ReporteDepartamentoServiceTests(TestCase):
     def test_query_count_does_not_grow_with_employees(self):
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
+        turno = Turno.objects.create(nombre='Jornada 8 a 16', hora_entrada=time(8), hora_salida=time(16))
+        AsistenciaEmpleado.objects.create(
+            empleado=self.employee, fecha=self.start, turno=turno,
+            entrada=dt(self.start, 8), salida=dt(self.start, 17),
+        )
         with CaptureQueriesContext(connection) as one:
-            self.build()
-        Empleado.objects.bulk_create([Empleado(codigo=f'Q-{n}',nombre=f'Persona {n}',fecha_ingreso=self.start,departamento='PRODUCCION') for n in range(20)])
+            first_report = self.build()
+        employees = Empleado.objects.bulk_create([Empleado(codigo=f'Q-{n}',nombre=f'Persona {n}',fecha_ingreso=self.start,departamento='PRODUCCION') for n in range(20)])
+        AsistenciaEmpleado.objects.bulk_create([
+            AsistenciaEmpleado(empleado=employee, fecha=self.start, turno=turno,
+                entrada=dt(self.start, 8), salida=dt(self.start, 17))
+            for employee in employees
+        ])
         with CaptureQueriesContext(connection) as many:
-            self.build()
+            larger_report = self.build()
+        self.assertEqual(len(first_report['reportes']), 1)
+        self.assertEqual(len(larger_report['reportes']), 21)
+        self.assertTrue(all(report['extra_resumen']['detectado_minutos'] == 60
+            for report in larger_report['reportes']))
         self.assertEqual(len(one),len(many))
         self.assertLessEqual(len(many),8)
 

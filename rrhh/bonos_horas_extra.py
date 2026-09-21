@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils.dateparse import parse_date
 from django.utils import timezone
@@ -12,6 +13,8 @@ from rest_framework.response import Response
 
 from rrhh.models import Empleado, HoraExtra
 from rrhh.services import calcular_monto_hora_extra, usuario_jefe_directo_de_empleado
+from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
+from rrhh.services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 
 
 ESTADOS_HORA_EXTRA_ACTIVOS = {
@@ -96,6 +99,11 @@ def _hora_extra_payload(hora_extra: HoraExtra, user=None, puede_gestionar: bool 
 class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     permission_classes = [IsAuthenticated]
 
+    def handle_exception(self, exc):
+        if isinstance(exc, JornadaExtraConflict):
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return super().handle_exception(exc)
+
     def empleados_queryset(self):
         return Empleado.objects.none()
 
@@ -163,6 +171,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             }
         )
 
+    @transaction.atomic
     def create(self, request):
         empleado_id = request.data.get("empleado")
         try:
@@ -181,6 +190,7 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             return Response({"horas": "Captura horas extra mayores a cero."}, status=status.HTTP_400_BAD_REQUEST)
         if not notas:
             return Response({"notas": "El motivo es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
+        bloquear_jornadas_extra([(empleado.pk, fecha)])
         if HoraExtra.objects.filter(empleado=empleado, fecha=fecha, estado__in=ESTADOS_HORA_EXTRA_ACTIVOS).exists():
             return Response(
                 {"detail": "Ya existe una hora extra activa para este empleado y fecha."},
@@ -209,8 +219,18 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         return get_object_or_404(self._horas_extra(), pk=self.kwargs["pk"])
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def editar(self, request, pk=None):
         hora_extra = self.get_object()
+        identidad_destino = (hora_extra.empleado_id, hora_extra.fecha)
+        destino = parse_date(str(request.data.get("fecha") or ""))
+        hora_extra, _ = bloquear_hora_extra(
+            hora_extra.pk, jornadas_adicionales=[(hora_extra.empleado_id, destino)] if destino else [],
+        )
+        if (hora_extra.empleado_id, hora_extra.fecha) != identidad_destino:
+            return Response({"detail": "La jornada cambió. Recarga y reintenta la corrección."},
+                status=status.HTTP_409_CONFLICT)
+        self.get_object()  # El equipo/período se verifica de nuevo después de esperar.
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para editar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado not in ESTADOS_HORA_EXTRA_EDITABLES:
@@ -270,8 +290,11 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
         )
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def eliminar(self, request, pk=None):
         hora_extra = self.get_object()
+        hora_extra, _ = bloquear_hora_extra(hora_extra.pk)
+        self.get_object()
         if not self.can_gestionar_empleado(hora_extra.empleado):
             return Response({"detail": "No tienes permiso para eliminar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
         if hora_extra.estado not in ESTADOS_HORA_EXTRA_ELIMINABLES:
@@ -299,16 +322,9 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def autorizar(self, request, pk=None):
         hora_extra = self.get_object()
-        if hora_extra.estado != HoraExtra.ESTADO_PENDIENTE:
-            return Response({"detail": "Solo se pueden autorizar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
-        if not _puede_autorizar_hora_extra(request.user, hora_extra):
-            return Response({"detail": "Solo el jefe directo asignado puede autorizar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
-        hora_extra.estado = HoraExtra.ESTADO_AUTORIZADO
-        hora_extra.autorizado_por = request.user
-
-        hora_extra.fecha_autorizacion_jefe = timezone.now()
-        calcular_monto_hora_extra(hora_extra)
-        hora_extra.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        hora_extra, _message, error = resolver_hora_extra(hora_extra.pk, "autorizar", request.user)
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             _hora_extra_payload(
                 hora_extra,
@@ -321,15 +337,11 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def rechazar(self, request, pk=None):
         hora_extra = self.get_object()
-        if hora_extra.jefe_directo_id != request.user.id:
-            return Response({"detail": "Solo el jefe directo asignado puede rechazar esta hora extra."}, status=status.HTTP_403_FORBIDDEN)
-        if hora_extra.estado != HoraExtra.ESTADO_PENDIENTE:
-            return Response({"detail": "Solo se pueden rechazar horas extra pendientes."}, status=status.HTTP_400_BAD_REQUEST)
-        hora_extra.estado = HoraExtra.ESTADO_RECHAZADO
-        hora_extra.autorizado_por = request.user
-
-        hora_extra.fecha_autorizacion_jefe = timezone.now()
-        hora_extra.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+        hora_extra, _message, error = resolver_hora_extra(
+            hora_extra.pk, "rechazar", request.user, permitir_superusuario=False,
+        )
+        if error:
+            return Response({"detail": error}, status=status.HTTP_400_BAD_REQUEST)
         return Response(
             _hora_extra_payload(
                 hora_extra,

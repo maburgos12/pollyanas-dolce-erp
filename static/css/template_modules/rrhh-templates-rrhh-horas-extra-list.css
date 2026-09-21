@@ -12,10 +12,12 @@
     border-bottom: 1px solid var(--rosa);
     display: grid;
     gap: 14px;
-    grid-template-columns: minmax(280px, 1.4fr) minmax(130px, .6fr) minmax(280px, 1.1fr) minmax(200px, auto) auto;
+    grid-template-columns: minmax(280px, 2fr) minmax(90px, .5fr) minmax(140px, 1fr) minmax(100px, .6fr) minmax(110px, .7fr);
     min-height: 78px;
     padding: 12px 14px;
+    scroll-margin-top: 100px;
   }
+  .ch-row-item > * { min-width: 0; overflow-wrap: anywhere; }
   .ch-row-item:last-child { border-bottom: 0; }
   .ch-row-item strong { color: var(--texto); display: block; font-size: 15px; }
   .ch-row-item div, .ch-row-item p { color: var(--texto-light); font-size: 13px; }
@@ -24,8 +26,18 @@
   .ch-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .ch-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
   .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+  .ch-calculation-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 10px 0 0; padding: 10px; background: var(--blanco); border: 1px solid var(--rosa); border-radius: 6px; }
+  .ch-calculation-context dt { color: var(--texto-light); font-size: 12px; font-weight: 700; }
+  .ch-calculation-context dd { color: var(--texto); margin: 2px 0 0; font-size: 13px; }
+  .ch-row-item .ch-calculation-warning { color: #6f5415; background: #fff8e6; border: 1px solid var(--dorado); border-radius: 6px; padding: 8px 10px; line-height: 1.45; }
+  .ch-actions .btn:disabled { color: var(--texto-light); background: var(--gris-suave); border: 1px solid var(--texto-light); cursor: not-allowed; opacity: 1; box-shadow: none; transform: none; }
+  @media (min-width: 761px) and (max-width: 1200px) {
+    .ch-row-item { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+    .ch-row-item > :first-child { grid-row: span 4; }
+  }
   @media (max-width: 760px) {
     .ch-status-strip { grid-template-columns: 1fr; }
     .ch-row-item { grid-template-columns: 1fr; }
     .ch-row-badges { justify-content: flex-start; }
+    .ch-calculation-context { grid-template-columns: 1fr; }
   }

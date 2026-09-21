@@ -9,7 +9,11 @@ from core.access import can_manage_rrhh
 
 from rrhh.models import AsistenciaEmpleado, HoraExtra, NominaLinea, NominaPeriodo
 from rrhh.services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
-from rrhh.services_extra_conciliacion import detectar_minutos_extra, NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO
+from rrhh.services_extra_conciliacion import (
+    detectar_minutos_extra, diagnosticar_horas_extra, saldo_automatico_esperado,
+    NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO,
+)
+from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
 
 TIEMPO_COMIDA_MINUTOS = 35
 
@@ -71,17 +75,23 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     Crea o actualiza la HoraExtra derivada de una asistencia.
     No modifica registros ya autorizados, rechazados o pagados.
     """
-    # Serializa eventos del mismo día, incluso entre Hik y Point.
+    identidad = AsistenciaEmpleado.objects.get(pk=asistencia.pk)
+    bloquear_jornadas_extra([(identidad.empleado_id, identidad.fecha)])
+    # Serializa eventos del mismo día, incluso cuando aún no existe extra.
     asistencia = AsistenciaEmpleado.objects.select_for_update(of=('self',)).select_related(
         'empleado__jefe_directo__usuario_erp', 'turno').get(pk=asistencia.pk)
-    minutos = detectar_minutos_extra(asistencia)
-    registros = list(HoraExtra.objects.filter(empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
+    if (asistencia.empleado_id, asistencia.fecha) != (identidad.empleado_id, identidad.fecha):
+        return None  # La corrección de jornada requiere una nueva evaluación.
+    vinculada = HoraExtra.objects.filter(asistencia_id=asistencia.pk).first()
+    if vinculada and (vinculada.empleado_id, vinculada.fecha) != (asistencia.empleado_id, asistencia.fecha):
+        return vinculada  # No recrear ni trasladar un vínculo corregido manualmente.
+    diagnostico = diagnosticar_horas_extra(asistencia)
+    registros = list(HoraExtra.objects.select_for_update(of=('self',)).filter(
+        empleado_id=asistencia.empleado_id, fecha=asistencia.fecha).order_by('pk'))
     he = next((r for r in registros if r.asistencia_id == asistencia.pk), None)
-    if minutos is None:
+    saldo = saldo_automatico_esperado(diagnostico, registros, he)
+    if saldo is None:
         return he
-    # Una solicitud independiente ya cubre parte del tiempo; no la duplicamos.
-    cobertura = sum((r.horas for r in registros if r != he and r.estado != HoraExtra.ESTADO_CANCELADO), Decimal('0'))
-    saldo = max(calcular_horas_extra(asistencia) - cobertura, Decimal('0'))
     reactivar = bool(he and saldo > 0 and he.estado == HoraExtra.ESTADO_CANCELADO
         and he.notas.startswith(NOTA_EXTRA_AUTOMATICA) and he.notas.endswith(NOTA_SALDO_CUBIERTO))
     if he and he.estado != HoraExtra.ESTADO_PENDIENTE and not reactivar:

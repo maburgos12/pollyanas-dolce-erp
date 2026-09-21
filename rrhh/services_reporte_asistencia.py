@@ -75,7 +75,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
     ids = [employee.id for employee in candidates]
     window = fecha_fin-timedelta(days=29)
     start_dt, end_dt = _midnight(fecha_inicio), _midnight(fecha_fin+timedelta(days=1))
-    attendance = {(a.empleado_id,a.fecha): a for a in AsistenciaEmpleado.objects.filter(empleado_id__in=ids,fecha__range=(fecha_inicio,fecha_fin)).select_related('turno','sucursal')}
+    attendance = {(a.empleado_id,a.fecha): a for a in AsistenciaEmpleado.objects.filter(empleado_id__in=ids,fecha__range=(fecha_inicio,fecha_fin)).select_related('turno','sucursal','empleado')}
     extras = defaultdict(list)
     for item in HoraExtra.objects.filter(empleado_id__in=ids,fecha__range=(fecha_inicio,fecha_fin)):
         extras[(item.empleado_id,item.fecha)].append(item)

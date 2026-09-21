@@ -53,7 +53,10 @@ def _validar_pendiente(ajuste: AjusteAsistencia) -> None:
         raise ValidationError({"estado": "Solo se pueden resolver ajustes pendientes."})
 
 
+@transaction.atomic
 def crear_ajuste_asistencia(empleado, fecha, tipo_ajuste, valores_propuestos, motivo, solicitado_por):
+    from .services_extra_bloqueos import bloquear_jornadas_extra
+    bloquear_jornadas_extra([(empleado.pk, fecha)])
     motivo = (motivo or "").strip()
     if not motivo:
         raise ValidationError({"motivo": "El motivo es obligatorio."})
@@ -81,6 +84,12 @@ def crear_ajuste_asistencia(empleado, fecha, tipo_ajuste, valores_propuestos, mo
 
 @transaction.atomic
 def aprobar_ajuste_asistencia(ajuste, user, comentario=""):
+    from .services_extra_bloqueos import bloquear_jornadas_extra
+    identidad = AjusteAsistencia.objects.select_related("asistencia").get(pk=ajuste.pk)
+    jornadas = {(identidad.empleado_id, identidad.fecha)}
+    if identidad.asistencia_id:
+        jornadas.add((identidad.asistencia.empleado_id, identidad.asistencia.fecha))
+    bloquear_jornadas_extra(jornadas)
     ajuste = (
         AjusteAsistencia.objects.select_for_update()
         .select_related("empleado")

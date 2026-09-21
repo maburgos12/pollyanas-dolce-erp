@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -87,6 +87,16 @@ class Empleado(models.Model):
         (NIVEL_JEFATURA, "Jefatura"),
         (NIVEL_DIRECCION, "Dirección"),
     ]
+    MARCAJE_AUTO = "AUTO"
+    MARCAJE_CUATRO_MARCAS = "CUATRO_MARCAS"
+    MARCAJE_DOS_MARCAS = "DOS_MARCAS"
+    MARCAJE_RUTA = "RUTA"
+    MODALIDAD_MARCAJE_CHOICES = [
+        (MARCAJE_AUTO, "Automática según puesto y fuente"),
+        (MARCAJE_CUATRO_MARCAS, "Cuatro marcas"),
+        (MARCAJE_DOS_MARCAS, "Dos marcas"),
+        (MARCAJE_RUTA, "Trabajo en ruta"),
+    ]
 
     codigo = models.CharField(max_length=40, unique=True, blank=True)
     nombre = models.CharField(max_length=180)
@@ -115,6 +125,13 @@ class Empleado(models.Model):
     departamento_origen = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     departamento = models.CharField(max_length=40, choices=DEP_CHOICES, blank=True, default="", db_index=True)
     puesto_operativo = models.CharField(max_length=80, blank=True, default="", db_index=True)
+    modalidad_marcaje = models.CharField(
+        max_length=20,
+        choices=MODALIDAD_MARCAJE_CHOICES,
+        default=MARCAJE_AUTO,
+        db_index=True,
+        help_text="Define las marcas esperadas; Automática usa puesto y fuente de asistencia.",
+    )
     nivel_organizacional = models.CharField(
         max_length=20,
         choices=NIVEL_ORGANIZACIONAL_CHOICES,
@@ -1243,6 +1260,15 @@ class HoraExtra(models.Model):
     def __str__(self) -> str:
         return f"{self.empleado} · {self.fecha} · {self.horas}h"
 
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None):
+        # Mantiene pre_save, SQL y conciliación dentro del mismo advisory xact lock,
+        # incluso en ORM directo/autocommit. Sin savepoint: un error SQL debe
+        # invalidar la autorización exterior aunque un llamador capture el error.
+        using = using or router.db_for_write(type(self), instance=self)
+        with transaction.atomic(using=using, savepoint=False):
+            return super().save(force_insert=force_insert, force_update=force_update,
+                using=using, update_fields=update_fields)
+
 
 class PermisoSalida(models.Model):
     TIPO_PERMISO_HORA = "permiso_hora"
@@ -1922,6 +1948,8 @@ class IncidenciaAsistencia(models.Model):
     TIPO_FALTA_RETARDOS = "falta_retardos"
     TIPO_JORNADA_INCOMPLETA = "jornada_incompleta"
     TIPO_HORA_EXTRA_PENDIENTE = "hora_extra_pendiente"
+    TIPO_HORA_EXTRA_NO_CALCULABLE = "extra_no_calculable"
+    TIPO_MARCAJE_INCOMPLETO = "marcaje_incompleto"
     TIPO_COMIDA_EXCEDIDA = "comida_excedida"
     TIPO_SUSPENSION = "suspension"
     TIPO_AVISO_BAJA_FALTAS = "aviso_baja_faltas"
@@ -1934,6 +1962,8 @@ class IncidenciaAsistencia(models.Model):
         (TIPO_FALTA_RETARDOS, "Falta por retardos"),
         (TIPO_JORNADA_INCOMPLETA, "Jornada incompleta"),
         (TIPO_HORA_EXTRA_PENDIENTE, "Hora extra pendiente"),
+        (TIPO_HORA_EXTRA_NO_CALCULABLE, "Hora extra no calculable"),
+        (TIPO_MARCAJE_INCOMPLETO, "Marcaje incompleto"),
         (TIPO_COMIDA_EXCEDIDA, "Comida excedida"),
         (TIPO_SUSPENSION, "Suspensión"),
         (TIPO_AVISO_BAJA_FALTAS, "Aviso por faltas"),
