@@ -35,6 +35,17 @@ def _resolve_sucursal_id(sucursal: Sucursal | int) -> int:
     return int(sucursal)
 
 
+def sold_point_skus_for_range(*, sucursal: Sucursal | int, start_date: date, end_date: date) -> set[str]:
+    """Return Point SKUs with positive sales for an operational catalog."""
+    return set(
+        PointDailySale.objects.filter(
+            branch__erp_branch_id=_resolve_sucursal_id(sucursal),
+            sale_date__range=(start_date, end_date),
+            quantity__gt=0,
+        ).order_by().values_list("product__sku", flat=True).distinct()
+    )
+
+
 def _resolve_producto_id(producto: Receta | int | None) -> int | None:
     if producto is None:
         return None
