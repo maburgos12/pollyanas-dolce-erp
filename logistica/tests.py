@@ -1682,7 +1682,7 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
             set(REQUIRED_TEMPLATE_MARKERS),
             {"route-control-v92-paradas-ruta-viva"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v93-revision-ticket-combustible", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -2748,6 +2748,87 @@ def _ticket_jpeg_rotado(variante: int = 0) -> bytes:
     buffer = BytesIO()
     imagen.save(buffer, format="JPEG", exif=exif)
     return buffer.getvalue()
+
+class LogisticaPWARechazaFotoNoTicketTests(TestCase):
+    """La PWA rechaza la foto al guardar solo cuando es seguro hacerlo.
+
+    Bloquear a un repartidor parado en una gasolinera es caro: solo se rechaza
+    cuando el lector afirma que la foto no es un ticket y hay señal para que la
+    persona vuelva a tomarla.
+    """
+
+    URL = "/api/logistica/combustible/"
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="repartidor.pwa", password="pass123")
+        sucursal = Sucursal.objects.create(codigo="QA-PWA", nombre="QA PWA", activa=True)
+        unidad = Unidad.objects.create(codigo="QA-PWA-1", descripcion="Unidad PWA", sucursal=sucursal)
+        self.repartidor = Repartidor.objects.create(
+            user=self.user, sucursal=sucursal, unidad_asignada=unidad
+        )
+        BitacoraSalidaLlegada.objects.create(
+            repartidor=self.repartidor,
+            unidad=unidad,
+            km_salida=1000,
+            nivel_gas_salida="1/2",
+            foto_tablero_salida=SimpleUploadedFile("tablero.gif", VALID_GIF, content_type="image/gif"),
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _post(self, **extra):
+        return self.client.post(
+            self.URL,
+            {
+                "litros": "44.61",
+                "importe_total": "1200.00",
+                "nivel_gas_despues": "1/2",
+                "foto_ticket": SimpleUploadedFile(
+                    "ticket.jpg", _ticket_jpeg_rotado(variante=3), content_type="image/jpeg"
+                ),
+            },
+            format="multipart",
+            **extra,
+        )
+
+    def test_foto_que_no_es_ticket_se_rechaza_y_no_guarda_la_carga(self):
+        with mock.patch(
+            "api.logistica_views.leer_ticket", return_value=_lectura(es_ticket=False)
+        ):
+            respuesta = self._post()
+
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("no parece un ticket", respuesta.json()["detail"])
+        self.assertEqual(CargaCombustibleUnidad.objects.count(), 0)
+
+    def test_ticket_valido_se_guarda(self):
+        lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200.00"), precio=Decimal("26.90"))
+        with mock.patch("api.logistica_views.leer_ticket", return_value=lectura):
+            respuesta = self._post()
+
+        self.assertEqual(respuesta.status_code, 201)
+        self.assertEqual(CargaCombustibleUnidad.objects.count(), 1)
+
+    def test_lector_caido_no_bloquea_al_repartidor(self):
+        """Una falla del servicio jamás deja a alguien sin registrar su gasto."""
+        with mock.patch(
+            "api.logistica_views.leer_ticket",
+            side_effect=TicketOCRNoDisponible("timeout"),
+        ):
+            respuesta = self._post()
+
+        self.assertEqual(respuesta.status_code, 201)
+        self.assertEqual(CargaCombustibleUnidad.objects.count(), 1)
+
+    def test_reenvio_desde_la_cola_offline_no_se_rechaza(self):
+        """El repartidor ya no está en la gasolinera: rechazarlo perdería el gasto."""
+        with mock.patch("api.logistica_views.leer_ticket") as lector:
+            respuesta = self._post(HTTP_X_LOGISTICA_OFFLINE_REPLAY="1")
+
+        self.assertEqual(respuesta.status_code, 201)
+        self.assertEqual(CargaCombustibleUnidad.objects.count(), 1)
+        lector.assert_not_called()
+
 
 class LogisticaCombustibleAuditoriaTests(TestCase):
     def test_auditoria_marca_ticket_duplicado_como_alto_riesgo(self):
@@ -5444,7 +5525,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("logistica:pwa_sw", pwa_html)
         self.assertIn("?v=route-control-v92-paradas-ruta-viva", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v93-revision-ticket-combustible", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5607,7 +5688,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v93-revision-ticket-combustible", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path

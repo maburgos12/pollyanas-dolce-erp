@@ -79,9 +79,9 @@ def _from_email() -> str:
 
 
 @shared_task
-def auditar_ticket_combustible(carga_id):
+def auditar_ticket_combustible(carga_id, lectura=None):
     try:
-        return auditar_carga_combustible(carga_id)
+        return auditar_carga_combustible(carga_id, lectura)
     except CargaCombustibleUnidad.DoesNotExist:
         return {"estado": "no_encontrado", "carga_id": carga_id}
 

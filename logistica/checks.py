@@ -139,7 +139,7 @@ REQUIRED_TEMPLATE_MARKERS = {
 }
 
 REQUIRED_SERVICE_WORKER_MARKERS = {
-    "pollyanas-logistica-pwa-v92-paradas-ruta-viva": "cache versionado de la PWA",
+    "pollyanas-logistica-pwa-v93-revision-ticket-combustible": "cache versionado de la PWA",
     'event.request.mode === "navigate"': "estrategia network-first para navegacion",
     'url.pathname === "/logistica/app/"': "estrategia network-first para el app shell",
 }

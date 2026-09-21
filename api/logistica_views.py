@@ -51,6 +51,7 @@ from logistica.models import (
 from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.pwa_compat import is_exact_v59_replay_contract, v59_compat_active
 from logistica.services_combustible_auditoria import auditar_carga_combustible
+from logistica.services_ticket_ocr import TicketOCRNoDisponible, leer_ticket
 from logistica.tasks import auditar_ticket_combustible
 from logistica.services_carga_ruta import (
     checklist_bloquea_salida,
@@ -235,14 +236,39 @@ def _liberar_ruta_desde_bitacora_salida(
     liberar_ruta_con_turno(ruta=ruta, actor=user, bitacora=bitacora)
 
 
-def _auditar_ticket_combustible_sin_bloquear(carga_id: int) -> None:
+def _auditar_ticket_combustible_sin_bloquear(carga_id: int, lectura: dict | None = None) -> None:
     try:
-        auditar_ticket_combustible.delay(carga_id)
+        auditar_ticket_combustible.delay(carga_id, lectura)
     except Exception:
         try:
-            auditar_carga_combustible(carga_id)
+            auditar_carga_combustible(carga_id, lectura)
         except Exception as exc:
             logger.warning("No se pudo auditar ticket de combustible %s: %s", carga_id, exc)
+
+
+def _revisar_foto_de_ticket(foto, *, es_reenvio_offline: bool) -> tuple[dict | None, str | None]:
+    """Lee la foto antes de guardar la carga.
+
+    Devuelve (lectura, motivo_de_rechazo). Solo se rechaza cuando el lector
+    afirma que la foto no es un ticket y el repartidor está en línea para
+    corregirla. Ante cualquier otra cosa —servicio caído, tiempo agotado,
+    captura reenviada desde la cola sin señal— se acepta la carga y la
+    auditoría posterior la marca: nunca se deja a alguien sin registrar un
+    gasto real por una falla nuestra.
+    """
+    if es_reenvio_offline:
+        return None, None
+    try:
+        lectura = leer_ticket(foto)
+    except TicketOCRNoDisponible as exc:
+        logger.warning("No se pudo revisar la foto del ticket antes de guardar: %s", exc)
+        return None, None
+    if not lectura["es_ticket"]:
+        return lectura, (
+            "La foto no parece un ticket de combustible. Toma la foto del ticket "
+            "de la bomba, con los litros y el importe visibles."
+        )
+    return lectura, None
 
 
 def _serializer_error_message(errors) -> str:
@@ -839,6 +865,16 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
 
         serializer = LogisticaCargaCombustibleCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
+        # La cola offline de la PWA descarta un 400 en silencio: rechazar un
+        # reenvío haría perder la captura de un gasto real sin avisar a nadie.
+        es_reenvio_offline = request.headers.get("X-Logistica-Offline-Replay") == "1"
+        lectura, rechazo = _revisar_foto_de_ticket(
+            serializer.validated_data["foto_ticket"], es_reenvio_offline=es_reenvio_offline
+        )
+        if rechazo:
+            return Response({"detail": rechazo}, status=status.HTTP_400_BAD_REQUEST)
+
         carga = CargaCombustibleUnidad.objects.create(
             bitacora=bitacora,
             unidad=bitacora.unidad,
@@ -858,7 +894,7 @@ class LogisticaCargaCombustibleView(_LogisticaBaseView):
                 "importe_total": str(carga.importe_total),
             },
         )
-        transaction.on_commit(lambda: _auditar_ticket_combustible_sin_bloquear(carga.id))
+        transaction.on_commit(lambda: _auditar_ticket_combustible_sin_bloquear(carga.id, lectura))
         return Response(LogisticaCargaCombustibleSerializer(carga).data, status=status.HTTP_201_CREATED)
 
 
