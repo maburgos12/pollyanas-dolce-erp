@@ -2,6 +2,7 @@ from django.contrib import admin
 
 from .models import (
     AjusteAsistencia,
+    AsignacionTurnoEmpleado,
     AsistenciaEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -37,6 +38,15 @@ from .models import (
     VacanteRRHH,
     VacanteSeguimiento,
 )
+
+
+@admin.register(AsignacionTurnoEmpleado)
+class AsignacionTurnoEmpleadoAdmin(admin.ModelAdmin):
+    list_display = ("empleado", "turno", "fecha_inicio", "fecha_fin", "proteger_reingesta_historica", "motivo")
+    list_filter = ("turno", "fecha_inicio", "proteger_reingesta_historica")
+    search_fields = ("empleado__codigo", "empleado__nombre", "motivo")
+    autocomplete_fields = ("empleado", "turno")
+    readonly_fields = ("proteger_reingesta_historica",)
 
 
 @admin.register(CatalogoFuncionOperativa)
@@ -446,8 +456,9 @@ class SuspensionEmpleadoAdmin(admin.ModelAdmin):
 
 @admin.register(Turno)
 class TurnoAdmin(admin.ModelAdmin):
-    list_display = ("nombre", "hora_entrada", "hora_salida", "tolerancia_minutos", "activo")
-    list_filter = ("activo",)
+    list_display = ("nombre", "hora_entrada", "hora_salida", "tolerancia_minutos", "activo", "deteccion_por_checada")
+    list_filter = ("activo", "deteccion_por_checada")
+    search_fields = ("nombre",)
 
 
 @admin.register(ImportacionChecador)

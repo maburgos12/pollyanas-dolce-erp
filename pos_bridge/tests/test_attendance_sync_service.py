@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, time
 from types import SimpleNamespace
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.test import TestCase
@@ -9,7 +10,7 @@ from django.test import TestCase
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointSyncJob
 from pos_bridge.services.attendance_sync_service import PointAttendanceSyncService
-from rrhh.models import AsistenciaEmpleado, Empleado, Turno
+from rrhh.models import AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, Turno
 
 
 class ResolveErpBranchTests(TestCase):
@@ -86,6 +87,37 @@ class FakeHttpSessionService:
 
 
 class PointAttendanceSyncServiceTests(TestCase):
+    def test_horario_confirmado_prevalece_y_reingesta_historica_no_recalcula(self):
+        Sucursal.objects.create(codigo="CRUCERO", nombre="Crucero", activa=True)
+        empleado = Empleado.objects.create(codigo="255", nombre="Persona envíos", fecha_ingreso=date(2026, 1, 1))
+        turno = Turno.objects.create(
+            nombre="Envíos confirmado", hora_entrada=time(9), hora_salida=time(17),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+            proteger_reingesta_historica=True,
+        )
+        PointBranch.objects.create(external_id="2", name="Crucero")
+        session = FakeSession(attendance_rows=[{
+            "Codigo": "255", "Empleado": "Persona envíos", "Entrada": "2026-05-27T10:45:00",
+            "Salida": "2026-05-27T19:00:00", "H_Entrada": "08:00:00",
+            "H_Salida": "16:00:00", "IDX": 99001,
+        }])
+        service = PointAttendanceSyncService(
+            bridge_settings=FakeSettings(), http_session_service=FakeHttpSessionService(session),
+        )
+        with patch("pos_bridge.services.attendance_sync_service.generar_horas_extra_automatico") as extra, \
+             patch("pos_bridge.services.attendance_sync_service.evaluar_dia_empleado") as reglas, \
+             patch("pos_bridge.services.attendance_sync_service.programar_sincronizacion_bonos_desde_checador") as bonos:
+            job = service.run_sync(start_date=date(2026, 5, 27), end_date=date(2026, 5, 27), branch_filter="Crucero")
+            self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
+            extra.assert_not_called()
+            reglas.assert_not_called()
+            bonos.assert_not_called()
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 5, 27))
+        self.assertEqual(asistencia.turno_id, turno.pk)
+
     def test_run_sync_persists_point_attendance(self):
         sucursal = Sucursal.objects.create(codigo="CRUCERO", nombre="Crucero", activa=True)
         empleado = Empleado.objects.create(codigo="0010", nombre="Empleado Crucero", sucursal="Crucero")

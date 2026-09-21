@@ -182,13 +182,17 @@ def _run_post_projection_effects(receipt_id: int) -> None:
                 empleado_id=receipt.empleado_id,
                 fecha=local_dt.date(),
             ).first()
-            if asistencia and asistencia.salida:
+            from .services_turnos import es_jornada_historica_antes_de_asignacion
+
+            historica = es_jornada_historica_antes_de_asignacion(asistencia)
+            if asistencia and asistencia.salida and not historica:
                 generar_horas_extra_automatico(asistencia)
-            evaluar_dia_empleado(receipt.empleado, local_dt.date())
-            programar_sincronizacion_bonos_desde_checador(
-                receipt.empleado_id,
-                local_dt.date(),
-            )
+            if not historica:
+                evaluar_dia_empleado(receipt.empleado, local_dt.date())
+                programar_sincronizacion_bonos_desde_checador(
+                    receipt.empleado_id,
+                    local_dt.date(),
+                )
             receipt.effects_status = "completed"
             receipt.effects_version = receipt.projection_version
             receipt.ultimo_error = ""
@@ -281,8 +285,12 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
             asistencia.minutos_trabajados = 0
         if not created and fuente_anterior != AsistenciaEmpleado.FUENTE_HIKCONNECT_API:
             asistencia.fuente = fuente_anterior
-        if not asistencia.turno_id and asistencia.entrada:
-            asistencia.turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
+        if not asistencia.turno_id:
+            from .services_turnos import turno_asignado_para_fecha
+
+            asistencia.turno = turno_asignado_para_fecha(empleado, fecha)
+            if asistencia.turno is None and asistencia.entrada:
+                asistencia.turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
         asistencia.save()
 
         receipt.empleado = empleado

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, time
 from uuid import uuid4
 
 from django.apps import apps
@@ -10,7 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 from unittest.mock import patch
 
-from .models import AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente
+from .models import AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, Turno
 from .services_identidad import vincular_identidad_pendiente
 
 
@@ -73,6 +74,30 @@ class HikIngestaV2Tests(TestCase):
 
     def _ledger(self):
         return apps.get_model("rrhh", "EventoHikCloud")
+
+    def test_horario_confirmado_en_reingesta_historica_no_recalcula(self):
+        turno = Turno.objects.create(
+            nombre="Horario confirmado Hik V2", hora_entrada=time(9), hora_salida=time(17),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+            proteger_reingesta_historica=True,
+        )
+        events = [
+            self._event(occurred_at="2026-07-28T10:45:00-07:00", kind="check_in"),
+            self._event(occurred_at="2026-07-28T19:00:00-07:00", kind="check_out"),
+        ]
+        with patch("rrhh.services_hik_ingesta.generar_horas_extra_automatico") as extra, \
+             patch("rrhh.services_hik_ingesta.evaluar_dia_empleado") as reglas, \
+             patch("rrhh.services_hik_ingesta.programar_sincronizacion_bonos_desde_checador") as bonos:
+            response = self._post(events)
+            self.assertEqual(response.status_code, 200, response.content)
+            extra.assert_not_called()
+            reglas.assert_not_called()
+            bonos.assert_not_called()
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=date(2026, 7, 28))
+        self.assertEqual(asistencia.turno_id, turno.pk)
 
     def test_mismo_guid_y_mismo_payload_es_duplicate_y_conserva_un_solo_recibo(self):
         event = self._event(event_id="guid-same-payload")
