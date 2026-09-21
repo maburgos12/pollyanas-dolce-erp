@@ -167,6 +167,7 @@ class PointAttendanceSyncService:
         if scheduled_entry and scheduled_exit:
             exact = Turno.objects.filter(
                 activo=True,
+                deteccion_por_checada=True,
                 hora_entrada=scheduled_entry,
                 hora_salida=scheduled_exit,
             ).first()
@@ -178,7 +179,7 @@ class PointAttendanceSyncService:
         base = local_entry.date()
         best = None
         best_diff = None
-        for turno in Turno.objects.filter(activo=True):
+        for turno in Turno.objects.filter(activo=True, deteccion_por_checada=True):
             turno_start = datetime.combine(base, turno.hora_entrada)
             entry_naive = datetime.combine(base, local_entry.time())
             diff = abs((entry_naive - turno_start).total_seconds() / 60)
@@ -434,11 +435,16 @@ class PointAttendanceSyncService:
             if delta < timedelta(0):
                 delta += timedelta(days=1)
             asistencia.minutos_trabajados = max(int(delta.total_seconds() / 60), 0)
-        asistencia.turno = asistencia.turno or self._resolve_turno(
-            payload.scheduled_entry,
-            payload.scheduled_exit,
-            asistencia.entrada,
-        )
+        if not asistencia.turno_id:
+            from rrhh.services_turnos import turno_asignado_para_fecha
+
+            asistencia.turno = turno_asignado_para_fecha(empleado, payload.attendance_date)
+            if asistencia.turno is None:
+                asistencia.turno = self._resolve_turno(
+                    payload.scheduled_entry,
+                    payload.scheduled_exit,
+                    asistencia.entrada,
+                )
         asistencia.fuente = AsistenciaEmpleado.FUENTE_POINT
         asistencia.observacion = self._merge_point_observation(
             asistencia.observacion,
@@ -453,14 +459,18 @@ class PointAttendanceSyncService:
             ),
         )
         asistencia.save()
-        if asistencia.salida:
+        from rrhh.services_turnos import es_jornada_historica_antes_de_asignacion
+
+        historica = es_jornada_historica_antes_de_asignacion(asistencia)
+        if asistencia.salida and not historica:
             generar_horas_extra_automatico(asistencia)
-        try:
-            evaluar_dia_empleado(asistencia.empleado, asistencia.fecha)
-        except Exception as exc:
-            self.logger.warning("Error evaluando reglas RRHH para asistencia Point %s: %s", asistencia.id, exc)
-        else:
-            programar_sincronizacion_bonos_desde_checador(asistencia.empleado_id, asistencia.fecha)
+        if not historica:
+            try:
+                evaluar_dia_empleado(asistencia.empleado, asistencia.fecha)
+            except Exception as exc:
+                self.logger.warning("Error evaluando reglas RRHH para asistencia Point %s: %s", asistencia.id, exc)
+            else:
+                programar_sincronizacion_bonos_desde_checador(asistencia.empleado_id, asistencia.fecha)
         if match_method in {"name", "name_tokens"}:
             return asistencia, "created_by_name" if created else "updated_by_name"
         return asistencia, "created" if created else "updated"

@@ -11,6 +11,7 @@ from rrhh.models import AsistenciaEmpleado, Empleado, ImportacionChecador
 from rrhh.services import generar_horas_extra_automatico
 from rrhh.services_asistencia_reglas import evaluar_dia_empleado
 from rrhh.services_bonos_checador import programar_sincronizacion_bonos_desde_checador
+from rrhh.services_turnos import es_jornada_historica_antes_de_asignacion, turno_asignado_para_fecha
 
 
 COLUMNAS_ESPERADAS = ["id_empleado", "nombre", "fecha", "hora_entrada", "hora_salida"]
@@ -103,6 +104,13 @@ def importar_excel_hikconnect(archivo, user, fecha_inicio, fecha_fin):
                     "sucursal": _sucursal_de_empleado(empleado),
                 },
             )
+            if not asistencia.turno_id:
+                asistencia.turno = turno_asignado_para_fecha(empleado, fecha)
+                if asistencia.turno_id:
+                    asistencia.save(update_fields=["turno"])
+            if es_jornada_historica_antes_de_asignacion(asistencia):
+                procesados += 1
+                continue
             generar_horas_extra_automatico(asistencia)
             try:
                 evaluar_dia_empleado(empleado, fecha)

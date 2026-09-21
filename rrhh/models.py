@@ -1124,6 +1124,10 @@ class Turno(models.Model):
     hora_salida = models.TimeField()
     tolerancia_minutos = models.PositiveSmallIntegerField(default=10)
     activo = models.BooleanField(default=True)
+    deteccion_por_checada = models.BooleanField(
+        default=True,
+        help_text="Permite inferir este turno por la hora de entrada cuando no hay horario asignado al empleado.",
+    )
 
     class Meta:
         verbose_name = "Turno"
@@ -1131,6 +1135,42 @@ class Turno(models.Model):
 
     def __str__(self) -> str:
         return f"{self.nombre} ({self.hora_entrada}-{self.hora_salida})"
+
+
+class AsignacionTurnoEmpleado(models.Model):
+    """Horario confirmado de una persona, con vigencia independiente de sus checadas."""
+
+    empleado = models.ForeignKey("rrhh.Empleado", on_delete=models.CASCADE, related_name="turnos_asignados")
+    turno = models.ForeignKey(Turno, on_delete=models.PROTECT, related_name="asignaciones_empleado")
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField(null=True, blank=True)
+    motivo = models.CharField(max_length=200, blank=True, default="")
+    proteger_reingesta_historica = models.BooleanField(default=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["empleado__nombre", "-fecha_inicio"]
+        constraints = [
+            models.UniqueConstraint(fields=["empleado", "fecha_inicio"], name="rrhh_turno_empleado_inicio_unico"),
+            models.CheckConstraint(
+                check=Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=models.F("fecha_inicio")),
+                name="rrhh_turno_empleado_rango_valido",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.empleado_id or not self.fecha_inicio:
+            return
+        solapadas = type(self).objects.filter(empleado_id=self.empleado_id).exclude(pk=self.pk)
+        solapadas = solapadas.filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=self.fecha_inicio))
+        if self.fecha_fin:
+            solapadas = solapadas.filter(fecha_inicio__lte=self.fecha_fin)
+        if solapadas.exists():
+            raise ValidationError("Ya existe un turno asignado a esta persona dentro de la vigencia.")
+
+    def __str__(self) -> str:
+        return f"{self.empleado} · {self.turno} desde {self.fecha_inicio}"
 
 
 class AvisoCumpleanos(models.Model):

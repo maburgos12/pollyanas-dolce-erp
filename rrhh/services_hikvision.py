@@ -97,7 +97,7 @@ def _detectar_turno(hora_entrada: dtime) -> Turno | None:
     menor_diff = None
     base = timezone.localdate()
     dt_evento = datetime.combine(base, hora_entrada)
-    for turno in Turno.objects.filter(activo=True):
+    for turno in Turno.objects.filter(activo=True, deteccion_por_checada=True):
         dt_turno = datetime.combine(base, turno.hora_entrada)
         diff = abs((dt_evento - dt_turno).total_seconds() / 60)
         if diff <= 90 and (menor_diff is None or diff < menor_diff):
@@ -312,22 +312,30 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
         procesados += procesados_grupo
 
         if not asistencia.turno_id:
-            turno = _detectar_turno(timezone.localtime(asistencia.entrada).time()) if asistencia.entrada else None
+            from .services_turnos import turno_asignado_para_fecha
+
+            turno = turno_asignado_para_fecha(empleado, fecha)
+            if turno is None and asistencia.entrada:
+                turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
             if turno:
                 asistencia.turno = turno
 
         asistencia.save()
-        if asistencia.salida:
+        from .services_turnos import es_jornada_historica_antes_de_asignacion
+
+        historica = es_jornada_historica_antes_de_asignacion(asistencia)
+        if asistencia.salida and not historica:
             try:
                 generar_horas_extra_automatico(asistencia)
             except Exception as exc:
                 log.warning("Error generando horas extra para %s: %s", empleado, exc)
-        try:
-            evaluar_dia_empleado(empleado, fecha)
-        except Exception as exc:
-            log.warning("Error evaluando reglas de asistencia para %s %s: %s", empleado, fecha, exc)
-        else:
-            programar_sincronizacion_bonos_desde_checador(empleado.id, fecha)
+        if not historica:
+            try:
+                evaluar_dia_empleado(empleado, fecha)
+            except Exception as exc:
+                log.warning("Error evaluando reglas de asistencia para %s %s: %s", empleado, fecha, exc)
+            else:
+                programar_sincronizacion_bonos_desde_checador(empleado.id, fecha)
 
         for _, ev, marca in registros:
             marca_duplicada = any(_es_marca_cercana(marca.dt, existente.dt) for existente in _marcas_existentes(asistencia) if existente.dt != marca.dt)
