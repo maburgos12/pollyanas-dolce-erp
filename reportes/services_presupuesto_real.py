@@ -25,6 +25,7 @@ from decimal import Decimal
 from django.db.models import Sum
 from django.utils import timezone
 
+from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de
 from .models import (
     GastoOperativoMensual,
     LineaPresupuestoMensual,
@@ -383,7 +384,15 @@ class PresupuestoRealConsolidacionService:
                 periodo__fecha_fin__month=periodo.month,
                 periodo__estatus__in=[NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA],
             )
-            .values("empleado__departamento", "empleado__sucursal_ref_id")
+            .values(
+                "empleado__departamento",
+                "empleado__sucursal_ref_id",
+                # Puesto y área operativa entran al agrupado para poder separar,
+                # dentro de un mismo departamento, quién es costo de fabricación
+                # y quién no. Ver reportes.clasificacion_nomina.
+                "empleado__puesto",
+                "empleado__puesto_operativo",
+            )
             .annotate(**agregados)
         )
 
@@ -393,6 +402,9 @@ class PresupuestoRealConsolidacionService:
         if campo not in NOMINA_CAMPOS_VALIDOS:
             raise ValueError(f"campo_monto de nómina inválido: {campo}")
         departamento = str(filtros.get("departamento") or "").strip().upper()
+        destino = str(filtros.get("destino") or "").strip().upper()
+        if destino and destino not in DESTINOS_VALIDOS:
+            raise ValueError(f"destino de nómina inválido: {destino}")
         sucursal = regla.sucursal_efectiva()
         sucursal_id = sucursal.id if sucursal is not None else None
 
@@ -402,6 +414,12 @@ class PresupuestoRealConsolidacionService:
             if departamento and fila["empleado__departamento"] != departamento:
                 continue
             if sucursal_id is not None and fila["empleado__sucursal_ref_id"] != sucursal_id:
+                continue
+            # Sin `destino` la regla se comporta igual que siempre: toma el
+            # departamento completo.
+            if destino and destino_de(
+                fila["empleado__puesto"], fila["empleado__puesto_operativo"]
+            ) != destino:
                 continue
             total += fila[campo] or Decimal("0")
             hubo_datos = True
@@ -426,6 +444,10 @@ class PresupuestoRealConsolidacionService:
                 "codigo_concepto",
                 "linea__empleado__departamento",
                 "linea__empleado__sucursal_ref_id",
+                # Igual que el índice de nómina: permite separar por destino
+                # dentro de un mismo departamento.
+                "linea__empleado__puesto",
+                "linea__empleado__puesto_operativo",
             )
             .annotate(importe=Sum("importe"))
         )
@@ -440,6 +462,9 @@ class PresupuestoRealConsolidacionService:
             str(departamento).strip().upper()
             for departamento in filtros.get("departamentos", [])
         }
+        destino = str(filtros.get("destino") or "").strip().upper()
+        if destino and destino not in DESTINOS_VALIDOS:
+            raise ValueError(f"destino de nómina inválido: {destino}")
         sucursal = regla.sucursal_efectiva()
         sucursal_id = sucursal.id if sucursal is not None else None
 
@@ -453,6 +478,10 @@ class PresupuestoRealConsolidacionService:
             if departamentos and fila["linea__empleado__departamento"] not in departamentos:
                 continue
             if sucursal_id is not None and fila["linea__empleado__sucursal_ref_id"] != sucursal_id:
+                continue
+            if destino and destino_de(
+                fila["linea__empleado__puesto"], fila["linea__empleado__puesto_operativo"]
+            ) != destino:
                 continue
             total += fila["importe"] or Decimal("0")
             hubo_datos = True
