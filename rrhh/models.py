@@ -1290,6 +1290,9 @@ class HoraExtra(models.Model):
     )
     fecha_autorizacion_jefe = models.DateTimeField(null=True, blank=True)
     notas = models.TextField(blank=True)
+    # Evidencia de una decisión humana sobre una propuesta originada en asistencia.
+    # El saldo y la huella impiden reutilizarla tras modificar la jornada.
+    ajuste_autorizacion = models.JSONField(default=dict, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
 
     class Meta:

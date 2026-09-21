@@ -1,4 +1,6 @@
 """Detección y conciliación de extra; consultar no cambia registros."""
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -120,6 +122,38 @@ def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
     return max(horas - cobertura, Decimal("0"))
 
 
+def huella_calculo_extra(asistencia):
+    """Identifica los insumos usados al justificar una cantidad distinta al saldo."""
+    turno = asistencia.turno if asistencia.turno_id else None
+    insumos = {
+        "empleado": asistencia.empleado_id,
+        "fecha": asistencia.fecha.isoformat(),
+        "fuente": asistencia.fuente,
+        "modalidad": modalidad_marcaje_efectiva(asistencia),
+        "entrada": asistencia.entrada.isoformat() if asistencia.entrada else None,
+        "salida_comida": asistencia.salida_comida.isoformat() if asistencia.salida_comida else None,
+        "regreso_comida": asistencia.regreso_comida.isoformat() if asistencia.regreso_comida else None,
+        "salida": asistencia.salida.isoformat() if asistencia.salida else None,
+        "turno": asistencia.turno_id,
+        "hora_entrada_turno": turno.hora_entrada.isoformat() if turno else None,
+        "hora_salida_turno": turno.hora_salida.isoformat() if turno else None,
+        "tolerancia": turno.tolerancia_minutos if turno else None,
+    }
+    return hashlib.sha256(json.dumps(insumos, sort_keys=True).encode()).hexdigest()
+
+
+def evidencia_ajuste_extra(hora_extra, saldo, motivo, usuario):
+    """Congela una corrección humana para esta asistencia y este saldo calculado."""
+    return {
+        "horas": f"{hora_extra.horas:.2f}",
+        "saldo": f"{saldo:.2f}",
+        "huella": huella_calculo_extra(hora_extra.asistencia),
+        "motivo": motivo.strip(),
+        "usuario": usuario,
+        "registrado_en": timezone.now().isoformat(),
+    }
+
+
 def contexto_hora_extra(hora_extra, registros_dia=None):
     """Explica el cálculo actual sin modificar propuestas ni autorizaciones."""
     if not es_hora_extra_automatica(hora_extra):
@@ -139,8 +173,17 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
         registros_dia = HoraExtra.objects.filter(empleado_id=hora_extra.empleado_id, fecha=hora_extra.fecha)
     saldo = saldo_automatico_esperado(diagnostico, registros_dia, hora_extra)
     calculable_positivo = diagnostico.minutos is not None and diagnostico.minutos > 0
-    puede_autorizar = calculable_positivo and saldo > 0 and hora_extra.horas == saldo
-    requiere_revision = diagnostico.requiere_revision or not puede_autorizar
+    ajuste = hora_extra.ajuste_autorizacion or {}
+    ajuste_vigente = bool(
+        ajuste.get("motivo")
+        and ajuste.get("horas") == f"{hora_extra.horas:.2f}"
+        and ajuste.get("saldo") == f"{saldo:.2f}"
+        and ajuste.get("huella") == huella_calculo_extra(asistencia)
+    )
+    puede_autorizar = calculable_positivo and saldo > 0 and (
+        hora_extra.horas == saldo or ajuste_vigente
+    )
+    requiere_revision = diagnostico.requiere_revision or not puede_autorizar or ajuste_vigente
     motivo_bloqueo = ""
     if not puede_autorizar:
         if calculable_positivo:
@@ -158,6 +201,8 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
         estado = "Revisión recomendada"
     elif not puede_autorizar:
         estado = "No calculable"
+    elif ajuste_vigente and hora_extra.horas != saldo:
+        estado = "Ajuste justificado"
     elif requiere_revision:
         estado = "Requiere revisión"
     else:
@@ -174,6 +219,8 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
         "puede_autorizar": puede_autorizar,
         "motivo_bloqueo": motivo_bloqueo,
         "requiere_revision": requiere_revision,
+        "ajuste_justificado": ajuste_vigente and hora_extra.horas != saldo,
+        "saldo_detectado": str(saldo) if saldo is not None else None,
     }
 
 
@@ -187,12 +234,18 @@ def conciliar_extra_diario(asistencia, registros):
     solicitado = horas_a_minutos(sum((r.horas for r in registros if r.estado == HoraExtra.ESTADO_PENDIENTE), Decimal('0')))
     pendiente = max(detectado - autorizado - rechazado, 0) if detectado is not None else None
     diferencia = detectado - autorizado if detectado is not None else None
+    ajuste_autorizado = any(
+        r.ajuste_autorizacion and contexto_hora_extra(r, registros).get('ajuste_justificado')
+        for r in registros if r.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}
+    )
     if diagnostico.codigo == 'sin_turno':
         estado = 'No calculable: falta asignar turno'
     elif detectado is None:
         estado = 'No calculable: faltan checadas o intervalo válido'
     elif rechazado:
         estado = 'Con tiempo rechazado' if not pendiente else 'Con rechazo y diferencia pendiente'
+    elif ajuste_autorizado:
+        estado = 'Ajuste justificado: diferencia pendiente' if pendiente else 'Ajuste justificado autorizado'
     elif pendiente:
         estado = 'Pendiente de autorización' if not autorizado else 'Autorización parcial'
     elif autorizado > detectado:
@@ -213,4 +266,5 @@ def conciliar_extra_diario(asistencia, registros):
         'comida_observable': diagnostico.comida_observable,
         'requiere_revision': diagnostico.requiere_revision,
         'codigo': diagnostico.codigo,
+        'ajuste_autorizado': ajuste_autorizado,
     }

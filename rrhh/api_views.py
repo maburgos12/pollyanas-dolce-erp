@@ -166,7 +166,15 @@ class HoraExtraViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         self.check_object_permissions(request, actual)
         serializer = self.get_serializer(actual, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
+        cambia_base = any(
+            nombre in serializer.validated_data and serializer.validated_data[nombre] != getattr(actual, nombre)
+            for nombre in ("horas", "fecha", "empleado")
+        )
+        if actual.asistencia_id and cambia_base:
+            # El PATCH genérico no recoge una justificación verificable.
+            serializer.save(ajuste_autorizacion={})
+        else:
+            self.perform_update(serializer)
         return Response(serializer.data)
 
     @transaction.atomic

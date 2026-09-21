@@ -2266,6 +2266,7 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
 
     def test_todas_las_apis_bloquean_saldo_automatico_obsoleto(self):
         from datetime import time
+        from rrhh.bonos_horas_extra import _hora_extra_payload
 
         turno = Turno.objects.create(nombre="Turno APIs", hora_entrada=time(8), hora_salida=time(16))
         for consumidor in ("generica", "produccion", "ventas"):
@@ -2273,11 +2274,114 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
                 hora, url = self._extra_y_url(consumidor)
                 AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(turno=turno)
                 HoraExtra.objects.filter(pk=hora.pk).update(horas=Decimal("2.00"))
+                hora.refresh_from_db()
+                payload = _hora_extra_payload(hora, self.jefe_user, puede_gestionar=True)
+                self.assertFalse(payload["puede_autorizar"])
+                self.assertTrue(payload["puede_rechazar"])
+                self.assertIn("saldo automático vigente", payload["revision_extra"])
                 antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
                 response = self.client.post(url)
                 self.assertEqual(response.status_code, 400)
                 self.assertIn("saldo automático vigente", response.json()["detail"])
                 self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_ajuste_justificado_permite_autorizar_y_conserva_el_calculo_original(self):
+        from datetime import datetime, time
+        from rrhh.services_extra_conciliacion import conciliar_extra_diario, contexto_hora_extra
+
+        hora, url = self._extra_y_url("produccion")
+        turno = Turno.objects.create(nombre="Turno ajuste", hora_entrada=time(8), hora_salida=time(16))
+        AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(
+            turno=turno, salida=timezone.make_aware(datetime(2026, 9, 18, 16, 57)),
+        )
+        editada = self.client.post(url.replace("/autorizar/", "/editar/"), {
+            "fecha": hora.fecha.isoformat(), "horas": "1",
+            "notas": hora.notas, "motivo_cambio": "Cerrar la hora completa",
+        }, format="json")
+        self.assertEqual(editada.status_code, 200)
+        hora.refresh_from_db()
+        self.assertEqual(hora.ajuste_autorizacion["saldo"], "0.95")
+        self.assertEqual(hora.ajuste_autorizacion["motivo"], "Cerrar la hora completa")
+        self.assertTrue(contexto_hora_extra(hora)["ajuste_justificado"])
+        notas = self.client.patch(reverse("rrhh:hora-extra-detail", args=[hora.pk]), {
+            "empleado": hora.empleado_id, "fecha": hora.fecha.isoformat(),
+            "horas": "1.00", "notas": hora.notas + "\nRevisado por Capital Humano.",
+        }, format="json")
+        self.assertEqual(notas.status_code, 200)
+        hora.refresh_from_db()
+        self.assertEqual(hora.ajuste_autorizacion["saldo"], "0.95")
+        autorizada = self.client.post(url)
+        self.assertEqual(autorizada.status_code, 200)
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(hora.horas, Decimal("1.00"))
+        conciliacion = conciliar_extra_diario(hora.asistencia, [hora])
+        self.assertEqual(conciliacion["detectado_minutos"], 57)
+        self.assertEqual(conciliacion["autorizado_minutos"], 60)
+        self.assertEqual(conciliacion["estado"], "Ajuste justificado autorizado")
+
+    def test_ajuste_justificado_caduca_si_cambian_las_checadas(self):
+        from datetime import datetime, time
+        from rrhh.bonos_horas_extra import _hora_extra_payload
+        from rrhh.services import generar_horas_extra_automatico
+
+        hora, url = self._extra_y_url("produccion")
+        turno = Turno.objects.create(nombre="Turno ajuste caducable", hora_entrada=time(8), hora_salida=time(16))
+        AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(
+            turno=turno, salida=timezone.make_aware(datetime(2026, 9, 18, 16, 57)),
+        )
+        editada = self.client.post(url.replace("/autorizar/", "/editar/"), {
+            "fecha": hora.fecha.isoformat(), "horas": "1.00",
+            "notas": hora.notas, "motivo_cambio": "Cerrar la hora completa",
+        }, format="json")
+        self.assertEqual(editada.status_code, 200)
+        generar_horas_extra_automatico(AsistenciaEmpleado.objects.get(pk=hora.asistencia_id))
+        hora.refresh_from_db()
+        self.assertEqual(hora.horas, Decimal("1.00"))
+        AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(
+            salida=timezone.make_aware(datetime(2026, 9, 18, 17, 3)),
+        )
+        hora.refresh_from_db()
+        payload = _hora_extra_payload(hora, self.jefe_user, puede_gestionar=True)
+        self.assertFalse(payload["puede_autorizar"])
+        self.assertTrue(payload["puede_rechazar"])
+        self.assertTrue(payload["ajuste_requiere_revision"])
+        bloqueada = self.client.post(url)
+        self.assertEqual(bloqueada.status_code, 400)
+        self.assertIn("saldo automático vigente", bloqueada.json()["detail"])
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+
+    def test_reconocer_correccion_historica_no_cambia_horas_y_es_idempotente(self):
+        from datetime import datetime, time
+        from django.core.management import call_command
+        from io import StringIO
+
+        hora, url = self._extra_y_url("produccion")
+        turno = Turno.objects.create(nombre="Turno histórico", hora_entrada=time(8), hora_salida=time(16))
+        AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(
+            turno=turno, salida=timezone.make_aware(datetime(2026, 9, 18, 16, 57)),
+        )
+        HoraExtra.objects.filter(pk=hora.pk).update(
+            horas=Decimal("1.00"),
+            notas="[Detección automática] Saldo anterior.\n\n"
+                  "Correccion registrada por jefe.extra.apis el 2026-09-21 11:47: Cerrar la hora completa.",
+        )
+        preview = StringIO()
+        call_command("registrar_ajustes_extra_pendientes", "--ids", str(hora.pk), stdout=preview)
+        self.assertIn("por_registrar", preview.getvalue())
+        hora.refresh_from_db()
+        self.assertEqual(hora.ajuste_autorizacion, {})
+        salida = StringIO()
+        call_command("registrar_ajustes_extra_pendientes", "--ids", str(hora.pk), "--apply", stdout=salida)
+        self.assertIn("registrado", salida.getvalue())
+        hora.refresh_from_db()
+        self.assertEqual(hora.horas, Decimal("1.00"))
+        self.assertEqual(hora.ajuste_autorizacion["saldo"], "0.95")
+        repetida = StringIO()
+        call_command("registrar_ajustes_extra_pendientes", "--ids", str(hora.pk), "--apply", stdout=repetida)
+        self.assertIn("ya_registrado", repetida.getvalue())
+        self.assertEqual(self.client.post(url).status_code, 200)
 
     def test_editar_notas_en_cada_api_no_elude_origen_automatico(self):
         for consumidor in ("generica", "produccion", "ventas"):
