@@ -2701,13 +2701,24 @@ class GastoRecurrenteVersion(models.Model):
         (METODO_OTRO, "Otro"),
     ]
 
+    # Un compromiso fijo no siempre se cobra cada mes: hay licencias y pólizas que
+    # se renuevan una vez al año. La periodicidad guarda el ciclo real del contrato.
+    PERIODICIDAD_CHOICES = [
+        (1, "Mensual"),
+        (2, "Bimestral"),
+        (3, "Trimestral"),
+        (6, "Semestral"),
+        (12, "Anual"),
+    ]
+    PERIODICIDADES = tuple(valor for valor, _ in PERIODICIDAD_CHOICES)
+
     gasto_recurrente = models.ForeignKey(
         GastoRecurrente, on_delete=models.PROTECT, related_name="versiones"
     )
     vigencia_inicio = models.DateField(db_index=True)
     vigencia_fin = models.DateField(null=True, blank=True, db_index=True)
     periodicidad_meses = models.PositiveSmallIntegerField(
-        choices=[(1, "Mensual"), (2, "Bimestral")], default=1,
+        choices=PERIODICIDAD_CHOICES, default=1,
     )
     monto = models.DecimalField(max_digits=18, decimal_places=2)
     dia_vencimiento = models.PositiveSmallIntegerField(default=1)
@@ -2743,7 +2754,7 @@ class GastoRecurrenteVersion(models.Model):
                 name="gasto_rec_dia_vencimiento_valido",
             ),
             models.CheckConstraint(
-                check=models.Q(periodicidad_meses__in=(1, 2)),
+                check=models.Q(periodicidad_meses__in=(1, 2, 3, 6, 12)),
                 name="gasto_rec_periodicidad_valida",
             ),
         ]

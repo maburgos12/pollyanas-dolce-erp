@@ -96,7 +96,32 @@ class CoberturaGastosTests(TestCase):
 
     def test_periodicidad_invalida_no_crea_contrato(self):
         with self.assertRaises(ValidationError):
-            self.recurrente(periodicidad_meses=3)
+            self.recurrente(periodicidad_meses=5)
+
+    def test_anual_cubre_doce_meses_y_solo_genera_en_el_aniversario(self):
+        # Una licencia anual (CONTPAQi, pólizas) se cobra una vez y cubre el año.
+        recurrente = self.recurrente(periodicidad_meses=12)
+        marzo, creada = generar_obligacion_recurrente(
+            usuario=self.usuario, recurrente=recurrente, periodo=date(2026, 1, 1),
+        )
+        self.assertTrue(creada)
+        self.assertEqual(marzo.gasto_operativo.cobertura_mes_inicio, date(2026, 1, 1))
+        self.assertEqual(marzo.gasto_operativo.cobertura_mes_fin, date(2026, 12, 1))
+        for mes in range(2, 13):
+            with self.assertRaises(ValidationError):
+                generar_obligacion_recurrente(
+                    usuario=self.usuario, recurrente=recurrente, periodo=date(2026, mes, 1),
+                )
+        siguiente, creada = generar_obligacion_recurrente(
+            usuario=self.usuario, recurrente=recurrente, periodo=date(2027, 1, 1),
+        )
+        self.assertTrue(creada)
+        self.assertEqual(siguiente.gasto_operativo.cobertura_mes_fin, date(2027, 12, 1))
+        self.assertEqual(ObligacionGasto.objects.count(), 2)
+
+    def test_anual_rechaza_inicio_a_media_cobertura(self):
+        with self.assertRaisesMessage(ValidationError, "primer día"):
+            self.recurrente(periodicidad_meses=12, vigencia_inicio=date(2026, 1, 15))
 
     def test_bimestral_rechaza_inicio_parcial_al_crear_y_editar(self):
         with self.assertRaisesMessage(ValidationError, "primer día"):
@@ -122,7 +147,7 @@ class CoberturaGastosTests(TestCase):
 
     def test_edicion_no_corta_ciclo_aun_sin_obligaciones(self):
         recurrente = self.recurrente(periodicidad_meses=2)
-        with self.assertRaisesMessage(ValidationError, "ciclo bimestral"):
+        with self.assertRaisesMessage(ValidationError, "ciclo de 2 meses"):
             editar_gasto_recurrente(
                 usuario=self.usuario, recurrente=recurrente, vigencia_inicio=date(2026, 2, 1),
                 monto=120, dia_vencimiento=5, condicion_pago="CONTADO",
