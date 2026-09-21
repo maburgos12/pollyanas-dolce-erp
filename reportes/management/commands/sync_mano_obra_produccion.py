@@ -32,12 +32,16 @@ def _months_between(desde: date, hasta: date) -> list[date]:
 class Command(BaseCommand):
     help = (
         "Sincroniza mano de obra de producción en GastoOperativoMensual desde "
-        "rrhh.NominaLinea (depto PRODUCCION), reemplazando cargas manuales legacy "
-        "del mismo mes/categoría."
+        "rrhh.NominaLinea (depto PRODUCCION). No toca capturas hechas por otra "
+        "vía: si el mes ya las tiene, lo reporta y sigue con el siguiente."
     )
 
     def add_arguments(self, parser):
         parser.add_argument("--periodo", help="Mes único, formato YYYY-MM.")
+        parser.add_argument(
+            "--desglose", action="store_true",
+            help="Muestra el importe abierto por área operativa.",
+        )
         parser.add_argument("--desde", help="Inicio de rango, formato YYYY-MM.")
         parser.add_argument("--hasta", help="Fin de rango, formato YYYY-MM.")
         parser.add_argument("--dry-run", action="store_true", help="Calcula y muestra sin persistir.")
@@ -60,15 +64,30 @@ class Command(BaseCommand):
         else:
             meses = _months_between(_parse_period(desde_option), _parse_period(hasta_option))
 
+        mostrar_desglose = bool(options.get("desglose"))
         for mes in meses:
             resumen = sincronizar_mano_obra_produccion(mes, dry_run=dry_run)
             if not resumen.escrito and not dry_run:
-                self.stdout.write(self.style.WARNING(f"{mes:%Y-%m}: {resumen.motivo}"))
-                continue
-            estado = "DRY-RUN" if dry_run else "OK"
-            self.stdout.write(
-                f"{mes:%Y-%m} [{estado}]: monto=${resumen.monto:,.2f} "
-                f"filas_legacy_borradas={resumen.filas_legacy_borradas} "
-                f"external_key={resumen.external_key or '-'} "
-                f"{('· ' + resumen.motivo) if resumen.motivo else ''}"
-            )
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"{mes:%Y-%m}: {resumen.motivo}"
+                        + (f" (calculado: ${resumen.monto:,.2f})" if resumen.monto else "")
+                    )
+                )
+            else:
+                estado = "DRY-RUN" if dry_run else "OK"
+                self.stdout.write(
+                    f"{mes:%Y-%m} [{estado}]: monto=${resumen.monto:,.2f} "
+                    f"filas_previas={resumen.filas_previas} "
+                    f"external_key={resumen.external_key or '-'} "
+                    f"{('· ' + resumen.motivo) if resumen.motivo else ''}"
+                )
+            if mostrar_desglose and resumen.desglose:
+                self.stdout.write("  producción, por área:")
+                for area, importe in resumen.desglose.items():
+                    self.stdout.write(f"    {area:28} ${importe:>13,.2f}")
+                fuera = {d: i for d, i in resumen.destinos.items() if d != "PRODUCCION"}
+                if fuera:
+                    self.stdout.write("  fuera del costo de fabricación:")
+                    for destino, importe in fuera.items():
+                        self.stdout.write(f"    {destino:28} ${importe:>13,.2f}")

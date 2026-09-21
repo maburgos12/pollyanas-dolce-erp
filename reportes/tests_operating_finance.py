@@ -85,10 +85,13 @@ from reportes.services_historical_branch_expense_import import HistoricalBranchE
 from reportes.services_operating_expense_automation import OperatingExpenseImportAutomationService
 from reportes.services_production_expense_import import ProductionExpenseImportService
 from reportes.services_nomina_produccion import (
+    SIN_AREA,
     calcular_mano_obra_produccion,
+    desglose_mano_obra_produccion,
+    desglose_por_destino,
     sincronizar_mano_obra_produccion,
 )
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
 
 
 class OperatingFinanceBootstrapServiceTests(TestCase):
@@ -3667,7 +3670,10 @@ class ManoObraProduccionAutomaticaTests(TestCase):
         self.assertEqual(resumen.monto, Decimal("7000.00"))
         self.assertEqual(GastoOperativoMensual.objects.count(), 0)
 
-    def test_reemplaza_filas_legacy_del_mismo_mes_sin_duplicar(self):
+    def test_no_pisa_capturas_hechas_por_otra_via(self):
+        # Las capturas del Excel traen el desglose por concepto y la parte
+        # patronal; este motor solo calcula percepciones, así que borrarlas
+        # perdería dinero real. Se detiene y lo reporta.
         OperatingFinanceBootstrapService().bootstrap()
         categoria = CategoriaGasto.objects.get(codigo="MANO_OBRA_PROD")
         centro = CentroCosto.objects.get(codigo="PROD")
@@ -3686,7 +3692,91 @@ class ManoObraProduccionAutomaticaTests(TestCase):
 
         resumen = sincronizar_mano_obra_produccion(date(2026, 5, 1))
 
-        self.assertEqual(resumen.filas_legacy_borradas, 1)
-        filas = GastoOperativoMensual.objects.filter(periodo=date(2026, 5, 1), categoria_gasto=categoria, centro_costo=centro)
+        self.assertFalse(resumen.escrito)
+        self.assertEqual(resumen.filas_previas, 1)
+        self.assertIn("no se sobrescriben", resumen.motivo)
+        filas = GastoOperativoMensual.objects.filter(
+            periodo=date(2026, 5, 1), categoria_gasto=categoria, centro_costo=centro
+        )
         self.assertEqual(filas.count(), 1)
-        self.assertEqual(filas.first().monto, Decimal("7000.00"))
+        self.assertEqual(filas.first().monto, Decimal("6000.00"))
+
+    def test_incluye_prestaciones_que_total_percepciones_deja_fuera(self):
+        # total_percepciones = salario_base + bonos, así que la despensa no entra.
+        produccion = self._empleado(codigo="P7", nombre="Prod Siete", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        linea = NominaLinea.objects.create(
+            periodo=periodo, empleado=produccion, salario_base=Decimal("7000.00")
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea, tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            nombre="Sueldo", importe=Decimal("7000.00"),
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea, tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            nombre="Despensa", importe=Decimal("1200.00"),
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea, tipo=NominaConceptoLinea.TIPO_DEDUCCION,
+            nombre="IMSS trabajador", importe=Decimal("300.00"),
+        )
+
+        self.assertEqual(linea.total_percepciones, Decimal("7000.00"))
+        self.assertEqual(calcular_mano_obra_produccion(date(2026, 5, 1)), Decimal("8200.00"))
+
+    def test_excluye_a_quien_no_es_costo_de_fabricacion(self):
+        # Dirección: el jefe de producción reporta a administración, cuartos
+        # fríos resguarda inventarios y envío a sucursales es logística.
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        for codigo, puesto, importe in [
+            ("J1", "Jefe de Producción", "20000.00"),
+            ("C1", "Cuartos Fríos", "9000.00"),
+            ("E1", "Envio a sucursales", "8000.00"),
+            ("S1", "Supervisora de Producción", "11000.00"),
+        ]:
+            empleado = self._empleado(codigo=codigo, nombre=puesto, departamento=Empleado.DEP_PRODUCCION)
+            empleado.puesto = puesto
+            empleado.save(update_fields=["puesto"])
+            NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal(importe))
+
+        # Solo la supervisora es costo de fabricación.
+        self.assertEqual(calcular_mano_obra_produccion(date(2026, 5, 1)), Decimal("11000.00"))
+        destinos = desglose_por_destino(date(2026, 5, 1))
+        self.assertEqual(destinos["PRODUCCION"], Decimal("11000.00"))
+        self.assertEqual(destinos["ADMINISTRACION"], Decimal("20000.00"))
+        self.assertEqual(destinos["CEDIS"], Decimal("9000.00"))
+        self.assertEqual(destinos["LOGISTICA"], Decimal("8000.00"))
+
+    def test_crucero_ya_no_divide_la_produccion_por_locacion(self):
+        # «Crucero» marcaba a quien producía fuera de CEDIS; hoy están en planta.
+        empleado = self._empleado(codigo="K1", nombre="Prod Crucero", departamento=Empleado.DEP_PRODUCCION)
+        empleado.puesto_operativo = "CRUCERO"
+        empleado.save(update_fields=["puesto_operativo"])
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=Decimal("6000.00"))
+
+        self.assertEqual(calcular_mano_obra_produccion(date(2026, 5, 1)), Decimal("6000.00"))
+
+    def test_desglose_agrupa_por_area_y_junta_a_los_mandos(self):
+        horneador = self._empleado(codigo="P8", nombre="Prod Ocho", departamento=Empleado.DEP_PRODUCCION)
+        horneador.puesto_operativo = "HORNOS"
+        horneador.save(update_fields=["puesto_operativo"])
+        jefe = self._empleado(codigo="P9", nombre="Prod Nueve", departamento=Empleado.DEP_PRODUCCION)
+        periodo = self._periodo(
+            fecha_inicio=date(2026, 5, 1), fecha_fin=date(2026, 5, 15), estatus=NominaPeriodo.ESTATUS_CERRADA
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=horneador, salario_base=Decimal("5000.00"))
+        NominaLinea.objects.create(periodo=periodo, empleado=jefe, salario_base=Decimal("9000.00"))
+
+        desglose = desglose_mano_obra_produccion(date(2026, 5, 1))
+
+        self.assertEqual(desglose["HORNOS"], Decimal("5000.00"))
+        self.assertEqual(desglose[SIN_AREA], Decimal("9000.00"))
+        # El más caro va primero para que el desglose se lea de un vistazo.
+        self.assertEqual(list(desglose)[0], SIN_AREA)
