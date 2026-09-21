@@ -5,9 +5,10 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pos_bridge.models import (
-    PointDailySale, PointInventorySnapshot, PointInsumoInventorySnapshot,
+    PointInventorySnapshot, PointInsumoInventorySnapshot,
     PointTransferLine, PointSyncJob,
 )
+from ventas.services.sales_read_service import sold_point_skus_for_range
 
 
 def codigos_habituales(sucursal, *, ahora=None):
@@ -15,9 +16,9 @@ def codigos_habituales(sucursal, *, ahora=None):
         return set()
     ahora = ahora or timezone.now()
     today = timezone.localdate(ahora)
-    codes = set(PointDailySale.objects.filter(
-        branch__erp_branch=sucursal, sale_date__range=(today-timedelta(days=30), today),
-        quantity__gt=0).order_by().values_list('product__sku', flat=True).distinct())
+    codes = sold_point_skus_for_range(
+        sucursal=sucursal, start_date=today-timedelta(days=30), end_date=today,
+    )
     receipts = PointTransferLine.objects.filter(
         Q(erp_destination_branch=sucursal)|Q(destination_branch__erp_branch=sucursal),
         is_received=True, is_cancelled=False, is_current_snapshot=True,

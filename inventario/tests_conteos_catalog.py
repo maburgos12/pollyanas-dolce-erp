@@ -36,6 +36,22 @@ class BranchCountCatalogTests(TestCase):
         PointInventorySnapshot.objects.create(branch=self.point_branch,product=fresh,sync_job=job,stock=1,captured_at=now-timedelta(hours=1))
         self.assertIn('NEW',codigos_habituales(self.branch))
 
+    def test_recent_sales_include_only_positive_codes_from_the_selected_branch(self):
+        today=timezone.localdate()
+        sold=PointProduct.objects.create(external_id='recent-sold',sku='RECENT',name='Vendido')
+        zero=PointProduct.objects.create(external_id='recent-zero',sku='ZERO',name='Sin venta')
+        other=PointProduct.objects.create(external_id='other-branch',sku='OTHER',name='Otra sucursal')
+        other_branch=Sucursal.objects.create(codigo='SALE-OTHER',nombre='Otra sucursal ventas')
+        other_point=PointBranch.objects.create(external_id='sale-other',name='Otra sucursal ventas',erp_branch=other_branch)
+        PointDailySale.objects.create(branch=self.point_branch,product=sold,sale_date=today-timedelta(days=30),quantity=1)
+        PointDailySale.objects.create(branch=self.point_branch,product=zero,sale_date=today,quantity=0)
+        PointDailySale.objects.create(branch=other_point,product=other,sale_date=today,quantity=1)
+        codes=codigos_habituales(self.branch)
+        self.assertIn('RECENT',codes)
+        self.assertNotIn('ZERO',codes)
+        self.assertNotIn('OTHER',codes)
+        self.assertNotIn('004493',codes)
+
     def test_branch_without_activity_has_no_whole_catalog_fallback(self):
         branch=Sucursal.objects.create(codigo='EMPTY',nombre='Sin movimiento')
         self.assertEqual(codigos_habituales(branch),set())
