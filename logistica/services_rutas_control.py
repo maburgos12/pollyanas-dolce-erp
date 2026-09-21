@@ -135,6 +135,22 @@ def liberar_ruta_con_turno(
     )
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise LiberacionRutaError("La ruta ya está cerrada o cancelada y no puede liberarse.")
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA and ruta.fecha_ruta > timezone.localdate():
+        raise LiberacionRutaError(
+            f"La ruta está programada para el {ruta.fecha_ruta:%d/%m/%Y}; podrás liberarla ese día.",
+            error_code="ruta_futura",
+        )
+    if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
+        from .services_discrepancias import pendientes_vencidos_para_planeacion
+
+        responsables = {actor.pk: actor}
+        if ruta.created_by_id:
+            responsables[ruta.created_by_id] = ruta.created_by
+        if any(pendientes_vencidos_para_planeacion(user, timezone.localdate()) for user in responsables.values()):
+            raise LiberacionRutaError(
+                "Aclara las diferencias pendientes antes de liberar la ruta.",
+                error_code="diferencias_pendientes",
+            )
     if not ruta.repartidor_id:
         raise LiberacionRutaError("No se puede liberar la ruta: asigna repartidor.")
     if not ruta.unidad_operativa_id:

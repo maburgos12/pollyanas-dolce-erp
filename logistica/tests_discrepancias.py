@@ -109,7 +109,7 @@ class DiscrepanciasLogisticaTests(PersistenciaCargaSucursalTests):
 
         self.assertEqual(list(pendientes_vencidos_para_planeacion(self.jefe, timezone.localdate())), [caso])
 
-    def test_planeacion_muestra_deuda_y_post_no_crea_ruta(self):
+    def test_deuda_bloquea_ruta_de_hoy_pero_permite_programar_futura(self):
         UserModuleAccess.objects.create(user=self.jefe, module="logistica.rutas", access=UserModuleAccess.ACCESS_MANAGE, updated_by=self.jefe)
         caso = DiscrepanciaLogistica.objects.create(
             ruta=self.ruta, parada=self.parada, linea_carga=self.linea,
@@ -122,11 +122,23 @@ class DiscrepanciasLogisticaTests(PersistenciaCargaSucursalTests):
         total_antes = self.ruta.__class__.objects.count()
 
         get_response = self.client.get(reverse("logistica:rutas"))
-        post_response = self.client.post(reverse("logistica:rutas"), {"nombre": "Ruta que no debe crearse"})
+        post_response = self.client.post(reverse("logistica:rutas"), {
+            "nombre": "Ruta que no debe crearse",
+            "fecha_ruta": timezone.localdate().isoformat(),
+            "puntos_ruta": [str(self.parada.punto_id)],
+        }, follow=True)
 
-        self.assertContains(get_response, "Aclara las diferencias pendientes antes de planear")
-        self.assertEqual(post_response.status_code, 403)
+        self.assertContains(get_response, "Puedes programar una ruta futura")
+        self.assertContains(post_response, "Aclara las diferencias pendientes antes de planear una ruta para hoy")
         self.assertEqual(self.ruta.__class__.objects.count(), total_antes)
+
+        futura = self.client.post(reverse("logistica:rutas"), {
+            "nombre": "Ruta futura con deuda",
+            "fecha_ruta": (timezone.localdate() + timedelta(days=2)).isoformat(),
+            "puntos_ruta": [str(self.parada.punto_id)],
+        }, follow=True)
+        self.assertEqual(futura.status_code, 200)
+        self.assertTrue(self.ruta.__class__.objects.filter(nombre="Ruta futura con deuda").exists())
 
     def test_bandeja_resuelve_discrepancia_con_trazabilidad(self):
         UserModuleAccess.objects.create(user=self.jefe, module="logistica.rutas", access=UserModuleAccess.ACCESS_MANAGE, updated_by=self.jefe)

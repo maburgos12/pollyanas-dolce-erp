@@ -132,6 +132,8 @@ def _parse_date(raw: str | None):
 def _ruta_status_choices_for(ruta: RutaEntrega):
     if ruta.estatus == RutaEntrega.ESTATUS_PLANEADA:
         allowed = {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_CANCELADA}
+        if ruta.fecha_ruta > timezone.localdate():
+            allowed.remove(RutaEntrega.ESTATUS_EN_RUTA)
     elif ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
         allowed = {RutaEntrega.ESTATUS_EN_RUTA, RutaEntrega.ESTATUS_COMPLETADA, RutaEntrega.ESTATUS_CANCELADA}
     else:
@@ -846,6 +848,7 @@ def _logistica_focus_summary(*, selected_focus: str, rutas_count: int) -> dict[s
         return None
     titles = {
         "HOY": ("Rutas del día", "Vista enfocada en la programación de hoy."),
+        "PROXIMAS": ("Próximas rutas", "Rutas planeadas para fechas posteriores a hoy."),
         "EN_RUTA": ("Unidades en tránsito", "Vista enfocada en rutas actualmente en ejecución."),
         "PENDIENTES": ("Entregas por cerrar", "Vista enfocada en rutas con entregas pendientes."),
         "INCIDENCIAS": ("Incidencias abiertas", "Vista enfocada en rutas con excepciones logísticas."),
@@ -1884,15 +1887,18 @@ def rutas(request):
         raise PermissionDenied("No tienes permisos para ver Logística")
 
     discrepancias_vencidas = pendientes_vencidos_para_planeacion(request.user, timezone.localdate())
-    if request.method == "POST" and discrepancias_vencidas:
-        return JsonResponse(
-            {"detail": "Aclara las diferencias pendientes antes de planear una ruta nueva."},
-            status=403,
-        )
-
     if request.method == "POST":
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
+
+        fecha_raw = (request.POST.get("fecha_ruta") or "").strip()
+        fecha_ruta = _parse_date(fecha_raw) if fecha_raw else timezone.localdate()
+        if fecha_ruta is None:
+            messages.error(request, "La fecha de ruta no es válida. Selecciona una fecha del calendario.")
+            return redirect("logistica:rutas")
+        if discrepancias_vencidas and fecha_ruta <= timezone.localdate():
+            messages.error(request, "Aclara las diferencias pendientes antes de planear una ruta para hoy.")
+            return redirect("logistica:rutas")
 
         nombre = (request.POST.get("nombre") or "").strip()
         puntos_ruta_ids = [value for value in request.POST.getlist("puntos_ruta") if str(value).isdigit()]
@@ -1932,7 +1938,6 @@ def rutas(request):
                 messages.error(request, "Los puntos seleccionados no están activos. Revisa el catálogo de puntos logísticos.")
                 return redirect("logistica:rutas")
 
-            fecha_ruta = _parse_date(request.POST.get("fecha_ruta")) or timezone.localdate()
             sucursales_repetidas = {
                 punto.sucursal_id
                 for _, _, punto in puntos_ordenados
@@ -1951,7 +1956,7 @@ def rutas(request):
                 fecha=fecha_ruta,
                 puntos=puntos_repetidos,
             ):
-                messages.error(request, "Ya existe ruta del día para esa sucursal y no hay transferencia Point nueva para otra vuelta.")
+                messages.error(request, "Ya existe una ruta para esa sucursal y fecha; otra vuelta requiere una transferencia Point nueva.")
                 return redirect("logistica:rutas")
 
             with transaction.atomic():
@@ -2047,9 +2052,12 @@ def rutas(request):
         ).exclude(paradas__punto__tipo=PuntoLogistico.TIPO_CEDIS).distinct()
     elif enterprise_focus == "POINT_BLOQUEO":
         rutas_qs = rutas_qs.filter(_point_sin_enviado_q()).distinct()
+    elif enterprise_focus == "PROXIMAS":
+        rutas_qs = rutas_qs.filter(fecha_ruta__gt=today, estatus=RutaEntrega.ESTATUS_PLANEADA)
 
     rutas_total = RutaEntrega.objects.count()
     rutas_hoy = RutaEntrega.objects.filter(fecha_ruta=today).count()
+    rutas_proximas = RutaEntrega.objects.filter(fecha_ruta__gt=today, estatus=RutaEntrega.ESTATUS_PLANEADA).count()
     rutas_en_ruta = RutaEntrega.objects.filter(estatus=RutaEntrega.ESTATUS_EN_RUTA).count()
     entregas_pendientes = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(entrega_estado=ParadaRuta.ENTREGA_PENDIENTE).count()
     incidencias = ParadaRuta.objects.exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).filter(
@@ -2121,6 +2129,7 @@ def rutas(request):
         .annotate(total=Count("id", distinct=True))
         .values("total")[:1]
     )
+    orden_rutas = ("fecha_ruta", "id") if enterprise_focus == "PROXIMAS" else ("-fecha_ruta", "-id")
 
     context = {
         "module_tabs": _module_tabs("rutas", request.user),
@@ -2148,7 +2157,7 @@ def rutas(request):
                 Subquery(monto_transferido_subquery, output_field=DecimalField(max_digits=18, decimal_places=2)),
                 Decimal("0"),
             ),
-        ).order_by("-fecha_ruta", "-id")[:200],
+        ).order_by(*orden_rutas)[:200],
         "q": q,
         "estatus": estatus,
         "enterprise_focus": enterprise_focus,
@@ -2157,10 +2166,12 @@ def rutas(request):
         "estatus_choices": RutaEntrega.ESTATUS_CHOICES,
         "repartidores": Repartidor.objects.filter(user__is_active=True).select_related("user", "user__empleado_rrhh", "unidad_asignada").order_by("user__first_name", "user__username"),
         "unidades": Unidad.objects.filter(activa=True).order_by("codigo"),
+        "today": today,
         "puntos_creacion": PuntoLogistico.objects.filter(activo=True).select_related("sucursal").order_by("tipo", "nombre"),
         "totales": {
             "rutas": rutas_total,
             "hoy": rutas_hoy,
+            "proximas": rutas_proximas,
             "en_ruta": rutas_en_ruta,
             "pendientes": entregas_pendientes,
             "incidencias": incidencias,
@@ -2328,6 +2339,29 @@ def ruta_detail(request, pk: int):
             return redirect("logistica:ruta_detail", pk=ruta.id)
 
         if action == "update_plan":
+            fecha_raw = (request.POST.get("fecha_ruta") or "").strip()
+            fecha_nueva = _parse_date(fecha_raw) if fecha_raw else ruta.fecha_ruta
+            if fecha_nueva is None:
+                messages.error(request, "La fecha de ruta no es válida. Selecciona una fecha del calendario.")
+                return redirect("logistica:ruta_detail", pk=ruta.id)
+            if fecha_nueva != ruta.fecha_ruta:
+                if RutaCargaChecklistLinea.objects.filter(checklist__ruta=ruta).exists():
+                    messages.error(request, "La ruta ya tiene carga vinculada; no se puede cambiar su fecha.")
+                    return redirect("logistica:ruta_detail", pk=ruta.id)
+                puntos_ruta = [parada.punto for parada in ruta.paradas.select_related("punto")]
+                sucursales = {p.sucursal_id for p in puntos_ruta if p.tipo != PuntoLogistico.TIPO_CEDIS and p.sucursal_id}
+                repetidas = set(
+                    RutaEntrega.objects.filter(fecha_ruta=fecha_nueva, paradas__punto__sucursal_id__in=sucursales)
+                    .exclude(pk=ruta.pk)
+                    .exclude(estatus=RutaEntrega.ESTATUS_CANCELADA)
+                    .values_list("paradas__punto__sucursal_id", flat=True)
+                )
+                if repetidas and not ruta_tiene_movimiento_point_nuevo(
+                    fecha=fecha_nueva,
+                    puntos=[p for p in puntos_ruta if p.sucursal_id in repetidas],
+                ):
+                    messages.error(request, "Ya existe una ruta para esa sucursal y fecha; otra vuelta requiere una transferencia Point nueva.")
+                    return redirect("logistica:ruta_detail", pk=ruta.id)
             repartidor_id = (request.POST.get("repartidor") or "").strip()
             acompanante_id = (request.POST.get("acompanante") or "").strip()
             unidad_id = (request.POST.get("unidad_operativa") or "").strip()
@@ -2343,7 +2377,8 @@ def ruta_detail(request, pk: int):
                 messages.error(request, "No puedes cambiar repartidor o unidad mientras la ruta está en seguimiento.")
                 return redirect("logistica:ruta_detail", pk=ruta.id)
             ruta.nombre = (request.POST.get("nombre") or ruta.nombre).strip()
-            ruta.fecha_ruta = _parse_date(request.POST.get("fecha_ruta")) or ruta.fecha_ruta
+            fecha_anterior = ruta.fecha_ruta
+            ruta.fecha_ruta = fecha_nueva
             ruta.repartidor = repartidor
             ruta.acompanante = acompanante
             ruta.acompanante_manual = (request.POST.get("acompanante_manual") or "").strip()
@@ -2358,7 +2393,7 @@ def ruta_detail(request, pk: int):
                 "UPDATE",
                 "logistica.RutaEntrega",
                 str(ruta.id),
-                {"folio": ruta.folio, "repartidor": ruta.repartidor_id, "unidad_operativa": ruta.unidad_operativa_id},
+                {"folio": ruta.folio, "fecha_anterior": str(fecha_anterior), "fecha_ruta": str(ruta.fecha_ruta), "repartidor": ruta.repartidor_id, "unidad_operativa": ruta.unidad_operativa_id},
             )
             messages.success(request, "Planeación de ruta actualizada.")
             return redirect("logistica:ruta_detail", pk=ruta.id)
@@ -3139,6 +3174,7 @@ def ruta_detail(request, pk: int):
         "module_tabs": _module_tabs("rutas", request.user),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
         "ruta": ruta,
+        "today": timezone.localdate(),
         "entregas": entregas_qs,
         "pedidos": pedidos_disponibles,
         "estatus_ruta_choices": _ruta_status_choices_for(ruta),

@@ -5721,7 +5721,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v92-paradas-ruta-viva", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v93-rutas-futuras", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();
