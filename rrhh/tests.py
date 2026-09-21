@@ -4859,7 +4859,7 @@ class RRHHViewsTests(TestCase):
             'disabled aria-disabled="true"', 'data-async-action data-reset-on-success="false"',
             'data-pending-label="Autorizando…"', 'data-pending-label="Rechazando…"',
             'class="ch-calculation-warning"', 'role="status"', "Asigna el turno",
-            "?v=20260920-contexto-extra-v1",
+            "?v=20260921-estados-movil-v1",
         ):
             self.assertContains(response, contenido)
 
