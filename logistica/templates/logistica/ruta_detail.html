@@ -136,7 +136,7 @@
     </div>
     <div class="ops-summary">
       <article class="ops-summary-card"><span class="muted">Ruta</span><strong style="font-size:22px;">{{ ruta.nombre }}</strong><div>{{ ruta.folio }}</div></article>
-      <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{{ ruta.get_estatus_display }}</div></article>
+      <article class="ops-summary-card"><span class="muted">Fecha</span><strong style="font-size:22px;">{{ ruta.fecha_ruta|date:"Y-m-d" }}</strong><div>{% if ruta.fecha_ruta > today and ruta.estatus == 'PLANEADA' %}Programada para fecha futura{% else %}{{ ruta.get_estatus_display }}{% endif %}</div></article>
       <article class="ops-summary-card"><span class="muted">Repartidor / unidad</span><strong style="font-size:22px;">{{ ruta.repartidor|default:ruta.chofer|default:"-" }}</strong><div>{{ ruta.unidad_operativa|default:ruta.unidad|default:"Sin unidad" }}</div></article>
       <article class="ops-summary-card"><span class="muted">Paradas</span><strong>{{ paradas|length|intcomma }}</strong><div>Valor pedidos ${{ ruta.monto_estimado_total|floatformat:2|intcomma }}</div></article>
     </div>
@@ -258,8 +258,11 @@
           <button class="btn btn-primary" type="submit">Actualizar estatus</button>
         </div>
       </form>
+      {% if ruta.estatus == 'PLANEADA' and ruta.fecha_ruta > today %}
+      <div class="route-status-note" style="margin-top:12px;">Esta ruta está programada para el {{ ruta.fecha_ruta|date:'d/m/Y' }}. Podrás liberarla cuando llegue esa fecha.</div>
+      {% endif %}
       {% if not ruta.repartidor_id or not ruta.unidad_operativa_id or not paradas %}
-      <div class="route-status-note" style="margin-top:12px;">Para liberar seguimiento: asigna repartidor, unidad operativa y al menos una parada.</div>
+      <div class="route-status-note" style="margin-top:12px;">Antes de liberar, falta{% if not ruta.repartidor_id %} asignar repartidor{% endif %}{% if not ruta.unidad_operativa_id %}{% if not ruta.repartidor_id %},{% endif %} asignar unidad operativa{% endif %}{% if not paradas %}{% if not ruta.repartidor_id or not ruta.unidad_operativa_id %} y{% endif %} agregar una parada{% endif %}.</div>
       {% endif %}
       {% if cierre_diferencia_disponible %}
       <form method="post" style="margin-top:12px;" onsubmit="return confirm('¿Cerrar la ruta con diferencia autorizada y alertar a Logística?');">

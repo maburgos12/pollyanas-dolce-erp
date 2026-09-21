@@ -4,7 +4,7 @@ import zlib
 import importlib
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -71,10 +71,13 @@ from logistica.services_entregas import (
     revisar_entrega_excepcional,
 )
 from logistica.services_rutas_control import (
+    LiberacionRutaError,
     distancia_metros,
+    liberar_ruta_con_turno,
     registrar_ubicacion_ruta,
     resumen_control_rutas,
     ruta_es_operativa_hoy,
+    ruta_operativa_para_repartidor,
 )
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
@@ -1680,9 +1683,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v92-paradas-ruta-viva"},
+            {"route-control-v93-rutas-futuras"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v93-rutas-futuras", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -3211,7 +3214,7 @@ class LogisticaViewsTests(TestCase):
         resp = self.client.get(reverse("logistica:rutas"))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Logística · Rutas")
-        self.assertContains(resp, "Planear ruta del día")
+        self.assertContains(resp, "Planear ruta")
         self.assertContains(resp, "Sucursales o puntos a visitar")
         self.assertContains(resp, "Filtro operativo")
         self.assertContains(resp, "Rutas de entrega")
@@ -3616,7 +3619,7 @@ class LogisticaViewsTests(TestCase):
         )
 
         self.assertEqual(resp_post.status_code, 200)
-        self.assertContains(resp_post, "no hay transferencia Point nueva")
+        self.assertContains(resp_post, "otra vuelta requiere una transferencia Point nueva")
         self.assertFalse(RutaEntrega.objects.filter(nombre="CEDIS-COLOSIO").exists())
 
     def test_rutas_create_permite_segunda_vuelta_con_transferencia_point_nueva(self):
@@ -5442,9 +5445,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v92-paradas-ruta-viva", pwa_html)
+        self.assertIn("?v=route-control-v93-rutas-futuras", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v93-rutas-futuras", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5607,7 +5610,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v92-paradas-ruta-viva", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v93-rutas-futuras", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -9284,7 +9287,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v92-paradas-ruta-viva", pwa_html)
+        self.assertIn("route-control-v93-rutas-futuras", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
@@ -10015,3 +10018,113 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(punto_inactivo.activo)
         self.assertContains(response, "No se puede activar")
+
+
+class LogisticaRutasFuturasTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="planeacion.futura", password="pass123")
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.client.force_login(self.user)
+        self.sucursal = Sucursal.objects.create(codigo="FUT-01", nombre="Sucursal Futura", activa=True)
+        self.punto = PuntoLogistico.objects.create(
+            nombre="Sucursal Futura",
+            tipo=PuntoLogistico.TIPO_SUCURSAL,
+            sucursal=self.sucursal,
+            latitud="25.570000",
+            longitud="-108.470000",
+        )
+        self.fecha_futura = timezone.localdate() + timedelta(days=3)
+
+    def _crear(self, *, fecha=None, nombre="Ruta futura"):
+        return self.client.post(
+            reverse("logistica:rutas"),
+            {
+                "nombre": nombre,
+                "fecha_ruta": (fecha or self.fecha_futura).isoformat(),
+                "puntos_ruta": [str(self.punto.id)],
+            },
+            follow=True,
+        )
+
+    def test_crea_ruta_futura_sin_asignaciones_y_la_muestra_en_proximas(self):
+        response = self._crear()
+        ruta = RutaEntrega.objects.get(nombre="Ruta futura")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ruta.fecha_ruta, self.fecha_futura)
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+        self.assertIsNone(ruta.repartidor_id)
+        self.assertIsNone(ruta.unidad_operativa_id)
+        self.assertEqual(ruta.paradas.count(), 1)
+
+        proximas = self.client.get(reverse("logistica:rutas"), {"enterprise_focus": "PROXIMAS"})
+        self.assertContains(proximas, ruta.folio)
+        self.assertContains(proximas, "Programada")
+        self.assertContains(proximas, "Pendiente: repartidor y unidad")
+
+    def test_fecha_invalida_no_crea_ruta_para_hoy(self):
+        response = self.client.post(
+            reverse("logistica:rutas"),
+            {"nombre": "Fecha inválida", "fecha_ruta": "no-es-fecha", "puntos_ruta": [str(self.punto.id)]},
+            follow=True,
+        )
+        self.assertContains(response, "La fecha de ruta no es válida")
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Fecha inválida").exists())
+
+    def test_ruta_planeada_se_puede_reprogramar(self):
+        self._crear()
+        ruta = RutaEntrega.objects.get(nombre="Ruta futura")
+        nueva_fecha = self.fecha_futura + timedelta(days=1)
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.pk}),
+            {"action": "update_plan", "nombre": ruta.nombre, "fecha_ruta": nueva_fecha.isoformat()},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(ruta.fecha_ruta, nueva_fecha)
+        self.assertContains(response, "Programada para fecha futura")
+
+    def test_diferencia_vencida_permite_programar_pero_bloquea_liberacion(self):
+        with patch("logistica.views.pendientes_vencidos_para_planeacion", return_value=[object()]):
+            response = self._crear()
+        self.assertEqual(response.status_code, 200)
+        ruta = RutaEntrega.objects.get(nombre="Ruta futura")
+        ruta.fecha_ruta = timezone.localdate()
+        ruta.save(update_fields=["fecha_ruta"])
+        with patch("logistica.services_discrepancias.pendientes_vencidos_para_planeacion", return_value=[object()]):
+            with self.assertRaisesMessage(LiberacionRutaError, "Aclara las diferencias pendientes"):
+                liberar_ruta_con_turno(ruta=ruta, actor=self.user)
+
+    def test_diferencia_vencida_sigue_bloqueando_creacion_para_hoy(self):
+        with patch("logistica.views.pendientes_vencidos_para_planeacion", return_value=[object()]):
+            response = self._crear(fecha=timezone.localdate(), nombre="Ruta de hoy")
+        self.assertContains(response, "Aclara las diferencias pendientes")
+        self.assertFalse(RutaEntrega.objects.filter(nombre="Ruta de hoy").exists())
+
+    def test_ruta_futura_no_se_libera_ni_aparece_como_operativa(self):
+        self._crear()
+        ruta = RutaEntrega.objects.get(nombre="Ruta futura")
+        repartidor = Repartidor.objects.create(user=self.user, sucursal=self.sucursal)
+        ruta.repartidor = repartidor
+        ruta.save(update_fields=["repartidor"])
+        self.assertIsNone(ruta_operativa_para_repartidor(repartidor))
+        with self.assertRaisesMessage(LiberacionRutaError, "podrás liberarla ese día"):
+            liberar_ruta_con_turno(ruta=ruta, actor=self.user)
+        ruta.refresh_from_db()
+        self.assertEqual(ruta.estatus, RutaEntrega.ESTATUS_PLANEADA)
+
+    def test_cambiar_fecha_a_dia_ya_programado_no_duplica_sucursal(self):
+        self._crear()
+        ruta = RutaEntrega.objects.get(nombre="Ruta futura")
+        otra_fecha = self.fecha_futura + timedelta(days=1)
+        previa = RutaEntrega.objects.create(nombre="Otra ruta", fecha_ruta=otra_fecha)
+        ParadaRuta.objects.create(ruta=previa, punto=self.punto, orden=1)
+
+        response = self.client.post(
+            reverse("logistica:ruta_detail", kwargs={"pk": ruta.pk}),
+            {"action": "update_plan", "nombre": ruta.nombre, "fecha_ruta": otra_fecha.isoformat()},
+            follow=True,
+        )
+        ruta.refresh_from_db()
+        self.assertContains(response, "Ya existe una ruta para esa sucursal y fecha")
+        self.assertEqual(ruta.fecha_ruta, self.fecha_futura)

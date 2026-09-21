@@ -93,19 +93,23 @@
 
   <section class="ops-grid-2">
     <article class="card">
-      <div class="card-header">Planear ruta del día</div>
+      <div class="card-header">Planear ruta</div>
       {% if discrepancias_vencidas %}
       <div class="route-create-note">
-        <strong>Aclara las diferencias pendientes antes de planear.</strong>
-        <p>Tienes {{ discrepancias_vencidas|length }} caso{{ discrepancias_vencidas|length|pluralize }} del día anterior sin atender.</p>
+        <strong>Puedes programar una ruta futura. Para planear una ruta de hoy o liberar una ruta, primero aclara las diferencias pendientes.</strong>
+        <p>Tienes {{ discrepancias_vencidas|length }} caso{{ discrepancias_vencidas|length|pluralize }} anterior{{ discrepancias_vencidas|length|pluralize:'es' }} sin atender.</p>
         <a class="btn btn-primary" href="{% url 'logistica:revisiones_entrega' %}">Revisar diferencias</a>
       </div>
-      {% elif can_manage_logistica %}
+      {% endif %}
+      {% if can_manage_logistica %}
       <form method="post" class="route-create-form" style="margin-bottom:0;">
         {% csrf_token %}
+        <p class="muted">Elige hoy para la ruta normal o una fecha posterior para programarla. Ambas se guardan como planeadas.</p>
         <div class="route-create-grid">
           <input class="input-field" type="text" name="nombre" placeholder="Ej. Ruta CEDIS - Sucursales" required>
-          <input class="input-field" type="date" name="fecha_ruta" value="{% now 'Y-m-d' %}">
+          <label>Fecha de ruta
+            <input class="input-field" type="date" name="fecha_ruta" value="{{ today|date:'Y-m-d' }}" min="{{ today|date:'Y-m-d' }}" required>
+          </label>
           <select class="input-field" name="repartidor">
             <option value="">Repartidor operativo...</option>
             {% for repartidor in repartidores %}
@@ -151,7 +155,7 @@
         </div>
         <input class="input-field" type="text" name="notas" placeholder="Notas internas de carga, horarios o prioridad">
         <input type="hidden" name="estatus" value="PLANEADA">
-        <div class="route-create-note">Se crea como planeada con paradas. El KM se ajusta después en el detalle si hace falta.</div>
+        <div class="route-create-note">Una ruta futura se podrá preparar ahora y liberar cuando llegue su fecha y la carga esté lista.</div>
         <button class="btn btn-primary" type="submit" {% if not puntos_creacion %}disabled{% endif %}>Crear ruta planeada</button>
       </form>
       {% else %}
@@ -177,6 +181,7 @@
       </form>
       <div class="ops-chip-row">
         <span class="ops-chip">Rutas hoy {{ totales.hoy }}</span>
+        <a class="ops-chip" href="{% url 'logistica:rutas' %}?enterprise_focus=PROXIMAS">Próximas rutas {{ totales.proximas }}</a>
         <span class="ops-chip">En tránsito {{ totales.en_ruta }}</span>
         {% if date_from or date_to %}<span class="ops-chip">Rango aplicado</span>{% endif %}
       </div>
@@ -184,7 +189,7 @@
   </section>
 
   <section class="card">
-    <div class="card-header">Rutas de entrega</div>
+    <div class="card-header">{% if enterprise_focus == 'PROXIMAS' %}Próximas rutas{% else %}Rutas de entrega{% endif %}</div>
     <div class="table-responsive">
       <table class="table table-striped">
         <thead>
@@ -210,11 +215,11 @@
           <tr>
             <td>{{ r.folio }}</td>
             <td>{{ r.nombre }}</td>
-            <td>{{ r.fecha_ruta|date:"Y-m-d" }}</td>
+            <td>{{ r.fecha_ruta|date:"Y-m-d" }}{% if r.fecha_ruta > today and r.estatus == 'PLANEADA' %}<br><span class="badge bg-info">Programada</span>{% endif %}</td>
             <td>{% if r.repartidor %}{{ r.repartidor }}{% elif r.chofer %}{{ r.chofer }}{% else %}-{% endif %}</td>
             <td>{% if r.acompanante %}{{ r.acompanante }}{% elif r.acompanante_manual %}{{ r.acompanante_manual }}{% else %}-{% endif %}</td>
             <td>{% if r.unidad_operativa %}{{ r.unidad_operativa.codigo }}{% elif r.unidad %}{{ r.unidad }}{% else %}-{% endif %}</td>
-            <td>{% if r.repartidor_id and r.unidad_operativa_id %}<span class="badge bg-success">Asignada</span>{% else %}<span class="badge bg-warning">Pendiente</span>{% endif %}</td>
+            <td>{% if r.repartidor_id and r.unidad_operativa_id %}<span class="badge bg-success">Asignada</span>{% else %}<span class="badge bg-warning">Pendiente{% if not r.repartidor_id and not r.unidad_operativa_id %}: repartidor y unidad{% elif not r.repartidor_id %}: repartidor{% else %}: unidad{% endif %}</span>{% endif %}</td>
             <td class="text-end">{{ r.paradas_entrega_total }}</td>
             <td class="text-end">{{ r.paradas_entregadas }}</td>
             <td class="text-end">{{ r.paradas_incidencia }}</td>
