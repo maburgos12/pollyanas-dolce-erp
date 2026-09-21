@@ -40,6 +40,9 @@
           {% if not he.contexto_calculo.puede_autorizar %}
             <p class="ch-calculation-warning" id="hora-extra-aviso-{{ he.id }}" role="status">{{ he.contexto_calculo.motivo_bloqueo }}</p>
           {% endif %}
+          {% if not he.jefatura_actualizada %}
+            <p class="ch-calculation-warning" role="status">La jefatura cambió. Sincroniza esta detección antes de resolverla.</p>
+          {% endif %}
           {% if he.notas %}<p>{{ he.notas|truncatechars:140 }}</p>{% endif %}
         </div>
         <div>{{ he.fecha|date:"Y-m-d" }}</div>
@@ -50,6 +53,7 @@
           {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
         </div>
         {% if key == "pendiente" %}
+          {% if he.jefatura_actualizada %}
           {% if he.jefe_directo_id == user_id or is_superuser %}
             <form method="post" class="ch-actions" data-async-action data-reset-on-success="false">
               {% csrf_token %}
@@ -57,6 +61,7 @@
               <button class="btn btn-primary" type="submit" name="action" value="autorizar" data-pending-label="Autorizando…"{% if not he.contexto_calculo.puede_autorizar %} disabled aria-disabled="true" aria-describedby="hora-extra-aviso-{{ he.id }}"{% endif %}>Autorizar</button>
               <button class="btn btn-secondary" type="submit" name="action" value="rechazar" data-pending-label="Rechazando…">Rechazar</button>
             </form>
+          {% endif %}
           {% endif %}
         {% endif %}
       </article>
