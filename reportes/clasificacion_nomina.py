@@ -39,7 +39,7 @@ DESTINO_POR_AREA = {
 }
 
 # Todo lo demás cuenta en el área de su departamento. En producción eso incluye
-# HORNOS, EMBETUNADO, ARMADO y PREPARACIONES —masas, bases, galletas, betunes—,
+# HORNOS, EMBETUNADO, ARMADO y PREPARACION —masas, bases, galletas, betunes—,
 # que son las recetas de tipo PREPARACION del catálogo.
 #
 # CRUCERO sigue apareciendo en expedientes sin reasignar: marcaba a quien

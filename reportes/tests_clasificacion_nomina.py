@@ -39,7 +39,7 @@ class ClasificacionNominaTests(TestCase):
         )
 
     def test_las_areas_que_fabrican_cuentan_como_produccion(self):
-        for area in ("HORNOS", "EMBETUNADO", "ARMADO", "PREPARACIONES"):
+        for area in ("HORNOS", "EMBETUNADO", "ARMADO", "PREPARACION"):
             self.assertEqual(
                 destino_de(Empleado.NIVEL_COLABORADOR, area), DESTINO_PRODUCCION,
             )
