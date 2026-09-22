@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from .models import AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, Turno
 from .services_identidad import vincular_identidad_pendiente
+from .services_extra_conciliacion import diagnosticar_horas_extra
 
 
 @override_settings(ERP_PUBLIC_API_KEY="hik-v2-test-key")
@@ -283,6 +284,114 @@ class HikIngestaV2Tests(TestCase):
             self._ledger().objects.filter(projection_status="applied").count(),
             2,
         )
+
+    def test_tres_punches_neutros_usan_primera_y_ultima_como_extremos(self):
+        turno = Turno.objects.create(
+            nombre="Producción 8 a 16", hora_entrada=time(8), hora_salida=time(16),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+        )
+        events = [
+            self._event(event_id="nallely-entrada", occurred_at="2026-07-28T07:55:54-07:00", kind="punch"),
+            self._event(event_id="nallely-comida", occurred_at="2026-07-28T11:13:27-07:00", kind="punch"),
+            self._event(event_id="nallely-salida", occurred_at="2026-07-28T17:03:11-07:00", kind="punch"),
+        ]
+
+        response = self._post(events)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha="2026-07-28")
+        self.assertEqual(timezone.localtime(asistencia.entrada).time(), time(7, 55, 54))
+        self.assertEqual(timezone.localtime(asistencia.salida_comida).time(), time(11, 13, 27))
+        self.assertIsNone(asistencia.regreso_comida)
+        self.assertEqual(timezone.localtime(asistencia.salida).time(), time(17, 3, 11))
+        diagnostico = diagnosticar_horas_extra(asistencia)
+        self.assertEqual(diagnostico.minutos, 63)
+        self.assertTrue(diagnostico.requiere_revision)
+
+    def test_tres_punches_antes_de_salida_conservan_jornada_abierta(self):
+        turno = Turno.objects.create(
+            nombre="Producción 8 a 16 parcial", hora_entrada=time(8), hora_salida=time(16),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+        )
+        events = [
+            self._event(event_id="parcial-entrada", occurred_at="2026-07-28T08:00:00-07:00", kind="punch"),
+            self._event(event_id="parcial-comida-sale", occurred_at="2026-07-28T12:00:00-07:00", kind="punch"),
+            self._event(event_id="parcial-comida-regresa", occurred_at="2026-07-28T13:00:00-07:00", kind="punch"),
+        ]
+
+        response = self._post(events)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha="2026-07-28")
+        self.assertEqual(timezone.localtime(asistencia.salida_comida).time(), time(12))
+        self.assertEqual(timezone.localtime(asistencia.regreso_comida).time(), time(13))
+        self.assertIsNone(asistencia.salida)
+
+    def test_cinco_punches_neutros_eligen_comida_y_apartan_marca_temprana(self):
+        turno = Turno.objects.create(
+            nombre="Producción 8 a 16", hora_entrada=time(8), hora_salida=time(16),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+        )
+        events = [
+            self._event(event_id="rocio-salida", occurred_at="2026-07-28T17:00:40-07:00", kind="punch"),
+            self._event(event_id="rocio-comida-sale", occurred_at="2026-07-28T12:25:36-07:00", kind="punch"),
+            self._event(event_id="rocio-entrada", occurred_at="2026-07-28T07:47:16-07:00", kind="punch"),
+            self._event(event_id="rocio-comida-regresa", occurred_at="2026-07-28T13:05:04-07:00", kind="punch"),
+            self._event(event_id="rocio-repetida", occurred_at="2026-07-28T07:47:18-07:00", kind="punch"),
+        ]
+
+        response = self._post(events)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha="2026-07-28")
+        self.assertEqual(timezone.localtime(asistencia.entrada).time(), time(7, 47, 16))
+        self.assertEqual(timezone.localtime(asistencia.salida_comida).time(), time(12, 25, 36))
+        self.assertEqual(timezone.localtime(asistencia.regreso_comida).time(), time(13, 5, 4))
+        self.assertEqual(timezone.localtime(asistencia.salida).time(), time(17, 0, 40))
+        self.assertEqual(self._ledger().objects.filter(projection_status="applied").count(), 5)
+        diagnostico = diagnosticar_horas_extra(asistencia)
+        self.assertEqual(diagnostico.minutos, 60)
+        self.assertFalse(diagnostico.requiere_revision)
+
+    def test_marca_explicita_prevalece_sobre_punch_cercano_en_ambos_ordenes(self):
+        turno = Turno.objects.create(
+            nombre="Producción 8 a 16 mixta", hora_entrada=time(8), hora_salida=time(16),
+            deteccion_por_checada=False,
+        )
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=turno, fecha_inicio=date(2026, 1, 1),
+        )
+        for dia, neutral_primero in ((28, True), (29, False)):
+            with self.subTest(neutral_primero=neutral_primero):
+                fecha = f"2026-07-{dia:02d}"
+                primera, segunda = (
+                    ("punch", "check_in") if neutral_primero else ("check_in", "punch")
+                )
+                events = [
+                    self._event(event_id=f"mixta-{dia}-primera", occurred_at=f"{fecha}T07:47:16-07:00", kind=primera),
+                    self._event(event_id=f"mixta-{dia}-segunda", occurred_at=f"{fecha}T07:47:18-07:00", kind=segunda),
+                    self._event(event_id=f"mixta-{dia}-comida-sale", occurred_at=f"{fecha}T12:25:36-07:00", kind="punch"),
+                    self._event(event_id=f"mixta-{dia}-comida-regresa", occurred_at=f"{fecha}T13:05:04-07:00", kind="punch"),
+                    self._event(event_id=f"mixta-{dia}-salida", occurred_at=f"{fecha}T17:00:40-07:00", kind="check_out"),
+                ]
+
+                response = self._post(events)
+
+                self.assertEqual(response.status_code, 200, response.content)
+                asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=fecha)
+                self.assertEqual(timezone.localtime(asistencia.entrada).time(), time(7, 47, 18 if neutral_primero else 16))
+                self.assertEqual(timezone.localtime(asistencia.salida_comida).time(), time(12, 25, 36))
+                self.assertEqual(timezone.localtime(asistencia.regreso_comida).time(), time(13, 5, 4))
+                self.assertEqual(timezone.localtime(asistencia.salida).time(), time(17, 0, 40))
 
     def test_reenvio_del_guid_no_reproyecta_ni_repite_efectos(self):
         event = self._event(event_id="guid-effects-once")

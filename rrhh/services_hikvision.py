@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from typing import Any
 
 import requests
@@ -24,6 +24,9 @@ ESTADO_SALIDA = {"checkOut", "overtimeOut"}
 VENTANA_DUPLICADO_MINUTOS = 5
 OBS_REVISION_TRES_MARCAJES = "REVISIÓN: 3 marcajes"
 OBS_MARCAJES_EXTRA = "Marcajes extra"
+COMIDA_OBJETIVO_MINUTOS = 35
+COMIDA_MINIMA_PLAUSIBLE_MINUTOS = 5
+COMIDA_MAXIMA_PLAUSIBLE_MINUTOS = 180
 OBS_TECNICAS_HIK_PREFIXES = ("breakOut@", "breakIn@", "checkIn@", "checkOut@", "overtimeIn@", "overtimeOut@")
 
 # La empresa tiene UN SOLO checador físico y está en Matriz/CEDIS (mismo lugar);
@@ -42,6 +45,7 @@ class MarcaHik:
     status: str
     serial_no: Any = None
     nueva: bool = True
+    neutral: bool = False
 
 
 def _parse_hik_time(time_str: str):
@@ -141,6 +145,25 @@ def _filtrar_marcas_cercanas(marcas: list[MarcaHik]) -> tuple[list[MarcaHik], in
     return aceptadas, duplicados
 
 
+def _filtrar_repeticiones_neutras(marcas: list[MarcaHik]) -> tuple[list[MarcaHik], int]:
+    """Quita de la proyección punches repetidos sin borrar el ledger durable."""
+    aceptadas: list[MarcaHik] = []
+    duplicados = 0
+    for marca in sorted(marcas, key=lambda item: timezone.localtime(item.dt)):
+        cercanas = [aceptada for aceptada in aceptadas if _es_marca_cercana(marca.dt, aceptada.dt)]
+        if cercanas:
+            if marca.neutral:
+                if marca.nueva:
+                    duplicados += 1
+                continue
+            neutras = [aceptada for aceptada in cercanas if aceptada.neutral]
+            if neutras:
+                aceptadas = [aceptada for aceptada in aceptadas if aceptada not in neutras]
+                duplicados += sum(1 for neutral in neutras if neutral.nueva)
+        aceptadas.append(marca)
+    return aceptadas, duplicados
+
+
 def _actualizar_observacion_hik(asistencia: AsistenciaEmpleado, notas: list[str]) -> None:
     partes_actuales = [
         parte.strip()
@@ -158,9 +181,13 @@ def _aplicar_marcajes(
     marcas_nuevas: list[MarcaHik],
     *,
     filtrar_cercanas: bool = True,
+    filtrar_repeticiones_neutras: bool = False,
+    proyectar_extremos_neutros: bool = False,
 ) -> tuple[int, str]:
     todas = [*_marcas_existentes(asistencia), *marcas_nuevas]
-    if filtrar_cercanas:
+    if filtrar_repeticiones_neutras:
+        marcas, duplicados = _filtrar_repeticiones_neutras(todas)
+    elif filtrar_cercanas:
         marcas, duplicados = _filtrar_marcas_cercanas(todas)
     else:
         marcas, duplicados = todas, 0
@@ -172,7 +199,68 @@ def _aplicar_marcajes(
     asistencia.regreso_comida = None
     asistencia.salida = None
 
-    if len(marcas) == 2:
+    fin_turno_programado = None
+    if asistencia.turno_id:
+        inicio_turno_programado = timezone.make_aware(
+            datetime.combine(asistencia.fecha, asistencia.turno.hora_entrada)
+        )
+        fin_turno_programado = timezone.make_aware(
+            datetime.combine(asistencia.fecha, asistencia.turno.hora_salida)
+        )
+        if fin_turno_programado <= inicio_turno_programado:
+            fin_turno_programado += timedelta(days=1)
+
+    tres_marcas_sin_salida = (
+        proyectar_extremos_neutros
+        and len(marcas) == 3
+        and fin_turno_programado is not None
+        and marcas[-1].dt < fin_turno_programado
+    )
+    dos_marcas_sin_salida = (
+        proyectar_extremos_neutros
+        and len(marcas) == 2
+        and fin_turno_programado is not None
+        and marcas[-1].dt < fin_turno_programado
+        and asistencia.empleado.modalidad_marcaje != Empleado.MARCAJE_DOS_MARCAS
+    )
+
+    if tres_marcas_sin_salida:
+        asistencia.salida_comida = marcas[1].dt
+        asistencia.regreso_comida = marcas[2].dt
+        notas.append(OBS_REVISION_TRES_MARCAJES)
+    elif dos_marcas_sin_salida:
+        asistencia.salida_comida = marcas[1].dt
+    elif proyectar_extremos_neutros and len(marcas) >= 2:
+        asistencia.salida = marcas[-1].dt
+        interiores = marcas[1:-1]
+        seleccionadas: set[int] = set()
+        if len(interiores) == 1:
+            asistencia.salida_comida = interiores[0].dt
+            seleccionadas.add(0)
+            notas.append(OBS_REVISION_TRES_MARCAJES)
+        elif len(interiores) >= 2:
+            candidatos = []
+            for indice in range(len(interiores) - 1):
+                inicio_comida = interiores[indice].dt
+                fin_comida = interiores[indice + 1].dt
+                if fin_turno_programado and not (
+                    inicio_turno_programado <= inicio_comida < fin_comida <= fin_turno_programado
+                ):
+                    continue
+                minutos = _minutos_entre(inicio_comida, fin_comida)
+                if COMIDA_MINIMA_PLAUSIBLE_MINUTOS <= minutos <= COMIDA_MAXIMA_PLAUSIBLE_MINUTOS:
+                    candidatos.append((abs(minutos - COMIDA_OBJETIVO_MINUTOS), indice))
+            candidatos.sort()
+            if candidatos and (len(candidatos) == 1 or candidatos[0][0] < candidatos[1][0]):
+                _, indice = candidatos[0]
+                asistencia.salida_comida = interiores[indice].dt
+                asistencia.regreso_comida = interiores[indice + 1].dt
+                seleccionadas.update({indice, indice + 1})
+        extras = [marca for indice, marca in enumerate(interiores) if indice not in seleccionadas]
+        if extras:
+            horas = ", ".join(timezone.localtime(marca.dt).strftime("%H:%M") for marca in extras)
+            notas.append(f"{OBS_MARCAJES_EXTRA}: {horas}")
+    elif len(marcas) == 2:
         if marcas[1].status in ESTADO_SALIDA:
             asistencia.salida = marcas[1].dt
         else:

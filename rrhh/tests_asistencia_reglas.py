@@ -95,7 +95,7 @@ class ReglasAsistenciaRRHHTests(TestCase):
             tipo=IncidenciaAsistencia.TIPO_MARCAJE_INCOMPLETO,
         )
         self.assertIn("comida", incidencia.detalle.lower())
-        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+        self.assertEqual(HoraExtra.objects.get(asistencia=asistencia).horas, Decimal("1.00"))
 
     def test_point_sin_marcas_de_comida_no_genera_marcaje_incompleto(self):
         fecha = date(2026, 6, 1)
@@ -224,7 +224,7 @@ class ReglasAsistenciaRRHHTests(TestCase):
             (time(16, 10), None, False),
             (time(16, 11), None, True),
             (time(7), None, False),
-            (time(17), time(12), False),
+            (time(17), time(12), True),
         )
         for offset, (salida, comida, esperado) in enumerate(casos):
             with self.subTest(salida=salida, comida=comida):
