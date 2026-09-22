@@ -197,6 +197,34 @@ class Empleado(models.Model):
         seq = Empleado.objects.filter(codigo__startswith=prefix).count() + 1
         return f"{prefix}{seq:03d}"
 
+    @staticmethod
+    def _clave_funcion(valor) -> str:
+        """Forma comparable de un área: sin acentos ni separadores distintos.
+
+        «Cuartos Fríos», «cuartos_frios» y «CUARTOS FRIOS» dan la misma clave.
+        """
+        import re
+
+        return re.sub(r"[^A-Z0-9]+", "_", normalizar_nombre(valor or "").upper()).strip("_")
+
+    def _resolver_funcion_operativa(self, valor) -> str:
+        """Adopta la escritura del catálogo cuando reconoce el área.
+
+        El catálogo es la autoridad de cómo se escribe cada función: si alguien
+        la teclea distinto pero es la misma, se guarda la forma canónica. Lo que
+        no reconoce se conserva normalizado en vez de descartarse, para que un
+        área nueva no se pierda y quede visible como huérfana.
+        """
+        clave = self._clave_funcion(valor)
+        if not clave:
+            return ""
+        # ponytail: el catálogo son ~16 filas, se recorre en memoria. Si llegara
+        # a crecer, indexar una columna con la clave normalizada.
+        for funcion in CatalogoFuncionOperativa.objects.all():
+            if self._clave_funcion(funcion.puesto_operativo) == clave:
+                return funcion.puesto_operativo
+        return normalizar_nombre(valor or "").upper()
+
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
@@ -206,7 +234,7 @@ class Empleado(models.Model):
         # PREPARACION: la comparación falla en silencio y la persona cae en el
         # destino por omisión sin que nadie lo note. Se normaliza aquí para que
         # el dato entre limpio y sirva igual a todos sus consumidores.
-        self.puesto_operativo = normalizar_nombre(self.puesto_operativo or "").upper()
+        self.puesto_operativo = self._resolver_funcion_operativa(self.puesto_operativo)
         self.nivel_organizacional = normalizar_nombre(self.nivel_organizacional or "").upper()
         if not self.codigo:
             self.codigo = self._generate_codigo()

@@ -4,7 +4,7 @@ from django.test import TestCase
 from reportes.clasificacion_nomina import (
     DESTINO_CEDIS, DESTINO_ADMINISTRACION, DESTINO_PRODUCCION, destino_de,
 )
-from rrhh.models import Empleado
+from rrhh.models import CatalogoFuncionOperativa, Empleado
 
 
 class NormalizacionEmpleadoTests(TestCase):
@@ -48,6 +48,35 @@ class NormalizacionEmpleadoTests(TestCase):
         self.assertEqual(
             destino_de(e.nivel_organizacional, e.puesto_operativo), DESTINO_ADMINISTRACION,
         )
+
+    def test_adopta_la_escritura_del_catalogo(self):
+        # El catálogo es la autoridad de cómo se escribe cada área.
+        CatalogoFuncionOperativa.objects.update_or_create(
+            codigo="PRUEBA CUARTOS",
+            defaults={"etiqueta": "Cuartos fríos", "puesto_operativo": "CUARTOS_FRIOS",
+                      "departamento_actual": "PRODUCCION"},
+        )
+        for i, variante in enumerate(["Cuartos Fríos", "cuartos frios", "CUARTOS-FRIOS"]):
+            e = self._empleado(codigo=f"C{i}", puesto_operativo=variante)
+            e.refresh_from_db()
+            self.assertEqual(e.puesto_operativo, "CUARTOS_FRIOS", f"falló con «{variante}»")
+
+    def test_un_area_desconocida_no_se_pierde(self):
+        # Se conserva normalizada para que quede visible como huérfana, en vez
+        # de descartarse en silencio.
+        e = self._empleado(codigo="C9", puesto_operativo="Área nueva")
+        e.refresh_from_db()
+        self.assertEqual(e.puesto_operativo, "AREA NUEVA")
+
+    def test_renombrar_en_el_catalogo_manda_sobre_lo_tecleado(self):
+        CatalogoFuncionOperativa.objects.update_or_create(
+            codigo="PRUEBA ENVIO",
+            defaults={"etiqueta": "Envío a sucursal", "puesto_operativo": "ENVIO_A_SUCURSAL",
+                      "departamento_actual": "PRODUCCION"},
+        )
+        e = self._empleado(codigo="C8", puesto_operativo="envio a sucursal")
+        e.refresh_from_db()
+        self.assertEqual(e.puesto_operativo, "ENVIO_A_SUCURSAL")
 
     def test_vacio_sigue_siendo_vacio(self):
         e = self._empleado(codigo="N6")
