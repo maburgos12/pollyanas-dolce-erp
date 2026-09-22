@@ -604,3 +604,50 @@ por sí solos un estado terminal.
   protección de `main`; validar allí el PR y la ejecución posterior al merge.
 - Estas reglas no amplían la autorización para cambios delicados ni sustituyen la
   validación en producción cuando la implementación modifica el ERP.
+
+---
+
+## Regla de evidencia — ninguna cifra sin origen verificable
+
+Vigente desde el 2026-09-22 por instrucción de Mauricio. Aplica a todo dato,
+importe, porcentaje o conclusión que se le reporte, se escriba en el ERP o se
+use para decidir.
+
+**No se inventa ni se estima nada.** Si un dato no está en el ERP, en un CFDI,
+en un recibo, en un estado de cuenta o en un documento que Mauricio compartió,
+la respuesta es «no lo tengo» y se dice cuál es el documento que hace falta.
+Un promedio, un prorrateo o un importe «típico» no son evidencia: son
+estimaciones, y se marcan como tales o no se usan.
+
+### Antes de reportar cualquier cifra
+
+1. **Nombrar la fuente.** De qué tabla, qué CFDI, qué recibo, qué consulta sale.
+   Una cifra sin origen no se reporta.
+2. **Verificar la suma antes de presentarla.** Un total derivado —un porcentaje,
+   un acumulado, una proporción— se comprueba contra una magnitud conocida antes
+   de enseñarlo. Si el resultado no es plausible para una cadena de nueve
+   pastelerías, está mal armado: revisarlo, no publicarlo.
+3. **No mezclar naturalezas.** Ingresos con egresos, detalle con roll-up,
+   presupuesto con real, o el mismo dinero abierto por dos dimensiones, no se
+   suman entre sí. Es la misma trampa de doble conteo que este proyecto ya
+   documenta para los rubros agregados.
+4. **Distinguir lo verificado de lo inferido.** Si algo se dedujo por
+   cruce de importes, coincidencia de fechas o descarte, se dice que es una
+   inferencia y qué la confirmaría.
+5. **No comparar contra una constante tecleada a mano.** Verificar un dato
+   contra un número que el propio agente escribió no es verificación: es
+   circular. La comprobación se hace contra la fuente.
+
+### Al equivocarse
+
+Se corrige de inmediato, se dice qué cifra queda invalidada y por qué, y no se
+reutiliza hasta rehacerla. No se defiende un número malo ni se minimiza el
+error: cuesta más la confianza que la corrección.
+
+### Por qué existe esta regla
+
+El ERP es la fuente de verdad de la operación. El Excel de administración fue
+andamio para arrancar donde no había facturas, y se va retirando conforme cada
+rubro consigue su fuente viva. Un dato inventado que entre al ERP contamina
+justo aquello que lo hace confiable, y a diferencia de un error de código,
+nadie lo detecta después.
