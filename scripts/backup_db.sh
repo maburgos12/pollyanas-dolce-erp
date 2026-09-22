@@ -10,7 +10,15 @@ DB_NAME="${DB_NAME:-pastelerias_erp}"
 DB_USER="${DB_USER:-postgres}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONTEOS_EVIDENCE_DIR="${CONTEOS_EVIDENCE_DIR:-$SCRIPT_DIR/../storage/conteos_evidencias}"
-KEEP_LAST=7
+KEEP_LAST="${BACKUP_KEEP_LAST:-7}"
+BACKUP_EXPORT_DIR="${BACKUP_EXPORT_DIR:-}"
+BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
+[[ "$KEEP_LAST" =~ ^[1-9][0-9]*$ ]] || { echo "BACKUP_KEEP_LAST debe ser un entero positivo" >&2; exit 1; }
+if [[ -n "$BACKUP_EXPORT_DIR" && -z "$BACKUP_EXPORT_GROUP" ]] ||
+   [[ -z "$BACKUP_EXPORT_DIR" && -n "$BACKUP_EXPORT_GROUP" ]]; then
+    echo "BACKUP_EXPORT_DIR y BACKUP_EXPORT_GROUP deben configurarse juntos" >&2
+    exit 1
+fi
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
@@ -118,6 +126,19 @@ mv "$STAGING/$PREFIX.manifest" "$BACKUP_DIR/$PREFIX.manifest"
 PUBLISHED=1
 rm -f "$BACKUP_DIR/$PREFIX.incomplete"
 
+# Publish hard links only after the manifest is complete. This exposes the three
+# verified files to a restricted reader without storing a second local copy.
+if [ -n "$BACKUP_EXPORT_DIR" ]; then
+    install -d -m 0750 "$BACKUP_EXPORT_DIR"
+    chgrp "$BACKUP_EXPORT_GROUP" "$BACKUP_EXPORT_DIR"
+    for suffix in sql.gz conteos.tar.gz manifest; do
+        file="$BACKUP_DIR/$PREFIX.$suffix"
+        chgrp "$BACKUP_EXPORT_GROUP" "$file"
+        chmod 0640 "$file"
+        ln "$file" "$BACKUP_EXPORT_DIR/$PREFIX.$suffix"
+    done
+fi
+
 # Preserve the original policy: seven usable restore points TOTAL, including
 # legacy SQL-only backups. Incomplete/corrupt sets are neither counted nor erased.
 shopt -s nullglob
@@ -138,6 +159,9 @@ done
 DELETE_COUNT=$(( ${#COMPLETE[@]} - KEEP_LAST ))
 for ((i=0; i<DELETE_COUNT; i++)); do
     old=${COMPLETE[$i]}
+    if [ -n "$BACKUP_EXPORT_DIR" ]; then
+        rm -f "$BACKUP_EXPORT_DIR/$old.manifest" "$BACKUP_EXPORT_DIR/$old.sql.gz" "$BACKUP_EXPORT_DIR/$old.conteos.tar.gz"
+    fi
     rm -f "$BACKUP_DIR/$old.manifest" "$BACKUP_DIR/$old.sql.gz" "$BACKUP_DIR/$old.conteos.tar.gz" "$BACKUP_DIR/$old.incomplete"
     log "Rotado conjunto: $old"
 done
