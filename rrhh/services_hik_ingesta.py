@@ -267,16 +267,36 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
             else:
                 status = "checkOut" if item.tipo_evento == "check_out" else "checkIn"
             marcas_ledger.append(
-                MarcaHik(dt=item.ocurrido_en, status=status, serial_no=item.event_id)
+                MarcaHik(
+                    dt=item.ocurrido_en,
+                    status=status,
+                    serial_no=item.event_id,
+                    neutral=item.tipo_evento == "punch",
+                )
             )
+        from .services_turnos import turno_asignado_para_fecha
+
+        turno = asistencia.turno or turno_asignado_para_fecha(empleado, fecha)
+        if turno is None and (marcas_previas or marcas_ledger):
+            primera = min([*marcas_previas, *marcas_ledger], key=lambda marca: marca.dt)
+            turno = _detectar_turno(timezone.localtime(primera.dt).time())
+        if turno:
+            asistencia.turno = turno
         asistencia.entrada = None
         asistencia.salida_comida = None
         asistencia.regreso_comida = None
         asistencia.salida = None
+        solo_punches = (
+            bool(receipts)
+            and all(item.tipo_evento == "punch" for item in receipts)
+            and not marcas_previas
+        )
         _aplicar_marcajes(
             asistencia,
             [*marcas_previas, *marcas_ledger],
             filtrar_cercanas=False,
+            filtrar_repeticiones_neutras=any(marca.neutral for marca in marcas_ledger),
+            proyectar_extremos_neutros=solo_punches,
         )
         todas_las_marcas = [*marcas_previas, *marcas_ledger]
         if len(todas_las_marcas) == 1 and todas_las_marcas[0].status == "checkOut":
@@ -285,12 +305,6 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
             asistencia.minutos_trabajados = 0
         if not created and fuente_anterior != AsistenciaEmpleado.FUENTE_HIKCONNECT_API:
             asistencia.fuente = fuente_anterior
-        if not asistencia.turno_id:
-            from .services_turnos import turno_asignado_para_fecha
-
-            asistencia.turno = turno_asignado_para_fecha(empleado, fecha)
-            if asistencia.turno is None and asistencia.entrada:
-                asistencia.turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
         asistencia.save()
 
         receipt.empleado = empleado

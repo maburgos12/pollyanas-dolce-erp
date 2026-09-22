@@ -152,7 +152,7 @@ class ReporteDepartamentoServiceTests(TestCase):
         report=self.build()['reportes'][0]
         self.assertEqual(report['filas'][0]['tarde_minutos'],12)
         self.assertEqual(report['filas'][0]['retardos_registrados'],0)
-        self.assertEqual(report['extra_resumen']['detectado_minutos'],48)
+        self.assertEqual(report['extra_resumen']['detectado_minutos'],60)
 
     def test_id_outside_database_range_rejected_before_query(self):
         for invalid in ('9'*100, '0', '²', '１２', str(2**63), 0):

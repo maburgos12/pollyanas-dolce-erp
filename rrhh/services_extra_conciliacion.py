@@ -9,7 +9,6 @@ from django.utils import timezone
 
 from .models import AsistenciaEmpleado, Empleado, HoraExtra
 
-COMIDA_INCLUIDA_MINUTOS = 35
 NOTA_EXTRA_AUTOMATICA = '[Detección automática]'
 NOTA_SALDO_CUBIERTO = '[Saldo automático cubierto o checada corregida]'
 
@@ -49,7 +48,7 @@ def horas_a_minutos(value):
 
 
 def diagnosticar_horas_extra(asistencia):
-    """Diagnóstico de solo lectura contra el turno real, con comida incluida."""
+    """Calcula únicamente el tiempo posterior a la salida programada."""
     modalidad = modalidad_marcaje_efectiva(asistencia)
     comida_observable = bool(asistencia and asistencia.salida_comida and asistencia.regreso_comida)
     contexto = {'modalidad': modalidad, 'comida_observable': comida_observable}
@@ -64,9 +63,6 @@ def diagnosticar_horas_extra(asistencia):
     if intervalo > timedelta(days=1):
         return DiagnosticoHoraExtra(None, 'intervalo_invalido', 'El intervalo excede 24 horas.',
             requiere_revision=True, duracion_minutos=duracion_cruda, **contexto)
-    if bool(asistencia.salida_comida) != bool(asistencia.regreso_comida):
-        return DiagnosticoHoraExtra(None, 'marcaje_comida_incompleto', 'Falta una marca de comida.',
-            requiere_revision=True, duracion_minutos=duracion_cruda, **contexto)
     if not asistencia.turno_id:
         return DiagnosticoHoraExtra(None, 'sin_turno', 'Falta asignar el turno de esta jornada.',
             requiere_revision=True, duracion_minutos=duracion_cruda, **contexto)
@@ -76,26 +72,29 @@ def diagnosticar_horas_extra(asistencia):
     fin_turno = timezone.make_aware(datetime.combine(asistencia.fecha, turno.hora_salida))
     if fin_turno <= inicio_turno:
         fin_turno += timedelta(days=1)
-    jornada = int((fin_turno - inicio_turno).total_seconds() // 60)
-    inicio, fin = max(asistencia.entrada, inicio_turno), asistencia.salida
-    if fin <= inicio:
+    if asistencia.salida <= asistencia.entrada:
         return DiagnosticoHoraExtra(None, 'intervalo_invalido', 'La salida final no supera el inicio del turno.',
             requiere_revision=True, duracion_minutos=duracion_cruda, **contexto)
-    duracion = int((fin - inicio).total_seconds() // 60)
-    # Los primeros 35 minutos de comida forman parte de la jornada programada.
+
+    requiere_revision = False
+    detalle = 'Comida registrada.' if comida_observable else 'La comida no es observable en las marcas.'
+    codigo = 'calculado'
+    if bool(asistencia.salida_comida) != bool(asistencia.regreso_comida):
+        requiere_revision = True
+        codigo = 'calculado_con_revision_comida'
+        detalle = 'Tiempo extra calculado por salida programada; falta una marca de comida.'
     if comida_observable:
         comida_inicio, comida_fin = asistencia.salida_comida, asistencia.regreso_comida
-        if not asistencia.entrada <= comida_inicio < comida_fin <= fin:
-            return DiagnosticoHoraExtra(None, 'marcaje_comida_invalido', 'Las marcas de comida no forman un intervalo válido dentro de la jornada.',
-                requiere_revision=True, duracion_minutos=duracion_cruda, **contexto)
-        comida = int((comida_fin - comida_inicio).total_seconds() // 60)
-        duracion -= max(comida - COMIDA_INCLUIDA_MINUTOS, 0)
-    excedente = max(0, duracion - jornada)
-    tolerancia = int(turno.tolerancia_minutos or 0)
-    minutos = excedente if excedente > tolerancia else 0
-    detalle = 'Comida registrada.' if comida_observable else 'La comida no es observable en las marcas.'
-    return DiagnosticoHoraExtra(minutos, 'calculado', detalle,
-        requiere_revision=not comida_observable, duracion_minutos=duracion_cruda, **contexto)
+        if not asistencia.entrada <= comida_inicio < comida_fin <= asistencia.salida:
+            requiere_revision = True
+            codigo = 'calculado_con_revision_comida'
+            detalle = 'Tiempo extra calculado por salida programada; las marcas de comida requieren revisión.'
+
+    excedente = max(0, int((asistencia.salida - fin_turno).total_seconds() // 60))
+    minutos = excedente
+    return DiagnosticoHoraExtra(minutos, codigo, detalle,
+        requiere_revision=requiere_revision or not comida_observable,
+        duracion_minutos=duracion_cruda, **contexto)
 
 
 def detectar_minutos_extra(asistencia):
@@ -261,7 +260,7 @@ def conciliar_extra_diario(asistencia, registros):
         'detectado': formato_minutos(detectado), 'autorizado': formato_minutos(autorizado),
         'pendiente': formato_minutos(pendiente), 'rechazado': formato_minutos(rechazado),
         'estado': estado, 'registros': registros,
-        'base': 'Turno de la asistencia; comida incluida' if detectado is not None else diagnostico.detalle,
+        'base': 'Salida programada del turno' if detectado is not None else diagnostico.detalle,
         'modalidad': diagnostico.modalidad,
         'comida_observable': diagnostico.comida_observable,
         'requiere_revision': diagnostico.requiere_revision,

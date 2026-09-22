@@ -112,7 +112,7 @@ def generar_horas_extra_automatico(asistencia: AsistenciaEmpleado) -> HoraExtra 
     if he is None:
         return HoraExtra.objects.create(asistencia=asistencia, empleado_id=asistencia.empleado_id,
             fecha=asistencia.fecha, horas=saldo,
-            notas=f'{NOTA_EXTRA_AUTOMATICA} Jornada con comida incluida. Saldo no cubierto por otros registros.',
+            notas=f'{NOTA_EXTRA_AUTOMATICA} Tiempo posterior a la salida programada. Saldo no cubierto por otros registros.',
             jefe_directo=usuario_jefe_directo_de_empleado(asistencia.empleado))
     if he.horas != saldo or reactivar:
         he.horas = saldo

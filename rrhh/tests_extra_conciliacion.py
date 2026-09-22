@@ -107,7 +107,7 @@ class ExtraConciliacionTests(TestCase):
         self.assertEqual(conciliacion['estado'], 'No calculable: falta asignar turno')
         self.assertEqual(conciliacion['base'], 'Falta asignar el turno de esta jornada.')
 
-    def test_una_marca_de_comida_preserva_extra_existente_en_cualquier_estado(self):
+    def test_una_marca_de_comida_calcula_extra_y_preserva_registro_existente(self):
         asistencia = self.asistencia()
         he = HoraExtra.objects.create(
             empleado=self.empleado, fecha=self.fecha, asistencia=asistencia,
@@ -121,7 +121,10 @@ class ExtraConciliacionTests(TestCase):
                 with self.subTest(campo=campo, estado=estado):
                     HoraExtra.objects.filter(pk=he.pk).update(estado=estado)
                     before = list(HoraExtra.objects.values())
-                    self.assertEqual(diagnosticar_horas_extra(asistencia).codigo, 'marcaje_comida_incompleto')
+                    diagnostico = diagnosticar_horas_extra(asistencia)
+                    self.assertEqual(diagnostico.codigo, 'calculado_con_revision_comida')
+                    self.assertEqual(diagnostico.minutos, 120)
+                    self.assertTrue(diagnostico.requiere_revision)
                     self.assertEqual(generar_horas_extra_automatico(asistencia).pk, he.pk)
                     self.assertEqual(list(HoraExtra.objects.values()), before)
             setattr(asistencia, campo, original)
@@ -148,7 +151,7 @@ class ExtraConciliacionTests(TestCase):
                 setattr(asistencia, campo, original)
         self.assertEqual(diagnosticar_horas_extra(None).codigo, 'marcaje_incompleto')
 
-    def test_una_sola_marca_de_comida_no_es_calculable(self):
+    def test_una_sola_marca_de_comida_calcula_extra_desde_salida_programada(self):
         asistencia = self.asistencia()
         for campo in ('salida_comida', 'regreso_comida'):
             with self.subTest(campo=campo):
@@ -156,16 +159,16 @@ class ExtraConciliacionTests(TestCase):
                 setattr(asistencia, campo, None)
                 asistencia.save(update_fields=[campo])
                 diagnostico = diagnosticar_horas_extra(asistencia)
-                self.assertIsNone(diagnostico.minutos)
-                self.assertEqual(diagnostico.codigo, 'marcaje_comida_incompleto')
+                self.assertEqual(diagnostico.minutos, 120)
+                self.assertEqual(diagnostico.codigo, 'calculado_con_revision_comida')
                 self.assertFalse(diagnostico.comida_observable)
                 self.assertTrue(diagnostico.requiere_revision)
-                self.assertIsNone(generar_horas_extra_automatico(asistencia))
+                self.assertIsNotNone(generar_horas_extra_automatico(asistencia))
                 setattr(asistencia, campo, original)
                 asistencia.save(update_fields=[campo])
-        self.assertFalse(HoraExtra.objects.exists())
+        self.assertEqual(HoraExtra.objects.get().horas, Decimal('2.00'))
 
-    def test_comida_fuera_de_intervalo_no_es_calculable(self):
+    def test_comida_fuera_de_intervalo_no_bloquea_extra_posterior_al_turno(self):
         asistencia = self.asistencia()
         for inicio, fin in (
             (asistencia.entrada - timedelta(minutes=1), asistencia.entrada),
@@ -175,13 +178,31 @@ class ExtraConciliacionTests(TestCase):
             with self.subTest(inicio=inicio, fin=fin):
                 asistencia.salida_comida, asistencia.regreso_comida = inicio, fin
                 diagnostico = diagnosticar_horas_extra(asistencia)
-                self.assertIsNone(diagnostico.minutos)
-                self.assertEqual(diagnostico.codigo, 'marcaje_comida_invalido')
+                self.assertEqual(diagnostico.minutos, 120)
+                self.assertEqual(diagnostico.codigo, 'calculado_con_revision_comida')
                 self.assertTrue(diagnostico.requiere_revision)
 
     def test_entrada_anticipada_no_amplia_extra(self):
         asistencia = self.asistencia(entrada=time(7, 56))
         self.assertEqual(diagnosticar_horas_extra(asistencia).minutos, 120)
+
+    def test_entrada_tardia_no_reduce_extra_posterior_a_salida_programada(self):
+        asistencia = self.asistencia(entrada=time(8, 30), salida=time(17))
+        self.assertEqual(diagnosticar_horas_extra(asistencia).minutos, 60)
+
+    def test_tolerancia_de_entrada_no_oculta_minutos_posteriores_a_la_salida(self):
+        asistencia = self.asistencia(salida=time(16, 5))
+        self.assertEqual(diagnosticar_horas_extra(asistencia).minutos, 5)
+
+    def test_turno_nocturno_calcula_desde_salida_programada_del_dia_siguiente(self):
+        turno = Turno.objects.create(
+            nombre='Nocturno 22 a 6', hora_entrada=time(22), hora_salida=time(6),
+        )
+        asistencia = self.asistencia(entrada=time(22), salida=time(7), turno=turno)
+        asistencia.salida += timedelta(days=1)
+        asistencia.salida_comida = None
+        asistencia.regreso_comida = None
+        self.assertEqual(diagnosticar_horas_extra(asistencia).minutos, 60)
 
     def test_intervalo_crudo_mayor_a_24_horas_no_se_oculta_por_turno(self):
         asistencia = self.asistencia(entrada=time(7), salida=time(7))
@@ -205,14 +226,14 @@ class ExtraConciliacionTests(TestCase):
                 self.assertEqual(generar_horas_extra_automatico(asistencia).pk, he.pk)
                 self.assertEqual(list(HoraExtra.objects.values()), before)
 
-    def test_comida_excedida_no_se_convierte_en_extra(self):
+    def test_comida_excedida_no_reduce_extra_posterior_a_salida_programada(self):
         a = self.asistencia()
         a.minutos_comida = 120
         a.minutos_trabajados = 480
         a.regreso_comida = a.salida_comida + timedelta(minutes=120)
         for fuente in ['hikconnect_api', 'point', 'manual']:
             a.fuente = fuente
-            self.assertEqual(calcular_horas_extra(a), Decimal('0.58'))
+            self.assertEqual(calcular_horas_extra(a), Decimal('2.00'))
 
     def test_turno_y_fuentes_comparten_comida_incluida(self):
         turno = Turno.objects.create(nombre='8 horas', hora_entrada=time(8), hora_salida=time(16))
@@ -311,8 +332,8 @@ class ExtraConciliacionTests(TestCase):
         self.assertEqual(sum(row[columns['extra_detectado_minutos']] or 0 for row in rows[1:]), 120)
         self.assertEqual(sum(row[columns['extra_autorizado_minutos']] or 0 for row in rows[1:]), 120)
 
-    def test_tolerancia_exacta_no_genera_extra(self):
-        self.assertEqual(calcular_horas_extra(self.asistencia(salida=time(16, 10))), Decimal('0'))
+    def test_tolerancia_de_entrada_no_se_aplica_a_la_salida(self):
+        self.assertEqual(calcular_horas_extra(self.asistencia(salida=time(16, 10))), Decimal('0.17'))
 
     def test_autorizacion_superior_se_mantiene_y_advierte(self):
         self.asistencia()
