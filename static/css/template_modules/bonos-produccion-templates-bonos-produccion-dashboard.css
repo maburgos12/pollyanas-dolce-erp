@@ -9,6 +9,11 @@
   .bonos-btn.primary{background:#8b2252;color:#fff;border-color:#8b2252}
   .bonos-btn:disabled{opacity:.55;cursor:not-allowed}
   .period-filter{display:grid;grid-template-columns:1fr 1fr auto;gap:.55rem;align-items:end}
+  .bonos-period-notice{background:#fff9e9;border:1px solid #e5c97a;border-radius:10px;padding:1rem 1.15rem;color:#4f3814}
+  .bonos-period-notice strong{display:block;font-size:1rem}
+  .bonos-period-notice p{margin:.35rem 0 .7rem;max-width:72ch}
+  .bonos-period-notice a{color:#7b214b;font-weight:800}
+  .bonos-period-notice form{margin-top:.7rem}
   .bonos-field{display:grid;gap:.3rem}
   .bonos-field label{font-size:.72rem;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#6b5f70}
   .bonos-field input,.bonos-field textarea,.bonos-field select{width:100%;border:1px solid #e7ddeb;border-radius:8px;padding:.58rem .65rem;font:inherit;background:#fbf8fb}

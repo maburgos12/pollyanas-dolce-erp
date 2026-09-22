@@ -8,8 +8,10 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from core.branch_catalog import display_branch_name
-from core.access import can_manage_rrhh
+from core.access import can_manage_rrhh, can_view_rrhh
 from core.models import Sucursal, UserProfile
+from rrhh.models import Empleado
+from rrhh.services_catalogos import funciones_operativas_catalogo
 
 
 @login_required
@@ -29,6 +31,35 @@ def asignacion_sucursales_api(request):
         row["valor"] = row["nombre"]
         row["nombre"] = display_branch_name(row["nombre"])
     return JsonResponse({"count": len(rows), "results": rows})
+
+
+@login_required
+def asignacion_produccion_api(request):
+    if not can_view_rrhh(request.user):
+        from django.core.exceptions import PermissionDenied
+        raise PermissionDenied
+
+    areas = [
+        {"id": funcion.codigo, "nombre": funcion.etiqueta, "puesto_operativo": funcion.puesto_operativo}
+        for funcion in funciones_operativas_catalogo()
+        if funcion.departamento_actual == Empleado.DEP_PRODUCCION
+    ]
+    from bonos_produccion.empleados import empleados_elegibles_bonos_produccion
+    elegibles_ids = set(empleados_elegibles_bonos_produccion().values_list("id", flat=True))
+    empleados = [
+        {
+            "id": empleado.id,
+            "codigo": empleado.codigo,
+            "nombre": empleado.nombre,
+            "area": empleado.area,
+            "puesto_operativo": empleado.puesto_operativo,
+            "sucursal": empleado.sucursal_display,
+            "participa_bonos_produccion": empleado.id in elegibles_ids,
+        }
+        for empleado in Empleado.objects.filter(activo=True, departamento=Empleado.DEP_PRODUCCION)
+        .select_related("sucursal_ref").order_by("nombre", "id")
+    ]
+    return JsonResponse({"areas": areas, "empleados": empleados})
 
 
 @login_required

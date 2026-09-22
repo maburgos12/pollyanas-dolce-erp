@@ -6,7 +6,7 @@
 {% block body_class %}page-bonos-produccion-dashboard{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-dashboard.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/bonos-produccion-templates-bonos-produccion-dashboard.css?v=20260922-fuente-rrhh-v1">
 {% endblock %}
 
 {% block content %}
@@ -50,7 +50,30 @@
     </form>
   </section>
 
-  <section class="kpi-grid">
+  {% if not periodo %}
+  <section class="bonos-period-notice" role="status">
+    <strong>El periodo seleccionado aún no existe.</strong>
+    <p>Estos valores son una propuesta de configuración; todavía no hay bonos ni importes para este mes.</p>
+    {% if ultimo_periodo %}<a href="?mes={{ ultimo_periodo.mes }}&amp;anio={{ ultimo_periodo.anio }}">Ver el último periodo disponible ({{ ultimo_periodo.mes }}/{{ ultimo_periodo.anio }})</a>{% endif %}
+  </section>
+  {% elif faltantes_count %}
+  <section class="bonos-period-notice" role="status">
+    <strong>{{ elegibles_count }} colaborador{{ elegibles_count|pluralize:"es" }} elegible{{ elegibles_count|pluralize:"s" }} en RRHH; faltan {{ faltantes_count }} en este periodo.</strong>
+    <p>La participación y el puesto se administran en el expediente de RRHH. Sincronizar crea sólo los bonos faltantes y conserva los ya capturados.</p>
+    {% if can_manage %}
+    <form method="post" action="{% url 'bonos_produccion:bonos-produccion-dashboard' %}#personal-rrhh" data-async-action>
+      {% csrf_token %}
+      <input type="hidden" name="action" value="inicializar">
+      <input type="hidden" name="mes" value="{{ mes }}">
+      <input type="hidden" name="anio" value="{{ anio }}">
+      <button class="bonos-btn primary" type="submit" data-pending-label="Sincronizando…">Sincronizar personal desde RRHH</button>
+    </form>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if periodo %}
+  <section class="kpi-grid" id="personal-rrhh">
     <article class="kpi-card"><div class="kpi-label">Total a pagar</div><div class="kpi-value gold">${{ total_bonos|floatformat:2|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Empleados</div><div class="kpi-value">{{ bonos|length|intcomma }}</div></article>
     <article class="kpi-card"><div class="kpi-label">Pasan todo</div><div class="kpi-value wine">{{ passing|intcomma }}</div></article>
@@ -59,6 +82,7 @@
     {% elif periodo_estado == "cierra_hoy" %}<article class="kpi-card"><div class="kpi-label">Estado</div><div class="kpi-value pd-u-f2ea5fc13d"><span class="status-pill cierra-hoy">Cierra hoy</span></div></article>
     {% endif %}
   </section>
+  {% endif %}
 
   <section class="bonos-card">
     <div class="bonos-card-h">
@@ -108,7 +132,7 @@
 	            {% for row in area_rows %}
 	            <button class="rule-tab {% if forloop.first %}active{% endif %}" type="button" data-rule-area="{{ row.area }}">
 	              <strong>{{ row.label }}</strong>
-	              <span>{{ row.count }} empleados · ${{ row.monto|floatformat:2|intcomma }}</span>
+	              <span>{% if periodo %}{{ row.count }} empleados · {% else %}Propuesta · {% endif %}${{ row.monto|floatformat:2|intcomma }}</span>
 	            </button>
 	            {% endfor %}
 	          </div>
@@ -119,7 +143,7 @@
 	            <div class="rule-panel-head">
 	              <div>
                 <div class="rule-panel-title">{{ row.label }}</div>
-                <div class="rule-panel-meta">{{ row.count }} empleados · monto base ${{ row.monto|floatformat:2|intcomma }}</div>
+                <div class="rule-panel-meta">{% if periodo %}{{ row.count }} empleados · {% else %}Propuesta · {% endif %}monto base ${{ row.monto|floatformat:2|intcomma }}</div>
               </div>
               <span class="status-pill neutral">Regla por área</span>
             </div>
@@ -176,11 +200,11 @@
     </div>
   </section>
 
-  <section class="area-grid">
+  {% if periodo %}<section class="area-grid">
     {% for row in area_rows %}
     <article class="area-chip"><span>{{ row.label }}</span><strong>{{ row.count }} empleados</strong><small>${{ row.total|floatformat:2|intcomma }}</small></article>
     {% endfor %}
-  </section>
+  </section>{% endif %}
 
   <section class="bonos-card">
     <div class="bonos-card-h">

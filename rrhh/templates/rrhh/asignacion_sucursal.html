@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Asignación de personal{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-asignacion-sucursal.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-asignacion-sucursal.css?v=20260922-fuente-rrhh-v1">
 {% endblock %}
 
 {% block content %}
@@ -12,7 +12,7 @@
   <div class="assign-header">
     <div>
       <h1 class="assign-title">Asignación de personal</h1>
-      <p class="assign-subtitle">Liga empleados de ventas a sucursal y clasifica producción por área operativa para que bonos inicialice con datos reales.</p>
+      <p class="assign-subtitle">Los expedientes de RRHH definen la sucursal, el departamento y la función de cada colaborador. La participación en bonos se consulta en ese mismo expediente.</p>
     </div>
     <div class="assign-tabs" role="tablist">
       <button class="assign-tab active" data-mode="ventas" type="button">Ventas</button>
@@ -63,13 +63,7 @@
 
 <script>
 (() => {
-  const areasProduccion = [
-    {id: "HORNOS", nombre: "Hornos"},
-    {id: "EMBETUNADO", nombre: "Embetunado"},
-    {id: "ARMADO", nombre: "Armado"},
-    {id: "CRUCERO", nombre: "Crucero"},
-  ];
-  const state = {mode: "ventas", choices: [], selected: null, assigned: [], pool: [], search: ""};
+  const state = {mode: "ventas", choices: [], selected: null, assigned: [], pool: [], productionEmployees: [], search: ""};
   const root = document.getElementById("rrhh-assignment-app");
   const els = {
     status: root.querySelector("[data-status]"),
@@ -123,6 +117,7 @@
       employee.codigo,
       employee.area,
       employee.puesto,
+      employee.puesto_operativo,
       employee.sucursal,
       employee.rfc,
       employee.curp,
@@ -143,19 +138,32 @@
   function employeeRow(employee, actionLabel, actionClass, onClick) {
     const row = document.createElement("div");
     row.className = "employee-row";
-    row.innerHTML = `
-      <div class="avatar">${initials(employee.nombre)}</div>
-      <div>
-        <div class="employee-name"></div>
-        <div class="employee-meta"><span class="badge"></span>${employee.sucursal ? ` · ${employee.sucursal}` : ""}</div>
-      </div>
-      <button class="assign-action ${actionClass}" type="button"></button>
-    `;
+    row.innerHTML = `<div class="avatar"></div><div><div class="employee-name"></div><div class="employee-meta"><span class="badge"></span><span class="employee-location"></span></div><div class="employee-bonus"></div></div><button class="assign-action ${actionClass}" type="button"></button>`;
+    row.querySelector(".avatar").textContent = initials(employee.nombre);
     row.querySelector(".employee-name").textContent = employee.nombre;
-    row.querySelector(".badge").textContent = employee.area || "SIN AREA";
+    row.querySelector(".badge").textContent = state.mode === "produccion" ? (employee.puesto_operativo || "SIN FUNCIÓN") : (employee.area || "SIN ÁREA");
+    row.querySelector(".employee-location").textContent = employee.sucursal ? ` · ${employee.sucursal}` : "";
+    const bonus = row.querySelector(".employee-bonus");
+    if (state.mode === "produccion") {
+      bonus.textContent = employee.participa_bonos_produccion ? "Participa en bono de producción" : "Bono de producción no habilitado en RRHH";
+      bonus.classList.toggle("needs-review", !employee.participa_bonos_produccion);
+    }
     const button = row.querySelector("button");
     button.textContent = actionLabel;
-    button.addEventListener("click", onClick);
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      button.textContent = "Guardando…";
+      try {
+        await onClick();
+        window.ERPActionUI?.showToast({type: "success", message: "Asignación actualizada en RRHH."});
+      } catch (error) {
+        setStatus(error.message);
+        window.ERPActionUI?.showToast({type: "error", message: error.message});
+        button.disabled = false;
+        button.textContent = actionLabel;
+      }
+    });
     return row;
   }
 
@@ -219,13 +227,15 @@
       const payload = await api("/rrhh/api/asignacion-sucursales/");
       state.choices = payload.results;
     } else {
-      state.choices = areasProduccion;
+      const payload = await api("/rrhh/api/asignacion-produccion/");
+      state.choices = payload.areas;
+      state.productionEmployees = payload.empleados;
     }
     state.selected = state.choices[0] || null;
-    await loadEmployees();
+    await loadEmployees(state.mode === "produccion");
   }
 
-  async function loadEmployees() {
+  async function loadEmployees(useCachedProduction = false) {
     if (!state.selected) {
       render();
       return;
@@ -239,12 +249,13 @@
       state.assigned = assigned.results;
       state.pool = pool.results;
     } else {
-      const [assigned, pool] = await Promise.all([
-        api(`/api/rrhh/empleados/?area=${encodeURIComponent(state.selected.id)}&limit=500`),
-        api("/api/rrhh/empleados/?area=PRODUCCION&sin_sucursal=1&limit=500"),
-      ]);
-      state.assigned = assigned.results;
-      state.pool = pool.results;
+      if (!useCachedProduction) {
+        const payload = await api("/rrhh/api/asignacion-produccion/");
+        state.productionEmployees = payload.empleados;
+      }
+      const puestos = new Set(state.choices.map(choice => choice.puesto_operativo));
+      state.assigned = state.productionEmployees.filter(employee => employee.puesto_operativo === state.selected.puesto_operativo);
+      state.pool = state.productionEmployees.filter(employee => !puestos.has(employee.puesto_operativo));
     }
     setStatus("");
     render();
