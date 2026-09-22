@@ -200,6 +200,14 @@ class Empleado(models.Model):
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
+        # El área y el nivel se comparan contra catálogos cerrados (ver
+        # CatalogoFuncionOperativa, que ya normaliza los suyos). Capturar
+        # «Preparación» desde la pantalla dejaba un valor que no empata con
+        # PREPARACION: la comparación falla en silencio y la persona cae en el
+        # destino por omisión sin que nadie lo note. Se normaliza aquí para que
+        # el dato entre limpio y sirva igual a todos sus consumidores.
+        self.puesto_operativo = normalizar_nombre(self.puesto_operativo or "").upper()
+        self.nivel_organizacional = normalizar_nombre(self.nivel_organizacional or "").upper()
         if not self.codigo:
             self.codigo = self._generate_codigo()
         super().save(*args, **kwargs)
