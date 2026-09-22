@@ -31,3 +31,25 @@ def bonos_produccion_elegibles_queryset(qs):
         Q(estatus__in=["CERRADO", "PAGADO"])
         | Q(empleado_id__in=empleados_ids)
     )
+
+
+def inicializar_bonos_desde_rrhh(periodo):
+    """Materializa el personal elegible del expediente RRHH sin alterar bonos existentes."""
+    from .models import (
+        AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado,
+        area_bono_produccion_empleado,
+    )
+
+    areas_validas = {codigo for codigo, _ in AREAS_PRODUCCION}
+    creados = 0
+    considerados = 0
+    for empleado in empleados_elegibles_bonos_produccion():
+        area = area_bono_produccion_empleado(empleado)
+        if area not in areas_validas:
+            area = AREA_PRODUCCION
+        considerados += 1
+        _, created = BonoProduccionEmpleado.objects.get_or_create(
+            periodo=periodo, empleado=empleado, defaults={"area": area},
+        )
+        creados += int(created)
+    return {"creados": creados, "total": considerados}

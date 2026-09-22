@@ -17,7 +17,7 @@ from django.views.decorators.csrf import ensure_csrf_cookie
 
 from core.access import can_manage_submodule, can_view_module, can_view_submodule, is_bonos_produccion_capture_only
 
-from .empleados import bonos_produccion_elegibles_queryset
+from .empleados import bonos_produccion_elegibles_queryset, empleados_elegibles_bonos_produccion, inicializar_bonos_desde_rrhh
 from .models import AREA_PRODUCCION, AREAS_PRODUCCION, BonoProduccionEmpleado, ConfigBonoArea, ConfigBonoPeriodo
 from .services_checador import sincronizar_asistencia_desde_checador
 
@@ -138,6 +138,20 @@ def bonos_produccion_dashboard(request):
             return _dashboard_redirect(mes, anio)
 
         periodo = get_object_or_404(ConfigBonoPeriodo, mes=mes, anio=anio)
+        if action == "inicializar":
+            if mes != today.month or anio != today.year:
+                mensaje = "La sincronización desde RRHH sólo está disponible para el periodo actual."
+                if request.headers.get("Accept", "").startswith("application/json"):
+                    return JsonResponse({"ok": False, "toast": {"type": "error", "message": mensaje}}, status=400)
+                messages.error(request, mensaje)
+                return _dashboard_redirect(mes, anio)
+            resultado = inicializar_bonos_desde_rrhh(periodo)
+            mensaje = f"Personal sincronizado desde RRHH: {resultado['creados']} bonos creados."
+            destino = f"{reverse('bonos_produccion:bonos-produccion-dashboard')}?mes={mes}&anio={anio}#personal-rrhh"
+            if request.headers.get("Accept", "").startswith("application/json"):
+                return JsonResponse({"ok": True, "toast": {"type": "success", "message": mensaje}, "redirect": destino})
+            messages.success(request, mensaje)
+            return redirect(destino)
         if action == "recalcular":
             total = periodo.recalcular_todos()
             messages.success(request, f"Bonos recalculados: {total}.")
@@ -177,6 +191,9 @@ def bonos_produccion_dashboard(request):
             return _dashboard_redirect(mes, anio)
 
     periodo = ConfigBonoPeriodo.objects.filter(mes=mes, anio=anio).first()
+    ultimo_periodo = ConfigBonoPeriodo.objects.order_by("-anio", "-mes").first() if not periodo else None
+    periodo_actual = bool(periodo and mes == today.month and anio == today.year)
+    elegibles_ids = set(empleados_elegibles_bonos_produccion().values_list("id", flat=True)) if periodo_actual else set()
     if periodo:
         periodo.asegurar_reglas_area()
     bonos = list(
@@ -220,6 +237,7 @@ def bonos_produccion_dashboard(request):
         )
 
     total_bonos = sum((bono.total_a_pagar for bono in bonos), Decimal("0"))
+    faltantes_count = len(elegibles_ids - {bono.empleado_id for bono in bonos})
     passing = sum(1 for bono in bonos if bono.pasa_uniforme and bono.pasa_asistencia and bono.pasa_puntualidad and bono.pasa_produccion)
 
     # Estado visual del período basado en fecha_fin vs hoy (sin cambio en BD)
@@ -241,6 +259,9 @@ def bonos_produccion_dashboard(request):
         "bonos_produccion/dashboard.html",
         {
             "periodo": periodo,
+            "ultimo_periodo": ultimo_periodo,
+            "elegibles_count": len(elegibles_ids),
+            "faltantes_count": faltantes_count,
             "periodo_estado": periodo_estado,
             "mes": mes,
             "anio": anio,

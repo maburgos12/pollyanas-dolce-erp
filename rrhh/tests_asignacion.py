@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from core.models import Sucursal
-from rrhh.models import Empleado
+from rrhh.models import BonoEsquema, CatalogoFuncionOperativa, Empleado
 
 
 class RRHHAsignacionSucursalTests(TestCase):
@@ -110,6 +110,65 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertEqual(response.status_code, 200)
         empleado.refresh_from_db()
         self.assertEqual(empleado.area, "PRODUCCION")
+
+    def test_asignacion_produccion_lee_catalogo_y_puesto_del_expediente(self):
+        Empleado.objects.create(
+            nombre="Hornos con area antigua", area="PRODUCCION",
+            departamento=Empleado.DEP_PRODUCCION, puesto_operativo="HORNOS",
+        )
+        CatalogoFuncionOperativa.objects.filter(codigo="CRUCERO").update(activo=False)
+
+        response = self.client.get("/rrhh/api/asignacion-produccion/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("HORNOS", {row["puesto_operativo"] for row in data["areas"]})
+        self.assertNotIn("CRUCERO", {row["puesto_operativo"] for row in data["areas"]})
+        empleado = next(row for row in data["empleados"] if row["nombre"] == "Hornos con area antigua")
+        self.assertEqual(empleado["puesto_operativo"], "HORNOS")
+        self.assertEqual(empleado["area"], "PRODUCCION")
+
+    def test_asignacion_muestra_elegibilidad_por_esquema_activo(self):
+        empleado = Empleado.objects.create(
+            nombre="Hornos con esquema", departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="HORNOS", participa_bonos_produccion=False,
+        )
+        esquema, _ = BonoEsquema.objects.update_or_create(
+            codigo="PRODUCCION", defaults={"nombre": "Producción", "activo": True},
+        )
+        empleado.bonos_esquemas.add(esquema)
+
+        response = self.client.get("/rrhh/api/asignacion-produccion/")
+
+        row = next(row for row in response.json()["empleados"] if row["id"] == empleado.id)
+        self.assertTrue(row["participa_bonos_produccion"])
+
+    def test_asignar_funcion_actualiza_la_identidad_rrhh_completa(self):
+        CatalogoFuncionOperativa.objects.update_or_create(
+            codigo="PREPARACION",
+            defaults={
+                "etiqueta": "Preparación", "departamento_origen": Empleado.DEP_PRODUCCION,
+                "departamento_actual": Empleado.DEP_PRODUCCION,
+                "puesto_operativo": "PREPARACION", "activo": True,
+            },
+        )
+        empleado = Empleado.objects.create(
+            nombre="Colaboradora en preparación", area="PRODUCCION",
+            departamento=Empleado.DEP_PRODUCCION, puesto_operativo="",
+            participa_bonos_produccion=True,
+        )
+
+        response = self.client.patch(
+            f"/api/rrhh/empleados/{empleado.id}/asignar-sucursal/",
+            data={"area_detalle": "PREPARACION"}, content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.area, "PREPARACION")
+        self.assertEqual(empleado.departamento, Empleado.DEP_PRODUCCION)
+        self.assertEqual(empleado.puesto_operativo, "PREPARACION")
+        self.assertTrue(empleado.participa_bonos_produccion)
 
     def test_get_sin_asignar_se_basa_en_fk_no_en_texto(self):
         # Pendiente = sin FK canónico. Un empleado con texto pero SIN FK sigue pendiente

@@ -189,13 +189,14 @@ def sincronizar_bonos_operativos_periodo_actual(empleado: Empleado) -> None:
         ConfigBonoPeriodo,
         area_bono_produccion_empleado,
     )
+    from bonos_produccion.empleados import empleados_elegibles_bonos_produccion
     from bonos_ventas.models import BonoVentasEmpleado, ConfigBonoVentasPeriodo
     from core.branch_catalog import resolver_sucursal_por_texto
 
     periodo_produccion = ConfigBonoPeriodo.objects.filter(mes=hoy.month, anio=hoy.year).first()
     if periodo_produccion:
         bonos = BonoProduccionEmpleado.objects.filter(periodo=periodo_produccion, empleado=empleado)
-        if empleado.activo and empleado.participa_bonos_produccion:
+        if empleados_elegibles_bonos_produccion().filter(pk=empleado.pk).exists():
             areas_validas = {codigo for codigo, _ in AREAS_PRODUCCION}
             area = area_bono_produccion_empleado(empleado)
             if area not in areas_validas:

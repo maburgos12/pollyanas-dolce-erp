@@ -14,7 +14,7 @@ from . import (
     views_suspensiones,
     views_vacantes,
 )
-from .views_html import asignacion_sucursal_view, asignacion_sucursales_api, usuarios_sucursal_view, usuarios_sucursal_update
+from .views_html import asignacion_sucursal_view, asignacion_sucursales_api, asignacion_produccion_api, usuarios_sucursal_view, usuarios_sucursal_update
 
 app_name = "rrhh"
 
@@ -38,6 +38,7 @@ urlpatterns = [
     path("cumpleanos/guardar/", views_cumpleanos.guardar_cumpleanos, name="rrhh_cumpleanos_guardar"),
     path("asignacion-sucursal/", asignacion_sucursal_view, name="rrhh_asignacion_sucursal"),
     path("api/asignacion-sucursales/", asignacion_sucursales_api, name="rrhh_asignacion_sucursales_api"),
+    path("api/asignacion-produccion/", asignacion_produccion_api, name="rrhh_asignacion_produccion_api"),
     path("usuarios-sucursal/", usuarios_sucursal_view, name="rrhh_usuarios_sucursal"),
     path("api/usuarios-sucursal/actualizar/", usuarios_sucursal_update, name="rrhh_usuarios_sucursal_update"),
     path("nomina/", views.nomina, name="nomina"),

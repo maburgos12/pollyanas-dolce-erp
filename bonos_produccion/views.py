@@ -148,23 +148,8 @@ class ConfigBonoPeriodoViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="inicializar-bonos")
     def inicializar_bonos(self, request, pk=None):
         periodo = self.get_object()
-        areas_validas = {code for code, _ in AREAS_PRODUCCION}
-        empleados = empleados_elegibles_bonos_produccion()
-        creados = 0
-        considerados = 0
-        for empleado in empleados:
-            area = area_bono_produccion_empleado(empleado)
-            if area not in areas_validas:
-                area = AREA_PRODUCCION
-            considerados += 1
-            _, created = BonoProduccionEmpleado.objects.get_or_create(
-                periodo=periodo,
-                empleado=empleado,
-                defaults={"area": area},
-            )
-            if created:
-                creados += 1
-        return Response({"creados": creados, "total": considerados}, status=status.HTTP_200_OK)
+        from .empleados import inicializar_bonos_desde_rrhh
+        return Response(inicializar_bonos_desde_rrhh(periodo), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="sync-checador")
     def sync_checador(self, request, pk=None):

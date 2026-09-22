@@ -14,7 +14,7 @@ from core.access import can_manage_rrhh, can_view_rrhh
 from core.audit import log_event
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.models import Sucursal
-from rrhh.models import Empleado, NominaLinea, NominaPeriodo
+from rrhh.models import CatalogoFuncionOperativa, Empleado, NominaLinea, NominaPeriodo
 
 from .rrhh_serializers import (
     RRHHEmpleadoSerializer,
@@ -135,8 +135,6 @@ class RRHHEmpleadosSinAsignarView(_RRHHBaseView):
 
 
 class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
-    AREAS_PRODUCCION = {"PRODUCCION", "HORNOS", "EMBETUNADO", "ARMADO", "CRUCERO"}
-
     def patch(self, request, empleado_id: int):
         if not can_manage_rrhh(request.user):
             return Response({"detail": "No tienes permisos para editar RRHH."}, status=status.HTTP_403_FORBIDDEN)
@@ -172,24 +170,39 @@ class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
             update_fields.extend(["sucursal_ref", "sucursal"])
 
         if area_detalle:
-            if area_detalle not in self.AREAS_PRODUCCION:
+            funcion = None
+            if area_detalle != "PRODUCCION":
+                funcion = CatalogoFuncionOperativa.objects.filter(
+                    codigo=area_detalle, activo=True, departamento_actual=Empleado.DEP_PRODUCCION,
+                ).first()
+            if area_detalle != "PRODUCCION" and not funcion:
                 return Response(
                     {"error": f"Área de producción '{area_detalle}' inválida"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            empleado.area = area_detalle
-            update_fields.append("area")
+            empleado.area = funcion.codigo if funcion else "PRODUCCION"
+            empleado.puesto_operativo = funcion.puesto_operativo if funcion else ""
+            empleado.departamento = funcion.departamento_actual if funcion else Empleado.DEP_PRODUCCION
+            if funcion:
+                empleado.departamento_origen = funcion.departamento_origen
+                update_fields.append("departamento_origen")
+            update_fields.extend(["area", "puesto_operativo", "departamento"])
 
         if update_fields == ["updated_at"]:
             return Response({"error": "Se requiere sucursal o area_detalle."}, status=status.HTTP_400_BAD_REQUEST)
 
-        empleado.save(update_fields=update_fields)
+        with transaction.atomic():
+            empleado.save(update_fields=update_fields)
+            if area_detalle:
+                from rrhh.services_bonos import sincronizar_bonos_operativos_periodo_actual
+                sincronizar_bonos_operativos_periodo_actual(empleado)
         log_event(
             request.user,
             "UPDATE",
             "rrhh.Empleado",
             str(empleado.id),
-            {"nombre": empleado.nombre, "sucursal": empleado.sucursal, "area": empleado.area},
+            {"nombre": empleado.nombre, "sucursal": empleado.sucursal, "area": empleado.area,
+             "departamento": empleado.departamento, "puesto_operativo": empleado.puesto_operativo},
         )
         return Response(RRHHEmpleadoSerializer(empleado).data, status=status.HTTP_200_OK)
 

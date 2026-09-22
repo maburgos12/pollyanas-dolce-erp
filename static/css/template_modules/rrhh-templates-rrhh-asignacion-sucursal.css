@@ -93,6 +93,9 @@
   }
   .employee-name { font-weight: 850; line-height: 1.2; }
   .employee-meta { color: var(--texto-light); font-size: 13px; margin-top: 2px; }
+  .employee-bonus { color: var(--texto-light); font-size: 12px; margin-top: 4px; }
+  .employee-bonus.needs-review { color: #795000; font-weight: 800; }
+  .assign-action:disabled { cursor: wait; opacity: .65; }
   .badge {
     background: #f7eef3;
     border-radius: 999px;
