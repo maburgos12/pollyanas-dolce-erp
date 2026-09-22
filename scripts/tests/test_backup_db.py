@@ -1,5 +1,6 @@
 """Standalone backup contract tests; no Docker daemon or database is used."""
 import gzip
+import grp
 import hashlib
 import os
 from pathlib import Path
@@ -104,6 +105,42 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 7)
         self.assertFalse((self.backups / 'backup_20100101_010101.sql.gz').exists())
         self.assertFalse((self.backups / 'backup_20200101_010101.sql.gz').exists())
+
+    def test_restricted_export_links_complete_sets_and_removes_rotated_links(self):
+        self.seed(number=4)
+        export = self.root / 'hbs-export'
+        group = grp.getgrgid(os.getgid()).gr_name
+        for manifest in self.backups.glob('backup_*.manifest'):
+            base = manifest.stem
+            export.mkdir(exist_ok=True)
+            for suffix in ('sql.gz', 'conteos.tar.gz', 'manifest'):
+                source = self.backups / f'{base}.{suffix}'
+                os.link(source, export / source.name)
+        result = self.run_backup(BACKUP_KEEP_LAST='3', BACKUP_EXPORT_DIR=str(export),
+                                 BACKUP_EXPORT_GROUP=group)
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertEqual(len(list(self.backups.glob('backup_*.manifest'))), 3)
+        self.assertEqual(len(list(export.glob('backup_*.manifest'))), 3)
+        for suffix in ('sql.gz', 'conteos.tar.gz', 'manifest'):
+            name = f'backup_{STAMP}.{suffix}'
+            self.assertEqual((self.backups / name).stat().st_ino, (export / name).stat().st_ino)
+            self.assertEqual((export / name).stat().st_mode & 0o777, 0o640)
+        self.assertFalse((export / 'backup_20200101_010101.manifest').exists())
+
+    def test_export_requires_both_path_and_group(self):
+        result = self.run_backup(BACKUP_EXPORT_DIR=str(self.root / 'hbs-export'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(list(self.backups.glob('backup_*.manifest')))
+
+    def test_export_failure_does_not_rotate_existing_backups(self):
+        self.seed(number=7)
+        self.stub('ln', 'exit 23\n')
+        result = self.run_backup(BACKUP_KEEP_LAST='3',
+                                 BACKUP_EXPORT_DIR=str(self.root / 'hbs-export'),
+                                 BACKUP_EXPORT_GROUP=grp.getgrgid(os.getgid()).gr_name)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.backups / f'backup_{STAMP}.manifest').exists())
+        self.assertTrue((self.backups / 'backup_20200101_010101.manifest').exists())
 
     def test_transition_keeps_only_seven_legacy_plus_new_total(self):
         for day in range(1, 8):
