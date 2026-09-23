@@ -145,6 +145,12 @@ class RRHHEmpleadoAsignarSucursalView(_RRHHBaseView):
         area_detalle = (request.data.get("area_detalle") or "").strip().upper()
         update_fields = ["updated_at"]
 
+        if area_detalle and area_detalle != "PRODUCCION" and empleado.nivel_organizacional != Empleado.NIVEL_COLABORADOR:
+            return Response(
+                {"error": "Solo colaboradores pueden asignarse a una función operativa de producción."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # Este módulo es la FUENTE canónica: escribe el FK `sucursal_ref` (id estable)
         # y mantiene el texto `sucursal` sólo como display/legacy. Acepta sucursal_id
         # (preferido) o nombre (resuelto por el resolver canónico, sin match exacto).

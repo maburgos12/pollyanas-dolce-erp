@@ -89,7 +89,10 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertEqual(empleado.sucursal, "")
 
     def test_patch_asignar_area_produccion_y_regresar_a_pool(self):
-        empleado = Empleado.objects.create(nombre="Empleado Produccion", area="PRODUCCION", sucursal="")
+        empleado = Empleado.objects.create(
+            nombre="Empleado Produccion", area="PRODUCCION", sucursal="",
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
+        )
 
         response = self.client.patch(
             f"/api/rrhh/empleados/{empleado.id}/asignar-sucursal/",
@@ -115,6 +118,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         Empleado.objects.create(
             nombre="Hornos con area antigua", area="PRODUCCION",
             departamento=Empleado.DEP_PRODUCCION, puesto_operativo="HORNOS",
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
         )
         CatalogoFuncionOperativa.objects.filter(codigo="CRUCERO").update(activo=False)
 
@@ -128,10 +132,42 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertEqual(empleado["puesto_operativo"], "HORNOS")
         self.assertEqual(empleado["area"], "PRODUCCION")
 
+    def test_asignacion_produccion_solo_muestra_colaboradores_operativos(self):
+        colaborador = Empleado.objects.create(
+            nombre="Colaborador pendiente", departamento=Empleado.DEP_PRODUCCION,
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
+        )
+        niveles_mando = [
+            Empleado.NIVEL_ENCARGADA,
+            Empleado.NIVEL_SUPERVISION,
+            Empleado.NIVEL_JEFATURA,
+            Empleado.NIVEL_DIRECCION,
+        ]
+        mandos = [
+            Empleado.objects.create(
+                nombre=f"Responsable {nivel}", departamento=Empleado.DEP_PRODUCCION,
+                puesto=f"Responsable de Producción {nivel}",
+                nivel_organizacional=nivel,
+            )
+            for nivel in niveles_mando
+        ]
+        sin_nivel = Empleado.objects.create(
+            nombre="Nivel pendiente de revisar", departamento=Empleado.DEP_PRODUCCION,
+        )
+
+        response = self.client.get("/rrhh/api/asignacion-produccion/")
+
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()["empleados"]}
+        self.assertIn(colaborador.id, ids)
+        self.assertTrue(ids.isdisjoint({empleado.id for empleado in mandos}))
+        self.assertNotIn(sin_nivel.id, ids)
+
     def test_asignacion_muestra_elegibilidad_por_esquema_activo(self):
         empleado = Empleado.objects.create(
             nombre="Hornos con esquema", departamento=Empleado.DEP_PRODUCCION,
             puesto_operativo="HORNOS", participa_bonos_produccion=False,
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
         )
         esquema, _ = BonoEsquema.objects.update_or_create(
             codigo="PRODUCCION", defaults={"nombre": "Producción", "activo": True},
@@ -155,6 +191,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         empleado = Empleado.objects.create(
             nombre="Colaboradora en preparación", area="PRODUCCION",
             departamento=Empleado.DEP_PRODUCCION, puesto_operativo="",
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
             participa_bonos_produccion=True,
         )
 
@@ -169,6 +206,31 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertEqual(empleado.departamento, Empleado.DEP_PRODUCCION)
         self.assertEqual(empleado.puesto_operativo, "PREPARACION")
         self.assertTrue(empleado.participa_bonos_produccion)
+
+    def test_asignar_funcion_rechaza_mandos_y_nivel_sin_definir(self):
+        for nivel in [
+            Empleado.NIVEL_ENCARGADA,
+            Empleado.NIVEL_SUPERVISION,
+            Empleado.NIVEL_JEFATURA,
+            Empleado.NIVEL_DIRECCION,
+            "",
+        ]:
+            with self.subTest(nivel=nivel):
+                empleado = Empleado.objects.create(
+                    nombre=f"Responsable {nivel or 'sin nivel'}",
+                    departamento=Empleado.DEP_PRODUCCION,
+                    nivel_organizacional=nivel,
+                )
+
+                response = self.client.patch(
+                    f"/api/rrhh/empleados/{empleado.id}/asignar-sucursal/",
+                    data={"area_detalle": "HORNOS"}, content_type="application/json",
+                )
+
+                self.assertEqual(response.status_code, 400)
+                empleado.refresh_from_db()
+                self.assertEqual(empleado.puesto_operativo, "")
+                self.assertEqual(empleado.departamento, Empleado.DEP_PRODUCCION)
 
     def test_get_sin_asignar_se_basa_en_fk_no_en_texto(self):
         # Pendiente = sin FK canónico. Un empleado con texto pero SIN FK sigue pendiente
@@ -235,5 +297,5 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertIn("Sucursal Colosio", names)
         self.assertIn("Sucursal El Túnel", values)
         self.assertIn("Sucursal Las Glorias", values)
-        self.assertNotIn("Sucursal Matriz", values)
+        self.assertIn("Sucursal Matriz", values)
         self.assertNotIn("CEDIS", names)
