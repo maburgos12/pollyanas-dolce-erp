@@ -87,13 +87,13 @@ class ReconciliarIdentidadHikTests(TestCase):
     def setUp(self):
         self.destino = Empleado.objects.create(codigo="355", nombre="Johan", activo=True)
         self.origen = Empleado.objects.create(codigo="356", nombre="Angélica", activo=True)
-        self._evento(
+        self.historia_destino = self._evento(
             event_id="historia-destino-355",
             codigo="355",
             empleado=self.destino,
             ocurrido_en=datetime(2026, 9, 15, 8, 0),
         )
-        self._evento(
+        self.historia_origen = self._evento(
             event_id="historia-origen-356",
             codigo="356",
             empleado=self.origen,
@@ -110,6 +110,13 @@ class ReconciliarIdentidadHikTests(TestCase):
         Empleado.objects.filter(pk=self.origen.pk).update(codigo="355")
         self.destino.refresh_from_db()
         self.origen.refresh_from_db()
+        self.asistencia_historica = AsistenciaEmpleado.objects.create(
+            empleado=self.origen,
+            fecha=date(2026, 9, 10),
+            entrada=timezone.make_aware(datetime(2026, 9, 10, 8, 0)),
+            salida=timezone.make_aware(datetime(2026, 9, 10, 17, 0)),
+            fuente=AsistenciaEmpleado.FUENTE_HIKCONNECT_API,
+        )
         self.receipt = self._evento(
             event_id="marca-mal-asignada-355",
             codigo="355",
@@ -195,11 +202,18 @@ class ReconciliarIdentidadHikTests(TestCase):
         self.asistencia.refresh_from_db()
         self.extra.refresh_from_db()
         self.receipt.refresh_from_db()
+        self.historia_destino.refresh_from_db()
+        self.historia_origen.refresh_from_db()
+        self.asistencia_historica.refresh_from_db()
         self.assertEqual(self.origen.codigo, "356")
         self.assertEqual(self.destino.codigo, "355")
         self.assertEqual(self.receipt.empleado_id, self.destino.id)
         self.assertEqual(self.asistencia.empleado_id, self.destino.id)
         self.assertEqual(self.extra.empleado_id, self.destino.id)
+        self.assertEqual(self.historia_destino.empleado_id, self.destino.id)
+        self.assertEqual(self.historia_origen.empleado_id, self.origen.id)
+        self.assertEqual(self.asistencia_historica.empleado_id, self.origen.id)
+        self.assertEqual(EventoHikCloud.objects.count(), 3)
         audit = AuditLog.objects.get(model="rrhh.IdentidadHik")
         self.assertEqual(audit.payload["conteos"]["recibos"], 1)
         self.assertEqual(audit.payload["respaldo_sha256"], result["respaldo_sha256"])
