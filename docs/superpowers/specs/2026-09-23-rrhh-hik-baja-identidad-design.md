@@ -2,7 +2,7 @@
 
 Fecha: 2026-09-23
 
-Estado: aprobado conceptualmente por Dirección; pendiente de revisión del documento
+Estado: aprobado por Dirección el 2026-09-23
 
 Responsable: Codex
 
@@ -39,6 +39,8 @@ el error.
 4. El caso `355` se reconcilia hacia Johan sin perder evidencia cruda y sin
    borrar decisiones autorizadas o pagadas.
 5. Toda corrección deja respaldo, conteos antes/después y `AuditLog`.
+6. La baja no elimina ni reescribe asistencias, recibos o horas extra anteriores:
+   el historial de la persona permanece disponible para consulta y auditoría.
 
 ## Alternativas consideradas
 
