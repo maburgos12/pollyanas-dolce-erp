@@ -225,6 +225,31 @@ class Empleado(models.Model):
                 return funcion.puesto_operativo
         return normalizar_nombre(valor or "").upper()
 
+    def _validar_reserva_historica_codigo_hik(self) -> None:
+        """Impide trasladar el historial del checador al cambiar un código.
+
+        Los expedientes que ya contienen una colisión pueden seguir guardando
+        otros campos. La validación solo entra cuando se asigna un código nuevo
+        o distinto al valor persistido.
+        """
+        codigo_anterior = None
+        if self.pk:
+            codigo_anterior = type(self).objects.filter(pk=self.pk).values_list(
+                "codigo", flat=True
+            ).first()
+        if codigo_anterior == self.codigo:
+            return
+        if EventoHikCloud.objects.filter(
+            codigo_externo__iexact=self.codigo,
+            empleado_id__isnull=False,
+        ).exclude(empleado_id=self.pk).exists():
+            raise ValidationError({
+                "codigo": (
+                    "Este código Hik conserva historial de otra persona y no "
+                    "puede reasignarse. Use la reconciliación auditada de RRHH."
+                ),
+            })
+
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
@@ -238,6 +263,7 @@ class Empleado(models.Model):
         self.nivel_organizacional = normalizar_nombre(self.nivel_organizacional or "").upper()
         if not self.codigo:
             self.codigo = self._generate_codigo()
+        self._validar_reserva_historica_codigo_hik()
         super().save(*args, **kwargs)
 
 
