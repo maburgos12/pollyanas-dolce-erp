@@ -55,6 +55,12 @@
         {% if key == "pendiente" %}
           {% if he.jefatura_actualizada %}
           {% if he.jefe_directo_id == user_id or is_superuser %}
+            <form method="post" class="ch-actions" data-async-action data-reset-on-success="false">
+              {% csrf_token %}
+              <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+              <button class="btn btn-primary" type="submit" name="action" value="autorizar" data-pending-label="Autorizando…"{% if not he.contexto_calculo.puede_autorizar %} disabled aria-disabled="true" aria-describedby="hora-extra-aviso-{{ he.id }}"{% endif %}>Autorizar</button>
+              <button class="btn btn-secondary" type="submit" name="action" value="rechazar" data-pending-label="Rechazando…">Rechazar</button>
+            </form>
             {% if he.asistencia_id %}
             <details class="ch-time-editor">
               <summary>Editar tiempo</summary>
@@ -85,12 +91,6 @@
               </form>
             </details>
             {% endif %}
-            <form method="post" class="ch-actions" data-async-action data-reset-on-success="false">
-              {% csrf_token %}
-              <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
-              <button class="btn btn-primary" type="submit" name="action" value="autorizar" data-pending-label="Autorizando…"{% if not he.contexto_calculo.puede_autorizar %} disabled aria-disabled="true" aria-describedby="hora-extra-aviso-{{ he.id }}"{% endif %}>Autorizar</button>
-              <button class="btn btn-secondary" type="submit" name="action" value="rechazar" data-pending-label="Rechazando…">Rechazar</button>
-            </form>
           {% endif %}
           {% endif %}
         {% endif %}
