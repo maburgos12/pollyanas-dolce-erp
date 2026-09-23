@@ -14,7 +14,14 @@ from .models import AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, Ev
 from .services import generar_horas_extra_automatico
 from .services_asistencia_reglas import evaluar_dia_empleado
 from .services_bonos_checador import programar_sincronizacion_bonos_desde_checador
-from .services_hikvision import MarcaHik, _aplicar_marcajes, _detectar_turno, _marcas_existentes, _resolver_sucursal
+from .services_hikvision import (
+    MarcaHik,
+    _aplicar_marcajes,
+    _baja_bloquea_marca,
+    _detectar_turno,
+    _marcas_existentes,
+    _resolver_sucursal,
+)
 from .services_identidad import buscar_empleado_por_codigo, registrar_identidad_pendiente
 
 
@@ -146,7 +153,10 @@ def _duplicate_result(receipt: EventoHikCloud, incoming_hash: str) -> dict[str, 
             reason_code="event_id_payload_mismatch",
             receipt_id=receipt.id,
         )
-    if receipt.estado == EventoHikCloud.ESTADO_DIFERIDO:
+    if receipt.estado == EventoHikCloud.ESTADO_RECHAZADO:
+        outcome = "rejected"
+        retryable = False
+    elif receipt.estado == EventoHikCloud.ESTADO_DIFERIDO:
         outcome = "deferred"
         retryable = True
     elif receipt.projection_status != "applied":
@@ -230,6 +240,27 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
         empleado = Empleado.objects.select_for_update().get(pk=receipt.empleado_id)
         local_dt = timezone.localtime(receipt.ocurrido_en)
         fecha = local_dt.date()
+        if _baja_bloquea_marca(empleado, fecha):
+            receipt.empleado = empleado
+            receipt.estado = EventoHikCloud.ESTADO_RECHAZADO
+            receipt.reason_code = "employee_inactive_after_termination"
+            receipt.retryable = False
+            receipt.projection_status = "none"
+            receipt.effects_status = "skipped"
+            receipt.procesado_en = timezone.now()
+            receipt.save(
+                update_fields=[
+                    "empleado",
+                    "estado",
+                    "reason_code",
+                    "retryable",
+                    "projection_status",
+                    "effects_status",
+                    "procesado_en",
+                    "actualizado_en",
+                ]
+            )
+            return receipt
         asistencia, created = AsistenciaEmpleado.objects.get_or_create(
             empleado=empleado,
             fecha=fecha,
@@ -370,7 +401,10 @@ def ingest_event(event: Any) -> dict[str, Any]:
             if receipt.payload_hash != payload_hash:
                 return _duplicate_result(receipt, payload_hash)
             EventoHikCloud.objects.filter(pk=receipt.pk).update(intentos=F("intentos") + 1)
-            if receipt.projection_status == "applied":
+            if (
+                receipt.projection_status == "applied"
+                or receipt.estado == EventoHikCloud.ESTADO_RECHAZADO
+            ):
                 return _duplicate_result(receipt, payload_hash)
 
         if not receipt:
@@ -428,7 +462,17 @@ def ingest_event(event: Any) -> dict[str, Any]:
         receipt_id = receipt.id
 
     projected = project_receipt(receipt_id, empleado_id=empleado.id)
-    _run_post_projection_effects(receipt_id)
+    if projected.projection_status == "applied":
+        _run_post_projection_effects(receipt_id)
+    if projected.estado == EventoHikCloud.ESTADO_RECHAZADO:
+        return _result(
+            event_id,
+            "rejected",
+            retryable=False,
+            reason_code=projected.reason_code,
+            receipt_id=receipt_id,
+            projection=projected.projection_status,
+        )
     return _result(
         event_id,
         "accepted",

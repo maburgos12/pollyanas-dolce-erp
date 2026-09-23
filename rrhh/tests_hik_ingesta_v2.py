@@ -11,7 +11,14 @@ from django.urls import reverse
 from django.utils import timezone
 from unittest.mock import patch
 
-from .models import AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, EmpleadoIdentidadPendiente, Turno
+from .models import (
+    AsignacionTurnoEmpleado,
+    AsistenciaEmpleado,
+    Empleado,
+    EmpleadoBaja,
+    EmpleadoIdentidadPendiente,
+    Turno,
+)
 from .services_identidad import vincular_identidad_pendiente
 from .services_extra_conciliacion import diagnosticar_horas_extra
 
@@ -75,6 +82,67 @@ class HikIngestaV2Tests(TestCase):
 
     def _ledger(self):
         return apps.get_model("rrhh", "EventoHikCloud")
+
+    def _dar_de_baja(self, fecha_baja: date) -> None:
+        EmpleadoBaja.objects.create(
+            empleado=self.empleado,
+            nombre=self.empleado.nombre,
+            fecha_ingreso=self.empleado.fecha_ingreso,
+            fecha_baja=fecha_baja,
+        )
+        self.empleado.refresh_from_db()
+
+    def test_marca_del_dia_de_baja_se_conserva(self):
+        self._dar_de_baja(date(2026, 7, 28))
+
+        result = self._single_result(self._post([
+            self._event(event_id="guid-termination-day"),
+        ]))
+
+        self.assertEqual(result["outcome"], "accepted")
+        self.assertTrue(
+            AsistenciaEmpleado.objects.filter(
+                empleado=self.empleado,
+                fecha=date(2026, 7, 28),
+            ).exists()
+        )
+
+    def test_marca_posterior_a_baja_es_rechazo_terminal(self):
+        self._dar_de_baja(date(2026, 7, 28))
+        event = self._event(
+            event_id="guid-after-termination",
+            occurred_at="2026-07-29T08:00:00-07:00",
+        )
+
+        result = self._single_result(self._post([event]))
+
+        self.assertEqual(result["outcome"], "rejected")
+        self.assertEqual(result["reason_code"], "employee_inactive_after_termination")
+        self.assertFalse(result["retryable"])
+        self.assertEqual(result["projection"], "none")
+        self.assertFalse(AsistenciaEmpleado.objects.filter(empleado=self.empleado).exists())
+        receipt = self._ledger().objects.get(event_id=event["event_id"])
+        self.assertEqual(receipt.empleado_id, self.empleado.id)
+        self.assertEqual(receipt.estado, receipt.ESTADO_RECHAZADO)
+        self.assertEqual(receipt.projection_status, "none")
+        self.assertEqual(receipt.effects_status, "skipped")
+
+    def test_reenvio_post_baja_conserva_rechazo_terminal(self):
+        self._dar_de_baja(date(2026, 7, 28))
+        event = self._event(
+            event_id="guid-after-termination-duplicate",
+            occurred_at="2026-07-29T08:00:00-07:00",
+        )
+
+        first = self._single_result(self._post([event]))
+        second = self._single_result(self._post([event]))
+
+        self.assertEqual(first["outcome"], "rejected")
+        self.assertEqual(second["outcome"], "rejected")
+        self.assertFalse(second["retryable"])
+        self.assertEqual(second["reason_code"], "employee_inactive_after_termination")
+        self.assertEqual(self._ledger().objects.filter(event_id=event["event_id"]).count(), 1)
+        self.assertEqual(AsistenciaEmpleado.objects.count(), 0)
 
     def test_horario_confirmado_en_reingesta_historica_no_recalcula(self):
         turno = Turno.objects.create(
