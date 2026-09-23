@@ -1,17 +1,30 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from io import BytesIO
+from io import BytesIO, StringIO
+import json
 
 from openpyxl import load_workbook
 
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from core.models import AuditLog
 from rrhh.models import AsistenciaEmpleado, Empleado, HoraExtra, IncidenciaAsistencia, Turno
 from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
-from rrhh.services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
+from rrhh.services_extra_conciliacion import (
+    DiagnosticoHoraExtra,
+    conciliar_extra_diario,
+    contexto_hora_extra,
+    diagnosticar_horas_extra,
+    es_bloque_extra_autorizable,
+    formatear_duracion_horas,
+    modalidad_marcaje_efectiva,
+    saldo_automatico_minutos,
+    saldo_automatico_esperado,
+)
 from rrhh.views_asistencia import _build_reporte_asistencia
 
 
@@ -30,6 +43,134 @@ class ExtraConciliacionTests(TestCase):
         return AsistenciaEmpleado.objects.create(empleado=self.empleado, fecha=self.fecha,
             entrada=dt(entrada), salida=dt(salida), minutos_trabajados=565,
             salida_comida=dt(time(12)), regreso_comida=dt(time(12, 35)), minutos_comida=35, **kwargs)
+
+    def diagnostico(self, minutos):
+        return DiagnosticoHoraExtra(
+            minutos, 'calculado', 'Comida registrada.',
+            modalidad=Empleado.MARCAJE_CUATRO_MARCAS,
+            comida_observable=True,
+            requiere_revision=False,
+        )
+
+    def test_saldo_menor_a_50_minutos_no_genera_propuesta(self):
+        self.assertEqual(saldo_automatico_esperado(self.diagnostico(49), []), Decimal('0'))
+
+    def test_saldo_desde_50_minutos_conserva_evidencia(self):
+        self.assertEqual(saldo_automatico_esperado(self.diagnostico(50), []), Decimal('0.83'))
+
+    def test_umbral_se_aplica_al_saldo_no_cubierto(self):
+        cobertura = HoraExtra(
+            empleado=self.empleado, fecha=self.fecha, horas=Decimal('0.50'),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+
+    def test_saldo_en_minutos_conserva_residuo_antes_del_umbral(self):
+        cobertura = HoraExtra(
+            empleado=self.empleado, fecha=self.fecha, horas=Decimal('0.50'),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+        self.assertEqual(saldo_automatico_minutos(self.diagnostico(70), [cobertura]), 40)
+        self.assertEqual(
+            saldo_automatico_esperado(self.diagnostico(70), [cobertura]),
+            Decimal('0'),
+        )
+
+    def test_formato_humano_no_muestra_fracciones(self):
+        casos = {
+            Decimal('0.02'): '1 min',
+            Decimal('0.50'): '30 min',
+            Decimal('0.83'): '50 min',
+            Decimal('1.00'): '1 h',
+            Decimal('1.50'): '1 h 30 min',
+            Decimal('2.00'): '2 h',
+        }
+        for horas, etiqueta in casos.items():
+            with self.subTest(horas=horas):
+                self.assertEqual(formatear_duracion_horas(horas), etiqueta)
+
+    def test_bloque_autorizable_exige_multiplos_de_30_minutos(self):
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('0')))
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('0.83')))
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('1.17')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('0.50')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('1.00')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('1.50')))
+
+    def test_propuesta_exacta_fuera_de_bloque_exige_ajuste_antes_de_autorizar(self):
+        asistencia = self.asistencia(salida=time(16, 50))
+        hora_extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            asistencia=asistencia,
+            horas=Decimal('0.83'),
+            notas='[Detección automática] Tiempo posterior a la salida programada.',
+        )
+
+        contexto = contexto_hora_extra(hora_extra, [hora_extra])
+
+        self.assertFalse(contexto['puede_autorizar'])
+        self.assertIn('30 minutos', contexto['motivo_bloqueo'])
+
+    def test_regularizacion_de_umbral_es_dry_run_auditable_e_idempotente(self):
+        asistencia = self.asistencia(salida=time(16, 49))
+        [hora_extra] = HoraExtra.objects.bulk_create([
+            HoraExtra(
+                empleado=self.empleado,
+                fecha=self.fecha,
+                asistencia=asistencia,
+                horas=Decimal('0.82'),
+                notas='[Detección automática] Tiempo posterior a la salida programada.',
+            ),
+        ])
+
+        preview = StringIO()
+        call_command('regularizar_horas_extra_umbral', stdout=preview)
+        self.assertEqual(json.loads(preview.getvalue())[0]['id'], hora_extra.pk)
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertFalse(AuditLog.objects.filter(action='RRHH_EXTRA_UMBRAL_CANCELADA').exists())
+
+        aplicada = StringIO()
+        call_command('regularizar_horas_extra_umbral', '--apply', stdout=aplicada)
+        self.assertEqual(json.loads(aplicada.getvalue())[0]['estado'], 'cancelada')
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertIn('Umbral mínimo de 50 minutos', hora_extra.notas)
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action='RRHH_EXTRA_UMBRAL_CANCELADA',
+                model='rrhh.HoraExtra',
+                object_id=str(hora_extra.pk),
+            ).count(),
+            1,
+        )
+
+        repetida = StringIO()
+        call_command('regularizar_horas_extra_umbral', '--apply', stdout=repetida)
+        self.assertEqual(json.loads(repetida.getvalue()), [])
+        self.assertEqual(
+            AuditLog.objects.filter(action='RRHH_EXTRA_UMBRAL_CANCELADA').count(),
+            1,
+        )
+
+    def test_regularizacion_no_toca_propuesta_desde_50_minutos(self):
+        asistencia = self.asistencia(salida=time(16, 50))
+        [hora_extra] = HoraExtra.objects.bulk_create([
+            HoraExtra(
+                empleado=self.empleado,
+                fecha=self.fecha,
+                asistencia=asistencia,
+                horas=Decimal('0.83'),
+                notas='[Detección automática] Tiempo posterior a la salida programada.',
+            ),
+        ])
+
+        salida = StringIO()
+        call_command('regularizar_horas_extra_umbral', '--apply', stdout=salida)
+
+        self.assertEqual(json.loads(salida.getvalue()), [])
+        hora_extra.refresh_from_db()
+        self.assertEqual(hora_extra.estado, HoraExtra.ESTADO_PENDIENTE)
 
     def test_modalidad_auto_repartidor_es_ruta(self):
         self.empleado.puesto_operativo = "REPARTIDOR"

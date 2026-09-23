@@ -11,6 +11,8 @@ from .models import AsistenciaEmpleado, Empleado, HoraExtra
 
 NOTA_EXTRA_AUTOMATICA = '[Detección automática]'
 NOTA_SALDO_CUBIERTO = '[Saldo automático cubierto o checada corregida]'
+UMBRAL_SOLICITUD_EXTRA_MINUTOS = 50
+BLOQUE_AUTORIZACION_EXTRA_MINUTOS = 30
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,29 @@ def formato_minutos(value):
 
 def horas_a_minutos(value):
     return int((Decimal(value) * 60).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def minutos_a_horas(minutos):
+    return (Decimal(minutos) / Decimal('60')).quantize(Decimal('0.01'))
+
+
+def formatear_duracion_minutos(minutos):
+    horas, resto = divmod(int(minutos), 60)
+    partes = []
+    if horas:
+        partes.append(f'{horas} h')
+    if resto or not partes:
+        partes.append(f'{resto} min')
+    return ' '.join(partes)
+
+
+def formatear_duracion_horas(horas):
+    return formatear_duracion_minutos(horas_a_minutos(horas))
+
+
+def es_bloque_extra_autorizable(horas):
+    minutos = horas_a_minutos(horas)
+    return minutos > 0 and minutos % BLOQUE_AUTORIZACION_EXTRA_MINUTOS == 0
 
 
 def diagnosticar_horas_extra(asistencia):
@@ -107,18 +132,27 @@ def es_hora_extra_automatica(hora_extra):
     return bool(hora_extra.asistencia_id)
 
 
-def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
-    """Saldo en horas con el redondeo del generador; None significa no calculable."""
+def saldo_automatico_minutos(diagnostico, registros, hora_extra=None):
+    """Saldo crudo no cubierto; conserva minutos menores al umbral para auditoría."""
     if diagnostico.minutos is None:
         return None
     if diagnostico.minutos <= 0:
-        return Decimal("0")
-    horas = (Decimal(diagnostico.minutos) / 60).quantize(Decimal("0.01"))
+        return 0
     cobertura = sum(
         (r.horas for r in registros if r != hora_extra and r.estado != HoraExtra.ESTADO_CANCELADO),
         Decimal("0"),
     )
-    return max(horas - cobertura, Decimal("0"))
+    return max(diagnostico.minutos - horas_a_minutos(cobertura), 0)
+
+
+def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
+    """Saldo en horas con el redondeo del generador; None significa no calculable."""
+    saldo_minutos = saldo_automatico_minutos(diagnostico, registros, hora_extra)
+    if saldo_minutos is None:
+        return None
+    if saldo_minutos < UMBRAL_SOLICITUD_EXTRA_MINUTOS:
+        return Decimal('0')
+    return minutos_a_horas(saldo_minutos)
 
 
 def huella_calculo_extra(asistencia):
@@ -179,13 +213,16 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
         and ajuste.get("saldo") == f"{saldo:.2f}"
         and ajuste.get("huella") == huella_calculo_extra(asistencia)
     )
-    puede_autorizar = calculable_positivo and saldo > 0 and (
+    bloque_autorizable = es_bloque_extra_autorizable(hora_extra.horas)
+    puede_autorizar = calculable_positivo and saldo > 0 and bloque_autorizable and (
         hora_extra.horas == saldo or ajuste_vigente
     )
     requiere_revision = diagnostico.requiere_revision or not puede_autorizar or ajuste_vigente
     motivo_bloqueo = ""
     if not puede_autorizar:
-        if calculable_positivo:
+        if calculable_positivo and saldo and not bloque_autorizable:
+            motivo_bloqueo = "Ajusta el tiempo a bloques de 30 minutos antes de autorizar."
+        elif calculable_positivo:
             motivo_bloqueo = "La propuesta no coincide con el saldo automático vigente."
         elif diagnostico.minutos == 0:
             motivo_bloqueo = "No se detectan horas extra en la asistencia actual."
@@ -193,7 +230,7 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
             motivo_bloqueo = diagnostico.detalle
         if diagnostico.codigo == "sin_turno":
             motivo_bloqueo += " Asigna el turno y reevalúa la asistencia antes de autorizar."
-        else:
+        elif bloque_autorizable:
             motivo_bloqueo += " Corrige y reevalúa la asistencia antes de autorizar."
 
     if not puede_autorizar and hora_extra.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}:

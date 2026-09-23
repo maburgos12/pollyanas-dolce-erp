@@ -25,15 +25,30 @@
   .ch-row-badges { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .ch-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .ch-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
-  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+  .ch-actions { display: flex; flex-wrap: wrap; gap: 8px; grid-column: 5; margin: 0; }
   .ch-calculation-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; margin: 10px 0 0; padding: 10px; background: var(--blanco); border: 1px solid var(--rosa); border-radius: 6px; }
   .ch-calculation-context dt { color: var(--texto-light); font-size: 12px; font-weight: 700; }
   .ch-calculation-context dd { color: var(--texto); margin: 2px 0 0; font-size: 13px; }
   .ch-row-item .ch-calculation-warning { color: #6f5415; background: #fff8e6; border: 1px solid var(--dorado); border-radius: 6px; padding: 8px 10px; line-height: 1.45; }
   .ch-actions .btn:disabled { color: var(--texto-light); background: var(--gris-suave); border: 1px solid var(--texto-light); cursor: not-allowed; opacity: 1; box-shadow: none; transform: none; }
+  .ch-time-editor { align-self: stretch; border-top: 1px solid var(--rosa); grid-column: 1 / -1; padding-top: 10px; }
+  .ch-time-editor summary { color: var(--vino); cursor: pointer; font-size: 13px; font-weight: 800; width: fit-content; }
+  .ch-time-editor summary:focus-visible { outline: 3px solid rgba(139, 34, 82, .28); outline-offset: 3px; }
+  .ch-time-evidence { align-items: baseline; display: flex; gap: 8px; margin-top: 10px; }
+  .ch-time-evidence span { color: var(--texto-light); font-size: 12px; }
+  .ch-time-evidence strong { color: var(--texto); font-size: 14px; }
+  .ch-time-form { display: grid; gap: 10px; margin-top: 10px; max-width: 520px; }
+  .ch-time-fields { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ch-time-form label { color: var(--texto); display: grid; font-size: 12px; font-weight: 800; gap: 4px; }
+  .ch-time-form input, .ch-time-form select, .ch-time-form textarea { background: #fff; border: 1px solid #ccbfc3; border-radius: 6px; color: var(--texto); font: inherit; min-height: 42px; padding: 8px 10px; width: 100%; }
+  .ch-time-form textarea { min-height: 64px; resize: vertical; }
+  .ch-time-form input:focus-visible, .ch-time-form select:focus-visible, .ch-time-form textarea:focus-visible { border-color: var(--vino); outline: 3px solid rgba(139, 34, 82, .18); }
+  .ch-time-form .ch-time-help { color: var(--texto-light); font-size: 12px; margin: 0; }
+  .ch-time-form .btn { justify-self: start; }
   @media (min-width: 761px) and (max-width: 1200px) {
     .ch-row-item { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
     .ch-row-item > :first-child { grid-row: span 4; }
+    .ch-actions { grid-column: 2; }
   }
   @media (max-width: 760px) {
     .ch-status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 10px; }
@@ -42,6 +57,8 @@
     .ch-status-card span { font-size: 10px; line-height: 1.2; margin-top: 3px; }
     .ch-status-card:last-child { grid-column: 1 / -1; }
     .ch-row-item { grid-template-columns: 1fr; }
+    .ch-actions { grid-column: 1; }
     .ch-row-badges { justify-content: flex-start; }
     .ch-calculation-context { grid-template-columns: 1fr; }
+    .ch-time-fields { grid-template-columns: 1fr 1fr; }
   }
