@@ -2999,7 +2999,9 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
             asistencia = AsistenciaEmpleado.objects.create(
                 empleado=empleado, fecha=fecha, turno=turno,
                 entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
-                salida=timezone.make_aware(datetime.combine(fecha, time(17))),
+                # 80 min detectados - 30 min manuales = 50 min descubiertos:
+                # conserva el caso concurrente justo en el nuevo umbral.
+                salida=timezone.make_aware(datetime.combine(fecha, time(17, 20))),
             )
             generador = Thread(target=generar, args=(asistencia,), daemon=True)
             generador.start()
@@ -3031,7 +3033,7 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
         self.assertEqual(manual.monto_calculado, Decimal("50.00"))
         automatica = HoraExtra.objects.get(asistencia=asistencia)
         self.assertEqual(automatica.estado, HoraExtra.ESTADO_PENDIENTE)
-        self.assertEqual(automatica.horas, Decimal("0.50"))
+        self.assertEqual(automatica.horas, Decimal("0.83"))
 
     def test_patch_obsoleto_no_revierte_autorizacion_concurrente(self):
         from datetime import date
@@ -3165,7 +3167,9 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
                         if bloqueado:
                             break
                         terminado.wait(timeout=0.01)
-                asistencia.salida = timezone.make_aware(datetime(2026, 9, 18, 17))
+                # 65 min detectados - 15 min manuales = 50 min descubiertos:
+                # conserva la serialización justo en el nuevo umbral.
+                asistencia.salida = timezone.make_aware(datetime(2026, 9, 18, 17, 5))
                 asistencia.save(update_fields=["salida"])
                 generar_horas_extra_automatico(asistencia)
         finally:
@@ -3182,7 +3186,7 @@ class HoraExtraAutorizacionConcurrenteTests(TransactionTestCase):
         self.assertEqual(manual.monto_calculado, Decimal("25"))
         automatica = HoraExtra.objects.get(asistencia=asistencia)
         self.assertEqual(automatica.estado, HoraExtra.ESTADO_PENDIENTE)
-        self.assertEqual(automatica.horas, Decimal("0.75"))
+        self.assertEqual(automatica.horas, Decimal("0.83"))
 
     def test_autorizacion_espera_asistencia_y_rechaza_propuesta_cancelada(self):
         from datetime import date, datetime, time
