@@ -11,7 +11,15 @@ from django.utils import timezone
 
 from rrhh.models import AsistenciaEmpleado, Empleado, HoraExtra, IncidenciaAsistencia, Turno
 from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
-from rrhh.services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
+from rrhh.services_extra_conciliacion import (
+    DiagnosticoHoraExtra,
+    conciliar_extra_diario,
+    diagnosticar_horas_extra,
+    es_bloque_extra_autorizable,
+    formatear_duracion_horas,
+    modalidad_marcaje_efectiva,
+    saldo_automatico_esperado,
+)
 from rrhh.views_asistencia import _build_reporte_asistencia
 
 
@@ -30,6 +38,51 @@ class ExtraConciliacionTests(TestCase):
         return AsistenciaEmpleado.objects.create(empleado=self.empleado, fecha=self.fecha,
             entrada=dt(entrada), salida=dt(salida), minutos_trabajados=565,
             salida_comida=dt(time(12)), regreso_comida=dt(time(12, 35)), minutos_comida=35, **kwargs)
+
+    def diagnostico(self, minutos):
+        return DiagnosticoHoraExtra(
+            minutos, 'calculado', 'Comida registrada.',
+            modalidad=Empleado.MARCAJE_CUATRO_MARCAS,
+            comida_observable=True,
+            requiere_revision=False,
+        )
+
+    def test_saldo_menor_a_50_minutos_no_genera_propuesta(self):
+        self.assertEqual(saldo_automatico_esperado(self.diagnostico(49), []), Decimal('0'))
+
+    def test_saldo_desde_50_minutos_conserva_evidencia(self):
+        self.assertEqual(saldo_automatico_esperado(self.diagnostico(50), []), Decimal('0.83'))
+
+    def test_umbral_se_aplica_al_saldo_no_cubierto(self):
+        cobertura = HoraExtra(
+            empleado=self.empleado, fecha=self.fecha, horas=Decimal('0.50'),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+        self.assertEqual(
+            saldo_automatico_esperado(self.diagnostico(70), [cobertura]),
+            Decimal('0'),
+        )
+
+    def test_formato_humano_no_muestra_fracciones(self):
+        casos = {
+            Decimal('0.02'): '1 min',
+            Decimal('0.50'): '30 min',
+            Decimal('0.83'): '50 min',
+            Decimal('1.00'): '1 h',
+            Decimal('1.50'): '1 h 30 min',
+            Decimal('2.00'): '2 h',
+        }
+        for horas, etiqueta in casos.items():
+            with self.subTest(horas=horas):
+                self.assertEqual(formatear_duracion_horas(horas), etiqueta)
+
+    def test_bloque_autorizable_exige_multiplos_de_30_minutos(self):
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('0')))
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('0.83')))
+        self.assertFalse(es_bloque_extra_autorizable(Decimal('1.17')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('0.50')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('1.00')))
+        self.assertTrue(es_bloque_extra_autorizable(Decimal('1.50')))
 
     def test_modalidad_auto_repartidor_es_ruta(self):
         self.empleado.puesto_operativo = "REPARTIDOR"

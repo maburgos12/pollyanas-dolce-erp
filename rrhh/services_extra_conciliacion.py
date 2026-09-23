@@ -11,6 +11,8 @@ from .models import AsistenciaEmpleado, Empleado, HoraExtra
 
 NOTA_EXTRA_AUTOMATICA = '[Detección automática]'
 NOTA_SALDO_CUBIERTO = '[Saldo automático cubierto o checada corregida]'
+UMBRAL_SOLICITUD_EXTRA_MINUTOS = 50
+BLOQUE_AUTORIZACION_EXTRA_MINUTOS = 30
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,29 @@ def formato_minutos(value):
 
 def horas_a_minutos(value):
     return int((Decimal(value) * 60).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+
+
+def minutos_a_horas(minutos):
+    return (Decimal(minutos) / Decimal('60')).quantize(Decimal('0.01'))
+
+
+def formatear_duracion_minutos(minutos):
+    horas, resto = divmod(int(minutos), 60)
+    partes = []
+    if horas:
+        partes.append(f'{horas} h')
+    if resto or not partes:
+        partes.append(f'{resto} min')
+    return ' '.join(partes)
+
+
+def formatear_duracion_horas(horas):
+    return formatear_duracion_minutos(horas_a_minutos(horas))
+
+
+def es_bloque_extra_autorizable(horas):
+    minutos = horas_a_minutos(horas)
+    return minutos > 0 and minutos % BLOQUE_AUTORIZACION_EXTRA_MINUTOS == 0
 
 
 def diagnosticar_horas_extra(asistencia):
@@ -113,12 +138,14 @@ def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
         return None
     if diagnostico.minutos <= 0:
         return Decimal("0")
-    horas = (Decimal(diagnostico.minutos) / 60).quantize(Decimal("0.01"))
     cobertura = sum(
         (r.horas for r in registros if r != hora_extra and r.estado != HoraExtra.ESTADO_CANCELADO),
         Decimal("0"),
     )
-    return max(horas - cobertura, Decimal("0"))
+    saldo_minutos = max(diagnostico.minutos - horas_a_minutos(cobertura), 0)
+    if saldo_minutos < UMBRAL_SOLICITUD_EXTRA_MINUTOS:
+        return Decimal('0')
+    return minutos_a_horas(saldo_minutos)
 
 
 def huella_calculo_extra(asistencia):
