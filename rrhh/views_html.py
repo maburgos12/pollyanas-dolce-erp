@@ -23,7 +23,7 @@ def asignacion_sucursal_view(request):
 def asignacion_sucursales_api(request):
     rows = list(
         Sucursal.objects.filter(activa=True)
-        .exclude(codigo__in=["MATRIZ", "CEDIS", "DEVOLUCIONES", "ALMACEN"])
+        .exclude(codigo__in=["CEDIS", "DEVOLUCIONES", "ALMACEN"])
         .order_by("nombre")
         .values("id", "nombre", "activa")
     )
@@ -56,7 +56,11 @@ def asignacion_produccion_api(request):
             "sucursal": empleado.sucursal_display,
             "participa_bonos_produccion": empleado.id in elegibles_ids,
         }
-        for empleado in Empleado.objects.filter(activo=True, departamento=Empleado.DEP_PRODUCCION)
+        for empleado in Empleado.objects.filter(
+            activo=True,
+            departamento=Empleado.DEP_PRODUCCION,
+            nivel_organizacional=Empleado.NIVEL_COLABORADOR,
+        )
         .select_related("sucursal_ref").order_by("nombre", "id")
     ]
     return JsonResponse({"areas": areas, "empleados": empleados})
