@@ -729,10 +729,10 @@ class ConexionVacacionesAsistenciaTests(TestCase):
     def test_captura_retroactiva_concilia_falta_pendiente(self):
         from django.test import override_settings
 
-        from rrhh.services_vacaciones import crear_solicitud_vacaciones
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones, es_dia_laborable
 
         fecha = timezone.localdate() - timedelta(days=7)
-        while fecha.weekday() == 6:  # es_dia_laborable excluye domingos
+        while not es_dia_laborable(fecha):
             fecha -= timedelta(days=1)
         IncidenciaAsistencia.objects.create(
             empleado=self.empleado,
@@ -766,11 +766,12 @@ class ConexionVacacionesAsistenciaTests(TestCase):
 
         from rrhh.services_vacaciones import (
             crear_solicitud_vacaciones,
+            es_dia_laborable,
             rechazar_solicitud_vacaciones,
         )
 
         fecha = timezone.localdate() - timedelta(days=7)
-        while fecha.weekday() == 6:
+        while not es_dia_laborable(fecha):
             fecha -= timedelta(days=1)
         self._crear_periodo_con_saldo()
         rrhh_user = get_user_model().objects.create_superuser(
