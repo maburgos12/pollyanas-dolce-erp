@@ -132,17 +132,24 @@ def es_hora_extra_automatica(hora_extra):
     return bool(hora_extra.asistencia_id)
 
 
-def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
-    """Saldo en horas con el redondeo del generador; None significa no calculable."""
+def saldo_automatico_minutos(diagnostico, registros, hora_extra=None):
+    """Saldo crudo no cubierto; conserva minutos menores al umbral para auditoría."""
     if diagnostico.minutos is None:
         return None
     if diagnostico.minutos <= 0:
-        return Decimal("0")
+        return 0
     cobertura = sum(
         (r.horas for r in registros if r != hora_extra and r.estado != HoraExtra.ESTADO_CANCELADO),
         Decimal("0"),
     )
-    saldo_minutos = max(diagnostico.minutos - horas_a_minutos(cobertura), 0)
+    return max(diagnostico.minutos - horas_a_minutos(cobertura), 0)
+
+
+def saldo_automatico_esperado(diagnostico, registros, hora_extra=None):
+    """Saldo en horas con el redondeo del generador; None significa no calculable."""
+    saldo_minutos = saldo_automatico_minutos(diagnostico, registros, hora_extra)
+    if saldo_minutos is None:
+        return None
     if saldo_minutos < UMBRAL_SOLICITUD_EXTRA_MINUTOS:
         return Decimal('0')
     return minutos_a_horas(saldo_minutos)
