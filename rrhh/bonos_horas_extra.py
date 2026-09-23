@@ -17,7 +17,7 @@ from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
 from rrhh.services_horas_extra_jefatura import jefatura_hora_extra_actualizada
 from rrhh.services_extra_bloqueos import JornadaExtraConflict, bloquear_hora_extra, bloquear_jornadas_extra
 from rrhh.services_extra_conciliacion import (
-    contexto_hora_extra, diagnosticar_horas_extra, evidencia_ajuste_extra,
+    contexto_hora_extra, diagnosticar_horas_extra, es_bloque_extra_autorizable, evidencia_ajuste_extra,
     saldo_automatico_esperado,
 )
 
@@ -288,6 +288,16 @@ class BaseHorasExtraEquipoViewSet(viewsets.ViewSet):
             cambios["notas"] = {"antes": hora_extra.notas or "", "despues": notas}
         if not cambios:
             return Response({"detail": "No hay cambios para guardar."}, status=status.HTTP_400_BAD_REQUEST)
+        if (
+            hora_extra.asistencia_id
+            and hora_extra.estado == HoraExtra.ESTADO_PENDIENTE
+            and "horas" in cambios
+            and not es_bloque_extra_autorizable(horas)
+        ):
+            return Response(
+                {"horas": "El tiempo autorizado debe capturarse en bloques de 30 minutos."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         hora_extra.fecha = fecha
         hora_extra.horas = horas

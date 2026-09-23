@@ -2227,6 +2227,82 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
             BonoVentasEmpleado.objects.create(periodo=periodo, empleado=empleado, sucursal=sucursal)
         return hora, f"/api/bonos-{consumidor}/horas-extra/{hora.pk}/autorizar/?mes=9&anio=2026"
 
+    def _extra_calculable(self, minutos=58):
+        from datetime import datetime, time, timedelta
+        from rrhh.services import generar_horas_extra_automatico
+
+        hora, _url = self._extra_y_url("generica")
+        turno = Turno.objects.create(
+            nombre=f"Turno ajuste {minutos}", hora_entrada=time(8), hora_salida=time(16),
+        )
+        AsistenciaEmpleado.objects.filter(pk=hora.asistencia_id).update(
+            turno=turno,
+            salida=timezone.make_aware(datetime(2026, 9, 18, 16, 0) + timedelta(minutes=minutos)),
+        )
+        generar_horas_extra_automatico(AsistenciaEmpleado.objects.get(pk=hora.asistencia_id))
+        hora.refresh_from_db()
+        return hora
+
+    def test_ajuste_pendiente_registra_bloque_y_evidencia(self):
+        from rrhh.services_horas_extra_autorizacion import ajustar_hora_extra_pendiente
+
+        hora = self._extra_calculable(58)
+        ajustada, mensaje, error = ajustar_hora_extra_pendiente(
+            hora.pk,
+            self.jefe_user,
+            horas=Decimal("1.00"),
+            motivo="Se acordó cerrar la hora completa",
+        )
+        self.assertEqual(error, "")
+        self.assertIn("ajustado", mensaje.lower())
+        self.assertEqual(ajustada.horas, Decimal("1.00"))
+        self.assertEqual(ajustada.ajuste_autorizacion["saldo"], "0.97")
+        self.assertEqual(
+            ajustada.ajuste_autorizacion["motivo"],
+            "Se acordó cerrar la hora completa",
+        )
+        self.assertIn("Correccion registrada", ajustada.notas)
+
+    def test_ajuste_pendiente_rechaza_valor_fuera_de_bloques(self):
+        from rrhh.services_horas_extra_autorizacion import ajustar_hora_extra_pendiente
+
+        hora = self._extra_calculable(58)
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+        _ajustada, _mensaje, error = ajustar_hora_extra_pendiente(
+            hora.pk, self.jefe_user, horas=Decimal("1.17"), motivo="Setenta minutos",
+        )
+        self.assertIn("30 minutos", error)
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
+
+    def test_ajuste_pendiente_exige_motivo(self):
+        from rrhh.services_horas_extra_autorizacion import ajustar_hora_extra_pendiente
+
+        hora = self._extra_calculable(58)
+        _ajustada, _mensaje, error = ajustar_hora_extra_pendiente(
+            hora.pk, self.jefe_user, horas=Decimal("1.00"), motivo="  ",
+        )
+        self.assertIn("motivo", error.lower())
+
+    def test_ajuste_pendiente_respeta_al_autorizador_asignado(self):
+        from django.core.exceptions import PermissionDenied
+        from rrhh.services_horas_extra_autorizacion import ajustar_hora_extra_pendiente
+
+        hora = self._extra_calculable(58)
+        ajeno = User.objects.create_user(username="ajeno.extra")
+        with self.assertRaises(PermissionDenied):
+            ajustar_hora_extra_pendiente(
+                hora.pk, ajeno, horas=Decimal("1.00"), motivo="Sin permiso",
+            )
+
+    def test_autorizacion_exige_bloque_de_30_minutos(self):
+        from rrhh.services_horas_extra_autorizacion import resolver_hora_extra
+
+        hora = self._extra_calculable(58)
+        _hora, _mensaje, error = resolver_hora_extra(hora.pk, "autorizar", self.jefe_user)
+        self.assertIn("30 minutos", error)
+        hora.refresh_from_db()
+        self.assertEqual(hora.estado, HoraExtra.ESTADO_PENDIENTE)
+
     def test_todas_las_apis_bloquean_automatica_sin_turno_sin_mutar(self):
         for consumidor in ("generica", "produccion", "ventas"):
             with self.subTest(consumidor=consumidor):
@@ -2319,6 +2395,21 @@ class HoraExtraAutorizacionAPIsTests(TestCase):
         self.assertEqual(conciliacion["detectado_minutos"], 57)
         self.assertEqual(conciliacion["autorizado_minutos"], 60)
         self.assertEqual(conciliacion["estado"], "Ajuste justificado autorizado")
+
+    def test_api_editar_rechaza_ajuste_fuera_de_bloques_de_30_minutos(self):
+        hora, url = self._extra_y_url("produccion")
+        antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
+
+        response = self.client.post(url.replace("/autorizar/", "/editar/"), {
+            "fecha": hora.fecha.isoformat(),
+            "horas": "1.17",
+            "notas": hora.notas,
+            "motivo_cambio": "Ajuste fuera del bloque acordado",
+        }, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("30 minutos", response.json()["horas"])
+        self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
 
     def test_ajuste_justificado_caduca_si_cambian_las_checadas(self):
         from datetime import datetime, time
