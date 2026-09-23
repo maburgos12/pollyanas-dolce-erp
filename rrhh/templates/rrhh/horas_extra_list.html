@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Horas extra{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260921-estados-movil-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260923-extra-bloques-v2">
 {% endblock %}
 
 {% block content %}
@@ -48,13 +48,43 @@
         <div>{{ he.fecha|date:"Y-m-d" }}</div>
         <div>{% if he.jefe_directo %}Jefe directo: {{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
         <div class="ch-row-badges">
-          <span class="ch-badge">{{ he.horas }} h</span>
+          <span class="ch-badge">{{ he.duracion_label }}</span>
           <span class="ch-badge">{{ label }}</span>
           {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
         </div>
         {% if key == "pendiente" %}
           {% if he.jefatura_actualizada %}
           {% if he.jefe_directo_id == user_id or is_superuser %}
+            {% if he.asistencia_id %}
+            <details class="ch-time-editor">
+              <summary>Editar tiempo</summary>
+              <div class="ch-time-evidence">
+                <span>Tiempo detectado</span>
+                <strong>{{ he.saldo_detectado_label|default:"No calculable" }}</strong>
+              </div>
+              <form method="post" class="ch-time-form" data-async-action data-reset-on-success="false">
+                {% csrf_token %}
+                <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+                <div class="ch-time-fields">
+                  <label>Horas
+                    <input type="number" name="horas_enteras" min="0" max="24" step="1" inputmode="numeric" required>
+                  </label>
+                  <label>Minutos
+                    <select name="minutos" required>
+                      <option value="">Selecciona</option>
+                      <option value="0">0 min</option>
+                      <option value="30">30 min</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Motivo del ajuste
+                  <textarea name="motivo_ajuste" rows="2" maxlength="500" required placeholder="Indica el tiempo acordado y por qué se corrige"></textarea>
+                </label>
+                <p class="ch-time-help">El tiempo autorizado se registra en bloques de 30 minutos.</p>
+                <button class="btn btn-secondary" type="submit" name="action" value="ajustar" data-pending-label="Guardando…">Guardar ajuste</button>
+              </form>
+            </details>
+            {% endif %}
             <form method="post" class="ch-actions" data-async-action data-reset-on-success="false">
               {% csrf_token %}
               <input type="hidden" name="hora_extra_id" value="{{ he.id }}">

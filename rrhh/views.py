@@ -67,8 +67,12 @@ USUARIOS_ERP_EXCLUIDOS_RRHH = frozenset(
     }
 )
 from .services_bonos import asegurar_esquemas_base, esquema_codigo, sincronizar_esquemas_bono
-from .services_extra_conciliacion import contexto_hora_extra, es_hora_extra_automatica
-from .services_horas_extra_autorizacion import resolver_hora_extra
+from .services_extra_conciliacion import (
+    contexto_hora_extra,
+    es_hora_extra_automatica,
+    formatear_duracion_horas,
+)
+from .services_horas_extra_autorizacion import ajustar_hora_extra_pendiente, resolver_hora_extra
 from .services_horas_extra_jefatura import (
     jefatura_hora_extra_actualizada, sincronizar_jefe_horas_extra_pendientes,
 )
@@ -2665,9 +2669,26 @@ def horas_extra_list(request):
     if request.method == "POST":
         status_error = 400
         try:
-            he, message, error = resolver_hora_extra(
-                request.POST.get("hora_extra_id"), (request.POST.get("action") or "").strip(), request.user,
-            )
+            action = (request.POST.get("action") or "").strip()
+            if action == "ajustar":
+                try:
+                    horas_enteras = int(request.POST.get("horas_enteras") or "")
+                    minutos = int(request.POST.get("minutos") or "")
+                    if horas_enteras < 0 or minutos not in {0, 30}:
+                        raise ValueError
+                    horas_ajustadas = Decimal(horas_enteras) + (Decimal(minutos) / Decimal(60))
+                except (TypeError, ValueError):
+                    horas_ajustadas = None
+                he, message, error = ajustar_hora_extra_pendiente(
+                    request.POST.get("hora_extra_id"),
+                    request.user,
+                    horas=horas_ajustadas,
+                    motivo=request.POST.get("motivo_ajuste"),
+                )
+            else:
+                he, message, error = resolver_hora_extra(
+                    request.POST.get("hora_extra_id"), action, request.user,
+                )
             hora_extra_id = he.pk
         except JornadaExtraConflict as exc:
             hora_extra_id, error, status_error = request.POST.get("hora_extra_id"), str(exc), 409
@@ -2725,6 +2746,9 @@ def horas_extra_list(request):
     grupos = {estado: [] for estado, _label in estados}
     for he in horas_extra:
         he.contexto_calculo = contexto_hora_extra(he, registros_por_dia.get((he.empleado_id, he.fecha), []))
+        he.duracion_label = formatear_duracion_horas(he.horas)
+        saldo_detectado = he.contexto_calculo.get("saldo_detectado")
+        he.saldo_detectado_label = formatear_duracion_horas(saldo_detectado) if saldo_detectado is not None else ""
         grupos[he.estado].append(he)
     columnas = [(estado, label, grupos[estado]) for estado, label in estados]
     return render(

@@ -206,13 +206,16 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
         and ajuste.get("saldo") == f"{saldo:.2f}"
         and ajuste.get("huella") == huella_calculo_extra(asistencia)
     )
-    puede_autorizar = calculable_positivo and saldo > 0 and (
+    bloque_autorizable = es_bloque_extra_autorizable(hora_extra.horas)
+    puede_autorizar = calculable_positivo and saldo > 0 and bloque_autorizable and (
         hora_extra.horas == saldo or ajuste_vigente
     )
     requiere_revision = diagnostico.requiere_revision or not puede_autorizar or ajuste_vigente
     motivo_bloqueo = ""
     if not puede_autorizar:
-        if calculable_positivo:
+        if calculable_positivo and saldo and not bloque_autorizable:
+            motivo_bloqueo = "Ajusta el tiempo a bloques de 30 minutos antes de autorizar."
+        elif calculable_positivo:
             motivo_bloqueo = "La propuesta no coincide con el saldo automático vigente."
         elif diagnostico.minutos == 0:
             motivo_bloqueo = "No se detectan horas extra en la asistencia actual."
@@ -220,7 +223,7 @@ def contexto_hora_extra(hora_extra, registros_dia=None):
             motivo_bloqueo = diagnostico.detalle
         if diagnostico.codigo == "sin_turno":
             motivo_bloqueo += " Asigna el turno y reevalúa la asistencia antes de autorizar."
-        else:
+        elif bloque_autorizable:
             motivo_bloqueo += " Corrige y reevalúa la asistencia antes de autorizar."
 
     if not puede_autorizar and hora_extra.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}:

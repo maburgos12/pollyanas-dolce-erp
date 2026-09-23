@@ -14,6 +14,7 @@ from rrhh.services import calcular_horas_extra, generar_horas_extra_automatico
 from rrhh.services_extra_conciliacion import (
     DiagnosticoHoraExtra,
     conciliar_extra_diario,
+    contexto_hora_extra,
     diagnosticar_horas_extra,
     es_bloque_extra_autorizable,
     formatear_duracion_horas,
@@ -83,6 +84,21 @@ class ExtraConciliacionTests(TestCase):
         self.assertTrue(es_bloque_extra_autorizable(Decimal('0.50')))
         self.assertTrue(es_bloque_extra_autorizable(Decimal('1.00')))
         self.assertTrue(es_bloque_extra_autorizable(Decimal('1.50')))
+
+    def test_propuesta_exacta_fuera_de_bloque_exige_ajuste_antes_de_autorizar(self):
+        asistencia = self.asistencia(salida=time(16, 50))
+        hora_extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=self.fecha,
+            asistencia=asistencia,
+            horas=Decimal('0.83'),
+            notas='[Detección automática] Tiempo posterior a la salida programada.',
+        )
+
+        contexto = contexto_hora_extra(hora_extra, [hora_extra])
+
+        self.assertFalse(contexto['puede_autorizar'])
+        self.assertIn('30 minutos', contexto['motivo_bloqueo'])
 
     def test_modalidad_auto_repartidor_es_ruta(self):
         self.empleado.puesto_operativo = "REPARTIDOR"
