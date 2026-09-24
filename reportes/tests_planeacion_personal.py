@@ -104,6 +104,37 @@ class PersonnelPlanTests(TestCase):
         values.update(kwargs)
         return CfdiDescargado.objects.create(**values)
 
+    def add_complete_non_isn_components(self, month):
+        self.invoice(f'ordinary-{month}', payroll_xml(f'2026-{month:02d}-15', 'O', '100'))
+        self.invoice(f'extraordinary-{month}', payroll_xml(f'2026-{month:02d}-28', 'E', '20'))
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_MENSUAL,
+            periodo=date(2026, month, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('30'),
+        )
+        ExpedienteCedulaIMSS.objects.create(
+            tipo=ExpedienteCedulaIMSS.TIPO_BIMESTRAL,
+            periodo=date(2026, month, 1),
+            registro_patronal='E5240157100',
+            estado=ExpedienteCedulaIMSS.ESTADO_APLICADO,
+            total_patronal=D('40'),
+        )
+        self.invoice(
+            f'fees-{month}',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+            '<c:Concepto Descripcion="COMISION" Importe="10"/>'
+            '</c:Conceptos></c:Comprobante>',
+            tipo_cfdi='recibido',
+            tipo_comprobante='I',
+            rfc_emisor='EDENRED',
+            nombre_emisor='EDENRED MEXICO',
+            rfc_receptor=RFC,
+            total=D('11.60'),
+            fecha_emision=datetime(2026, month, 20, tzinfo=tz.utc),
+        )
+
     def test_future_cut_excludes_partial_month_and_keeps_current_staff(self, _):
         Empleado.objects.create(codigo='ACTIVE', nombre='Activa', activo=True)
         Empleado.objects.create(codigo='LEFT', nombre='Baja', activo=False)
@@ -132,6 +163,7 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(build_personnel_plan()['months'][-1]['fees'], D(464))
 
     def test_isn_uses_obligation_period(self, _):
+        self.add_complete_non_isn_components(7)
         xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
                '<c:Concepto Descripcion="Empresarial decl.Nomina" '
                'NoIdentificacion="202607 2-003" Importe="16737"/>'
@@ -143,8 +175,10 @@ class PersonnelPlanTests(TestCase):
         self.assertIsNone(result['months'][7]['isn'])
         source = next(item for item in result['months'][6]['sources'] if item['reference'] == 'isn')
         self.assertFalse(source['reconciled'])
+        self.assertFalse(result['months'][6]['reconciled_components'])
 
     def test_isn_applied_dossier_replaces_raw_cfdi_once_and_preserves_provenance(self, _):
+        self.add_complete_non_isn_components(8)
         xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
                '<c:Concepto Descripcion="Empresarial decl.Nomina" '
                'NoIdentificacion="202608 2-003" Importe="999"/>'
@@ -179,6 +213,7 @@ class PersonnelPlanTests(TestCase):
             'amount': D('16168.00'),
             'reconciled': True,
         }])
+        self.assertTrue(agosto['reconciled_components'])
 
     def test_unrecognized_service_is_not_silently_treated_as_zero(self, _):
         invoice = self.invoice('unknown-service',

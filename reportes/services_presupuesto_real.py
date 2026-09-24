@@ -267,6 +267,12 @@ class PresupuestoRealConsolidacionService:
                 indices["nomina_concepto"] = self._build_nomina_concepto_index(periodo)
             return self._monto_nomina_concepto(regla, indices["nomina_concepto"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_ISN_CFDI:
+            errores_contrato = regla.errores_contrato_corporativo_isn()
+            if errores_contrato:
+                raise ValueError(
+                    "ISN_CFDI solo admite una regla corporativa sin dimensiones. "
+                    "Corrige: " + ", ".join(errores_contrato) + "."
+                )
             if "isn" not in indices:
                 indices["isn"] = {
                     row["periodo"]: row["importe_pagado"]

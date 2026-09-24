@@ -176,6 +176,92 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertEqual(linea.metadata, {"captura": "humana"})
         self.assertEqual(summary.protegidas_manual, 1)
 
+    def test_isn_cfdi_full_clean_rechaza_dimensiones_no_corporativas(self):
+        rubro, _ = self.crear_linea(
+            concepto="ISN sucursal",
+            sucursal=self.sucursal,
+        )
+        regla = ReglaFuenteRubro(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            sucursal=self.otra_sucursal,
+            categoria_gasto=self.categoria,
+            centro_costo=self.centro,
+            filtros={"sucursal": "GVE01"},
+            modo_asignacion=ReglaFuenteRubro.MODO_CONTROL,
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            regla.full_clean()
+
+        mensaje = str(error.exception)
+        for dimension in (
+            "rubro.sucursal",
+            "regla.sucursal",
+            "categoria_gasto",
+            "centro_costo",
+            "filtros",
+            "CANONICA",
+        ):
+            self.assertIn(dimension, mensaje)
+
+    def test_isn_cfdi_invalida_insertada_sin_full_clean_no_publica(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN inválido directo",
+            sucursal=self.sucursal,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn()
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.fuente_real, "")
+        self.assertEqual(summary.actualizadas, 0)
+        self.assertEqual(len(summary.errores), 1)
+        self.assertIn("ISN_CFDI solo admite una regla corporativa", summary.errores[0])
+
+    def test_isn_cfdi_usa_identidad_global_y_evitar_doble_fuente(self):
+        rubro_a, _ = self.crear_linea(concepto="ISN corporativo A")
+        rubro_b, _ = self.crear_linea(concepto="ISN corporativo B")
+        primera = ReglaFuenteRubro.objects.create(
+            rubro=rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            )
+
+        self.assertTrue(primera.clave_fuente)
+        self.assertEqual(
+            primera.clave_fuente,
+            ReglaFuenteRubro(
+                rubro=rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            ).calcular_clave_fuente(),
+        )
+        self.assertEqual(
+            primera.clave_fuente,
+            ReglaFuenteRubro(
+                rubro=self.crear_linea(
+                    concepto="ISN inválido dimensionado",
+                    sucursal=self.sucursal,
+                )[0],
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+                sucursal=self.otra_sucursal,
+                categoria_gasto=self.categoria,
+                centro_costo=self.centro,
+                filtros={"dimension": "ignorada"},
+            ).calcular_clave_fuente(),
+        )
+
     def test_gasto_operativo_suma_solo_reales_del_periodo_categoria_y_sucursal(self):
         """GASTO_OPERATIVO ignora presupuesto, otros meses, categorías y sucursales."""
         rubro, linea = self.crear_linea(sucursal=self.sucursal)

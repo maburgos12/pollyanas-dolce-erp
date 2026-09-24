@@ -1071,9 +1071,33 @@ class ReglaFuenteRubro(models.Model):
     def sucursal_efectiva(self):
         return self.sucursal or self.rubro.sucursal
 
+    def errores_contrato_corporativo_isn(self) -> list[str]:
+        """Dimensiones prohibidas para la fuente fiscal corporativa de ISN."""
+        if self.tipo_fuente != self.FUENTE_ISN_CFDI:
+            return []
+        errores = []
+        if self.rubro_id and self.rubro.sucursal_id is not None:
+            errores.append("rubro.sucursal")
+        if self.sucursal_id is not None:
+            errores.append("regla.sucursal")
+        if self.categoria_gasto_id is not None:
+            errores.append("categoria_gasto")
+        if self.centro_costo_id is not None:
+            errores.append("centro_costo")
+        if self.filtros:
+            errores.append("filtros")
+        if self.modo_asignacion != self.MODO_CANONICA:
+            errores.append("modo_asignacion debe ser CANONICA")
+        return errores
+
     def calcular_clave_fuente(self) -> str:
         if not self.activa or self.tipo_fuente == self.FUENTE_MANUAL:
             return ""
+        if self.tipo_fuente == self.FUENTE_ISN_CFDI:
+            # Un expediente aplicado es un total corporativo único. Su identidad
+            # nunca depende del rubro ni de dimensiones que una escritura directa
+            # pudiera haber agregado sin ejecutar full_clean().
+            return hashlib.sha256(b"ISN_CFDI:CORPORATIVO").hexdigest()
         filtros = dict(self.filtros or {})
         filtros.pop("porcentaje", None)
         filtros.pop("desde", None)
@@ -1177,6 +1201,14 @@ class ReglaFuenteRubro(models.Model):
 
     def clean(self):
         super().clean()
+        errores_isn = self.errores_contrato_corporativo_isn()
+        if errores_isn:
+            raise ValidationError({
+                "tipo_fuente": (
+                    "ISN_CFDI solo admite una regla corporativa sin dimensiones. "
+                    "Corrige: " + ", ".join(errores_isn) + "."
+                )
+            })
         if (
             self.modo_asignacion == self.MODO_CANONICA
             and (self.filtros or {}).get("porcentaje") is not None

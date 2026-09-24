@@ -234,7 +234,11 @@ def build_personnel_plan(cutoff=None):
             ('imss', 'IMSS'), ('rcv', 'RCV/Infonavit'), ('isn', 'ISN'), ('fees', 'servicio de vales')
         ) if row[key] is not None]
         row['reconciled_components'] = (all(v is not None for v in components)
-                                         and row['cfdis'] > 0 and not row['errors'] and not unparsed)
+                                         and row['cfdis'] > 0 and not row['errors'] and not unparsed
+                                         and not any(
+                                             source.get('reconciled') is False
+                                             for source in row['sources']
+                                         ))
         row['ratio'] = (money(row['documented'] / row['sales'] * 100)
                         if row['sales'] and row['documented'] is not None else None)
         row['target'] = money(row['sales'] * Decimal('.25')) if row['sales'] else None
