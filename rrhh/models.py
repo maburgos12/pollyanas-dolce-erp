@@ -1243,6 +1243,18 @@ class JornadaSemanal(models.Model):
     vigencia_hasta = models.DateField(null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(vigencia_hasta__isnull=True)
+                    | Q(vigencia_desde__isnull=True)
+                    | Q(vigencia_hasta__gte=models.F("vigencia_desde"))
+                ),
+                name="rrhh_jornada_semanal_rango_valido",
+            ),
+        ]
+
     def __str__(self) -> str:
         return self.nombre
 

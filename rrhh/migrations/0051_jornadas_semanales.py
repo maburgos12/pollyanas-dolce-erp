@@ -52,6 +52,10 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.AddConstraint(
+            model_name='jornadasemanal',
+            constraint=models.CheckConstraint(check=models.Q(('vigencia_hasta__isnull', True), ('vigencia_desde__isnull', True), ('vigencia_hasta__gte', models.F('vigencia_desde')), _connector='OR'), name='rrhh_jornada_semanal_rango_valido'),
+        ),
+        migrations.AddConstraint(
             model_name='asignacionjornadaempleado',
             constraint=models.UniqueConstraint(fields=('empleado', 'fecha_inicio'), name='rrhh_jornada_empleado_inicio_unico'),
         ),
