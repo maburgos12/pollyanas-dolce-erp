@@ -9,17 +9,22 @@ from django.utils import timezone
 
 from rrhh.models import (
     AplicacionGoceVacaciones,
+    AsignacionJornadaEmpleado,
+    AsignacionTurnoEmpleado,
     AsistenciaEmpleado,
     Empleado,
     EmpleadoBaja,
     HoraExtra,
     IncidenciaAsistencia,
+    IncidenciaAsistenciaBitacora,
+    JornadaSemanal,
+    JornadaSemanalDia,
     PermisoSalida,
     PeriodoVacacional,
     SolicitudVacaciones,
     Turno,
 )
-from rrhh.services_asistencia_reglas import evaluar_dia_empleado
+from rrhh.services_asistencia_reglas import evaluar_dia_empleado, evaluar_rango_asistencia
 
 
 TZ = ZoneInfo("America/Mazatlan")
@@ -27,6 +32,186 @@ TZ = ZoneInfo("America/Mazatlan")
 
 def dt_local(fecha: date, hora: time) -> datetime:
     return datetime(fecha.year, fecha.month, fecha.day, hora.hour, hora.minute, tzinfo=TZ)
+
+
+class DescansoJornadaSemanalReglasTests(TestCase):
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            codigo="DESCANSO-REGLAS", nombre="Persona con descanso configurado",
+            fecha_ingreso=date(2026, 9, 1),
+        )
+        self.turno = Turno.objects.create(
+            nombre="Diurno descanso reglas", hora_entrada=time(8), hora_salida=time(16),
+            tolerancia_minutos=10,
+        )
+
+    def asignar_semana(self, *, descansos=(2, 6)):
+        jornada = JornadaSemanal.objects.create(nombre="Semana con miércoles y domingo libres")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia,
+                turno=None if dia in descansos else self.turno,
+            )
+        return AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Horario confirmado",
+        )
+
+    def test_descanso_sin_marcas_no_crea_falta_ni_extra_incluso_entre_semana(self):
+        self.asignar_semana()
+        for fecha in (date(2026, 9, 13), date(2026, 9, 9)):
+            with self.subTest(fecha=fecha):
+                resultado = evaluar_dia_empleado(self.empleado, fecha)
+                self.assertEqual(resultado.creados, 0)
+                self.assertFalse(IncidenciaAsistencia.objects.filter(
+                    empleado=self.empleado, fecha=fecha,
+                ).exists())
+                self.assertFalse(HoraExtra.objects.filter(empleado=self.empleado, fecha=fecha).exists())
+
+    def test_descanso_resuelve_falta_y_diagnostico_automaticos_sin_borrar_historial(self):
+        fecha = date(2026, 9, 9)
+        falta = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            detalle="Falta original para revisar",
+        )
+        diagnostico = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        )
+        manual = IncidenciaAsistencia.objects.create(
+            empleado=self.empleado, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_JORNADA_INCOMPLETA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            editado_manual=True,
+        )
+        self.asignar_semana()
+
+        primero = evaluar_dia_empleado(self.empleado, fecha)
+        segundo = evaluar_dia_empleado(self.empleado, fecha)
+
+        falta.refresh_from_db()
+        diagnostico.refresh_from_db()
+        manual.refresh_from_db()
+        self.assertEqual((primero.creados, primero.resueltos), (0, 2))
+        self.assertEqual((segundo.creados, segundo.resueltos), (0, 0))
+        self.assertEqual(falta.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+        self.assertEqual(diagnostico.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+        self.assertEqual(manual.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(IncidenciaAsistencia.objects.filter(empleado=self.empleado, fecha=fecha).count(), 3)
+        self.assertEqual(IncidenciaAsistenciaBitacora.objects.filter(
+            incidencia__in=[falta, diagnostico], campo="estado",
+        ).count(), 2)
+        self.assertIn("Falta original para revisar", IncidenciaAsistenciaBitacora.objects.get(
+            incidencia=falta, campo="estado",
+        ).comentario)
+
+    def test_descanso_con_marcas_conserva_asistencia_y_solicita_revision_sin_turno_ni_extra(self):
+        fecha = date(2026, 9, 9)
+        self.asignar_semana()
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=fecha, turno=self.turno,
+            entrada=dt_local(fecha, time(8)), salida=dt_local(fecha, time(12)),
+            minutos_trabajados=240,
+        )
+
+        primero = evaluar_dia_empleado(self.empleado, fecha)
+        segundo = evaluar_dia_empleado(self.empleado, fecha)
+
+        asistencia.refresh_from_db()
+        self.assertIsNone(asistencia.turno)
+        self.assertEqual(asistencia.entrada, dt_local(fecha, time(8)))
+        self.assertEqual(asistencia.salida, dt_local(fecha, time(12)))
+        self.assertEqual(primero.creados, 1)
+        self.assertEqual(segundo.creados, 0)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA,
+        ).exists())
+        diagnostico = IncidenciaAsistencia.objects.get(
+            empleado=self.empleado, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+        )
+        self.assertEqual(diagnostico.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertEqual(diagnostico.asistencia, asistencia)
+        self.assertEqual(diagnostico.metadata["motivo"], "descanso")
+        self.assertIn("descanso", diagnostico.detalle.lower())
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_sin_asignacion_y_legacy_conservan_reglas_previas(self):
+        lunes = date(2026, 9, 14)
+        sin_registro = evaluar_dia_empleado(self.empleado, lunes)
+        self.assertEqual(sin_registro.creados, 1)
+        self.assertTrue(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=lunes, tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        ).exists())
+
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.turno, fecha_inicio=date(2026, 9, 15),
+        )
+        martes = date(2026, 9, 15)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=martes, turno=self.turno,
+            entrada=dt_local(martes, time(8, 20)), salida=dt_local(martes, time(17)),
+            minutos_trabajados=520,
+        )
+        evaluar_dia_empleado(self.empleado, martes)
+        self.assertTrue(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=martes, tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        ).exists())
+        self.assertTrue(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_evaluacion_masiva_tambien_respeta_descanso(self):
+        self.asignar_semana()
+        fecha = date(2026, 9, 9)
+        resultado = evaluar_rango_asistencia(fecha, fecha, empleados=[self.empleado])
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha,
+        ).exists())
+
+    def test_domingo_laborable_semanal_sin_asistencia_genera_falta(self):
+        self.asignar_semana(descansos=(2,))
+        fecha = date(2026, 9, 13)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 1)
+        self.assertTrue(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_FALTA,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        ).exists())
+
+    def test_dia_laborable_semanal_conserva_turno_y_extra(self):
+        self.asignar_semana()
+        fecha = date(2026, 9, 14)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=fecha, turno=self.turno,
+            entrada=dt_local(fecha, time(8)), salida=dt_local(fecha, time(17)),
+            minutos_trabajados=540,
+        )
+
+        evaluar_dia_empleado(self.empleado, fecha)
+
+        asistencia.refresh_from_db()
+        self.assertEqual(asistencia.turno, self.turno)
+        self.assertTrue(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_legacy_domingo_sin_asistencia_conserva_excepcion_del_calendario(self):
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.turno, fecha_inicio=date(2026, 9, 1),
+        )
+        fecha = date(2026, 9, 13)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha,
+        ).exists())
 
 
 class ReglasAsistenciaRRHHTests(TestCase):
