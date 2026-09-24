@@ -1235,6 +1235,93 @@ class AsignacionTurnoEmpleado(models.Model):
         return f"{self.empleado} · {self.turno} desde {self.fecha_inicio}"
 
 
+class JornadaSemanal(models.Model):
+    nombre = models.CharField(max_length=100, unique=True)
+    descripcion = models.CharField(max_length=240, blank=True, default="")
+    activo = models.BooleanField(default=True, db_index=True)
+    vigencia_desde = models.DateField(null=True, blank=True)
+    vigencia_hasta = models.DateField(null=True, blank=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    Q(vigencia_hasta__isnull=True)
+                    | Q(vigencia_desde__isnull=True)
+                    | Q(vigencia_hasta__gte=models.F("vigencia_desde"))
+                ),
+                name="rrhh_jornada_semanal_rango_valido",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
+
+
+class JornadaSemanalDia(models.Model):
+    jornada = models.ForeignKey(JornadaSemanal, on_delete=models.CASCADE, related_name="dias")
+    dia_semana = models.PositiveSmallIntegerField()
+    turno = models.ForeignKey(
+        Turno, on_delete=models.PROTECT, null=True, blank=True, related_name="jornadas_dia"
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["jornada", "dia_semana"], name="rrhh_jornada_dia_unico"
+            ),
+            models.CheckConstraint(
+                check=Q(dia_semana__gte=0) & Q(dia_semana__lte=6),
+                name="rrhh_jornada_dia_valido",
+            ),
+        ]
+
+
+class AsignacionJornadaEmpleado(models.Model):
+    empleado = models.ForeignKey(
+        "rrhh.Empleado", on_delete=models.CASCADE, related_name="jornadas_asignadas"
+    )
+    jornada = models.ForeignKey(
+        JornadaSemanal, on_delete=models.PROTECT, related_name="asignaciones"
+    )
+    fecha_inicio = models.DateField()
+    fecha_fin = models.DateField(null=True, blank=True)
+    motivo = models.CharField(max_length=200)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="jornadas_empleado_creadas",
+    )
+    proteger_reingesta_historica = models.BooleanField(default=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-fecha_inicio", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["empleado", "fecha_inicio"],
+                name="rrhh_jornada_empleado_inicio_unico",
+            ),
+            models.CheckConstraint(
+                check=Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=models.F("fecha_inicio")),
+                name="rrhh_jornada_empleado_rango_valido",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if not self.empleado_id or not self.fecha_inicio:
+            return
+        solapadas = type(self).objects.filter(empleado_id=self.empleado_id).exclude(pk=self.pk)
+        solapadas = solapadas.filter(
+            Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=self.fecha_inicio)
+        )
+        if self.fecha_fin:
+            solapadas = solapadas.filter(fecha_inicio__lte=self.fecha_fin)
+        if solapadas.exists():
+            raise ValidationError("Ya existe una jornada asignada a esta persona dentro de la vigencia.")
+
+
 class AvisoCumpleanos(models.Model):
     """Bitácora persistente; aceptar un correo no prueba su entrega al buzón."""
 

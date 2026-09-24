@@ -5,7 +5,7 @@
 {% block page_title %}RRHH · Empleados{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales-v4">
 {% endblock %}
 
 {% block content %}
@@ -208,7 +208,7 @@
   {% endif %}
 
   <section class="rrhh-layout">
-    <article class="rrhh-card">
+    <article class="rrhh-card" id="alta-empleado">
       <div class="rrhh-card-header">
         <div>
           <div class="rrhh-card-title">Alta de empleado</div>
@@ -217,7 +217,7 @@
       </div>
       <div class="rrhh-card-body">
         {% if can_manage_rrhh %}
-        <form method="post" enctype="multipart/form-data" data-has-user="false">
+        <form method="post" enctype="multipart/form-data" data-has-user="false" data-async-action data-reset-on-success="false">
           {% csrf_token %}
           <input type="hidden" name="action" value="create">
           {% if alta_pendiente_seleccionada %}
@@ -230,20 +230,20 @@
             </div>
             <div class="rrhh-field">
               <label for="codigo">Código de empleado / ID checador</label>
-              <input id="codigo" class="input-field" type="text" name="codigo" autocomplete="off">
+              <input id="codigo" class="input-field" type="text" name="codigo" value="{{ alta_prefill.codigo|default:'' }}" autocomplete="off">
               <div class="rrhh-help">Debe coincidir con el número usado en nómina y checador.</div>
             </div>
             <div class="rrhh-field">
               <label for="rfc">RFC</label>
-              <input id="rfc" class="input-field" type="text" name="rfc">
+              <input id="rfc" class="input-field" type="text" name="rfc" value="{{ alta_prefill.rfc|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="curp">CURP</label>
-              <input id="curp" class="input-field" type="text" name="curp">
+              <input id="curp" class="input-field" type="text" name="curp" value="{{ alta_prefill.curp|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="nss">NSS / IMSS</label>
-              <input id="nss" class="input-field" type="text" name="nss">
+              <input id="nss" class="input-field" type="text" name="nss" value="{{ alta_prefill.nss|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="area">Área / división</label>
@@ -310,7 +310,8 @@
                 {% for jefe in empleados_jefes %}
                   <option value="{{ jefe.id }}"
                           data-departamento="{{ jefe.departamento|default_if_none:'' }}"
-                          data-nivel="{{ jefe.nivel_organizacional|default_if_none:'' }}">{{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}</option>
+                          data-nivel="{{ jefe.nivel_organizacional|default_if_none:'' }}"
+                          {% if alta_prefill.jefe_directo == jefe.id|stringformat:'s' %}selected{% endif %}>{{ jefe.nombre }}{% if jefe.departamento %} · {{ jefe.get_departamento_display }}{% endif %}</option>
                 {% endfor %}
               </select>
             </div>
@@ -318,7 +319,7 @@
               <label for="tipo_personal">Tipo de personal</label>
               <select id="tipo_personal" class="input-field" name="tipo_personal">
                 {% for value,label in tipo_personal_choices %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if alta_prefill.tipo_personal == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -326,7 +327,7 @@
               <label for="tipo_contrato">Contrato</label>
               <select id="tipo_contrato" class="input-field" name="tipo_contrato">
                 {% for value,label in contrato_choices %}
-                <option value="{{ value }}">{{ label }}</option>
+                <option value="{{ value }}" {% if alta_prefill.tipo_contrato == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -334,9 +335,31 @@
               <label for="fecha_ingreso">Ingreso</label>
               <input id="fecha_ingreso" class="input-field" type="date" name="fecha_ingreso" value="{{ alta_prefill.fecha_ingreso|default:'' }}">
             </div>
+            <fieldset class="rrhh-jornada span-2" data-jornada-form data-jornada-alta>
+              <legend>Jornada semanal</legend>
+              <input type="hidden" name="jornada_gestion_presente" value="1">
+              <div class="rrhh-jornada-fields">
+                <div class="rrhh-field">
+                  <label for="jornada-semanal-alta">Perfil semanal</label>
+                  <select id="jornada-semanal-alta" class="input-field" name="jornada_id" data-jornada-select>
+                    <option value="">Sin jornada asignada</option>
+                    {% for jornada in jornadas_semanales %}<option value="{{ jornada.id }}" {% if alta_prefill.jornada_id == jornada.id|stringformat:'s' %}selected{% endif %}>{{ jornada.nombre }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div class="rrhh-field">
+                  <label for="jornada-fecha-alta">Inicio de vigencia</label>
+                  <input id="jornada-fecha-alta" class="input-field" type="date" name="jornada_fecha_inicio" value="{{ alta_prefill_jornada_fecha }}" data-jornada-fecha>
+                </div>
+                <div class="rrhh-field rrhh-jornada-motivo">
+                  <label for="jornada-motivo-alta">Motivo de asignación</label>
+                  <input id="jornada-motivo-alta" class="input-field" type="text" name="jornada_motivo" maxlength="200" value="{{ alta_prefill.jornada_motivo|default:'' }}" data-jornada-motivo>
+                </div>
+              </div>
+              <div class="rrhh-jornada-preview" aria-live="polite" data-jornada-preview></div>
+            </fieldset>
             <div class="rrhh-field">
               <label for="salario_diario">Salario diario</label>
-              <input id="salario_diario" class="input-field" type="number" min="0" step="0.01" name="salario_diario">
+              <input id="salario_diario" class="input-field" type="number" min="0" step="0.01" name="salario_diario" value="{{ alta_prefill.salario_diario|default:'' }}">
             </div>
             <div class="rrhh-field">
               <label for="telefono">Teléfono</label>
@@ -361,7 +384,7 @@
                 <div class="rrhh-help">El usuario se crea desde esta alta para evitar cuentas sueltas sin empleado.</div>
               </div>
               <label class="rrhh-checkline">
-                <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
+                <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle {% if alta_form_draft.crear_usuario_erp == 'on' %}checked{% endif %}>
                 Crear usuario y contraseña para este empleado
               </label>
             </div>
@@ -370,7 +393,7 @@
             </div>
             <div class="rrhh-field" data-new-user-field hidden>
               <label for="nuevo_usuario_username">Usuario nuevo</label>
-              <input id="nuevo_usuario_username" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
+              <input id="nuevo_usuario_username" class="input-field" type="text" name="nuevo_usuario_username" value="{{ alta_prefill.nuevo_usuario_username|default:'' }}" autocomplete="off">
             </div>
             <div class="rrhh-field" data-new-user-field hidden>
               <label for="nuevo_usuario_password">Contraseña temporal</label>
@@ -381,7 +404,7 @@
               <select id="sucursal_app_id" class="input-field" name="sucursal_app_id">
                 <option value="">Sin sucursal</option>
                 {% for s in sucursales_app %}
-                  <option value="{{ s.id }}">{{ s.nombre }}</option>
+                  <option value="{{ s.id }}"{% if alta_prefill.sucursal_app_id == s.id|stringformat:'s' %} selected{% endif %}>{{ s.nombre }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps móviles y capturas.</div>
@@ -390,7 +413,7 @@
               <label for="logistica_tipo_identidad">Acceso logística / unidades</label>
               <select id="logistica_tipo_identidad" class="input-field" name="logistica_tipo_identidad" data-logistics-access>
                 {% for value,label in logistica_tipo_identidad_choices %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if alta_prefill.logistica_tipo_identidad == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
               <div class="rrhh-help">Al seleccionar acceso se abre la captura de licencia y autorización.</div>
@@ -411,23 +434,23 @@
                 <div class="rrhh-form-grid">
                 <div class="rrhh-field">
                   <label for="motivo_autorizacion">Motivo de autorización</label>
-                  <input id="motivo_autorizacion" class="input-field" type="text" name="motivo_autorizacion">
+                  <input id="motivo_autorizacion" class="input-field" type="text" name="motivo_autorizacion" value="{{ alta_prefill.motivo_autorizacion|default:'' }}">
                 </div>
                 <div class="rrhh-field">
                   <label for="autorizado_por">Autorizado por</label>
-                  <input id="autorizado_por" class="input-field" type="text" name="autorizado_por">
+                  <input id="autorizado_por" class="input-field" type="text" name="autorizado_por" value="{{ alta_prefill.autorizado_por|default:'' }}">
                 </div>
                 <div class="rrhh-field">
                   <label for="numero_licencia">Número de licencia</label>
-                  <input id="numero_licencia" class="input-field" type="text" name="numero_licencia">
+                  <input id="numero_licencia" class="input-field" type="text" name="numero_licencia" value="{{ alta_prefill.numero_licencia|default:'' }}">
                 </div>
                 <div class="rrhh-field">
                   <label for="licencia_expedicion">Expedición</label>
-                  <input id="licencia_expedicion" class="input-field" type="date" name="licencia_expedicion">
+                  <input id="licencia_expedicion" class="input-field" type="date" name="licencia_expedicion" value="{{ alta_prefill.licencia_expedicion|default:'' }}">
                 </div>
                 <div class="rrhh-field">
                   <label for="licencia_expiracion">Vencimiento</label>
-                  <input id="licencia_expiracion" class="input-field" type="date" name="licencia_expiracion">
+                  <input id="licencia_expiracion" class="input-field" type="date" name="licencia_expiracion" value="{{ alta_prefill.licencia_expiracion|default:'' }}">
                 </div>
                 <div class="rrhh-field">
                   <label for="archivo_licencia">Archivo licencia</label>
@@ -435,7 +458,7 @@
                 </div>
                 <div class="rrhh-field span-2">
                   <label for="notas_identidad">Notas de logística</label>
-                  <textarea id="notas_identidad" class="input-field" name="notas_identidad" rows="2"></textarea>
+                  <textarea id="notas_identidad" class="input-field" name="notas_identidad" rows="2">{{ alta_prefill.notas_identidad|default:'' }}</textarea>
                 </div>
                 </div>
                 <div class="rrhh-actions">
@@ -451,7 +474,7 @@
               <div class="rrhh-bonus-options">
                 {% for esquema in bono_esquemas %}
                 <label class="rrhh-checkline">
-                  <input type="checkbox" name="bono_esquemas" value="{{ esquema.id }}" data-bonus-code="{{ esquema.codigo }}">
+                  <input type="checkbox" name="bono_esquemas" value="{{ esquema.id }}" data-bonus-code="{{ esquema.codigo }}" {% if esquema.id|stringformat:'s' in alta_form_draft.bono_esquemas %}checked{% endif %}>
                   {{ esquema.nombre }}
                 </label>
                 {% endfor %}
@@ -460,10 +483,10 @@
                 <span class="muted">¿Otro departamento o esquema?</span>
                 <button class="btn btn-secondary" type="button" data-bonus-other-open>Agregar esquema de bono</button>
               </div>
-              <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
-              <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
-              <input type="hidden" name="bono_esquema_otro_area" data-bonus-other="area">
-              <input type="hidden" name="bono_esquema_otro_descripcion" data-bonus-other="descripcion">
+              <input type="hidden" name="bono_esquema_otro_nombre" value="{{ alta_prefill.bono_esquema_otro_nombre|default:'' }}" data-bonus-other="nombre">
+              <input type="hidden" name="bono_esquema_otro_departamento" value="{{ alta_prefill.bono_esquema_otro_departamento|default:'' }}" data-bonus-other="departamento">
+              <input type="hidden" name="bono_esquema_otro_area" value="{{ alta_prefill.bono_esquema_otro_area|default:'' }}" data-bonus-other="area">
+              <input type="hidden" name="bono_esquema_otro_descripcion" value="{{ alta_prefill.bono_esquema_otro_descripcion|default:'' }}" data-bonus-other="descripcion">
             </div>
             <input type="hidden" name="participa_bonos_ventas" data-legacy-bonus="VENTAS">
             <input type="hidden" name="participa_bonos_produccion" data-legacy-bonus="PRODUCCION">
@@ -652,7 +675,7 @@
   </section>
   {% endif %}
 
-  <section class="rrhh-card">
+  <section class="rrhh-card" id="catalogo-empleados">
     <div class="rrhh-card-header">
       <div>
         <div class="rrhh-card-title">Catálogo de empleados</div>
@@ -705,6 +728,7 @@
               <td class="cell-wrap">
                 <div class="rrhh-employee-name">{{ e.nombre }}</div>
                 <div class="rrhh-employee-code">{{ e.codigo }}</div>
+                <div class="rrhh-employee-jornada">{% if e.jornada_vigente %}{{ e.jornada_vigente.jornada.nombre }}{% else %}Sin jornada asignada{% endif %}</div>
               </td>
               <td class="cell-nowrap">{{ e.rfc|default:"-" }}</td>
               <td class="cell-nowrap">{{ e.curp|default:"-" }}</td>
@@ -739,12 +763,34 @@
                 {% endif %}
               </td>
             </tr>
-            {% if can_manage_rrhh %}
-            <tr class="rrhh-edit-row">
-              <td colspan="14">
-                <details class="rrhh-edit-panel">
-                  <summary>Editar {{ e.nombre }}</summary>
-                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data" data-has-user="{% if e.usuario_erp_id %}true{% else %}false{% endif %}">
+            <tr class="rrhh-edit-row" id="empleado-{{ e.id }}">
+              <td colspan="15">
+                {% with e.form_values|default:e as e %}
+                <details class="rrhh-edit-panel" {% if ficha_error_empleado_id == e.id or open_employee_id == e.id %}open{% endif %}>
+                  <summary>{% if can_manage_rrhh %}Editar{% else %}Ver jornada de{% endif %} {{ e.nombre }}</summary>
+                  <section class="rrhh-jornada-current" tabindex="-1" aria-label="Jornada semanal actual">
+                    <h3>Jornada semanal</h3>
+                    {% if e.jornada_vigente %}
+                      <strong>{{ e.jornada_vigente.jornada.nombre }}</strong>
+                      <span>Vigente desde {{ e.jornada_vigente.fecha_inicio|date:'d/m/Y' }}{% if e.jornada_vigente.fecha_fin %} hasta {{ e.jornada_vigente.fecha_fin|date:'d/m/Y' }}{% endif %}</span>
+                      <ul class="rrhh-jornada-week">{% for dia in e.jornada_vigente.resumen.dias_resumen %}<li><span>{{ dia.nombre }}</span><span>{{ dia.horario }}</span></li>{% endfor %}</ul>
+                      <strong>{{ e.jornada_vigente.resumen.total_texto }}</strong>
+                    {% else %}<strong>Sin jornada asignada</strong>{% endif %}
+                  </section>
+                  <details class="rrhh-jornada-history">
+                    <summary>Historial de jornadas ({{ e.jornada_historial|length }})</summary>
+                    {% for asignacion in e.jornada_historial %}
+                    <div class="rrhh-jornada-history-row">
+                      <strong>{{ asignacion.jornada.nombre }}</strong>
+                      <span>{{ asignacion.fecha_inicio|date:'d/m/Y' }} – {% if asignacion.fecha_fin %}{{ asignacion.fecha_fin|date:'d/m/Y' }}{% else %}actualidad{% endif %}</span>
+                      <span>{{ asignacion.resumen.total_texto }}</span>
+                      <span>{{ asignacion.motivo }}</span>
+                      {% if asignacion.creado_por %}<span>Registró: {{ asignacion.creado_por.get_full_name|default:asignacion.creado_por.username }}</span>{% endif %}
+                    </div>
+                    {% empty %}<p>Sin asignaciones registradas.</p>{% endfor %}
+                  </details>
+                  {% if can_manage_rrhh %}
+                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data" data-has-user="{% if e.usuario_erp_id %}true{% else %}false{% endif %}" data-async-action data-reset-on-success="false">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update">
                     <input type="hidden" name="empleado_id" value="{{ e.id }}">
@@ -875,6 +921,30 @@
                         <label for="edit_ingreso_{{ e.id }}">Ingreso</label>
                         <input id="edit_ingreso_{{ e.id }}" class="input-field" type="date" name="fecha_ingreso" value="{{ e.fecha_ingreso|date:'Y-m-d' }}">
                       </div>
+                      <fieldset class="rrhh-jornada span-2" data-jornada-form>
+                        <legend>Cambiar jornada</legend>
+                        <input type="hidden" name="jornada_gestion_presente" value="1">
+                        <div class="rrhh-jornada-fields">
+                          <div class="rrhh-field">
+                            <label for="jornada-semanal-{{ e.id }}">Perfil semanal</label>
+                            <select id="jornada-semanal-{{ e.id }}" class="input-field" name="jornada_id" data-jornada-select>
+                              <option value="">Sin jornada asignada</option>
+                              {% for jornada in jornadas_semanales %}<option value="{{ jornada.id }}" {% if e.form_draft.jornada_id == jornada.id|stringformat:'s' or not e.form_draft and e.jornada_vigente.jornada_id == jornada.id %}selected{% endif %}>{{ jornada.nombre }}</option>{% endfor %}
+                              {% if e.jornada_inactiva_preview %}<option value="{{ e.jornada_inactiva_preview.id }}" {% if e.form_draft.jornada_id == e.jornada_inactiva_preview.id|stringformat:'s' or not e.form_draft %}selected{% endif %}>{{ e.jornada_vigente.jornada.nombre }} (inactiva · solo conservar)</option>{% endif %}
+                            </select>
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="jornada-fecha-{{ e.id }}">Inicio del cambio</label>
+                            <input id="jornada-fecha-{{ e.id }}" class="input-field" type="date" name="jornada_fecha_inicio" value="{{ e.form_draft.jornada_fecha_inicio|default:'' }}" data-jornada-fecha>
+                          </div>
+                          <div class="rrhh-field rrhh-jornada-motivo">
+                            <label for="jornada-motivo-{{ e.id }}">Motivo del cambio o cierre</label>
+                            <input id="jornada-motivo-{{ e.id }}" class="input-field" type="text" name="jornada_motivo" maxlength="200" value="{{ e.form_draft.jornada_motivo|default:'' }}" data-jornada-motivo>
+                          </div>
+                        </div>
+                        {% if e.jornada_inactiva_preview %}{{ e.jornada_inactiva_preview|json_script:e.jornada_inactiva_script_id }}{% endif %}
+                        <div class="rrhh-jornada-preview" aria-live="polite" data-jornada-preview></div>
+                      </fieldset>
                       <div class="rrhh-field">
                         <label for="edit_salario_{{ e.id }}">Salario diario</label>
                         <input id="edit_salario_{{ e.id }}" class="input-field" type="number" min="0" step="0.01" name="salario_diario" value="{{ e.salario_diario }}">
@@ -907,7 +977,7 @@
                         </div>
                         {% if not e.usuario_erp_id %}
                         <label class="rrhh-checkline">
-                          <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle>
+                          <input type="checkbox" name="crear_usuario_erp" data-create-user-toggle {% if e.form_draft.crear_usuario_erp == 'on' %}checked{% endif %}>
                           Crear usuario y contraseña para este empleado
                         </label>
                         {% endif %}
@@ -918,7 +988,7 @@
                       {% if not e.usuario_erp_id %}
                       <div class="rrhh-field" data-new-user-field hidden>
                         <label for="edit_nuevo_usuario_username_{{ e.id }}">Usuario nuevo</label>
-                        <input id="edit_nuevo_usuario_username_{{ e.id }}" class="input-field" type="text" name="nuevo_usuario_username" autocomplete="off">
+                        <input id="edit_nuevo_usuario_username_{{ e.id }}" class="input-field" type="text" name="nuevo_usuario_username" value="{{ e.form_draft.nuevo_usuario_username|default:'' }}" autocomplete="off">
                       </div>
                       <div class="rrhh-field" data-new-user-field hidden>
                         <label for="edit_nuevo_usuario_password_{{ e.id }}">Contraseña temporal</label>
@@ -930,7 +1000,7 @@
                         <select id="edit_sucursal_app_{{ e.id }}" class="input-field" name="sucursal_app_id">
                           <option value="">— Sin sucursal —</option>
                           {% for s in sucursales_app %}
-                          <option value="{{ s.id }}" {% if e.usuario_erp_id and e.usuario_erp.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                          <option value="{{ s.id }}" {% if e.form_draft and e.form_sucursal_app_id == s.id|stringformat:'s' or not e.form_draft and e.usuario_erp_id and e.usuario_erp.userprofile.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
                           {% endfor %}
                         </select>
                         <div class="rrhh-help">Define desde qué sucursal opera el usuario en apps de captura (mermas, recepción, etc.).</div>
@@ -940,9 +1010,11 @@
                         <select id="edit_logistica_tipo_identidad_{{ e.id }}" class="input-field" name="logistica_tipo_identidad" data-logistics-access>
                           {% for value,label in logistica_tipo_identidad_choices %}
                             <option value="{{ value }}"
-                              {% if e.repartidor_logistica and e.repartidor_logistica.tipo_identidad == value %}
+                              {% if e.form_draft and e.form_draft.logistica_tipo_identidad == value %}
                                 selected
-                              {% elif not e.repartidor_logistica and e.puesto_operativo == 'REPARTIDOR' and value == 'empleado_dolce' %}
+                              {% elif not e.form_draft and e.repartidor_logistica and e.repartidor_logistica.tipo_identidad == value %}
+                                selected
+                              {% elif not e.form_draft and not e.repartidor_logistica and e.puesto_operativo == 'REPARTIDOR' and value == 'empleado_dolce' %}
                                 selected
                               {% endif %}>{{ label }}</option>
                           {% endfor %}
@@ -965,23 +1037,23 @@
                           <div class="rrhh-form-grid">
                           <div class="rrhh-field">
                             <label for="edit_motivo_autorizacion_{{ e.id }}">Motivo de autorización</label>
-                            <input id="edit_motivo_autorizacion_{{ e.id }}" class="input-field" type="text" name="motivo_autorizacion" value="{{ e.repartidor_logistica.motivo_autorizacion|default:'' }}">
+                            <input id="edit_motivo_autorizacion_{{ e.id }}" class="input-field" type="text" name="motivo_autorizacion" value="{% if e.form_draft %}{{ e.form_draft.motivo_autorizacion }}{% else %}{{ e.repartidor_logistica.motivo_autorizacion|default:'' }}{% endif %}">
                           </div>
                           <div class="rrhh-field">
                             <label for="edit_autorizado_por_{{ e.id }}">Autorizado por</label>
-                            <input id="edit_autorizado_por_{{ e.id }}" class="input-field" type="text" name="autorizado_por" value="{{ e.repartidor_logistica.autorizado_por|default:'' }}">
+                            <input id="edit_autorizado_por_{{ e.id }}" class="input-field" type="text" name="autorizado_por" value="{% if e.form_draft %}{{ e.form_draft.autorizado_por }}{% else %}{{ e.repartidor_logistica.autorizado_por|default:'' }}{% endif %}">
                           </div>
                           <div class="rrhh-field">
                             <label for="edit_numero_licencia_{{ e.id }}">Número de licencia</label>
-                            <input id="edit_numero_licencia_{{ e.id }}" class="input-field" type="text" name="numero_licencia" value="{{ e.repartidor_logistica.numero_licencia|default:'' }}">
+                            <input id="edit_numero_licencia_{{ e.id }}" class="input-field" type="text" name="numero_licencia" value="{% if e.form_draft %}{{ e.form_draft.numero_licencia }}{% else %}{{ e.repartidor_logistica.numero_licencia|default:'' }}{% endif %}">
                           </div>
                           <div class="rrhh-field">
                             <label for="edit_licencia_expedicion_{{ e.id }}">Expedición</label>
-                            <input id="edit_licencia_expedicion_{{ e.id }}" class="input-field" type="date" name="licencia_expedicion" value="{{ e.repartidor_logistica.licencia_expedicion|date:'Y-m-d' }}">
+                            <input id="edit_licencia_expedicion_{{ e.id }}" class="input-field" type="date" name="licencia_expedicion" value="{% if e.form_draft %}{{ e.form_draft.licencia_expedicion }}{% else %}{{ e.repartidor_logistica.licencia_expedicion|date:'Y-m-d' }}{% endif %}">
                           </div>
                           <div class="rrhh-field">
                             <label for="edit_licencia_expiracion_{{ e.id }}">Vencimiento</label>
-                            <input id="edit_licencia_expiracion_{{ e.id }}" class="input-field" type="date" name="licencia_expiracion" value="{{ e.repartidor_logistica.licencia_expiracion|date:'Y-m-d' }}">
+                            <input id="edit_licencia_expiracion_{{ e.id }}" class="input-field" type="date" name="licencia_expiracion" value="{% if e.form_draft %}{{ e.form_draft.licencia_expiracion }}{% else %}{{ e.repartidor_logistica.licencia_expiracion|date:'Y-m-d' }}{% endif %}">
                           </div>
                           <div class="rrhh-field">
                             <label for="edit_archivo_licencia_{{ e.id }}">Archivo licencia</label>
@@ -989,7 +1061,7 @@
                           </div>
                           <div class="rrhh-field span-2">
                             <label for="edit_notas_identidad_{{ e.id }}">Notas de logística</label>
-                            <textarea id="edit_notas_identidad_{{ e.id }}" class="input-field" name="notas_identidad" rows="2">{{ e.repartidor_logistica.notas_identidad|default:'' }}</textarea>
+                            <textarea id="edit_notas_identidad_{{ e.id }}" class="input-field" name="notas_identidad" rows="2">{% if e.form_draft %}{{ e.form_draft.notas_identidad }}{% else %}{{ e.repartidor_logistica.notas_identidad|default:'' }}{% endif %}</textarea>
                           </div>
                           </div>
                           <div class="rrhh-actions">
@@ -1022,20 +1094,21 @@
                           <span class="muted">¿Otro departamento o esquema?</span>
                           <button class="btn btn-secondary" type="button" data-bonus-other-open>Agregar esquema de bono</button>
                         </div>
-                        <input type="hidden" name="bono_esquema_otro_nombre" data-bonus-other="nombre">
-                        <input type="hidden" name="bono_esquema_otro_departamento" data-bonus-other="departamento">
-                        <input type="hidden" name="bono_esquema_otro_area" data-bonus-other="area">
-                        <input type="hidden" name="bono_esquema_otro_descripcion" data-bonus-other="descripcion">
+                        <input type="hidden" name="bono_esquema_otro_nombre" value="{{ e.form_draft.bono_esquema_otro_nombre|default:'' }}" data-bonus-other="nombre">
+                        <input type="hidden" name="bono_esquema_otro_departamento" value="{{ e.form_draft.bono_esquema_otro_departamento|default:'' }}" data-bonus-other="departamento">
+                        <input type="hidden" name="bono_esquema_otro_area" value="{{ e.form_draft.bono_esquema_otro_area|default:'' }}" data-bonus-other="area">
+                        <input type="hidden" name="bono_esquema_otro_descripcion" value="{{ e.form_draft.bono_esquema_otro_descripcion|default:'' }}" data-bonus-other="descripcion">
                       </div>
                     </div>
                     <div class="rrhh-actions">
                       <button class="btn btn-primary btn-small" type="submit">Guardar cambios</button>
                     </div>
                   </form>
+                  {% endif %}
                 </details>
+                {% endwith %}
               </td>
             </tr>
-            {% endif %}
             {% empty %}
             <tr><td colspan="15" class="muted">Sin empleados para este filtro.</td></tr>
             {% endfor %}
@@ -1082,8 +1155,89 @@
   </div>
 </dialog>
 
+{{ jornadas_catalogo|json_script:"rrhh-jornadas-catalogo" }}
 <script>
 (() => {
+  function revealAnchoredEmployee() {
+    const hash = window.location.hash;
+    if (!/^#empleado-\d+$/.test(hash)) return;
+    const row = document.getElementById(hash.slice(1));
+    const panel = row?.querySelector('.rrhh-edit-panel');
+    const jornada = panel?.querySelector('.rrhh-jornada-current');
+    if (!jornada) return;
+    panel.open = true;
+    requestAnimationFrame(() => {
+      if (window.location.hash !== hash) return;
+      jornada.focus({ preventScroll: true });
+      jornada.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  }
+  window.addEventListener('pageshow', revealAnchoredEmployee);
+  window.addEventListener('hashchange', revealAnchoredEmployee);
+
+  const catalogoNode = document.getElementById('rrhh-jornadas-catalogo');
+  const jornadas = new Map((catalogoNode ? JSON.parse(catalogoNode.textContent) : []).map(jornada => [String(jornada.id), jornada]));
+  const mensajeSinJornada = 'Sin jornada asignada. La asistencia y las horas extra pueden quedar no calculables.';
+
+  function renderJornadaPreview(fieldset) {
+    const select = fieldset.querySelector('[data-jornada-select]');
+    const preview = fieldset.querySelector('[data-jornada-preview]');
+    const localNode = fieldset.querySelector('script[type="application/json"]');
+    const vigenteInactiva = localNode ? JSON.parse(localNode.textContent) : null;
+    const jornada = jornadas.get(select.value) || (
+      vigenteInactiva && String(vigenteInactiva.id) === select.value ? vigenteInactiva : null
+    );
+    preview.replaceChildren();
+    if (!jornada) {
+      const aviso = document.createElement('p');
+      aviso.className = 'rrhh-jornada-warning';
+      aviso.textContent = mensajeSinJornada;
+      preview.appendChild(aviso);
+      return;
+    }
+    const total = document.createElement('strong');
+    total.className = 'rrhh-jornada-total';
+    total.textContent = jornada.total_texto;
+    preview.appendChild(total);
+    const week = document.createElement('ul');
+    week.className = 'rrhh-jornada-week';
+    jornada.dias_resumen.forEach(dia => {
+      const row = document.createElement('li');
+      const nombre = document.createElement('span');
+      const horario = document.createElement('span');
+      nombre.textContent = dia.nombre;
+      horario.textContent = dia.horario;
+      row.append(nombre, horario);
+      week.appendChild(row);
+    });
+    preview.appendChild(week);
+  }
+
+  document.querySelectorAll('[data-jornada-form]').forEach(fieldset => {
+    const select = fieldset.querySelector('[data-jornada-select]');
+    const fecha = fieldset.querySelector('[data-jornada-fecha]');
+    const motivo = fieldset.querySelector('[data-jornada-motivo]');
+    const initialValue = select.value;
+    const alta = fieldset.hasAttribute('data-jornada-alta');
+    const ingreso = alta ? fieldset.closest('form').querySelector('[name="fecha_ingreso"]') : null;
+    let fechaEditada = Boolean(alta && fecha.value && ingreso && fecha.value !== ingreso.value);
+    const syncRequired = () => {
+      const hayCambio = alta ? Boolean(select.value) : (
+        select.value !== initialValue || Boolean(fecha.value) || Boolean(motivo.value.trim())
+      );
+      fecha.required = hayCambio && !alta;
+      motivo.required = hayCambio;
+    };
+    select.addEventListener('change', () => { renderJornadaPreview(fieldset); syncRequired(); });
+    fecha.addEventListener('input', () => { fechaEditada = true; syncRequired(); });
+    motivo.addEventListener('input', syncRequired);
+    if (ingreso) ingreso.addEventListener('input', () => {
+      if (!fechaEditada) fecha.value = ingreso.value;
+    });
+    renderJornadaPreview(fieldset);
+    syncRequired();
+  });
+
   const tableShells = Array.from(document.querySelectorAll('.rrhh-employee-table-shell'));
   const syncTableShellWidth = (shell) => {
     shell.style.setProperty('--rrhh-table-viewport', `${shell.clientWidth}px`);

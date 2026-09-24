@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from copy import copy
 from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Prefetch, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -27,6 +29,7 @@ from core.models import Sucursal
 
 from .models import (
     AsistenciaEmpleado,
+    AsignacionJornadaEmpleado,
     AltaPendienteEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -36,6 +39,8 @@ from .models import (
     HoraExtra,
     ImportacionChecador,
     IncapacidadEmpleado,
+    JornadaSemanal,
+    JornadaSemanalDia,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -76,6 +81,7 @@ from .services_horas_extra_autorizacion import ajustar_hora_extra_pendiente, res
 from .services_horas_extra_jefatura import (
     jefatura_hora_extra_actualizada, sincronizar_jefe_horas_extra_pendientes,
 )
+from .services_jornadas_empleado import aplicar_jornada_desde_post
 from .services_extra_bloqueos import JornadaExtraConflict
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
@@ -219,9 +225,10 @@ def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], 
 def _resolver_sucursal_desde_post(post_data) -> Sucursal | None:
     sucursal_id = (post_data.get("sucursal_id") or "").strip()
     if sucursal_id:
-        if not sucursal_id.isdigit():
+        sucursal_pk = _safe_int(sucursal_id)
+        if sucursal_pk is None:
             raise ValidationError("Selecciona una sucursal válida del catálogo.")
-        sucursal = Sucursal.objects.filter(pk=int(sucursal_id), activa=True).first()
+        sucursal = Sucursal.objects.filter(pk=sucursal_pk, activa=True).first()
         if not sucursal:
             raise ValidationError("Selecciona una sucursal válida del catálogo.")
         return sucursal
@@ -278,9 +285,10 @@ def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: E
     jefe_id = (post_data.get("jefe_directo") or "").strip()
     if not jefe_id:
         return None
-    if not jefe_id.isdigit():
+    jefe_pk = _safe_int(jefe_id)
+    if jefe_pk is None:
         raise ValidationError("Selecciona un jefe directo valido.")
-    qs = Empleado.objects.filter(pk=int(jefe_id), activo=True).filter(liderazgo_q())
+    qs = Empleado.objects.filter(pk=jefe_pk, activo=True).filter(liderazgo_q())
     if empleado:
         qs = qs.exclude(pk=empleado.pk)
     jefe = qs.first()
@@ -294,8 +302,13 @@ def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: E
 
 
 def _safe_int(raw: str | None) -> int | None:
-    value = (raw or "").strip()
-    return int(value) if value.isdigit() else None
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not re.fullmatch(r"[0-9]{1,19}", value):
+        return None
+    numero = int(value)
+    return numero if 0 < numero <= 9_223_372_036_854_775_807 else None
 
 
 def _crear_usuario_rrhh_para_empleado(request, empleado: Empleado):
@@ -345,9 +358,10 @@ def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
         raise ValidationError("Selecciona la sucursal app para crear el usuario con acceso a logística.")
     if crear_usuario:
         return _crear_usuario_rrhh_para_empleado(request, empleado)
-    if usuario_erp_id.isdigit():
+    usuario_pk = _safe_int(usuario_erp_id)
+    if usuario_pk is not None:
         User = get_user_model()
-        nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
+        nuevo_user = User.objects.filter(pk=usuario_pk).first()
         if nuevo_user and (
             not hasattr(nuevo_user, "empleado_rrhh")
             or nuevo_user.empleado_rrhh is None
@@ -1202,10 +1216,13 @@ def _crear_empleado_desde_post(
         empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
         if empleado.usuario_erp_id:
             empleado.save(update_fields=["usuario_erp"])
+        aplicar_jornada_desde_post(
+            empleado=empleado, post=request.POST, actor=request.user, creacion=True,
+        )
         sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
         asegurar_identidad_operativa_empleado(
             empleado,
-            sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+            sucursal_app_id=_safe_int(sucursal_app_id),
         )
         _sincronizar_logistica_desde_post(request, empleado)
         sincronizar_esquemas_bono(empleado, request.POST, organizacion)
@@ -1231,6 +1248,158 @@ def _crear_empleado_desde_post(
     return empleado
 
 
+_BORRADOR_FICHA_CAMPOS = frozenset({
+    "nombre", "codigo", "rfc", "curp", "nss", "area", "puesto", "departamento_origen",
+    "departamento", "puesto_operativo", "nivel_organizacional", "jefe_directo",
+    "tipo_personal", "tipo_contrato", "fecha_ingreso", "salario_diario", "telefono",
+    "email", "sucursal_id", "crear_usuario_erp", "nuevo_usuario_username",
+    "sucursal_app_id", "logistica_tipo_identidad", "motivo_autorizacion", "autorizado_por",
+    "numero_licencia", "licencia_expedicion", "licencia_expiracion", "notas_identidad",
+    "activo", "participa_bonos_ventas", "participa_bonos_produccion",
+    "bono_esquema_otro_nombre", "bono_esquema_otro_departamento", "bono_esquema_otro_area",
+    "bono_esquema_otro_descripcion", "jornada_gestion_presente", "jornada_id",
+    "jornada_fecha_inicio", "jornada_motivo", "alta_pendiente_id",
+})
+
+
+_JORNADA_DIAS = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+
+
+def _resumen_jornada_semanal(jornada):
+    """Resumen para plantilla y preview, calculado del turno de cada día."""
+    por_dia = {dia.dia_semana: dia for dia in jornada.dias.all()}
+    resumen = []
+    total_minutos = 0
+    for indice, nombre in enumerate(_JORNADA_DIAS):
+        dia = por_dia.get(indice)
+        turno = dia.turno if dia else None
+        if turno:
+            entrada = turno.hora_entrada.hour * 60 + turno.hora_entrada.minute
+            salida = turno.hora_salida.hour * 60 + turno.hora_salida.minute
+            minutos = (salida - entrada) % (24 * 60)
+            total_minutos += minutos
+            horario = f"{turno.hora_entrada:%H:%M}–{turno.hora_salida:%H:%M}"
+        else:
+            minutos = 0
+            horario = "Descanso"
+        resumen.append({"nombre": nombre, "horario": horario, "minutos": minutos})
+    horas, minutos = divmod(total_minutos, 60)
+    total_texto = f"{horas} h {minutos} min semanales" if minutos else f"{horas} h semanales"
+    return {"dias_resumen": resumen, "total_minutos": total_minutos, "total_texto": total_texto}
+
+
+_BORRADOR_LOGISTICA_CAMPOS = frozenset({
+    "motivo_autorizacion", "autorizado_por", "numero_licencia", "notas_identidad",
+    "licencia_expedicion", "licencia_expiracion",
+})
+
+
+def _borrador_ficha_desde_post(post):
+    borrador = {campo: str(post.get(campo) or "") for campo in _BORRADOR_FICHA_CAMPOS}
+    borrador["bono_esquemas"] = post.getlist("bono_esquemas")
+    return borrador
+
+
+_FICHA_ID_CAMPOS = frozenset({
+    "jefe_directo", "sucursal_id", "sucursal_app_id", "usuario_erp",
+    "alta_pendiente_id", "jornada_id",
+})
+_FICHA_MAX_BONO_ESQUEMAS = 50
+
+
+def _errores_ids_ficha(post):
+    errores = {}
+    for campo in _FICHA_ID_CAMPOS:
+        valor = (post.get(campo) or "").strip()
+        if valor and _safe_int(valor) is None:
+            errores[campo] = [f"Selecciona un valor válido para {campo}."]
+    bonos = post.getlist("bono_esquemas")
+    if len(bonos) > _FICHA_MAX_BONO_ESQUEMAS or any(
+        not isinstance(valor, str) or valor != valor.strip() or _safe_int(valor) is None
+        for valor in bonos
+    ):
+        errores["bono_esquemas"] = ["Selecciona hasta 50 esquemas de bono con identificadores válidos."]
+    return errores
+
+
+def _errores_longitud_borrador(borrador):
+    from logistica.models import Repartidor
+
+    errores = {}
+    for modelo, permitidos in (
+        (Empleado, _BORRADOR_FICHA_CAMPOS - _BORRADOR_LOGISTICA_CAMPOS),
+        (Repartidor, _BORRADOR_LOGISTICA_CAMPOS),
+    ):
+        for campo in modelo._meta.fields:
+            if campo.name not in permitidos or not campo.max_length:
+                continue
+            if len(borrador[campo.name]) > campo.max_length:
+                errores[campo.name] = [f"{campo.verbose_name} admite máximo {campo.max_length} caracteres."]
+    usuario_max = get_user_model()._meta.get_field("username").max_length
+    if len(borrador["nuevo_usuario_username"]) > usuario_max:
+        errores["nuevo_usuario_username"] = [f"El usuario admite máximo {usuario_max} caracteres."]
+    return errores
+
+
+def _url_ficha_empleado(request, empleado=None, *, abrir_empleado=False):
+    filtros = {
+        clave: request.GET[clave] for clave in ("q", "estado", "enterprise_focus")
+        if clave in request.GET
+    }
+    if not empleado:
+        pendiente = (request.POST.get("alta_pendiente_id") or "").strip()
+        pendiente_pk = _safe_int(pendiente)
+        if pendiente_pk is not None:
+            filtros["alta_pendiente"] = pendiente_pk
+    if abrir_empleado and empleado:
+        filtros["open_employee"] = empleado.pk
+    query = f"?{urlencode(filtros)}" if filtros else ""
+    fragmento = (
+        f"empleado-{empleado.pk}" if empleado else
+        "catalogo-empleados" if request.POST.get("action") == "update" else "alta-empleado"
+    )
+    return f'{reverse("rrhh:empleados")}{query}#{fragmento}'
+
+
+def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None):
+    redirect_url = _url_ficha_empleado(request, empleado, abrir_empleado=error is None)
+    if error is not None:
+        errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
+        borrador = _borrador_ficha_desde_post(request.POST)
+        errores_ids = _errores_ids_ficha(request.POST)
+        errores = {**_errores_longitud_borrador(borrador), **errores_ids, **errores}
+        if _wants_progressive_response(request):
+            texto = next(iter(errores.values()))[0]
+            return JsonResponse({
+                "ok": False, "toast": {"type": "error", "message": texto, "persistent": True},
+                "errors": errores, "values": borrador,
+            }, status=400)
+        excedidos = [
+            campo for campo, valor in borrador.items()
+            if isinstance(valor, str) and len(valor) > 10_000
+        ]
+        for campo in excedidos:
+            borrador.pop(campo)
+            errores[campo] = [f"{campo} supera el límite del borrador de 10000 caracteres; vuelve a capturarlo."]
+        for campo in errores_ids:
+            borrador.pop(campo, None)
+        texto = errores[excedidos[0]][0] if excedidos else next(iter(errores.values()))[0]
+        messages.error(request, texto)
+        request.session["rrhh_ficha_error_flash"] = {
+            "accion": "update" if request.POST.get("action") == "update" else "create",
+            "empleado_id": empleado.pk if empleado else None,
+            "values": borrador,
+        }
+        return redirect(redirect_url)
+    if _wants_progressive_response(request):
+        return JsonResponse({
+            "ok": True, "toast": {"type": "success", "message": mensaje},
+            "redirect": redirect_url, "reload": True,
+        })
+    messages.success(request, mensaje)
+    return redirect(redirect_url)
+
+
 @login_required
 def empleados(request):
     if not can_view_rrhh(request.user):
@@ -1246,12 +1415,13 @@ def empleados(request):
         alta_pendiente_id = (request.POST.get("alta_pendiente_id") or "").strip()
         if action == "create" and alta_pendiente_id:
             alta_pendiente = AltaPendienteEmpleado.objects.filter(
-                pk=int(alta_pendiente_id) if alta_pendiente_id.isdigit() else None,
+                pk=_safe_int(alta_pendiente_id),
                 estado=AltaPendienteEmpleado.ESTADO_PENDIENTE,
             ).first()
             if not alta_pendiente:
-                messages.error(request, "Selecciona un alta pendiente válida.")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "alta_pendiente_id": "Selecciona un alta pendiente válida.",
+                }))
         if action == "vincular_identidad":
             pendiente = get_object_or_404(
                 EmpleadoIdentidadPendiente,
@@ -1338,21 +1508,41 @@ def empleados(request):
             messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
             return redirect("rrhh:empleados")
         codigo = _codigo_empleado_desde_post(request.POST)
-        if not nombre:
-            messages.error(request, "Nombre del empleado es obligatorio.")
-        elif action == "update":
+        empleado_edicion = None
+        if action == "update":
             empleado_id = (request.POST.get("empleado_id") or "").strip()
-            empleado = get_object_or_404(Empleado, pk=int(empleado_id)) if empleado_id.isdigit() else None
-            if not empleado:
-                messages.error(request, "Selecciona un empleado válido para editar.")
-            elif duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
-                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
+            empleado_pk = _safe_int(empleado_id)
+            empleado_edicion = Empleado.objects.filter(pk=empleado_pk).first() if empleado_pk else None
+            if not empleado_edicion:
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "empleado_id": "Selecciona un empleado válido para editar.",
+                }))
+        if action in {"create", "update"}:
+            errores_formulario = {
+                **_errores_longitud_borrador(_borrador_ficha_desde_post(request.POST)),
+                **_errores_ids_ficha(request.POST),
+            }
+            if errores_formulario:
+                return _respuesta_ficha_empleado(
+                    request, empleado=empleado_edicion, error=ValidationError(errores_formulario),
+                )
+        if not nombre:
+            return _respuesta_ficha_empleado(request, empleado=empleado_edicion, error=ValidationError({
+                "nombre": "Nombre del empleado es obligatorio.",
+            }))
+        elif action == "update":
+            empleado = empleado_edicion
+            if duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
+                return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                    "codigo": f"El código {codigo} ya pertenece a {duplicado.nombre}.",
+                }))
             else:
                 try:
                     organizacion = _organizacion_desde_post(request.POST, empleado)
                 except ValidationError as exc:
-                    messages.error(request, f"Organización inválida: {exc.messages[0]}")
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "organizacion": f"Organización inválida: {exc.messages[0]}",
+                    }))
                 if codigo:
                     empleado.codigo = codigo
                 empleado.nombre = nombre
@@ -1368,8 +1558,9 @@ def empleados(request):
                 try:
                     empleado.jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion, empleado)
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "jefe_directo": exc.messages[0],
+                    }))
                 empleado.tipo_personal = (request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip()
                 empleado.participa_bonos_ventas = organizacion["participa_bonos_ventas"]
                 empleado.participa_bonos_produccion = organizacion["participa_bonos_produccion"]
@@ -1381,57 +1572,64 @@ def empleados(request):
                 try:
                     sucursal = _resolver_sucursal_desde_post(request.POST)
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "sucursal_id": exc.messages[0],
+                    }))
                 empleado.sucursal = sucursal.nombre if sucursal else ""
                 empleado.sucursal_ref = sucursal
                 empleado.activo = request.POST.get("activo") == "on"
                 try:
-                    empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+                    with transaction.atomic():
+                        Empleado.objects.select_for_update().get(pk=empleado.pk)
+                        try:
+                            empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+                        except ValidationError as exc:
+                            raise ValidationError({"usuario_erp": exc.messages[0]}) from exc
+                        empleado.save()
+                        sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
+                        aplicar_jornada_desde_post(
+                            empleado=empleado, post=request.POST, actor=request.user,
+                        )
+                        sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
+                        asegurar_identidad_operativa_empleado(
+                            empleado,
+                            sucursal_app_id=_safe_int(sucursal_app_id),
+                        )
+                        _sincronizar_logistica_desde_post(request, empleado)
+                        sincronizar_esquemas_bono(empleado, request.POST, organizacion)
+                        log_event(
+                            request.user,
+                            "UPDATE",
+                            "rrhh.Empleado",
+                            str(empleado.id),
+                            {
+                                "codigo": empleado.codigo,
+                                "nombre": empleado.nombre,
+                                "activo": empleado.activo,
+                            },
+                        )
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
-                with transaction.atomic():
-                    empleado.save()
-                    sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
-                sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
-                asegurar_identidad_operativa_empleado(
-                    empleado,
-                    sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=exc)
+                return _respuesta_ficha_empleado(
+                    request, empleado=empleado, mensaje=f"Empleado {empleado.nombre} actualizado.",
                 )
-                try:
-                    _sincronizar_logistica_desde_post(request, empleado)
-                except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
-                sincronizar_esquemas_bono(empleado, request.POST, organizacion)
-                log_event(
-                    request.user,
-                    "UPDATE",
-                    "rrhh.Empleado",
-                    str(empleado.id),
-                    {
-                        "codigo": empleado.codigo,
-                        "nombre": empleado.nombre,
-                        "activo": empleado.activo,
-                    },
-                )
-                messages.success(request, f"Empleado {empleado.nombre} actualizado.")
-                return redirect("rrhh:empleados")
         else:
             try:
                 organizacion = _organizacion_desde_post(request.POST)
             except ValidationError as exc:
-                messages.error(request, f"Organización inválida: {exc.messages[0]}")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "organizacion": f"Organización inválida: {exc.messages[0]}",
+                }))
             if duplicado := _empleado_con_codigo_duplicado(codigo):
-                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "codigo": f"El código {codigo} ya pertenece a {duplicado.nombre}.",
+                }))
             try:
                 jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion)
             except ValidationError as exc:
-                messages.error(request, exc.messages[0])
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "jefe_directo": exc.messages[0],
+                }))
             try:
                 empleado = _crear_empleado_desde_post(
                     request,
@@ -1442,22 +1640,40 @@ def empleados(request):
                     alta_pendiente=alta_pendiente,
                 )
             except ValidationError as exc:
-                messages.error(request, exc.messages[0])
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=exc)
             if alta_pendiente:
-                messages.success(request, f"Empleado {empleado.nombre} registrado desde alta pendiente y vacante actualizada.")
+                mensaje = f"Empleado {empleado.nombre} registrado desde alta pendiente y vacante actualizada."
             else:
-                messages.success(request, f"Empleado {empleado.nombre} registrado.")
-            return redirect("rrhh:empleados")
+                mensaje = f"Empleado {empleado.nombre} registrado."
+            return _respuesta_ficha_empleado(request, empleado=empleado, mensaje=mensaje)
 
+    ficha_error_flash = request.session.pop("rrhh_ficha_error_flash", None) if request.method == "GET" else None
     q = (request.GET.get("q") or "").strip()
     estado = (request.GET.get("estado") or "activos").strip().lower()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
 
     asegurar_esquemas_base()
-    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(  # rrhh-allow-inactive-history: filtro estado controla historial
+    jornadas_activas = list(JornadaSemanal.objects.filter(activo=True).prefetch_related(
+        Prefetch("dias", queryset=JornadaSemanalDia.objects.select_related("turno").order_by("dia_semana"))
+    ).order_by("nombre", "pk"))
+    for jornada in jornadas_activas:
+        jornada.resumen = _resumen_jornada_semanal(jornada)
+    resumen_por_jornada = {jornada.pk: jornada.resumen for jornada in jornadas_activas}
+    jornada_catalogo = [
+        {"id": jornada.pk, "nombre": jornada.nombre, **jornada.resumen}
+        for jornada in jornadas_activas
+    ]
+    qs_base = Empleado.objects.all().prefetch_related(  # rrhh-allow-inactive-history: filtro estado controla historial
+        "bonos_esquemas",
+        Prefetch("jornadas_asignadas", queryset=AsignacionJornadaEmpleado.objects.select_related(
+            "jornada", "creado_por"
+        ).prefetch_related(Prefetch(
+            "jornada__dias", queryset=JornadaSemanalDia.objects.select_related("turno").order_by("dia_semana")
+        )).order_by("-fecha_inicio", "-pk")),
+    ).annotate(
         total_lineas_nomina=Count("lineas_nomina")
     )
+    qs = qs_base
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q)
@@ -1545,7 +1761,33 @@ def empleados(request):
     )
 
     empleados_page = list(qs.order_by("nombre")[:600])
+    if ficha_error_flash and ficha_error_flash.get("accion") == "update":
+        borrador_id = ficha_error_flash.get("empleado_id")
+        if not any(empleado.pk == borrador_id for empleado in empleados_page):
+            empleado_borrador = qs_base.filter(pk=borrador_id).first()
+            if empleado_borrador:
+                empleados_page.append(empleado_borrador)
+    open_employee_pk = _safe_int(request.GET.get("open_employee"))
+    open_employee_id = (
+        open_employee_pk if any(empleado.pk == open_employee_pk for empleado in empleados_page) else None
+    )
+    hoy = timezone.localdate()
     for empleado in empleados_page:
+        empleado.jornada_historial = list(empleado.jornadas_asignadas.all())
+        empleado.jornada_vigente = next((asignacion for asignacion in empleado.jornada_historial if (
+            asignacion.fecha_inicio <= hoy and (asignacion.fecha_fin is None or asignacion.fecha_fin >= hoy)
+        )), None)
+        for asignacion in empleado.jornada_historial:
+            if asignacion.jornada_id not in resumen_por_jornada:
+                resumen_por_jornada[asignacion.jornada_id] = _resumen_jornada_semanal(asignacion.jornada)
+            asignacion.resumen = resumen_por_jornada[asignacion.jornada_id]
+        vigente_inactiva = empleado.jornada_vigente
+        empleado.jornada_inactiva_preview = (
+            {"id": vigente_inactiva.jornada_id, "nombre": vigente_inactiva.jornada.nombre,
+             **vigente_inactiva.resumen}
+            if vigente_inactiva and not vigente_inactiva.jornada.activo else None
+        )
+        empleado.jornada_inactiva_script_id = f"rrhh-jornada-inactiva-{empleado.pk}"
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
         empleado.sucursal_form_id = _sucursal_form_id(
             sucursal_ref_id=empleado.sucursal_ref_id,
@@ -1557,6 +1799,75 @@ def empleados(request):
                 empleado.repartidor_logistica = empleado.usuario_erp.repartidor_logistica
             except Exception:
                 empleado.repartidor_logistica = None
+        if ficha_error_flash and ficha_error_flash.get("empleado_id") == empleado.pk:
+            valores_flash = ficha_error_flash.get("values")
+            borrador = dict(valores_flash) if isinstance(valores_flash, dict) else {}
+            formulario = copy(empleado)
+            formulario._state = copy(empleado._state)
+            formulario._state.fields_cache = dict(empleado._state.fields_cache)
+            for campo in (
+                "nombre", "codigo", "rfc", "curp", "nss", "area", "puesto",
+                "departamento_origen", "departamento", "puesto_operativo",
+                "nivel_organizacional", "tipo_personal", "tipo_contrato", "telefono", "email",
+            ):
+                if campo in borrador:
+                    setattr(formulario, campo, borrador[campo])
+            if borrador.get("fecha_ingreso"):
+                try:
+                    formulario.fecha_ingreso = dt_date.fromisoformat(borrador["fecha_ingreso"])
+                except ValueError:
+                    pass
+            if "salario_diario" in borrador:
+                formulario.salario_diario = borrador["salario_diario"]
+            if "jefe_directo" in borrador:
+                jefe_raw = borrador["jefe_directo"]
+                if jefe_raw == "":
+                    formulario.jefe_directo_id = None
+                elif jefe_pk := _safe_int(jefe_raw):
+                    formulario.jefe_directo_id = jefe_pk
+                else:
+                    borrador.pop("jefe_directo")
+            if "sucursal_id" in borrador and (
+                borrador["sucursal_id"] == "" or _safe_int(borrador["sucursal_id"]) is not None
+            ):
+                formulario.sucursal_form_id = borrador["sucursal_id"]
+            perfil_usuario = getattr(empleado.usuario_erp, "userprofile", None) if empleado.usuario_erp_id else None
+            sucursal_app_id = getattr(perfil_usuario, "sucursal_id", None)
+            sucursal_app_raw = borrador.get("sucursal_app_id", "")
+            formulario.form_sucursal_app_id = (
+                sucursal_app_raw if sucursal_app_raw == "" or _safe_int(sucursal_app_raw) is not None
+                else str(sucursal_app_id or "")
+            )
+            if "activo" in borrador:
+                formulario.activo = borrador["activo"] == "on"
+            bonos_raw = borrador.get("bono_esquemas")
+            if isinstance(bonos_raw, list) and len(bonos_raw) <= _FICHA_MAX_BONO_ESQUEMAS:
+                bonos_ids = [_safe_int(valor) for valor in bonos_raw]
+                if all(
+                    bono_pk is not None and isinstance(valor, str) and valor == valor.strip()
+                    for valor, bono_pk in zip(bonos_raw, bonos_ids)
+                ):
+                    formulario.bono_esquema_ids = set(bonos_ids)
+                else:
+                    borrador["bono_esquemas"] = [str(pk) for pk in empleado.bono_esquema_ids]
+            else:
+                borrador["bono_esquemas"] = [str(pk) for pk in empleado.bono_esquema_ids]
+            repartidor = empleado.repartidor_logistica
+            borrador.setdefault("logistica_tipo_identidad", (
+                repartidor.tipo_identidad if repartidor else
+                "empleado_dolce" if empleado.puesto_operativo == "REPARTIDOR" else ""
+            ))
+            for campo in ("motivo_autorizacion", "autorizado_por", "numero_licencia", "notas_identidad"):
+                borrador.setdefault(campo, getattr(repartidor, campo, "") or "")
+            for campo in ("licencia_expedicion", "licencia_expiracion"):
+                fecha = getattr(repartidor, campo, None)
+                borrador.setdefault(campo, fecha.isoformat() if fecha else "")
+            formulario.form_draft = borrador
+            formulario.jornada_historial = empleado.jornada_historial
+            formulario.jornada_vigente = empleado.jornada_vigente
+            formulario.jornada_inactiva_preview = empleado.jornada_inactiva_preview
+            formulario.jornada_inactiva_script_id = empleado.jornada_inactiva_script_id
+            empleado.form_values = formulario
 
     identidades_pendientes = list(
         EmpleadoIdentidadPendiente.objects.select_related("empleado_sugerido")
@@ -1586,14 +1897,25 @@ def empleados(request):
     )
     alta_pendiente_id = (request.GET.get("alta_pendiente") or "").strip()
     alta_pendiente_seleccionada = None
-    if alta_pendiente_id.isdigit():
-        alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=int(alta_pendiente_id)).first()
+    alta_pendiente_pk = _safe_int(alta_pendiente_id)
+    if alta_pendiente_pk is not None:
+        alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=alta_pendiente_pk).first()
     altas_pendientes = list(altas_pendientes_qs[:20])
     alta_prefill = _alta_pendiente_prefill(alta_pendiente_seleccionada)
+    alta_form_draft = None
+    if ficha_error_flash and ficha_error_flash.get("accion") == "create":
+        alta_form_draft = ficha_error_flash["values"]
+        alta_prefill.update(alta_form_draft)
+    alta_prefill_jornada_fecha = (
+        alta_prefill["jornada_fecha_inicio"] if "jornada_fecha_inicio" in alta_prefill
+        else alta_prefill.get("fecha_ingreso") or ""
+    )
 
     context = {
         "module_tabs": _module_tabs("empleados", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
+        "jornadas_semanales": jornadas_activas,
+        "jornadas_catalogo": jornada_catalogo,
         "empleados": empleados_page,
         "q": q,
         "estado": estado,
@@ -1670,9 +1992,17 @@ def empleados(request):
         "altas_pendientes": altas_pendientes,
         "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
         "alta_prefill": alta_prefill,
+        "alta_prefill_jornada_fecha": alta_prefill_jornada_fecha,
+        "alta_form_draft": alta_form_draft,
+        "ficha_error_empleado_id": ficha_error_flash.get("empleado_id") if ficha_error_flash else None,
+        "open_employee_id": open_employee_id,
         "alta_prefill_sucursal_id": _sucursal_form_id(
             sucursal_ref_id=None,
             sucursal_texto=alta_prefill.get("sucursal", ""),
+        ) if not alta_form_draft else alta_form_draft.get(
+            "sucursal_id", _sucursal_form_id(
+                sucursal_ref_id=None, sucursal_texto=alta_prefill.get("sucursal", ""),
+            ),
         ),
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),

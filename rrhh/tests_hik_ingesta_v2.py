@@ -12,11 +12,15 @@ from django.utils import timezone
 from unittest.mock import patch
 
 from .models import (
+    AsignacionJornadaEmpleado,
     AsignacionTurnoEmpleado,
     AsistenciaEmpleado,
     Empleado,
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
+    HoraExtra,
+    JornadaSemanal,
+    JornadaSemanalDia,
     Turno,
 )
 from .services_identidad import vincular_identidad_pendiente
@@ -166,6 +170,44 @@ class HikIngestaV2Tests(TestCase):
             reglas.assert_not_called()
             bonos.assert_not_called()
         asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=date(2026, 7, 28))
+        self.assertEqual(asistencia.turno_id, turno.pk)
+
+    def test_domingo_descanso_con_marcas_no_infiere_turno_ni_extra(self):
+        turno = Turno.objects.create(
+            nombre="Detectable Hik V2", hora_entrada=time(8, 30), hora_salida=time(16, 30),
+        )
+        jornada = JornadaSemanal.objects.create(nombre="Descanso domingo Hik V2")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia, turno=None if dia == 6 else turno,
+            )
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Jornada confirmada",
+        )
+        events = [
+            self._event(occurred_at="2026-09-13T08:30:00-07:00", kind="check_in"),
+            self._event(occurred_at="2026-09-13T19:00:00-07:00", kind="check_out"),
+        ]
+        response = self._post(events)
+        self.assertEqual(response.status_code, 200, response.content)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=date(2026, 9, 13))
+        self.assertIsNotNone(asistencia.entrada)
+        self.assertIsNotNone(asistencia.salida)
+        self.assertIsNone(asistencia.turno_id)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
+    def test_sin_asignacion_conserva_inferencia_por_checada(self):
+        turno = Turno.objects.create(
+            nombre="Detectable sin asignación Hik V2",
+            hora_entrada=time(8, 30), hora_salida=time(16, 30),
+        )
+        response = self._post([
+            self._event(occurred_at="2026-09-13T08:30:00-07:00", kind="check_in"),
+            self._event(occurred_at="2026-09-13T19:00:00-07:00", kind="check_out"),
+        ])
+        self.assertEqual(response.status_code, 200, response.content)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=self.empleado, fecha=date(2026, 9, 13))
         self.assertEqual(asistencia.turno_id, turno.pk)
 
     def test_mismo_guid_y_mismo_payload_es_duplicate_y_conserva_un_solo_recibo(self):

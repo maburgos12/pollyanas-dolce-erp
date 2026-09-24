@@ -8,19 +8,22 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .models import (
+    AsignacionJornadaEmpleado,
     AsistenciaEmpleado,
     Empleado,
     HoraExtra,
     IncapacidadEmpleado,
     IncidenciaAsistencia,
+    IncidenciaAsistenciaBitacora,
     PermisoSalida,
     SolicitudVacaciones,
     SuspensionEmpleado,
     Turno,
 )
 from .services import TIEMPO_COMIDA_MINUTOS, generar_horas_extra_automatico, minutos_jornada_programada
-from .services_vacaciones import es_dia_laborable
+from .services_vacaciones import es_descanso_oficial, es_dia_laborable
 from .services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
+from .services_turnos import ESTADO_DESCANSO, ESTADO_LABORABLE, horario_programado_para_fecha
 
 
 VENTANA_RETARDOS_DIAS = 15
@@ -634,17 +637,41 @@ def _evaluar_escalamientos(empleado: Empleado, fecha: date, touched: set[str]) -
     return creados, actualizados
 
 
-def _resolver_incidencias_stale(empleado: Empleado, fecha: date, touched: set[str]) -> int:
+def _resolver_incidencias_stale(
+    empleado: Empleado, fecha: date, touched: set[str], *, motivo_auditoria: str = "",
+) -> int:
     stale = IncidenciaAsistencia.objects.filter(
         empleado=empleado,
         fecha=fecha,
         editado_manual=False,
-    ).exclude(tipo__in=touched)
-    return stale.exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(
+    ).exclude(tipo__in=touched).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
+    nuevos_valores = dict(
         estado=IncidenciaAsistencia.ESTADO_RESUELTO,
         severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
         detalle="Incidencia resuelta por reevaluacion automatica.",
     )
+    if not motivo_auditoria:
+        return stale.update(**nuevos_valores)
+
+    # Siempre bloquear incidencias por PK. Una edición manual toma una sola fila;
+    # aquí el estado se vuelve a leer después de esperar ese bloqueo.
+    filas = list(stale.select_for_update(of=("self",)).order_by("pk"))
+    resueltos = 0
+    for fila in filas:
+        if fila.editado_manual or fila.estado == IncidenciaAsistencia.ESTADO_RESUELTO:
+            continue
+        actualizado = IncidenciaAsistencia.objects.filter(
+            pk=fila.pk, editado_manual=False,
+        ).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(**nuevos_valores)
+        if not actualizado:
+            continue
+        IncidenciaAsistenciaBitacora.objects.create(
+            incidencia=fila, campo="estado", valor_anterior=fila.estado,
+            valor_nuevo=IncidenciaAsistencia.ESTADO_RESUELTO,
+            comentario=f"{motivo_auditoria} Detalle anterior: {fila.detalle}",
+        )
+        resueltos += actualizado
+    return resueltos
 
 
 def _baja_bloquea_evaluacion(empleado: Empleado, fecha: date) -> bool:
@@ -681,9 +708,53 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
         .filter(empleado=empleado, fecha=fecha)
         .first()
     )
+    horario = horario_programado_para_fecha(empleado, fecha)
+    if horario.estado == ESTADO_DESCANSO:
+        tiene_marcas = bool(asistencia and any((
+            asistencia.entrada, asistencia.salida_comida,
+            asistencia.regreso_comida, asistencia.salida,
+        )))
+        if asistencia and asistencia.turno_id:
+            asistencia.turno = None
+            asistencia.save(update_fields=["turno"])
+        if tiene_marcas:
+            creados_integridad, actualizados_integridad = _evaluar_integridad_marcaje(asistencia, touched)
+            creados += creados_integridad
+            actualizados += actualizados_integridad
+            creados_comida, actualizados_comida = _evaluar_comida(asistencia, touched)
+            creados += creados_comida
+            actualizados += actualizados_comida
+            tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE
+            touched.add(tipo)
+            _, creada, actualizada = _upsert_incidencia(
+                empleado=empleado,
+                fecha=fecha,
+                tipo=tipo,
+                estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
+                asistencia=asistencia,
+                detalle="Asistencia en descanso configurado; requiere revisión de RRHH sin calcular horas extra.",
+                metadata={"motivo": "descanso", "requiere_revision": True},
+            )
+            creados += int(creada)
+            actualizados += int(actualizada)
+        resueltos = _resolver_incidencias_stale(
+            empleado, fecha, touched,
+            motivo_auditoria="Reevaluación automática por descanso configurado.",
+        )
+        return ResultadoEvaluacionAsistencia(
+            evaluados=1, creados=creados, actualizados=actualizados, resueltos=resueltos,
+        )
     if not asistencia:
         if not es_dia_laborable(fecha):
-            return ResultadoEvaluacionAsistencia(evaluados=1)
+            domingo_semanal_laborable = (
+                fecha.weekday() == 6
+                and not es_descanso_oficial(fecha)
+                and horario.estado == ESTADO_LABORABLE
+                and isinstance(horario.asignacion, AsignacionJornadaEmpleado)
+            )
+            if not domingo_semanal_laborable:
+                return ResultadoEvaluacionAsistencia(evaluados=1)
 
     suspension = _suspension_activa_en_fecha(empleado, fecha)
     if suspension:

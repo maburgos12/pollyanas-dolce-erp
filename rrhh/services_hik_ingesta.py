@@ -192,10 +192,14 @@ def _run_post_projection_effects(receipt_id: int) -> None:
                 empleado_id=receipt.empleado_id,
                 fecha=local_dt.date(),
             ).first()
-            from .services_turnos import es_jornada_historica_antes_de_asignacion
+            from .services_turnos import (
+                ESTADO_DESCANSO, es_jornada_historica_antes_de_asignacion,
+                horario_programado_para_fecha,
+            )
 
             historica = es_jornada_historica_antes_de_asignacion(asistencia)
-            if asistencia and asistencia.salida and not historica:
+            horario = horario_programado_para_fecha(receipt.empleado, local_dt.date())
+            if asistencia and asistencia.salida and not historica and horario.estado != ESTADO_DESCANSO:
                 generar_horas_extra_automatico(asistencia)
             if not historica:
                 evaluar_dia_empleado(receipt.empleado, local_dt.date())
@@ -305,14 +309,19 @@ def project_receipt(receipt_id: int, *, empleado_id: int | None = None) -> Event
                     neutral=item.tipo_evento == "punch",
                 )
             )
-        from .services_turnos import turno_asignado_para_fecha
+        from .services_turnos import (
+            ESTADO_DESCANSO, ESTADO_LABORABLE, ESTADO_SIN_ASIGNACION,
+            horario_programado_para_fecha,
+        )
 
-        turno = asistencia.turno or turno_asignado_para_fecha(empleado, fecha)
-        if turno is None and (marcas_previas or marcas_ledger):
+        horario = horario_programado_para_fecha(empleado, fecha)
+        if horario.estado == ESTADO_DESCANSO:
+            asistencia.turno = None
+        elif horario.estado == ESTADO_LABORABLE:
+            asistencia.turno = horario.turno
+        elif horario.estado == ESTADO_SIN_ASIGNACION and not asistencia.turno_id and (marcas_previas or marcas_ledger):
             primera = min([*marcas_previas, *marcas_ledger], key=lambda marca: marca.dt)
-            turno = _detectar_turno(timezone.localtime(primera.dt).time())
-        if turno:
-            asistencia.turno = turno
+            asistencia.turno = _detectar_turno(timezone.localtime(primera.dt).time())
         asistencia.entrada = None
         asistencia.salida_comida = None
         asistencia.regreso_comida = None

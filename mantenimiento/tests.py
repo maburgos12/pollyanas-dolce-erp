@@ -1349,10 +1349,13 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         searchable_selects = (Path(settings.BASE_DIR) / "static/js/searchable_selects.js").read_text()
         css = (Path(settings.BASE_DIR) / "static/css/template_modules/templates-mantenimiento-dashboard.css").read_text()
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
-        # La versión del shell global cambia con cada entrega;
-        # la URL de registro no cambia al actualizar su contenido.
-        self.assertIn("20260724-superuser-preview-v23", base)
-        self.assertRegex(service_worker, r'const CACHE_NAME = "pollyanas-erp-shell-v\d+-[^"\n]+";')
+        # La versión del shell global cambia con cada entrega y debe coincidir
+        # entre la URL de registro y el nombre de caché servido.
+        self.assertIn("20260923-jornadas-semanales-v4", base)
+        self.assertIn(
+            'const CACHE_NAME = "pollyanas-erp-shell-20260923-jornadas-semanales-v4";',
+            service_worker,
+        )
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)
 

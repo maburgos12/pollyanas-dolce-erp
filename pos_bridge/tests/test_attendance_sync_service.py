@@ -10,7 +10,10 @@ from django.test import TestCase
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointSyncJob
 from pos_bridge.services.attendance_sync_service import PointAttendanceSyncService
-from rrhh.models import AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, Turno
+from rrhh.models import (
+    AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
+    Empleado, HoraExtra, JornadaSemanal, JornadaSemanalDia, Turno,
+)
 
 
 class ResolveErpBranchTests(TestCase):
@@ -87,6 +90,43 @@ class FakeHttpSessionService:
 
 
 class PointAttendanceSyncServiceTests(TestCase):
+    def test_domingo_descanso_con_marcas_no_infiere_turno_ni_extra(self):
+        Sucursal.objects.create(codigo="CRUCERO", nombre="Crucero", activa=True)
+        empleado = Empleado.objects.create(codigo="255", nombre="Persona descanso Point")
+        turno = Turno.objects.create(
+            nombre="Detectable Point", hora_entrada=time(8, 30), hora_salida=time(16, 30),
+        )
+        jornada = JornadaSemanal.objects.create(nombre="Descanso domingo Point")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia, turno=None if dia == 6 else turno,
+            )
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Jornada confirmada",
+        )
+        AsistenciaEmpleado.objects.create(
+            empleado=empleado, fecha=date(2026, 9, 13), turno=turno,
+        )
+        PointBranch.objects.create(external_id="2", name="Crucero")
+        session = FakeSession(attendance_rows=[{
+            "Codigo": "255", "Empleado": "Persona descanso Point",
+            "Entrada": "2026-09-13T08:30:00", "Salida": "2026-09-13T19:00:00",
+            "H_Entrada": "08:30:00", "H_Salida": "16:30:00", "IDX": 99002,
+        }])
+        service = PointAttendanceSyncService(
+            bridge_settings=FakeSettings(), http_session_service=FakeHttpSessionService(session),
+        )
+        job = service.run_sync(
+            start_date=date(2026, 9, 13), end_date=date(2026, 9, 13), branch_filter="Crucero",
+        )
+        self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 9, 13))
+        self.assertIsNotNone(asistencia.entrada)
+        self.assertIsNotNone(asistencia.salida)
+        self.assertIsNone(asistencia.turno_id)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
+
     def test_horario_confirmado_prevalece_y_reingesta_historica_no_recalcula(self):
         Sucursal.objects.create(codigo="CRUCERO", nombre="Crucero", activa=True)
         empleado = Empleado.objects.create(codigo="255", nombre="Persona envíos", fecha_ingreso=date(2026, 1, 1))
