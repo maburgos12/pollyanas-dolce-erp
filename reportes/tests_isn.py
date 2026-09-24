@@ -188,6 +188,19 @@ class ISNModelTests(TestCase):
         expediente.refresh_from_db()
         self.assertEqual(expediente.uuid, cfdi.uuid)
 
+    def test_update_fields_persiste_cfdi_y_uuid_como_pareja(self):
+        cfdi_a = self._crear_cfdi("CFDI-PAREJA-A")
+        cfdi_b = self._crear_cfdi("CFDI-PAREJA-B")
+        expediente = self._crear_expediente(cfdi=cfdi_a)
+
+        expediente.cfdi = cfdi_b
+        expediente.metadata = {"revision": "parcial"}
+        expediente.save(update_fields={"metadata"})
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.cfdi_id, cfdi_b.pk)
+        self.assertEqual(expediente.uuid, expediente.cfdi.uuid)
+
     def test_cfdi_de_un_expediente_esta_protegido(self):
         cfdi = self._crear_cfdi("CFDI-PROTEGIDO")
         self._crear_expediente(

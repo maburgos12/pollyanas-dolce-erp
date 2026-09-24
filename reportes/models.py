@@ -3212,7 +3212,10 @@ class ExpedienteISN(models.Model):
         if self.cfdi_id:
             self.uuid = self.cfdi.uuid
             if kwargs.get("update_fields") is not None:
-                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"uuid"}
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {
+                    "cfdi",
+                    "uuid",
+                }
         return super().save(*args, **kwargs)
 
 
