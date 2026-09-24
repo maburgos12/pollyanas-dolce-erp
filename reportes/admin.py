@@ -11,7 +11,9 @@ from reportes.models import (
     CategoriaGasto,
     CentroCosto,
     CorteOficialDiario,
+    DistribucionISNEmpleado,
     EmpresaResultadoMensual,
+    ExpedienteISN,
     ExpansionPolicyConfig,
     ExpansionZoneScore,
     ForecastCalibrationProfile,
@@ -48,6 +50,86 @@ from reportes.models import (
     SupplierLeadTime,
     LineaPresupuestoMensual,
 )
+
+
+class ISNReadOnlyAdminMixin:
+    """Expone evidencia fiscal para consulta sin habilitar mutaciones."""
+
+    def get_readonly_fields(self, request, obj=None):
+        return tuple(field.name for field in self.model._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ExpedienteISN)
+class ExpedienteISNAdmin(ISNReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "periodo",
+        "revision",
+        "estado",
+        "importe_pagado",
+        "base_gravada_calculada",
+        "base_declarada",
+        "uuid",
+    )
+    list_filter = ("periodo", "estado", "revision")
+    search_fields = ("uuid", "cfdi__uuid")
+    list_select_related = ("cfdi", "aplicado_por")
+    ordering = ("-periodo", "-revision")
+
+
+@admin.register(DistribucionISNEmpleado)
+class DistribucionISNEmpleadoAdmin(ISNReadOnlyAdminMixin, admin.ModelAdmin):
+    list_display = (
+        "periodo",
+        "revision",
+        "estado",
+        "uuid",
+        "empleado",
+        "sucursal",
+        "area_codigo",
+        "base_gravada",
+        "monto_isn",
+    )
+    list_filter = (
+        "expediente__periodo",
+        "expediente__estado",
+        "sucursal",
+        "area_codigo",
+    )
+    search_fields = (
+        "expediente__uuid",
+        "empleado__codigo",
+        "empleado__nombre",
+        "sucursal__codigo",
+        "sucursal__nombre",
+        "area_codigo",
+    )
+    list_select_related = ("expediente", "empleado", "sucursal")
+    ordering = ("-expediente__periodo", "empleado__nombre")
+
+    @admin.display(description="Periodo", ordering="expediente__periodo")
+    def periodo(self, obj):
+        return obj.expediente.periodo
+
+    @admin.display(description="Revisión", ordering="expediente__revision")
+    def revision(self, obj):
+        return obj.expediente.revision
+
+    @admin.display(description="Estado", ordering="expediente__estado")
+    def estado(self, obj):
+        return obj.expediente.estado
+
+    @admin.display(description="UUID", ordering="expediente__uuid")
+    def uuid(self, obj):
+        return obj.expediente.uuid
 
 
 @admin.register(AnalyticAuditLog)

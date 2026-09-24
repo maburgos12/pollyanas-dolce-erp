@@ -1,12 +1,13 @@
 """Pruebas de consolidación del real en el presupuesto maestro."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone as tz
 from decimal import Decimal
 from io import StringIO
 
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.test import TestCase
 from django.utils import timezone
 
@@ -18,6 +19,7 @@ from reportes.models import (
     CategoriaGasto,
     CentroCosto,
     EmpresaResultadoMensual,
+    ExpedienteISN,
     GastoOperativoMensual,
     LineaPresupuestoMensual,
     ReglaFuenteRubro,
@@ -29,6 +31,7 @@ from reportes.services_presupuesto_real import (
     migrar_fuentes_legadas,
 )
 from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from sat_client.models import CfdiDescargado
 
 
 class PresupuestoRealConsolidacionTests(TestCase):
@@ -103,6 +106,258 @@ class PresupuestoRealConsolidacionTests(TestCase):
 
     def consolidar(self, **kwargs):
         return PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo, **kwargs)
+
+    def crear_expediente_isn(self, *, estado=ExpedienteISN.ESTADO_APLICADO, importe="16168.00"):
+        cfdi = CfdiDescargado.objects.create(
+            uuid=f"ISN-{estado}-{ExpedienteISN.objects.count()}",
+            rfc_emisor="GES8101015I7",
+            rfc_receptor="GEF211230KR2",
+            subtotal=Decimal(importe),
+            total=Decimal(importe),
+            tipo_cfdi="recibido",
+            tipo_comprobante="I",
+            estatus="vigente",
+            moneda="MXN",
+            xml_raw='<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"/>',
+            fecha_emision=datetime(2026, 4, 1, tzinfo=tz.utc),
+        )
+        return ExpedienteISN.objects.create(
+            periodo=self.periodo,
+            revision=ExpedienteISN.objects.count() + 1,
+            uuid=cfdi.uuid,
+            cfdi=cfdi,
+            importe_pagado=Decimal(importe),
+            base_gravada_calculada=Decimal("600000.00"),
+            estado=estado,
+            aplicado_en=(
+                datetime(2026, 4, 2, tzinfo=tz.utc)
+                if estado in (ExpedienteISN.ESTADO_APLICADO, ExpedienteISN.ESTADO_REEMPLAZADO)
+                else None
+            ),
+        )
+
+    def test_isn_cfdi_publica_solo_expediente_aplicado_en_fila_corporativa(self):
+        rubro, linea = self.crear_linea(concepto="Impuesto sobre nómina")
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn(estado=ExpedienteISN.ESTADO_VALIDO, importe="999.00")
+        aplicado = self.crear_expediente_isn()
+        presupuesto_original = linea.monto_presupuesto
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(rubro.sucursal)
+        self.assertEqual(linea.monto_presupuesto, presupuesto_original)
+        self.assertEqual(linea.monto_real, aplicado.importe_pagado)
+        self.assertEqual(linea.fuente_real, "AUTO:ISN_CFDI")
+        self.assertEqual(summary.actualizadas, 1)
+
+    def test_isn_cfdi_respeta_captura_manual(self):
+        rubro, linea = self.crear_linea(
+            concepto="Impuesto sobre nómina manual",
+            monto_real=Decimal("777.00"),
+            fuente_real="MANUAL:yesenia",
+        )
+        linea.metadata = {"captura": "humana"}
+        linea.save(update_fields=["metadata"])
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn()
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("777.00"))
+        self.assertEqual(linea.fuente_real, "MANUAL:yesenia")
+        self.assertEqual(linea.metadata, {"captura": "humana"})
+        self.assertEqual(summary.protegidas_manual, 1)
+
+    def test_isn_cfdi_cancelado_posterior_no_publica_y_advierte_en_auto(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN cancelado",
+            monto_real=Decimal("16168.00"),
+            fuente_real="AUTO:ISN_CFDI",
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        expediente = self.crear_expediente_isn()
+        CfdiDescargado.objects.filter(pk=expediente.cfdi_id).update(estatus=" CANCELADO ")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.fuente_real, "AUTO:ISN_CFDI")
+        self.assertTrue(linea.metadata["sin_datos_fuente"])
+        self.assertEqual(linea.metadata["fuente_sin_datos_previa"], "AUTO:ISN_CFDI")
+        self.assertIsNone(
+            LineaPresupuestoMensual.objects.filter(pk=linea.pk).aggregate(
+                total=Sum("monto_real")
+            )["total"]
+        )
+        self.assertEqual(summary.sin_datos_fuente, 1)
+
+        segunda = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.metadata["monto_sin_datos_previo"], "16168.00")
+        self.assertEqual(segunda.sin_datos_fuente, 1)
+
+    def test_isn_cfdi_cancelado_posterior_no_toca_manual(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN cancelado manual",
+            monto_real=Decimal("777.00"),
+            fuente_real="MANUAL:yesenia",
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        expediente = self.crear_expediente_isn()
+        CfdiDescargado.objects.filter(pk=expediente.cfdi_id).update(estatus="cancelado")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("777.00"))
+        self.assertEqual(linea.fuente_real, "MANUAL:yesenia")
+        self.assertEqual(summary.protegidas_manual, 1)
+
+    def test_isn_cfdi_full_clean_rechaza_dimensiones_no_corporativas(self):
+        rubro, _ = self.crear_linea(
+            concepto="ISN sucursal",
+            sucursal=self.sucursal,
+        )
+        regla = ReglaFuenteRubro(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            sucursal=self.otra_sucursal,
+            categoria_gasto=self.categoria,
+            centro_costo=self.centro,
+            filtros={"sucursal": "GVE01"},
+            modo_asignacion=ReglaFuenteRubro.MODO_CONTROL,
+        )
+
+        with self.assertRaises(ValidationError) as error:
+            regla.full_clean()
+
+        mensaje = str(error.exception)
+        for dimension in (
+            "rubro.sucursal",
+            "regla.sucursal",
+            "categoria_gasto",
+            "centro_costo",
+            "filtros",
+            "CANONICA",
+        ):
+            self.assertIn(dimension, mensaje)
+
+    def test_isn_cfdi_invalida_insertada_sin_full_clean_no_publica(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN inválido directo",
+            sucursal=self.sucursal,
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn()
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.fuente_real, "")
+        self.assertEqual(summary.actualizadas, 0)
+        self.assertEqual(len(summary.errores), 1)
+        self.assertIn("ISN_CFDI solo admite una regla corporativa", summary.errores[0])
+
+    def test_isn_cfdi_usa_identidad_global_y_evitar_doble_fuente(self):
+        rubro_a, _ = self.crear_linea(concepto="ISN corporativo A")
+        rubro_b, _ = self.crear_linea(concepto="ISN corporativo B")
+        primera = ReglaFuenteRubro.objects.create(
+            rubro=rubro_a,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            )
+
+        self.assertTrue(primera.clave_fuente)
+        self.assertEqual(
+            primera.clave_fuente,
+            ReglaFuenteRubro(
+                rubro=rubro_b,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            ).calcular_clave_fuente(),
+        )
+
+    def test_isn_cfdi_permanece_canonica_en_nomina_y_resultados(self):
+        for codigo in ("nomina", "resultados"):
+            with self.subTest(area=codigo):
+                area = AreaPresupuesto.objects.create(
+                    nombre=f"Área {codigo}",
+                    codigo=codigo,
+                )
+                rubro, _ = self.crear_linea(
+                    concepto=f"ISN {codigo}",
+                    area=area,
+                )
+                regla = ReglaFuenteRubro(
+                    rubro=rubro,
+                    tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+                )
+
+                regla.full_clean()
+                self.assertEqual(regla.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
+                regla.save()
+                regla.refresh_from_db()
+                self.assertEqual(regla.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
+                regla.delete()
+
+    def test_isn_cfdi_global_colisiona_entre_nomina_y_resultados(self):
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina ISN", codigo="nomina")
+        resultados = AreaPresupuesto.objects.create(nombre="Resultados ISN", codigo="resultados")
+        rubro_nomina, _ = self.crear_linea(concepto="ISN nómina", area=nomina)
+        rubro_resultados, _ = self.crear_linea(concepto="ISN resultados", area=resultados)
+        primera = ReglaFuenteRubro.objects.create(
+            rubro=rubro_nomina,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro_resultados,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            )
+
+        primera.refresh_from_db()
+        self.assertEqual(primera.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
+        self.assertEqual(
+            primera.clave_fuente,
+            ReglaFuenteRubro(
+                rubro=self.crear_linea(
+                    concepto="ISN inválido dimensionado",
+                    sucursal=self.sucursal,
+                )[0],
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+                sucursal=self.otra_sucursal,
+                categoria_gasto=self.categoria,
+                centro_costo=self.centro,
+                filtros={"dimension": "ignorada"},
+            ).calcular_clave_fuente(),
+        )
 
     def test_gasto_operativo_suma_solo_reales_del_periodo_categoria_y_sucursal(self):
         """GASTO_OPERATIVO ignora presupuesto, otros meses, categorías y sucursales."""
@@ -399,8 +654,13 @@ class PresupuestoRealConsolidacionTests(TestCase):
             codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
         )
         nomina = AreaPresupuesto.objects.create(nombre="Nómina seed", codigo="nomina")
+        administracion = AreaPresupuesto.objects.create(nombre="Administración seed", codigo="administracion")
         ventas = AreaPresupuesto.objects.create(nombre="Ventas seed", codigo="ventas")
         sueldo, _ = self.crear_linea(concepto="SUELDO", area=nomina)
+        isn, _ = self.crear_linea(concepto="Impuesto sobre nómina", area=administracion)
+        isn_sucursal, _ = self.crear_linea(
+            concepto="Impuesto sobre nómina", area=administracion, sucursal=self.sucursal
+        )
         venta, _ = self.crear_linea(
             concepto="BOLLO · CHOCOLATE", area=ventas, sucursal=self.sucursal, tipo=RubroPresupuesto.TIPO_INGRESO
         )
@@ -432,6 +692,16 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertTrue(
             ReglaFuenteRubro.objects.filter(
                 rubro=sueldo, origen=ReglaFuenteRubro.ORIGEN_SEED, tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA
+            ).exists()
+        )
+        regla_isn = ReglaFuenteRubro.objects.get(rubro=isn, origen=ReglaFuenteRubro.ORIGEN_SEED)
+        self.assertEqual(regla_isn.tipo_fuente, ReglaFuenteRubro.FUENTE_ISN_CFDI)
+        self.assertIsNone(isn.sucursal)
+        self.assertEqual(regla_isn.filtros, {})
+        self.assertFalse(
+            ReglaFuenteRubro.objects.filter(
+                rubro=isn_sucursal,
+                origen=ReglaFuenteRubro.ORIGEN_SEED,
             ).exists()
         )
         regla_venta = ReglaFuenteRubro.objects.get(rubro=venta, origen=ReglaFuenteRubro.ORIGEN_SEED)

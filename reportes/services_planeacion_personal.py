@@ -15,7 +15,8 @@ from core.models import Sucursal
 from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
-from .models import ExpedienteCedulaIMSS
+from .models import ExpedienteCedulaIMSS, ExpedienteISN
+from .services_isn import extraer_isn_cfdi
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -81,6 +82,35 @@ def build_personnel_plan(cutoff=None):
             month = month.date()
         rows[month].update(sales=item['amount'], branches=item['branches'])
 
+    # El expediente aplicado es el control fiscal canónico del ISN. Se carga
+    # antes que los CFDI para que el comprobante fuente no se sume otra vez.
+    expedientes_isn = ExpedienteISN.objects.filter(
+        periodo__gte=start,
+        periodo__lt=end,
+        estado=ExpedienteISN.ESTADO_APLICADO,
+    ).select_related('cfdi').only(
+        'id', 'periodo', 'uuid', 'importe_pagado', 'cfdi__estatus'
+    )
+    periodos_isn_aplicados = set()
+    for expediente in expedientes_isn:
+        row = rows.get(expediente.periodo)
+        if row is None:
+            continue
+        if (expediente.cfdi.estatus or '').strip().upper() != 'VIGENTE':
+            row['errors'].append(
+                f'El CFDI de ISN ya no esta vigente: {expediente.uuid}.'
+            )
+            continue
+        periodos_isn_aplicados.add(expediente.periodo)
+        row['isn'] = expediente.importe_pagado
+        row['sources'].append(dict(
+            kind='ISN · expediente aplicado',
+            id=expediente.pk,
+            reference=expediente.uuid,
+            amount=expediente.importe_pagado,
+            reconciled=True,
+        ))
+
     # Una sola entidad; el receptor individual nunca se exporta.
     invoices = CfdiDescargado.objects.filter(
         Q(rfc_emisor=RFC, tipo_comprobante='N', tipo_cfdi='emitido') |
@@ -90,11 +120,13 @@ def build_personnel_plan(cutoff=None):
           rfc_emisor='GES8101015I7'),
         fecha_emision__date__gte=start, fecha_emision__date__lte=today,
         estatus__iexact='vigente', moneda='MXN',
-    ).only('id', 'uuid', 'xml_raw', 'tipo_comprobante', 'nombre_emisor',
-           'fecha_emision', 'total', 'rfc_emisor').order_by('id')
+    ).only('id', 'uuid', 'xml_raw', 'tipo_comprobante', 'tipo_cfdi',
+           'nombre_emisor', 'fecha_emision', 'total', 'rfc_emisor',
+           'rfc_receptor', 'estatus').order_by('id')
     unparsed = []
     for invoice in invoices.iterator():
         try:
+            source_reconciled = None
             if invoice.tipo_comprobante == 'N':
                 month, amount, kind, root = parse_payroll(invoice.xml_raw or '')
                 if month not in rows:
@@ -109,18 +141,11 @@ def build_personnel_plan(cutoff=None):
                 root = ET.fromstring((invoice.xml_raw or '').lstrip('\ufeff'))
                 concepts = root.findall('.//' + CFDI_NS + 'Concepto')
                 if invoice.rfc_emisor == 'GES8101015I7':
-                    matching = [c for c in concepts if 'nomina' in
-                                c.attrib.get('Descripcion', '').lower()]
-                    if not matching:
+                    month, amount = extraer_isn_cfdi(invoice)
+                    if month not in rows or month in periodos_isn_aplicados:
                         continue
-                    matches = {re.match(r'(\d{4})(\d{2})\b', c.attrib.get('NoIdentificacion', ''))
-                               for c in matching}
-                    months = {date(int(m[1]), int(m[2]), 1) for m in matches if m}
-                    if len(months) != 1:
-                        raise ValueError('Periodo fiscal no inequívoco')
-                    month = months.pop()
-                    amount = sum((Decimal(c.attrib['Importe']) for c in matching), ZERO)
-                    key, detail = 'isn', 'Impuesto sobre nómina · periodo del concepto'
+                    key, detail = 'isn', 'ISN · CFDI estatal sin expediente'
+                    source_reconciled = False
                 else:
                     # No sumar cargas de saldo: los vales ya están en percepciones.
                     issued = root.attrib.get('Fecha', '')[:10]
@@ -151,8 +176,11 @@ def build_personnel_plan(cutoff=None):
                 if month not in rows:
                     continue
                 rows[month][key] = (rows[month][key] or ZERO) + amount
-            rows[month]['sources'].append(dict(kind=detail, id=invoice.pk,
-                                               reference=invoice.uuid, amount=amount))
+            source = dict(kind=detail, id=invoice.pk,
+                          reference=invoice.uuid, amount=amount)
+            if source_reconciled is not None:
+                source['reconciled'] = source_reconciled
+            rows[month]['sources'].append(source)
         except (ET.ParseError, ValueError, KeyError, TypeError, ArithmeticError):
             unparsed.append(invoice.pk)
 
@@ -213,7 +241,11 @@ def build_personnel_plan(cutoff=None):
             ('imss', 'IMSS'), ('rcv', 'RCV/Infonavit'), ('isn', 'ISN'), ('fees', 'servicio de vales')
         ) if row[key] is not None]
         row['reconciled_components'] = (all(v is not None for v in components)
-                                         and row['cfdis'] > 0 and not row['errors'] and not unparsed)
+                                         and row['cfdis'] > 0 and not row['errors'] and not unparsed
+                                         and not any(
+                                             source.get('reconciled') is False
+                                             for source in row['sources']
+                                         ))
         row['ratio'] = (money(row['documented'] / row['sales'] * 100)
                         if row['sales'] and row['documented'] is not None else None)
         row['target'] = money(row['sales'] * Decimal('.25')) if row['sales'] else None

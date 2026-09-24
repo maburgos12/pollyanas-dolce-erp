@@ -947,6 +947,7 @@ class ReglaFuenteRubro(models.Model):
     FUENTE_MANTENIMIENTO_EQUIPO = "MANTENIMIENTO_EQUIPO"
     FUENTE_COSTO_REVENTA = "COSTO_REVENTA"
     FUENTE_MERMA_PRODUCTO = "MERMA_PRODUCTO"
+    FUENTE_ISN_CFDI = "ISN_CFDI"
     FUENTE_MANUAL = "MANUAL"
     FUENTE_CHOICES = [
         (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
@@ -962,6 +963,7 @@ class ReglaFuenteRubro(models.Model):
         (FUENTE_MANTENIMIENTO_EQUIPO, "Mantenimiento de equipos (activos)"),
         (FUENTE_COSTO_REVENTA, "Costo de reventa de complementos"),
         (FUENTE_MERMA_PRODUCTO, "Merma física de producto (módulo mermas)"),
+        (FUENTE_ISN_CFDI, "ISN desde CFDI estatal"),
         (FUENTE_MANUAL, "Captura manual"),
     ]
 
@@ -1069,9 +1071,33 @@ class ReglaFuenteRubro(models.Model):
     def sucursal_efectiva(self):
         return self.sucursal or self.rubro.sucursal
 
+    def errores_contrato_corporativo_isn(self) -> list[str]:
+        """Dimensiones prohibidas para la fuente fiscal corporativa de ISN."""
+        if self.tipo_fuente != self.FUENTE_ISN_CFDI:
+            return []
+        errores = []
+        if self.rubro_id and self.rubro.sucursal_id is not None:
+            errores.append("rubro.sucursal")
+        if self.sucursal_id is not None:
+            errores.append("regla.sucursal")
+        if self.categoria_gasto_id is not None:
+            errores.append("categoria_gasto")
+        if self.centro_costo_id is not None:
+            errores.append("centro_costo")
+        if self.filtros:
+            errores.append("filtros")
+        if self.modo_asignacion != self.MODO_CANONICA:
+            errores.append("modo_asignacion debe ser CANONICA")
+        return errores
+
     def calcular_clave_fuente(self) -> str:
         if not self.activa or self.tipo_fuente == self.FUENTE_MANUAL:
             return ""
+        if self.tipo_fuente == self.FUENTE_ISN_CFDI:
+            # Un expediente aplicado es un total corporativo único. Su identidad
+            # nunca depende del rubro ni de dimensiones que una escritura directa
+            # pudiera haber agregado sin ejecutar full_clean().
+            return hashlib.sha256(b"ISN_CFDI:CORPORATIVO").hexdigest()
         filtros = dict(self.filtros or {})
         filtros.pop("porcentaje", None)
         filtros.pop("desde", None)
@@ -1175,6 +1201,14 @@ class ReglaFuenteRubro(models.Model):
 
     def clean(self):
         super().clean()
+        errores_isn = self.errores_contrato_corporativo_isn()
+        if errores_isn:
+            raise ValidationError({
+                "tipo_fuente": (
+                    "ISN_CFDI solo admite una regla corporativa sin dimensiones. "
+                    "Corrige: " + ", ".join(errores_isn) + "."
+                )
+            })
         if (
             self.modo_asignacion == self.MODO_CANONICA
             and (self.filtros or {}).get("porcentaje") is not None
@@ -1182,6 +1216,7 @@ class ReglaFuenteRubro(models.Model):
             self.modo_asignacion = self.MODO_DISTRIBUCION
         elif (
             self.modo_asignacion == self.MODO_CANONICA
+            and self.tipo_fuente != self.FUENTE_ISN_CFDI
             and self.rubro.area.codigo in {"nomina", "resultados"}
         ):
             self.modo_asignacion = self.MODO_CONTROL
@@ -1213,6 +1248,7 @@ class ReglaFuenteRubro(models.Model):
             self.modo_asignacion = self.MODO_DISTRIBUCION
         elif (
             self.modo_asignacion == self.MODO_CANONICA
+            and self.tipo_fuente != self.FUENTE_ISN_CFDI
             and self.rubro.area.codigo in {"nomina", "resultados"}
         ):
             self.modo_asignacion = self.MODO_CONTROL
@@ -3104,3 +3140,161 @@ class DetalleCedulaIMSS(models.Model):
 
     def __str__(self) -> str:
         return f"NSS •••••••{self.nss[-4:]} · {self.nombre_origen}"
+
+
+class ExpedienteISN(models.Model):
+    ESTADO_VALIDO = "VALIDO"
+    ESTADO_APLICADO = "APLICADO"
+    ESTADO_REEMPLAZADO = "REEMPLAZADO"
+    ESTADO_DISCREPANCIA = "DISCREPANCIA"
+    ESTADO_CHOICES = [
+        (value, value.title())
+        for value in (
+            ESTADO_VALIDO,
+            ESTADO_APLICADO,
+            ESTADO_REEMPLAZADO,
+            ESTADO_DISCREPANCIA,
+        )
+    ]
+
+    periodo = models.DateField(db_index=True)
+    revision = models.PositiveSmallIntegerField(default=1)
+    uuid = models.CharField(max_length=36, unique=True)
+    cfdi = models.OneToOneField(
+        "sat_client.CfdiDescargado",
+        on_delete=models.PROTECT,
+        related_name="expediente_isn",
+    )
+    importe_pagado = models.DecimalField(max_digits=14, decimal_places=2)
+    base_gravada_calculada = models.DecimalField(max_digits=14, decimal_places=2)
+    base_declarada = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES)
+    aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expedientes_isn_aplicados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    aplicado_en = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(periodo__day=1),
+                name="isn_periodo_primer_dia",
+            ),
+            models.CheckConstraint(
+                check=models.Q(revision__gte=1),
+                name="isn_revision_gte_1",
+            ),
+            models.CheckConstraint(
+                check=models.Q(importe_pagado__gt=0),
+                name="isn_importe_pagado_gt_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(base_gravada_calculada__gte=0),
+                name="isn_base_calculada_gte_0",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(base_declarada__isnull=True)
+                    | models.Q(base_declarada__gte=0)
+                ),
+                name="isn_base_declarada_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    estado__in=(
+                        "VALIDO",
+                        "APLICADO",
+                        "REEMPLAZADO",
+                        "DISCREPANCIA",
+                    )
+                ),
+                name="isn_estado_valido",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(
+                        estado__in=("APLICADO", "REEMPLAZADO"),
+                        aplicado_en__isnull=False,
+                    )
+                    | (
+                        ~models.Q(estado__in=("APLICADO", "REEMPLAZADO"))
+                        & models.Q(aplicado_en__isnull=True)
+                    )
+                ),
+                name="isn_aplicacion_fecha_coherente",
+            ),
+            models.UniqueConstraint(
+                fields=["periodo", "revision"],
+                name="uniq_isn_periodo_revision",
+            ),
+            models.UniqueConstraint(
+                fields=["periodo"],
+                condition=models.Q(estado="APLICADO"),
+                name="uniq_isn_aplicado_periodo",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields:
+                return super().save(*args, **kwargs)
+            actualiza_cfdi = bool({"cfdi", "cfdi_id"} & update_fields)
+            if "uuid" in update_fields and not actualiza_cfdi:
+                raise ValueError("uuid solo puede actualizarse junto con cfdi")
+            if actualiza_cfdi and self.cfdi_id:
+                self.uuid = self.cfdi.uuid
+                update_fields.add("uuid")
+            kwargs["update_fields"] = update_fields
+        elif self.cfdi_id:
+            self.uuid = self.cfdi.uuid
+        return super().save(*args, **kwargs)
+
+
+class DistribucionISNEmpleado(models.Model):
+    expediente = models.ForeignKey(
+        ExpedienteISN,
+        on_delete=models.PROTECT,
+        related_name="distribuciones",
+    )
+    empleado = models.ForeignKey(
+        "rrhh.Empleado",
+        on_delete=models.PROTECT,
+        related_name="distribuciones_isn",
+    )
+    base_gravada = models.DecimalField(max_digits=14, decimal_places=2)
+    monto_isn = models.DecimalField(max_digits=14, decimal_places=2)
+    area_codigo = models.CharField(max_length=50)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        related_name="distribuciones_isn",
+    )
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(base_gravada__gte=0),
+                name="isn_dist_base_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(monto_isn__gte=0),
+                name="isn_dist_monto_gte_0",
+            ),
+            models.UniqueConstraint(
+                fields=["expediente", "empleado"],
+                name="uniq_isn_expediente_empleado",
+            )
+        ]

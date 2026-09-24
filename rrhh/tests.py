@@ -5493,7 +5493,13 @@ class ListaRayaIdentidadTests(TestCase):
             importar_lista_raya_nomina,
         )
 
-        empleado = Empleado.objects.create(nombre="REY IVAN VALDEZ FELIX", codigo="EMP-2606-001")
+        sucursal = Sucursal.objects.create(codigo="SNAP-RAYA", nombre="Snapshot raya")
+        empleado = Empleado.objects.create(
+            nombre="REY IVAN VALDEZ FELIX",
+            codigo="EMP-2606-001",
+            departamento=Empleado.DEP_PRODUCCION,
+            sucursal_ref=sucursal,
+        )
         row = EmpleadoListaRaya(
             codigo="346",
             nombre="REY IVAN VALDEZ FELIX",
@@ -5534,11 +5540,95 @@ class ListaRayaIdentidadTests(TestCase):
             importar_lista_raya_nomina(tmp.name, commit=True)
 
         self.assertEqual(Empleado.objects.filter(nombre="REY IVAN VALDEZ FELIX").count(), 1)
-        self.assertEqual(NominaLinea.objects.get().empleado, empleado)
+        linea = NominaLinea.objects.get()
+        self.assertEqual(linea.empleado, empleado)
+        self.assertEqual(linea.sucursal_snapshot, sucursal)
+        self.assertEqual(linea.departamento_snapshot, Empleado.DEP_PRODUCCION)
+        self.assertEqual(linea.snapshot_origen, NominaLinea.SNAPSHOT_LISTA_RAYA)
+        self.assertIsNotNone(linea.snapshot_capturado_en)
         pendiente = EmpleadoIdentidadPendiente.objects.get(fuente=EmpleadoIdentidadPendiente.FUENTE_NOMINA, codigo_externo="346")
         self.assertEqual(pendiente.empleado_sugerido, empleado)
         empleado.refresh_from_db()
         self.assertEqual(empleado.codigo, "EMP-2606-001")
+
+
+class NominaLineaSnapshotTests(TestCase):
+    def test_creacion_normal_fija_snapshot_y_no_lo_cambia_despues(self):
+        from datetime import date
+
+        sucursal_origen = Sucursal.objects.create(codigo="SNAP-ORI", nombre="Origen")
+        sucursal_destino = Sucursal.objects.create(codigo="SNAP-DES", nombre="Destino")
+        empleado = Empleado.objects.create(
+            codigo="EMP-SNAPSHOT",
+            nombre="Empleado snapshot",
+            departamento=Empleado.DEP_VENTAS,
+            sucursal_ref=sucursal_origen,
+        )
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+        )
+
+        linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.sucursal_ref = sucursal_destino
+        empleado.save(update_fields=["departamento", "sucursal_ref"])
+        linea.observaciones = "edicion posterior"
+        linea.save(update_fields=["observaciones"])
+        linea.refresh_from_db()
+
+        self.assertEqual(linea.sucursal_snapshot, sucursal_origen)
+        self.assertEqual(linea.departamento_snapshot, Empleado.DEP_VENTAS)
+        self.assertEqual(linea.snapshot_origen, NominaLinea.SNAPSHOT_CREACION)
+        self.assertIsNotNone(linea.snapshot_capturado_en)
+
+    def test_captura_explicita_preview_apply_no_sobreescribe_y_es_inmutable(self):
+        from datetime import date
+        from io import StringIO
+
+        origen = Sucursal.objects.create(codigo="SNAP-CMD-O", nombre="Origen")
+        destino = Sucursal.objects.create(codigo="SNAP-CMD-D", nombre="Destino")
+        empleado = Empleado.objects.create(
+            codigo="EMP-SNAPSHOT-CMD", nombre="Snapshot command",
+            departamento=Empleado.DEP_VENTAS, sucursal_ref=origen,
+        )
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 8, 1), fecha_fin=date(2026, 8, 15)
+        )
+        linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
+        NominaLinea.objects.filter(pk=linea.pk).update(
+            sucursal_snapshot=None, departamento_snapshot="",
+            snapshot_origen="", snapshot_capturado_en=None,
+        )
+
+        preview = StringIO()
+        call_command("capturar_snapshots_nomina", periodo="2026-08", stdout=preview)
+        linea.refresh_from_db()
+        self.assertIsNone(linea.sucursal_snapshot)
+        self.assertIn("DRY-RUN", preview.getvalue())
+
+        call_command(
+            "capturar_snapshots_nomina", periodo="2026-08", apply=True,
+            stdout=StringIO(),
+        )
+        linea.refresh_from_db()
+        capturado_en = linea.snapshot_capturado_en
+        self.assertEqual(linea.sucursal_snapshot, origen)
+        self.assertEqual(linea.departamento_snapshot, Empleado.DEP_VENTAS)
+        self.assertEqual(linea.snapshot_origen, NominaLinea.SNAPSHOT_CAPTURA_EXPLICITA)
+        self.assertIsNotNone(capturado_en)
+
+        empleado.sucursal_ref = destino
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.save(update_fields=["sucursal_ref", "departamento"])
+        call_command(
+            "capturar_snapshots_nomina", periodo="2026-08", apply=True,
+            stdout=StringIO(),
+        )
+        linea.refresh_from_db()
+        self.assertEqual(linea.sucursal_snapshot, origen)
+        self.assertEqual(linea.departamento_snapshot, Empleado.DEP_VENTAS)
+        self.assertEqual(linea.snapshot_capturado_en, capturado_en)
 
     def test_command_dry_run_no_toca_base(self):
         if not LISTA_RAYA_SAMPLE.exists():

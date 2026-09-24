@@ -23,11 +23,13 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
 from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de
 from .models import (
     GastoOperativoMensual,
+    ExpedienteISN,
     LineaPresupuestoMensual,
     ObligacionGasto,
     ReglaFuenteRubro,
@@ -181,10 +183,23 @@ class PresupuestoRealConsolidacionService:
                 metadata = dict(linea.metadata or {})
                 metadata["sin_datos_fuente"] = True
                 metadata["fuente_sin_datos_en"] = timezone.now().isoformat()
+                if linea.fuente_real == f"{AUTO_PREFIX}{ReglaFuenteRubro.FUENTE_ISN_CFDI}":
+                    metadata.setdefault("fuente_sin_datos_previa", linea.fuente_real)
+                    if linea.monto_real is not None:
+                        metadata.setdefault(
+                            "monto_sin_datos_previo",
+                            str(linea.monto_real),
+                        )
                 if not dry_run:
+                    actualizacion = {
+                        "metadata": metadata,
+                        "actualizado_en": timezone.now(),
+                    }
+                    if linea.fuente_real == f"{AUTO_PREFIX}{ReglaFuenteRubro.FUENTE_ISN_CFDI}":
+                        actualizacion["monto_real"] = None
                     LineaPresupuestoMensual.objects.filter(
                         pk=linea.pk, fuente_real=linea.fuente_real
-                    ).update(metadata=metadata, actualizado_en=timezone.now())
+                    ).update(**actualizacion)
                 continue
 
             tipos = sorted({r.tipo_fuente for r in reglas})
@@ -265,6 +280,25 @@ class PresupuestoRealConsolidacionService:
             if "nomina_concepto" not in indices:
                 indices["nomina_concepto"] = self._build_nomina_concepto_index(periodo)
             return self._monto_nomina_concepto(regla, indices["nomina_concepto"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_ISN_CFDI:
+            errores_contrato = regla.errores_contrato_corporativo_isn()
+            if errores_contrato:
+                raise ValueError(
+                    "ISN_CFDI solo admite una regla corporativa sin dimensiones. "
+                    "Corrige: " + ", ".join(errores_contrato) + "."
+                )
+            if "isn" not in indices:
+                indices["isn"] = {
+                    row["periodo"]: row["importe_pagado"]
+                    for row in ExpedienteISN.objects.annotate(
+                        cfdi_estatus_normalizado=Upper(Trim("cfdi__estatus"))
+                    ).filter(
+                        estado=ExpedienteISN.ESTADO_APLICADO,
+                        periodo=periodo,
+                        cfdi_estatus_normalizado="VIGENTE",
+                    ).values("periodo", "importe_pagado")
+                }
+            return (indices["isn"].get(periodo, Decimal("0")), periodo in indices["isn"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS:
             if "ventas" not in indices:
                 indices["ventas"] = self._build_ventas_index(periodo)
