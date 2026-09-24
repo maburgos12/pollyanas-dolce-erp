@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('fecha_inicio', models.DateField()),
                 ('fecha_fin', models.DateField(blank=True, null=True)),
-                ('motivo', models.CharField(blank=True, default='', max_length=200)),
+                ('motivo', models.CharField(max_length=200)),
                 ('proteger_reingesta_historica', models.BooleanField(default=False)),
                 ('creado_en', models.DateTimeField(auto_now_add=True)),
                 ('creado_por', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='jornadas_empleado_creadas', to=settings.AUTH_USER_MODEL)),

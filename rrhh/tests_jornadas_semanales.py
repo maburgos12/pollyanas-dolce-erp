@@ -1,6 +1,7 @@
 from datetime import date
 
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase
 
 from rrhh.models import AsignacionJornadaEmpleado, Empleado, JornadaSemanal, JornadaSemanalDia
@@ -20,6 +21,8 @@ class JornadaSemanalModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             JornadaSemanalDia(jornada=jornada, dia_semana=0, turno=None).full_clean()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            JornadaSemanalDia.objects.create(jornada=jornada, dia_semana=0, turno=None)
 
         otro = JornadaSemanalDia(jornada=jornada, dia_semana=1, turno=None)
         otro.full_clean()
@@ -36,7 +39,7 @@ class JornadaSemanalModelTests(TestCase):
         jornada = self.jornada()
         AsignacionJornadaEmpleado.objects.create(
             empleado=self.empleado, jornada=jornada,
-            fecha_inicio=date(2026, 9, 1), fecha_fin=date(2026, 9, 14),
+            fecha_inicio=date(2026, 9, 1), fecha_fin=date(2026, 9, 14), motivo="Inicial",
         )
 
         for inicio, fin in (
@@ -48,19 +51,19 @@ class JornadaSemanalModelTests(TestCase):
             with self.subTest(inicio=inicio, fin=fin), self.assertRaises(ValidationError):
                 AsignacionJornadaEmpleado(
                     empleado=self.empleado, jornada=jornada,
-                    fecha_inicio=inicio, fecha_fin=fin,
+                    fecha_inicio=inicio, fecha_fin=fin, motivo="Cambio",
                 ).full_clean()
 
     def test_vigencias_contiguas_y_empleados_distintos_se_permiten(self):
         jornada = self.jornada()
         AsignacionJornadaEmpleado.objects.create(
             empleado=self.empleado, jornada=jornada,
-            fecha_inicio=date(2026, 9, 1), fecha_fin=date(2026, 9, 14),
+            fecha_inicio=date(2026, 9, 1), fecha_fin=date(2026, 9, 14), motivo="Inicial",
         )
 
         siguiente = AsignacionJornadaEmpleado(
             empleado=self.empleado, jornada=jornada,
-            fecha_inicio=date(2026, 9, 15), fecha_fin=None,
+            fecha_inicio=date(2026, 9, 15), fecha_fin=None, motivo="Continuidad",
         )
         siguiente.full_clean()
         siguiente.save()
@@ -68,10 +71,18 @@ class JornadaSemanalModelTests(TestCase):
         otra_persona = Empleado.objects.create(codigo="JORNADA-002", nombre="Otra persona")
         paralelo = AsignacionJornadaEmpleado(
             empleado=otra_persona, jornada=jornada,
-            fecha_inicio=date(2026, 9, 1), fecha_fin=None,
+            fecha_inicio=date(2026, 9, 1), fecha_fin=None, motivo="Ingreso",
         )
         paralelo.full_clean()
         paralelo.save()
+
+    def test_motivo_es_obligatorio(self):
+        asignacion = AsignacionJornadaEmpleado(
+            empleado=self.empleado, jornada=self.jornada(),
+            fecha_inicio=date(2026, 9, 1), motivo="",
+        )
+        with self.assertRaises(ValidationError):
+            asignacion.full_clean()
 
     def test_servicio_asigna_y_rechaza_traslape(self):
         jornada = self.jornada()

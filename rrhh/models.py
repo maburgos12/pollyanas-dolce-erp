@@ -1275,7 +1275,7 @@ class AsignacionJornadaEmpleado(models.Model):
     )
     fecha_inicio = models.DateField()
     fecha_fin = models.DateField(null=True, blank=True)
-    motivo = models.CharField(max_length=200, blank=True, default="")
+    motivo = models.CharField(max_length=200)
     creado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="jornadas_empleado_creadas",
