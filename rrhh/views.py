@@ -1775,6 +1775,13 @@ def empleados(request):
             if asignacion.jornada_id not in resumen_por_jornada:
                 resumen_por_jornada[asignacion.jornada_id] = _resumen_jornada_semanal(asignacion.jornada)
             asignacion.resumen = resumen_por_jornada[asignacion.jornada_id]
+        vigente_inactiva = empleado.jornada_vigente
+        empleado.jornada_inactiva_preview = (
+            {"id": vigente_inactiva.jornada_id, "nombre": vigente_inactiva.jornada.nombre,
+             **vigente_inactiva.resumen}
+            if vigente_inactiva and not vigente_inactiva.jornada.activo else None
+        )
+        empleado.jornada_inactiva_script_id = f"rrhh-jornada-inactiva-{empleado.pk}"
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
         empleado.sucursal_form_id = _sucursal_form_id(
             sucursal_ref_id=empleado.sucursal_ref_id,
@@ -1852,6 +1859,8 @@ def empleados(request):
             formulario.form_draft = borrador
             formulario.jornada_historial = empleado.jornada_historial
             formulario.jornada_vigente = empleado.jornada_vigente
+            formulario.jornada_inactiva_preview = empleado.jornada_inactiva_preview
+            formulario.jornada_inactiva_script_id = empleado.jornada_inactiva_script_id
             empleado.form_values = formulario
 
     identidades_pendientes = list(

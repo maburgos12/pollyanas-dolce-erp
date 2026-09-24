@@ -379,6 +379,8 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
             response = self.client.get(f"{self.url}?q=no-encuentra-este-empleado")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Historial de jornadas (4)")
+        self.assertContains(response, "(inactiva · solo conservar)", count=1)
+        self.assertContains(response, f'id="rrhh-jornada-inactiva-{empleado.pk}"')
         dias_queries = [
             query for query in queries if 'FROM "rrhh_jornadasemanaldia"' in query["sql"]
         ]
@@ -413,6 +415,89 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertEqual(empleado.jornadas_asignadas.count(), 1)
         inicial.refresh_from_db()
         self.assertIsNone(inicial.fecha_fin)
+
+    def test_vigente_inactiva_solo_aparece_en_su_edicion_y_preview_local(self):
+        turno = Turno.objects.create(nombre="Diurno", hora_entrada=time(8), hora_salida=time(16))
+        for dia in range(6):
+            JornadaSemanalDia.objects.create(jornada=self.jornada, dia_semana=dia, turno=turno)
+        JornadaSemanalDia.objects.create(jornada=self.jornada, dia_semana=6)
+        empleado, _ = self.empleado_con_jornada()
+        otro = Empleado.objects.create(nombre="Otro empleado", codigo="OTRO-JORNADA")
+        self.jornada.nombre = '<script>alert("inactiva")</script>'
+        self.jornada.activo = False
+        self.jornada.save(update_fields=["nombre", "activo"])
+
+        response = self.client.get(self.url)
+        html = response.content.decode()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "(inactiva · solo conservar)", count=1)
+        self.assertIn(f'id="rrhh-jornada-inactiva-{empleado.pk}"', html)
+        self.assertNotIn(f'id="rrhh-jornada-inactiva-{otro.pk}"', html)
+        self.assertIn('48 h semanales', html)
+        self.assertIn('\\u003Cscript\\u003Ealert', html)
+        self.assertNotIn('<script>alert("inactiva")</script>', html)
+        catalogo = re.search(r'<script id="rrhh-jornadas-catalogo"[^>]*>(.*?)</script>', html, re.S)
+        self.assertIsNotNone(catalogo)
+        self.assertNotIn(f'"id": {self.jornada.pk}', catalogo.group(1))
+        alta = re.search(r'<select id="jornada-semanal-alta"[^>]*>(.*?)</select>', html, re.S)
+        self.assertIsNotNone(alta)
+        self.assertNotIn(f'value="{self.jornada.pk}"', alta.group(1))
+        propia = re.search(rf'<select id="jornada-semanal-{empleado.pk}"[^>]*>(.*?)</select>', html, re.S)
+        ajena = re.search(rf'<select id="jornada-semanal-{otro.pk}"[^>]*>(.*?)</select>', html, re.S)
+        self.assertIsNotNone(propia)
+        self.assertIsNotNone(ajena)
+        self.assertRegex(propia.group(1), rf'<option value="{self.jornada.pk}" selected>')
+        self.assertNotIn(f'value="{self.jornada.pk}"', ajena.group(1))
+
+    def test_vigente_inactiva_se_conserva_al_editar_otros_datos_y_no_se_reasigna(self):
+        empleado, inicial = self.empleado_con_jornada()
+        self.jornada.activo = False
+        self.jornada.save(update_fields=["activo"])
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="", jornada_motivo="",
+            nombre="Nombre actualizado",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        empleado.refresh_from_db()
+        inicial.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Nombre actualizado")
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="2026-09-20",
+            jornada_motivo="Reasignar inactiva",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_id", response.json()["errors"])
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+        otro = Empleado.objects.create(nombre="Otro", codigo="JORNADA-OTRO")
+        response = self.client.post(self.url, self.datos_edicion(
+            otro, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="2026-09-20",
+            jornada_motivo="Asignar inactiva",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_id", response.json()["errors"])
+        response = self.client.post(self.url, self.datos_alta(
+            codigo="JORNADA-ALTA-INACTIVA", jornada_id=str(self.jornada.pk),
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_id", response.json()["errors"])
+
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="2026-09-20",
+            jornada_motivo="Cierre autorizado",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 19))
 
     def test_seleccion_vacia_con_jornada_vigente_exige_datos_y_no_cierra(self):
         empleado, inicial = self.empleado_con_jornada()

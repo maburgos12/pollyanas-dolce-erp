@@ -930,6 +930,7 @@
                             <select id="jornada-semanal-{{ e.id }}" class="input-field" name="jornada_id" data-jornada-select>
                               <option value="">Sin jornada asignada</option>
                               {% for jornada in jornadas_semanales %}<option value="{{ jornada.id }}" {% if e.form_draft.jornada_id == jornada.id|stringformat:'s' or not e.form_draft and e.jornada_vigente.jornada_id == jornada.id %}selected{% endif %}>{{ jornada.nombre }}</option>{% endfor %}
+                              {% if e.jornada_inactiva_preview %}<option value="{{ e.jornada_inactiva_preview.id }}" {% if e.form_draft.jornada_id == e.jornada_inactiva_preview.id|stringformat:'s' or not e.form_draft %}selected{% endif %}>{{ e.jornada_vigente.jornada.nombre }} (inactiva · solo conservar)</option>{% endif %}
                             </select>
                           </div>
                           <div class="rrhh-field">
@@ -941,6 +942,7 @@
                             <input id="jornada-motivo-{{ e.id }}" class="input-field" type="text" name="jornada_motivo" maxlength="200" value="{{ e.form_draft.jornada_motivo|default:'' }}" data-jornada-motivo>
                           </div>
                         </div>
+                        {% if e.jornada_inactiva_preview %}{{ e.jornada_inactiva_preview|json_script:e.jornada_inactiva_script_id }}{% endif %}
                         <div class="rrhh-jornada-preview" aria-live="polite" data-jornada-preview></div>
                       </fieldset>
                       <div class="rrhh-field">
@@ -1163,7 +1165,11 @@
   function renderJornadaPreview(fieldset) {
     const select = fieldset.querySelector('[data-jornada-select]');
     const preview = fieldset.querySelector('[data-jornada-preview]');
-    const jornada = jornadas.get(select.value);
+    const localNode = fieldset.querySelector('script[type="application/json"]');
+    const vigenteInactiva = localNode ? JSON.parse(localNode.textContent) : null;
+    const jornada = jornadas.get(select.value) || (
+      vigenteInactiva && String(vigenteInactiva.id) === select.value ? vigenteInactiva : null
+    );
     preview.replaceChildren();
     if (!jornada) {
       const aviso = document.createElement('p');
