@@ -464,4 +464,3 @@ Verify by fresh database read and authenticated browser:
 - [ ] **Step 7: Close the task workspace**
 
 Run `scripts/task_workspace_audit.sh`, then `scripts/task_workspace_close.sh --state merged` for this registered task after production validation and remote branch cleanup.
-
