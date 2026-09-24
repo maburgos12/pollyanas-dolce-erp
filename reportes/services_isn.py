@@ -20,6 +20,7 @@ from sat_client.models import CfdiDescargado
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
 TOLERANCIA_BASE_DECLARADA = CENT
+MAX_BASE_DECLARADA = Decimal("999999999999.99")
 CFDI_NS = "{http://www.sat.gob.mx/cfd/4}"
 RFC_SINALOA = "GES8101015I7"
 RFC_EMPRESA = "GEF211230KR2"
@@ -425,6 +426,7 @@ def preparar_expediente_isn(
 ) -> PreviewExpedienteISN:
     if not isinstance(periodo, date) or periodo.day != 1:
         raise ValueError("El periodo de ISN debe ser el primer dia del mes.")
+    base_declarada = _normalizar_base_declarada(base_declarada)
 
     cfdi = _resolver_cfdi_isn(periodo, uuid)
     periodo_cfdi, importe_pagado = extraer_isn_cfdi(cfdi)
@@ -513,8 +515,28 @@ def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise ValueError("La base declarada debe ser un numero decimal.") from exc
     if not valor.is_finite() or valor < ZERO:
-        raise ValueError("La base declarada debe ser finita y no negativa.")
-    return money(valor)
+        if not valor.is_finite():
+            raise ValueError("La base declarada debe ser finita.")
+        raise ValueError("La base declarada no puede ser negativa.")
+    if valor.as_tuple().exponent < -2:
+        raise ValueError("La base declarada admite como maximo dos decimales.")
+    if valor > MAX_BASE_DECLARADA:
+        raise ValueError(
+            "La base declarada excede el maximo representable "
+            f"{MAX_BASE_DECLARADA}."
+        )
+    try:
+        normalizada = money(valor)
+    except ArithmeticError as exc:
+        raise ValueError(
+            "La base declarada no se puede normalizar como importe monetario."
+        ) from exc
+    if normalizada > MAX_BASE_DECLARADA:
+        raise ValueError(
+            "La base declarada excede el maximo representable "
+            f"{MAX_BASE_DECLARADA}."
+        )
+    return normalizada
 
 
 def _conciliar_base_declarada(

@@ -1049,6 +1049,67 @@ class ISNApplicationTests(TestCase):
                 "no-es-decimal",
             )
 
+    def test_base_declarada_rechaza_valores_no_representables_sin_escribir(self):
+        empleado = self._crear_empleado("E-BASE-INVALIDA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-BASE-INVALIDA")
+        casos = (
+            ("1e999999", "maximo"),
+            ("NaN", "finita"),
+            ("Infinity", "finita"),
+            ("1.001", "dos decimales"),
+            ("1000000000000.00", "maximo"),
+        )
+
+        for valor, mensaje in casos:
+            with self.subTest(valor=valor, flujo="servicio-dry-run"):
+                with self.assertRaisesMessage(ValueError, mensaje):
+                    preparar_expediente_isn(
+                        self.PERIODO,
+                        uuid=cfdi.uuid,
+                        base_declarada=D(valor),
+                    )
+                self.assertEqual(ExpedienteISN.objects.count(), 0)
+
+            preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+            with self.subTest(valor=valor, flujo="servicio-apply"):
+                with self.assertRaisesMessage(ValueError, mensaje):
+                    aplicar_expediente_isn(preview, base_declarada=D(valor))
+                self.assertEqual(ExpedienteISN.objects.count(), 0)
+                self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
+
+            for aplicar in (False, True):
+                flujo = "cli-apply" if aplicar else "cli-dry-run"
+                argumentos = [
+                    "--periodo",
+                    "2026-08",
+                    "--uuid",
+                    cfdi.uuid,
+                    "--base-declarada",
+                    valor,
+                ]
+                if aplicar:
+                    argumentos.append("--apply")
+                with self.subTest(valor=valor, flujo=flujo):
+                    with self.assertRaisesMessage(CommandError, mensaje):
+                        call_command("materializar_isn", *argumentos)
+                    self.assertEqual(ExpedienteISN.objects.count(), 0)
+                    self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
+
+    def test_base_declarada_acepta_maximo_representable(self):
+        empleado = self._crear_empleado("E-BASE-MAXIMA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-BASE-MAXIMA")
+
+        preview = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            base_declarada=D("999999999999.99"),
+        )
+
+        self.assertEqual(preview.base_declarada, D("999999999999.99"))
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+
 
 class ISNConcurrencyTests(TransactionTestCase):
     PERIODO = date(2026, 8, 1)
