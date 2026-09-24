@@ -244,6 +244,18 @@ class ISNSourceTests(TestCase):
         self.assertEqual(periodo, date(2026, 8, 1))
         self.assertEqual(importe, D("16168.00"))
 
+    def test_acepta_identificador_completo_del_isn_sinaloa(self):
+        xml = self.CFDI_XML.replace(
+            "202608   2-003",
+            "202608 2-003-001-0006",
+        )
+        cfdi = self._crear_cfdi(uuid="CFDI-ISN-SINALOA-COMPLETO", xml_raw=xml)
+
+        periodo, importe = extraer_isn_cfdi(cfdi)
+
+        self.assertEqual(periodo, date(2026, 8, 1))
+        self.assertEqual(importe, D("16168.00"))
+
     def test_rechaza_cfdi_que_no_es_ingreso_recibido_vigente_de_la_empresa(self):
         casos = (
             ("rfc_emisor", "AAA010101AAA"),
@@ -311,11 +323,19 @@ class ISNSourceTests(TestCase):
         self.assertEqual(importe, D("16168.00"))
 
     def test_rechaza_codigo_distinto_con_descripcion_generica(self):
-        xml = self.CFDI_XML.replace("202608   2-003", "202608 9-999")
-        cfdi = self._crear_cfdi(uuid="CFDI-CODIGO-DISTINTO", xml_raw=xml)
+        for indice, codigo in enumerate(("9-999", "2-003-001-9999"), start=1):
+            with self.subTest(codigo=codigo):
+                xml = self.CFDI_XML.replace(
+                    "202608   2-003",
+                    f"202608 {codigo}",
+                )
+                cfdi = self._crear_cfdi(
+                    uuid=f"CFDI-CODIGO-DISTINTO-{indice}",
+                    xml_raw=xml,
+                )
 
-        with self.assertRaises(ValueError):
-            extraer_isn_cfdi(cfdi)
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
 
     def test_rechaza_mezcla_con_codigo_fiscal_no_clasificable(self):
         xml = self.CFDI_XML.replace(
