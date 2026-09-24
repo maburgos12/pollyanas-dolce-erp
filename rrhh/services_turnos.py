@@ -1,10 +1,31 @@
 """Resuelve horarios confirmados por persona y fecha sin inferirlos de la llegada."""
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from .models import AsignacionTurnoEmpleado
+from .models import AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, Empleado
+
+
+@transaction.atomic
+def asignar_jornada_empleado(*, empleado, jornada, fecha_inicio, fecha_fin, motivo, actor):
+    Empleado.objects.select_for_update().get(pk=empleado.pk)
+    list(
+        AsignacionJornadaEmpleado.objects.select_for_update()
+        .filter(empleado=empleado)
+    )
+    asignacion = AsignacionJornadaEmpleado(
+        empleado=empleado,
+        jornada=jornada,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        motivo=motivo,
+        creado_por=actor,
+    )
+    asignacion.full_clean()
+    asignacion.save()
+    return asignacion
 
 
 def turno_asignado_para_fecha(empleado, fecha):
