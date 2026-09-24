@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 import hashlib
 import json
@@ -26,6 +26,7 @@ from .services_extra_conciliacion import (
     saldo_automatico_esperado,
 )
 from .services_asistencia_reglas import _evaluar_hora_extra
+from .services_extra_bloqueos import bloquear_jornadas_extra
 from .services_turnos import asignar_jornada_empleado
 from .signals_extra import _conciliando
 
@@ -107,6 +108,29 @@ def _asistencia_proyectada(asistencia, turno):
         turno_id=turno.pk if turno and turno.pk else (-1 if turno else None),
         turno=turno,
     )
+
+
+def _incidencia_snapshot(incidencia):
+    """Estado operativo que debe seguir vigente antes de tocar una incidencia."""
+    if incidencia is None:
+        return None
+    return {
+        "id": incidencia.pk, "tipo": incidencia.tipo, "estado": incidencia.estado,
+        "editado_manual": incidencia.editado_manual,
+        "detalle": incidencia.detalle, "metadata": incidencia.metadata,
+        "severidad": incidencia.severidad, "minutos": incidencia.minutos,
+        "asistencia_id": incidencia.asistencia_id,
+        "hora_extra_id": incidencia.hora_extra_id,
+        "permiso_id": incidencia.permiso_id,
+        "solicitud_vacaciones_id": incidencia.solicitud_vacaciones_id,
+        "goce_sueldo": incidencia.goce_sueldo,
+        "ventana_inicio": incidencia.ventana_inicio.isoformat() if incidencia.ventana_inicio else None,
+        "ventana_fin": incidencia.ventana_fin.isoformat() if incidencia.ventana_fin else None,
+        "conteo_retardos_15d": incidencia.conteo_retardos_15d,
+        "conteo_faltas_30d": incidencia.conteo_faltas_30d,
+        "creado_en": incidencia.creado_en.isoformat(),
+        "actualizado_en": incidencia.actualizado_en.isoformat(),
+    }
 
 
 def _plan(hoy: date, *, bloquear=False):
@@ -238,12 +262,9 @@ def _plan(hoy: date, *, bloquear=False):
     fechas_reconciliar = set(fechas_turno_cambiado)
     fechas_reconciliar.update((he.empleado_id, he.fecha) for he in extras_db
                               if he.asistencia_id and he.estado == HoraExtra.ESTADO_PENDIENTE)
-    fechas_examinar = set(fechas_reconciliar)
-    fechas_examinar.update((he.empleado_id, he.fecha) for he in extras_db
-                           if he.asistencia_id and he.estado in {
-                                HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO,
-                                HoraExtra.ESTADO_RECHAZADO, HoraExtra.ESTADO_CANCELADO,
-                            })
+    # Una asistencia cuyo turno ya es correcto también puede carecer de una
+    # propuesta automática. El diagnóstico es lectura pura para todo el rango.
+    fechas_examinar = {(a.empleado_id, a.fecha) for a in asistencias_db}
     pendientes = []
     resueltas = []
     incidencias = []
@@ -265,7 +286,7 @@ def _plan(hoy: date, *, bloquear=False):
                                    "empleado_id": a.empleado_id, "fecha": a.fecha.isoformat(),
                                    "anterior": str(vinculado.horas), "nuevo": str(saldo),
                                    "accion": accion})
-        elif key in fechas_reconciliar and not vinculado:
+        elif not vinculado:
             saldo = saldo_automatico_esperado(diagnostico, registros)
             if saldo and saldo > 0:
                 pendientes.append({"id": None, "asistencia_id": a.pk,
@@ -284,12 +305,19 @@ def _plan(hoy: date, *, bloquear=False):
                 incidencias.append({"id": existente.pk if existente else None,
                                     "asistencia_id": a.pk, "empleado_id": a.empleado_id,
                                     "fecha": a.fecha.isoformat(), "tipo": tipo,
-                                    "accion": "actualizar" if existente else "crear"})
+                                    "accion": "actualizar" if existente else "crear",
+                                    "antes": _incidencia_snapshot(existente)})
         for he in registros:
             if he.asistencia_id != a.pk or he.estado == HoraExtra.ESTADO_PENDIENTE:
                 continue
             if he.estado not in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO,
                                  HoraExtra.ESTADO_RECHAZADO, HoraExtra.ESTADO_CANCELADO}:
+                continue
+            if (he.estado == HoraExtra.ESTADO_CANCELADO
+                    and he.notas.startswith(NOTA_EXTRA_AUTOMATICA)
+                    and he.notas.endswith(NOTA_SALDO_CUBIERTO)):
+                # La propia cancelación ya quedó en AuditLog; no necesita una
+                # segunda aplicación para abrir REVIEW humano espurio.
                 continue
             if diagnostico.minutos is None or diagnostico.minutos != horas_a_minutos(he.horas):
                 resueltas.append({"id": he.pk, "empleado_id": a.empleado_id,
@@ -298,7 +326,7 @@ def _plan(hoy: date, *, bloquear=False):
                                   "detectado_minutos": diagnostico.minutos,
                                   "monto_calculado": str(he.monto_calculado) if he.monto_calculado is not None else None})
         for tipo in TIPOS_EXTRA:
-            if key not in fechas_reconciliar:
+            if key not in fechas_reconciliar and not reevaluar:
                 continue
             incidencia = incidencias_por_fecha.get((a.empleado_id, a.fecha, tipo))
             if incidencia and incidencia.estado == IncidenciaAsistencia.ESTADO_PENDIENTE and not incidencia.editado_manual:
@@ -311,7 +339,8 @@ def _plan(hoy: date, *, bloquear=False):
                 if obsoleta:
                     incidencias.append({"id": incidencia.pk, "empleado_id": a.empleado_id,
                                         "fecha": a.fecha.isoformat(), "tipo": tipo,
-                                        "accion": "resolver"})
+                                        "accion": "resolver",
+                                        "antes": _incidencia_snapshot(incidencia)})
 
     plan = {
         "modo": "preview", "personas_objetivo": 6, "personas": personas,
@@ -499,6 +528,17 @@ def configurar_jornadas_administrativas_2026(
             raise ConfiguracionJornadasError("La aplicación requiere PostgreSQL.")
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_advisory_xact_lock(%s)", [LOCK_KEY])
+        # El guardado ordinario de extra toma advisory diario ANTES de filas.
+        # Cubrir todo el manifiesto y rango evita phantoms de asistencia/extra
+        # y mantiene ese mismo orden antes de cualquier select_for_update.
+        limite = min(hoy, FIN)
+        if limite >= INICIO:
+            jornadas = [
+                (empleado_id, INICIO + timedelta(days=offset))
+                for empleado_id, _, _ in MANIFIESTO
+                for offset in range((limite - INICIO).days + 1)
+            ]
+            bloquear_jornadas_extra(jornadas)
         plan = _plan(hoy, bloquear=True)
         if plan["conflictos"]:
             raise ConfiguracionJornadasError(f"La carga tiene conflictos: {_canonical(plan['conflictos'])}")

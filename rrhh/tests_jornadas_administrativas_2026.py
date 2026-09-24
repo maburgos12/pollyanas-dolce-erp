@@ -5,13 +5,14 @@ from decimal import Decimal
 from io import StringIO
 import json
 from queue import Queue
-from threading import Barrier, Thread
+from threading import Barrier, Event, Thread
+from time import sleep
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -24,6 +25,7 @@ from rrhh.models import (
 from rrhh.services_jornadas_administrativas_2026 import (
     ConfiguracionJornadasError, configurar_jornadas_administrativas_2026,
 )
+from rrhh.services_extra_bloqueos import bloquear_jornadas_extra
 
 
 PERSONAS = (
@@ -60,6 +62,12 @@ class PreviewJornadasAdministrativasTests(TransactionTestCase):
         crear_personas()
 
     def test_preview_reporta_seis_y_no_ejecuta_escrituras(self):
+        fecha = date(2026, 9, 17)
+        AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
         with CaptureQueriesContext(connection) as queries:
             plan = configurar_jornadas_administrativas_2026(hoy=date(2026, 9, 24))
         self.assertEqual(plan["modo"], "preview")
@@ -68,6 +76,7 @@ class PreviewJornadasAdministrativasTests(TransactionTestCase):
         self.assertEqual(len(plan["turnos"]), 3)
         self.assertEqual(len(plan["jornadas"]), 2)
         self.assertEqual(len(plan["asignaciones"]), 6)
+        self.assertEqual(plan["pendientes_a_reconciliar"][0]["accion"], "crear")
         self.assertEqual(plan["conflictos"], [])
         json.dumps(plan)
         escrituras = [q["sql"] for q in queries if q["sql"].lstrip().upper().startswith((
@@ -110,6 +119,62 @@ class ConcurrenciaJornadasAdministrativasTests(TransactionTestCase):
             self.assertFalse(hilo.is_alive())
         self.assertEqual(sorted([resultados.get_nowait() for _ in hilos]), ["aplicado", "obsoleto"])
         self.assertEqual(AsignacionJornadaEmpleado.objects.count(), 6)
+
+    def test_apply_y_guardado_normal_de_extra_no_se_bloquean_mutuamente(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        huella = configurar_jornadas_administrativas_2026(hoy=fecha)["fingerprint"]
+        diario_adquirido = Event()
+        continuar_guardado = Event()
+        resultados = Queue()
+
+        def guardado_normal():
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    bloquear_jornadas_extra([(3, fecha)])
+                    diario_adquirido.set()
+                    self.assertTrue(continuar_guardado.wait(10))
+                    HoraExtra.objects.create(
+                        empleado_id=3, asistencia_id=asistencia.pk, fecha=fecha,
+                        horas=Decimal("1.00"), notas="[Detección automática] normal",
+                    )
+                resultados.put("guardado")
+            except Exception as exc:
+                resultados.put(type(exc).__name__)
+            finally:
+                close_old_connections()
+
+        def aplicar_t6():
+            close_old_connections()
+            try:
+                configurar_jornadas_administrativas_2026(
+                    aplicar=True, hoy=fecha, actor=self.actor,
+                    expected_fingerprint=huella,
+                )
+                resultados.put("aplicado")
+            except ConfiguracionJornadasError:
+                resultados.put("obsoleto")
+            except Exception as exc:
+                resultados.put(type(exc).__name__)
+            finally:
+                close_old_connections()
+
+        normal = Thread(target=guardado_normal)
+        carga = Thread(target=aplicar_t6)
+        normal.start()
+        self.assertTrue(diario_adquirido.wait(10))
+        carga.start()
+        sleep(0.3)
+        continuar_guardado.set()
+        for hilo in (normal, carga):
+            hilo.join(timeout=15)
+            self.assertFalse(hilo.is_alive(), "posible deadlock entre locks diarios y filas")
+        self.assertEqual(sorted([resultados.get_nowait() for _ in range(2)]), ["guardado", "obsoleto"])
 
 
 class AplicacionJornadasAdministrativasTests(TestCase):
@@ -196,6 +261,83 @@ class AplicacionJornadasAdministrativasTests(TestCase):
             )
         self.assertFalse(JornadaSemanal.objects.exists())
         self.assertFalse(AuditLog.objects.exists())
+
+    def test_edicion_de_incidencia_recalculable_cambia_huella_y_aborta_apply(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado_id=3, fecha=fecha, asistencia=asistencia,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            detalle="Sin turno anterior", metadata={"origen": "automatico"},
+        )
+        previa = configurar_jornadas_administrativas_2026(hoy=fecha)
+        incidencia.detalle = "Comentario operativo nuevo"
+        incidencia.save(update_fields=["detalle", "actualizado_en"])
+        nueva = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertNotEqual(previa["fingerprint"], nueva["fingerprint"])
+        with self.assertRaisesMessage(ConfiguracionJornadasError, "huella"):
+            configurar_jornadas_administrativas_2026(
+                aplicar=True, hoy=fecha, actor=self.actor,
+                expected_fingerprint=previa["fingerprint"],
+            )
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.detalle, "Comentario operativo nuevo")
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_PENDIENTE)
+        self.assertFalse(JornadaSemanal.objects.exists())
+        incidencia.editado_manual = True
+        incidencia.save(update_fields=["editado_manual", "actualizado_en"])
+        manual = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertNotEqual(nueva["fingerprint"], manual["fingerprint"])
+        incidencia.editado_manual = False
+        incidencia.estado = IncidenciaAsistencia.ESTADO_CONCILIADO
+        incidencia.save(update_fields=["editado_manual", "estado", "actualizado_en"])
+        conciliada = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertNotEqual(nueva["fingerprint"], conciliada["fingerprint"])
+
+    def test_turno_ya_correcto_sin_extra_tambien_propone_una_hora(self):
+        turno = Turno.objects.create(
+            nombre="Administrativa 2026 08:00-16:30", hora_entrada=time(8),
+            hora_salida=time(16, 30), deteccion_por_checada=False,
+        )
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha, turno=turno,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        plan = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(plan["asistencias_a_actualizar"], [])
+        self.assertEqual([(p["accion"], p["nuevo"]) for p in plan["pendientes_a_reconciliar"]],
+                         [("crear", "1.00")])
+        aplicar(actor=self.actor, hoy=fecha)
+        self.assertEqual(HoraExtra.objects.get(asistencia=asistencia).horas, Decimal("1.00"))
+
+    def test_cancelacion_bajo_umbral_no_genera_review_en_segundo_apply(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 19))),
+        )
+        [pendiente] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            horas=Decimal("1.00"), notas="[Detección automática] propuesta",
+        )])
+        primero = aplicar(actor=self.actor, hoy=fecha)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertTrue(any(x["modelo"] == "HoraExtra" and x["accion"] == "cancelar"
+                            for x in primero["aplicadas"]))
+        self.assertEqual(primero["extras_resueltas_con_diferencia"], [])
+        self.assertEqual(configurar_jornadas_administrativas_2026(hoy=fecha)["extras_resueltas_con_diferencia"], [])
+        segundo = aplicar(actor=self.actor, hoy=fecha)
+        self.assertEqual(segundo["aplicadas"], [])
+        self.assertFalse(AuditLog.objects.filter(action="REVIEW").exists())
 
     def test_asistencia_cambia_solo_en_rango_y_descanso_queda_sin_turno(self):
         viejo = Turno.objects.create(nombre="Viejo", hora_entrada=time(7), hora_salida=time(15))
