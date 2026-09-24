@@ -9,6 +9,8 @@ from django.utils import timezone
 from core.models import Sucursal
 from reportes.models import DistribucionISNEmpleado, ExpedienteISN
 from reportes.services_isn import (
+    MAX_CFDI_XML_BYTES,
+    _validar_lineas_nomina_mes,
     bases_gravadas_empleados,
     calcular_isn_sinaloa,
     extraer_isn_cfdi,
@@ -42,7 +44,7 @@ class ISNSourceTests(TestCase):
     <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4">
       <cfdi:Conceptos>
         <cfdi:Concepto NoIdentificacion="OTRO" Descripcion="Otro cobro" Importe="999.99" />
-        <cfdi:Concepto NoIdentificacion="202608 2-003" Descripcion="Impuesto sobre nomina" Importe="16168.00" />
+        <cfdi:Concepto NoIdentificacion=" 202608   2-003 " Descripcion="Servicio estatal" Importe="16168.00" />
       </cfdi:Conceptos>
     </cfdi:Comprobante>
     """
@@ -50,14 +52,14 @@ class ISNSourceTests(TestCase):
     def _crear_cfdi(self, **overrides):
         datos = {
             "uuid": "CFDI-ISN-FUENTE",
-            "rfc_emisor": "GES8101015I7",
-            "rfc_receptor": "GEF211230KR2",
+            "rfc_emisor": " ges8101015i7 ",
+            "rfc_receptor": " gef211230kr2 ",
             "subtotal": D("16168.00"),
             "total": D("16168.00"),
             "tipo_comprobante": "I",
             "tipo_cfdi": CfdiDescargado.TIPO_RECIBIDO,
             "fecha_emision": datetime(2026, 9, 17, tzinfo=UTC),
-            "estatus": "vigente",
+            "estatus": " VIGENTE ",
             "xml_raw": self.CFDI_XML,
         }
         datos.update(overrides)
@@ -79,11 +81,21 @@ class ISNSourceTests(TestCase):
         datos.update(overrides)
         return Empleado.objects.create(**datos)
 
-    def _crear_periodo(self, *, empleado, estatus, fecha_fin, conceptos):
+    def _crear_periodo(
+        self,
+        *,
+        empleado,
+        estatus,
+        fecha_fin,
+        conceptos,
+        fecha_inicio=None,
+        tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+    ):
         periodo = NominaPeriodo.objects.create(
-            fecha_inicio=fecha_fin.replace(day=1),
+            fecha_inicio=fecha_inicio or fecha_fin.replace(day=1),
             fecha_fin=fecha_fin,
             estatus=estatus,
+            tipo_periodo=tipo_periodo,
         )
         linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
         for codigo, importe in conceptos:
@@ -119,7 +131,7 @@ class ISNSourceTests(TestCase):
                     extraer_isn_cfdi(cfdi)
 
     def test_rechaza_xml_sin_periodo_o_con_periodos_ambiguos(self):
-        xml_sin_periodo = self.CFDI_XML.replace("202608 2-003", "SIN-PERIODO")
+        xml_sin_periodo = self.CFDI_XML.replace("202608   2-003", "SIN-PERIODO")
         xml_ambiguo = self.CFDI_XML.replace(
             "</cfdi:Conceptos>",
             '<cfdi:Concepto NoIdentificacion="202607 2-003" '
@@ -129,6 +141,41 @@ class ISNSourceTests(TestCase):
         for indice, xml in enumerate(("<xml", xml_sin_periodo, xml_ambiguo), start=1):
             with self.subTest(indice=indice):
                 cfdi = self._crear_cfdi(uuid=f"CFDI-XML-{indice}", xml_raw=xml)
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
+
+    def test_rechaza_concepto_duplicado_o_con_codigo_distinto(self):
+        duplicado = self.CFDI_XML.replace(
+            "</cfdi:Conceptos>",
+            '<cfdi:Concepto NoIdentificacion="202608 2-003" '
+            'Descripcion="Segundo" Importe="1.00" />'
+            "</cfdi:Conceptos>",
+        )
+        otro_codigo = self.CFDI_XML.replace("202608   2-003", "202608 2-004")
+        for indice, xml in enumerate((duplicado, otro_codigo), start=1):
+            with self.subTest(indice=indice):
+                cfdi = self._crear_cfdi(uuid=f"CFDI-CODIGO-{indice}", xml_raw=xml)
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
+
+    def test_rechaza_importe_no_positivo_o_no_finito(self):
+        for indice, importe in enumerate(("0", "-0.01", "NaN", "Infinity"), start=1):
+            with self.subTest(importe=importe):
+                xml = self.CFDI_XML.replace('Importe="16168.00"', f'Importe="{importe}"')
+                cfdi = self._crear_cfdi(uuid=f"CFDI-IMPORTE-{indice}", xml_raw=xml)
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
+
+    def test_rechaza_xml_vacio_excesivo_o_con_declaraciones_peligrosas(self):
+        casos = (
+            "",
+            "x" * (MAX_CFDI_XML_BYTES + 1),
+            '<!DOCTYPE foo SYSTEM "externo"><foo />',
+            '<!ENTITY xxe SYSTEM "externo"><foo />',
+        )
+        for indice, xml in enumerate(casos, start=1):
+            with self.subTest(indice=indice):
+                cfdi = self._crear_cfdi(uuid=f"CFDI-SEGURO-{indice}", xml_raw=xml)
                 with self.assertRaises(ValueError):
                     extraer_isn_cfdi(cfdi)
 
@@ -179,12 +226,14 @@ class ISNSourceTests(TestCase):
             (NominaPeriodo.ESTATUS_BORRADOR, date(2026, 8, 15), D("400.00")),
             (NominaPeriodo.ESTATUS_CERRADA, date(2026, 9, 7), D("800.00")),
         )
-        for estatus, fecha_fin, importe in casos:
+        inicios = (date(2026, 8, 1), date(2026, 8, 8), date(2026, 8, 16), date(2026, 9, 1))
+        for (estatus, fecha_fin, importe), fecha_inicio in zip(casos, inicios):
             self._crear_periodo(
                 empleado=empleado,
                 estatus=estatus,
                 fecha_fin=fecha_fin,
                 conceptos=(("1", importe),),
+                fecha_inicio=fecha_inicio,
             )
 
         bases = bases_gravadas_empleados(date(2026, 8, 1))
@@ -194,6 +243,133 @@ class ISNSourceTests(TestCase):
     def test_rechaza_anio_sin_uma_configurada(self):
         with self.assertRaisesMessage(ValueError, "UMA"):
             bases_gravadas_empleados(date(2027, 1, 1))
+
+    def test_uma_cambia_en_la_frontera_de_febrero_2026(self):
+        empleado_enero = self._crear_empleado(codigo="E-UMA-ENERO")
+        self._crear_periodo(
+            empleado=empleado_enero,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_fin=date(2026, 1, 31),
+            conceptos=(("24", D("3400.00")),),
+        )
+        empleado_febrero = self._crear_empleado(codigo="E-UMA-FEBRERO")
+        self._crear_periodo(
+            empleado=empleado_febrero,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_inicio=date(2026, 2, 1),
+            fecha_fin=date(2026, 2, 15),
+            conceptos=(("24", D("3520.00")),),
+        )
+
+        self.assertEqual(
+            bases_gravadas_empleados(date(2026, 1, 31)),
+            {empleado_enero.id: D("5.80")},
+        )
+        self.assertEqual(
+            bases_gravadas_empleados(date(2026, 2, 1)),
+            {empleado_febrero.id: D("0.70")},
+        )
+
+    def test_rechaza_mes_sin_periodos_cerrados_o_pagados(self):
+        empleado = self._crear_empleado(codigo="E-SIN-VALIDO")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_BORRADOR,
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(("1", D("100.00")),),
+        )
+
+        with self.assertRaisesMessage(ValueError, "periodos"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_periodos_con_rango_duplicado_o_solapado(self):
+        empleado = self._crear_empleado(codigo="E-RANGOS")
+        periodo = self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(("1", D("100.00")),),
+        )
+        for indice, (inicio, fin) in enumerate(
+            ((date(2026, 8, 1), date(2026, 8, 15)), (date(2026, 8, 15), date(2026, 8, 31))),
+            start=1,
+        ):
+            with self.subTest(indice=indice):
+                segundo = NominaPeriodo.objects.create(
+                    fecha_inicio=inicio,
+                    fecha_fin=fin,
+                    estatus=NominaPeriodo.ESTATUS_PAGADA,
+                )
+                with self.assertRaises(ValueError):
+                    bases_gravadas_empleados(date(2026, 8, 1))
+                segundo.delete()
+        periodo.delete()
+
+    def test_rechaza_mezcla_de_tipo_periodo_en_el_mes(self):
+        empleado = self._crear_empleado(codigo="E-TIPOS")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(("1", D("100.00")),),
+            tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+        )
+        NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 8, 16),
+            fecha_fin=date(2026, 8, 31),
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            tipo_periodo=NominaPeriodo.TIPO_SEMANAL,
+        )
+
+        with self.assertRaisesMessage(ValueError, "tipo"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_incluye_empleado_sin_percepciones_con_base_cero(self):
+        empleado = self._crear_empleado(codigo="E-SIN-PERCEPCIONES")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(),
+        )
+
+        self.assertEqual(
+            bases_gravadas_empleados(date(2026, 8, 1)),
+            {empleado.id: D("0.00")},
+        )
+
+    def test_rechaza_empleado_sin_metadatos_aunque_no_tenga_percepciones(self):
+        empleado = self._crear_empleado(codigo="E-CERO-SIN-DEP", departamento="")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(),
+        )
+
+        with self.assertRaises(ValueError):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_percepcion_negativa(self):
+        empleado = self._crear_empleado(codigo="E-NEGATIVO")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(("1", D("-0.01")),),
+        )
+
+        with self.assertRaisesMessage(ValueError, "negativa"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_linea_duplicada_por_periodo_y_empleado(self):
+        linea_a = type("Linea", (), {"periodo_id": 1, "empleado_id": 7})()
+        linea_b = type("Linea", (), {"periodo_id": 1, "empleado_id": 7})()
+
+        with self.assertRaisesMessage(ValueError, "duplicada"):
+            _validar_lineas_nomina_mes([linea_a, linea_b])
 
     def test_rechaza_empleado_sin_sucursal(self):
         empleado = self._crear_empleado(codigo="E-SIN-SUCURSAL")

@@ -1,10 +1,10 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 import re
 from xml.etree import ElementTree as ET
 
-from rrhh.models import NominaConceptoLinea, NominaPeriodo
+from rrhh.models import NominaConceptoLinea, NominaLinea, NominaPeriodo
 
 
 CENT = Decimal("0.01")
@@ -13,7 +13,12 @@ CFDI_NS = "{http://www.sat.gob.mx/cfd/4}"
 RFC_SINALOA = "GES8101015I7"
 RFC_EMPRESA = "GEF211230KR2"
 CODIGOS_EXENTOS_COMPLETOS = {"20", "22", "26", "32"}
-UMA_DIARIA = {2026: Decimal("117.31")}
+# Dos MiB cubren holgadamente un CFDI individual y limitan uso de memoria abusivo.
+MAX_CFDI_XML_BYTES = 2 * 1024 * 1024
+UMA_DIARIA_VIGENCIAS = (
+    (date(2026, 1, 1), date(2026, 1, 31), Decimal("113.14")),
+    (date(2026, 2, 1), date(2026, 12, 31), Decimal("117.31")),
+)
 
 
 def money(value: Decimal) -> Decimal:
@@ -70,28 +75,37 @@ def prorratear_isn(
 
 
 def extraer_isn_cfdi(cfdi) -> tuple[date, Decimal]:
-    if cfdi.rfc_emisor != RFC_SINALOA or cfdi.rfc_receptor != RFC_EMPRESA:
+    if (
+        (cfdi.rfc_emisor or "").strip().upper() != RFC_SINALOA
+        or (cfdi.rfc_receptor or "").strip().upper() != RFC_EMPRESA
+    ):
         raise ValueError("El CFDI no corresponde al ISN de la empresa.")
     if (
-        (cfdi.estatus or "").lower() != "vigente"
+        (cfdi.estatus or "").strip().upper() != "VIGENTE"
         or cfdi.tipo_cfdi != "recibido"
         or cfdi.tipo_comprobante != "I"
     ):
         raise ValueError("El CFDI no esta vigente como ingreso recibido.")
 
+    xml = cfdi.xml_raw or ""
+    if not xml.strip():
+        raise ValueError("El XML del CFDI de ISN esta vacio.")
+    if len(xml.encode("utf-8")) > MAX_CFDI_XML_BYTES:
+        raise ValueError("El XML del CFDI de ISN excede el limite permitido.")
+    xml_upper = xml.upper()
+    if "<!DOCTYPE" in xml_upper or "<!ENTITY" in xml_upper:
+        raise ValueError("El XML del CFDI de ISN contiene declaraciones no permitidas.")
     try:
-        root = ET.fromstring((cfdi.xml_raw or "").lstrip("\ufeff"))
+        root = ET.fromstring(xml.lstrip("\ufeff"))
     except ET.ParseError as exc:
         raise ValueError("El XML del CFDI de ISN no es valido.") from exc
 
     matches = []
     for concepto in root.findall(f".//{CFDI_NS}Concepto"):
-        if "nomina" not in concepto.attrib.get("Descripcion", "").lower():
-            continue
-        match = re.match(
-            r"(\d{4})(\d{2})\b",
-            concepto.attrib.get("NoIdentificacion", ""),
+        identificador = " ".join(
+            concepto.attrib.get("NoIdentificacion", "").split()
         )
+        match = re.fullmatch(r"(\d{4})(0[1-9]|1[0-2]) 2-003", identificador)
         if not match:
             continue
         try:
@@ -99,70 +113,122 @@ def extraer_isn_cfdi(cfdi) -> tuple[date, Decimal]:
             importe = Decimal(concepto.attrib["Importe"])
         except (KeyError, ValueError, ArithmeticError) as exc:
             raise ValueError("El concepto de ISN tiene periodo o importe invalido.") from exc
+        if not importe.is_finite() or importe <= ZERO:
+            raise ValueError("El importe del concepto de ISN debe ser positivo y finito.")
         matches.append((periodo, importe))
 
-    periodos = {periodo for periodo, _ in matches}
-    if not matches or len(periodos) != 1:
-        raise ValueError("Periodo fiscal de ISN no inequivoco.")
-    return periodos.pop(), money(sum((importe for _, importe in matches), ZERO))
+    if len(matches) != 1:
+        raise ValueError("Debe existir un unico concepto fiscal de ISN.")
+    periodo, importe = matches[0]
+    return periodo, money(importe)
+
+
+def _uma_diaria_vigente(fecha: date) -> Decimal:
+    for inicio, fin, valor in UMA_DIARIA_VIGENCIAS:
+        if inicio <= fecha <= fin:
+            return valor
+    raise ValueError(f"No hay UMA configurada para {fecha.isoformat()}.")
+
+
+def _validar_periodos_nomina_mes(periodos) -> None:
+    if not periodos:
+        raise ValueError("El mes no tiene periodos de nomina cerrados o pagados.")
+    tipos = {periodo.tipo_periodo for periodo in periodos}
+    if len(tipos) != 1:
+        raise ValueError("El mes mezcla mas de un tipo de periodo de nomina.")
+
+    rangos = [(periodo.fecha_inicio, periodo.fecha_fin) for periodo in periodos]
+    if len(set(rangos)) != len(rangos):
+        raise ValueError("El mes contiene rangos de nomina duplicados.")
+    rangos_ordenados = sorted(rangos)
+    for (inicio_anterior, fin_anterior), (inicio, fin) in zip(
+        rangos_ordenados,
+        rangos_ordenados[1:],
+    ):
+        if inicio <= fin_anterior:
+            raise ValueError(
+                "El mes contiene rangos de nomina solapados: "
+                f"{inicio_anterior} a {fin_anterior} y {inicio} a {fin}."
+            )
+
+
+def _validar_lineas_nomina_mes(lineas) -> None:
+    conteos = Counter((linea.periodo_id, linea.empleado_id) for linea in lineas)
+    if any(total > 1 for total in conteos.values()):
+        raise ValueError("Existe una linea de nomina duplicada para periodo y empleado.")
 
 
 def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
-    try:
-        uma_diaria = UMA_DIARIA[periodo.year]
-    except KeyError as exc:
-        raise ValueError(f"No hay UMA configurada para {periodo.year}.") from exc
-
-    conceptos = (
-        NominaConceptoLinea.objects.filter(
-            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
-            linea__periodo__estatus__in=(
-                NominaPeriodo.ESTATUS_CERRADA,
-                NominaPeriodo.ESTATUS_PAGADA,
-            ),
-            linea__periodo__fecha_fin__year=periodo.year,
-            linea__periodo__fecha_fin__month__lte=periodo.month,
-        )
-        .select_related(
-            "linea__periodo",
-            "linea__empleado",
-            "linea__empleado__sucursal_ref",
-        )
-        .order_by("linea__empleado_id", "id")
+    fecha_mes = date(periodo.year, periodo.month, 1)
+    uma_diaria = _uma_diaria_vigente(fecha_mes)
+    estados_validos = (
+        NominaPeriodo.ESTATUS_CERRADA,
+        NominaPeriodo.ESTATUS_PAGADA,
     )
+    periodos_mes = list(
+        NominaPeriodo.objects.filter(
+            estatus__in=estados_validos,
+            fecha_fin__year=periodo.year,
+            fecha_fin__month=periodo.month,
+        ).order_by("fecha_inicio", "fecha_fin", "id")
+    )
+    _validar_periodos_nomina_mes(periodos_mes)
 
-    bases = defaultdict(lambda: ZERO)
-    aguinaldos_previos = defaultdict(lambda: ZERO)
-    aguinaldos_mes = defaultdict(lambda: ZERO)
-    empleados_vistos = set()
-    for concepto in conceptos:
-        empleado = concepto.linea.empleado
-        es_mes_solicitado = concepto.linea.periodo.fecha_fin.month == periodo.month
-        if es_mes_solicitado and (
-            not empleado.sucursal_ref_id or not empleado.departamento
-        ):
+    lineas = list(
+        NominaLinea.objects.filter(periodo_id__in=[item.pk for item in periodos_mes])
+        .select_related("empleado", "empleado__sucursal_ref", "periodo")
+        .order_by("periodo_id", "empleado_id", "id")
+    )
+    _validar_lineas_nomina_mes(lineas)
+
+    bases = {}
+    empleado_ids = set()
+    for linea in lineas:
+        empleado = linea.empleado
+        if not empleado.sucursal_ref_id or not empleado.departamento:
             raise ValueError(
                 f"El empleado {empleado.codigo or empleado.pk} requiere sucursal y departamento."
             )
+        empleado_ids.add(empleado.pk)
+        bases[empleado.pk] = ZERO
 
-        empleado_id = empleado.pk
+    conceptos_mes = list(
+        NominaConceptoLinea.objects.filter(
+            linea_id__in=[linea.pk for linea in lineas],
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+        ).order_by("linea__empleado_id", "id")
+    )
+    aguinaldos_previos = defaultdict(lambda: ZERO)
+    aguinaldos_mes = defaultdict(lambda: ZERO)
+    for concepto in conceptos_mes:
+        empleado_id = concepto.linea.empleado_id
         codigo = (concepto.codigo_concepto or "").strip()
         importe = Decimal(concepto.importe or ZERO)
-        if codigo == "24":
-            acumulado = aguinaldos_mes if es_mes_solicitado else aguinaldos_previos
-            acumulado[empleado_id] += importe
-        if not es_mes_solicitado:
-            continue
-
-        empleados_vistos.add(empleado_id)
+        if importe < ZERO:
+            raise ValueError("La nomina contiene una percepcion negativa.")
         if codigo in CODIGOS_EXENTOS_COMPLETOS:
             continue
         if codigo == "24":
+            aguinaldos_mes[empleado_id] += importe
             continue
         bases[empleado_id] += importe
 
+    conceptos_aguinaldo_previos = NominaConceptoLinea.objects.filter(
+        linea__empleado_id__in=empleado_ids,
+        linea__periodo__estatus__in=estados_validos,
+        linea__periodo__fecha_fin__year=periodo.year,
+        linea__periodo__fecha_fin__month__lt=periodo.month,
+        tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+        codigo_concepto="24",
+    ).order_by("linea__empleado_id", "id")
+    for concepto in conceptos_aguinaldo_previos:
+        importe = Decimal(concepto.importe or ZERO)
+        if importe < ZERO:
+            raise ValueError("La nomina contiene una percepcion negativa.")
+        aguinaldos_previos[concepto.linea.empleado_id] += importe
+
     exencion_aguinaldo = Decimal("30") * uma_diaria
-    for empleado_id in empleados_vistos:
+    for empleado_id in empleado_ids:
         gravado_previo = max(
             ZERO,
             aguinaldos_previos[empleado_id] - exencion_aguinaldo,
