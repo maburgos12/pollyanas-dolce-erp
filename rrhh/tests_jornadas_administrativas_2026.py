@@ -15,6 +15,7 @@ from django.core.management.base import CommandError
 from django.db import close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import timezone
 
 from core.models import AuditLog
@@ -304,7 +305,7 @@ class AplicacionJornadasAdministrativasTests(TestCase):
         asistencia = AsistenciaEmpleado.objects.create(
             empleado_id=3, fecha=fecha,
             entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
-            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(18, 30))),
         )
         [manual] = HoraExtra.objects.bulk_create([HoraExtra(
             empleado_id=3, fecha=fecha, horas=Decimal("1.00"),
@@ -343,6 +344,129 @@ class AplicacionJornadasAdministrativasTests(TestCase):
                          [("crear", "1.00")])
         aplicar(actor=self.actor, hoy=fecha)
         self.assertEqual(HoraExtra.objects.get(asistencia=asistencia).horas, Decimal("1.00"))
+
+    def test_propuesta_nueva_asigna_jefe_y_aparece_en_su_bandeja(self):
+        jefe_usuario = get_user_model().objects.create_user(username="jefe_t6", password="test")
+        jefe_empleado = Empleado.objects.create(
+            pk=200, codigo="JORNADA-2026-JEFE", nombre="Jefe directo T6", usuario_erp=jefe_usuario,
+        )
+        Empleado.objects.filter(pk=3).update(jefe_directo=jefe_empleado)
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        aplicar(actor=self.actor, hoy=fecha)
+        extra = HoraExtra.objects.get(asistencia=asistencia)
+        self.assertEqual(extra.jefe_directo_id, jefe_usuario.pk)
+        self.client.force_login(jefe_usuario)
+        respuesta = self.client.get(reverse("rrhh:rrhh_he_list"))
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn(extra.pk, [fila.pk for _estado, _titulo, filas
+                                 in respuesta.context["columnas"] for fila in filas])
+        self.assertContains(respuesta, "Autorizar")
+        self.client.post(reverse("rrhh:rrhh_he_list"), {
+            "hora_extra_id": extra.pk, "action": "autorizar",
+        })
+        extra.refresh_from_db()
+        self.assertEqual(extra.estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertEqual(extra.autorizado_por_id, jefe_usuario.pk)
+
+    def test_propuesta_pendiente_recalculada_sincroniza_jefatura(self):
+        jefe_usuario = get_user_model().objects.create_user(username="jefe_t6_nuevo", password="test")
+        jefe_anterior = get_user_model().objects.create_user(username="jefe_t6_anterior", password="test")
+        jefe_empleado = Empleado.objects.create(
+            pk=200, codigo="JORNADA-2026-JEFE", nombre="Jefe directo T6", usuario_erp=jefe_usuario,
+        )
+        Empleado.objects.filter(pk=3).update(jefe_directo=jefe_empleado)
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        [pendiente] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            horas=Decimal("0.50"), jefe_directo=jefe_anterior,
+        )])
+        aplicar(actor=self.actor, hoy=fecha)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.horas, Decimal("1.00"))
+        self.assertEqual(pendiente.estado, HoraExtra.ESTADO_PENDIENTE)
+        self.assertEqual(pendiente.jefe_directo_id, jefe_usuario.pk)
+        self.assertEqual(aplicar(actor=self.actor, hoy=fecha)["aplicadas"], [])
+
+    def test_cuarenta_y_nueve_minutos_no_crean_incidencia_pendiente(self):
+        fecha = date(2026, 9, 17)
+        AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 19))),
+        )
+        plan = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertFalse(any(i["tipo"] == IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
+                             and i["accion"] == "crear" for i in plan["incidencias_a_reconciliar"]))
+        aplicar(actor=self.actor, hoy=fecha)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado_id=3, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        ).exists())
+        self.assertEqual(aplicar(actor=self.actor, hoy=fecha)["aplicadas"], [])
+
+    def test_cancelar_por_umbral_resuelve_incidencia_automatica(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 19))),
+        )
+        [pendiente] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, asistencia=asistencia, fecha=fecha, horas=Decimal("1.00"),
+        )])
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+            hora_extra=pendiente, editado_manual=False,
+        )
+        plan = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(
+            [i["accion"] for i in plan["incidencias_a_reconciliar"] if i["id"] == incidencia.pk],
+            ["resolver"],
+        )
+        aplicar(actor=self.actor, hoy=fecha)
+        pendiente.refresh_from_db()
+        incidencia.refresh_from_db()
+        self.assertEqual(pendiente.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_RESUELTO)
+        self.assertEqual(aplicar(actor=self.actor, hoy=fecha)["aplicadas"], [])
+
+    def test_extra_manual_autorizada_concilia_incidencia_sin_acciones_duplicadas(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, fecha=fecha, horas=Decimal("1.00"),
+            estado=HoraExtra.ESTADO_AUTORIZADO, notas="Manual autorizada",
+        )])
+        incidencia = IncidenciaAsistencia.objects.create(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            tipo=IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE,
+            estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+        )
+        plan = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(
+            [i["accion"] for i in plan["incidencias_a_reconciliar"] if i["id"] == incidencia.pk],
+            ["actualizar"],
+        )
+        aplicar(actor=self.actor, hoy=fecha)
+        incidencia.refresh_from_db()
+        self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
 
     def test_cancelacion_bajo_umbral_no_genera_review_en_segundo_apply(self):
         fecha = date(2026, 9, 17)

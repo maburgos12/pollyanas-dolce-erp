@@ -23,11 +23,13 @@ from .models import (
     HoraExtra, IncidenciaAsistencia, JornadaSemanal, JornadaSemanalDia, Turno,
 )
 from .services_extra_conciliacion import (
-    NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO, diagnosticar_horas_extra, horas_a_minutos,
-    saldo_automatico_esperado,
+    NOTA_EXTRA_AUTOMATICA, NOTA_SALDO_CUBIERTO, UMBRAL_SOLICITUD_EXTRA_MINUTOS,
+    diagnosticar_horas_extra, horas_a_minutos, saldo_automatico_esperado,
+    saldo_automatico_minutos,
 )
 from .services_asistencia_reglas import _evaluar_hora_extra
 from .services_extra_bloqueos import bloquear_jornadas_extra
+from .services import usuario_jefe_directo_de_empleado
 from .services_turnos import asignar_jornada_empleado
 from .signals_extra import _conciliando
 
@@ -301,6 +303,8 @@ def _plan(hoy: date, *, bloquear=False):
         nombre_turno = PERFILES[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
         turno = turnos_obj[nombre_turno] if nombre_turno else None
         diagnostico = diagnosticar_horas_extra(_asistencia_proyectada(a, turno))
+        jefe_nuevo = usuario_jefe_directo_de_empleado(a.empleado)
+        jefe_nuevo_id = getattr(jefe_nuevo, "pk", None)
         asistencias_evaluadas.append({
             "id": a.pk, "empleado_id": a.empleado_id, "fecha": a.fecha.isoformat(),
             "turno_id": a.turno_id, "turno_programado": nombre_turno,
@@ -317,25 +321,44 @@ def _plan(hoy: date, *, bloquear=False):
         })
         registros = extras_por_fecha.get(key, [])
         vinculado = next((he for he in registros if he.asistencia_id == a.pk), None)
+        saldo_crudo = saldo_automatico_minutos(diagnostico, registros, vinculado)
+        saldo_autorizado = sum(
+            horas_a_minutos(he.horas) for he in registros
+            if he.estado in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO}
+        )
         pendientes_antes = len(pendientes)
-        if key in fechas_reconciliar and vinculado and vinculado.estado == HoraExtra.ESTADO_PENDIENTE and not vinculado.ajuste_autorizacion:
-            saldo = saldo_automatico_esperado(diagnostico, registros, vinculado)
-            if saldo is not None:
-                accion = "cancelar" if saldo <= 0 else "cambiar" if vinculado.horas != saldo else "sin_cambio"
+        if key in fechas_reconciliar and vinculado and vinculado.estado == HoraExtra.ESTADO_PENDIENTE:
+            saldo = (None if vinculado.ajuste_autorizacion else
+                     saldo_automatico_esperado(diagnostico, registros, vinculado))
+            if saldo is not None or vinculado.jefe_directo_id != jefe_nuevo_id:
+                accion = ("cancelar" if saldo is not None and saldo <= 0 else
+                          "cambiar" if saldo is not None and vinculado.horas != saldo else
+                          "sincronizar_jefe" if vinculado.jefe_directo_id != jefe_nuevo_id else
+                          "sin_cambio")
                 pendientes.append({"id": vinculado.pk, "asistencia_id": a.pk,
                                    "empleado_id": a.empleado_id, "fecha": a.fecha.isoformat(),
-                                   "anterior": str(vinculado.horas), "nuevo": str(saldo),
+                                   "anterior": str(vinculado.horas),
+                                   "nuevo": str(saldo) if saldo is not None else str(vinculado.horas),
+                                   "jefe_anterior_id": vinculado.jefe_directo_id,
+                                   "jefe_nuevo_id": jefe_nuevo_id,
                                    "accion": accion})
         elif not vinculado:
             saldo = saldo_automatico_esperado(diagnostico, registros)
             if saldo and saldo > 0:
                 pendientes.append({"id": None, "asistencia_id": a.pk,
                                    "empleado_id": a.empleado_id, "fecha": a.fecha.isoformat(),
-                                   "anterior": None, "nuevo": str(saldo), "accion": "crear"})
+                                   "anterior": None, "nuevo": str(saldo),
+                                   "jefe_anterior_id": None, "jefe_nuevo_id": jefe_nuevo_id,
+                                   "accion": "crear"})
         reevaluar = key in fechas_turno_cambiado or any(
-            item["accion"] != "sin_cambio" for item in pendientes[pendientes_antes:]
+            item["accion"] in {"crear", "cambiar", "cancelar"}
+            for item in pendientes[pendientes_antes:]
         )
-        if reevaluar and diagnostico.minutos is not None and diagnostico.minutos > 0:
+        saldo_supera_umbral = (saldo_crudo is not None
+                               and saldo_crudo >= UMBRAL_SOLICITUD_EXTRA_MINUTOS)
+        extra_conciliada = (diagnostico.minutos is not None and diagnostico.minutos > 0
+                            and saldo_autorizado >= diagnostico.minutos)
+        if reevaluar and (saldo_supera_umbral or extra_conciliada):
             tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
             existente = incidencias_por_fecha.get((a.empleado_id, a.fecha, tipo))
             if existente is None or (
@@ -375,7 +398,10 @@ def _plan(hoy: date, *, bloquear=False):
                 obsoleta = ((tipo == IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE
                              and diagnostico.codigo != "sin_turno")
                             or (tipo == IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
-                                and (diagnostico.minutos is None or diagnostico.minutos == 0)))
+                                and (diagnostico.minutos is None or not saldo_supera_umbral)
+                                and not extra_conciliada
+                                and (incidencia.hora_extra_id is None
+                                     or (vinculado and incidencia.hora_extra_id == vinculado.pk))))
                 if obsoleta:
                     incidencias.append({"id": incidencia.pk, "empleado_id": a.empleado_id,
                                         "fecha": a.fecha.isoformat(), "tipo": tipo,
@@ -477,28 +503,36 @@ def _aplicar_plan(plan, actor):
             if fila["accion"] == "crear":
                 he = HoraExtra(empleado_id=asistencia.empleado_id, asistencia=asistencia,
                                fecha=asistencia.fecha, horas=Decimal(fila["nuevo"]),
-                               notas=f"{NOTA_EXTRA_AUTOMATICA} Saldo por salida programada.")
+                               notas=f"{NOTA_EXTRA_AUTOMATICA} Saldo por salida programada.",
+                               jefe_directo_id=fila["jefe_nuevo_id"])
                 he.full_clean()
                 he.save()
                 antes = None
                 accion = "CREATE"
             else:
                 he = HoraExtra.objects.get(pk=fila["id"])
-                antes = {"horas": str(he.horas), "estado": he.estado, "notas": he.notas}
+                antes = {"horas": str(he.horas), "estado": he.estado, "notas": he.notas,
+                         "jefe_directo_id": he.jefe_directo_id}
                 if he.estado != HoraExtra.ESTADO_PENDIENTE or he.asistencia_id != asistencia.pk:
                     raise ConfiguracionJornadasError("La propuesta cambió durante la aplicación.")
+                cambios = []
+                if he.jefe_directo_id != fila["jefe_nuevo_id"]:
+                    he.jefe_directo_id = fila["jefe_nuevo_id"]
+                    cambios.append("jefe_directo")
                 if fila["accion"] == "cancelar":
                     he.estado = HoraExtra.ESTADO_CANCELADO
                     he.notas += "\n" + NOTA_SALDO_CUBIERTO
-                    he.save(update_fields=["estado", "notas"])
-                else:
+                    cambios.extend(["estado", "notas"])
+                elif fila["accion"] == "cambiar":
                     he.horas = Decimal(fila["nuevo"])
-                    he.save(update_fields=["horas"])
+                    cambios.append("horas")
+                he.save(update_fields=cambios)
                 accion = "UPDATE"
         finally:
             _conciliando.reset(token)
         _auditar(actor, accion, "rrhh.HoraExtra", he.pk, antes,
-                 {"horas": str(he.horas), "estado": he.estado, "notas": he.notas},
+                 {"horas": str(he.horas), "estado": he.estado, "notas": he.notas,
+                  "jefe_directo_id": he.jefe_directo_id},
                  fecha=he.fecha)
         aplicadas.append({"modelo": "HoraExtra", "id": he.pk, "accion": fila["accion"]})
 
