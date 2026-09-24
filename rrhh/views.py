@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from copy import copy
 from datetime import date as dt_date, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import re
 from tempfile import NamedTemporaryFile
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.models import Group
@@ -1235,17 +1237,57 @@ def _crear_empleado_desde_post(
     return empleado
 
 
+_BORRADOR_FICHA_CAMPOS = frozenset({
+    "nombre", "codigo", "rfc", "curp", "nss", "area", "puesto", "departamento_origen",
+    "departamento", "puesto_operativo", "nivel_organizacional", "jefe_directo",
+    "tipo_personal", "tipo_contrato", "fecha_ingreso", "salario_diario", "telefono",
+    "email", "sucursal_id", "crear_usuario_erp", "nuevo_usuario_username",
+    "sucursal_app_id", "logistica_tipo_identidad", "motivo_autorizacion", "autorizado_por",
+    "numero_licencia", "licencia_expedicion", "licencia_expiracion", "notas_identidad",
+    "activo", "participa_bonos_ventas", "participa_bonos_produccion",
+    "bono_esquema_otro_nombre", "bono_esquema_otro_departamento", "bono_esquema_otro_area",
+    "bono_esquema_otro_descripcion", "jornada_gestion_presente", "jornada_id",
+    "jornada_fecha_inicio", "jornada_motivo", "alta_pendiente_id",
+})
+
+
+def _borrador_ficha_desde_post(post):
+    borrador = {campo: str(post.get(campo) or "").strip()[:250] for campo in _BORRADOR_FICHA_CAMPOS}
+    borrador["bono_esquemas"] = [valor for valor in post.getlist("bono_esquemas") if valor.isdigit()][:50]
+    return borrador
+
+
+def _url_ficha_empleado(request, empleado=None):
+    filtros = {
+        clave: request.GET[clave] for clave in ("q", "estado", "enterprise_focus")
+        if clave in request.GET
+    }
+    if not empleado:
+        pendiente = (request.POST.get("alta_pendiente_id") or "").strip()
+        if pendiente.isdigit():
+            filtros["alta_pendiente"] = pendiente
+    query = f"?{urlencode(filtros)}" if filtros else ""
+    fragmento = f"empleado-{empleado.pk}" if empleado else "alta-empleado"
+    return f'{reverse("rrhh:empleados")}{query}#{fragmento}'
+
+
 def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None):
-    redirect_url = f'{reverse("rrhh:empleados")}#empleado-{empleado.pk}' if empleado else reverse("rrhh:empleados")
+    redirect_url = _url_ficha_empleado(request, empleado)
     if error is not None:
         errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
         texto = next(iter(errores.values()))[0]
+        borrador = _borrador_ficha_desde_post(request.POST)
         if _wants_progressive_response(request):
             return JsonResponse({
                 "ok": False, "toast": {"type": "error", "message": texto, "persistent": True},
-                "errors": errores,
+                "errors": errores, "values": borrador,
             }, status=400)
         messages.error(request, texto)
+        request.session["rrhh_ficha_error_flash"] = {
+            "accion": "update" if empleado else "create",
+            "empleado_id": empleado.pk if empleado else None,
+            "values": borrador,
+        }
         return redirect(redirect_url)
     if _wants_progressive_response(request):
         return JsonResponse({
@@ -1275,8 +1317,9 @@ def empleados(request):
                 estado=AltaPendienteEmpleado.ESTADO_PENDIENTE,
             ).first()
             if not alta_pendiente:
-                messages.error(request, "Selecciona un alta pendiente válida.")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "alta_pendiente_id": "Selecciona un alta pendiente válida.",
+                }))
         if action == "vincular_identidad":
             pendiente = get_object_or_404(
                 EmpleadoIdentidadPendiente,
@@ -1364,20 +1407,27 @@ def empleados(request):
             return redirect("rrhh:empleados")
         codigo = _codigo_empleado_desde_post(request.POST)
         if not nombre:
-            messages.error(request, "Nombre del empleado es obligatorio.")
+            return _respuesta_ficha_empleado(request, error=ValidationError({
+                "nombre": "Nombre del empleado es obligatorio.",
+            }))
         elif action == "update":
             empleado_id = (request.POST.get("empleado_id") or "").strip()
-            empleado = get_object_or_404(Empleado, pk=int(empleado_id)) if empleado_id.isdigit() else None
+            empleado = Empleado.objects.filter(pk=int(empleado_id)).first() if empleado_id.isdigit() else None
             if not empleado:
-                messages.error(request, "Selecciona un empleado válido para editar.")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "empleado_id": "Selecciona un empleado válido para editar.",
+                }))
             elif duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
-                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
+                return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                    "codigo": f"El código {codigo} ya pertenece a {duplicado.nombre}.",
+                }))
             else:
                 try:
                     organizacion = _organizacion_desde_post(request.POST, empleado)
                 except ValidationError as exc:
-                    messages.error(request, f"Organización inválida: {exc.messages[0]}")
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "organizacion": f"Organización inválida: {exc.messages[0]}",
+                    }))
                 if codigo:
                     empleado.codigo = codigo
                 empleado.nombre = nombre
@@ -1393,8 +1443,9 @@ def empleados(request):
                 try:
                     empleado.jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion, empleado)
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "jefe_directo": exc.messages[0],
+                    }))
                 empleado.tipo_personal = (request.POST.get("tipo_personal") or Empleado.TIPO_POLLYANA).strip()
                 empleado.participa_bonos_ventas = organizacion["participa_bonos_ventas"]
                 empleado.participa_bonos_produccion = organizacion["participa_bonos_produccion"]
@@ -1406,16 +1457,18 @@ def empleados(request):
                 try:
                     sucursal = _resolver_sucursal_desde_post(request.POST)
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "sucursal_id": exc.messages[0],
+                    }))
                 empleado.sucursal = sucursal.nombre if sucursal else ""
                 empleado.sucursal_ref = sucursal
                 empleado.activo = request.POST.get("activo") == "on"
                 try:
                     empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
+                        "usuario_erp": exc.messages[0],
+                    }))
                 try:
                     with transaction.atomic():
                         Empleado.objects.select_for_update().get(pk=empleado.pk)
@@ -1451,16 +1504,19 @@ def empleados(request):
             try:
                 organizacion = _organizacion_desde_post(request.POST)
             except ValidationError as exc:
-                messages.error(request, f"Organización inválida: {exc.messages[0]}")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "organizacion": f"Organización inválida: {exc.messages[0]}",
+                }))
             if duplicado := _empleado_con_codigo_duplicado(codigo):
-                messages.error(request, f"El código {codigo} ya pertenece a {duplicado.nombre}.")
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "codigo": f"El código {codigo} ya pertenece a {duplicado.nombre}.",
+                }))
             try:
                 jefe_directo_id = _resolver_jefe_directo_desde_post(request.POST, organizacion)
             except ValidationError as exc:
-                messages.error(request, exc.messages[0])
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=ValidationError({
+                    "jefe_directo": exc.messages[0],
+                }))
             try:
                 empleado = _crear_empleado_desde_post(
                     request,
@@ -1478,6 +1534,7 @@ def empleados(request):
                 mensaje = f"Empleado {empleado.nombre} registrado."
             return _respuesta_ficha_empleado(request, empleado=empleado, mensaje=mensaje)
 
+    ficha_error_flash = request.session.pop("rrhh_ficha_error_flash", None) if request.method == "GET" else None
     q = (request.GET.get("q") or "").strip()
     estado = (request.GET.get("estado") or "activos").strip().lower()
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
@@ -1573,6 +1630,12 @@ def empleados(request):
     )
 
     empleados_page = list(qs.order_by("nombre")[:600])
+    if ficha_error_flash and ficha_error_flash.get("accion") == "update":
+        borrador_id = ficha_error_flash.get("empleado_id")
+        if not any(empleado.pk == borrador_id for empleado in empleados_page):
+            empleado_borrador = Empleado.objects.filter(pk=borrador_id).first()
+            if empleado_borrador:
+                empleados_page.append(empleado_borrador)
     for empleado in empleados_page:
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
         empleado.sucursal_form_id = _sucursal_form_id(
@@ -1585,6 +1648,30 @@ def empleados(request):
                 empleado.repartidor_logistica = empleado.usuario_erp.repartidor_logistica
             except Exception:
                 empleado.repartidor_logistica = None
+        if ficha_error_flash and ficha_error_flash.get("empleado_id") == empleado.pk:
+            borrador = ficha_error_flash["values"]
+            formulario = copy(empleado)
+            formulario._state = copy(empleado._state)
+            formulario._state.fields_cache = dict(empleado._state.fields_cache)
+            for campo in (
+                "nombre", "codigo", "rfc", "curp", "nss", "area", "puesto",
+                "departamento_origen", "departamento", "puesto_operativo",
+                "nivel_organizacional", "tipo_personal", "tipo_contrato", "telefono", "email",
+            ):
+                setattr(formulario, campo, borrador[campo])
+            if borrador["fecha_ingreso"]:
+                try:
+                    formulario.fecha_ingreso = dt_date.fromisoformat(borrador["fecha_ingreso"])
+                except ValueError:
+                    pass
+            formulario.salario_diario = borrador["salario_diario"]
+            formulario.jefe_directo_id = int(borrador["jefe_directo"]) if borrador["jefe_directo"].isdigit() else None
+            formulario.sucursal_form_id = borrador["sucursal_id"]
+            formulario.form_sucursal_app_id = borrador["sucursal_app_id"]
+            formulario.activo = borrador["activo"] == "on"
+            formulario.bono_esquema_ids = {int(valor) for valor in borrador["bono_esquemas"]}
+            formulario.form_draft = borrador
+            empleado.form_values = formulario
 
     identidades_pendientes = list(
         EmpleadoIdentidadPendiente.objects.select_related("empleado_sugerido")
@@ -1618,6 +1705,10 @@ def empleados(request):
         alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=int(alta_pendiente_id)).first()
     altas_pendientes = list(altas_pendientes_qs[:20])
     alta_prefill = _alta_pendiente_prefill(alta_pendiente_seleccionada)
+    alta_form_draft = None
+    if ficha_error_flash and ficha_error_flash.get("accion") == "create":
+        alta_form_draft = ficha_error_flash["values"]
+        alta_prefill.update(alta_form_draft)
 
     context = {
         "module_tabs": _module_tabs("empleados", request.user),
@@ -1698,10 +1789,12 @@ def empleados(request):
         "altas_pendientes": altas_pendientes,
         "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
         "alta_prefill": alta_prefill,
+        "alta_form_draft": alta_form_draft,
+        "ficha_error_empleado_id": ficha_error_flash.get("empleado_id") if ficha_error_flash else None,
         "alta_prefill_sucursal_id": _sucursal_form_id(
             sucursal_ref_id=None,
             sucursal_texto=alta_prefill.get("sucursal", ""),
-        ),
+        ) if not alta_form_draft else alta_form_draft["sucursal_id"],
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

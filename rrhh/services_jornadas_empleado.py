@@ -6,8 +6,10 @@ import re
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from core.access import can_manage_rrhh
+from core.audit import log_event
 
 from .models import AsignacionJornadaEmpleado, Empleado, JornadaSemanal
 from .services_turnos import asignar_jornada_empleado
@@ -41,21 +43,28 @@ def aplicar_jornada_desde_post(*, empleado, post, actor, creacion=False):
         return ResultadoJornada(False, "Empleado registrado sin jornada semanal.", None)
 
     Empleado.objects.select_for_update().get(pk=empleado.pk)
-    asignaciones = list(
-        AsignacionJornadaEmpleado.objects.select_for_update()
-        .filter(empleado_id=empleado.pk).order_by("-fecha_inicio", "-pk")
-    )
-    vigente = next((item for item in asignaciones if item.fecha_fin is None), None)
-    if not jornada_id and not vigente:
+    fecha_raw = (post.get("jornada_fecha_inicio") or "").strip()
+    if not jornada_id and not fecha_raw and not AsignacionJornadaEmpleado.objects.filter(empleado_id=empleado.pk).exists():
         return ResultadoJornada(False, "El empleado ya estaba sin jornada semanal.", None)
 
-    fecha_raw = (post.get("jornada_fecha_inicio") or "").strip()
     if creacion and jornada_id and not fecha_raw and empleado.fecha_ingreso:
         fecha_inicio = empleado.fecha_ingreso
     else:
         fecha_inicio = _fecha_desde_post(fecha_raw)
     if empleado.fecha_ingreso and fecha_inicio < empleado.fecha_ingreso:
         raise ValidationError({"jornada_fecha_inicio": "El inicio de la jornada no puede ser anterior al ingreso."})
+
+    vigentes = list(
+        AsignacionJornadaEmpleado.objects.select_for_update()
+        .filter(empleado_id=empleado.pk, fecha_inicio__lte=fecha_inicio)
+        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=fecha_inicio))
+        .order_by("-fecha_inicio", "-pk")[:2]
+    )
+    if len(vigentes) > 1:
+        raise ValidationError({"jornada_fecha_inicio": "Hay jornadas traslapadas; revisa el historial antes de cambiarla."})
+    vigente = vigentes[0] if vigentes else None
+    if not jornada_id and not vigente:
+        return ResultadoJornada(False, "El empleado ya estaba sin jornada semanal.", None)
 
     motivo = (post.get("jornada_motivo") or "").strip()
     if not motivo:
@@ -75,9 +84,20 @@ def aplicar_jornada_desde_post(*, empleado, post, actor, creacion=False):
         raise ValidationError({"jornada_fecha_inicio": "El cambio debe iniciar después de la jornada vigente."})
 
     if vigente:
+        fin_anterior = vigente.fecha_fin
         vigente.fecha_fin = fecha_inicio - timedelta(days=1)
         vigente.full_clean()
         vigente.save(update_fields=["fecha_fin"])
+        log_event(actor, "UPDATE", "rrhh.AsignacionJornadaEmpleado", str(vigente.pk), {
+            "tipo": "cambio" if jornada else "cierre",
+            "empleado_id": empleado.pk,
+            "asignacion_id": vigente.pk,
+            "jornada_id": vigente.jornada_id,
+            "fecha_inicio": vigente.fecha_inicio.isoformat(),
+            "fecha_fin_anterior": fin_anterior.isoformat() if fin_anterior else None,
+            "fecha_fin_nueva": vigente.fecha_fin.isoformat(),
+            "motivo": motivo,
+        })
 
     if jornada is None:
         return ResultadoJornada(True, "Jornada semanal cerrada.", None)
@@ -86,4 +106,13 @@ def aplicar_jornada_desde_post(*, empleado, post, actor, creacion=False):
         empleado=empleado, jornada=jornada, fecha_inicio=fecha_inicio,
         fecha_fin=None, motivo=motivo, actor=actor,
     )
+    log_event(actor, "CREATE", "rrhh.AsignacionJornadaEmpleado", str(asignacion.pk), {
+        "tipo": "asignacion",
+        "empleado_id": empleado.pk,
+        "asignacion_id": asignacion.pk,
+        "jornada_id": jornada.pk,
+        "fecha_inicio": fecha_inicio.isoformat(),
+        "fecha_fin": None,
+        "motivo": motivo,
+    })
     return ResultadoJornada(True, "Jornada semanal actualizada.", asignacion)

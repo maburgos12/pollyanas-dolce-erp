@@ -10,6 +10,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
 from django.urls import reverse
+from core.models import AuditLog
 
 from rrhh.models import (
     AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
@@ -329,6 +330,11 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(empleado.jornadas_asignadas.count(), 0)
+        con_fecha = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(con_fecha.status_code, 200)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 0)
 
     def test_error_de_jornada_revierte_edicion_y_asignaciones(self):
         empleado, inicial = self.empleado_con_jornada()
@@ -372,6 +378,105 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         inicial.refresh_from_db()
         self.assertEqual(empleado.nombre, "Persona existente")
         self.assertIsNone(inicial.fecha_fin)
+
+    def test_cambio_de_asignacion_con_fin_futuro_conserva_fin_original_en_auditoria(self):
+        empleado, inicial = self.empleado_con_jornada()
+        inicial.fecha_fin = date(2026, 12, 31)
+        inicial.save(update_fields=["fecha_fin"])
+        response = self.client.post(self.url, self.datos_edicion(empleado))
+        self.assertEqual(response.status_code, 302)
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        evento = AuditLog.objects.get(model="rrhh.AsignacionJornadaEmpleado", action="UPDATE", object_id=str(inicial.pk))
+        self.assertEqual(evento.user, self.actor)
+        self.assertEqual(evento.payload["fecha_fin_anterior"], "2026-12-31")
+        self.assertEqual(evento.payload["fecha_fin_nueva"], "2026-09-14")
+        self.assertEqual(evento.payload["motivo"], "Cambio aprobado")
+
+    def test_cierre_con_fin_futuro_registra_motivo_sin_cambiar_motivo_original(self):
+        empleado, inicial = self.empleado_con_jornada()
+        inicial.fecha_fin = date(2026, 12, 31)
+        inicial.save(update_fields=["fecha_fin"])
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_motivo="Cierre documentado",
+        ))
+        self.assertEqual(response.status_code, 302)
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        self.assertEqual(inicial.motivo, "Asignación original")
+        evento = AuditLog.objects.get(model="rrhh.AsignacionJornadaEmpleado", action="UPDATE", object_id=str(inicial.pk))
+        self.assertEqual(evento.payload["motivo"], "Cierre documentado")
+        self.assertEqual(evento.payload["tipo"], "cierre")
+
+    def test_validaciones_previas_de_alta_y_edicion_responden_json(self):
+        alta = self.client.post(self.url, self.datos_alta(jefe_directo="invalido"), HTTP_ACCEPT="application/json")
+        self.assertEqual(alta.status_code, 400)
+        self.assertFalse(alta.json()["ok"])
+        self.assertTrue(alta.json()["toast"]["persistent"])
+        empleado, _ = self.empleado_con_jornada()
+        edicion = self.client.post(self.url, self.datos_edicion(
+            empleado, jefe_directo="invalido",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(edicion.status_code, 400)
+        self.assertFalse(edicion.json()["ok"])
+        self.assertTrue(edicion.json()["toast"]["persistent"])
+
+    def test_id_de_edicion_inexistente_responde_json_400(self):
+        response = self.client.post(self.url, {
+            "action": "update", "empleado_id": "999999999", "nombre": "Desconocido",
+        }, HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("empleado_id", response.json()["errors"])
+
+    def test_error_html_repopula_draft_una_vez_y_reabre_edicion(self):
+        empleado, _ = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, nombre="Nombre en borrador", telefono="6671234567", jornada_motivo="",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(f"#empleado-{empleado.pk}", response["Location"])
+        self.assertNotIn("Nombre en borrador", response["Location"])
+        pantalla = self.client.get(response["Location"].split("#")[0])
+        self.assertContains(pantalla, f'id="empleado-{empleado.pk}"')
+        self.assertContains(pantalla, 'value="Nombre en borrador"')
+        self.assertContains(pantalla, 'value="6671234567"')
+        self.assertContains(pantalla, '<details class="rrhh-edit-panel" open>')
+        segunda = self.client.get(response["Location"].split("#")[0])
+        self.assertNotContains(segunda, 'value="Nombre en borrador"')
+
+    def test_error_html_de_alta_conserva_campos_y_no_guarda_password(self):
+        datos = self.datos_alta(
+            nombre="Alta pendiente de corrección", rfc="XAXX010101000",
+            telefono="6679876543", crear_usuario_erp="on",
+            nuevo_usuario_username="nueva.persona", nuevo_usuario_password="secreto-123",
+            jornada_motivo="",
+        )
+        response = self.client.post(f"{self.url}?estado=activos&q=Buscada", datos)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("estado=activos", response["Location"])
+        self.assertIn("q=Buscada", response["Location"])
+        self.assertIn("#alta-empleado", response["Location"])
+        pantalla = self.client.get(response["Location"].split("#")[0])
+        self.assertContains(pantalla, 'id="alta-empleado"')
+        self.assertContains(pantalla, 'value="Alta pendiente de corrección"')
+        self.assertContains(pantalla, 'value="XAXX010101000"')
+        self.assertContains(pantalla, 'value="6679876543"')
+        self.assertNotContains(pantalla, "secreto-123")
+        self.assertNotIn("rrhh_ficha_error_flash", self.client.session)
+
+    def test_draft_de_edicion_visibiliza_empleado_filtrado_sin_cambiar_otros(self):
+        empleado, _ = self.empleado_con_jornada()
+        otro = Empleado.objects.create(nombre="Otro empleado", codigo="OTRO-001")
+        response = self.client.post(f"{self.url}?q=Otro", self.datos_edicion(
+            empleado, nombre="Draft visible", salario_diario="123.45", jornada_motivo="",
+        ))
+        pantalla = self.client.get(response["Location"].split("#")[0])
+        self.assertContains(pantalla, 'value="Draft visible"')
+        self.assertContains(pantalla, 'value="123.45"')
+        self.assertContains(pantalla, f'id="empleado-{empleado.pk}"')
+        self.assertContains(pantalla, f'id="empleado-{otro.pk}"')
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Persona existente")
 
     def test_reenvio_de_misma_jornada_no_duplica(self):
         empleado, inicial = self.empleado_con_jornada()
@@ -427,6 +532,24 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertEqual(empleado.nombre, "Persona existente")
         self.assertIsNone(inicial.fecha_fin)
         self.assertEqual(empleado.jornadas_asignadas.count(), 2)
+
+    def test_dos_vigentes_corruptas_se_rechazan_sin_mutacion(self):
+        empleado, inicial = self.empleado_con_jornada()
+        segunda = AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=self.otra, fecha_inicio=date(2026, 9, 10),
+            fecha_fin=date(2026, 9, 30), motivo="Dato corrupto",
+        )
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_fecha_inicio="2026-09-15", nombre="No persistir",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_fecha_inicio", response.json()["errors"])
+        empleado.refresh_from_db()
+        inicial.refresh_from_db()
+        segunda.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Persona existente")
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(segunda.fecha_fin, date(2026, 9, 30))
 
     def test_usuario_sin_gestion_no_puede_crear_editar_ni_aplicar_servicio(self):
         from rrhh.services_jornadas_empleado import aplicar_jornada_desde_post
