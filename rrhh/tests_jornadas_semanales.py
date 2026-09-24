@@ -356,6 +356,34 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         ]
         self.assertLessEqual(len(consultas_jornada), 2)
 
+    def test_borrador_fuera_del_filtro_precarga_historial_sin_n_mas_uno(self):
+        turno = Turno.objects.create(nombre="Borrador QA", hora_entrada=time(8), hora_salida=time(16))
+        empleado = Empleado.objects.create(nombre="Fuera del filtro", codigo="JORNADA-BORRADOR")
+        perfiles = [JornadaSemanal.objects.create(nombre=f"Perfil borrador {indice}", activo=False) for indice in range(4)]
+        for indice, perfil in enumerate(perfiles):
+            for dia in range(7):
+                JornadaSemanalDia.objects.create(jornada=perfil, dia_semana=dia, turno=turno if dia < 6 else None)
+            AsignacionJornadaEmpleado.objects.create(
+                empleado=empleado, jornada=perfil, fecha_inicio=date(2026, 8, 1 + indice * 7),
+                fecha_fin=date(2026, 8, 7 + indice * 7) if indice < 3 else None,
+                motivo=f"Motivo {indice}", creado_por=self.actor,
+            )
+        session = self.client.session
+        session["rrhh_ficha_error_flash"] = {
+            "accion": "update", "empleado_id": empleado.pk,
+            "values": {"jornada_id": str(perfiles[-1].pk), "jornada_fecha_inicio": "2026-09-01",
+                       "jornada_motivo": "Revisión de borrador"},
+        }
+        session.save()
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(f"{self.url}?q=no-encuentra-este-empleado")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Historial de jornadas (4)")
+        dias_queries = [
+            query for query in queries if 'FROM "rrhh_jornadasemanaldia"' in query["sql"]
+        ]
+        self.assertLessEqual(len(dias_queries), 2)
+
     def test_preview_serializa_nombre_seguro_y_minutos_exactos(self):
         turno = Turno.objects.create(
             nombre="Especial", hora_entrada=time(8), hora_salida=time(16, 30),
@@ -385,6 +413,35 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertEqual(empleado.jornadas_asignadas.count(), 1)
         inicial.refresh_from_db()
         self.assertIsNone(inicial.fecha_fin)
+
+    def test_seleccion_vacia_con_jornada_vigente_exige_datos_y_no_cierra(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_fecha_inicio", response.json()["errors"])
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
+
+    def test_seleccion_vacia_con_fecha_y_motivo_cierra_jornada(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="2026-09-15",
+            jornada_motivo="Cierre autorizado",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+    def test_seleccion_vacia_sin_vigente_es_no_op(self):
+        empleado = Empleado.objects.create(nombre="Sin jornada", codigo="JORNADA-SIN")
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(empleado.jornadas_asignadas.exists())
 
     def test_historial_muestra_periodos_cerrados_y_vigente(self):
         empleado, inicial = self.empleado_con_jornada()

@@ -1661,7 +1661,7 @@ def empleados(request):
         {"id": jornada.pk, "nombre": jornada.nombre, **jornada.resumen}
         for jornada in jornadas_activas
     ]
-    qs = Empleado.objects.all().prefetch_related(  # rrhh-allow-inactive-history: filtro estado controla historial
+    qs_base = Empleado.objects.all().prefetch_related(  # rrhh-allow-inactive-history: filtro estado controla historial
         "bonos_esquemas",
         Prefetch("jornadas_asignadas", queryset=AsignacionJornadaEmpleado.objects.select_related(
             "jornada", "creado_por"
@@ -1671,6 +1671,7 @@ def empleados(request):
     ).annotate(
         total_lineas_nomina=Count("lineas_nomina")
     )
+    qs = qs_base
     if q:
         qs = qs.filter(
             Q(nombre__icontains=q)
@@ -1761,7 +1762,7 @@ def empleados(request):
     if ficha_error_flash and ficha_error_flash.get("accion") == "update":
         borrador_id = ficha_error_flash.get("empleado_id")
         if not any(empleado.pk == borrador_id for empleado in empleados_page):
-            empleado_borrador = Empleado.objects.filter(pk=borrador_id).first()
+            empleado_borrador = qs_base.filter(pk=borrador_id).first()
             if empleado_borrador:
                 empleados_page.append(empleado_borrador)
     hoy = timezone.localdate()
