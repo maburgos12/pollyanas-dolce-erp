@@ -258,6 +258,8 @@ def importar_lista_raya_nomina(
                 NominaLinea(
                     periodo=periodo,
                     empleado=empleado,
+                    sucursal_snapshot_id=empleado.sucursal_ref_id,
+                    departamento_snapshot=empleado.departamento or "",
                     dias_trabajados=row.dias_pagados,
                     horas_trabajadas=row.horas_trabajadas,
                     horas_dia=row.horas_dia,

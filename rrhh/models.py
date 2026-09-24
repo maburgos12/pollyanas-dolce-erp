@@ -535,6 +535,14 @@ class NominaPeriodo(models.Model):
 class NominaLinea(models.Model):
     periodo = models.ForeignKey(NominaPeriodo, on_delete=models.CASCADE, related_name="lineas")
     empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT, related_name="lineas_nomina")
+    sucursal_snapshot = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="lineas_nomina_snapshot",
+    )
+    departamento_snapshot = models.CharField(max_length=50, blank=True, default="")
     dias_trabajados = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
     horas_trabajadas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
     horas_dia = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
@@ -562,6 +570,19 @@ class NominaLinea(models.Model):
         return f"{self.periodo.folio} · {self.empleado.nombre}"
 
     def save(self, *args, **kwargs):
+        if self._state.adding:
+            if self.sucursal_snapshot_id is None:
+                self.sucursal_snapshot_id = self.empleado.sucursal_ref_id
+            if not self.departamento_snapshot:
+                self.departamento_snapshot = self.empleado.departamento or ""
+        elif self.pk:
+            snapshot_actual = type(self).objects.filter(pk=self.pk).values(
+                "sucursal_snapshot_id",
+                "departamento_snapshot",
+            ).first()
+            if snapshot_actual:
+                self.sucursal_snapshot_id = snapshot_actual["sucursal_snapshot_id"]
+                self.departamento_snapshot = snapshot_actual["departamento_snapshot"]
         if (self.salario_base or Decimal("0")) <= 0 and (self.empleado.salario_diario or Decimal("0")) > 0:
             self.salario_base = (self.empleado.salario_diario or Decimal("0")) * (self.dias_trabajados or Decimal("0"))
         self.total_percepciones = (self.salario_base or Decimal("0")) + (self.bonos or Decimal("0"))
