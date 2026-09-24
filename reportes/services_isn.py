@@ -18,6 +18,7 @@ from sat_client.models import CfdiDescargado
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
+TOLERANCIA_BASE_DECLARADA = CENT
 CFDI_NS = "{http://www.sat.gob.mx/cfd/4}"
 RFC_SINALOA = "GES8101015I7"
 RFC_EMPRESA = "GEF211230KR2"
@@ -42,16 +43,32 @@ class FilaPreviewISN:
 @dataclass(frozen=True)
 class PreviewExpedienteISN:
     cfdi: CfdiDescargado
+    cfdi_uuid: str
     periodo: date
     importe_pagado: Decimal
     base_gravada_total: Decimal
+    base_declarada: Decimal | None
+    diferencia_base: Decimal | None
+    estado_previsto: str
     filas: tuple[FilaPreviewISN, ...]
 
     def render(self) -> str:
+        base_declarada = (
+            f"{self.base_declarada:.2f}"
+            if self.base_declarada is not None
+            else "N/D"
+        )
+        diferencia = (
+            f"{self.diferencia_base:.2f}"
+            if self.diferencia_base is not None
+            else "N/D"
+        )
         encabezado = (
-            f"ISN periodo={self.periodo:%Y-%m} uuid={self.cfdi.uuid} "
+            f"ISN periodo={self.periodo:%Y-%m} uuid={self.cfdi_uuid} "
             f"importe={self.importe_pagado:.2f} "
-            f"base={self.base_gravada_total:.2f} empleados={len(self.filas)}"
+            f"base_calculada={self.base_gravada_total:.2f} "
+            f"base_declarada={base_declarada} diferencia={diferencia} "
+            f"estado_previsto={self.estado_previsto} empleados={len(self.filas)}"
         )
         detalle = (
             f"empleado={fila.empleado_id} base={fila.base_gravada:.2f} "
@@ -392,6 +409,7 @@ def preparar_expediente_isn(
     periodo: date,
     *,
     uuid: str | None = None,
+    base_declarada: Decimal | None = None,
 ) -> PreviewExpedienteISN:
     if not isinstance(periodo, date) or periodo.day != 1:
         raise ValueError("El periodo de ISN debe ser el primer dia del mes.")
@@ -407,6 +425,12 @@ def preparar_expediente_isn(
     if len(empleados) != len(bases):
         raise ValueError("El universo de nomina contiene empleados inexistentes.")
 
+    base_gravada_total = money(sum(bases.values(), ZERO))
+    base_declarada, diferencia_base, estado_previsto = _conciliar_base_declarada(
+        base_gravada_total,
+        base_declarada,
+    )
+
     filas = tuple(
         FilaPreviewISN(
             empleado_id=empleado_id,
@@ -419,9 +443,13 @@ def preparar_expediente_isn(
     )
     return PreviewExpedienteISN(
         cfdi=cfdi,
+        cfdi_uuid=cfdi.uuid,
         periodo=periodo,
         importe_pagado=money(importe_pagado),
-        base_gravada_total=money(sum(bases.values(), ZERO)),
+        base_gravada_total=base_gravada_total,
+        base_declarada=base_declarada,
+        diferencia_base=diferencia_base,
+        estado_previsto=estado_previsto,
         filas=filas,
     )
 
@@ -448,9 +476,21 @@ def _validar_preview(preview: PreviewExpedienteISN) -> None:
     ):
         raise ValueError("Los montos del preview de ISN no cuadran con el CFDI.")
 
-    periodo_cfdi, importe_cfdi = extraer_isn_cfdi(preview.cfdi)
-    if periodo_cfdi != preview.periodo or importe_cfdi != money(preview.importe_pagado):
-        raise ValueError("El CFDI cambio despues de preparar el preview de ISN.")
+    if preview.estado_previsto not in (
+        ExpedienteISN.ESTADO_APLICADO,
+        ExpedienteISN.ESTADO_DISCREPANCIA,
+    ):
+        raise ValueError("El estado previsto del preview de ISN no es valido.")
+    base_declarada, diferencia, estado = _conciliar_base_declarada(
+        preview.base_gravada_total,
+        preview.base_declarada,
+    )
+    if (
+        base_declarada != preview.base_declarada
+        or diferencia != preview.diferencia_base
+        or estado != preview.estado_previsto
+    ):
+        raise ValueError("La conciliacion del preview de ISN no es coherente.")
 
 
 def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None:
@@ -462,42 +502,85 @@ def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None
     return money(valor)
 
 
+def _conciliar_base_declarada(
+    base_gravada_total: Decimal,
+    base_declarada: Decimal | None,
+) -> tuple[Decimal | None, Decimal | None, str]:
+    base_declarada = _normalizar_base_declarada(base_declarada)
+    if base_declarada is None:
+        return None, None, ExpedienteISN.ESTADO_APLICADO
+    diferencia = money(base_declarada - money(base_gravada_total))
+    estado = (
+        ExpedienteISN.ESTADO_DISCREPANCIA
+        if abs(diferencia) > TOLERANCIA_BASE_DECLARADA
+        else ExpedienteISN.ESTADO_APLICADO
+    )
+    return base_declarada, diferencia, estado
+
+
 def _aplicar_expediente_isn_una_vez(
     preview: PreviewExpedienteISN,
     *,
     base_declarada: Decimal | None,
+    diferencia_base: Decimal | None,
+    estado_previsto: str,
     aplicado_por=None,
 ) -> ExpedienteISN:
     with transaction.atomic():
+        try:
+            cfdi_actual = CfdiDescargado.objects.select_for_update().get(
+                pk=preview.cfdi.pk
+            )
+        except CfdiDescargado.DoesNotExist as exc:
+            raise ValueError("El CFDI del preview ya no existe.") from exc
+        periodo_cfdi, importe_cfdi = extraer_isn_cfdi(cfdi_actual)
+        if (
+            cfdi_actual.uuid != preview.cfdi_uuid
+            or periodo_cfdi != preview.periodo
+            or importe_cfdi != money(preview.importe_pagado)
+        ):
+            raise ValueError("El CFDI cambio despues de preparar el preview de ISN.")
+
         expedientes = list(
             ExpedienteISN.objects.select_for_update()
             .filter(periodo=preview.periodo)
             .order_by("revision", "pk")
         )
         existente = next(
-            (item for item in expedientes if item.uuid == preview.cfdi.uuid),
+            (item for item in expedientes if item.uuid == preview.cfdi_uuid),
             None,
         )
         if existente is not None:
             return existente
 
-        for anterior in expedientes:
-            if anterior.estado == ExpedienteISN.ESTADO_APLICADO:
-                anterior.estado = ExpedienteISN.ESTADO_REEMPLAZADO
-                anterior.save(update_fields={"estado"})
+        if estado_previsto == ExpedienteISN.ESTADO_APLICADO:
+            for anterior in expedientes:
+                if anterior.estado == ExpedienteISN.ESTADO_APLICADO:
+                    anterior.estado = ExpedienteISN.ESTADO_REEMPLAZADO
+                    anterior.save(update_fields={"estado"})
 
         expediente = ExpedienteISN.objects.create(
             periodo=preview.periodo,
             revision=max((item.revision for item in expedientes), default=0) + 1,
-            uuid=preview.cfdi.uuid,
-            cfdi=preview.cfdi,
+            uuid=preview.cfdi_uuid,
+            cfdi=cfdi_actual,
             importe_pagado=preview.importe_pagado,
             base_gravada_calculada=preview.base_gravada_total,
             base_declarada=base_declarada,
             estado=ExpedienteISN.ESTADO_VALIDO,
-            aplicado_por=aplicado_por,
+            aplicado_por=(
+                aplicado_por
+                if estado_previsto == ExpedienteISN.ESTADO_APLICADO
+                else None
+            ),
             aplicado_en=None,
-            metadata={"empleados": len(preview.filas)},
+            metadata={
+                "empleados": len(preview.filas),
+                "diferencia_base": (
+                    str(diferencia_base) if diferencia_base is not None else None
+                ),
+                "estado_previsto": estado_previsto,
+            },
         )
         DistribucionISNEmpleado.objects.bulk_create(
             [
@@ -522,8 +605,12 @@ def _aplicar_expediente_isn_una_vez(
         if money(totales["importe"] or ZERO) != money(preview.importe_pagado):
             raise ValueError("Los montos materializados de ISN no cuadran.")
 
-        expediente.estado = ExpedienteISN.ESTADO_APLICADO
-        expediente.aplicado_en = timezone.now()
+        expediente.estado = estado_previsto
+        expediente.aplicado_en = (
+            timezone.now()
+            if estado_previsto == ExpedienteISN.ESTADO_APLICADO
+            else None
+        )
         expediente.save(update_fields={"estado", "aplicado_en"})
         return expediente
 
@@ -535,7 +622,16 @@ def aplicar_expediente_isn(
     aplicado_por=None,
 ) -> ExpedienteISN:
     _validar_preview(preview)
-    base_declarada = _normalizar_base_declarada(base_declarada)
+    if base_declarada is not None and preview.base_declarada is not None:
+        if _normalizar_base_declarada(base_declarada) != preview.base_declarada:
+            raise ValueError("La base declarada no coincide con el preview de ISN.")
+    base_a_conciliar = (
+        base_declarada if base_declarada is not None else preview.base_declarada
+    )
+    base_declarada, diferencia_base, estado_previsto = _conciliar_base_declarada(
+        preview.base_gravada_total,
+        base_a_conciliar,
+    )
 
     ultimo_error = None
     for _ in range(3):
@@ -543,11 +639,10 @@ def aplicar_expediente_isn(
             return _aplicar_expediente_isn_una_vez(
                 preview,
                 base_declarada=base_declarada,
+                diferencia_base=diferencia_base,
+                estado_previsto=estado_previsto,
                 aplicado_por=aplicado_por,
             )
         except IntegrityError as exc:
             ultimo_error = exc
-            existente = ExpedienteISN.objects.filter(uuid=preview.cfdi.uuid).first()
-            if existente is not None:
-                return existente
     raise ultimo_error

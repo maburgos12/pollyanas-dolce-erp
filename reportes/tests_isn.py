@@ -6,6 +6,7 @@ from io import StringIO
 from django.core.management import call_command
 from django.db import connection
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
@@ -693,13 +694,31 @@ class ISNApplicationTests(TestCase):
             "materializar_isn",
             periodo="2026-08",
             uuid=cfdi.uuid,
+            base_declarada=D("4000.02"),
             stdout=stdout,
         )
 
         self.assertEqual(ExpedienteISN.objects.count(), 0)
         self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
         self.assertIn("CFDI-ISN-DRY", stdout.getvalue())
+        self.assertIn("base_calculada=4000.00", stdout.getvalue())
+        self.assertIn("base_declarada=4000.02", stdout.getvalue())
+        self.assertIn("diferencia=0.02", stdout.getvalue())
+        self.assertIn("estado_previsto=DISCREPANCIA", stdout.getvalue())
         self.assertIn("DRY-RUN: sin cambios", stdout.getvalue())
+
+    def test_preparar_sin_uuid_exige_candidato_unico(self):
+        empleado = self._crear_empleado("E-CANDIDATO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        unico = self._crear_cfdi("CFDI-ISN-UNICO")
+
+        preview = preparar_expediente_isn(self.PERIODO)
+
+        self.assertEqual(preview.cfdi.pk, unico.pk)
+
+        self._crear_cfdi("CFDI-ISN-AMBIGUO")
+        with self.assertRaisesMessage(ValueError, "unico CFDI candidato"):
+            preparar_expediente_isn(self.PERIODO)
 
     def test_apply_crea_expediente_y_linea_por_empleado_incluso_base_cero(self):
         empleado_a = self._crear_empleado("E-APPLY-A")
@@ -749,6 +768,22 @@ class ISNApplicationTests(TestCase):
         self.assertEqual(ExpedienteISN.objects.count(), 1)
         self.assertEqual(DistribucionISNEmpleado.objects.count(), 1)
 
+    def test_tolerancia_de_un_centavo_conserva_estado_aplicado(self):
+        empleado = self._crear_empleado("E-TOLERANCIA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-TOLERANCIA")
+
+        preview = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            base_declarada=D("4000.01"),
+        )
+        expediente = aplicar_expediente_isn(preview)
+
+        self.assertEqual(preview.diferencia_base, D("0.01"))
+        self.assertEqual(preview.estado_previsto, ExpedienteISN.ESTADO_APLICADO)
+        self.assertEqual(expediente.estado, ExpedienteISN.ESTADO_APLICADO)
+
     def test_cfdi_correctivo_crea_revision_y_reemplaza_sin_borrar_aplicado_en(self):
         empleado = self._crear_empleado("E-CORRECTIVO")
         self._crear_nomina_completa(((empleado, D("4000.00")),))
@@ -770,6 +805,102 @@ class ISNApplicationTests(TestCase):
         self.assertEqual(correctivo.estado, ExpedienteISN.ESTADO_APLICADO)
         self.assertEqual(correctivo.importe_pagado, D("110.00"))
         self.assertEqual(ExpedienteISN.objects.count(), 2)
+
+    def test_discrepancia_material_no_desplaza_aplicado_previo(self):
+        empleado = self._crear_empleado("E-DISCREPANCIA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi_original = self._crear_cfdi("CFDI-ISN-APLICADO-PREVIO")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi_original.uuid)
+        )
+        cfdi_discrepante = self._crear_cfdi("CFDI-ISN-DISCREPANTE", "110.00")
+        preview = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi_discrepante.uuid,
+            base_declarada=D("4000.02"),
+        )
+
+        discrepante = aplicar_expediente_isn(preview)
+
+        original.refresh_from_db()
+        self.assertEqual(original.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertEqual(discrepante.estado, ExpedienteISN.ESTADO_DISCREPANCIA)
+        self.assertIsNone(discrepante.aplicado_en)
+        self.assertEqual(discrepante.distribuciones.count(), 1)
+        self.assertEqual(
+            discrepante.distribuciones.aggregate(total=Sum("monto_isn"))["total"],
+            D("110.00"),
+        )
+        stdout = StringIO()
+        call_command(
+            "materializar_isn",
+            periodo="2026-08",
+            uuid=cfdi_discrepante.uuid,
+            base_declarada=D("4000.02"),
+            apply=True,
+            stdout=stdout,
+        )
+        self.assertIn(
+            f"DISCREPANCIA expediente={discrepante.pk}",
+            stdout.getvalue(),
+        )
+        self.assertNotIn(
+            f"APLICADO expediente={discrepante.pk}",
+            stdout.getvalue(),
+        )
+        self.assertEqual(ExpedienteISN.objects.count(), 2)
+
+    def test_comando_reporta_estado_real_del_expediente(self):
+        empleado = self._crear_empleado("E-ESTADO-COMANDO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi_original = self._crear_cfdi("CFDI-ISN-COMANDO-ORIGINAL")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi_original.uuid)
+        )
+        cfdi_correctivo = self._crear_cfdi("CFDI-ISN-COMANDO-CORRECTIVO")
+        aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi_correctivo.uuid)
+        )
+        original.refresh_from_db()
+        self.assertEqual(original.estado, ExpedienteISN.ESTADO_REEMPLAZADO)
+        stdout = StringIO()
+
+        call_command(
+            "materializar_isn",
+            periodo="2026-08",
+            uuid=cfdi_original.uuid,
+            apply=True,
+            stdout=stdout,
+        )
+
+        self.assertIn(f"REEMPLAZADO expediente={original.pk}", stdout.getvalue())
+        self.assertNotIn(f"APLICADO expediente={original.pk}", stdout.getvalue())
+
+    def test_cfdi_cancelado_despues_del_preview_aborta_sin_escribir(self):
+        empleado = self._crear_empleado("E-CANCELADO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-CANCELADO")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        CfdiDescargado.objects.filter(pk=cfdi.pk).update(estatus="CANCELADO")
+
+        with self.assertRaises(ValueError):
+            aplicar_expediente_isn(preview)
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+        self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
+
+    def test_cfdi_modificado_despues_del_preview_aborta_sin_escribir(self):
+        empleado = self._crear_empleado("E-CFDI-CAMBIADO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-CAMBIADO")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        xml_cambiado = cfdi.xml_raw.replace('Importe="100.00"', 'Importe="101.00"')
+        CfdiDescargado.objects.filter(pk=cfdi.pk).update(xml_raw=xml_cambiado)
+
+        with self.assertRaisesMessage(ValueError, "cambio"):
+            aplicar_expediente_isn(preview)
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
 
     def test_nomina_incompleta_falla_antes_de_escribir(self):
         empleado = self._crear_empleado("E-INCOMPLETO")

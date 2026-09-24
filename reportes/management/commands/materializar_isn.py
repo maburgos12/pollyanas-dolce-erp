@@ -33,6 +33,7 @@ class Command(BaseCommand):
             preview = preparar_expediente_isn(
                 parse_period(options["periodo"]),
                 uuid=options["uuid"],
+                base_declarada=options["base_declarada"],
             )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc
@@ -41,12 +42,13 @@ class Command(BaseCommand):
             try:
                 expediente = aplicar_expediente_isn(
                     preview,
-                    base_declarada=options["base_declarada"],
                 )
             except ValueError as exc:
                 raise CommandError(str(exc)) from exc
             self.stdout.write(
-                self.style.SUCCESS(f"APLICADO expediente={expediente.pk}")
+                self.style.SUCCESS(
+                    f"{expediente.estado} expediente={expediente.pk}"
+                )
             )
         else:
             self.stdout.write("DRY-RUN: sin cambios")
