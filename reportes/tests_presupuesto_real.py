@@ -247,6 +247,48 @@ class PresupuestoRealConsolidacionTests(TestCase):
                 tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
             ).calcular_clave_fuente(),
         )
+
+    def test_isn_cfdi_permanece_canonica_en_nomina_y_resultados(self):
+        for codigo in ("nomina", "resultados"):
+            with self.subTest(area=codigo):
+                area = AreaPresupuesto.objects.create(
+                    nombre=f"Área {codigo}",
+                    codigo=codigo,
+                )
+                rubro, _ = self.crear_linea(
+                    concepto=f"ISN {codigo}",
+                    area=area,
+                )
+                regla = ReglaFuenteRubro(
+                    rubro=rubro,
+                    tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+                )
+
+                regla.full_clean()
+                self.assertEqual(regla.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
+                regla.save()
+                regla.refresh_from_db()
+                self.assertEqual(regla.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
+                regla.delete()
+
+    def test_isn_cfdi_global_colisiona_entre_nomina_y_resultados(self):
+        nomina = AreaPresupuesto.objects.create(nombre="Nómina ISN", codigo="nomina")
+        resultados = AreaPresupuesto.objects.create(nombre="Resultados ISN", codigo="resultados")
+        rubro_nomina, _ = self.crear_linea(concepto="ISN nómina", area=nomina)
+        rubro_resultados, _ = self.crear_linea(concepto="ISN resultados", area=resultados)
+        primera = ReglaFuenteRubro.objects.create(
+            rubro=rubro_nomina,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ReglaFuenteRubro.objects.create(
+                rubro=rubro_resultados,
+                tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+            )
+
+        primera.refresh_from_db()
+        self.assertEqual(primera.modo_asignacion, ReglaFuenteRubro.MODO_CANONICA)
         self.assertEqual(
             primera.clave_fuente,
             ReglaFuenteRubro(

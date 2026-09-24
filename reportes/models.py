@@ -1216,6 +1216,7 @@ class ReglaFuenteRubro(models.Model):
             self.modo_asignacion = self.MODO_DISTRIBUCION
         elif (
             self.modo_asignacion == self.MODO_CANONICA
+            and self.tipo_fuente != self.FUENTE_ISN_CFDI
             and self.rubro.area.codigo in {"nomina", "resultados"}
         ):
             self.modo_asignacion = self.MODO_CONTROL
@@ -1247,6 +1248,7 @@ class ReglaFuenteRubro(models.Model):
             self.modo_asignacion = self.MODO_DISTRIBUCION
         elif (
             self.modo_asignacion == self.MODO_CANONICA
+            and self.tipo_fuente != self.FUENTE_ISN_CFDI
             and self.rubro.area.codigo in {"nomina", "resultados"}
         ):
             self.modo_asignacion = self.MODO_CONTROL
