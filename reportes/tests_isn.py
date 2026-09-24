@@ -194,7 +194,10 @@ class ISNSourceTests(TestCase):
             estatus=estatus,
             tipo_periodo=tipo_periodo,
         )
-        total_percepciones = sum((importe for _, importe in conceptos), D("0"))
+        total_percepciones = sum(
+            (importe for codigo, importe in conceptos if codigo.strip() != "32"),
+            D("0"),
+        )
         linea = NominaLinea.objects.create(
             periodo=periodo,
             empleado=empleado,
@@ -488,6 +491,26 @@ class ISNSourceTests(TestCase):
 
         with self.assertRaisesMessage(ValueError, "total_percepciones"):
             bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_despensa_no_forma_parte_del_total_pagado_de_lista_de_raya(self):
+        empleado = self._crear_empleado(codigo="E-DESPENSA-CUADRE")
+        periodos = self._crear_mes_valido(
+            empleado=empleado,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("1000.00")), ("32", D("300.00"))),
+            conceptos_segunda=(("1", D("500.00")), ("32", D("200.00"))),
+        )
+        NominaLinea.objects.filter(periodo=periodos[0], empleado=empleado).update(
+            total_percepciones=D("1000.00")
+        )
+        NominaLinea.objects.filter(periodo=periodos[1], empleado=empleado).update(
+            total_percepciones=D("500.00")
+        )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases[empleado.id], D("1500.00"))
 
     def test_aguinaldo_consume_tope_anual_sin_arrastrar_salario_previo(self):
         empleado = self._crear_empleado(codigo="E-AGUINALDO-YTD")
@@ -983,10 +1006,6 @@ class ISNApplicationTests(TestCase):
         empleado = self._crear_empleado("E-POLITICA-PARCIAL")
         self._crear_nomina_completa(((empleado, D("1000.00")),))
         primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
-        primera.salario_base = D("1400.00")
-        primera.save(
-            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
-        )
         NominaConceptoLinea.objects.create(
             linea=primera,
             tipo=NominaConceptoLinea.TIPO_PERCEPCION,
@@ -1012,10 +1031,6 @@ class ISNApplicationTests(TestCase):
         empleado = self._crear_empleado("E-CMD-EXENCION")
         self._crear_nomina_completa(((empleado, D("1000.00")),))
         primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
-        primera.salario_base = D("1400.00")
-        primera.save(
-            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
-        )
         NominaConceptoLinea.objects.create(
             linea=primera,
             tipo=NominaConceptoLinea.TIPO_PERCEPCION,
@@ -1051,10 +1066,6 @@ class ISNApplicationTests(TestCase):
         empleado = self._crear_empleado("E-CANON-EXENCION")
         self._crear_nomina_completa(((empleado, D("1000.00")),))
         primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
-        primera.salario_base = D("1400.00")
-        primera.save(
-            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
-        )
         NominaConceptoLinea.objects.create(
             linea=primera,
             tipo=NominaConceptoLinea.TIPO_PERCEPCION,

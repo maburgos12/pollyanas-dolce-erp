@@ -353,17 +353,24 @@ def _bases_gravadas_y_snapshots(
         .values("linea_id", "linea__empleado_id", "codigo_concepto", "importe")
     )
     percepciones_por_linea = defaultdict(lambda: ZERO)
+    percepciones_pagadas_por_linea = defaultdict(lambda: ZERO)
     for concepto in conceptos_mes:
-        percepciones_por_linea[concepto["linea_id"]] += Decimal(
-            concepto["importe"] or ZERO
-        )
+        importe = Decimal(concepto["importe"] or ZERO)
+        percepciones_por_linea[concepto["linea_id"]] += importe
+        # La lista de raya presenta la despensa (código 32) como concepto
+        # informativo, pero no la incluye en "Total Percepciones" ni en el
+        # neto pagado. Se valida aparte del total sin retirarla del cálculo
+        # fiscal: abajo continúa participando conforme a la política de
+        # exención configurada.
+        if (concepto["codigo_concepto"] or "").strip() != "32":
+            percepciones_pagadas_por_linea[concepto["linea_id"]] += importe
     for linea in lineas:
         if linea.pk not in percepciones_por_linea:
             raise ValueError(
                 f"La linea de nomina {linea.pk} no tiene conceptos de percepcion."
             )
         if abs(
-            money(percepciones_por_linea[linea.pk])
+            money(percepciones_pagadas_por_linea[linea.pk])
             - money(linea.total_percepciones or ZERO)
         ) > CENT:
             raise ValueError(
