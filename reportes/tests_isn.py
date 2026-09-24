@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal as D
 
 from django.db import IntegrityError, transaction
+from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 
@@ -39,15 +40,23 @@ class ISNModelTests(TestCase):
             fecha_emision=timezone.now(),
         )
 
-    def _crear_expediente(self, *, cfdi, uuid="A", revision=1):
+    def _datos_expediente(self, *, cfdi, **overrides):
+        datos = {
+            "periodo": date(2026, 8, 1),
+            "revision": 1,
+            "uuid": "A",
+            "cfdi": cfdi,
+            "importe_pagado": D("100.00"),
+            "base_gravada_calculada": D("4000.00"),
+            "estado": ExpedienteISN.ESTADO_APLICADO,
+            "aplicado_en": timezone.now(),
+        }
+        datos.update(overrides)
+        return datos
+
+    def _crear_expediente(self, *, cfdi, **overrides):
         return ExpedienteISN.objects.create(
-            periodo=date(2026, 8, 1),
-            revision=revision,
-            uuid=uuid,
-            cfdi=cfdi,
-            importe_pagado=D("100.00"),
-            base_gravada_calculada=D("4000.00"),
-            estado=ExpedienteISN.ESTADO_APLICADO,
+            **self._datos_expediente(cfdi=cfdi, **overrides)
         )
 
     def test_solo_hay_un_expediente_aplicado_por_periodo(self):
@@ -76,3 +85,116 @@ class ISNModelTests(TestCase):
 
         with self.assertRaises(IntegrityError), transaction.atomic():
             DistribucionISNEmpleado.objects.create(**datos)
+
+    def test_periodo_debe_ser_el_primer_dia_del_mes(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-PERIODO"),
+            periodo=date(2026, 8, 15),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_revision_debe_ser_mayor_o_igual_a_uno(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-REVISION"),
+            revision=0,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_importe_pagado_debe_ser_positivo(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-IMPORTE"),
+            importe_pagado=D("0.00"),
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_bases_del_expediente_no_admiten_negativos(self):
+        casos = (
+            ("base_gravada_calculada", "CFDI-BASE-CALCULADA"),
+            ("base_declarada", "CFDI-BASE-DECLARADA"),
+        )
+        for revision, (campo, cfdi_uuid) in enumerate(casos, start=1):
+            with self.subTest(campo=campo):
+                datos = self._datos_expediente(
+                    cfdi=self._crear_cfdi(cfdi_uuid),
+                    uuid=cfdi_uuid,
+                    revision=revision,
+                    estado=ExpedienteISN.ESTADO_VALIDO,
+                    aplicado_en=None,
+                    **{campo: D("-0.01")},
+                )
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    ExpedienteISN.objects.create(**datos)
+
+    def test_estado_debe_ser_un_valor_permitido(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-ESTADO"),
+            estado="INVENTADO",
+            aplicado_en=None,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_estado_aplicado_exige_fecha_de_aplicacion(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-APLICADO-SIN-FECHA"),
+            aplicado_en=None,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_estado_no_aplicado_rechaza_fecha_de_aplicacion(self):
+        datos = self._datos_expediente(
+            cfdi=self._crear_cfdi("CFDI-VALIDO-CON-FECHA"),
+            estado=ExpedienteISN.ESTADO_VALIDO,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            ExpedienteISN.objects.create(**datos)
+
+    def test_distribucion_no_admite_montos_negativos(self):
+        sucursal = Sucursal.objects.create(codigo="S2", nombre="Sucursal 2")
+        expediente = self._crear_expediente(cfdi=self._crear_cfdi("CFDI-DISTRIBUCION"))
+        for numero, campo in enumerate(("base_gravada", "monto_isn"), start=1):
+            with self.subTest(campo=campo):
+                empleado = Empleado.objects.create(
+                    codigo=f"E2-{numero}",
+                    nombre=f"Empleado {numero}",
+                )
+                datos = {
+                    "expediente": expediente,
+                    "empleado": empleado,
+                    "base_gravada": D("100.00"),
+                    "monto_isn": D("10.00"),
+                    "area_codigo": "VENTAS",
+                    "sucursal": sucursal,
+                }
+                invalidos = {**datos, campo: D("-0.01")}
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    DistribucionISNEmpleado.objects.create(**invalidos)
+
+    def test_uuid_se_sincroniza_desde_el_cfdi(self):
+        cfdi = self._crear_cfdi("CFDI-UUID-CANONICO")
+
+        expediente = self._crear_expediente(cfdi=cfdi, uuid="UUID-DIVERGENTE")
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.uuid, cfdi.uuid)
+
+    def test_cfdi_de_un_expediente_esta_protegido(self):
+        cfdi = self._crear_cfdi("CFDI-PROTEGIDO")
+        self._crear_expediente(
+            cfdi=cfdi,
+            estado=ExpedienteISN.ESTADO_VALIDO,
+            aplicado_en=None,
+        )
+
+        with self.assertRaises(ProtectedError):
+            cfdi.delete()

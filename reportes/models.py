@@ -3153,6 +3153,50 @@ class ExpedienteISN(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                check=models.Q(periodo__day=1),
+                name="isn_periodo_primer_dia",
+            ),
+            models.CheckConstraint(
+                check=models.Q(revision__gte=1),
+                name="isn_revision_gte_1",
+            ),
+            models.CheckConstraint(
+                check=models.Q(importe_pagado__gt=0),
+                name="isn_importe_pagado_gt_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(base_gravada_calculada__gte=0),
+                name="isn_base_calculada_gte_0",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(base_declarada__isnull=True)
+                    | models.Q(base_declarada__gte=0)
+                ),
+                name="isn_base_declarada_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    estado__in=(
+                        "VALIDO",
+                        "APLICADO",
+                        "REEMPLAZADO",
+                        "DISCREPANCIA",
+                    )
+                ),
+                name="isn_estado_valido",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(estado="APLICADO", aplicado_en__isnull=False)
+                    | (
+                        ~models.Q(estado="APLICADO")
+                        & models.Q(aplicado_en__isnull=True)
+                    )
+                ),
+                name="isn_aplicacion_fecha_coherente",
+            ),
             models.UniqueConstraint(
                 fields=["periodo", "revision"],
                 name="uniq_isn_periodo_revision",
@@ -3163,6 +3207,13 @@ class ExpedienteISN(models.Model):
                 name="uniq_isn_aplicado_periodo",
             ),
         ]
+
+    def save(self, *args, **kwargs):
+        if self.cfdi_id:
+            self.uuid = self.cfdi.uuid
+            if kwargs.get("update_fields") is not None:
+                kwargs["update_fields"] = set(kwargs["update_fields"]) | {"uuid"}
+        return super().save(*args, **kwargs)
 
 
 class DistribucionISNEmpleado(models.Model):
@@ -3187,6 +3238,14 @@ class DistribucionISNEmpleado(models.Model):
 
     class Meta:
         constraints = [
+            models.CheckConstraint(
+                check=models.Q(base_gravada__gte=0),
+                name="isn_dist_base_gte_0",
+            ),
+            models.CheckConstraint(
+                check=models.Q(monto_isn__gte=0),
+                name="isn_dist_monto_gte_0",
+            ),
             models.UniqueConstraint(
                 fields=["expediente", "empleado"],
                 name="uniq_isn_expediente_empleado",
