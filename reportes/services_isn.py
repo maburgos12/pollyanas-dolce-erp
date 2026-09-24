@@ -1,14 +1,19 @@
 from collections import Counter, defaultdict
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import re
 import unicodedata
 from xml.etree import ElementTree as ET
 
-from django.db.models import Count
+from django.db import IntegrityError, transaction
+from django.db.models import Count, Sum
+from django.utils import timezone
 
-from rrhh.models import NominaConceptoLinea, NominaLinea, NominaPeriodo
+from reportes.models import DistribucionISNEmpleado, ExpedienteISN
+from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from sat_client.models import CfdiDescargado
 
 
 CENT = Decimal("0.01")
@@ -23,6 +28,38 @@ UMA_DIARIA_VIGENCIAS = (
     (date(2026, 1, 1), date(2026, 1, 31), Decimal("113.14")),
     (date(2026, 2, 1), date(2026, 12, 31), Decimal("117.31")),
 )
+
+
+@dataclass(frozen=True)
+class FilaPreviewISN:
+    empleado_id: int
+    base_gravada: Decimal
+    monto_isn: Decimal
+    area_codigo: str
+    sucursal_id: int
+
+
+@dataclass(frozen=True)
+class PreviewExpedienteISN:
+    cfdi: CfdiDescargado
+    periodo: date
+    importe_pagado: Decimal
+    base_gravada_total: Decimal
+    filas: tuple[FilaPreviewISN, ...]
+
+    def render(self) -> str:
+        encabezado = (
+            f"ISN periodo={self.periodo:%Y-%m} uuid={self.cfdi.uuid} "
+            f"importe={self.importe_pagado:.2f} "
+            f"base={self.base_gravada_total:.2f} empleados={len(self.filas)}"
+        )
+        detalle = (
+            f"empleado={fila.empleado_id} base={fila.base_gravada:.2f} "
+            f"isn={fila.monto_isn:.2f} area={fila.area_codigo} "
+            f"sucursal={fila.sucursal_id}"
+            for fila in self.filas
+        )
+        return "\n".join((encabezado, *detalle))
 
 
 def money(value: Decimal) -> Decimal:
@@ -318,3 +355,199 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
         empleado_id: money(base)
         for empleado_id, base in sorted(bases.items())
     }
+
+
+def _resolver_cfdi_isn(periodo: date, uuid: str | None) -> CfdiDescargado:
+    if uuid:
+        try:
+            cfdi = CfdiDescargado.objects.get(uuid=uuid)
+        except CfdiDescargado.DoesNotExist as exc:
+            raise ValueError(f"No existe el CFDI con UUID {uuid}.") from exc
+        periodo_cfdi, _ = extraer_isn_cfdi(cfdi)
+        if periodo_cfdi != periodo:
+            raise ValueError("El periodo del CFDI no coincide con el periodo solicitado.")
+        return cfdi
+
+    candidatos = []
+    queryset = CfdiDescargado.objects.filter(
+        tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+        tipo_comprobante="I",
+    ).order_by("pk")
+    for cfdi in queryset.iterator():
+        try:
+            periodo_cfdi, _ = extraer_isn_cfdi(cfdi)
+        except ValueError:
+            continue
+        if periodo_cfdi == periodo:
+            candidatos.append(cfdi)
+    if len(candidatos) != 1:
+        raise ValueError(
+            "Debe existir un unico CFDI candidato de ISN para el periodo "
+            f"{periodo:%Y-%m}; encontrados={len(candidatos)}."
+        )
+    return candidatos[0]
+
+
+def preparar_expediente_isn(
+    periodo: date,
+    *,
+    uuid: str | None = None,
+) -> PreviewExpedienteISN:
+    if not isinstance(periodo, date) or periodo.day != 1:
+        raise ValueError("El periodo de ISN debe ser el primer dia del mes.")
+
+    cfdi = _resolver_cfdi_isn(periodo, uuid)
+    periodo_cfdi, importe_pagado = extraer_isn_cfdi(cfdi)
+    if periodo_cfdi != periodo:
+        raise ValueError("El periodo del CFDI no coincide con el periodo solicitado.")
+
+    bases = bases_gravadas_empleados(periodo)
+    montos = prorratear_isn(bases, importe_pagado)
+    empleados = Empleado.objects.filter(pk__in=bases).in_bulk()
+    if len(empleados) != len(bases):
+        raise ValueError("El universo de nomina contiene empleados inexistentes.")
+
+    filas = tuple(
+        FilaPreviewISN(
+            empleado_id=empleado_id,
+            base_gravada=money(base),
+            monto_isn=money(montos[empleado_id]),
+            area_codigo=empleados[empleado_id].departamento,
+            sucursal_id=empleados[empleado_id].sucursal_ref_id,
+        )
+        for empleado_id, base in sorted(bases.items())
+    )
+    return PreviewExpedienteISN(
+        cfdi=cfdi,
+        periodo=periodo,
+        importe_pagado=money(importe_pagado),
+        base_gravada_total=money(sum(bases.values(), ZERO)),
+        filas=filas,
+    )
+
+
+def _validar_preview(preview: PreviewExpedienteISN) -> None:
+    if preview.periodo.day != 1:
+        raise ValueError("El periodo de ISN debe ser el primer dia del mes.")
+    if not preview.filas:
+        raise ValueError("El preview de ISN no contiene empleados.")
+    empleado_ids = [fila.empleado_id for fila in preview.filas]
+    if len(empleado_ids) != len(set(empleado_ids)):
+        raise ValueError("El preview de ISN contiene empleados duplicados.")
+    if any(
+        fila.base_gravada < ZERO or fila.monto_isn < ZERO
+        for fila in preview.filas
+    ):
+        raise ValueError("El preview de ISN contiene importes negativos.")
+    if money(sum((fila.base_gravada for fila in preview.filas), ZERO)) != money(
+        preview.base_gravada_total
+    ):
+        raise ValueError("Las bases del preview de ISN no cuadran.")
+    if money(sum((fila.monto_isn for fila in preview.filas), ZERO)) != money(
+        preview.importe_pagado
+    ):
+        raise ValueError("Los montos del preview de ISN no cuadran con el CFDI.")
+
+    periodo_cfdi, importe_cfdi = extraer_isn_cfdi(preview.cfdi)
+    if periodo_cfdi != preview.periodo or importe_cfdi != money(preview.importe_pagado):
+        raise ValueError("El CFDI cambio despues de preparar el preview de ISN.")
+
+
+def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None:
+    if base_declarada is None:
+        return None
+    valor = Decimal(base_declarada)
+    if not valor.is_finite() or valor < ZERO:
+        raise ValueError("La base declarada debe ser finita y no negativa.")
+    return money(valor)
+
+
+def _aplicar_expediente_isn_una_vez(
+    preview: PreviewExpedienteISN,
+    *,
+    base_declarada: Decimal | None,
+    aplicado_por=None,
+) -> ExpedienteISN:
+    with transaction.atomic():
+        expedientes = list(
+            ExpedienteISN.objects.select_for_update()
+            .filter(periodo=preview.periodo)
+            .order_by("revision", "pk")
+        )
+        existente = next(
+            (item for item in expedientes if item.uuid == preview.cfdi.uuid),
+            None,
+        )
+        if existente is not None:
+            return existente
+
+        for anterior in expedientes:
+            if anterior.estado == ExpedienteISN.ESTADO_APLICADO:
+                anterior.estado = ExpedienteISN.ESTADO_REEMPLAZADO
+                anterior.save(update_fields={"estado"})
+
+        expediente = ExpedienteISN.objects.create(
+            periodo=preview.periodo,
+            revision=max((item.revision for item in expedientes), default=0) + 1,
+            uuid=preview.cfdi.uuid,
+            cfdi=preview.cfdi,
+            importe_pagado=preview.importe_pagado,
+            base_gravada_calculada=preview.base_gravada_total,
+            base_declarada=base_declarada,
+            estado=ExpedienteISN.ESTADO_VALIDO,
+            aplicado_por=aplicado_por,
+            aplicado_en=None,
+            metadata={"empleados": len(preview.filas)},
+        )
+        DistribucionISNEmpleado.objects.bulk_create(
+            [
+                DistribucionISNEmpleado(
+                    expediente=expediente,
+                    empleado_id=fila.empleado_id,
+                    base_gravada=fila.base_gravada,
+                    monto_isn=fila.monto_isn,
+                    area_codigo=fila.area_codigo,
+                    sucursal_id=fila.sucursal_id,
+                )
+                for fila in preview.filas
+            ]
+        )
+
+        totales = expediente.distribuciones.aggregate(
+            base=Sum("base_gravada"),
+            importe=Sum("monto_isn"),
+        )
+        if money(totales["base"] or ZERO) != money(preview.base_gravada_total):
+            raise ValueError("Las bases materializadas de ISN no cuadran.")
+        if money(totales["importe"] or ZERO) != money(preview.importe_pagado):
+            raise ValueError("Los montos materializados de ISN no cuadran.")
+
+        expediente.estado = ExpedienteISN.ESTADO_APLICADO
+        expediente.aplicado_en = timezone.now()
+        expediente.save(update_fields={"estado", "aplicado_en"})
+        return expediente
+
+
+def aplicar_expediente_isn(
+    preview: PreviewExpedienteISN,
+    *,
+    base_declarada: Decimal | None = None,
+    aplicado_por=None,
+) -> ExpedienteISN:
+    _validar_preview(preview)
+    base_declarada = _normalizar_base_declarada(base_declarada)
+
+    ultimo_error = None
+    for _ in range(3):
+        try:
+            return _aplicar_expediente_isn_una_vez(
+                preview,
+                base_declarada=base_declarada,
+                aplicado_por=aplicado_por,
+            )
+        except IntegrityError as exc:
+            ultimo_error = exc
+            existente = ExpedienteISN.objects.filter(uuid=preview.cfdi.uuid).first()
+            if existente is not None:
+                return existente
+    raise ultimo_error

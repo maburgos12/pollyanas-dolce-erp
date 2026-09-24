@@ -1,7 +1,9 @@
 from calendar import monthrange
 from datetime import UTC, date, datetime
 from decimal import Decimal as D
+from io import StringIO
 
+from django.core.management import call_command
 from django.db import connection
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
@@ -17,6 +19,8 @@ from reportes.services_isn import (
     bases_gravadas_empleados,
     calcular_isn_sinaloa,
     extraer_isn_cfdi,
+    aplicar_expediente_isn,
+    preparar_expediente_isn,
     prorratear_isn,
 )
 from rrhh.models import (
@@ -610,6 +614,179 @@ class ISNSourceTests(TestCase):
 
         with self.assertRaises(ValueError):
             bases_gravadas_empleados(date(2026, 8, 1))
+
+
+class ISNApplicationTests(TestCase):
+    PERIODO = date(2026, 8, 1)
+
+    def _crear_cfdi(self, uuid, importe="100.00"):
+        xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4">
+          <cfdi:Conceptos>
+            <cfdi:Concepto NoIdentificacion="202608 2-003"
+              Descripcion="Impuesto sobre nomina" Importe="{importe}" />
+          </cfdi:Conceptos>
+        </cfdi:Comprobante>
+        """
+        return CfdiDescargado.objects.create(
+            uuid=uuid,
+            rfc_emisor="GES8101015I7",
+            rfc_receptor="GEF211230KR2",
+            subtotal=D(importe),
+            total=D(importe),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            fecha_emision=datetime(2026, 9, 17, tzinfo=UTC),
+            estatus="VIGENTE",
+            xml_raw=xml,
+        )
+
+    def _crear_empleado(self, codigo, departamento=Empleado.DEP_VENTAS):
+        sucursal = Sucursal.objects.create(
+            codigo=f"S-{codigo}",
+            nombre=f"Sucursal {codigo}",
+        )
+        return Empleado.objects.create(
+            codigo=codigo,
+            nombre=f"Empleado {codigo}",
+            departamento=departamento,
+            sucursal_ref=sucursal,
+        )
+
+    def _crear_nomina_completa(self, bases):
+        periodos = (
+            NominaPeriodo.objects.create(
+                fecha_inicio=date(2026, 8, 1),
+                fecha_fin=date(2026, 8, 15),
+                estatus=NominaPeriodo.ESTATUS_CERRADA,
+                tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+            ),
+            NominaPeriodo.objects.create(
+                fecha_inicio=date(2026, 8, 16),
+                fecha_fin=date(2026, 8, 31),
+                estatus=NominaPeriodo.ESTATUS_PAGADA,
+                tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+            ),
+        )
+        for empleado, base in bases:
+            for indice, periodo in enumerate(periodos):
+                linea = NominaLinea.objects.create(
+                    periodo=periodo,
+                    empleado=empleado,
+                )
+                if indice == 0 and base:
+                    NominaConceptoLinea.objects.create(
+                        linea=linea,
+                        tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                        codigo_concepto="1",
+                        nombre="Sueldo",
+                        importe=base,
+                    )
+
+    def test_dry_run_no_escribe_y_muestra_preview(self):
+        empleado = self._crear_empleado("E-DRY")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-DRY")
+        stdout = StringIO()
+
+        call_command(
+            "materializar_isn",
+            periodo="2026-08",
+            uuid=cfdi.uuid,
+            stdout=stdout,
+        )
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+        self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
+        self.assertIn("CFDI-ISN-DRY", stdout.getvalue())
+        self.assertIn("DRY-RUN: sin cambios", stdout.getvalue())
+
+    def test_apply_crea_expediente_y_linea_por_empleado_incluso_base_cero(self):
+        empleado_a = self._crear_empleado("E-APPLY-A")
+        empleado_b = self._crear_empleado("E-APPLY-B", Empleado.DEP_PRODUCCION)
+        self._crear_nomina_completa(
+            ((empleado_a, D("4000.00")), (empleado_b, D("0.00")))
+        )
+        cfdi = self._crear_cfdi("CFDI-ISN-APPLY")
+
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        expediente = aplicar_expediente_isn(
+            preview,
+            base_declarada=D("4000.00"),
+        )
+
+        self.assertEqual(expediente.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertEqual(expediente.revision, 1)
+        self.assertEqual(expediente.base_declarada, D("4000.00"))
+        lineas = list(expediente.distribuciones.order_by("empleado_id"))
+        self.assertEqual(len(lineas), 2)
+        self.assertEqual(
+            sum((linea.base_gravada for linea in lineas), D("0")),
+            D("4000.00"),
+        )
+        self.assertEqual(
+            sum((linea.monto_isn for linea in lineas), D("0")),
+            D("100.00"),
+        )
+        linea_cero = next(
+            linea for linea in lineas if linea.empleado_id == empleado_b.id
+        )
+        self.assertEqual(linea_cero.base_gravada, D("0.00"))
+        self.assertEqual(linea_cero.monto_isn, D("0.00"))
+        self.assertEqual(linea_cero.area_codigo, Empleado.DEP_PRODUCCION)
+        self.assertEqual(linea_cero.sucursal_id, empleado_b.sucursal_ref_id)
+
+    def test_reaplicar_mismo_uuid_es_idempotente(self):
+        empleado = self._crear_empleado("E-IDEMPOTENTE")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-IDEMPOTENTE")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        primero = aplicar_expediente_isn(preview)
+        segundo = aplicar_expediente_isn(preview)
+
+        self.assertEqual(segundo.pk, primero.pk)
+        self.assertEqual(ExpedienteISN.objects.count(), 1)
+        self.assertEqual(DistribucionISNEmpleado.objects.count(), 1)
+
+    def test_cfdi_correctivo_crea_revision_y_reemplaza_sin_borrar_aplicado_en(self):
+        empleado = self._crear_empleado("E-CORRECTIVO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi_original = self._crear_cfdi("CFDI-ISN-ORIGINAL", "100.00")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi_original.uuid)
+        )
+        aplicado_en_original = original.aplicado_en
+        cfdi_correctivo = self._crear_cfdi("CFDI-ISN-CORRECTIVO", "110.00")
+
+        correctivo = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi_correctivo.uuid)
+        )
+
+        original.refresh_from_db()
+        self.assertEqual(original.estado, ExpedienteISN.ESTADO_REEMPLAZADO)
+        self.assertEqual(original.aplicado_en, aplicado_en_original)
+        self.assertEqual(correctivo.revision, 2)
+        self.assertEqual(correctivo.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertEqual(correctivo.importe_pagado, D("110.00"))
+        self.assertEqual(ExpedienteISN.objects.count(), 2)
+
+    def test_nomina_incompleta_falla_antes_de_escribir(self):
+        empleado = self._crear_empleado("E-INCOMPLETO")
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+        )
+        NominaLinea.objects.create(periodo=periodo, empleado=empleado)
+        cfdi = self._crear_cfdi("CFDI-ISN-INCOMPLETO")
+
+        with self.assertRaises(ValueError):
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+        self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
 
 
 class ISNModelTests(TestCase):
