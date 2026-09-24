@@ -215,6 +215,33 @@ class PersonnelPlanTests(TestCase):
         }])
         self.assertTrue(agosto['reconciled_components'])
 
+    def test_isn_aplicado_con_cfdi_cancelado_deja_periodo_sin_dato_y_advierte(self, _):
+        self.add_complete_non_isn_components(8)
+        cfdi = self.invoice(
+            'isn-cancelado-posterior',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+            '<c:Concepto Descripcion="Empresarial decl.Nomina" '
+            'NoIdentificacion="202608 2-003" Importe="16168"/>'
+            '</c:Conceptos></c:Comprobante>',
+            tipo_cfdi='recibido',
+            tipo_comprobante='I',
+            rfc_emisor='GES8101015I7',
+            rfc_receptor=RFC,
+            estatus=' CANCELADO ',
+        )
+        ExpedienteISN.objects.create(
+            periodo=date(2026, 8, 1), revision=1, uuid=cfdi.uuid, cfdi=cfdi,
+            importe_pagado=D('16168.00'), base_gravada_calculada=D('660307.70'),
+            estado=ExpedienteISN.ESTADO_APLICADO,
+            aplicado_en=datetime(2026, 9, 8, tzinfo=tz.utc),
+        )
+
+        agosto = build_personnel_plan()['months'][-1]
+
+        self.assertIsNone(agosto['isn'])
+        self.assertTrue(any('CFDI de ISN ya no esta vigente' in error for error in agosto['errors']))
+        self.assertFalse(agosto['reconciled_components'])
+
     def test_unrecognized_service_is_not_silently_treated_as_zero(self, _):
         invoice = self.invoice('unknown-service',
             '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'

@@ -23,6 +23,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import Sum
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
 from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de
@@ -276,9 +277,12 @@ class PresupuestoRealConsolidacionService:
             if "isn" not in indices:
                 indices["isn"] = {
                     row["periodo"]: row["importe_pagado"]
-                    for row in ExpedienteISN.objects.filter(
+                    for row in ExpedienteISN.objects.annotate(
+                        cfdi_estatus_normalizado=Upper(Trim("cfdi__estatus"))
+                    ).filter(
                         estado=ExpedienteISN.ESTADO_APLICADO,
                         periodo=periodo,
+                        cfdi_estatus_normalizado="VIGENTE",
                     ).values("periodo", "importe_pagado")
                 }
             return (indices["isn"].get(periodo, Decimal("0")), periodo in indices["isn"])

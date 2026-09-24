@@ -194,8 +194,13 @@ class ISNSourceTests(TestCase):
             estatus=estatus,
             tipo_periodo=tipo_periodo,
         )
-        linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
-        for codigo, importe in conceptos:
+        total_percepciones = sum((importe for _, importe in conceptos), D("0"))
+        linea = NominaLinea.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            salario_base=total_percepciones,
+        )
+        for codigo, importe in (conceptos or (("1", D("0.00")),)):
             NominaConceptoLinea.objects.create(
                 linea=linea,
                 tipo=NominaConceptoLinea.TIPO_PERCEPCION,
@@ -364,6 +369,55 @@ class ISNSourceTests(TestCase):
         bases = bases_gravadas_empleados(date(2026, 8, 1))
 
         self.assertEqual(bases, {empleado.id: D("10480.70")})
+
+    def test_politica_exenta_admite_proporcion_parcial_y_valida_rango(self):
+        empleado = self._crear_empleado(codigo="E-EXENCION-PARCIAL")
+        self._crear_mes_valido(
+            empleado=empleado,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("1000.00")), ("32", D("400.00"))),
+        )
+
+        bases = bases_gravadas_empleados(
+            date(2026, 8, 1),
+            politica_exenciones={"20": D("1"), "22": D("1"), "26": D("1"), "32": D("0.5")},
+        )
+
+        self.assertEqual(bases, {empleado.id: D("1200.00")})
+        for proporcion in (D("-0.01"), D("1.01")):
+            with self.subTest(proporcion=proporcion), self.assertRaisesMessage(ValueError, "entre 0 y 1"):
+                bases_gravadas_empleados(
+                    date(2026, 8, 1),
+                    politica_exenciones={"32": proporcion},
+                )
+
+    def test_rechaza_linea_sin_conceptos_aunque_total_sea_cero(self):
+        empleado = self._crear_empleado(codigo="E-SIN-CONCEPTOS")
+        self._crear_mes_valido(empleado=empleado, anio=2026, mes=8)
+        NominaLinea.objects.filter(
+            empleado=empleado,
+            periodo__fecha_inicio=date(2026, 8, 16),
+        ).get().conceptos.all().delete()
+
+        with self.assertRaisesMessage(ValueError, "conceptos de percepcion"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_total_percepciones_que_no_cuadra_con_conceptos(self):
+        empleado = self._crear_empleado(codigo="E-CUADRE")
+        periodos = self._crear_mes_valido(
+            empleado=empleado,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("1000.00")),),
+            conceptos_segunda=(("1", D("500.00")),),
+        )
+        NominaLinea.objects.filter(periodo=periodos[0], empleado=empleado).update(
+            total_percepciones=D("999.98")
+        )
+
+        with self.assertRaisesMessage(ValueError, "total_percepciones"):
+            bases_gravadas_empleados(date(2026, 8, 1))
 
     def test_aguinaldo_consume_tope_anual_sin_arrastrar_salario_previo(self):
         empleado = self._crear_empleado(codigo="E-AGUINALDO-YTD")
@@ -582,6 +636,7 @@ class ISNSourceTests(TestCase):
                 for _ in range(25)
             ]
         )
+        NominaLinea.objects.filter(pk=linea.pk).update(total_percepciones=D("125.00"))
         with CaptureQueriesContext(connection) as muchas:
             bases_gravadas_empleados(date(2026, 8, 1))
 
@@ -709,7 +764,7 @@ class ISNSourceTests(TestCase):
 class ISNApplicationTests(TestCase):
     PERIODO = date(2026, 8, 1)
 
-    def _crear_cfdi(self, uuid, importe="100.00"):
+    def _crear_cfdi(self, uuid, importe="96.00"):
         xml = f"""<?xml version="1.0" encoding="UTF-8"?>
         <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4">
           <cfdi:Conceptos>
@@ -763,15 +818,15 @@ class ISNApplicationTests(TestCase):
                 linea = NominaLinea.objects.create(
                     periodo=periodo,
                     empleado=empleado,
+                    salario_base=base if indice == 0 else D("0.00"),
                 )
-                if indice == 0 and base:
-                    NominaConceptoLinea.objects.create(
-                        linea=linea,
-                        tipo=NominaConceptoLinea.TIPO_PERCEPCION,
-                        codigo_concepto="1",
-                        nombre="Sueldo",
-                        importe=base,
-                    )
+                NominaConceptoLinea.objects.create(
+                    linea=linea,
+                    tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                    codigo_concepto="1",
+                    nombre="Sueldo",
+                    importe=base if indice == 0 else D("0.00"),
+                )
 
     def test_dry_run_no_escribe_y_muestra_preview(self):
         empleado = self._crear_empleado("E-DRY")
@@ -795,6 +850,64 @@ class ISNApplicationTests(TestCase):
         self.assertIn("diferencia=0.02", stdout.getvalue())
         self.assertIn("estado_previsto=DISCREPANCIA", stdout.getvalue())
         self.assertIn("DRY-RUN: sin cambios", stdout.getvalue())
+
+    def test_tarifa_controla_estado_aunque_base_declarada_coincida_o_falte(self):
+        empleado = self._crear_empleado("E-TARIFA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-TARIFA", "100.00")
+
+        for base_declarada in (None, D("4000.00")):
+            with self.subTest(base_declarada=base_declarada):
+                preview = preparar_expediente_isn(
+                    self.PERIODO,
+                    uuid=cfdi.uuid,
+                    base_declarada=base_declarada,
+                )
+                self.assertEqual(preview.isn_calculado, D("96.00"))
+                self.assertEqual(preview.diferencia_isn, D("4.00"))
+                self.assertEqual(preview.estado_previsto, ExpedienteISN.ESTADO_DISCREPANCIA)
+                self.assertIn("isn_calculado=96.00", preview.render())
+                self.assertIn("diferencia_isn=4.00", preview.render())
+
+    def test_transferencia_posterior_no_altera_snapshot_del_preview(self):
+        empleado = self._crear_empleado("E-TRANSFERENCIA")
+        sucursal_origen_id = empleado.sucursal_ref_id
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-TRANSFERENCIA", "96.00")
+        sucursal_destino = Sucursal.objects.create(codigo="S-DESTINO", nombre="Destino")
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.sucursal_ref = sucursal_destino
+        empleado.save(update_fields=["departamento", "sucursal_ref"])
+
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        self.assertEqual(preview.filas[0].area_codigo, Empleado.DEP_VENTAS)
+        self.assertEqual(preview.filas[0].sucursal_id, sucursal_origen_id)
+
+    def test_rechaza_snapshots_distintos_entre_quincenas(self):
+        empleado = self._crear_empleado("E-SNAP-INC")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-SNAPSHOT-INCONSISTENTE", "96.00")
+        otra = Sucursal.objects.create(codigo="S-OTRA-SNAPSHOT", nombre="Otra")
+        segunda = NominaLinea.objects.filter(empleado=empleado).order_by("periodo__fecha_inicio").last()
+        NominaLinea.objects.filter(pk=segunda.pk).update(sucursal_snapshot=otra)
+
+        with self.assertRaisesMessage(ValueError, "snapshot inconsistente"):
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+    def test_aplicacion_guarda_politica_y_controles_de_tarifa_en_metadata(self):
+        empleado = self._crear_empleado("E-META")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-METADATA-CONTROLES", "96.00")
+
+        expediente = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        )
+
+        self.assertEqual(expediente.metadata["isn_calculado"], "96.00")
+        self.assertEqual(expediente.metadata["diferencia_isn"], "0.00")
+        self.assertEqual(expediente.metadata["tolerancia_isn"], "1.00")
+        self.assertEqual(expediente.metadata["politica_exenciones"]["32"], "1")
 
     def test_preparar_sin_uuid_exige_candidato_unico(self):
         empleado = self._crear_empleado("E-CANDIDATO")
@@ -854,7 +967,7 @@ class ISNApplicationTests(TestCase):
         )
         self.assertEqual(
             sum((linea.monto_isn for linea in lineas), D("0")),
-            D("100.00"),
+            D("96.00"),
         )
         linea_cero = next(
             linea for linea in lineas if linea.empleado_id == empleado_b.id
@@ -935,7 +1048,7 @@ class ISNApplicationTests(TestCase):
         self.assertIsNone(original.base_declarada)
         self.assertEqual(ExpedienteISN.objects.count(), 1)
 
-    def test_reintento_rechaza_nomina_mutada_sin_modificar_expediente(self):
+    def test_reintento_ignora_transferencia_posterior_y_conserva_snapshot(self):
         empleado = self._crear_empleado("E-NOMINA-MUTADA")
         self._crear_nomina_completa(((empleado, D("4000.00")),))
         cfdi = self._crear_cfdi("CFDI-ISN-NOMINA-MUTADA")
@@ -945,12 +1058,12 @@ class ISNApplicationTests(TestCase):
         empleado.departamento = Empleado.DEP_PRODUCCION
         empleado.save(update_fields={"departamento"})
 
-        with self.assertRaisesMessage(ValueError, "Conflicto de reintento ISN"):
-            aplicar_expediente_isn(
-                preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
-            )
+        reintento = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        )
 
         original.refresh_from_db()
+        self.assertEqual(reintento.pk, original.pk)
         self.assertEqual(original.base_gravada_calculada, D("4000.00"))
         self.assertEqual(
             original.distribuciones.get().area_codigo,
@@ -993,12 +1106,12 @@ class ISNApplicationTests(TestCase):
     def test_cfdi_correctivo_crea_revision_y_reemplaza_sin_borrar_aplicado_en(self):
         empleado = self._crear_empleado("E-CORRECTIVO")
         self._crear_nomina_completa(((empleado, D("4000.00")),))
-        cfdi_original = self._crear_cfdi("CFDI-ISN-ORIGINAL", "100.00")
+        cfdi_original = self._crear_cfdi("CFDI-ISN-ORIGINAL", "96.00")
         original = aplicar_expediente_isn(
             preparar_expediente_isn(self.PERIODO, uuid=cfdi_original.uuid)
         )
         aplicado_en_original = original.aplicado_en
-        cfdi_correctivo = self._crear_cfdi("CFDI-ISN-CORRECTIVO", "110.00")
+        cfdi_correctivo = self._crear_cfdi("CFDI-ISN-CORRECTIVO", "97.00")
 
         correctivo = aplicar_expediente_isn(
             preparar_expediente_isn(self.PERIODO, uuid=cfdi_correctivo.uuid)
@@ -1009,7 +1122,7 @@ class ISNApplicationTests(TestCase):
         self.assertEqual(original.aplicado_en, aplicado_en_original)
         self.assertEqual(correctivo.revision, 2)
         self.assertEqual(correctivo.estado, ExpedienteISN.ESTADO_APLICADO)
-        self.assertEqual(correctivo.importe_pagado, D("110.00"))
+        self.assertEqual(correctivo.importe_pagado, D("97.00"))
         self.assertEqual(ExpedienteISN.objects.count(), 2)
 
     def test_discrepancia_material_no_desplaza_aplicado_previo(self):
@@ -1100,13 +1213,29 @@ class ISNApplicationTests(TestCase):
         self._crear_nomina_completa(((empleado, D("4000.00")),))
         cfdi = self._crear_cfdi("CFDI-ISN-CAMBIADO")
         preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
-        xml_cambiado = cfdi.xml_raw.replace('Importe="100.00"', 'Importe="101.00"')
+        xml_cambiado = cfdi.xml_raw.replace('Importe="96.00"', 'Importe="97.00"')
         CfdiDescargado.objects.filter(pk=cfdi.pk).update(xml_raw=xml_cambiado)
 
         with self.assertRaisesMessage(ValueError, "cambio"):
             aplicar_expediente_isn(preview)
 
         self.assertEqual(ExpedienteISN.objects.count(), 0)
+
+    def test_nomina_parcial_despues_del_preview_aborta_antes_de_escribir(self):
+        empleado = self._crear_empleado("E-NOMINA-PARCIAL")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-NOMINA-PARCIAL")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        NominaLinea.objects.filter(
+            empleado=empleado,
+            periodo__fecha_inicio=date(2026, 8, 16),
+        ).get().conceptos.all().delete()
+
+        with self.assertRaisesMessage(ValueError, "conceptos de percepcion"):
+            aplicar_expediente_isn(preview)
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+        self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
 
     def test_nomina_incompleta_falla_antes_de_escribir(self):
         empleado = self._crear_empleado("E-INCOMPLETO")
@@ -1238,18 +1367,22 @@ class ISNConcurrencyTests(TransactionTestCase):
                 estatus=estatus,
                 tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
             )
-            linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
-            if inicio.day == 1:
-                NominaConceptoLinea.objects.create(
-                    linea=linea,
-                    tipo=NominaConceptoLinea.TIPO_PERCEPCION,
-                    codigo_concepto="1",
-                    nombre="Sueldo",
-                    importe=D("4000.00"),
-                )
+            importe = D("4000.00") if inicio.day == 1 else D("0.00")
+            linea = NominaLinea.objects.create(
+                periodo=periodo,
+                empleado=empleado,
+                salario_base=importe,
+            )
+            NominaConceptoLinea.objects.create(
+                linea=linea,
+                tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                codigo_concepto="1",
+                nombre="Sueldo",
+                importe=importe,
+            )
 
     def test_correctivos_simultaneos_crean_revisiones_secuenciales(self):
-        original_cfdi = self._crear_cfdi("CFDI-CONC-ORIGINAL", "100.00")
+        original_cfdi = self._crear_cfdi("CFDI-CONC-ORIGINAL", "96.00")
         aplicar_expediente_isn(
             preparar_expediente_isn(self.PERIODO, uuid=original_cfdi.uuid)
         )
@@ -1258,7 +1391,7 @@ class ISNConcurrencyTests(TransactionTestCase):
                 self.PERIODO,
                 uuid=self._crear_cfdi(f"CFDI-CONC-{indice}", importe).uuid,
             )
-            for indice, importe in ((1, "101.00"), (2, "102.00"))
+            for indice, importe in ((1, "97.00"), (2, "95.00"))
         ]
         barrera = threading.Barrier(2)
         resultados = []

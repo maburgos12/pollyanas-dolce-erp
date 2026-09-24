@@ -13,18 +13,24 @@ from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
 from reportes.models import DistribucionISNEmpleado, ExpedienteISN
-from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from rrhh.models import NominaConceptoLinea, NominaLinea, NominaPeriodo
 from sat_client.models import CfdiDescargado
 
 
 CENT = Decimal("0.01")
 ZERO = Decimal("0")
 TOLERANCIA_BASE_DECLARADA = CENT
+TOLERANCIA_ISN_CALCULADO = Decimal("1.00")
 MAX_BASE_DECLARADA = Decimal("999999999999.99")
 CFDI_NS = "{http://www.sat.gob.mx/cfd/4}"
 RFC_SINALOA = "GES8101015I7"
 RFC_EMPRESA = "GEF211230KR2"
-CODIGOS_EXENTOS_COMPLETOS = {"20", "22", "26", "32"}
+POLITICA_EXENCIONES_INICIAL = {
+    "20": Decimal("1"),
+    "22": Decimal("1"),
+    "26": Decimal("1"),
+    "32": Decimal("1"),
+}
 # Dos MiB cubren holgadamente un CFDI individual y limitan uso de memoria abusivo.
 MAX_CFDI_XML_BYTES = 2 * 1024 * 1024
 UMA_DIARIA_VIGENCIAS = (
@@ -51,7 +57,10 @@ class PreviewExpedienteISN:
     base_gravada_total: Decimal
     base_declarada: Decimal | None
     diferencia_base: Decimal | None
+    isn_calculado: Decimal
+    diferencia_isn: Decimal
     estado_previsto: str
+    politica_exenciones: tuple[tuple[str, Decimal], ...]
     filas: tuple[FilaPreviewISN, ...]
 
     def render(self) -> str:
@@ -70,6 +79,8 @@ class PreviewExpedienteISN:
             f"importe={self.importe_pagado:.2f} "
             f"base_calculada={self.base_gravada_total:.2f} "
             f"base_declarada={base_declarada} diferencia={diferencia} "
+            f"isn_calculado={self.isn_calculado:.2f} "
+            f"diferencia_isn={self.diferencia_isn:.2f} "
             f"estado_previsto={self.estado_previsto} empleados={len(self.filas)}"
         )
         detalle = (
@@ -252,9 +263,39 @@ def _validar_lineas_nomina_mes(lineas) -> None:
         raise ValueError("Existe una linea de nomina duplicada para periodo y empleado.")
 
 
-def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
+def _normalizar_politica_exenciones(
+    politica_exenciones: dict[str, Decimal] | None,
+) -> dict[str, Decimal]:
+    politica = dict(
+        POLITICA_EXENCIONES_INICIAL
+        if politica_exenciones is None
+        else politica_exenciones
+    )
+    normalizada = {}
+    for codigo, proporcion in politica.items():
+        codigo_normalizado = str(codigo or "").strip()
+        try:
+            valor = Decimal(proporcion)
+        except (InvalidOperation, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"La proporcion exenta del codigo {codigo_normalizado} debe ser decimal."
+            ) from exc
+        if not valor.is_finite() or valor < ZERO or valor > Decimal("1"):
+            raise ValueError(
+                f"La proporcion exenta del codigo {codigo_normalizado} debe estar entre 0 y 1."
+            )
+        normalizada[codigo_normalizado] = valor
+    return dict(sorted(normalizada.items()))
+
+
+def _bases_gravadas_y_snapshots(
+    periodo: date,
+    *,
+    politica_exenciones: dict[str, Decimal] | None = None,
+) -> tuple[dict[int, Decimal], dict[int, tuple[str, int]], dict[str, Decimal]]:
     fecha_mes = date(periodo.year, periodo.month, 1)
     uma_diaria = _uma_diaria_vigente(fecha_mes)
+    politica = _normalizar_politica_exenciones(politica_exenciones)
     estados_validos = (
         NominaPeriodo.ESTATUS_CERRADA,
         NominaPeriodo.ESTATUS_PAGADA,
@@ -272,21 +313,39 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
 
     lineas = list(
         NominaLinea.objects.filter(periodo_id__in=[item.pk for item in periodos_mes])
-        .select_related("empleado", "empleado__sucursal_ref", "periodo")
+        .select_related("periodo")
         .order_by("periodo_id", "empleado_id", "id")
     )
     _validar_lineas_nomina_mes(lineas)
 
     bases = {}
     empleado_ids = set()
+    snapshots_por_empleado = defaultdict(set)
+    periodos_por_empleado = defaultdict(set)
     for linea in lineas:
-        empleado = linea.empleado
-        if not empleado.sucursal_ref_id or not empleado.departamento:
+        if not linea.sucursal_snapshot_id or not linea.departamento_snapshot:
             raise ValueError(
-                f"El empleado {empleado.codigo or empleado.pk} requiere sucursal y departamento."
+                f"La linea de nomina {linea.pk} requiere snapshot de sucursal y departamento."
             )
-        empleado_ids.add(empleado.pk)
-        bases[empleado.pk] = ZERO
+        empleado_ids.add(linea.empleado_id)
+        bases[linea.empleado_id] = ZERO
+        snapshots_por_empleado[linea.empleado_id].add(
+            (linea.departamento_snapshot, linea.sucursal_snapshot_id)
+        )
+        periodos_por_empleado[linea.empleado_id].add(linea.periodo_id)
+
+    periodos_esperados = {item.pk for item in periodos_mes}
+    snapshots = {}
+    for empleado_id in sorted(empleado_ids):
+        if periodos_por_empleado[empleado_id] != periodos_esperados:
+            raise ValueError(
+                f"El empleado {empleado_id} no aparece en las dos quincenas del mes."
+            )
+        if len(snapshots_por_empleado[empleado_id]) != 1:
+            raise ValueError(
+                f"El empleado {empleado_id} tiene snapshot inconsistente entre quincenas."
+            )
+        snapshots[empleado_id] = next(iter(snapshots_por_empleado[empleado_id]))
 
     conceptos_mes = list(
         NominaConceptoLinea.objects.filter(
@@ -294,8 +353,25 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
             tipo=NominaConceptoLinea.TIPO_PERCEPCION,
         )
         .order_by("linea__empleado_id", "id")
-        .values("linea__empleado_id", "codigo_concepto", "importe")
+        .values("linea_id", "linea__empleado_id", "codigo_concepto", "importe")
     )
+    percepciones_por_linea = defaultdict(lambda: ZERO)
+    for concepto in conceptos_mes:
+        percepciones_por_linea[concepto["linea_id"]] += Decimal(
+            concepto["importe"] or ZERO
+        )
+    for linea in lineas:
+        if linea.pk not in percepciones_por_linea:
+            raise ValueError(
+                f"La linea de nomina {linea.pk} no tiene conceptos de percepcion."
+            )
+        if abs(
+            money(percepciones_por_linea[linea.pk])
+            - money(linea.total_percepciones or ZERO)
+        ) > CENT:
+            raise ValueError(
+                f"La linea de nomina {linea.pk} no cuadra total_percepciones contra sus conceptos."
+            )
     aguinaldos_previos = defaultdict(lambda: ZERO)
     aguinaldos_mes = defaultdict(lambda: ZERO)
     for concepto in conceptos_mes:
@@ -304,12 +380,11 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
         importe = Decimal(concepto["importe"] or ZERO)
         if importe < ZERO:
             raise ValueError("La nomina contiene una percepcion negativa.")
-        if codigo in CODIGOS_EXENTOS_COMPLETOS:
-            continue
         if codigo == "24":
             aguinaldos_mes[empleado_id] += importe
             continue
-        bases[empleado_id] += importe
+        proporcion_exenta = politica.get(codigo, ZERO)
+        bases[empleado_id] += importe * (Decimal("1") - proporcion_exenta)
 
     conceptos_aguinaldo_previos = list(
         NominaConceptoLinea.objects.filter(
@@ -370,10 +445,23 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
         )
         bases[empleado_id] += gravado_acumulado - gravado_previo
 
-    return {
+    bases_normalizadas = {
         empleado_id: money(base)
         for empleado_id, base in sorted(bases.items())
     }
+    return bases_normalizadas, snapshots, politica
+
+
+def bases_gravadas_empleados(
+    periodo: date,
+    *,
+    politica_exenciones: dict[str, Decimal] | None = None,
+) -> dict[int, Decimal]:
+    bases, _, _ = _bases_gravadas_y_snapshots(
+        periodo,
+        politica_exenciones=politica_exenciones,
+    )
+    return bases
 
 
 def _resolver_cfdi_isn(periodo: date, uuid: str | None) -> CfdiDescargado:
@@ -433,25 +521,26 @@ def preparar_expediente_isn(
     if periodo_cfdi != periodo:
         raise ValueError("El periodo del CFDI no coincide con el periodo solicitado.")
 
-    bases = bases_gravadas_empleados(periodo)
+    bases, snapshots, politica_exenciones = _bases_gravadas_y_snapshots(periodo)
     montos = prorratear_isn(bases, importe_pagado)
-    empleados = Empleado.objects.filter(pk__in=bases).in_bulk()
-    if len(empleados) != len(bases):
-        raise ValueError("El universo de nomina contiene empleados inexistentes.")
 
     base_gravada_total = money(sum(bases.values(), ZERO))
     base_declarada, diferencia_base, estado_previsto = _conciliar_base_declarada(
         base_gravada_total,
         base_declarada,
     )
+    isn_calculado = calcular_isn_sinaloa(base_gravada_total)
+    diferencia_isn = money(importe_pagado - isn_calculado)
+    if abs(diferencia_isn) > TOLERANCIA_ISN_CALCULADO:
+        estado_previsto = ExpedienteISN.ESTADO_DISCREPANCIA
 
     filas = tuple(
         FilaPreviewISN(
             empleado_id=empleado_id,
             base_gravada=money(base),
             monto_isn=money(montos[empleado_id]),
-            area_codigo=empleados[empleado_id].departamento,
-            sucursal_id=empleados[empleado_id].sucursal_ref_id,
+            area_codigo=snapshots[empleado_id][0],
+            sucursal_id=snapshots[empleado_id][1],
         )
         for empleado_id, base in sorted(bases.items())
     )
@@ -463,7 +552,10 @@ def preparar_expediente_isn(
         base_gravada_total=base_gravada_total,
         base_declarada=base_declarada,
         diferencia_base=diferencia_base,
+        isn_calculado=isn_calculado,
+        diferencia_isn=diferencia_isn,
         estado_previsto=estado_previsto,
+        politica_exenciones=tuple(politica_exenciones.items()),
         filas=filas,
     )
 
@@ -499,12 +591,25 @@ def _validar_preview(preview: PreviewExpedienteISN) -> None:
         preview.base_gravada_total,
         preview.base_declarada,
     )
+    isn_calculado = calcular_isn_sinaloa(preview.base_gravada_total)
+    diferencia_isn = money(preview.importe_pagado - isn_calculado)
+    if abs(diferencia_isn) > TOLERANCIA_ISN_CALCULADO:
+        estado = ExpedienteISN.ESTADO_DISCREPANCIA
     if (
         base_declarada != preview.base_declarada
         or diferencia != preview.diferencia_base
+        or isn_calculado != preview.isn_calculado
+        or diferencia_isn != preview.diferencia_isn
         or estado != preview.estado_previsto
     ):
         raise ValueError("La conciliacion del preview de ISN no es coherente.")
+    politica_normalizada = tuple(
+        _normalizar_politica_exenciones(
+            dict(preview.politica_exenciones)
+        ).items()
+    )
+    if politica_normalizada != preview.politica_exenciones:
+        raise ValueError("La politica de exenciones del preview de ISN no es coherente.")
 
 
 def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None:
@@ -593,6 +698,17 @@ def _validar_o_enriquecer_existente(
         preview.base_gravada_total
     ):
         conflictos.append("base calculada")
+    metadata_existente = existente.metadata or {}
+    if metadata_existente.get("isn_calculado") != str(preview.isn_calculado):
+        conflictos.append("ISN calculado")
+    if metadata_existente.get("diferencia_isn") != str(preview.diferencia_isn):
+        conflictos.append("diferencia ISN")
+    politica_preview = {
+        codigo: str(proporcion)
+        for codigo, proporcion in preview.politica_exenciones
+    }
+    if metadata_existente.get("politica_exenciones") != politica_preview:
+        conflictos.append("politica de exenciones")
     if existente.cfdi_id != preview.cfdi.pk:
         conflictos.append("CFDI")
 
@@ -644,6 +760,10 @@ def _validar_o_enriquecer_existente(
             {
                 "diferencia_base": str(diferencia_base),
                 "estado_previsto": estado_previsto,
+                "isn_calculado": str(preview.isn_calculado),
+                "diferencia_isn": str(preview.diferencia_isn),
+                "tolerancia_isn": str(TOLERANCIA_ISN_CALCULADO),
+                "politica_exenciones": politica_preview,
             }
         )
         existente.base_declarada = base_declarada
@@ -675,6 +795,36 @@ def _aplicar_expediente_isn_una_vez(
             or importe_cfdi != money(preview.importe_pagado)
         ):
             raise ValueError("El CFDI cambio despues de preparar el preview de ISN.")
+
+        bases_actuales, snapshots_actuales, politica_actual = (
+            _bases_gravadas_y_snapshots(
+                preview.periodo,
+                politica_exenciones=dict(preview.politica_exenciones),
+            )
+        )
+        filas_actuales = tuple(
+            (
+                empleado_id,
+                money(base),
+                snapshots_actuales[empleado_id][0],
+                snapshots_actuales[empleado_id][1],
+            )
+            for empleado_id, base in sorted(bases_actuales.items())
+        )
+        filas_preview = tuple(
+            (
+                fila.empleado_id,
+                money(fila.base_gravada),
+                fila.area_codigo,
+                fila.sucursal_id,
+            )
+            for fila in preview.filas
+        )
+        if (
+            filas_actuales != filas_preview
+            or tuple(politica_actual.items()) != preview.politica_exenciones
+        ):
+            raise ValueError("La nomina cambio despues de preparar el preview de ISN.")
 
         expedientes = list(
             ExpedienteISN.objects.select_for_update()
@@ -721,6 +871,13 @@ def _aplicar_expediente_isn_una_vez(
                     str(diferencia_base) if diferencia_base is not None else None
                 ),
                 "estado_previsto": estado_previsto,
+                "isn_calculado": str(preview.isn_calculado),
+                "diferencia_isn": str(preview.diferencia_isn),
+                "tolerancia_isn": str(TOLERANCIA_ISN_CALCULADO),
+                "politica_exenciones": {
+                    codigo: str(proporcion)
+                    for codigo, proporcion in preview.politica_exenciones
+                },
             },
         )
         DistribucionISNEmpleado.objects.bulk_create(
@@ -773,6 +930,8 @@ def aplicar_expediente_isn(
         preview.base_gravada_total,
         base_a_conciliar,
     )
+    if abs(preview.diferencia_isn) > TOLERANCIA_ISN_CALCULADO:
+        estado_previsto = ExpedienteISN.ESTADO_DISCREPANCIA
 
     ultimo_error = None
     for _ in range(3):

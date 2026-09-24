@@ -176,6 +176,47 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertEqual(linea.metadata, {"captura": "humana"})
         self.assertEqual(summary.protegidas_manual, 1)
 
+    def test_isn_cfdi_cancelado_posterior_no_publica_y_advierte_en_auto(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN cancelado",
+            monto_real=Decimal("16168.00"),
+            fuente_real="AUTO:ISN_CFDI",
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        expediente = self.crear_expediente_isn()
+        CfdiDescargado.objects.filter(pk=expediente.cfdi_id).update(estatus=" CANCELADO ")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("16168.00"))
+        self.assertEqual(linea.fuente_real, "AUTO:ISN_CFDI")
+        self.assertTrue(linea.metadata["sin_datos_fuente"])
+        self.assertEqual(summary.sin_datos_fuente, 1)
+
+    def test_isn_cfdi_cancelado_posterior_no_toca_manual(self):
+        rubro, linea = self.crear_linea(
+            concepto="ISN cancelado manual",
+            monto_real=Decimal("777.00"),
+            fuente_real="MANUAL:yesenia",
+        )
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        expediente = self.crear_expediente_isn()
+        CfdiDescargado.objects.filter(pk=expediente.cfdi_id).update(estatus="cancelado")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("777.00"))
+        self.assertEqual(linea.fuente_real, "MANUAL:yesenia")
+        self.assertEqual(summary.protegidas_manual, 1)
+
     def test_isn_cfdi_full_clean_rechaza_dimensiones_no_corporativas(self):
         rubro, _ = self.crear_linea(
             concepto="ISN sucursal",

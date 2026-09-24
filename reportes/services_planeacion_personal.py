@@ -88,11 +88,18 @@ def build_personnel_plan(cutoff=None):
         periodo__gte=start,
         periodo__lt=end,
         estado=ExpedienteISN.ESTADO_APLICADO,
-    ).only('id', 'periodo', 'uuid', 'importe_pagado')
+    ).select_related('cfdi').only(
+        'id', 'periodo', 'uuid', 'importe_pagado', 'cfdi__estatus'
+    )
     periodos_isn_aplicados = set()
     for expediente in expedientes_isn:
         row = rows.get(expediente.periodo)
         if row is None:
+            continue
+        if (expediente.cfdi.estatus or '').strip().upper() != 'VIGENTE':
+            row['errors'].append(
+                f'El CFDI de ISN ya no esta vigente: {expediente.uuid}.'
+            )
             continue
         periodos_isn_aplicados.add(expediente.periodo)
         row['isn'] = expediente.importe_pagado
