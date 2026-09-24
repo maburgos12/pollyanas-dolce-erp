@@ -7,6 +7,7 @@ import re
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from core.access import can_manage_rrhh
 from core.audit import log_event
@@ -42,8 +43,21 @@ def aplicar_jornada_desde_post(*, empleado, post, actor, creacion=False):
     if not jornada_id and creacion:
         return ResultadoJornada(False, "Empleado registrado sin jornada semanal.", None)
 
-    Empleado.objects.select_for_update().get(pk=empleado.pk)
+    # La ficha envía el selector vigente aun al editar otros datos. Sin fecha ni
+    # motivo explícitos, ese POST conserva la jornada y su historial.
     fecha_raw = (post.get("jornada_fecha_inicio") or "").strip()
+    motivo_raw = (post.get("jornada_motivo") or "").strip()
+    if not creacion and not fecha_raw and not motivo_raw:
+        if not jornada_id:
+            return ResultadoJornada(False, "Jornada sin cambios.", None)
+        hoy = timezone.localdate()
+        vigente_actual = AsignacionJornadaEmpleado.objects.filter(
+            empleado_id=empleado.pk, fecha_inicio__lte=hoy
+        ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=hoy)).order_by("-fecha_inicio", "-pk").first()
+        if vigente_actual and jornada_id == str(vigente_actual.jornada_id):
+            return ResultadoJornada(False, "Jornada sin cambios.", vigente_actual)
+
+    Empleado.objects.select_for_update().get(pk=empleado.pk)
     if not jornada_id and not fecha_raw and not AsignacionJornadaEmpleado.objects.filter(empleado_id=empleado.pk).exists():
         return ResultadoJornada(False, "El empleado ya estaba sin jornada semanal.", None)
 

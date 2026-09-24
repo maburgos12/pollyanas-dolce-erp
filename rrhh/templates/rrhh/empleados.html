@@ -5,7 +5,7 @@
 {% block page_title %}RRHH · Empleados{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales">
 {% endblock %}
 
 {% block content %}
@@ -217,7 +217,7 @@
       </div>
       <div class="rrhh-card-body">
         {% if can_manage_rrhh %}
-        <form method="post" enctype="multipart/form-data" data-has-user="false">
+        <form method="post" enctype="multipart/form-data" data-has-user="false" data-async-action data-reset-on-success="false">
           {% csrf_token %}
           <input type="hidden" name="action" value="create">
           {% if alta_pendiente_seleccionada %}
@@ -335,6 +335,28 @@
               <label for="fecha_ingreso">Ingreso</label>
               <input id="fecha_ingreso" class="input-field" type="date" name="fecha_ingreso" value="{{ alta_prefill.fecha_ingreso|default:'' }}">
             </div>
+            <fieldset class="rrhh-jornada span-2" data-jornada-form data-jornada-alta>
+              <legend>Jornada semanal</legend>
+              <input type="hidden" name="jornada_gestion_presente" value="1">
+              <div class="rrhh-jornada-fields">
+                <div class="rrhh-field">
+                  <label for="jornada-semanal-alta">Perfil semanal</label>
+                  <select id="jornada-semanal-alta" class="input-field" name="jornada_id" data-jornada-select>
+                    <option value="">Sin jornada asignada</option>
+                    {% for jornada in jornadas_semanales %}<option value="{{ jornada.id }}" {% if alta_prefill.jornada_id == jornada.id|stringformat:'s' %}selected{% endif %}>{{ jornada.nombre }}</option>{% endfor %}
+                  </select>
+                </div>
+                <div class="rrhh-field">
+                  <label for="jornada-fecha-alta">Inicio de vigencia</label>
+                  <input id="jornada-fecha-alta" class="input-field" type="date" name="jornada_fecha_inicio" value="{{ alta_prefill_jornada_fecha }}" data-jornada-fecha>
+                </div>
+                <div class="rrhh-field rrhh-jornada-motivo">
+                  <label for="jornada-motivo-alta">Motivo de asignación</label>
+                  <input id="jornada-motivo-alta" class="input-field" type="text" name="jornada_motivo" maxlength="200" value="{{ alta_prefill.jornada_motivo|default:'' }}" data-jornada-motivo>
+                </div>
+              </div>
+              <div class="rrhh-jornada-preview" aria-live="polite" data-jornada-preview></div>
+            </fieldset>
             <div class="rrhh-field">
               <label for="salario_diario">Salario diario</label>
               <input id="salario_diario" class="input-field" type="number" min="0" step="0.01" name="salario_diario" value="{{ alta_prefill.salario_diario|default:'' }}">
@@ -706,6 +728,7 @@
               <td class="cell-wrap">
                 <div class="rrhh-employee-name">{{ e.nombre }}</div>
                 <div class="rrhh-employee-code">{{ e.codigo }}</div>
+                <div class="rrhh-employee-jornada">{% if e.jornada_vigente %}{{ e.jornada_vigente.jornada.nombre }}{% else %}Sin jornada asignada{% endif %}</div>
               </td>
               <td class="cell-nowrap">{{ e.rfc|default:"-" }}</td>
               <td class="cell-nowrap">{{ e.curp|default:"-" }}</td>
@@ -740,13 +763,34 @@
                 {% endif %}
               </td>
             </tr>
-            {% if can_manage_rrhh %}
             <tr class="rrhh-edit-row" id="empleado-{{ e.id }}">
-              <td colspan="14">
+              <td colspan="15">
                 {% with e.form_values|default:e as e %}
                 <details class="rrhh-edit-panel" {% if ficha_error_empleado_id == e.id %}open{% endif %}>
-                  <summary>Editar {{ e.nombre }}</summary>
-                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data" data-has-user="{% if e.usuario_erp_id %}true{% else %}false{% endif %}">
+                  <summary>{% if can_manage_rrhh %}Editar{% else %}Ver jornada de{% endif %} {{ e.nombre }}</summary>
+                  <section class="rrhh-jornada-current" aria-label="Jornada semanal actual">
+                    <h3>Jornada semanal</h3>
+                    {% if e.jornada_vigente %}
+                      <strong>{{ e.jornada_vigente.jornada.nombre }}</strong>
+                      <span>Vigente desde {{ e.jornada_vigente.fecha_inicio|date:'d/m/Y' }}{% if e.jornada_vigente.fecha_fin %} hasta {{ e.jornada_vigente.fecha_fin|date:'d/m/Y' }}{% endif %}</span>
+                      <ul class="rrhh-jornada-week">{% for dia in e.jornada_vigente.resumen.dias_resumen %}<li><span>{{ dia.nombre }}</span><span>{{ dia.horario }}</span></li>{% endfor %}</ul>
+                      <strong>{{ e.jornada_vigente.resumen.total_texto }}</strong>
+                    {% else %}<strong>Sin jornada asignada</strong>{% endif %}
+                  </section>
+                  <details class="rrhh-jornada-history">
+                    <summary>Historial de jornadas ({{ e.jornada_historial|length }})</summary>
+                    {% for asignacion in e.jornada_historial %}
+                    <div class="rrhh-jornada-history-row">
+                      <strong>{{ asignacion.jornada.nombre }}</strong>
+                      <span>{{ asignacion.fecha_inicio|date:'d/m/Y' }} – {% if asignacion.fecha_fin %}{{ asignacion.fecha_fin|date:'d/m/Y' }}{% else %}actualidad{% endif %}</span>
+                      <span>{{ asignacion.resumen.total_texto }}</span>
+                      <span>{{ asignacion.motivo }}</span>
+                      {% if asignacion.creado_por %}<span>Registró: {{ asignacion.creado_por.get_full_name|default:asignacion.creado_por.username }}</span>{% endif %}
+                    </div>
+                    {% empty %}<p>Sin asignaciones registradas.</p>{% endfor %}
+                  </details>
+                  {% if can_manage_rrhh %}
+                  <form method="post" class="rrhh-edit-form" enctype="multipart/form-data" data-has-user="{% if e.usuario_erp_id %}true{% else %}false{% endif %}" data-async-action data-reset-on-success="false">
                     {% csrf_token %}
                     <input type="hidden" name="action" value="update">
                     <input type="hidden" name="empleado_id" value="{{ e.id }}">
@@ -877,6 +921,28 @@
                         <label for="edit_ingreso_{{ e.id }}">Ingreso</label>
                         <input id="edit_ingreso_{{ e.id }}" class="input-field" type="date" name="fecha_ingreso" value="{{ e.fecha_ingreso|date:'Y-m-d' }}">
                       </div>
+                      <fieldset class="rrhh-jornada span-2" data-jornada-form>
+                        <legend>Cambiar jornada</legend>
+                        <input type="hidden" name="jornada_gestion_presente" value="1">
+                        <div class="rrhh-jornada-fields">
+                          <div class="rrhh-field">
+                            <label for="jornada-semanal-{{ e.id }}">Perfil semanal</label>
+                            <select id="jornada-semanal-{{ e.id }}" class="input-field" name="jornada_id" data-jornada-select>
+                              <option value="">Sin jornada asignada</option>
+                              {% for jornada in jornadas_semanales %}<option value="{{ jornada.id }}" {% if e.form_draft.jornada_id == jornada.id|stringformat:'s' or not e.form_draft and e.jornada_vigente.jornada_id == jornada.id %}selected{% endif %}>{{ jornada.nombre }}</option>{% endfor %}
+                            </select>
+                          </div>
+                          <div class="rrhh-field">
+                            <label for="jornada-fecha-{{ e.id }}">Inicio del cambio</label>
+                            <input id="jornada-fecha-{{ e.id }}" class="input-field" type="date" name="jornada_fecha_inicio" value="{{ e.form_draft.jornada_fecha_inicio|default:'' }}" data-jornada-fecha>
+                          </div>
+                          <div class="rrhh-field rrhh-jornada-motivo">
+                            <label for="jornada-motivo-{{ e.id }}">Motivo del cambio o cierre</label>
+                            <input id="jornada-motivo-{{ e.id }}" class="input-field" type="text" name="jornada_motivo" maxlength="200" value="{{ e.form_draft.jornada_motivo|default:'' }}" data-jornada-motivo>
+                          </div>
+                        </div>
+                        <div class="rrhh-jornada-preview" aria-live="polite" data-jornada-preview></div>
+                      </fieldset>
                       <div class="rrhh-field">
                         <label for="edit_salario_{{ e.id }}">Salario diario</label>
                         <input id="edit_salario_{{ e.id }}" class="input-field" type="number" min="0" step="0.01" name="salario_diario" value="{{ e.salario_diario }}">
@@ -1036,11 +1102,11 @@
                       <button class="btn btn-primary btn-small" type="submit">Guardar cambios</button>
                     </div>
                   </form>
+                  {% endif %}
                 </details>
                 {% endwith %}
               </td>
             </tr>
-            {% endif %}
             {% empty %}
             <tr><td colspan="15" class="muted">Sin empleados para este filtro.</td></tr>
             {% endfor %}
@@ -1087,8 +1153,68 @@
   </div>
 </dialog>
 
+{{ jornadas_catalogo|json_script:"rrhh-jornadas-catalogo" }}
 <script>
 (() => {
+  const catalogoNode = document.getElementById('rrhh-jornadas-catalogo');
+  const jornadas = new Map((catalogoNode ? JSON.parse(catalogoNode.textContent) : []).map(jornada => [String(jornada.id), jornada]));
+  const mensajeSinJornada = 'Sin jornada asignada. La asistencia y las horas extra pueden quedar no calculables.';
+
+  function renderJornadaPreview(fieldset) {
+    const select = fieldset.querySelector('[data-jornada-select]');
+    const preview = fieldset.querySelector('[data-jornada-preview]');
+    const jornada = jornadas.get(select.value);
+    preview.replaceChildren();
+    if (!jornada) {
+      const aviso = document.createElement('p');
+      aviso.className = 'rrhh-jornada-warning';
+      aviso.textContent = mensajeSinJornada;
+      preview.appendChild(aviso);
+      return;
+    }
+    const total = document.createElement('strong');
+    total.className = 'rrhh-jornada-total';
+    total.textContent = jornada.total_texto;
+    preview.appendChild(total);
+    const week = document.createElement('ul');
+    week.className = 'rrhh-jornada-week';
+    jornada.dias_resumen.forEach(dia => {
+      const row = document.createElement('li');
+      const nombre = document.createElement('span');
+      const horario = document.createElement('span');
+      nombre.textContent = dia.nombre;
+      horario.textContent = dia.horario;
+      row.append(nombre, horario);
+      week.appendChild(row);
+    });
+    preview.appendChild(week);
+  }
+
+  document.querySelectorAll('[data-jornada-form]').forEach(fieldset => {
+    const select = fieldset.querySelector('[data-jornada-select]');
+    const fecha = fieldset.querySelector('[data-jornada-fecha]');
+    const motivo = fieldset.querySelector('[data-jornada-motivo]');
+    const initialValue = select.value;
+    const alta = fieldset.hasAttribute('data-jornada-alta');
+    const ingreso = alta ? fieldset.closest('form').querySelector('[name="fecha_ingreso"]') : null;
+    let fechaEditada = Boolean(alta && fecha.value && ingreso && fecha.value !== ingreso.value);
+    const syncRequired = () => {
+      const hayCambio = alta ? Boolean(select.value) : (
+        select.value !== initialValue || Boolean(fecha.value) || Boolean(motivo.value.trim())
+      );
+      fecha.required = hayCambio && !alta;
+      motivo.required = hayCambio;
+    };
+    select.addEventListener('change', () => { renderJornadaPreview(fieldset); syncRequired(); });
+    fecha.addEventListener('input', () => { fechaEditada = true; syncRequired(); });
+    motivo.addEventListener('input', syncRequired);
+    if (ingreso) ingreso.addEventListener('input', () => {
+      if (!fechaEditada) fecha.value = ingreso.value;
+    });
+    renderJornadaPreview(fieldset);
+    syncRequired();
+  });
+
   const tableShells = Array.from(document.querySelectorAll('.rrhh-employee-table-shell'));
   const syncTableShellWidth = (shell) => {
     shell.style.setProperty('--rrhh-table-viewport', `${shell.clientWidth}px`);

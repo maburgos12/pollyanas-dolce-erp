@@ -1,5 +1,7 @@
 from contextlib import nullcontext
 from datetime import date, time
+from pathlib import Path
+import re
 from queue import Queue
 from threading import Event, Thread
 from time import monotonic
@@ -9,8 +11,9 @@ from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
-from core.models import AuditLog
+from core.models import AuditLog, UserModuleAccess
 
 from rrhh.models import (
     AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
@@ -281,6 +284,121 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
             motivo="Asignación original",
         )
         return empleado, inicial
+
+    def test_ficha_muestra_selector_resumen_vigencia_historial_y_draft(self):
+        turno = Turno.objects.create(nombre="Diurno", hora_entrada=time(8), hora_salida=time(16))
+        for dia in range(6):
+            JornadaSemanalDia.objects.create(jornada=self.jornada, dia_semana=dia, turno=turno)
+        JornadaSemanalDia.objects.create(jornada=self.jornada, dia_semana=6)
+        empleado, inicial = self.empleado_con_jornada()
+        self.otra.activo = False
+        self.otra.save(update_fields=["activo"])
+        response = self.client.get(self.url)
+        html = response.content.decode()
+        self.assertContains(response, "48 h semanales")
+        self.assertContains(response, "Sin jornada asignada")
+        self.assertContains(response, "Vigente desde 01/09/2026")
+        self.assertContains(response, "Historial de jornadas")
+        self.assertContains(response, 'name="jornada_gestion_presente"', count=2)
+        self.assertContains(response, 'data-async-action', count=2)
+        self.assertContains(response, 'data-reset-on-success="false"', count=2)
+        self.assertContains(response, 'aria-live="polite"')
+        self.assertNotIn('>Semana B</option>', html)
+        self.assertIn('id="jornada-semanal-alta"', html)
+        self.assertIn(f'id="jornada-semanal-{empleado.pk}"', html)
+        jornada_ids = re.findall(r'id="(jornada-(?:semanal|fecha|motivo)-[^"]+)"', html)
+        self.assertEqual(len(jornada_ids), len(set(jornada_ids)))
+
+        session = self.client.session
+        session["rrhh_ficha_error_flash"] = {
+            "accion": "update", "empleado_id": empleado.pk,
+            "values": {"jornada_id": str(self.jornada.pk), "jornada_fecha_inicio": "2026-10-01",
+                       "jornada_motivo": "Cambio de prueba", "jornada_gestion_presente": "1"},
+        }
+        session.save()
+        response = self.client.get(self.url)
+        self.assertContains(response, 'value="2026-10-01"')
+        self.assertContains(response, "Cambio de prueba")
+        self.assertContains(response, f'id="empleado-{empleado.pk}"')
+
+        session = self.client.session
+        session["rrhh_ficha_error_flash"] = {
+            "accion": "create", "empleado_id": None,
+            "values": {"jornada_id": str(self.jornada.pk), "jornada_fecha_inicio": "2026-11-01",
+                       "jornada_motivo": "Alta en borrador", "fecha_ingreso": "2026-10-31"},
+        }
+        session.save()
+        response = self.client.get(self.url)
+        self.assertContains(response, 'value="2026-11-01"')
+        self.assertContains(response, "Alta en borrador")
+
+    def test_ficha_consulta_muestra_jornada_sin_edicion(self):
+        empleado, _ = self.empleado_con_jornada()
+        self.actor.groups.clear()
+        UserModuleAccess.objects.create(user=self.actor, module="rrhh", access="view")
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Semana A")
+        self.assertContains(response, "Historial de jornadas")
+        self.assertNotContains(response, 'name="jornada_gestion_presente"')
+
+    def test_ficha_jornadas_no_crece_por_empleado(self):
+        for index in range(5):
+            empleado = Empleado.objects.create(nombre=f"Prueba {index}", codigo=f"JQ{index}")
+            AsignacionJornadaEmpleado.objects.create(
+                empleado=empleado, jornada=self.jornada, fecha_inicio=date(2026, 9, 1), motivo="Inicial"
+            )
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        consultas_jornada = [
+            query for query in queries if '"rrhh_asignacionjornadaempleado"' in query["sql"]
+        ]
+        self.assertLessEqual(len(consultas_jornada), 2)
+
+    def test_preview_serializa_nombre_seguro_y_minutos_exactos(self):
+        turno = Turno.objects.create(
+            nombre="Especial", hora_entrada=time(8), hora_salida=time(16, 30),
+        )
+        self.jornada.nombre = '<img src=x onerror=alert(1)>'
+        self.jornada.save(update_fields=["nombre"])
+        for dia in range(5):
+            JornadaSemanalDia.objects.create(jornada=self.jornada, dia_semana=dia, turno=turno)
+        response = self.client.get(self.url)
+        html = response.content.decode()
+        self.assertContains(response, "42 h 30 min semanales")
+        self.assertIn("\\u003Cimg", html)
+        self.assertNotIn('<img src=x onerror=alert(1)>', html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn('data-jornada-preview', html)
+        self.assertIn('20260923-jornadas-semanales', html)
+        css = Path(__file__).resolve().parents[1] / "static/css/template_modules/rrhh-templates-rrhh-empleados.css"
+        self.assertIn(".rrhh-jornada-week", css.read_text())
+
+    def test_editar_otros_datos_no_exige_cambio_de_jornada(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="", jornada_motivo="",
+            nombre="Persona corregida",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
+
+    def test_historial_muestra_periodos_cerrados_y_vigente(self):
+        empleado, inicial = self.empleado_con_jornada()
+        inicial.fecha_fin = date(2026, 9, 14)
+        inicial.save(update_fields=["fecha_fin"])
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=self.otra, fecha_inicio=date(2026, 9, 15),
+            motivo="Cambio de área", creado_por=self.actor,
+        )
+        response = self.client.get(self.url)
+        self.assertContains(response, "Vigente desde 15/09/2026")
+        self.assertContains(response, "01/09/2026 – 14/09/2026")
+        self.assertContains(response, "Cambio de área")
+        self.assertContains(response, "Registró:")
 
     def test_alta_crea_empleado_y_asignacion_y_redirect_con_ancla(self):
         response = self.client.post(self.url, self.datos_alta())

@@ -1,4 +1,40 @@
 /* Extracted from rrhh/templates/rrhh/empleados.html */
+.rrhh-jornada {
+  border: 1px solid var(--rosa);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 8px 0;
+  min-width: 0;
+}
+
+.rrhh-jornada legend { color: var(--texto); font-weight: 800; padding: 0 5px; }
+.rrhh-jornada-fields { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.rrhh-jornada-fields .rrhh-field { min-width: 0; }
+.rrhh-jornada-fields .input-field { width: 100%; min-height: 44px; }
+.rrhh-jornada-preview { margin-top: 10px; color: var(--texto); }
+.rrhh-jornada-total { color: var(--vino); }
+.rrhh-jornada-warning { margin: 0; color: var(--texto); font-size: 0.9rem; }
+.rrhh-jornada-week { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; margin: 8px 0; list-style: none; }
+.rrhh-jornada-week li { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--rosa); font-size: 0.9rem; }
+.rrhh-jornada-week li span:last-child { text-align: right; }
+.rrhh-jornada-current { display: grid; gap: 5px; padding: 12px 0; color: var(--texto); }
+.rrhh-jornada-current h3 { font-family: inherit; font-size: 1rem; margin: 0; }
+.rrhh-jornada-current .rrhh-jornada-week { max-width: 580px; }
+.rrhh-jornada-history { border-top: 1px solid var(--rosa); padding: 8px 0; color: var(--texto); }
+.rrhh-jornada-history summary { cursor: pointer; font-weight: 700; }
+.rrhh-jornada-history-row { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--rosa); font-size: 0.9rem; }
+.rrhh-jornada-history-row strong { flex-basis: 100%; }
+.rrhh-employee-jornada { font-size: 0.8rem; color: var(--texto-light); }
+.rrhh-jornada :focus-visible, .rrhh-jornada-history summary:focus-visible { outline: 2px solid var(--vino); outline-offset: 2px; }
+form[data-async-action] .btn { transition: transform 140ms ease-out; }
+form[data-async-action] .btn:active { transform: scale(.97); }
+@media (min-width: 720px) {
+  .rrhh-jornada-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rrhh-jornada-motivo { grid-column: 1 / -1; }
+  .rrhh-jornada-week { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { form[data-async-action] .btn { transition: none; } }
+
 .rrhh-page {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -564,7 +600,7 @@
     z-index: 4;
   }
 
-  .rrhh-edit-panel summary {
+  .rrhh-edit-panel > summary {
     align-items: center;
     color: var(--vino);
     cursor: pointer;
@@ -576,17 +612,17 @@
     min-width: 0;
   }
 
-  .rrhh-edit-panel summary::-webkit-details-marker {
+  .rrhh-edit-panel > summary::-webkit-details-marker {
     display: none;
   }
 
-  .rrhh-edit-panel summary::after {
+  .rrhh-edit-panel > summary::after {
     content: "+";
     flex: 0 0 auto;
     font-weight: 800;
   }
 
-  .rrhh-edit-panel[open] summary::after {
+  .rrhh-edit-panel[open] > summary::after {
     content: "-";
   }
 

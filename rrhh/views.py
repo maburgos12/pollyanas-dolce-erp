@@ -14,7 +14,7 @@ from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Avg, Count, Q, Sum
+from django.db.models import Avg, Count, Prefetch, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -29,6 +29,7 @@ from core.models import Sucursal
 
 from .models import (
     AsistenciaEmpleado,
+    AsignacionJornadaEmpleado,
     AltaPendienteEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -38,6 +39,8 @@ from .models import (
     HoraExtra,
     ImportacionChecador,
     IncapacidadEmpleado,
+    JornadaSemanal,
+    JornadaSemanalDia,
     NominaConceptoLinea,
     NominaImportacion,
     NominaLinea,
@@ -1257,6 +1260,34 @@ _BORRADOR_FICHA_CAMPOS = frozenset({
     "bono_esquema_otro_descripcion", "jornada_gestion_presente", "jornada_id",
     "jornada_fecha_inicio", "jornada_motivo", "alta_pendiente_id",
 })
+
+
+_JORNADA_DIAS = ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")
+
+
+def _resumen_jornada_semanal(jornada):
+    """Resumen para plantilla y preview, calculado del turno de cada día."""
+    por_dia = {dia.dia_semana: dia for dia in jornada.dias.all()}
+    resumen = []
+    total_minutos = 0
+    for indice, nombre in enumerate(_JORNADA_DIAS):
+        dia = por_dia.get(indice)
+        turno = dia.turno if dia else None
+        if turno:
+            entrada = turno.hora_entrada.hour * 60 + turno.hora_entrada.minute
+            salida = turno.hora_salida.hour * 60 + turno.hora_salida.minute
+            minutos = (salida - entrada) % (24 * 60)
+            total_minutos += minutos
+            horario = f"{turno.hora_entrada:%H:%M}–{turno.hora_salida:%H:%M}"
+        else:
+            minutos = 0
+            horario = "Descanso"
+        resumen.append({"nombre": nombre, "horario": horario, "minutos": minutos})
+    horas, minutos = divmod(total_minutos, 60)
+    total_texto = f"{horas} h {minutos} min semanales" if minutos else f"{horas} h semanales"
+    return {"dias_resumen": resumen, "total_minutos": total_minutos, "total_texto": total_texto}
+
+
 _BORRADOR_LOGISTICA_CAMPOS = frozenset({
     "motivo_autorizacion", "autorizado_por", "numero_licencia", "notas_identidad",
     "licencia_expedicion", "licencia_expiracion",
@@ -1620,7 +1651,24 @@ def empleados(request):
     enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
 
     asegurar_esquemas_base()
-    qs = Empleado.objects.all().prefetch_related("bonos_esquemas").annotate(  # rrhh-allow-inactive-history: filtro estado controla historial
+    jornadas_activas = list(JornadaSemanal.objects.filter(activo=True).prefetch_related(
+        Prefetch("dias", queryset=JornadaSemanalDia.objects.select_related("turno").order_by("dia_semana"))
+    ).order_by("nombre", "pk"))
+    for jornada in jornadas_activas:
+        jornada.resumen = _resumen_jornada_semanal(jornada)
+    resumen_por_jornada = {jornada.pk: jornada.resumen for jornada in jornadas_activas}
+    jornada_catalogo = [
+        {"id": jornada.pk, "nombre": jornada.nombre, **jornada.resumen}
+        for jornada in jornadas_activas
+    ]
+    qs = Empleado.objects.all().prefetch_related(  # rrhh-allow-inactive-history: filtro estado controla historial
+        "bonos_esquemas",
+        Prefetch("jornadas_asignadas", queryset=AsignacionJornadaEmpleado.objects.select_related(
+            "jornada", "creado_por"
+        ).prefetch_related(Prefetch(
+            "jornada__dias", queryset=JornadaSemanalDia.objects.select_related("turno").order_by("dia_semana")
+        )).order_by("-fecha_inicio", "-pk")),
+    ).annotate(
         total_lineas_nomina=Count("lineas_nomina")
     )
     if q:
@@ -1716,7 +1764,16 @@ def empleados(request):
             empleado_borrador = Empleado.objects.filter(pk=borrador_id).first()
             if empleado_borrador:
                 empleados_page.append(empleado_borrador)
+    hoy = timezone.localdate()
     for empleado in empleados_page:
+        empleado.jornada_historial = list(empleado.jornadas_asignadas.all())
+        empleado.jornada_vigente = next((asignacion for asignacion in empleado.jornada_historial if (
+            asignacion.fecha_inicio <= hoy and (asignacion.fecha_fin is None or asignacion.fecha_fin >= hoy)
+        )), None)
+        for asignacion in empleado.jornada_historial:
+            if asignacion.jornada_id not in resumen_por_jornada:
+                resumen_por_jornada[asignacion.jornada_id] = _resumen_jornada_semanal(asignacion.jornada)
+            asignacion.resumen = resumen_por_jornada[asignacion.jornada_id]
         empleado.bono_esquema_ids = {esquema.id for esquema in empleado.bonos_esquemas.all()}
         empleado.sucursal_form_id = _sucursal_form_id(
             sucursal_ref_id=empleado.sucursal_ref_id,
@@ -1792,6 +1849,8 @@ def empleados(request):
                 fecha = getattr(repartidor, campo, None)
                 borrador.setdefault(campo, fecha.isoformat() if fecha else "")
             formulario.form_draft = borrador
+            formulario.jornada_historial = empleado.jornada_historial
+            formulario.jornada_vigente = empleado.jornada_vigente
             empleado.form_values = formulario
 
     identidades_pendientes = list(
@@ -1831,10 +1890,16 @@ def empleados(request):
     if ficha_error_flash and ficha_error_flash.get("accion") == "create":
         alta_form_draft = ficha_error_flash["values"]
         alta_prefill.update(alta_form_draft)
+    alta_prefill_jornada_fecha = (
+        alta_prefill["jornada_fecha_inicio"] if "jornada_fecha_inicio" in alta_prefill
+        else alta_prefill.get("fecha_ingreso") or ""
+    )
 
     context = {
         "module_tabs": _module_tabs("empleados", request.user),
         "can_manage_rrhh": can_manage_rrhh(request.user),
+        "jornadas_semanales": jornadas_activas,
+        "jornadas_catalogo": jornada_catalogo,
         "empleados": empleados_page,
         "q": q,
         "estado": estado,
@@ -1911,6 +1976,7 @@ def empleados(request):
         "altas_pendientes": altas_pendientes,
         "alta_pendiente_seleccionada": alta_pendiente_seleccionada,
         "alta_prefill": alta_prefill,
+        "alta_prefill_jornada_fecha": alta_prefill_jornada_fecha,
         "alta_form_draft": alta_form_draft,
         "ficha_error_empleado_id": ficha_error_flash.get("empleado_id") if ficha_error_flash else None,
         "alta_prefill_sucursal_id": _sucursal_form_id(
