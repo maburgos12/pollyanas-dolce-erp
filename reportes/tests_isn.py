@@ -152,6 +152,25 @@ class ISNSourceTests(TestCase):
 
         self.assertEqual(bases, {empleado.id: D("10480.70")})
 
+    def test_aguinaldo_consume_tope_anual_sin_arrastrar_salario_previo(self):
+        empleado = self._crear_empleado(codigo="E-AGUINALDO-YTD")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 1, 31),
+            conceptos=(("1", D("9000.00")), ("24", D("2000.00"))),
+        )
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(("24", D("2000.00")),),
+        )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases, {empleado.id: D("480.70")})
+
     def test_agrupa_por_empleado_solo_periodos_cerrados_o_pagados_que_terminan_en_mes(self):
         empleado = self._crear_empleado(codigo="E-AGRUPADO")
         casos = (

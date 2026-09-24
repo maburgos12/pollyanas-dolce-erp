@@ -121,39 +121,59 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
                 NominaPeriodo.ESTATUS_PAGADA,
             ),
             linea__periodo__fecha_fin__year=periodo.year,
-            linea__periodo__fecha_fin__month=periodo.month,
+            linea__periodo__fecha_fin__month__lte=periodo.month,
         )
-        .select_related("linea__empleado", "linea__empleado__sucursal_ref")
+        .select_related(
+            "linea__periodo",
+            "linea__empleado",
+            "linea__empleado__sucursal_ref",
+        )
         .order_by("linea__empleado_id", "id")
     )
 
     bases = defaultdict(lambda: ZERO)
-    aguinaldos = defaultdict(lambda: ZERO)
+    aguinaldos_previos = defaultdict(lambda: ZERO)
+    aguinaldos_mes = defaultdict(lambda: ZERO)
     empleados_vistos = set()
     for concepto in conceptos:
         empleado = concepto.linea.empleado
-        if not empleado.sucursal_ref_id or not empleado.departamento:
+        es_mes_solicitado = concepto.linea.periodo.fecha_fin.month == periodo.month
+        if es_mes_solicitado and (
+            not empleado.sucursal_ref_id or not empleado.departamento
+        ):
             raise ValueError(
                 f"El empleado {empleado.codigo or empleado.pk} requiere sucursal y departamento."
             )
 
         empleado_id = empleado.pk
-        empleados_vistos.add(empleado_id)
         codigo = (concepto.codigo_concepto or "").strip()
         importe = Decimal(concepto.importe or ZERO)
+        if codigo == "24":
+            acumulado = aguinaldos_mes if es_mes_solicitado else aguinaldos_previos
+            acumulado[empleado_id] += importe
+        if not es_mes_solicitado:
+            continue
+
+        empleados_vistos.add(empleado_id)
         if codigo in CODIGOS_EXENTOS_COMPLETOS:
             continue
         if codigo == "24":
-            aguinaldos[empleado_id] += importe
             continue
         bases[empleado_id] += importe
 
     exencion_aguinaldo = Decimal("30") * uma_diaria
     for empleado_id in empleados_vistos:
-        bases[empleado_id] += max(
+        gravado_previo = max(
             ZERO,
-            aguinaldos[empleado_id] - exencion_aguinaldo,
+            aguinaldos_previos[empleado_id] - exencion_aguinaldo,
         )
+        gravado_acumulado = max(
+            ZERO,
+            aguinaldos_previos[empleado_id]
+            + aguinaldos_mes[empleado_id]
+            - exencion_aguinaldo,
+        )
+        bases[empleado_id] += gravado_acumulado - gravado_previo
 
     return {
         empleado_id: money(base)
