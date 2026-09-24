@@ -184,10 +184,12 @@ class PresupuestoRealConsolidacionService:
                 metadata["sin_datos_fuente"] = True
                 metadata["fuente_sin_datos_en"] = timezone.now().isoformat()
                 if linea.fuente_real == f"{AUTO_PREFIX}{ReglaFuenteRubro.FUENTE_ISN_CFDI}":
-                    metadata["fuente_sin_datos_previa"] = linea.fuente_real
-                    metadata["monto_sin_datos_previo"] = (
-                        str(linea.monto_real) if linea.monto_real is not None else None
-                    )
+                    metadata.setdefault("fuente_sin_datos_previa", linea.fuente_real)
+                    if linea.monto_real is not None:
+                        metadata.setdefault(
+                            "monto_sin_datos_previo",
+                            str(linea.monto_real),
+                        )
                 if not dry_run:
                     actualizacion = {
                         "metadata": metadata,

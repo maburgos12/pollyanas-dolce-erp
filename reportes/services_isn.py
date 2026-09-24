@@ -288,7 +288,7 @@ def _normalizar_politica_exenciones(
             raise ValueError(
                 f"La proporcion exenta del codigo {codigo_normalizado} debe estar entre 0 y 1."
             )
-        normalizada[codigo_normalizado] = valor
+        normalizada[codigo_normalizado] = ZERO if valor == ZERO else valor.normalize()
     return dict(sorted(normalizada.items()))
 
 

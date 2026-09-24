@@ -985,8 +985,8 @@ class ISNApplicationTests(TestCase):
 
         self.assertEqual(preview.base_gravada_total, D("1200.00"))
         self.assertEqual(dict(preview.politica_exenciones)["20"], D("1"))
-        self.assertIn("exenciones=20:1,22:1,26:1,32:0.50", preview.render())
-        self.assertEqual(expediente.metadata["politica_exenciones"]["32"], "0.50")
+        self.assertIn("exenciones=20:1,22:1,26:1,32:0.5", preview.render())
+        self.assertEqual(expediente.metadata["politica_exenciones"]["32"], "0.5")
 
     def test_comando_exencion_parcial_dry_run_apply_e_idempotencia(self):
         empleado = self._crear_empleado("E-CMD-EXENCION")
@@ -1026,6 +1026,52 @@ class ISNApplicationTests(TestCase):
                 "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
                 apply=True, stdout=StringIO(),
             )
+
+    def test_reintento_canoniza_escala_de_exencion_y_rechaza_valor_distinto(self):
+        empleado = self._crear_empleado("E-CANON-EXENCION")
+        self._crear_nomina_completa(((empleado, D("1000.00")),))
+        primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
+        primera.salario_base = D("1400.00")
+        primera.save(
+            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
+        )
+        NominaConceptoLinea.objects.create(
+            linea=primera,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="32",
+            nombre="Parcial canonizable",
+            importe=D("400.00"),
+        )
+        cfdi = self._crear_cfdi("CFDI-ISN-CANON-EXENCION", "28.80")
+
+        preview_primero = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            politica_exenciones={"32": D("0.50")},
+        )
+        primero = aplicar_expediente_isn(preview_primero)
+        preview_reintento = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            politica_exenciones={"32": D("0.5")},
+        )
+        segundo = aplicar_expediente_isn(preview_reintento)
+
+        self.assertEqual(segundo.pk, primero.pk)
+        self.assertEqual(dict(preview_primero.politica_exenciones)["32"], D("0.5"))
+        self.assertEqual(
+            preview_reintento.politica_exenciones,
+            preview_primero.politica_exenciones,
+        )
+        self.assertEqual(segundo.metadata["politica_exenciones"]["32"], "0.5")
+
+        preview_distinto = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            politica_exenciones={"32": D("0.4")},
+        )
+        with self.assertRaisesMessage(ValueError, "Conflicto de reintento ISN"):
+            aplicar_expediente_isn(preview_distinto)
 
     def test_comando_rechaza_exenciones_invalidas_sin_escribir(self):
         empleado = self._crear_empleado("E-CMD-EX-INV")

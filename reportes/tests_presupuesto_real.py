@@ -204,6 +204,13 @@ class PresupuestoRealConsolidacionTests(TestCase):
         )
         self.assertEqual(summary.sin_datos_fuente, 1)
 
+        segunda = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.metadata["monto_sin_datos_previo"], "16168.00")
+        self.assertEqual(segunda.sin_datos_fuente, 1)
+
     def test_isn_cfdi_cancelado_posterior_no_toca_manual(self):
         rubro, linea = self.crear_linea(
             concepto="ISN cancelado manual",
