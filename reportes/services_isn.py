@@ -182,7 +182,7 @@ def extraer_isn_cfdi(cfdi) -> tuple[date, Decimal]:
             concepto.attrib.get("NoIdentificacion", "").split()
         ).upper()
         match_canonico = re.fullmatch(
-            r"(\d{4})(0[1-9]|1[0-2]) 2-003",
+            r"(\d{4})(0[1-9]|1[0-2]) 2-003(?:-001-0006)?",
             identificador,
         )
         match_legacy = re.fullmatch(
