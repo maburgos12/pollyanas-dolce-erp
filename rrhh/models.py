@@ -533,6 +533,15 @@ class NominaPeriodo(models.Model):
 
 
 class NominaLinea(models.Model):
+    SNAPSHOT_CREACION = "CREACION"
+    SNAPSHOT_LISTA_RAYA = "LISTA_RAYA"
+    SNAPSHOT_CAPTURA_EXPLICITA = "CAPTURA_EXPLICITA"
+    SNAPSHOT_ORIGEN_CHOICES = [
+        (SNAPSHOT_CREACION, "Creación de línea"),
+        (SNAPSHOT_LISTA_RAYA, "Importación de lista de raya"),
+        (SNAPSHOT_CAPTURA_EXPLICITA, "Captura explícita posterior"),
+    ]
+
     periodo = models.ForeignKey(NominaPeriodo, on_delete=models.CASCADE, related_name="lineas")
     empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT, related_name="lineas_nomina")
     sucursal_snapshot = models.ForeignKey(
@@ -543,6 +552,13 @@ class NominaLinea(models.Model):
         related_name="lineas_nomina_snapshot",
     )
     departamento_snapshot = models.CharField(max_length=50, blank=True, default="")
+    snapshot_origen = models.CharField(
+        max_length=24,
+        choices=SNAPSHOT_ORIGEN_CHOICES,
+        blank=True,
+        default="",
+    )
+    snapshot_capturado_en = models.DateTimeField(null=True, blank=True)
     dias_trabajados = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
     horas_trabajadas = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal("0"))
     horas_dia = models.DecimalField(max_digits=6, decimal_places=2, default=Decimal("0"))
@@ -575,14 +591,21 @@ class NominaLinea(models.Model):
                 self.sucursal_snapshot_id = self.empleado.sucursal_ref_id
             if not self.departamento_snapshot:
                 self.departamento_snapshot = self.empleado.departamento or ""
+            if self.sucursal_snapshot_id and self.departamento_snapshot:
+                self.snapshot_origen = self.snapshot_origen or self.SNAPSHOT_CREACION
+                self.snapshot_capturado_en = self.snapshot_capturado_en or timezone.now()
         elif self.pk:
             snapshot_actual = type(self).objects.filter(pk=self.pk).values(
                 "sucursal_snapshot_id",
                 "departamento_snapshot",
+                "snapshot_origen",
+                "snapshot_capturado_en",
             ).first()
             if snapshot_actual:
                 self.sucursal_snapshot_id = snapshot_actual["sucursal_snapshot_id"]
                 self.departamento_snapshot = snapshot_actual["departamento_snapshot"]
+                self.snapshot_origen = snapshot_actual["snapshot_origen"]
+                self.snapshot_capturado_en = snapshot_actual["snapshot_capturado_en"]
         if (self.salario_base or Decimal("0")) <= 0 and (self.empleado.salario_diario or Decimal("0")) > 0:
             self.salario_base = (self.empleado.salario_diario or Decimal("0")) * (self.dias_trabajados or Decimal("0"))
         self.total_percepciones = (self.salario_base or Decimal("0")) + (self.bonos or Decimal("0"))

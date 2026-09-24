@@ -250,6 +250,7 @@ def importar_lista_raya_nomina(
                 empleado = Empleado.objects.get(codigo=row.codigo)
             empleados_by_codigo[row.codigo] = empleado
         lineas_to_create: list[NominaLinea] = []
+        snapshot_capturado_en = timezone.now()
         row_by_codigo = {row.codigo: row for row in result.empleados}
         for row in result.empleados:
             empleado = empleados_by_codigo[row.codigo]
@@ -260,6 +261,8 @@ def importar_lista_raya_nomina(
                     empleado=empleado,
                     sucursal_snapshot_id=empleado.sucursal_ref_id,
                     departamento_snapshot=empleado.departamento or "",
+                    snapshot_origen=NominaLinea.SNAPSHOT_LISTA_RAYA,
+                    snapshot_capturado_en=snapshot_capturado_en,
                     dias_trabajados=row.dias_pagados,
                     horas_trabajadas=row.horas_trabajadas,
                     horas_dia=row.horas_dia,

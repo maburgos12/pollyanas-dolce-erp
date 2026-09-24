@@ -2,26 +2,6 @@ import django.db.models.deletion
 from django.db import migrations, models
 
 
-def backfill_nomina_snapshots(apps, schema_editor):
-    NominaLinea = apps.get_model("rrhh", "NominaLinea")
-    lineas = list(
-        NominaLinea.objects.select_related("empleado").only(
-            "id",
-            "empleado__sucursal_ref_id",
-            "empleado__departamento",
-        )
-    )
-    for linea in lineas:
-        linea.sucursal_snapshot_id = linea.empleado.sucursal_ref_id
-        linea.departamento_snapshot = linea.empleado.departamento or ""
-    if lineas:
-        NominaLinea.objects.bulk_update(
-            lineas,
-            ["sucursal_snapshot", "departamento_snapshot"],
-            batch_size=500,
-        )
-
-
 class Migration(migrations.Migration):
     dependencies = [
         ("core", "0023_cumpleanos_activos_y_avisos"),
@@ -45,5 +25,23 @@ class Migration(migrations.Migration):
                 to="core.sucursal",
             ),
         ),
-        migrations.RunPython(backfill_nomina_snapshots, migrations.RunPython.noop),
+        migrations.AddField(
+            model_name="nominalinea",
+            name="snapshot_capturado_en",
+            field=models.DateTimeField(blank=True, null=True),
+        ),
+        migrations.AddField(
+            model_name="nominalinea",
+            name="snapshot_origen",
+            field=models.CharField(
+                blank=True,
+                choices=[
+                    ("CREACION", "Creación de línea"),
+                    ("LISTA_RAYA", "Importación de lista de raya"),
+                    ("CAPTURA_EXPLICITA", "Captura explícita posterior"),
+                ],
+                default="",
+                max_length=24,
+            ),
+        ),
     ]
