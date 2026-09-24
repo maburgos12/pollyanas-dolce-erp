@@ -1,9 +1,12 @@
+from calendar import monthrange
 from datetime import UTC, date, datetime
 from decimal import Decimal as D
 
+from django.db import connection
 from django.db import IntegrityError, transaction
 from django.db.models.deletion import ProtectedError
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -107,6 +110,32 @@ class ISNSourceTests(TestCase):
                 importe=importe,
             )
         return periodo
+
+    def _crear_mes_valido(
+        self,
+        *,
+        empleado,
+        anio,
+        mes,
+        conceptos_primera=(),
+        conceptos_segunda=(),
+    ):
+        ultimo_dia = monthrange(anio, mes)[1]
+        primera = self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(anio, mes, 1),
+            fecha_fin=date(anio, mes, 15),
+            conceptos=conceptos_primera,
+        )
+        segunda = self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_inicio=date(anio, mes, 16),
+            fecha_fin=date(anio, mes, ultimo_dia),
+            conceptos=conceptos_segunda,
+        )
+        return primera, segunda
 
     def test_extrae_periodo_del_concepto_y_no_de_fecha_emision(self):
         cfdi = self._crear_cfdi()
@@ -224,11 +253,11 @@ class ISNSourceTests(TestCase):
 
     def test_calcula_base_por_empleado_con_exenciones_de_codigos_y_aguinaldo(self):
         empleado = self._crear_empleado()
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_PAGADA,
-            fecha_fin=date(2026, 8, 15),
-            conceptos=(
+            anio=2026,
+            mes=8,
+            conceptos_primera=(
                 ("1", D("10000.00")),
                 ("20", D("1000.00")),
                 ("22", D("2000.00")),
@@ -244,17 +273,17 @@ class ISNSourceTests(TestCase):
 
     def test_aguinaldo_consume_tope_anual_sin_arrastrar_salario_previo(self):
         empleado = self._crear_empleado(codigo="E-AGUINALDO-YTD")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 1, 31),
-            conceptos=(("1", D("9000.00")), ("24", D("2000.00"))),
+            anio=2026,
+            mes=1,
+            conceptos_primera=(("1", D("9000.00")), (" 24 ", D("2000.00"))),
         )
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_PAGADA,
-            fecha_fin=date(2026, 8, 15),
-            conceptos=(("24", D("2000.00")),),
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("24", D("2000.00")),),
         )
 
         bases = bases_gravadas_empleados(date(2026, 8, 1))
@@ -289,19 +318,18 @@ class ISNSourceTests(TestCase):
 
     def test_uma_cambia_en_la_frontera_de_febrero_2026(self):
         empleado_enero = self._crear_empleado(codigo="E-UMA-ENERO")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado_enero,
-            estatus=NominaPeriodo.ESTATUS_PAGADA,
-            fecha_fin=date(2026, 1, 31),
-            conceptos=(("24", D("3400.00")),),
+            anio=2026,
+            mes=1,
+            conceptos_primera=(("24", D("3400.00")),),
         )
         empleado_febrero = self._crear_empleado(codigo="E-UMA-FEBRERO")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado_febrero,
-            estatus=NominaPeriodo.ESTATUS_PAGADA,
-            fecha_inicio=date(2026, 2, 1),
-            fecha_fin=date(2026, 2, 15),
-            conceptos=(("24", D("3520.00")),),
+            anio=2026,
+            mes=2,
+            conceptos_primera=(("24", D("3520.00")),),
         )
 
         self.assertEqual(
@@ -325,6 +353,147 @@ class ISNSourceTests(TestCase):
         with self.assertRaisesMessage(ValueError, "periodos"):
             bases_gravadas_empleados(date(2026, 8, 1))
 
+    def test_rechaza_mes_con_una_sola_quincena(self):
+        empleado = self._crear_empleado(codigo="E-UNA-QUINCENA")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(("1", D("100.00")),),
+        )
+
+        with self.assertRaisesMessage(ValueError, "dos periodos"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_quincena_vacia(self):
+        empleado = self._crear_empleado(codigo="E-QUINCENA-VACIA")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(),
+        )
+        NominaPeriodo.objects.create(
+            fecha_inicio=date(2026, 8, 16),
+            fecha_fin=date(2026, 8, 31),
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+        )
+
+        with self.assertRaisesMessage(ValueError, "vacia"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_hueco_y_rango_invertido(self):
+        casos = (
+            ((1, 14), (16, 31), "hueco"),
+            ((1, 15), (20, 16), "invertido"),
+        )
+        for indice, (primera, segunda, mensaje) in enumerate(casos, start=1):
+            with self.subTest(mensaje=mensaje):
+                empleado = self._crear_empleado(codigo=f"E-RANGO-{indice}")
+                self._crear_periodo(
+                    empleado=empleado,
+                    estatus=NominaPeriodo.ESTATUS_CERRADA,
+                    fecha_inicio=date(2026, 8, primera[0]),
+                    fecha_fin=date(2026, 8, primera[1]),
+                    conceptos=(),
+                )
+                self._crear_periodo(
+                    empleado=empleado,
+                    estatus=NominaPeriodo.ESTATUS_PAGADA,
+                    fecha_inicio=date(2026, 8, segunda[0]),
+                    fecha_fin=date(2026, 8, segunda[1]),
+                    conceptos=(),
+                )
+                with self.assertRaisesMessage(ValueError, mensaje):
+                    bases_gravadas_empleados(date(2026, 8, 1))
+                NominaPeriodo.objects.all().delete()
+
+    def test_rechaza_cobertura_incompleta_del_mes(self):
+        empleado = self._crear_empleado(codigo="E-COBERTURA")
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_inicio=date(2026, 8, 2),
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(),
+        )
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_inicio=date(2026, 8, 16),
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(),
+        )
+
+        with self.assertRaisesMessage(ValueError, "cobertura completa"):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_mes_historico_de_aguinaldo_con_rangos_invalidos(self):
+        for indice, rangos in enumerate(
+            (
+                ((1, 15), (1, 15)),
+                ((1, 20), (15, 31)),
+            ),
+            start=1,
+        ):
+            with self.subTest(indice=indice):
+                empleado = self._crear_empleado(codigo=f"E-HIST-{indice}")
+                for numero, (inicio, fin) in enumerate(rangos):
+                    self._crear_periodo(
+                        empleado=empleado,
+                        estatus=(
+                            NominaPeriodo.ESTATUS_CERRADA
+                            if numero == 0
+                            else NominaPeriodo.ESTATUS_PAGADA
+                        ),
+                        fecha_inicio=date(2026, 1, inicio),
+                        fecha_fin=date(2026, 1, fin),
+                        conceptos=((" 24 ", D("2000.00")),) if numero == 0 else (),
+                    )
+                self._crear_mes_valido(
+                    empleado=empleado,
+                    anio=2026,
+                    mes=8,
+                    conceptos_primera=(("24", D("2000.00")),),
+                )
+
+                with self.assertRaises(ValueError):
+                    bases_gravadas_empleados(date(2026, 8, 1))
+                NominaPeriodo.objects.all().delete()
+
+    def test_numero_de_consultas_no_crece_con_los_conceptos(self):
+        empleado = self._crear_empleado(codigo="E-QUERIES")
+        primera, _ = self._crear_mes_valido(
+            empleado=empleado,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("100.00")),),
+        )
+        linea = primera.lineas.get(empleado=empleado)
+
+        with CaptureQueriesContext(connection) as pocas:
+            bases_gravadas_empleados(date(2026, 8, 1))
+        NominaConceptoLinea.objects.bulk_create(
+            [
+                NominaConceptoLinea(
+                    linea=linea,
+                    tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                    codigo_concepto="20",
+                    nombre="Exento",
+                    importe=D("1.00"),
+                )
+                for _ in range(25)
+            ]
+        )
+        with CaptureQueriesContext(connection) as muchas:
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(len(pocas), len(muchas))
+        self.assertLessEqual(len(muchas), 6)
+
     def test_rechaza_periodos_con_rango_duplicado_o_solapado(self):
         empleado = self._crear_empleado(codigo="E-RANGOS")
         periodo = self._crear_periodo(
@@ -344,6 +513,7 @@ class ISNSourceTests(TestCase):
                     fecha_fin=fin,
                     estatus=NominaPeriodo.ESTATUS_PAGADA,
                 )
+                NominaLinea.objects.create(periodo=segundo, empleado=empleado)
                 with self.assertRaises(ValueError):
                     bases_gravadas_empleados(date(2026, 8, 1))
                 segundo.delete()
@@ -371,11 +541,10 @@ class ISNSourceTests(TestCase):
 
     def test_incluye_empleado_sin_percepciones_con_base_cero(self):
         empleado = self._crear_empleado(codigo="E-SIN-PERCEPCIONES")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 8, 31),
-            conceptos=(),
+            anio=2026,
+            mes=8,
         )
 
         self.assertEqual(
@@ -385,11 +554,10 @@ class ISNSourceTests(TestCase):
 
     def test_rechaza_empleado_sin_metadatos_aunque_no_tenga_percepciones(self):
         empleado = self._crear_empleado(codigo="E-CERO-SIN-DEP", departamento="")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 8, 31),
-            conceptos=(),
+            anio=2026,
+            mes=8,
         )
 
         with self.assertRaises(ValueError):
@@ -397,11 +565,11 @@ class ISNSourceTests(TestCase):
 
     def test_rechaza_percepcion_negativa(self):
         empleado = self._crear_empleado(codigo="E-NEGATIVO")
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 8, 31),
-            conceptos=(("1", D("-0.01")),),
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("-0.01")),),
         )
 
         with self.assertRaisesMessage(ValueError, "negativa"):
@@ -418,11 +586,11 @@ class ISNSourceTests(TestCase):
         empleado = self._crear_empleado(codigo="E-SIN-SUCURSAL")
         empleado.sucursal_ref = None
         empleado.save(update_fields={"sucursal_ref"})
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 8, 31),
-            conceptos=(("1", D("100.00")),),
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("100.00")),),
         )
 
         with self.assertRaises(ValueError):
@@ -433,11 +601,11 @@ class ISNSourceTests(TestCase):
             codigo="E-SIN-DEPARTAMENTO",
             departamento="",
         )
-        self._crear_periodo(
+        self._crear_mes_valido(
             empleado=empleado,
-            estatus=NominaPeriodo.ESTATUS_CERRADA,
-            fecha_fin=date(2026, 8, 31),
-            conceptos=(("1", D("100.00")),),
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("100.00")),),
         )
 
         with self.assertRaises(ValueError):

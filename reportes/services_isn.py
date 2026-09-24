@@ -1,9 +1,12 @@
 from collections import Counter, defaultdict
-from datetime import date
+from calendar import monthrange
+from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 import re
 import unicodedata
 from xml.etree import ElementTree as ET
+
+from django.db.models import Count
 
 from rrhh.models import NominaConceptoLinea, NominaLinea, NominaPeriodo
 
@@ -154,26 +157,37 @@ def _uma_diaria_vigente(fecha: date) -> Decimal:
     raise ValueError(f"No hay UMA configurada para {fecha.isoformat()}.")
 
 
-def _validar_periodos_nomina_mes(periodos) -> None:
+def _validar_periodos_nomina_mes(periodos, fecha_mes: date) -> None:
     if not periodos:
         raise ValueError("El mes no tiene periodos de nomina cerrados o pagados.")
-    tipos = {periodo.tipo_periodo for periodo in periodos}
-    if len(tipos) != 1:
-        raise ValueError("El mes mezcla mas de un tipo de periodo de nomina.")
+    if len(periodos) != 2:
+        raise ValueError("El mes fiscal debe tener exactamente dos periodos de nomina.")
+    if any(
+        periodo.tipo_periodo != NominaPeriodo.TIPO_QUINCENAL
+        for periodo in periodos
+    ):
+        raise ValueError("El mes fiscal solo admite periodos de tipo quincenal.")
+    if any(periodo.fecha_inicio > periodo.fecha_fin for periodo in periodos):
+        raise ValueError("El mes contiene un rango de nomina invertido.")
+    if any(getattr(periodo, "lineas_count", 0) <= 0 for periodo in periodos):
+        raise ValueError("El mes contiene una quincena vacia.")
 
     rangos = [(periodo.fecha_inicio, periodo.fecha_fin) for periodo in periodos]
     if len(set(rangos)) != len(rangos):
         raise ValueError("El mes contiene rangos de nomina duplicados.")
     rangos_ordenados = sorted(rangos)
-    for (inicio_anterior, fin_anterior), (inicio, fin) in zip(
-        rangos_ordenados,
-        rangos_ordenados[1:],
-    ):
-        if inicio <= fin_anterior:
-            raise ValueError(
-                "El mes contiene rangos de nomina solapados: "
-                f"{inicio_anterior} a {fin_anterior} y {inicio} a {fin}."
-            )
+    (inicio_primera, fin_primera), (inicio_segunda, fin_segunda) = rangos_ordenados
+    ultimo_dia = date(
+        fecha_mes.year,
+        fecha_mes.month,
+        monthrange(fecha_mes.year, fecha_mes.month)[1],
+    )
+    if inicio_primera != fecha_mes or fin_segunda != ultimo_dia:
+        raise ValueError("Los periodos no dan cobertura completa al mes fiscal.")
+    if inicio_segunda <= fin_primera:
+        raise ValueError("El mes contiene rangos de nomina solapados.")
+    if inicio_segunda != fin_primera + timedelta(days=1):
+        raise ValueError("El mes contiene un hueco entre quincenas.")
 
 
 def _validar_lineas_nomina_mes(lineas) -> None:
@@ -194,9 +208,11 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
             estatus__in=estados_validos,
             fecha_fin__year=periodo.year,
             fecha_fin__month=periodo.month,
-        ).order_by("fecha_inicio", "fecha_fin", "id")
+        )
+        .annotate(lineas_count=Count("lineas"))
+        .order_by("fecha_inicio", "fecha_fin", "id")
     )
-    _validar_periodos_nomina_mes(periodos_mes)
+    _validar_periodos_nomina_mes(periodos_mes, fecha_mes)
 
     lineas = list(
         NominaLinea.objects.filter(periodo_id__in=[item.pk for item in periodos_mes])
@@ -220,14 +236,16 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
         NominaConceptoLinea.objects.filter(
             linea_id__in=[linea.pk for linea in lineas],
             tipo=NominaConceptoLinea.TIPO_PERCEPCION,
-        ).order_by("linea__empleado_id", "id")
+        )
+        .order_by("linea__empleado_id", "id")
+        .values("linea__empleado_id", "codigo_concepto", "importe")
     )
     aguinaldos_previos = defaultdict(lambda: ZERO)
     aguinaldos_mes = defaultdict(lambda: ZERO)
     for concepto in conceptos_mes:
-        empleado_id = concepto.linea.empleado_id
-        codigo = (concepto.codigo_concepto or "").strip()
-        importe = Decimal(concepto.importe or ZERO)
+        empleado_id = concepto["linea__empleado_id"]
+        codigo = (concepto["codigo_concepto"] or "").strip()
+        importe = Decimal(concepto["importe"] or ZERO)
         if importe < ZERO:
             raise ValueError("La nomina contiene una percepcion negativa.")
         if codigo in CODIGOS_EXENTOS_COMPLETOS:
@@ -237,19 +255,50 @@ def bases_gravadas_empleados(periodo: date) -> dict[int, Decimal]:
             continue
         bases[empleado_id] += importe
 
-    conceptos_aguinaldo_previos = NominaConceptoLinea.objects.filter(
-        linea__empleado_id__in=empleado_ids,
-        linea__periodo__estatus__in=estados_validos,
-        linea__periodo__fecha_fin__year=periodo.year,
-        linea__periodo__fecha_fin__month__lt=periodo.month,
-        tipo=NominaConceptoLinea.TIPO_PERCEPCION,
-        codigo_concepto="24",
-    ).order_by("linea__empleado_id", "id")
+    conceptos_aguinaldo_previos = list(
+        NominaConceptoLinea.objects.filter(
+            linea__empleado_id__in=empleado_ids,
+            linea__periodo__estatus__in=estados_validos,
+            linea__periodo__fecha_fin__year=periodo.year,
+            linea__periodo__fecha_fin__month__lt=periodo.month,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto__regex=r"^[[:space:]]*24[[:space:]]*$",
+        )
+        .order_by("linea__periodo__fecha_fin", "linea__empleado_id", "id")
+        .values(
+            "linea__periodo__fecha_fin",
+            "linea__empleado_id",
+            "codigo_concepto",
+            "importe",
+        )
+    )
+    meses_historicos = {
+        fila["linea__periodo__fecha_fin"].month
+        for fila in conceptos_aguinaldo_previos
+    }
+    periodos_historicos = list(
+        NominaPeriodo.objects.filter(
+            estatus__in=estados_validos,
+            fecha_fin__year=periodo.year,
+            fecha_fin__month__in=meses_historicos,
+        )
+        .annotate(lineas_count=Count("lineas"))
+        .order_by("fecha_fin", "fecha_inicio", "id")
+    )
+    periodos_por_mes = defaultdict(list)
+    for periodo_historico in periodos_historicos:
+        periodos_por_mes[periodo_historico.fecha_fin.month].append(periodo_historico)
+    for mes_historico in meses_historicos:
+        _validar_periodos_nomina_mes(
+            periodos_por_mes[mes_historico],
+            date(periodo.year, mes_historico, 1),
+        )
+
     for concepto in conceptos_aguinaldo_previos:
-        importe = Decimal(concepto.importe or ZERO)
+        importe = Decimal(concepto["importe"] or ZERO)
         if importe < ZERO:
             raise ValueError("La nomina contiene una percepcion negativa.")
-        aguinaldos_previos[concepto.linea.empleado_id] += importe
+        aguinaldos_previos[concepto["linea__empleado_id"]] += importe
 
     exencion_aguinaldo = Decimal("30") * uma_diaria
     for empleado_id in empleado_ids:
