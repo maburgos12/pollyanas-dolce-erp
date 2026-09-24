@@ -1,5 +1,6 @@
+from argparse import ArgumentTypeError
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -16,6 +17,15 @@ def parse_period(value: str) -> date:
     return parsed
 
 
+def parse_decimal(value: str) -> Decimal:
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError) as exc:
+        raise ArgumentTypeError(
+            "--base-declarada debe ser un numero decimal."
+        ) from exc
+
+
 class Command(BaseCommand):
     help = "Previsualiza o materializa la distribucion mensual del ISN."
 
@@ -25,7 +35,7 @@ class Command(BaseCommand):
             "--uuid",
             help="UUID exacto; si se omite debe existir un unico CFDI candidato",
         )
-        parser.add_argument("--base-declarada", type=Decimal)
+        parser.add_argument("--base-declarada", type=parse_decimal)
         parser.add_argument("--apply", action="store_true")
 
     def handle(self, *args, **options):

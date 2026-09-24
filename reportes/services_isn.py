@@ -2,13 +2,14 @@ from collections import Counter, defaultdict
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 import unicodedata
 from xml.etree import ElementTree as ET
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Sum
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
 from reportes.models import DistribucionISNEmpleado, ExpedienteISN
@@ -386,10 +387,21 @@ def _resolver_cfdi_isn(periodo: date, uuid: str | None) -> CfdiDescargado:
         return cfdi
 
     candidatos = []
-    queryset = CfdiDescargado.objects.filter(
-        tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
-        tipo_comprobante="I",
-    ).order_by("pk")
+    queryset = (
+        CfdiDescargado.objects.annotate(
+            rfc_emisor_normalizado=Upper(Trim("rfc_emisor")),
+            rfc_receptor_normalizado=Upper(Trim("rfc_receptor")),
+            estatus_normalizado=Upper(Trim("estatus")),
+        )
+        .filter(
+            rfc_emisor_normalizado=RFC_SINALOA,
+            rfc_receptor_normalizado=RFC_EMPRESA,
+            estatus_normalizado="VIGENTE",
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            tipo_comprobante="I",
+        )
+        .order_by("pk")
+    )
     for cfdi in queryset.iterator():
         try:
             periodo_cfdi, _ = extraer_isn_cfdi(cfdi)
@@ -496,7 +508,10 @@ def _validar_preview(preview: PreviewExpedienteISN) -> None:
 def _normalizar_base_declarada(base_declarada: Decimal | None) -> Decimal | None:
     if base_declarada is None:
         return None
-    valor = Decimal(base_declarada)
+    try:
+        valor = Decimal(base_declarada)
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("La base declarada debe ser un numero decimal.") from exc
     if not valor.is_finite() or valor < ZERO:
         raise ValueError("La base declarada debe ser finita y no negativa.")
     return money(valor)
@@ -518,6 +533,103 @@ def _conciliar_base_declarada(
     return base_declarada, diferencia, estado
 
 
+def _bloquear_periodo_isn(periodo: date) -> None:
+    if connection.vendor != "postgresql":
+        raise RuntimeError("La materializacion de ISN requiere PostgreSQL.")
+    llave_periodo = periodo.year * 100 + periodo.month
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [llave_periodo])
+
+
+def _snapshots_preview(preview: PreviewExpedienteISN) -> tuple[tuple, ...]:
+    return tuple(
+        (
+            fila.empleado_id,
+            money(fila.base_gravada),
+            money(fila.monto_isn),
+            fila.area_codigo,
+            fila.sucursal_id,
+        )
+        for fila in preview.filas
+    )
+
+
+def _validar_o_enriquecer_existente(
+    existente: ExpedienteISN,
+    preview: PreviewExpedienteISN,
+    *,
+    base_declarada: Decimal | None,
+    diferencia_base: Decimal | None,
+    estado_previsto: str,
+) -> ExpedienteISN:
+    conflictos = []
+    if existente.periodo != preview.periodo:
+        conflictos.append("periodo")
+    if money(existente.importe_pagado) != money(preview.importe_pagado):
+        conflictos.append("importe pagado")
+    if money(existente.base_gravada_calculada) != money(
+        preview.base_gravada_total
+    ):
+        conflictos.append("base calculada")
+    if existente.cfdi_id != preview.cfdi.pk:
+        conflictos.append("CFDI")
+
+    estado_compatible = existente.estado == estado_previsto or (
+        estado_previsto == ExpedienteISN.ESTADO_APLICADO
+        and existente.estado == ExpedienteISN.ESTADO_REEMPLAZADO
+    )
+    if not estado_compatible:
+        conflictos.append("estado previsto")
+
+    enriquecer_base = False
+    if existente.base_declarada is None:
+        if base_declarada is not None:
+            enriquecer_base = (
+                existente.estado == ExpedienteISN.ESTADO_APLICADO
+                and estado_previsto == ExpedienteISN.ESTADO_APLICADO
+            )
+            if not enriquecer_base:
+                conflictos.append("base declarada")
+    elif base_declarada is None or money(existente.base_declarada) != money(
+        base_declarada
+    ):
+        conflictos.append("base declarada")
+
+    snapshots_guardados = tuple(
+        existente.distribuciones.select_for_update()
+        .order_by("empleado_id")
+        .values_list(
+            "empleado_id",
+            "base_gravada",
+            "monto_isn",
+            "area_codigo",
+            "sucursal_id",
+        )
+    )
+    if snapshots_guardados != _snapshots_preview(preview):
+        conflictos.append("lineas snapshot")
+
+    if conflictos:
+        detalle = ", ".join(conflictos)
+        raise ValueError(
+            "Conflicto de reintento ISN para el mismo UUID: "
+            f"difieren {detalle}. Revise la fuente antes de reintentar."
+        )
+
+    if enriquecer_base:
+        metadata = dict(existente.metadata or {})
+        metadata.update(
+            {
+                "diferencia_base": str(diferencia_base),
+                "estado_previsto": estado_previsto,
+            }
+        )
+        existente.base_declarada = base_declarada
+        existente.metadata = metadata
+        existente.save(update_fields={"base_declarada", "metadata"})
+    return existente
+
+
 def _aplicar_expediente_isn_una_vez(
     preview: PreviewExpedienteISN,
     *,
@@ -527,6 +639,7 @@ def _aplicar_expediente_isn_una_vez(
     aplicado_por=None,
 ) -> ExpedienteISN:
     with transaction.atomic():
+        _bloquear_periodo_isn(preview.periodo)
         try:
             cfdi_actual = CfdiDescargado.objects.select_for_update().get(
                 pk=preview.cfdi.pk
@@ -551,7 +664,13 @@ def _aplicar_expediente_isn_una_vez(
             None,
         )
         if existente is not None:
-            return existente
+            return _validar_o_enriquecer_existente(
+                existente,
+                preview,
+                base_declarada=base_declarada,
+                diferencia_base=diferencia_base,
+                estado_previsto=estado_previsto,
+            )
 
         if estado_previsto == ExpedienteISN.ESTADO_APLICADO:
             for anterior in expedientes:

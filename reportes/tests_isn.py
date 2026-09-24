@@ -2,13 +2,16 @@ from calendar import monthrange
 from datetime import UTC, date, datetime
 from decimal import Decimal as D
 from io import StringIO
+import threading
+from unittest.mock import patch
 
 from django.core.management import call_command
-from django.db import connection
+from django.core.management.base import CommandError
+from django.db import close_old_connections, connection
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -720,6 +723,26 @@ class ISNApplicationTests(TestCase):
         with self.assertRaisesMessage(ValueError, "unico CFDI candidato"):
             preparar_expediente_isn(self.PERIODO)
 
+    def test_candidato_sin_uuid_prefiltra_antes_de_parsear_xml(self):
+        empleado = self._crear_empleado("E-PREFILTRO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        valido = self._crear_cfdi("CFDI-ISN-PREFILTRO")
+        ajeno = self._crear_cfdi("CFDI-AJENO-PREFILTRO")
+        CfdiDescargado.objects.filter(pk=ajeno.pk).update(
+            rfc_emisor="AAA010101AAA",
+            xml_raw="<xml-invalido",
+        )
+
+        with patch(
+            "reportes.services_isn.extraer_isn_cfdi",
+            wraps=extraer_isn_cfdi,
+        ) as extraer:
+            preview = preparar_expediente_isn(self.PERIODO)
+
+        self.assertEqual(preview.cfdi.pk, valido.pk)
+        ids_parseados = {llamada.args[0].pk for llamada in extraer.call_args_list}
+        self.assertNotIn(ajeno.pk, ids_parseados)
+
     def test_apply_crea_expediente_y_linea_por_empleado_incluso_base_cero(self):
         empleado_a = self._crear_empleado("E-APPLY-A")
         empleado_b = self._crear_empleado("E-APPLY-B", Empleado.DEP_PRODUCCION)
@@ -767,6 +790,103 @@ class ISNApplicationTests(TestCase):
         self.assertEqual(segundo.pk, primero.pk)
         self.assertEqual(ExpedienteISN.objects.count(), 1)
         self.assertEqual(DistribucionISNEmpleado.objects.count(), 1)
+
+    def test_reintento_enriquece_base_declarada_conciliada_antes_ausente(self):
+        empleado = self._crear_empleado("E-ENRIQUECIMIENTO")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-ENRIQUECIMIENTO")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        )
+        aplicado_en = original.aplicado_en
+
+        enriquecido = aplicar_expediente_isn(
+            preparar_expediente_isn(
+                self.PERIODO,
+                uuid=cfdi.uuid,
+                base_declarada=D("4000.01"),
+            )
+        )
+
+        enriquecido.refresh_from_db()
+        self.assertEqual(enriquecido.pk, original.pk)
+        self.assertEqual(enriquecido.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertEqual(enriquecido.aplicado_en, aplicado_en)
+        self.assertEqual(enriquecido.base_declarada, D("4000.01"))
+        self.assertEqual(enriquecido.metadata["diferencia_base"], "0.01")
+        self.assertEqual(ExpedienteISN.objects.count(), 1)
+
+        with self.assertRaisesMessage(ValueError, "base declarada"):
+            aplicar_expediente_isn(
+                preparar_expediente_isn(
+                    self.PERIODO,
+                    uuid=cfdi.uuid,
+                    base_declarada=D("4000.00"),
+                )
+            )
+        enriquecido.refresh_from_db()
+        self.assertEqual(enriquecido.base_declarada, D("4000.01"))
+
+    def test_reintento_discrepante_no_degrada_aplicado(self):
+        empleado = self._crear_empleado("E-REINT-DISC")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-REINTENTO-DISCREPANTE")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        )
+
+        with self.assertRaisesMessage(ValueError, "Conflicto de reintento ISN"):
+            aplicar_expediente_isn(
+                preparar_expediente_isn(
+                    self.PERIODO,
+                    uuid=cfdi.uuid,
+                    base_declarada=D("4000.02"),
+                )
+            )
+
+        original.refresh_from_db()
+        self.assertEqual(original.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertIsNone(original.base_declarada)
+        self.assertEqual(ExpedienteISN.objects.count(), 1)
+
+    def test_reintento_rechaza_nomina_mutada_sin_modificar_expediente(self):
+        empleado = self._crear_empleado("E-NOMINA-MUTADA")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-NOMINA-MUTADA")
+        original = aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+        )
+        empleado.departamento = Empleado.DEP_PRODUCCION
+        empleado.save(update_fields={"departamento"})
+
+        with self.assertRaisesMessage(ValueError, "Conflicto de reintento ISN"):
+            aplicar_expediente_isn(
+                preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+            )
+
+        original.refresh_from_db()
+        self.assertEqual(original.base_gravada_calculada, D("4000.00"))
+        self.assertEqual(
+            original.distribuciones.get().area_codigo,
+            Empleado.DEP_VENTAS,
+        )
+
+    def test_aplicacion_toma_lock_asesor_estable_del_periodo(self):
+        empleado = self._crear_empleado("E-LOCK-ASESOR")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-LOCK-ASESOR")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        with CaptureQueriesContext(connection) as queries:
+            aplicar_expediente_isn(preview)
+
+        locks = [
+            query["sql"]
+            for query in queries.captured_queries
+            if "pg_advisory_xact_lock" in query["sql"]
+        ]
+        self.assertEqual(len(locks), 1)
+        self.assertIn("202608", locks[0])
 
     def test_tolerancia_de_un_centavo_conserva_estado_aplicado(self):
         empleado = self._crear_empleado("E-TOLERANCIA")
@@ -918,6 +1038,114 @@ class ISNApplicationTests(TestCase):
 
         self.assertEqual(ExpedienteISN.objects.count(), 0)
         self.assertEqual(DistribucionISNEmpleado.objects.count(), 0)
+
+    def test_comando_rechaza_base_declarada_no_decimal_sin_traceback(self):
+        with self.assertRaisesMessage(CommandError, "numero decimal"):
+            call_command(
+                "materializar_isn",
+                "--periodo",
+                "2026-08",
+                "--base-declarada",
+                "no-es-decimal",
+            )
+
+
+class ISNConcurrencyTests(TransactionTestCase):
+    PERIODO = date(2026, 8, 1)
+
+    def _crear_cfdi(self, uuid, importe):
+        xml = f"""<cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4">
+          <cfdi:Conceptos>
+            <cfdi:Concepto NoIdentificacion="202608 2-003"
+              Descripcion="Impuesto sobre nomina" Importe="{importe}" />
+          </cfdi:Conceptos>
+        </cfdi:Comprobante>"""
+        return CfdiDescargado.objects.create(
+            uuid=uuid,
+            rfc_emisor="GES8101015I7",
+            rfc_receptor="GEF211230KR2",
+            subtotal=D(importe),
+            total=D(importe),
+            tipo_comprobante="I",
+            tipo_cfdi=CfdiDescargado.TIPO_RECIBIDO,
+            fecha_emision=datetime(2026, 9, 17, tzinfo=UTC),
+            estatus="VIGENTE",
+            xml_raw=xml,
+        )
+
+    def setUp(self):
+        sucursal = Sucursal.objects.create(codigo="S-CONC", nombre="Concurrente")
+        empleado = Empleado.objects.create(
+            codigo="E-CONC",
+            nombre="Empleado concurrente",
+            departamento=Empleado.DEP_VENTAS,
+            sucursal_ref=sucursal,
+        )
+        for inicio, fin, estatus in (
+            (date(2026, 8, 1), date(2026, 8, 15), NominaPeriodo.ESTATUS_CERRADA),
+            (date(2026, 8, 16), date(2026, 8, 31), NominaPeriodo.ESTATUS_PAGADA),
+        ):
+            periodo = NominaPeriodo.objects.create(
+                fecha_inicio=inicio,
+                fecha_fin=fin,
+                estatus=estatus,
+                tipo_periodo=NominaPeriodo.TIPO_QUINCENAL,
+            )
+            linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
+            if inicio.day == 1:
+                NominaConceptoLinea.objects.create(
+                    linea=linea,
+                    tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                    codigo_concepto="1",
+                    nombre="Sueldo",
+                    importe=D("4000.00"),
+                )
+
+    def test_correctivos_simultaneos_crean_revisiones_secuenciales(self):
+        original_cfdi = self._crear_cfdi("CFDI-CONC-ORIGINAL", "100.00")
+        aplicar_expediente_isn(
+            preparar_expediente_isn(self.PERIODO, uuid=original_cfdi.uuid)
+        )
+        previews = [
+            preparar_expediente_isn(
+                self.PERIODO,
+                uuid=self._crear_cfdi(f"CFDI-CONC-{indice}", importe).uuid,
+            )
+            for indice, importe in ((1, "101.00"), (2, "102.00"))
+        ]
+        barrera = threading.Barrier(2)
+        resultados = []
+        errores = []
+
+        def aplicar(preview):
+            close_old_connections()
+            try:
+                barrera.wait(timeout=5)
+                expediente = aplicar_expediente_isn(preview)
+                resultados.append(expediente.pk)
+            except Exception as exc:
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        hilos = [
+            threading.Thread(target=aplicar, args=(preview,))
+            for preview in previews
+        ]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join(timeout=10)
+
+        self.assertFalse(any(hilo.is_alive() for hilo in hilos))
+        self.assertFalse(errores, errores)
+        self.assertEqual(len(resultados), 2)
+        expedientes = list(ExpedienteISN.objects.order_by("revision"))
+        self.assertEqual([item.revision for item in expedientes], [1, 2, 3])
+        self.assertEqual(
+            sum(item.estado == ExpedienteISN.ESTADO_APLICADO for item in expedientes),
+            1,
+        )
 
 
 class ISNModelTests(TestCase):
