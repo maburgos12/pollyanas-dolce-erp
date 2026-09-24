@@ -222,9 +222,10 @@ def _catalogo_value(post_data, field_name: str, allowed_values: frozenset[str], 
 def _resolver_sucursal_desde_post(post_data) -> Sucursal | None:
     sucursal_id = (post_data.get("sucursal_id") or "").strip()
     if sucursal_id:
-        if not sucursal_id.isdigit():
+        sucursal_pk = _safe_int(sucursal_id)
+        if sucursal_pk is None:
             raise ValidationError("Selecciona una sucursal válida del catálogo.")
-        sucursal = Sucursal.objects.filter(pk=int(sucursal_id), activa=True).first()
+        sucursal = Sucursal.objects.filter(pk=sucursal_pk, activa=True).first()
         if not sucursal:
             raise ValidationError("Selecciona una sucursal válida del catálogo.")
         return sucursal
@@ -281,9 +282,10 @@ def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: E
     jefe_id = (post_data.get("jefe_directo") or "").strip()
     if not jefe_id:
         return None
-    if not jefe_id.isdigit():
+    jefe_pk = _safe_int(jefe_id)
+    if jefe_pk is None:
         raise ValidationError("Selecciona un jefe directo valido.")
-    qs = Empleado.objects.filter(pk=int(jefe_id), activo=True).filter(liderazgo_q())
+    qs = Empleado.objects.filter(pk=jefe_pk, activo=True).filter(liderazgo_q())
     if empleado:
         qs = qs.exclude(pk=empleado.pk)
     jefe = qs.first()
@@ -297,8 +299,13 @@ def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: E
 
 
 def _safe_int(raw: str | None) -> int | None:
-    value = (raw or "").strip()
-    return int(value) if value.isdigit() else None
+    if not isinstance(raw, str):
+        return None
+    value = raw.strip()
+    if not re.fullmatch(r"[0-9]{1,19}", value):
+        return None
+    numero = int(value)
+    return numero if 0 < numero <= 9_223_372_036_854_775_807 else None
 
 
 def _crear_usuario_rrhh_para_empleado(request, empleado: Empleado):
@@ -348,9 +355,10 @@ def _resolver_usuario_erp_desde_post(request, empleado: Empleado):
         raise ValidationError("Selecciona la sucursal app para crear el usuario con acceso a logística.")
     if crear_usuario:
         return _crear_usuario_rrhh_para_empleado(request, empleado)
-    if usuario_erp_id.isdigit():
+    usuario_pk = _safe_int(usuario_erp_id)
+    if usuario_pk is not None:
         User = get_user_model()
-        nuevo_user = User.objects.filter(pk=int(usuario_erp_id)).first()
+        nuevo_user = User.objects.filter(pk=usuario_pk).first()
         if nuevo_user and (
             not hasattr(nuevo_user, "empleado_rrhh")
             or nuevo_user.empleado_rrhh is None
@@ -1211,7 +1219,7 @@ def _crear_empleado_desde_post(
         sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
         asegurar_identidad_operativa_empleado(
             empleado,
-            sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+            sucursal_app_id=_safe_int(sucursal_app_id),
         )
         _sincronizar_logistica_desde_post(request, empleado)
         sincronizar_esquemas_bono(empleado, request.POST, organizacion)
@@ -1257,8 +1265,30 @@ _BORRADOR_LOGISTICA_CAMPOS = frozenset({
 
 def _borrador_ficha_desde_post(post):
     borrador = {campo: str(post.get(campo) or "") for campo in _BORRADOR_FICHA_CAMPOS}
-    borrador["bono_esquemas"] = [valor for valor in post.getlist("bono_esquemas") if valor.isdigit()]
+    borrador["bono_esquemas"] = post.getlist("bono_esquemas")
     return borrador
+
+
+_FICHA_ID_CAMPOS = frozenset({
+    "jefe_directo", "sucursal_id", "sucursal_app_id", "usuario_erp",
+    "alta_pendiente_id", "jornada_id",
+})
+_FICHA_MAX_BONO_ESQUEMAS = 50
+
+
+def _errores_ids_ficha(post):
+    errores = {}
+    for campo in _FICHA_ID_CAMPOS:
+        valor = (post.get(campo) or "").strip()
+        if valor and _safe_int(valor) is None:
+            errores[campo] = [f"Selecciona un valor válido para {campo}."]
+    bonos = post.getlist("bono_esquemas")
+    if len(bonos) > _FICHA_MAX_BONO_ESQUEMAS or any(
+        not isinstance(valor, str) or valor != valor.strip() or _safe_int(valor) is None
+        for valor in bonos
+    ):
+        errores["bono_esquemas"] = ["Selecciona hasta 50 esquemas de bono con identificadores válidos."]
+    return errores
 
 
 def _errores_longitud_borrador(borrador):
@@ -1287,8 +1317,9 @@ def _url_ficha_empleado(request, empleado=None):
     }
     if not empleado:
         pendiente = (request.POST.get("alta_pendiente_id") or "").strip()
-        if pendiente.isdigit():
-            filtros["alta_pendiente"] = pendiente
+        pendiente_pk = _safe_int(pendiente)
+        if pendiente_pk is not None:
+            filtros["alta_pendiente"] = pendiente_pk
     query = f"?{urlencode(filtros)}" if filtros else ""
     fragmento = (
         f"empleado-{empleado.pk}" if empleado else
@@ -1302,7 +1333,8 @@ def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None)
     if error is not None:
         errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
         borrador = _borrador_ficha_desde_post(request.POST)
-        errores = {**_errores_longitud_borrador(borrador), **errores}
+        errores_ids = _errores_ids_ficha(request.POST)
+        errores = {**_errores_longitud_borrador(borrador), **errores_ids, **errores}
         if _wants_progressive_response(request):
             texto = next(iter(errores.values()))[0]
             return JsonResponse({
@@ -1316,6 +1348,8 @@ def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None)
         for campo in excedidos:
             borrador.pop(campo)
             errores[campo] = [f"{campo} supera el límite del borrador de 10000 caracteres; vuelve a capturarlo."]
+        for campo in errores_ids:
+            borrador.pop(campo, None)
         texto = errores[excedidos[0]][0] if excedidos else next(iter(errores.values()))[0]
         messages.error(request, texto)
         request.session["rrhh_ficha_error_flash"] = {
@@ -1348,7 +1382,7 @@ def empleados(request):
         alta_pendiente_id = (request.POST.get("alta_pendiente_id") or "").strip()
         if action == "create" and alta_pendiente_id:
             alta_pendiente = AltaPendienteEmpleado.objects.filter(
-                pk=int(alta_pendiente_id) if alta_pendiente_id.isdigit() else None,
+                pk=_safe_int(alta_pendiente_id),
                 estado=AltaPendienteEmpleado.ESTADO_PENDIENTE,
             ).first()
             if not alta_pendiente:
@@ -1444,16 +1478,20 @@ def empleados(request):
         empleado_edicion = None
         if action == "update":
             empleado_id = (request.POST.get("empleado_id") or "").strip()
-            empleado_edicion = Empleado.objects.filter(pk=int(empleado_id)).first() if empleado_id.isdigit() else None
+            empleado_pk = _safe_int(empleado_id)
+            empleado_edicion = Empleado.objects.filter(pk=empleado_pk).first() if empleado_pk else None
             if not empleado_edicion:
                 return _respuesta_ficha_empleado(request, error=ValidationError({
                     "empleado_id": "Selecciona un empleado válido para editar.",
                 }))
         if action in {"create", "update"}:
-            errores_longitud = _errores_longitud_borrador(_borrador_ficha_desde_post(request.POST))
-            if errores_longitud:
+            errores_formulario = {
+                **_errores_longitud_borrador(_borrador_ficha_desde_post(request.POST)),
+                **_errores_ids_ficha(request.POST),
+            }
+            if errores_formulario:
                 return _respuesta_ficha_empleado(
-                    request, empleado=empleado_edicion, error=ValidationError(errores_longitud),
+                    request, empleado=empleado_edicion, error=ValidationError(errores_formulario),
                 )
         if not nombre:
             return _respuesta_ficha_empleado(request, empleado=empleado_edicion, error=ValidationError({
@@ -1508,14 +1546,12 @@ def empleados(request):
                 empleado.sucursal_ref = sucursal
                 empleado.activo = request.POST.get("activo") == "on"
                 try:
-                    empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
-                except ValidationError as exc:
-                    return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
-                        "usuario_erp": exc.messages[0],
-                    }))
-                try:
                     with transaction.atomic():
                         Empleado.objects.select_for_update().get(pk=empleado.pk)
+                        try:
+                            empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
+                        except ValidationError as exc:
+                            raise ValidationError({"usuario_erp": exc.messages[0]}) from exc
                         empleado.save()
                         sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
                         aplicar_jornada_desde_post(
@@ -1524,7 +1560,7 @@ def empleados(request):
                         sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
                         asegurar_identidad_operativa_empleado(
                             empleado,
-                            sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+                            sucursal_app_id=_safe_int(sucursal_app_id),
                         )
                         _sincronizar_logistica_desde_post(request, empleado)
                         sincronizar_esquemas_bono(empleado, request.POST, organizacion)
@@ -1693,7 +1729,8 @@ def empleados(request):
             except Exception:
                 empleado.repartidor_logistica = None
         if ficha_error_flash and ficha_error_flash.get("empleado_id") == empleado.pk:
-            borrador = dict(ficha_error_flash["values"])
+            valores_flash = ficha_error_flash.get("values")
+            borrador = dict(valores_flash) if isinstance(valores_flash, dict) else {}
             formulario = copy(empleado)
             formulario._state = copy(empleado._state)
             formulario._state.fields_cache = dict(empleado._state.fields_cache)
@@ -1712,16 +1749,38 @@ def empleados(request):
             if "salario_diario" in borrador:
                 formulario.salario_diario = borrador["salario_diario"]
             if "jefe_directo" in borrador:
-                formulario.jefe_directo_id = int(borrador["jefe_directo"]) if borrador["jefe_directo"].isdigit() else None
-            if "sucursal_id" in borrador:
+                jefe_raw = borrador["jefe_directo"]
+                if jefe_raw == "":
+                    formulario.jefe_directo_id = None
+                elif jefe_pk := _safe_int(jefe_raw):
+                    formulario.jefe_directo_id = jefe_pk
+                else:
+                    borrador.pop("jefe_directo")
+            if "sucursal_id" in borrador and (
+                borrador["sucursal_id"] == "" or _safe_int(borrador["sucursal_id"]) is not None
+            ):
                 formulario.sucursal_form_id = borrador["sucursal_id"]
             perfil_usuario = getattr(empleado.usuario_erp, "userprofile", None) if empleado.usuario_erp_id else None
             sucursal_app_id = getattr(perfil_usuario, "sucursal_id", None)
-            formulario.form_sucursal_app_id = borrador.get("sucursal_app_id", str(sucursal_app_id or ""))
+            sucursal_app_raw = borrador.get("sucursal_app_id", "")
+            formulario.form_sucursal_app_id = (
+                sucursal_app_raw if sucursal_app_raw == "" or _safe_int(sucursal_app_raw) is not None
+                else str(sucursal_app_id or "")
+            )
             if "activo" in borrador:
                 formulario.activo = borrador["activo"] == "on"
-            if "bono_esquemas" in borrador:
-                formulario.bono_esquema_ids = {int(valor) for valor in borrador["bono_esquemas"]}
+            bonos_raw = borrador.get("bono_esquemas")
+            if isinstance(bonos_raw, list) and len(bonos_raw) <= _FICHA_MAX_BONO_ESQUEMAS:
+                bonos_ids = [_safe_int(valor) for valor in bonos_raw]
+                if all(
+                    bono_pk is not None and isinstance(valor, str) and valor == valor.strip()
+                    for valor, bono_pk in zip(bonos_raw, bonos_ids)
+                ):
+                    formulario.bono_esquema_ids = set(bonos_ids)
+                else:
+                    borrador["bono_esquemas"] = [str(pk) for pk in empleado.bono_esquema_ids]
+            else:
+                borrador["bono_esquemas"] = [str(pk) for pk in empleado.bono_esquema_ids]
             repartidor = empleado.repartidor_logistica
             borrador.setdefault("logistica_tipo_identidad", (
                 repartidor.tipo_identidad if repartidor else
@@ -1763,8 +1822,9 @@ def empleados(request):
     )
     alta_pendiente_id = (request.GET.get("alta_pendiente") or "").strip()
     alta_pendiente_seleccionada = None
-    if alta_pendiente_id.isdigit():
-        alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=int(alta_pendiente_id)).first()
+    alta_pendiente_pk = _safe_int(alta_pendiente_id)
+    if alta_pendiente_pk is not None:
+        alta_pendiente_seleccionada = altas_pendientes_qs.filter(pk=alta_pendiente_pk).first()
     altas_pendientes = list(altas_pendientes_qs[:20])
     alta_prefill = _alta_pendiente_prefill(alta_pendiente_seleccionada)
     alta_form_draft = None

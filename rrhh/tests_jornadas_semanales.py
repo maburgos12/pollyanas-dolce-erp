@@ -350,6 +350,41 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertIsNone(inicial.fecha_fin)
         self.assertEqual(empleado.jornadas_asignadas.count(), 1)
 
+    def test_error_de_jornada_revierte_usuario_erp_y_auditoria_en_edicion(self):
+        empleado, _ = self.empleado_con_jornada()
+        username = "jornada_rollback_update"
+        datos = self.datos_edicion(
+            empleado, crear_usuario_erp="on", nuevo_usuario_username=username,
+            nuevo_usuario_password="temporal-123", jornada_motivo="",
+        )
+        fallido = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(fallido.status_code, 400)
+        self.assertFalse(get_user_model().objects.filter(username=username).exists())
+        self.assertFalse(AuditLog.objects.filter(model="auth.User", action="CREATE", payload__username=username).exists())
+        empleado.refresh_from_db()
+        self.assertIsNone(empleado.usuario_erp_id)
+        datos["jornada_motivo"] = "Cambio aprobado"
+        reintento = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(reintento.status_code, 200)
+        empleado.refresh_from_db()
+        self.assertEqual(empleado.usuario_erp.username, username)
+
+    def test_error_de_jornada_revierte_usuario_erp_y_auditoria_en_alta(self):
+        username = "jornada_rollback_create"
+        datos = self.datos_alta(
+            crear_usuario_erp="on", nuevo_usuario_username=username,
+            nuevo_usuario_password="temporal-123", jornada_motivo="",
+        )
+        fallido = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(fallido.status_code, 400)
+        self.assertFalse(Empleado.objects.filter(codigo="JORNADA-FICHA").exists())
+        self.assertFalse(get_user_model().objects.filter(username=username).exists())
+        self.assertFalse(AuditLog.objects.filter(model="auth.User", action="CREATE", payload__username=username).exists())
+        datos["jornada_motivo"] = "Alta confirmada"
+        reintento = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(reintento.status_code, 200)
+        self.assertEqual(Empleado.objects.get(codigo="JORNADA-FICHA").usuario_erp.username, username)
+
     def test_alta_invalida_revierte_empleado(self):
         response = self.client.post(self.url, self.datos_alta(jornada_motivo=""), HTTP_ACCEPT="application/json")
         self.assertEqual(response.status_code, 400)
@@ -566,6 +601,56 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         pantalla = self.client.get(self.url)
         self.assertEqual(pantalla.status_code, 200)
         self.assertContains(pantalla, "supera el límite del borrador")
+
+    def test_ids_hostiles_en_post_muestran_error_y_no_rompen_borrador(self):
+        empleado, _ = self.empleado_con_jornada()
+        casos = (
+            {"bono_esquemas": ["9" * 5000]},
+            {"bono_esquemas": ["²"]},
+            {"bono_esquemas": [" 1 "]},
+            {"bono_esquemas": ["1"] * 51},
+            {"jefe_directo": "²"},
+            {"jefe_directo": "9" * 5000},
+        )
+        for extra in casos:
+            with self.subTest(extra=next(iter(extra)) + str(len(next(iter(extra.values()))))):
+                datos = self.datos_edicion(empleado, **extra)
+                respuesta = self.client.post(self.url, datos)
+                self.assertEqual(respuesta.status_code, 302)
+                self.assertEqual(respuesta["Location"], f"{self.url}#empleado-{empleado.pk}")
+                pantalla = self.client.get(self.url)
+                self.assertEqual(pantalla.status_code, 200)
+                self.assertContains(pantalla, "válido")
+                segundo_get = self.client.get(self.url)
+                self.assertNotIn("rrhh_ficha_error_flash", self.client.session)
+                self.assertNotContains(segundo_get, "supera el límite del borrador")
+        empleado.refresh_from_db()
+        self.assertIsNone(empleado.jefe_directo_id)
+
+    def test_ids_hostiles_json_conservan_values_originales(self):
+        empleado, _ = self.empleado_con_jornada()
+        bono = "9" * 5000
+        respuesta = self.client.post(
+            self.url, self.datos_edicion(empleado, bono_esquemas=[bono]),
+            HTTP_ACCEPT="application/json",
+        )
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertTrue(respuesta.json()["toast"]["persistent"])
+        self.assertIn("bono_esquemas", respuesta.json()["errors"])
+        self.assertEqual(respuesta.json()["values"]["bono_esquemas"], [bono])
+
+    def test_borrador_legacy_con_ids_malformados_no_rompe_get(self):
+        empleado, _ = self.empleado_con_jornada()
+        sesion = self.client.session
+        sesion["rrhh_ficha_error_flash"] = {
+            "accion": "update", "empleado_id": empleado.pk,
+            "values": {"jefe_directo": "²", "bono_esquemas": ["9" * 5000]},
+        }
+        sesion.save()
+        pantalla = self.client.get(self.url)
+        self.assertEqual(pantalla.status_code, 200)
+        self.assertContains(pantalla, f'id="empleado-{empleado.pk}"')
+        self.assertNotIn("rrhh_ficha_error_flash", self.client.session)
 
     def test_campo_con_max_length_real_se_rechaza_sin_recortar_values(self):
         nombre = "N" * (Empleado._meta.get_field("nombre").max_length + 1)
