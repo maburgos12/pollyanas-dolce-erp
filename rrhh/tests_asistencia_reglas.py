@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from queue import Queue
+from threading import Event, Thread
+from time import monotonic
 from zoneinfo import ZoneInfo
 
-from django.test import TestCase
+from django.db import close_old_connections, connection, connections, transaction
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from rrhh.models import (
@@ -185,6 +189,29 @@ class DescansoJornadaSemanalReglasTests(TestCase):
             estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
         ).exists())
 
+    def test_feriado_oficial_entre_semana_prevalece_sobre_jornada_laborable(self):
+        self.asignar_semana(descansos=(6,))
+        fecha = date(2026, 9, 16)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha,
+        ).exists())
+
+    def test_feriado_oficial_en_domingo_prevalece_sobre_jornada_laborable(self):
+        self.asignar_semana(descansos=(2,))
+        fecha = date(2029, 9, 16)
+        self.assertEqual(fecha.weekday(), 6)
+
+        resultado = evaluar_dia_empleado(self.empleado, fecha)
+
+        self.assertEqual(resultado.creados, 0)
+        self.assertFalse(IncidenciaAsistencia.objects.filter(
+            empleado=self.empleado, fecha=fecha,
+        ).exists())
+
     def test_dia_laborable_semanal_conserva_turno_y_extra(self):
         self.asignar_semana()
         fecha = date(2026, 9, 14)
@@ -212,6 +239,113 @@ class DescansoJornadaSemanalReglasTests(TestCase):
         self.assertFalse(IncidenciaAsistencia.objects.filter(
             empleado=self.empleado, fecha=fecha,
         ).exists())
+
+
+class DescansoIncidenciaConcurrenteTests(TransactionTestCase):
+    def setUp(self):
+        self.empleado = Empleado.objects.create(
+            codigo="DESCANSO-CONC", nombre="Persona con incidencia concurrente",
+            fecha_ingreso=date(2026, 9, 1),
+        )
+        jornada = JornadaSemanal.objects.create(nombre="Semana con descanso concurrente")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(jornada=jornada, dia_semana=dia, turno=None)
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=jornada,
+            fecha_inicio=date(2026, 9, 1), motivo="Horario confirmado",
+        )
+
+    def test_edicion_manual_concurrente_no_genera_bitacora_automatica_falsa(self):
+        for offset, orden in enumerate(("manual_primero", "manual_mientras_espera")):
+            with self.subTest(orden=orden):
+                fecha = date(2026, 9, 9) + timedelta(weeks=offset)
+                incidencia = IncidenciaAsistencia.objects.create(
+                    empleado=self.empleado, fecha=fecha,
+                    tipo=IncidenciaAsistencia.TIPO_FALTA,
+                    estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+                    detalle="Falta original",
+                )
+                manual_bloqueo = Event()
+                liberar_manual = Event()
+                evaluacion_terminada = Event()
+                pid_evaluacion = Queue()
+                resultados = Queue()
+
+                def editar():
+                    close_old_connections()
+                    try:
+                        with transaction.atomic():
+                            with connection.cursor() as cursor:
+                                cursor.execute("SET LOCAL lock_timeout = '8s'")
+                            fila = IncidenciaAsistencia.objects.select_for_update().get(pk=incidencia.pk)
+                            if orden == "manual_primero":
+                                fila.estado = IncidenciaAsistencia.ESTADO_CONCILIADO
+                                fila.detalle = "Conciliación manual conservada"
+                                fila.editado_manual = True
+                                fila.save(update_fields=["estado", "detalle", "editado_manual"])
+                            manual_bloqueo.set()
+                            if not liberar_manual.wait(10):
+                                raise TimeoutError("No se liberó la edición manual")
+                            if orden == "manual_mientras_espera":
+                                fila.estado = IncidenciaAsistencia.ESTADO_CONCILIADO
+                                fila.detalle = "Conciliación manual conservada"
+                                fila.editado_manual = True
+                                fila.save(update_fields=["estado", "detalle", "editado_manual"])
+                        resultados.put(("manual", None))
+                    except Exception as exc:
+                        resultados.put(("manual", exc))
+                    finally:
+                        connections.close_all()
+
+                def evaluar():
+                    close_old_connections()
+                    try:
+                        with connection.cursor() as cursor:
+                            cursor.execute("SET lock_timeout = '8s'")
+                            cursor.execute("SELECT pg_backend_pid()")
+                            pid_evaluacion.put(cursor.fetchone()[0])
+                        resultado = evaluar_dia_empleado(self.empleado, fecha)
+                        resultados.put(("evaluacion", resultado))
+                    except Exception as exc:
+                        resultados.put(("evaluacion", exc))
+                    finally:
+                        evaluacion_terminada.set()
+                        connections.close_all()
+
+                hilo_manual = Thread(target=editar, daemon=True)
+                hilo_evaluacion = Thread(target=evaluar, daemon=True)
+                hilo_manual.start()
+                try:
+                    self.assertTrue(manual_bloqueo.wait(5))
+                    hilo_evaluacion.start()
+                    pid = pid_evaluacion.get(timeout=5)
+                    bloqueada = False
+                    limite = monotonic() + 5
+                    while monotonic() < limite and not evaluacion_terminada.is_set():
+                        with connection.cursor() as cursor:
+                            cursor.execute("SELECT cardinality(pg_blocking_pids(%s)) > 0", [pid])
+                            bloqueada = cursor.fetchone()[0]
+                        if bloqueada:
+                            break
+                        evaluacion_terminada.wait(0.01)
+                    self.assertTrue(bloqueada, "La evaluación debe esperar la fila de incidencia")
+                finally:
+                    liberar_manual.set()
+                    hilo_manual.join(timeout=12)
+                    if hilo_evaluacion.ident is not None:
+                        hilo_evaluacion.join(timeout=12)
+
+                self.assertFalse(hilo_manual.is_alive() or hilo_evaluacion.is_alive())
+                recibidos = dict(resultados.get(timeout=2) for _ in range(2))
+                self.assertIsNone(recibidos["manual"])
+                self.assertEqual(recibidos["evaluacion"].resueltos, 0)
+                incidencia.refresh_from_db()
+                self.assertEqual(incidencia.estado, IncidenciaAsistencia.ESTADO_CONCILIADO)
+                self.assertEqual(incidencia.detalle, "Conciliación manual conservada")
+                self.assertTrue(incidencia.editado_manual)
+                self.assertFalse(IncidenciaAsistenciaBitacora.objects.filter(
+                    incidencia=incidencia,
+                ).exists())
 
 
 class ReglasAsistenciaRRHHTests(TestCase):

@@ -21,9 +21,9 @@ from .models import (
     Turno,
 )
 from .services import TIEMPO_COMIDA_MINUTOS, generar_horas_extra_automatico, minutos_jornada_programada
-from .services_vacaciones import es_dia_laborable
+from .services_vacaciones import es_descanso_oficial, es_dia_laborable
 from .services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
-from .services_turnos import ESTADO_DESCANSO, horario_programado_para_fecha
+from .services_turnos import ESTADO_DESCANSO, ESTADO_LABORABLE, horario_programado_para_fecha
 
 
 VENTANA_RETARDOS_DIAS = 15
@@ -645,25 +645,33 @@ def _resolver_incidencias_stale(
         fecha=fecha,
         editado_manual=False,
     ).exclude(tipo__in=touched).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO)
-    if motivo_auditoria:
-        anteriores = list(stale.values("pk", "estado", "detalle"))
-        if not anteriores:
-            return 0
-        IncidenciaAsistenciaBitacora.objects.bulk_create([
-            IncidenciaAsistenciaBitacora(
-                incidencia_id=anterior["pk"], campo="estado",
-                valor_anterior=anterior["estado"],
-                valor_nuevo=IncidenciaAsistencia.ESTADO_RESUELTO,
-                comentario=f'{motivo_auditoria} Detalle anterior: {anterior["detalle"]}',
-            )
-            for anterior in anteriores
-        ])
-        stale = stale.filter(pk__in=[anterior["pk"] for anterior in anteriores])
-    return stale.update(
+    nuevos_valores = dict(
         estado=IncidenciaAsistencia.ESTADO_RESUELTO,
         severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
         detalle="Incidencia resuelta por reevaluacion automatica.",
     )
+    if not motivo_auditoria:
+        return stale.update(**nuevos_valores)
+
+    # Siempre bloquear incidencias por PK. Una edición manual toma una sola fila;
+    # aquí el estado se vuelve a leer después de esperar ese bloqueo.
+    filas = list(stale.select_for_update(of=("self",)).order_by("pk"))
+    resueltos = 0
+    for fila in filas:
+        if fila.editado_manual or fila.estado == IncidenciaAsistencia.ESTADO_RESUELTO:
+            continue
+        actualizado = IncidenciaAsistencia.objects.filter(
+            pk=fila.pk, editado_manual=False,
+        ).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO).update(**nuevos_valores)
+        if not actualizado:
+            continue
+        IncidenciaAsistenciaBitacora.objects.create(
+            incidencia=fila, campo="estado", valor_anterior=fila.estado,
+            valor_nuevo=IncidenciaAsistencia.ESTADO_RESUELTO,
+            comentario=f"{motivo_auditoria} Detalle anterior: {fila.detalle}",
+        )
+        resueltos += actualizado
+    return resueltos
 
 
 def _baja_bloquea_evaluacion(empleado: Empleado, fecha: date) -> bool:
@@ -738,8 +746,15 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
             evaluados=1, creados=creados, actualizados=actualizados, resueltos=resueltos,
         )
     if not asistencia:
-        if not es_dia_laborable(fecha) and not isinstance(horario.asignacion, AsignacionJornadaEmpleado):
-            return ResultadoEvaluacionAsistencia(evaluados=1)
+        if not es_dia_laborable(fecha):
+            domingo_semanal_laborable = (
+                fecha.weekday() == 6
+                and not es_descanso_oficial(fecha)
+                and horario.estado == ESTADO_LABORABLE
+                and isinstance(horario.asignacion, AsignacionJornadaEmpleado)
+            )
+            if not domingo_semanal_laborable:
+                return ResultadoEvaluacionAsistencia(evaluados=1)
 
     suspension = _suspension_activa_en_fecha(empleado, fecha)
     if suspension:
