@@ -4,9 +4,12 @@ from queue import Queue
 from threading import Event, Thread
 from time import monotonic
 
-from django.core.exceptions import ValidationError
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
+from django.urls import reverse
 
 from rrhh.models import (
     AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
@@ -238,6 +241,207 @@ class JornadaSemanalModelTests(TestCase):
                 fecha_inicio=date(2026, 9, 14), fecha_fin=None,
                 motivo="Traslape", actor=None,
             )
+
+
+class JornadaDesdeFichaEmpleadoTests(TestCase):
+    def setUp(self):
+        self.actor = get_user_model().objects.create_user(username="gestor.jornada", password="pass123")
+        self.actor.groups.add(Group.objects.get_or_create(name="RRHH")[0])
+        self.client.force_login(self.actor)
+        self.url = reverse("rrhh:empleados")
+        self.jornada = JornadaSemanal.objects.create(nombre="Semana A")
+        self.otra = JornadaSemanal.objects.create(nombre="Semana B")
+
+    def datos_alta(self, **extra):
+        return {
+            "action": "create", "nombre": "Persona nueva", "codigo": "JORNADA-FICHA",
+            "fecha_ingreso": "2026-09-01", "jornada_gestion_presente": "1",
+            "jornada_id": str(self.jornada.pk), "jornada_fecha_inicio": "2026-09-01",
+            "jornada_motivo": "Alta confirmada", **extra,
+        }
+
+    def datos_edicion(self, empleado, **extra):
+        return {
+            "action": "update", "empleado_id": str(empleado.pk),
+            "nombre": empleado.nombre, "codigo": empleado.codigo,
+            "fecha_ingreso": "2026-09-01", "activo": "on",
+            "jornada_gestion_presente": "1", "jornada_id": str(self.otra.pk),
+            "jornada_fecha_inicio": "2026-09-15", "jornada_motivo": "Cambio aprobado",
+            **extra,
+        }
+
+    def empleado_con_jornada(self):
+        empleado = Empleado.objects.create(
+            nombre="Persona existente", codigo="JORNADA-FICHA",
+            fecha_ingreso=date(2026, 9, 1),
+        )
+        inicial = AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=self.jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Asignación original",
+        )
+        return empleado, inicial
+
+    def test_alta_crea_empleado_y_asignacion_y_redirect_con_ancla(self):
+        response = self.client.post(self.url, self.datos_alta())
+        empleado = Empleado.objects.get(codigo="JORNADA-FICHA")
+        asignacion = empleado.jornadas_asignadas.get()
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertEqual(asignacion.jornada, self.jornada)
+        self.assertEqual(asignacion.fecha_inicio, date(2026, 9, 1))
+
+    def test_alta_precarga_inicio_desde_fecha_ingreso(self):
+        response = self.client.post(self.url, self.datos_alta(jornada_fecha_inicio=""))
+        empleado = Empleado.objects.get(codigo="JORNADA-FICHA")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(empleado.jornadas_asignadas.get().fecha_inicio, date(2026, 9, 1))
+
+    def test_cambio_cierra_vigente_y_crea_nueva_sin_reescribir_historial(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(empleado), HTTP_ACCEPT="application/json")
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        self.assertEqual(inicial.motivo, "Asignación original")
+        self.assertTrue(empleado.jornadas_asignadas.filter(jornada=self.otra, fecha_inicio=date(2026, 9, 15)).exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["toast"]["type"], "success")
+        self.assertEqual(response.json()["redirect"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertTrue(response.json()["reload"])
+
+    def test_cliente_antiguo_no_cambia_jornada(self):
+        empleado, inicial = self.empleado_con_jornada()
+        datos = self.datos_edicion(empleado)
+        for campo in ("jornada_gestion_presente", "jornada_id", "jornada_fecha_inicio", "jornada_motivo"):
+            datos.pop(campo)
+        self.client.post(self.url, datos)
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+    def test_edicion_sin_jornada_vigente_admite_seccion_vacia(self):
+        empleado = Empleado.objects.create(
+            nombre="Sin jornada", codigo="JORNADA-FICHA", fecha_ingreso=date(2026, 9, 1),
+        )
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_fecha_inicio="", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(empleado.jornadas_asignadas.count(), 0)
+
+    def test_error_de_jornada_revierte_edicion_y_asignaciones(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, nombre="Nombre que debe revertirse", jornada_motivo="",
+        ), HTTP_ACCEPT="application/json")
+        empleado.refresh_from_db()
+        inicial.refresh_from_db()
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.json()["ok"])
+        self.assertTrue(response.json()["toast"]["persistent"])
+        self.assertEqual(empleado.nombre, "Persona existente")
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+    def test_alta_invalida_revierte_empleado(self):
+        response = self.client.post(self.url, self.datos_alta(jornada_motivo=""), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_motivo", response.json()["errors"])
+        self.assertFalse(Empleado.objects.filter(codigo="JORNADA-FICHA").exists())
+
+    def test_cierre_explicito_y_reenvio_idempotente(self):
+        empleado, inicial = self.empleado_con_jornada()
+        datos = self.datos_edicion(empleado, jornada_id="", jornada_motivo="Cierre autorizado")
+        primera = self.client.post(self.url, datos)
+        segunda = self.client.post(self.url, datos)
+        inicial.refresh_from_db()
+        self.assertEqual(primera["Location"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertEqual(segunda.status_code, 302)
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+    def test_cierre_exige_motivo_y_conserva_historial_ante_error(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id="", jornada_motivo="", nombre="No persistir",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("jornada_motivo", response.json()["errors"])
+        empleado.refresh_from_db()
+        inicial.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Persona existente")
+        self.assertIsNone(inicial.fecha_fin)
+
+    def test_reenvio_de_misma_jornada_no_duplica(self):
+        empleado, inicial = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="2026-09-01",
+        ))
+        self.assertEqual(response.status_code, 302)
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 1)
+
+    def test_mismo_perfil_con_nueva_fecha_genera_periodo_nuevo(self):
+        empleado, inicial = self.empleado_con_jornada()
+        self.client.post(self.url, self.datos_edicion(empleado, jornada_id=str(self.jornada.pk)))
+        inicial.refresh_from_db()
+        self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
+        self.assertTrue(empleado.jornadas_asignadas.filter(
+            jornada=self.jornada, fecha_inicio=date(2026, 9, 15),
+        ).exists())
+
+    def test_fecha_invalida_anterior_e_inactiva_revierten_edicion(self):
+        empleado, inicial = self.empleado_con_jornada()
+        self.otra.activo = False
+        self.otra.save(update_fields=["activo"])
+        for cambios, campo in (
+            ({"jornada_fecha_inicio": "2026-09-40"}, "jornada_fecha_inicio"),
+            ({"jornada_fecha_inicio": "2026-08-31"}, "jornada_fecha_inicio"),
+            ({"jornada_id": str(self.otra.pk)}, "jornada_id"),
+        ):
+            with self.subTest(cambios=cambios):
+                response = self.client.post(self.url, self.datos_edicion(
+                    empleado, nombre="No persistir", **cambios,
+                ), HTTP_ACCEPT="application/json")
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(campo, response.json()["errors"])
+                empleado.refresh_from_db()
+                inicial.refresh_from_db()
+                self.assertEqual(empleado.nombre, "Persona existente")
+                self.assertIsNone(inicial.fecha_fin)
+
+    def test_traslape_no_deja_cierre_parcial(self):
+        empleado, inicial = self.empleado_con_jornada()
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=self.otra, fecha_inicio=date(2026, 9, 20),
+            fecha_fin=date(2026, 9, 30), motivo="Dato superpuesto previo",
+        )
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, jornada_fecha_inicio="2026-09-15", nombre="No persistir",
+        ), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        empleado.refresh_from_db()
+        inicial.refresh_from_db()
+        self.assertEqual(empleado.nombre, "Persona existente")
+        self.assertIsNone(inicial.fecha_fin)
+        self.assertEqual(empleado.jornadas_asignadas.count(), 2)
+
+    def test_usuario_sin_gestion_no_puede_crear_editar_ni_aplicar_servicio(self):
+        from rrhh.services_jornadas_empleado import aplicar_jornada_desde_post
+
+        empleado, inicial = self.empleado_con_jornada()
+        usuario = get_user_model().objects.create_user(username="lector.jornada", password="pass123")
+        usuario.groups.add(Group.objects.get_or_create(name="LECTURA")[0])
+        self.client.force_login(usuario)
+        self.assertEqual(self.client.post(self.url, self.datos_alta()).status_code, 403)
+        self.assertEqual(self.client.post(self.url, self.datos_edicion(empleado)).status_code, 403)
+        with self.assertRaises(PermissionDenied):
+            aplicar_jornada_desde_post(empleado=empleado, post=self.datos_edicion(empleado), actor=usuario)
+        self.assertEqual(Empleado.objects.filter(codigo="JORNADA-FICHA").count(), 1)
+        inicial.refresh_from_db()
+        self.assertIsNone(inicial.fecha_fin)
 
 
 class AsignacionJornadaConcurrenteTests(TransactionTestCase):

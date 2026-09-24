@@ -76,6 +76,7 @@ from .services_horas_extra_autorizacion import ajustar_hora_extra_pendiente, res
 from .services_horas_extra_jefatura import (
     jefatura_hora_extra_actualizada, sincronizar_jefe_horas_extra_pendientes,
 )
+from .services_jornadas_empleado import aplicar_jornada_desde_post
 from .services_extra_bloqueos import JornadaExtraConflict
 from .services_catalogos import (
     NIVEL_ORGANIZACIONAL_CHOICES,
@@ -1202,6 +1203,9 @@ def _crear_empleado_desde_post(
         empleado.usuario_erp = _resolver_usuario_erp_desde_post(request, empleado)
         if empleado.usuario_erp_id:
             empleado.save(update_fields=["usuario_erp"])
+        aplicar_jornada_desde_post(
+            empleado=empleado, post=request.POST, actor=request.user, creacion=True,
+        )
         sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
         asegurar_identidad_operativa_empleado(
             empleado,
@@ -1229,6 +1233,27 @@ def _crear_empleado_desde_post(
             },
         )
     return empleado
+
+
+def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None):
+    redirect_url = f'{reverse("rrhh:empleados")}#empleado-{empleado.pk}' if empleado else reverse("rrhh:empleados")
+    if error is not None:
+        errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
+        texto = next(iter(errores.values()))[0]
+        if _wants_progressive_response(request):
+            return JsonResponse({
+                "ok": False, "toast": {"type": "error", "message": texto, "persistent": True},
+                "errors": errores,
+            }, status=400)
+        messages.error(request, texto)
+        return redirect(redirect_url)
+    if _wants_progressive_response(request):
+        return JsonResponse({
+            "ok": True, "toast": {"type": "success", "message": mensaje},
+            "redirect": redirect_url, "reload": True,
+        })
+    messages.success(request, mensaje)
+    return redirect(redirect_url)
 
 
 @login_required
@@ -1391,33 +1416,37 @@ def empleados(request):
                 except ValidationError as exc:
                     messages.error(request, exc.messages[0])
                     return redirect("rrhh:empleados")
-                with transaction.atomic():
-                    empleado.save()
-                    sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
-                sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
-                asegurar_identidad_operativa_empleado(
-                    empleado,
-                    sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
-                )
                 try:
-                    _sincronizar_logistica_desde_post(request, empleado)
+                    with transaction.atomic():
+                        Empleado.objects.select_for_update().get(pk=empleado.pk)
+                        empleado.save()
+                        sincronizar_jefe_horas_extra_pendientes(empleado, actor=request.user)
+                        aplicar_jornada_desde_post(
+                            empleado=empleado, post=request.POST, actor=request.user,
+                        )
+                        sucursal_app_id = (request.POST.get("sucursal_app_id") or "").strip()
+                        asegurar_identidad_operativa_empleado(
+                            empleado,
+                            sucursal_app_id=int(sucursal_app_id) if sucursal_app_id.isdigit() else None,
+                        )
+                        _sincronizar_logistica_desde_post(request, empleado)
+                        sincronizar_esquemas_bono(empleado, request.POST, organizacion)
+                        log_event(
+                            request.user,
+                            "UPDATE",
+                            "rrhh.Empleado",
+                            str(empleado.id),
+                            {
+                                "codigo": empleado.codigo,
+                                "nombre": empleado.nombre,
+                                "activo": empleado.activo,
+                            },
+                        )
                 except ValidationError as exc:
-                    messages.error(request, exc.messages[0])
-                    return redirect("rrhh:empleados")
-                sincronizar_esquemas_bono(empleado, request.POST, organizacion)
-                log_event(
-                    request.user,
-                    "UPDATE",
-                    "rrhh.Empleado",
-                    str(empleado.id),
-                    {
-                        "codigo": empleado.codigo,
-                        "nombre": empleado.nombre,
-                        "activo": empleado.activo,
-                    },
+                    return _respuesta_ficha_empleado(request, empleado=empleado, error=exc)
+                return _respuesta_ficha_empleado(
+                    request, empleado=empleado, mensaje=f"Empleado {empleado.nombre} actualizado.",
                 )
-                messages.success(request, f"Empleado {empleado.nombre} actualizado.")
-                return redirect("rrhh:empleados")
         else:
             try:
                 organizacion = _organizacion_desde_post(request.POST)
@@ -1442,13 +1471,12 @@ def empleados(request):
                     alta_pendiente=alta_pendiente,
                 )
             except ValidationError as exc:
-                messages.error(request, exc.messages[0])
-                return redirect("rrhh:empleados")
+                return _respuesta_ficha_empleado(request, error=exc)
             if alta_pendiente:
-                messages.success(request, f"Empleado {empleado.nombre} registrado desde alta pendiente y vacante actualizada.")
+                mensaje = f"Empleado {empleado.nombre} registrado desde alta pendiente y vacante actualizada."
             else:
-                messages.success(request, f"Empleado {empleado.nombre} registrado.")
-            return redirect("rrhh:empleados")
+                mensaje = f"Empleado {empleado.nombre} registrado."
+            return _respuesta_ficha_empleado(request, empleado=empleado, mensaje=mensaje)
 
     q = (request.GET.get("q") or "").strip()
     estado = (request.GET.get("estado") or "activos").strip().lower()
