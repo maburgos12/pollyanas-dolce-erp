@@ -1,5 +1,5 @@
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, time
 from queue import Queue
 from threading import Event, Thread
 from time import monotonic
@@ -8,8 +8,121 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.test import TestCase, TransactionTestCase
 
-from rrhh.models import AsignacionJornadaEmpleado, Empleado, JornadaSemanal, JornadaSemanalDia
-from rrhh.services_turnos import asignar_jornada_empleado
+from rrhh.models import (
+    AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
+    Empleado, JornadaSemanal, JornadaSemanalDia, Turno,
+)
+from rrhh.services_turnos import (
+    ESTADO_DESCANSO, ESTADO_LABORABLE, ESTADO_SIN_ASIGNACION,
+    asignar_jornada_empleado, es_jornada_historica_antes_de_asignacion,
+    horario_programado_para_fecha, turno_asignado_para_fecha,
+)
+
+
+class JornadaSemanalResolverTests(TestCase):
+    def setUp(self):
+        self.empleado = Empleado.objects.create(codigo="JORNADA-RES", nombre="Persona administrativa")
+        self.lunes = Turno.objects.create(
+            nombre="Administrativo lunes a viernes", hora_entrada=time(8, 30),
+            hora_salida=time(16, 30),
+        )
+        self.sabado = Turno.objects.create(
+            nombre="Administrativo sábado", hora_entrada=time(8, 30),
+            hora_salida=time(13, 30),
+        )
+
+    def asignar_semana(self, *, completa=True, proteger=False):
+        jornada = JornadaSemanal.objects.create(nombre="Administrativa")
+        for dia in range(7 if completa else 6):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia,
+                turno=self.lunes if dia < 5 else self.sabado if dia == 5 else None,
+            )
+        asignacion = AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Horario confirmado", proteger_reingesta_historica=proteger,
+        )
+        return asignacion
+
+    def test_jornada_administrativa_resuelve_lunes_sabado_y_descanso(self):
+        asignacion = self.asignar_semana()
+        for fecha, turno, estado, salida in (
+            (date(2026, 9, 7), self.lunes, ESTADO_LABORABLE, time(16, 30)),
+            (date(2026, 9, 12), self.sabado, ESTADO_LABORABLE, time(13, 30)),
+            (date(2026, 9, 13), None, ESTADO_DESCANSO, None),
+        ):
+            with self.subTest(fecha=fecha):
+                horario = horario_programado_para_fecha(self.empleado, fecha)
+                self.assertEqual(horario.estado, estado)
+                self.assertEqual(horario.turno, turno)
+                self.assertEqual(horario.asignacion, asignacion)
+                self.assertEqual(horario.turno.hora_salida if horario.turno else None, salida)
+                self.assertEqual(turno_asignado_para_fecha(self.empleado, fecha), turno)
+
+    def test_fallback_legacy_conserva_turno_y_estado_laborable(self):
+        asignacion = AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.lunes, fecha_inicio=date(2026, 9, 1),
+        )
+        horario = horario_programado_para_fecha(self.empleado, date(2026, 9, 7))
+        self.assertEqual(horario.estado, ESTADO_LABORABLE)
+        self.assertEqual(horario.turno, self.lunes)
+        self.assertEqual(horario.asignacion, asignacion)
+        self.assertEqual(turno_asignado_para_fecha(self.empleado, date(2026, 9, 7)), self.lunes)
+
+    def test_sin_asignacion_se_distingue_de_descanso(self):
+        horario = horario_programado_para_fecha(self.empleado, date(2026, 9, 7))
+        self.assertEqual(horario.estado, ESTADO_SIN_ASIGNACION)
+        self.assertIsNone(horario.turno)
+        self.assertIsNone(horario.asignacion)
+
+    def test_jornada_semanal_vigente_prevalece_sobre_legacy(self):
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.lunes, fecha_inicio=date(2026, 9, 1),
+        )
+        asignacion = self.asignar_semana()
+        horario = horario_programado_para_fecha(self.empleado, date(2026, 9, 12))
+        self.assertEqual(horario.estado, ESTADO_LABORABLE)
+        self.assertEqual(horario.turno, self.sabado)
+        self.assertEqual(horario.asignacion, asignacion)
+        self.assertEqual(turno_asignado_para_fecha(self.empleado, date(2026, 9, 12)), self.sabado)
+
+    def test_dos_asignaciones_semanales_vigentes_se_rechazan(self):
+        primera = self.asignar_semana()
+        # objects.create no ejecuta full_clean; la restricción SQL solo impide
+        # fechas de inicio iguales, lo que permite simular datos ya corruptos.
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=primera.jornada,
+            fecha_inicio=date(2026, 9, 2), motivo="Traslape corrupto",
+        )
+        with self.assertRaises(ValidationError):
+            horario_programado_para_fecha(self.empleado, date(2026, 9, 7))
+
+    def test_perfil_semanal_incompleto_se_rechaza(self):
+        self.asignar_semana(completa=False)
+        with self.assertRaises(ValidationError):
+            horario_programado_para_fecha(self.empleado, date(2026, 9, 7))
+
+    def test_reingesta_historica_reconoce_asignacion_semanal_protegida(self):
+        self.asignar_semana(proteger=True)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=date(2026, 9, 7),
+        )
+        self.assertTrue(es_jornada_historica_antes_de_asignacion(asistencia))
+
+    def test_reingesta_historica_respeta_proteccion_legacy_y_semanal(self):
+        legacy = AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.lunes, fecha_inicio=date(2026, 9, 1),
+            proteger_reingesta_historica=True,
+        )
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=date(2026, 9, 7),
+        )
+        self.assertTrue(es_jornada_historica_antes_de_asignacion(asistencia))
+        legacy.proteger_reingesta_historica = False
+        legacy.save(update_fields=["proteger_reingesta_historica"])
+        self.assertFalse(es_jornada_historica_antes_de_asignacion(asistencia))
+        self.asignar_semana(proteger=False)
+        self.assertFalse(es_jornada_historica_antes_de_asignacion(asistencia))
 
 
 class JornadaSemanalModelTests(TestCase):
