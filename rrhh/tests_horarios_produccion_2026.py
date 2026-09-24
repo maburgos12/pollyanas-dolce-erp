@@ -13,8 +13,8 @@ from django.test import TestCase
 from django.utils import timezone
 
 from rrhh.models import (
-    AsignacionTurnoEmpleado, AsistenciaEmpleado, Empleado, HoraExtra,
-    IncidenciaAsistencia, Turno,
+    AsignacionJornadaEmpleado, AsignacionTurnoEmpleado, AsistenciaEmpleado,
+    Empleado, HoraExtra, IncidenciaAsistencia, JornadaSemanal, JornadaSemanalDia, Turno,
 )
 from rrhh.services_extra_conciliacion import diagnosticar_horas_extra
 from rrhh.services_turnos import es_jornada_historica_antes_de_asignacion, turno_asignado_para_fecha
@@ -184,3 +184,36 @@ class HorariosProduccion2026Tests(TestCase):
             bonos.assert_not_called()
         self.asistencia.refresh_from_db()
         self.assertEqual(self.asistencia.turno_id, turno.pk)
+
+    def test_excel_reimportado_en_descanso_limpia_turno_previo_sin_extra(self):
+        from rrhh.importers import importar_excel_hikconnect
+
+        domingo = date(2026, 9, 13)
+        turno = Turno.objects.create(
+            nombre="Envíos previo Excel", hora_entrada=time(8, 30), hora_salida=time(16, 30),
+        )
+        jornada = JornadaSemanal.objects.create(nombre="Descanso domingo Excel")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia, turno=None if dia == 6 else turno,
+            )
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=self.empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Jornada confirmada",
+        )
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado, fecha=domingo, turno=turno,
+        )
+        df = pd.DataFrame([{
+            "id_empleado": "255", "nombre": self.empleado.nombre,
+            "fecha": domingo, "hora_entrada": time(8, 30), "hora_salida": time(19),
+        }])
+        with patch("rrhh.importers.pd.read_excel", return_value=df), \
+             patch("rrhh.importers.ImportacionChecador.objects.create"):
+            result = importar_excel_hikconnect(StringIO(""), None, domingo, domingo)
+        self.assertEqual(result["procesados"], 1)
+        asistencia.refresh_from_db()
+        self.assertIsNotNone(asistencia.entrada)
+        self.assertIsNotNone(asistencia.salida)
+        self.assertIsNone(asistencia.turno_id)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())

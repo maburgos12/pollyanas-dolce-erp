@@ -435,16 +435,22 @@ class PointAttendanceSyncService:
             if delta < timedelta(0):
                 delta += timedelta(days=1)
             asistencia.minutos_trabajados = max(int(delta.total_seconds() / 60), 0)
-        if not asistencia.turno_id:
-            from rrhh.services_turnos import turno_asignado_para_fecha
+        from rrhh.services_turnos import (
+            ESTADO_DESCANSO, ESTADO_LABORABLE, ESTADO_SIN_ASIGNACION,
+            horario_programado_para_fecha,
+        )
 
-            asistencia.turno = turno_asignado_para_fecha(empleado, payload.attendance_date)
-            if asistencia.turno is None:
-                asistencia.turno = self._resolve_turno(
-                    payload.scheduled_entry,
-                    payload.scheduled_exit,
-                    asistencia.entrada,
-                )
+        horario = horario_programado_para_fecha(empleado, payload.attendance_date)
+        if horario.estado == ESTADO_DESCANSO:
+            asistencia.turno = None
+        elif horario.estado == ESTADO_LABORABLE:
+            asistencia.turno = horario.turno
+        elif horario.estado == ESTADO_SIN_ASIGNACION and not asistencia.turno_id:
+            asistencia.turno = self._resolve_turno(
+                payload.scheduled_entry,
+                payload.scheduled_exit,
+                asistencia.entrada,
+            )
         asistencia.fuente = AsistenciaEmpleado.FUENTE_POINT
         asistencia.observacion = self._merge_point_observation(
             asistencia.observacion,
@@ -462,7 +468,7 @@ class PointAttendanceSyncService:
         from rrhh.services_turnos import es_jornada_historica_antes_de_asignacion
 
         historica = es_jornada_historica_antes_de_asignacion(asistencia)
-        if asistencia.salida and not historica:
+        if asistencia.salida and not historica and horario.estado != ESTADO_DESCANSO:
             generar_horas_extra_automatico(asistencia)
         if not historica:
             try:

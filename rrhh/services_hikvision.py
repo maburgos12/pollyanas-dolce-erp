@@ -393,26 +393,31 @@ def procesar_eventos_hik(eventos: list[dict[str, Any]]) -> dict[str, Any]:
             },
         )
 
+        from .services_turnos import (
+            ESTADO_DESCANSO, ESTADO_LABORABLE, ESTADO_SIN_ASIGNACION,
+            horario_programado_para_fecha,
+        )
+
+        horario = horario_programado_para_fecha(empleado, fecha)
+        if horario.estado == ESTADO_DESCANSO:
+            asistencia.turno = None
+        elif horario.estado == ESTADO_LABORABLE:
+            asistencia.turno = horario.turno
+
         marcas_nuevas = [registro[2] for registro in registros]
         duplicados_grupo, resultado = _aplicar_marcajes(asistencia, marcas_nuevas)
         duplicados += duplicados_grupo
         procesados_grupo = max(len(marcas_nuevas) - duplicados_grupo, 0)
         procesados += procesados_grupo
 
-        if not asistencia.turno_id:
-            from .services_turnos import turno_asignado_para_fecha
-
-            turno = turno_asignado_para_fecha(empleado, fecha)
-            if turno is None and asistencia.entrada:
-                turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
-            if turno:
-                asistencia.turno = turno
+        if horario.estado == ESTADO_SIN_ASIGNACION and not asistencia.turno_id and asistencia.entrada:
+            asistencia.turno = _detectar_turno(timezone.localtime(asistencia.entrada).time())
 
         asistencia.save()
         from .services_turnos import es_jornada_historica_antes_de_asignacion
 
         historica = es_jornada_historica_antes_de_asignacion(asistencia)
-        if asistencia.salida and not historica:
+        if asistencia.salida and not historica and horario.estado != ESTADO_DESCANSO:
             try:
                 generar_horas_extra_automatico(asistencia)
             except Exception as exc:

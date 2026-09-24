@@ -14,7 +14,8 @@ from rrhh.models import (
 )
 from rrhh.services_turnos import (
     ESTADO_DESCANSO, ESTADO_LABORABLE, ESTADO_SIN_ASIGNACION,
-    asignar_jornada_empleado, es_jornada_historica_antes_de_asignacion,
+    _turno_legacy_asignado_para_fecha, asignar_jornada_empleado,
+    es_jornada_historica_antes_de_asignacion,
     horario_programado_para_fecha, turno_asignado_para_fecha,
 )
 
@@ -68,6 +69,16 @@ class JornadaSemanalResolverTests(TestCase):
         self.assertEqual(horario.turno, self.lunes)
         self.assertEqual(horario.asignacion, asignacion)
         self.assertEqual(turno_asignado_para_fecha(self.empleado, date(2026, 9, 7)), self.lunes)
+
+    def test_fallback_legacy_resuelve_con_dos_consultas(self):
+        AsignacionTurnoEmpleado.objects.create(
+            empleado=self.empleado, turno=self.lunes, fecha_inicio=date(2026, 9, 1),
+        )
+        fecha = date(2026, 9, 7)
+        with self.assertNumQueries(2):
+            horario = horario_programado_para_fecha(self.empleado, fecha)
+        self.assertEqual(horario.turno, self.lunes)
+        self.assertEqual(_turno_legacy_asignado_para_fecha(self.empleado, fecha), self.lunes)
 
     def test_sin_asignacion_se_distingue_de_descanso(self):
         horario = horario_programado_para_fecha(self.empleado, date(2026, 9, 7))

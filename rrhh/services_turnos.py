@@ -42,7 +42,7 @@ def asignar_jornada_empleado(*, empleado, jornada, fecha_inicio, fecha_fin, moti
     return asignacion
 
 
-def _turno_legacy_asignado_para_fecha(empleado, fecha):
+def _asignacion_legacy_para_fecha(empleado, fecha):
     if not empleado or not fecha:
         return None
     asignaciones = list(
@@ -53,7 +53,12 @@ def _turno_legacy_asignado_para_fecha(empleado, fecha):
     )
     if len(asignaciones) > 1:
         raise ValidationError("Hay turnos asignados que se traslapan; revisa la vigencia del empleado.")
-    return asignaciones[0].turno if asignaciones else None
+    return asignaciones[0] if asignaciones else None
+
+
+def _turno_legacy_asignado_para_fecha(empleado, fecha):
+    asignacion = _asignacion_legacy_para_fecha(empleado, fecha)
+    return asignacion.turno if asignacion else None
 
 
 def horario_programado_para_fecha(empleado, fecha):
@@ -78,18 +83,10 @@ def horario_programado_para_fecha(empleado, fecha):
         estado = ESTADO_LABORABLE if turno else ESTADO_DESCANSO
         return HorarioProgramado(estado, turno, asignacion)
 
-    turno = _turno_legacy_asignado_para_fecha(empleado, fecha)
-    if turno is None:
+    asignacion_legacy = _asignacion_legacy_para_fecha(empleado, fecha)
+    if asignacion_legacy is None:
         return HorarioProgramado(ESTADO_SIN_ASIGNACION, None, None)
-    asignacion_legacy = (
-        AsignacionTurnoEmpleado.objects.filter(
-            empleado=empleado, turno=turno, fecha_inicio__lte=fecha,
-        )
-        .filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=fecha))
-        .order_by("-fecha_inicio")
-        .first()
-    )
-    return HorarioProgramado(ESTADO_LABORABLE, turno, asignacion_legacy)
+    return HorarioProgramado(ESTADO_LABORABLE, asignacion_legacy.turno, asignacion_legacy)
 
 
 def turno_asignado_para_fecha(empleado, fecha):

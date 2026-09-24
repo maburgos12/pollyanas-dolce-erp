@@ -14,6 +14,7 @@ from unittest.mock import patch
 from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import (
     AplicacionGoceVacaciones,
+    AsignacionJornadaEmpleado,
     AsistenciaEmpleado,
     BonoEsquema,
     CatalogoFuncionOperativa,
@@ -21,6 +22,8 @@ from rrhh.models import (
     EmpleadoBaja,
     EmpleadoIdentidadPendiente,
     HoraExtra,
+    JornadaSemanal,
+    JornadaSemanalDia,
     IncidenciaAsistencia,
     IncapacidadEmpleado,
     NominaConceptoLinea,
@@ -1757,6 +1760,7 @@ class CapitalHumanoAPITests(TestCase):
         from rrhh.services_hikvision import procesar_eventos_hik
 
         empleado = Empleado.objects.create(nombre="Empleado ISAPI", codigo="340", salario_diario="400.00")
+        turno = Turno.objects.create(nombre="Detectable sin asignación ISAPI", hora_entrada="08:00", hora_salida="16:00")
 
         resultado = procesar_eventos_hik(
             [
@@ -1784,6 +1788,41 @@ class CapitalHumanoAPITests(TestCase):
         self.assertHoraLocal(asistencia.salida, 16, 11)
         self.assertEqual(asistencia.minutos_trabajados, 490)
         self.assertEqual(asistencia.fuente, AsistenciaEmpleado.FUENTE_HIKCONNECT_API)
+        self.assertEqual(asistencia.turno_id, turno.pk)
+
+    def test_procesar_eventos_hik_descanso_no_infiere_turno_ni_extra(self):
+        from datetime import date, time
+        from rrhh.services_hikvision import procesar_eventos_hik
+
+        empleado = Empleado.objects.create(nombre="Empleado descanso ISAPI", codigo="340")
+        turno = Turno.objects.create(
+            nombre="Detectable ISAPI", hora_entrada=time(8, 30), hora_salida=time(16, 30),
+        )
+        jornada = JornadaSemanal.objects.create(nombre="Descanso domingo ISAPI")
+        for dia in range(7):
+            JornadaSemanalDia.objects.create(
+                jornada=jornada, dia_semana=dia, turno=None if dia == 6 else turno,
+            )
+        AsignacionJornadaEmpleado.objects.create(
+            empleado=empleado, jornada=jornada, fecha_inicio=date(2026, 9, 1),
+            motivo="Jornada confirmada",
+        )
+        resultado = procesar_eventos_hik([
+            {
+                "employee_no": "340", "attendance_status": "checkIn",
+                "time": "2026-09-13T08:30:00-07:00", "serial_no": 501,
+            },
+            {
+                "employee_no": "340", "attendance_status": "checkOut",
+                "time": "2026-09-13T19:00:00-07:00", "serial_no": 502,
+            },
+        ])
+        self.assertEqual(resultado["procesados"], 2)
+        asistencia = AsistenciaEmpleado.objects.get(empleado=empleado, fecha=date(2026, 9, 13))
+        self.assertIsNotNone(asistencia.entrada)
+        self.assertIsNotNone(asistencia.salida)
+        self.assertIsNone(asistencia.turno_id)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=asistencia).exists())
 
     def test_procesar_eventos_hik_asigna_cuatro_marcajes_y_descuenta_comida(self):
         from rrhh.services_hikvision import procesar_eventos_hik
