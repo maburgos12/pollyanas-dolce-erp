@@ -1693,7 +1693,7 @@ def empleados(request):
             except Exception:
                 empleado.repartidor_logistica = None
         if ficha_error_flash and ficha_error_flash.get("empleado_id") == empleado.pk:
-            borrador = ficha_error_flash["values"]
+            borrador = dict(ficha_error_flash["values"])
             formulario = copy(empleado)
             formulario._state = copy(empleado._state)
             formulario._state.fields_cache = dict(empleado._state.fields_cache)
@@ -1702,18 +1702,36 @@ def empleados(request):
                 "departamento_origen", "departamento", "puesto_operativo",
                 "nivel_organizacional", "tipo_personal", "tipo_contrato", "telefono", "email",
             ):
-                setattr(formulario, campo, borrador[campo])
-            if borrador["fecha_ingreso"]:
+                if campo in borrador:
+                    setattr(formulario, campo, borrador[campo])
+            if borrador.get("fecha_ingreso"):
                 try:
                     formulario.fecha_ingreso = dt_date.fromisoformat(borrador["fecha_ingreso"])
                 except ValueError:
                     pass
-            formulario.salario_diario = borrador["salario_diario"]
-            formulario.jefe_directo_id = int(borrador["jefe_directo"]) if borrador["jefe_directo"].isdigit() else None
-            formulario.sucursal_form_id = borrador["sucursal_id"]
-            formulario.form_sucursal_app_id = borrador["sucursal_app_id"]
-            formulario.activo = borrador["activo"] == "on"
-            formulario.bono_esquema_ids = {int(valor) for valor in borrador["bono_esquemas"]}
+            if "salario_diario" in borrador:
+                formulario.salario_diario = borrador["salario_diario"]
+            if "jefe_directo" in borrador:
+                formulario.jefe_directo_id = int(borrador["jefe_directo"]) if borrador["jefe_directo"].isdigit() else None
+            if "sucursal_id" in borrador:
+                formulario.sucursal_form_id = borrador["sucursal_id"]
+            perfil_usuario = getattr(empleado.usuario_erp, "userprofile", None) if empleado.usuario_erp_id else None
+            sucursal_app_id = getattr(perfil_usuario, "sucursal_id", None)
+            formulario.form_sucursal_app_id = borrador.get("sucursal_app_id", str(sucursal_app_id or ""))
+            if "activo" in borrador:
+                formulario.activo = borrador["activo"] == "on"
+            if "bono_esquemas" in borrador:
+                formulario.bono_esquema_ids = {int(valor) for valor in borrador["bono_esquemas"]}
+            repartidor = empleado.repartidor_logistica
+            borrador.setdefault("logistica_tipo_identidad", (
+                repartidor.tipo_identidad if repartidor else
+                "empleado_dolce" if empleado.puesto_operativo == "REPARTIDOR" else ""
+            ))
+            for campo in ("motivo_autorizacion", "autorizado_por", "numero_licencia", "notas_identidad"):
+                borrador.setdefault(campo, getattr(repartidor, campo, "") or "")
+            for campo in ("licencia_expedicion", "licencia_expiracion"):
+                fecha = getattr(repartidor, campo, None)
+                borrador.setdefault(campo, fecha.isoformat() if fecha else "")
             formulario.form_draft = borrador
             empleado.form_values = formulario
 
@@ -1838,7 +1856,11 @@ def empleados(request):
         "alta_prefill_sucursal_id": _sucursal_form_id(
             sucursal_ref_id=None,
             sucursal_texto=alta_prefill.get("sucursal", ""),
-        ) if not alta_form_draft else alta_form_draft["sucursal_id"],
+        ) if not alta_form_draft else alta_form_draft.get(
+            "sucursal_id", _sucursal_form_id(
+                sucursal_ref_id=None, sucursal_texto=alta_prefill.get("sucursal", ""),
+            ),
+        ),
         "enterprise_chain": enterprise_chain,
         "critical_path_rows": _rrhh_critical_path_rows(enterprise_chain),
         "document_stage_rows": document_stage_rows,

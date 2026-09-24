@@ -514,6 +514,59 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertContains(pantalla, "supera el límite del borrador")
         self.assertNotContains(pantalla, "n" * 250)
 
+    def test_update_nombre_excesivo_reabre_edicion_sin_500_y_consume_flash(self):
+        empleado, _ = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, nombre="N" * 10001, telefono="6671112222",
+            fecha_ingreso="f" * 10001, salario_diario="1" * 10001,
+            jefe_directo="2" * 10001, sucursal_id="3" * 10001,
+            sucursal_app_id="4" * 10001, activo="a" * 10001,
+            notas_identidad="n" * 10001,
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}#empleado-{empleado.pk}")
+        pantalla = self.client.get(self.url)
+        self.assertEqual(pantalla.status_code, 200)
+        self.assertContains(pantalla, "supera el límite del borrador")
+        self.assertContains(pantalla, '<details class="rrhh-edit-panel" open>')
+        self.assertContains(pantalla, f'id="empleado-{empleado.pk}"')
+        self.assertContains(pantalla, 'value="Persona existente"')
+        self.assertContains(pantalla, 'value="6671112222"')
+        self.assertIsNone(pantalla.context["alta_form_draft"])
+        formulario = next(e.form_values for e in pantalla.context["empleados"] if e.pk == empleado.pk)
+        self.assertEqual(formulario.fecha_ingreso, date(2026, 9, 1))
+        self.assertEqual(formulario.salario_diario, empleado.salario_diario)
+        self.assertTrue(formulario.activo)
+        self.assertEqual(formulario.form_draft["notas_identidad"], "")
+        siguiente = self.client.get(self.url)
+        self.assertNotContains(siguiente, "supera el límite del borrador")
+        self.assertNotIn("rrhh_ficha_error_flash", self.client.session)
+
+    def test_alta_sucursal_excesiva_reabre_alta_sin_500(self):
+        response = self.client.post(self.url, self.datos_alta(
+            nombre="N" * 10001, sucursal_id="9" * 10001,
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}#alta-empleado")
+        pantalla = self.client.get(self.url)
+        self.assertEqual(pantalla.status_code, 200)
+        self.assertContains(pantalla, "supera el límite del borrador")
+        self.assertIsNotNone(pantalla.context["alta_form_draft"])
+
+    def test_update_con_usuario_sin_perfil_reabre_edicion_sin_500(self):
+        empleado, _ = self.empleado_con_jornada()
+        usuario = get_user_model().objects.create_user(username="jornada_sin_perfil")
+        perfil = getattr(usuario, "userprofile", None)
+        if perfil:
+            perfil.delete()
+        empleado.usuario_erp = usuario
+        empleado.save(update_fields=["usuario_erp"])
+        response = self.client.post(self.url, self.datos_edicion(empleado, nombre="N" * 10001))
+        self.assertEqual(response.status_code, 302)
+        pantalla = self.client.get(self.url)
+        self.assertEqual(pantalla.status_code, 200)
+        self.assertContains(pantalla, "supera el límite del borrador")
+
     def test_campo_con_max_length_real_se_rechaza_sin_recortar_values(self):
         nombre = "N" * (Empleado._meta.get_field("nombre").max_length + 1)
         response = self.client.post(self.url, self.datos_alta(nombre=nombre), HTTP_ACCEPT="application/json")
