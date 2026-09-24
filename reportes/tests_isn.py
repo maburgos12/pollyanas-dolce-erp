@@ -5,13 +5,15 @@ from io import StringIO
 import threading
 from unittest.mock import patch
 
+from django.contrib import admin
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
 from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.db.models.deletion import ProtectedError
-from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.test import RequestFactory, SimpleTestCase, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -34,6 +36,90 @@ from rrhh.models import (
     NominaPeriodo,
 )
 from sat_client.models import CfdiDescargado
+
+
+class ISNAdminTests(SimpleTestCase):
+    def setUp(self):
+        self.request = RequestFactory().get("/admin/reportes/")
+        self.request.user = get_user_model()(
+            username="auditor-isn",
+            is_staff=True,
+            is_superuser=True,
+        )
+
+    def test_registra_expediente_y_distribucion_con_campos_de_auditoria(self):
+        expediente_admin = admin.site._registry[ExpedienteISN]
+        distribucion_admin = admin.site._registry[DistribucionISNEmpleado]
+
+        self.assertEqual(
+            expediente_admin.list_display,
+            (
+                "periodo",
+                "revision",
+                "estado",
+                "importe_pagado",
+                "base_gravada_calculada",
+                "base_declarada",
+                "uuid",
+            ),
+        )
+        self.assertEqual(
+            expediente_admin.list_filter,
+            ("periodo", "estado", "revision"),
+        )
+        self.assertEqual(
+            expediente_admin.search_fields,
+            ("uuid", "cfdi__uuid"),
+        )
+        self.assertEqual(
+            distribucion_admin.list_display,
+            (
+                "periodo",
+                "revision",
+                "estado",
+                "uuid",
+                "empleado",
+                "sucursal",
+                "area_codigo",
+                "base_gravada",
+                "monto_isn",
+            ),
+        )
+        self.assertEqual(
+            distribucion_admin.list_filter,
+            (
+                "expediente__periodo",
+                "expediente__estado",
+                "sucursal",
+                "area_codigo",
+            ),
+        )
+        self.assertEqual(
+            distribucion_admin.search_fields,
+            (
+                "expediente__uuid",
+                "empleado__codigo",
+                "empleado__nombre",
+                "sucursal__codigo",
+                "sucursal__nombre",
+                "area_codigo",
+            ),
+        )
+
+    def test_admins_permiten_ver_detalle_pero_prohiben_mutaciones(self):
+        for model in (ExpedienteISN, DistribucionISNEmpleado):
+            with self.subTest(model=model.__name__):
+                model_admin = admin.site._registry[model]
+                campos = {field.name for field in model._meta.fields}
+
+                self.assertEqual(
+                    set(model_admin.get_readonly_fields(self.request)),
+                    campos,
+                )
+                self.assertTrue(model_admin.has_view_permission(self.request))
+                self.assertFalse(model_admin.has_add_permission(self.request))
+                self.assertFalse(model_admin.has_change_permission(self.request))
+                self.assertFalse(model_admin.has_delete_permission(self.request))
 
 
 class ISNMathTests(SimpleTestCase):
