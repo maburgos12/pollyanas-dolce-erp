@@ -183,10 +183,21 @@ class PresupuestoRealConsolidacionService:
                 metadata = dict(linea.metadata or {})
                 metadata["sin_datos_fuente"] = True
                 metadata["fuente_sin_datos_en"] = timezone.now().isoformat()
+                if linea.fuente_real == f"{AUTO_PREFIX}{ReglaFuenteRubro.FUENTE_ISN_CFDI}":
+                    metadata["fuente_sin_datos_previa"] = linea.fuente_real
+                    metadata["monto_sin_datos_previo"] = (
+                        str(linea.monto_real) if linea.monto_real is not None else None
+                    )
                 if not dry_run:
+                    actualizacion = {
+                        "metadata": metadata,
+                        "actualizado_en": timezone.now(),
+                    }
+                    if linea.fuente_real == f"{AUTO_PREFIX}{ReglaFuenteRubro.FUENTE_ISN_CFDI}":
+                        actualizacion["monto_real"] = None
                     LineaPresupuestoMensual.objects.filter(
                         pk=linea.pk, fuente_real=linea.fuente_real
-                    ).update(metadata=metadata, actualizado_en=timezone.now())
+                    ).update(**actualizacion)
                 continue
 
             tipos = sorted({r.tipo_fuente for r in reglas})

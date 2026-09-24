@@ -26,6 +26,30 @@ def parse_decimal(value: str) -> Decimal:
         ) from exc
 
 
+def parse_exenciones(values: list[str]) -> dict[str, Decimal]:
+    politica = {}
+    for value in values:
+        if value.count("=") != 1:
+            raise CommandError("--exencion debe usar CODIGO=PROPORCION.")
+        codigo, proporcion_raw = (part.strip() for part in value.split("=", 1))
+        if not codigo:
+            raise CommandError("--exencion requiere un codigo no vacio.")
+        if codigo in politica:
+            raise CommandError(f"--exencion repite el codigo {codigo}.")
+        try:
+            proporcion = Decimal(proporcion_raw)
+        except (InvalidOperation, ValueError) as exc:
+            raise CommandError(
+                f"--exencion {codigo} requiere una proporcion decimal."
+            ) from exc
+        if not proporcion.is_finite() or proporcion < 0 or proporcion > 1:
+            raise CommandError(
+                f"--exencion {codigo} debe estar entre 0 y 1."
+            )
+        politica[codigo] = proporcion
+    return politica
+
+
 class Command(BaseCommand):
     help = "Previsualiza o materializa la distribucion mensual del ISN."
 
@@ -36,6 +60,13 @@ class Command(BaseCommand):
             help="UUID exacto; si se omite debe existir un unico CFDI candidato",
         )
         parser.add_argument("--base-declarada", type=parse_decimal)
+        parser.add_argument(
+            "--exencion",
+            action="append",
+            default=[],
+            metavar="CODIGO=PROPORCION",
+            help="Sobrescribe una proporcion exenta; puede repetirse.",
+        )
         parser.add_argument("--apply", action="store_true")
 
     def handle(self, *args, **options):
@@ -44,6 +75,7 @@ class Command(BaseCommand):
                 parse_period(options["periodo"]),
                 uuid=options["uuid"],
                 base_declarada=options["base_declarada"],
+                politica_exenciones=parse_exenciones(options["exencion"]),
             )
         except ValueError as exc:
             raise CommandError(str(exc)) from exc

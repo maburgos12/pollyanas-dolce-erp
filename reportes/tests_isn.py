@@ -392,6 +392,56 @@ class ISNSourceTests(TestCase):
                     politica_exenciones={"32": proporcion},
                 )
 
+    def test_admite_alta_en_segunda_quincena_con_mes_completo(self):
+        ancla = self._crear_empleado(codigo="E-ANCLA-ALTA")
+        alta = self._crear_empleado(codigo="E-ALTA-SEGUNDA")
+        primera, segunda = self._crear_mes_valido(
+            empleado=ancla,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("100.00")),),
+            conceptos_segunda=(("1", D("100.00")),),
+        )
+        linea = NominaLinea.objects.create(
+            periodo=segunda, empleado=alta, salario_base=D("300.00")
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="1",
+            nombre="Sueldo",
+            importe=D("300.00"),
+        )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases[alta.id], D("300.00"))
+
+    def test_admite_baja_en_primera_quincena_con_mes_completo(self):
+        ancla = self._crear_empleado(codigo="E-ANCLA-BAJA")
+        baja = self._crear_empleado(codigo="E-BAJA-PRIMERA")
+        primera, segunda = self._crear_mes_valido(
+            empleado=ancla,
+            anio=2026,
+            mes=8,
+            conceptos_primera=(("1", D("100.00")),),
+            conceptos_segunda=(("1", D("100.00")),),
+        )
+        linea = NominaLinea.objects.create(
+            periodo=primera, empleado=baja, salario_base=D("250.00")
+        )
+        NominaConceptoLinea.objects.create(
+            linea=linea,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="1",
+            nombre="Sueldo",
+            importe=D("250.00"),
+        )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases[baja.id], D("250.00"))
+
     def test_rechaza_linea_sin_conceptos_aunque_total_sea_cero(self):
         empleado = self._crear_empleado(codigo="E-SIN-CONCEPTOS")
         self._crear_mes_valido(empleado=empleado, anio=2026, mes=8)
@@ -908,6 +958,87 @@ class ISNApplicationTests(TestCase):
         self.assertEqual(expediente.metadata["diferencia_isn"], "0.00")
         self.assertEqual(expediente.metadata["tolerancia_isn"], "1.00")
         self.assertEqual(expediente.metadata["politica_exenciones"]["32"], "1")
+
+    def test_override_parcial_se_mezcla_con_defaults_y_se_persiste(self):
+        empleado = self._crear_empleado("E-POLITICA-PARCIAL")
+        self._crear_nomina_completa(((empleado, D("1000.00")),))
+        primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
+        primera.salario_base = D("1400.00")
+        primera.save(
+            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
+        )
+        NominaConceptoLinea.objects.create(
+            linea=primera,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="32",
+            nombre="Concepto parcialmente exento",
+            importe=D("400.00"),
+        )
+        cfdi = self._crear_cfdi("CFDI-ISN-POLITICA-PARCIAL", "28.80")
+
+        preview = preparar_expediente_isn(
+            self.PERIODO,
+            uuid=cfdi.uuid,
+            politica_exenciones={"32": D("0.50")},
+        )
+        expediente = aplicar_expediente_isn(preview)
+
+        self.assertEqual(preview.base_gravada_total, D("1200.00"))
+        self.assertEqual(dict(preview.politica_exenciones)["20"], D("1"))
+        self.assertIn("exenciones=20:1,22:1,26:1,32:0.50", preview.render())
+        self.assertEqual(expediente.metadata["politica_exenciones"]["32"], "0.50")
+
+    def test_comando_exencion_parcial_dry_run_apply_e_idempotencia(self):
+        empleado = self._crear_empleado("E-CMD-EXENCION")
+        self._crear_nomina_completa(((empleado, D("1000.00")),))
+        primera = NominaLinea.objects.order_by("periodo__fecha_inicio").first()
+        primera.salario_base = D("1400.00")
+        primera.save(
+            update_fields=["salario_base", "total_percepciones", "neto_calculado"]
+        )
+        NominaConceptoLinea.objects.create(
+            linea=primera,
+            tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+            codigo_concepto="32",
+            nombre="Parcial",
+            importe=D("400.00"),
+        )
+        cfdi = self._crear_cfdi("CFDI-ISN-CMD-EXENCION", "28.80")
+        stdout = StringIO()
+
+        call_command(
+            "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
+            exencion=["32=0.50"], stdout=stdout,
+        )
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+        self.assertIn("base_calculada=1200.00", stdout.getvalue())
+        call_command(
+            "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
+            exencion=["32=0.50"], apply=True, stdout=StringIO(),
+        )
+        call_command(
+            "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
+            exencion=["32=0.50"], apply=True, stdout=StringIO(),
+        )
+        self.assertEqual(ExpedienteISN.objects.count(), 1)
+        with self.assertRaisesMessage(CommandError, "Conflicto de reintento ISN"):
+            call_command(
+                "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
+                apply=True, stdout=StringIO(),
+            )
+
+    def test_comando_rechaza_exenciones_invalidas_sin_escribir(self):
+        empleado = self._crear_empleado("E-CMD-EX-INV")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-CMD-EXENCION-INVALIDA")
+
+        for valor in ("32", "=0.5", "32=no", "32=-0.01", "32=1.01"):
+            with self.subTest(valor=valor), self.assertRaises(CommandError):
+                call_command(
+                    "materializar_isn", periodo="2026-08", uuid=cfdi.uuid,
+                    exencion=[valor], apply=True, stdout=StringIO(),
+                )
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
 
     def test_preparar_sin_uuid_exige_candidato_unico(self):
         empleado = self._crear_empleado("E-CANDIDATO")

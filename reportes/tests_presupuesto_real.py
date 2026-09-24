@@ -7,6 +7,7 @@ from io import StringIO
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.test import TestCase
 from django.utils import timezone
 
@@ -192,9 +193,15 @@ class PresupuestoRealConsolidacionTests(TestCase):
         summary = self.consolidar()
 
         linea.refresh_from_db()
-        self.assertEqual(linea.monto_real, Decimal("16168.00"))
+        self.assertIsNone(linea.monto_real)
         self.assertEqual(linea.fuente_real, "AUTO:ISN_CFDI")
         self.assertTrue(linea.metadata["sin_datos_fuente"])
+        self.assertEqual(linea.metadata["fuente_sin_datos_previa"], "AUTO:ISN_CFDI")
+        self.assertIsNone(
+            LineaPresupuestoMensual.objects.filter(pk=linea.pk).aggregate(
+                total=Sum("monto_real")
+            )["total"]
+        )
         self.assertEqual(summary.sin_datos_fuente, 1)
 
     def test_isn_cfdi_cancelado_posterior_no_toca_manual(self):

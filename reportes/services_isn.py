@@ -81,7 +81,12 @@ class PreviewExpedienteISN:
             f"base_declarada={base_declarada} diferencia={diferencia} "
             f"isn_calculado={self.isn_calculado:.2f} "
             f"diferencia_isn={self.diferencia_isn:.2f} "
-            f"estado_previsto={self.estado_previsto} empleados={len(self.filas)}"
+            f"estado_previsto={self.estado_previsto} empleados={len(self.filas)} "
+            "exenciones="
+            + ",".join(
+                f"{codigo}:{proporcion}"
+                for codigo, proporcion in self.politica_exenciones
+            )
         )
         detalle = (
             f"empleado={fila.empleado_id} base={fila.base_gravada:.2f} "
@@ -266,14 +271,13 @@ def _validar_lineas_nomina_mes(lineas) -> None:
 def _normalizar_politica_exenciones(
     politica_exenciones: dict[str, Decimal] | None,
 ) -> dict[str, Decimal]:
-    politica = dict(
-        POLITICA_EXENCIONES_INICIAL
-        if politica_exenciones is None
-        else politica_exenciones
-    )
+    politica = dict(POLITICA_EXENCIONES_INICIAL)
+    politica.update(politica_exenciones or {})
     normalizada = {}
     for codigo, proporcion in politica.items():
         codigo_normalizado = str(codigo or "").strip()
+        if not codigo_normalizado:
+            raise ValueError("El codigo de exencion no puede estar vacio.")
         try:
             valor = Decimal(proporcion)
         except (InvalidOperation, TypeError, ValueError) as exc:
@@ -321,7 +325,6 @@ def _bases_gravadas_y_snapshots(
     bases = {}
     empleado_ids = set()
     snapshots_por_empleado = defaultdict(set)
-    periodos_por_empleado = defaultdict(set)
     for linea in lineas:
         if not linea.sucursal_snapshot_id or not linea.departamento_snapshot:
             raise ValueError(
@@ -332,15 +335,9 @@ def _bases_gravadas_y_snapshots(
         snapshots_por_empleado[linea.empleado_id].add(
             (linea.departamento_snapshot, linea.sucursal_snapshot_id)
         )
-        periodos_por_empleado[linea.empleado_id].add(linea.periodo_id)
 
-    periodos_esperados = {item.pk for item in periodos_mes}
     snapshots = {}
     for empleado_id in sorted(empleado_ids):
-        if periodos_por_empleado[empleado_id] != periodos_esperados:
-            raise ValueError(
-                f"El empleado {empleado_id} no aparece en las dos quincenas del mes."
-            )
         if len(snapshots_por_empleado[empleado_id]) != 1:
             raise ValueError(
                 f"El empleado {empleado_id} tiene snapshot inconsistente entre quincenas."
@@ -511,6 +508,7 @@ def preparar_expediente_isn(
     *,
     uuid: str | None = None,
     base_declarada: Decimal | None = None,
+    politica_exenciones: dict[str, Decimal] | None = None,
 ) -> PreviewExpedienteISN:
     if not isinstance(periodo, date) or periodo.day != 1:
         raise ValueError("El periodo de ISN debe ser el primer dia del mes.")
@@ -521,7 +519,10 @@ def preparar_expediente_isn(
     if periodo_cfdi != periodo:
         raise ValueError("El periodo del CFDI no coincide con el periodo solicitado.")
 
-    bases, snapshots, politica_exenciones = _bases_gravadas_y_snapshots(periodo)
+    bases, snapshots, politica_exenciones = _bases_gravadas_y_snapshots(
+        periodo,
+        politica_exenciones=politica_exenciones,
+    )
     montos = prorratear_isn(bases, importe_pagado)
 
     base_gravada_total = money(sum(bases.values(), ZERO))
