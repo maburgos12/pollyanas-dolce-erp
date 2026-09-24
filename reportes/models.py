@@ -947,6 +947,7 @@ class ReglaFuenteRubro(models.Model):
     FUENTE_MANTENIMIENTO_EQUIPO = "MANTENIMIENTO_EQUIPO"
     FUENTE_COSTO_REVENTA = "COSTO_REVENTA"
     FUENTE_MERMA_PRODUCTO = "MERMA_PRODUCTO"
+    FUENTE_ISN_CFDI = "ISN_CFDI"
     FUENTE_MANUAL = "MANUAL"
     FUENTE_CHOICES = [
         (FUENTE_GASTO_OPERATIVO, "Gasto operativo mensual"),
@@ -962,6 +963,7 @@ class ReglaFuenteRubro(models.Model):
         (FUENTE_MANTENIMIENTO_EQUIPO, "Mantenimiento de equipos (activos)"),
         (FUENTE_COSTO_REVENTA, "Costo de reventa de complementos"),
         (FUENTE_MERMA_PRODUCTO, "Merma física de producto (módulo mermas)"),
+        (FUENTE_ISN_CFDI, "ISN desde CFDI estatal"),
         (FUENTE_MANUAL, "Captura manual"),
     ]
 
@@ -3104,3 +3106,89 @@ class DetalleCedulaIMSS(models.Model):
 
     def __str__(self) -> str:
         return f"NSS •••••••{self.nss[-4:]} · {self.nombre_origen}"
+
+
+class ExpedienteISN(models.Model):
+    ESTADO_VALIDO = "VALIDO"
+    ESTADO_APLICADO = "APLICADO"
+    ESTADO_REEMPLAZADO = "REEMPLAZADO"
+    ESTADO_DISCREPANCIA = "DISCREPANCIA"
+    ESTADO_CHOICES = [
+        (value, value.title())
+        for value in (
+            ESTADO_VALIDO,
+            ESTADO_APLICADO,
+            ESTADO_REEMPLAZADO,
+            ESTADO_DISCREPANCIA,
+        )
+    ]
+
+    periodo = models.DateField(db_index=True)
+    revision = models.PositiveSmallIntegerField(default=1)
+    uuid = models.CharField(max_length=36, unique=True)
+    cfdi = models.OneToOneField(
+        "sat_client.CfdiDescargado",
+        on_delete=models.PROTECT,
+        related_name="expediente_isn",
+    )
+    importe_pagado = models.DecimalField(max_digits=14, decimal_places=2)
+    base_gravada_calculada = models.DecimalField(max_digits=14, decimal_places=2)
+    base_declarada = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    estado = models.CharField(max_length=16, choices=ESTADO_CHOICES)
+    aplicado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expedientes_isn_aplicados",
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    aplicado_en = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["periodo", "revision"],
+                name="uniq_isn_periodo_revision",
+            ),
+            models.UniqueConstraint(
+                fields=["periodo"],
+                condition=models.Q(estado="APLICADO"),
+                name="uniq_isn_aplicado_periodo",
+            ),
+        ]
+
+
+class DistribucionISNEmpleado(models.Model):
+    expediente = models.ForeignKey(
+        ExpedienteISN,
+        on_delete=models.PROTECT,
+        related_name="distribuciones",
+    )
+    empleado = models.ForeignKey(
+        "rrhh.Empleado",
+        on_delete=models.PROTECT,
+        related_name="distribuciones_isn",
+    )
+    base_gravada = models.DecimalField(max_digits=14, decimal_places=2)
+    monto_isn = models.DecimalField(max_digits=14, decimal_places=2)
+    area_codigo = models.CharField(max_length=50)
+    sucursal = models.ForeignKey(
+        "core.Sucursal",
+        on_delete=models.PROTECT,
+        related_name="distribuciones_isn",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["expediente", "empleado"],
+                name="uniq_isn_expediente_empleado",
+            )
+        ]
