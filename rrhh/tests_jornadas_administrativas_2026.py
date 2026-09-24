@@ -299,6 +299,33 @@ class AplicacionJornadasAdministrativasTests(TestCase):
         conciliada = configurar_jornadas_administrativas_2026(hoy=fecha)
         self.assertNotEqual(nueva["fingerprint"], conciliada["fingerprint"])
 
+    def test_autorizacion_de_extra_manual_invalida_preview_antes_de_conciliar(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 30))),
+        )
+        [manual] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, fecha=fecha, horas=Decimal("1.00"),
+            estado=HoraExtra.ESTADO_PENDIENTE, notas="Captura manual",
+        )])
+        previa = configurar_jornadas_administrativas_2026(hoy=fecha)
+        HoraExtra.objects.filter(pk=manual.pk).update(estado=HoraExtra.ESTADO_AUTORIZADO)
+        nueva = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(previa["incidencias_a_reconciliar"], nueva["incidencias_a_reconciliar"])
+        self.assertNotEqual(previa["fingerprint"], nueva["fingerprint"])
+        with self.assertRaisesMessage(ConfiguracionJornadasError, "huella"):
+            configurar_jornadas_administrativas_2026(
+                aplicar=True, hoy=fecha, actor=self.actor,
+                expected_fingerprint=previa["fingerprint"],
+            )
+        self.assertIsNone(AsistenciaEmpleado.objects.get(pk=asistencia.pk).turno_id)
+        self.assertEqual(HoraExtra.objects.get(pk=manual.pk).estado, HoraExtra.ESTADO_AUTORIZADO)
+        self.assertFalse(IncidenciaAsistencia.objects.exists())
+        self.assertFalse(JornadaSemanal.objects.exists())
+        self.assertFalse(AuditLog.objects.exists())
+
     def test_turno_ya_correcto_sin_extra_tambien_propone_una_hora(self):
         turno = Turno.objects.create(
             nombre="Administrativa 2026 08:00-16:30", hora_entrada=time(8),

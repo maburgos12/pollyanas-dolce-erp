@@ -134,6 +134,23 @@ def _incidencia_snapshot(incidencia):
     }
 
 
+def _hora_extra_snapshot(extra):
+    """Insumos de conciliación, incluso de capturas manuales que no se editan."""
+    return {
+        "id": extra.pk, "empleado_id": extra.empleado_id,
+        "asistencia_id": extra.asistencia_id, "fecha": extra.fecha.isoformat(),
+        "horas": str(extra.horas), "tasa_extra": str(extra.tasa_extra),
+        "monto_calculado": str(extra.monto_calculado) if extra.monto_calculado is not None else None,
+        "estado": extra.estado, "jefe_directo_id": extra.jefe_directo_id,
+        "autorizado_por_id": extra.autorizado_por_id,
+        "fecha_autorizacion_jefe": (
+            extra.fecha_autorizacion_jefe.isoformat() if extra.fecha_autorizacion_jefe else None
+        ),
+        "notas": extra.notas, "ajuste_autorizacion": extra.ajuste_autorizacion,
+        "creado_en": extra.creado_en.isoformat() if extra.creado_en else None,
+    }
+
+
 def _plan(hoy: date, *, bloquear=False):
     limite = min(hoy, FIN)
     ids = [pk for pk, _, _ in MANIFIESTO]
@@ -369,6 +386,7 @@ def _plan(hoy: date, *, bloquear=False):
         "modo": "preview", "personas_objetivo": 6, "personas": personas,
         "turnos": turnos, "jornadas": jornadas, "asignaciones": asignaciones,
         "asistencias_evaluadas": asistencias_evaluadas,
+        "extras_evaluadas": [_hora_extra_snapshot(he) for he in extras_db],
         "asistencias_a_actualizar": asistencias_a_actualizar,
         "incidencias_a_reconciliar": incidencias,
         "pendientes_a_reconciliar": pendientes,
