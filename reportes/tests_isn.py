@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal as D
 
 from django.db import IntegrityError, transaction
@@ -8,8 +8,18 @@ from django.utils import timezone
 
 from core.models import Sucursal
 from reportes.models import DistribucionISNEmpleado, ExpedienteISN
-from reportes.services_isn import calcular_isn_sinaloa, prorratear_isn
-from rrhh.models import Empleado
+from reportes.services_isn import (
+    bases_gravadas_empleados,
+    calcular_isn_sinaloa,
+    extraer_isn_cfdi,
+    prorratear_isn,
+)
+from rrhh.models import (
+    Empleado,
+    NominaConceptoLinea,
+    NominaLinea,
+    NominaPeriodo,
+)
 from sat_client.models import CfdiDescargado
 
 
@@ -25,6 +35,175 @@ class ISNMathTests(SimpleTestCase):
 
         self.assertEqual(sum(result.values(), D("0")), D("10.00"))
         self.assertEqual(result, {1: D("3.34"), 2: D("3.33"), 3: D("3.33")})
+
+
+class ISNSourceTests(TestCase):
+    CFDI_XML = """<?xml version="1.0" encoding="UTF-8"?>
+    <cfdi:Comprobante xmlns:cfdi="http://www.sat.gob.mx/cfd/4">
+      <cfdi:Conceptos>
+        <cfdi:Concepto NoIdentificacion="OTRO" Descripcion="Otro cobro" Importe="999.99" />
+        <cfdi:Concepto NoIdentificacion="202608 2-003" Descripcion="Impuesto sobre nomina" Importe="16168.00" />
+      </cfdi:Conceptos>
+    </cfdi:Comprobante>
+    """
+
+    def _crear_cfdi(self, **overrides):
+        datos = {
+            "uuid": "CFDI-ISN-FUENTE",
+            "rfc_emisor": "GES8101015I7",
+            "rfc_receptor": "GEF211230KR2",
+            "subtotal": D("16168.00"),
+            "total": D("16168.00"),
+            "tipo_comprobante": "I",
+            "tipo_cfdi": CfdiDescargado.TIPO_RECIBIDO,
+            "fecha_emision": datetime(2026, 9, 17, tzinfo=UTC),
+            "estatus": "vigente",
+            "xml_raw": self.CFDI_XML,
+        }
+        datos.update(overrides)
+        return CfdiDescargado.objects.create(**datos)
+
+    def _crear_empleado(self, codigo="E-ISN", **overrides):
+        sucursal = overrides.pop("sucursal_ref", None)
+        if sucursal is None:
+            sucursal = Sucursal.objects.create(
+                codigo=f"S-{codigo}",
+                nombre=f"Sucursal {codigo}",
+            )
+        datos = {
+            "codigo": codigo,
+            "nombre": f"Empleado {codigo}",
+            "departamento": Empleado.DEP_VENTAS,
+            "sucursal_ref": sucursal,
+        }
+        datos.update(overrides)
+        return Empleado.objects.create(**datos)
+
+    def _crear_periodo(self, *, empleado, estatus, fecha_fin, conceptos):
+        periodo = NominaPeriodo.objects.create(
+            fecha_inicio=fecha_fin.replace(day=1),
+            fecha_fin=fecha_fin,
+            estatus=estatus,
+        )
+        linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado)
+        for codigo, importe in conceptos:
+            NominaConceptoLinea.objects.create(
+                linea=linea,
+                tipo=NominaConceptoLinea.TIPO_PERCEPCION,
+                codigo_concepto=codigo,
+                nombre=f"Concepto {codigo}",
+                importe=importe,
+            )
+        return periodo
+
+    def test_extrae_periodo_del_concepto_y_no_de_fecha_emision(self):
+        cfdi = self._crear_cfdi()
+
+        periodo, importe = extraer_isn_cfdi(cfdi)
+
+        self.assertEqual(periodo, date(2026, 8, 1))
+        self.assertEqual(importe, D("16168.00"))
+
+    def test_rechaza_cfdi_que_no_es_ingreso_recibido_vigente_de_la_empresa(self):
+        casos = (
+            ("rfc_emisor", "AAA010101AAA"),
+            ("rfc_receptor", "BBB010101BBB"),
+            ("estatus", "cancelado"),
+            ("tipo_cfdi", CfdiDescargado.TIPO_EMITIDO),
+            ("tipo_comprobante", "E"),
+        )
+        for indice, (campo, valor) in enumerate(casos, start=1):
+            with self.subTest(campo=campo):
+                cfdi = self._crear_cfdi(uuid=f"CFDI-INVALIDO-{indice}", **{campo: valor})
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
+
+    def test_rechaza_xml_sin_periodo_o_con_periodos_ambiguos(self):
+        xml_sin_periodo = self.CFDI_XML.replace("202608 2-003", "SIN-PERIODO")
+        xml_ambiguo = self.CFDI_XML.replace(
+            "</cfdi:Conceptos>",
+            '<cfdi:Concepto NoIdentificacion="202607 2-003" '
+            'Descripcion="Impuesto sobre nomina" Importe="15000.00" />'
+            "</cfdi:Conceptos>",
+        )
+        for indice, xml in enumerate(("<xml", xml_sin_periodo, xml_ambiguo), start=1):
+            with self.subTest(indice=indice):
+                cfdi = self._crear_cfdi(uuid=f"CFDI-XML-{indice}", xml_raw=xml)
+                with self.assertRaises(ValueError):
+                    extraer_isn_cfdi(cfdi)
+
+    def test_calcula_base_por_empleado_con_exenciones_de_codigos_y_aguinaldo(self):
+        empleado = self._crear_empleado()
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_PAGADA,
+            fecha_fin=date(2026, 8, 15),
+            conceptos=(
+                ("1", D("10000.00")),
+                ("20", D("1000.00")),
+                ("22", D("2000.00")),
+                ("24", D("4000.00")),
+                ("26", D("300.00")),
+                ("32", D("400.00")),
+            ),
+        )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases, {empleado.id: D("10480.70")})
+
+    def test_agrupa_por_empleado_solo_periodos_cerrados_o_pagados_que_terminan_en_mes(self):
+        empleado = self._crear_empleado(codigo="E-AGRUPADO")
+        casos = (
+            (NominaPeriodo.ESTATUS_CERRADA, date(2026, 8, 7), D("100.00")),
+            (NominaPeriodo.ESTATUS_PAGADA, date(2026, 8, 31), D("200.00")),
+            (NominaPeriodo.ESTATUS_BORRADOR, date(2026, 8, 15), D("400.00")),
+            (NominaPeriodo.ESTATUS_CERRADA, date(2026, 9, 7), D("800.00")),
+        )
+        for estatus, fecha_fin, importe in casos:
+            self._crear_periodo(
+                empleado=empleado,
+                estatus=estatus,
+                fecha_fin=fecha_fin,
+                conceptos=(("1", importe),),
+            )
+
+        bases = bases_gravadas_empleados(date(2026, 8, 1))
+
+        self.assertEqual(bases, {empleado.id: D("300.00")})
+
+    def test_rechaza_anio_sin_uma_configurada(self):
+        with self.assertRaisesMessage(ValueError, "UMA"):
+            bases_gravadas_empleados(date(2027, 1, 1))
+
+    def test_rechaza_empleado_sin_sucursal(self):
+        empleado = self._crear_empleado(codigo="E-SIN-SUCURSAL")
+        empleado.sucursal_ref = None
+        empleado.save(update_fields={"sucursal_ref"})
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(("1", D("100.00")),),
+        )
+
+        with self.assertRaises(ValueError):
+            bases_gravadas_empleados(date(2026, 8, 1))
+
+    def test_rechaza_empleado_sin_departamento(self):
+        empleado = self._crear_empleado(
+            codigo="E-SIN-DEPARTAMENTO",
+            departamento="",
+        )
+        self._crear_periodo(
+            empleado=empleado,
+            estatus=NominaPeriodo.ESTATUS_CERRADA,
+            fecha_fin=date(2026, 8, 31),
+            conceptos=(("1", D("100.00")),),
+        )
+
+        with self.assertRaises(ValueError):
+            bases_gravadas_empleados(date(2026, 8, 1))
 
 
 class ISNModelTests(TestCase):
