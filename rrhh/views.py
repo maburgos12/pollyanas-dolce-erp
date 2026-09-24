@@ -1249,12 +1249,35 @@ _BORRADOR_FICHA_CAMPOS = frozenset({
     "bono_esquema_otro_descripcion", "jornada_gestion_presente", "jornada_id",
     "jornada_fecha_inicio", "jornada_motivo", "alta_pendiente_id",
 })
+_BORRADOR_LOGISTICA_CAMPOS = frozenset({
+    "motivo_autorizacion", "autorizado_por", "numero_licencia", "notas_identidad",
+    "licencia_expedicion", "licencia_expiracion",
+})
 
 
 def _borrador_ficha_desde_post(post):
-    borrador = {campo: str(post.get(campo) or "").strip()[:250] for campo in _BORRADOR_FICHA_CAMPOS}
-    borrador["bono_esquemas"] = [valor for valor in post.getlist("bono_esquemas") if valor.isdigit()][:50]
+    borrador = {campo: str(post.get(campo) or "") for campo in _BORRADOR_FICHA_CAMPOS}
+    borrador["bono_esquemas"] = [valor for valor in post.getlist("bono_esquemas") if valor.isdigit()]
     return borrador
+
+
+def _errores_longitud_borrador(borrador):
+    from logistica.models import Repartidor
+
+    errores = {}
+    for modelo, permitidos in (
+        (Empleado, _BORRADOR_FICHA_CAMPOS - _BORRADOR_LOGISTICA_CAMPOS),
+        (Repartidor, _BORRADOR_LOGISTICA_CAMPOS),
+    ):
+        for campo in modelo._meta.fields:
+            if campo.name not in permitidos or not campo.max_length:
+                continue
+            if len(borrador[campo.name]) > campo.max_length:
+                errores[campo.name] = [f"{campo.verbose_name} admite máximo {campo.max_length} caracteres."]
+    usuario_max = get_user_model()._meta.get_field("username").max_length
+    if len(borrador["nuevo_usuario_username"]) > usuario_max:
+        errores["nuevo_usuario_username"] = [f"El usuario admite máximo {usuario_max} caracteres."]
+    return errores
 
 
 def _url_ficha_empleado(request, empleado=None):
@@ -1267,7 +1290,10 @@ def _url_ficha_empleado(request, empleado=None):
         if pendiente.isdigit():
             filtros["alta_pendiente"] = pendiente
     query = f"?{urlencode(filtros)}" if filtros else ""
-    fragmento = f"empleado-{empleado.pk}" if empleado else "alta-empleado"
+    fragmento = (
+        f"empleado-{empleado.pk}" if empleado else
+        "catalogo-empleados" if request.POST.get("action") == "update" else "alta-empleado"
+    )
     return f'{reverse("rrhh:empleados")}{query}#{fragmento}'
 
 
@@ -1275,16 +1301,25 @@ def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None)
     redirect_url = _url_ficha_empleado(request, empleado)
     if error is not None:
         errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
-        texto = next(iter(errores.values()))[0]
         borrador = _borrador_ficha_desde_post(request.POST)
+        errores = {**_errores_longitud_borrador(borrador), **errores}
         if _wants_progressive_response(request):
+            texto = next(iter(errores.values()))[0]
             return JsonResponse({
                 "ok": False, "toast": {"type": "error", "message": texto, "persistent": True},
                 "errors": errores, "values": borrador,
             }, status=400)
+        excedidos = [
+            campo for campo, valor in borrador.items()
+            if isinstance(valor, str) and len(valor) > 10_000
+        ]
+        for campo in excedidos:
+            borrador.pop(campo)
+            errores[campo] = [f"{campo} supera el límite del borrador de 10000 caracteres; vuelve a capturarlo."]
+        texto = errores[excedidos[0]][0] if excedidos else next(iter(errores.values()))[0]
         messages.error(request, texto)
         request.session["rrhh_ficha_error_flash"] = {
-            "accion": "update" if empleado else "create",
+            "accion": "update" if request.POST.get("action") == "update" else "create",
             "empleado_id": empleado.pk if empleado else None,
             "values": borrador,
         }
@@ -1406,18 +1441,27 @@ def empleados(request):
             messages.success(request, f"Plantilla autorizada actualizada: {plantilla}.")
             return redirect("rrhh:empleados")
         codigo = _codigo_empleado_desde_post(request.POST)
-        if not nombre:
-            return _respuesta_ficha_empleado(request, error=ValidationError({
-                "nombre": "Nombre del empleado es obligatorio.",
-            }))
-        elif action == "update":
+        empleado_edicion = None
+        if action == "update":
             empleado_id = (request.POST.get("empleado_id") or "").strip()
-            empleado = Empleado.objects.filter(pk=int(empleado_id)).first() if empleado_id.isdigit() else None
-            if not empleado:
+            empleado_edicion = Empleado.objects.filter(pk=int(empleado_id)).first() if empleado_id.isdigit() else None
+            if not empleado_edicion:
                 return _respuesta_ficha_empleado(request, error=ValidationError({
                     "empleado_id": "Selecciona un empleado válido para editar.",
                 }))
-            elif duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
+        if action in {"create", "update"}:
+            errores_longitud = _errores_longitud_borrador(_borrador_ficha_desde_post(request.POST))
+            if errores_longitud:
+                return _respuesta_ficha_empleado(
+                    request, empleado=empleado_edicion, error=ValidationError(errores_longitud),
+                )
+        if not nombre:
+            return _respuesta_ficha_empleado(request, empleado=empleado_edicion, error=ValidationError({
+                "nombre": "Nombre del empleado es obligatorio.",
+            }))
+        elif action == "update":
+            empleado = empleado_edicion
+            if duplicado := _empleado_con_codigo_duplicado(codigo, empleado.id):
                 return _respuesta_ficha_empleado(request, empleado=empleado, error=ValidationError({
                     "codigo": f"El código {codigo} ya pertenece a {duplicado.nombre}.",
                 }))

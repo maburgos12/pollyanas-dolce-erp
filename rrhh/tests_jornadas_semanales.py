@@ -478,6 +478,61 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         empleado.refresh_from_db()
         self.assertEqual(empleado.nombre, "Persona existente")
 
+    def test_nombre_vacio_en_update_conserva_modo_edicion_y_ancla(self):
+        empleado, _ = self.empleado_con_jornada()
+        response = self.client.post(self.url, self.datos_edicion(
+            empleado, nombre="", telefono="6671112222",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}#empleado-{empleado.pk}")
+        pantalla = self.client.get(response["Location"].split("#")[0])
+        self.assertContains(pantalla, f'id="empleado-{empleado.pk}"')
+        self.assertContains(pantalla, '<details class="rrhh-edit-panel" open>')
+        self.assertContains(pantalla, f'id="edit_telefono_{empleado.pk}"')
+        self.assertContains(pantalla, 'value="6671112222"')
+        self.assertIsNone(pantalla.context["alta_form_draft"])
+
+    def test_notas_largas_sobreviven_json_y_flash_html_sin_recorte(self):
+        empleado, _ = self.empleado_con_jornada()
+        notas = "  Nota de logística " + "x" * 320 + "  "
+        datos = self.datos_edicion(empleado, jornada_motivo="", notas_identidad=notas)
+        json_response = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(json_response.status_code, 400)
+        self.assertEqual(json_response.json()["values"]["notas_identidad"], notas)
+        html_response = self.client.post(self.url, datos)
+        pantalla = self.client.get(html_response["Location"].split("#")[0])
+        self.assertContains(pantalla, notas)
+
+    def test_limite_de_sesion_reporta_error_sin_recortar_json(self):
+        empleado, _ = self.empleado_con_jornada()
+        notas = "n" * 10001
+        datos = self.datos_edicion(empleado, jornada_motivo="", notas_identidad=notas)
+        json_response = self.client.post(self.url, datos, HTTP_ACCEPT="application/json")
+        self.assertEqual(json_response.json()["values"]["notas_identidad"], notas)
+        html_response = self.client.post(self.url, datos)
+        pantalla = self.client.get(html_response["Location"].split("#")[0])
+        self.assertContains(pantalla, "supera el límite del borrador")
+        self.assertNotContains(pantalla, "n" * 250)
+
+    def test_campo_con_max_length_real_se_rechaza_sin_recortar_values(self):
+        nombre = "N" * (Empleado._meta.get_field("nombre").max_length + 1)
+        response = self.client.post(self.url, self.datos_alta(nombre=nombre), HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nombre", response.json()["errors"])
+        self.assertEqual(response.json()["values"]["nombre"], nombre)
+        self.assertFalse(Empleado.objects.filter(nombre=nombre).exists())
+
+    def test_id_invalido_de_update_html_regresa_al_catalogo_sin_borrador_de_alta(self):
+        response = self.client.post(self.url, {
+            "action": "update", "empleado_id": "invalido", "nombre": "Intento de edición",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}#catalogo-empleados")
+        pantalla = self.client.get(self.url)
+        self.assertContains(pantalla, 'id="catalogo-empleados"')
+        self.assertContains(pantalla, "Selecciona un empleado válido para editar.")
+        self.assertIsNone(pantalla.context["alta_form_draft"])
+
     def test_reenvio_de_misma_jornada_no_duplica(self):
         empleado, inicial = self.empleado_con_jornada()
         response = self.client.post(self.url, self.datos_edicion(
