@@ -141,23 +141,51 @@ class ISNModelTests(TestCase):
         with self.assertRaises(IntegrityError), transaction.atomic():
             ExpedienteISN.objects.create(**datos)
 
-    def test_estado_aplicado_exige_fecha_de_aplicacion(self):
-        datos = self._datos_expediente(
-            cfdi=self._crear_cfdi("CFDI-APLICADO-SIN-FECHA"),
-            aplicado_en=None,
+    def test_estados_aplicados_exigen_fecha_de_aplicacion(self):
+        for revision, estado in enumerate(
+            (ExpedienteISN.ESTADO_APLICADO, ExpedienteISN.ESTADO_REEMPLAZADO),
+            start=1,
+        ):
+            with self.subTest(estado=estado):
+                datos = self._datos_expediente(
+                    cfdi=self._crear_cfdi(f"CFDI-{estado}-SIN-FECHA"),
+                    revision=revision,
+                    estado=estado,
+                    aplicado_en=None,
+                )
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    ExpedienteISN.objects.create(**datos)
+
+    def test_estados_sin_aplicacion_rechazan_fecha(self):
+        for revision, estado in enumerate(
+            (ExpedienteISN.ESTADO_VALIDO, ExpedienteISN.ESTADO_DISCREPANCIA),
+            start=1,
+        ):
+            with self.subTest(estado=estado):
+                datos = self._datos_expediente(
+                    cfdi=self._crear_cfdi(f"CFDI-{estado}-CON-FECHA"),
+                    revision=revision,
+                    estado=estado,
+                )
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    ExpedienteISN.objects.create(**datos)
+
+    def test_reemplazado_conserva_fecha_de_aplicacion(self):
+        expediente = self._crear_expediente(
+            cfdi=self._crear_cfdi("CFDI-REEMPLAZADO-CON-FECHA")
         )
+        aplicado_en = expediente.aplicado_en
 
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            ExpedienteISN.objects.create(**datos)
+        expediente.estado = ExpedienteISN.ESTADO_REEMPLAZADO
+        try:
+            with transaction.atomic():
+                expediente.save(update_fields={"estado"})
+        except IntegrityError:
+            self.fail("REEMPLAZADO debe conservar la fecha de aplicación")
 
-    def test_estado_no_aplicado_rechaza_fecha_de_aplicacion(self):
-        datos = self._datos_expediente(
-            cfdi=self._crear_cfdi("CFDI-VALIDO-CON-FECHA"),
-            estado=ExpedienteISN.ESTADO_VALIDO,
-        )
-
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            ExpedienteISN.objects.create(**datos)
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.estado, ExpedienteISN.ESTADO_REEMPLAZADO)
+        self.assertEqual(expediente.aplicado_en, aplicado_en)
 
     def test_distribucion_no_admite_montos_negativos(self):
         sucursal = Sucursal.objects.create(codigo="S2", nombre="Sucursal 2")
@@ -188,18 +216,74 @@ class ISNModelTests(TestCase):
         expediente.refresh_from_db()
         self.assertEqual(expediente.uuid, cfdi.uuid)
 
-    def test_update_fields_persiste_cfdi_y_uuid_como_pareja(self):
+    def test_update_fields_cfdi_explicito_persiste_cfdi_y_uuid_como_pareja(self):
         cfdi_a = self._crear_cfdi("CFDI-PAREJA-A")
         cfdi_b = self._crear_cfdi("CFDI-PAREJA-B")
         expediente = self._crear_expediente(cfdi=cfdi_a)
 
         expediente.cfdi = cfdi_b
-        expediente.metadata = {"revision": "parcial"}
-        expediente.save(update_fields={"metadata"})
+        expediente.save(update_fields={"cfdi"})
 
         expediente.refresh_from_db()
         self.assertEqual(expediente.cfdi_id, cfdi_b.pk)
         self.assertEqual(expediente.uuid, expediente.cfdi.uuid)
+
+    def test_update_fields_cfdi_id_explicito_persiste_pareja(self):
+        cfdi_a = self._crear_cfdi("CFDI-ID-PAREJA-A")
+        cfdi_b = self._crear_cfdi("CFDI-ID-PAREJA-B")
+        expediente = self._crear_expediente(cfdi=cfdi_a)
+
+        expediente.cfdi_id = cfdi_b.pk
+        expediente.save(update_fields={"cfdi_id"})
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.cfdi_id, cfdi_b.pk)
+        self.assertEqual(expediente.uuid, expediente.cfdi.uuid)
+
+    def test_update_fields_metadata_ignora_cfdi_y_uuid_incidentales(self):
+        cfdi_a = self._crear_cfdi("CFDI-METADATA-A")
+        cfdi_b = self._crear_cfdi("CFDI-METADATA-B")
+        expediente = self._crear_expediente(cfdi=cfdi_a)
+
+        expediente.cfdi = cfdi_b
+        expediente.uuid = "UUID-INCIDENTAL"
+        expediente.metadata = {"revision": "parcial"}
+        expediente.save(update_fields={"metadata"})
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.cfdi_id, cfdi_a.pk)
+        self.assertEqual(expediente.uuid, cfdi_a.uuid)
+        self.assertEqual(expediente.metadata, {"revision": "parcial"})
+
+    def test_update_fields_uuid_aislado_se_rechaza_sin_divergir(self):
+        cfdi = self._crear_cfdi("CFDI-UUID-AISLADO")
+        expediente = self._crear_expediente(cfdi=cfdi)
+        expediente.uuid = "UUID-AISLADO"
+
+        with self.assertRaisesMessage(
+            ValueError,
+            "uuid solo puede actualizarse junto con cfdi",
+        ):
+            expediente.save(update_fields={"uuid"})
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.uuid, expediente.cfdi.uuid)
+
+    def test_update_fields_vacio_es_no_op(self):
+        cfdi_a = self._crear_cfdi("CFDI-NO-OP-A")
+        cfdi_b = self._crear_cfdi("CFDI-NO-OP-B")
+        expediente = self._crear_expediente(cfdi=cfdi_a)
+        expediente.cfdi = cfdi_b
+        expediente.uuid = "UUID-NO-OP"
+        expediente.metadata = {"no": "persistir"}
+
+        with self.assertNumQueries(0):
+            expediente.save(update_fields=[])
+
+        expediente.refresh_from_db()
+        self.assertEqual(expediente.cfdi_id, cfdi_a.pk)
+        self.assertEqual(expediente.uuid, cfdi_a.uuid)
+        self.assertEqual(expediente.metadata, {})
 
     def test_cfdi_de_un_expediente_esta_protegido(self):
         cfdi = self._crear_cfdi("CFDI-PROTEGIDO")

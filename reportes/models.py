@@ -3189,9 +3189,12 @@ class ExpedienteISN(models.Model):
             ),
             models.CheckConstraint(
                 check=(
-                    models.Q(estado="APLICADO", aplicado_en__isnull=False)
+                    models.Q(
+                        estado__in=("APLICADO", "REEMPLAZADO"),
+                        aplicado_en__isnull=False,
+                    )
                     | (
-                        ~models.Q(estado="APLICADO")
+                        ~models.Q(estado__in=("APLICADO", "REEMPLAZADO"))
                         & models.Q(aplicado_en__isnull=True)
                     )
                 ),
@@ -3209,13 +3212,20 @@ class ExpedienteISN(models.Model):
         ]
 
     def save(self, *args, **kwargs):
-        if self.cfdi_id:
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            update_fields = set(update_fields)
+            if not update_fields:
+                return super().save(*args, **kwargs)
+            actualiza_cfdi = bool({"cfdi", "cfdi_id"} & update_fields)
+            if "uuid" in update_fields and not actualiza_cfdi:
+                raise ValueError("uuid solo puede actualizarse junto con cfdi")
+            if actualiza_cfdi and self.cfdi_id:
+                self.uuid = self.cfdi.uuid
+                update_fields.add("uuid")
+            kwargs["update_fields"] = update_fields
+        elif self.cfdi_id:
             self.uuid = self.cfdi.uuid
-            if kwargs.get("update_fields") is not None:
-                kwargs["update_fields"] = set(kwargs["update_fields"]) | {
-                    "cfdi",
-                    "uuid",
-                }
         return super().save(*args, **kwargs)
 
 
