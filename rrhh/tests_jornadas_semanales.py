@@ -332,6 +332,24 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertContains(response, 'value="2026-11-01"')
         self.assertContains(response, "Alta en borrador")
 
+    def test_ancla_de_guardado_revela_jornada_y_foco_solo_para_empleado(self):
+        empleado, _ = self.empleado_con_jornada()
+        response = self.client.get(self.url)
+        html = response.content.decode()
+        self.assertIn(f'id="empleado-{empleado.pk}"', html)
+        self.assertIn('class="rrhh-jornada-current" tabindex="-1"', html)
+        self.assertIn("window.location.hash", html)
+        self.assertIn("panel.open = true", html)
+        self.assertIn("jornada.focus(", html)
+        self.assertIn("window.addEventListener('pageshow'", html)
+        self.assertIn("window.addEventListener('hashchange'", html)
+        css = (Path(__file__).resolve().parents[1] /
+               "static/css/template_modules/rrhh-templates-rrhh-empleados.css").read_text()
+        self.assertIn(".rrhh-edit-panel > summary", css)
+        self.assertIn(".rrhh-jornada-history > summary", css)
+        self.assertIn(".main-content[data-hallmark-scope=\"erp\"] .rrhh-jornada .input-field", css)
+        self.assertIn("jornadas-semanales-v3", html)
+
     def test_ficha_consulta_muestra_jornada_sin_edicion(self):
         empleado, _ = self.empleado_con_jornada()
         self.actor.groups.clear()

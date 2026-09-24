@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20260923-jornadas-semanales-v2";
+const CACHE_NAME = "pollyanas-erp-shell-20260923-jornadas-semanales-v3";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

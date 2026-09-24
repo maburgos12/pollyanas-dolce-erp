@@ -5,7 +5,7 @@
 {% block page_title %}RRHH · Empleados{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales-v3">
 {% endblock %}
 
 {% block content %}
@@ -768,7 +768,7 @@
                 {% with e.form_values|default:e as e %}
                 <details class="rrhh-edit-panel" {% if ficha_error_empleado_id == e.id %}open{% endif %}>
                   <summary>{% if can_manage_rrhh %}Editar{% else %}Ver jornada de{% endif %} {{ e.nombre }}</summary>
-                  <section class="rrhh-jornada-current" aria-label="Jornada semanal actual">
+                  <section class="rrhh-jornada-current" tabindex="-1" aria-label="Jornada semanal actual">
                     <h3>Jornada semanal</h3>
                     {% if e.jornada_vigente %}
                       <strong>{{ e.jornada_vigente.jornada.nombre }}</strong>
@@ -1158,6 +1158,23 @@
 {{ jornadas_catalogo|json_script:"rrhh-jornadas-catalogo" }}
 <script>
 (() => {
+  function revealAnchoredEmployee() {
+    const hash = window.location.hash;
+    if (!/^#empleado-\d+$/.test(hash)) return;
+    const row = document.getElementById(hash.slice(1));
+    const panel = row?.querySelector('.rrhh-edit-panel');
+    const jornada = panel?.querySelector('.rrhh-jornada-current');
+    if (!jornada) return;
+    panel.open = true;
+    requestAnimationFrame(() => {
+      if (window.location.hash !== hash) return;
+      jornada.focus({ preventScroll: true });
+      jornada.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    });
+  }
+  window.addEventListener('pageshow', revealAnchoredEmployee);
+  window.addEventListener('hashchange', revealAnchoredEmployee);
+
   const catalogoNode = document.getElementById('rrhh-jornadas-catalogo');
   const jornadas = new Map((catalogoNode ? JSON.parse(catalogoNode.textContent) : []).map(jornada => [String(jornada.id), jornada]));
   const mensajeSinJornada = 'Sin jornada asignada. La asistencia y las horas extra pueden quedar no calculables.';
