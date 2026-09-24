@@ -144,19 +144,62 @@ class ISNSourceTests(TestCase):
                 with self.assertRaises(ValueError):
                     extraer_isn_cfdi(cfdi)
 
-    def test_rechaza_concepto_duplicado_o_con_codigo_distinto(self):
-        duplicado = self.CFDI_XML.replace(
+    def test_suma_multiples_conceptos_canonicos_del_mismo_periodo(self):
+        xml = self.CFDI_XML.replace(
             "</cfdi:Conceptos>",
             '<cfdi:Concepto NoIdentificacion="202608 2-003" '
             'Descripcion="Segundo" Importe="1.00" />'
             "</cfdi:Conceptos>",
         )
-        otro_codigo = self.CFDI_XML.replace("202608   2-003", "202608 2-004")
-        for indice, xml in enumerate((duplicado, otro_codigo), start=1):
-            with self.subTest(indice=indice):
-                cfdi = self._crear_cfdi(uuid=f"CFDI-CODIGO-{indice}", xml_raw=xml)
-                with self.assertRaises(ValueError):
-                    extraer_isn_cfdi(cfdi)
+        cfdi = self._crear_cfdi(uuid="CFDI-MULTIPLES", xml_raw=xml)
+
+        periodo, importe = extraer_isn_cfdi(cfdi)
+
+        self.assertEqual(periodo, date(2026, 8, 1))
+        self.assertEqual(importe, D("16169.00"))
+
+    def test_acepta_legacy_aaaamm_con_descripcion_nomina(self):
+        xml = self.CFDI_XML.replace(" 202608   2-003 ", "202608").replace(
+            "Servicio estatal",
+            "Impuesto sobre nomina",
+        )
+        cfdi = self._crear_cfdi(uuid="CFDI-LEGACY", xml_raw=xml)
+
+        periodo, importe = extraer_isn_cfdi(cfdi)
+
+        self.assertEqual(periodo, date(2026, 8, 1))
+        self.assertEqual(importe, D("16168.00"))
+
+    def test_descripcion_legacy_normaliza_acento(self):
+        xml = self.CFDI_XML.replace(" 202608   2-003 ", "202608").replace(
+            "Servicio estatal",
+            "Impuesto Sobre NÓMINA",
+        )
+        cfdi = self._crear_cfdi(uuid="CFDI-LEGACY-ACENTO", xml_raw=xml)
+
+        periodo, importe = extraer_isn_cfdi(cfdi)
+
+        self.assertEqual(periodo, date(2026, 8, 1))
+        self.assertEqual(importe, D("16168.00"))
+
+    def test_rechaza_codigo_distinto_con_descripcion_generica(self):
+        xml = self.CFDI_XML.replace("202608   2-003", "202608 9-999")
+        cfdi = self._crear_cfdi(uuid="CFDI-CODIGO-DISTINTO", xml_raw=xml)
+
+        with self.assertRaises(ValueError):
+            extraer_isn_cfdi(cfdi)
+
+    def test_rechaza_mezcla_con_codigo_fiscal_no_clasificable(self):
+        xml = self.CFDI_XML.replace(
+            "</cfdi:Conceptos>",
+            '<cfdi:Concepto NoIdentificacion="202608 9-999" '
+            'Descripcion="Impuesto sobre nomina" Importe="1.00" />'
+            "</cfdi:Conceptos>",
+        )
+        cfdi = self._crear_cfdi(uuid="CFDI-MEZCLA", xml_raw=xml)
+
+        with self.assertRaises(ValueError):
+            extraer_isn_cfdi(cfdi)
 
     def test_rechaza_importe_no_positivo_o_no_finito(self):
         for indice, importe in enumerate(("0", "-0.01", "NaN", "Infinity"), start=1):

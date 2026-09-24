@@ -2,6 +2,7 @@ from collections import Counter, defaultdict
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 import re
+import unicodedata
 from xml.etree import ElementTree as ET
 
 from rrhh.models import NominaConceptoLinea, NominaLinea, NominaPeriodo
@@ -104,9 +105,32 @@ def extraer_isn_cfdi(cfdi) -> tuple[date, Decimal]:
     for concepto in root.findall(f".//{CFDI_NS}Concepto"):
         identificador = " ".join(
             concepto.attrib.get("NoIdentificacion", "").split()
+        ).upper()
+        match_canonico = re.fullmatch(
+            r"(\d{4})(0[1-9]|1[0-2]) 2-003",
+            identificador,
         )
-        match = re.fullmatch(r"(\d{4})(0[1-9]|1[0-2]) 2-003", identificador)
-        if not match:
+        match_legacy = re.fullmatch(
+            r"(\d{4})(0[1-9]|1[0-2])",
+            identificador,
+        )
+        if match_canonico:
+            match = match_canonico
+        elif match_legacy:
+            descripcion = "".join(
+                caracter
+                for caracter in unicodedata.normalize(
+                    "NFKD",
+                    concepto.attrib.get("Descripcion", ""),
+                )
+                if not unicodedata.combining(caracter)
+            ).casefold()
+            if not re.search(r"\bnomina\b", descripcion):
+                raise ValueError("El concepto fiscal legado de ISN no es clasificable.")
+            match = match_legacy
+        elif re.match(r"^\d{4}(0[1-9]|1[0-2])", identificador):
+            raise ValueError("El concepto fiscal de ISN usa un codigo no permitido.")
+        else:
             continue
         try:
             periodo = date(int(match[1]), int(match[2]), 1)
@@ -117,10 +141,10 @@ def extraer_isn_cfdi(cfdi) -> tuple[date, Decimal]:
             raise ValueError("El importe del concepto de ISN debe ser positivo y finito.")
         matches.append((periodo, importe))
 
-    if len(matches) != 1:
-        raise ValueError("Debe existir un unico concepto fiscal de ISN.")
-    periodo, importe = matches[0]
-    return periodo, money(importe)
+    periodos = {periodo for periodo, _ in matches}
+    if not matches or len(periodos) != 1:
+        raise ValueError("El periodo fiscal de ISN no es inequivoco.")
+    return periodos.pop(), money(sum((importe for _, importe in matches), ZERO))
 
 
 def _uma_diaria_vigente(fecha: date) -> Decimal:
