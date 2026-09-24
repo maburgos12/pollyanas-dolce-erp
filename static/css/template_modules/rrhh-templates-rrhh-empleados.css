@@ -22,7 +22,8 @@
 .rrhh-jornada-current h3 { font-family: inherit; font-size: 1rem; margin: 0; }
 .rrhh-jornada-current .rrhh-jornada-week { max-width: 580px; }
 .rrhh-jornada-history { border-top: 1px solid var(--rosa); padding: 8px 0; color: var(--texto); }
-.rrhh-jornada-history > summary { align-items: center; box-sizing: border-box; cursor: pointer; display: flex; font-weight: 700; min-height: 44px; padding: 6px 0; }
+.rrhh-jornada-history > summary { box-sizing: border-box; cursor: pointer; display: list-item; font-weight: 700; list-style: disclosure-closed inside; min-height: 44px; padding: 10px 0; }
+.rrhh-jornada-history[open] > summary { list-style-type: disclosure-open; }
 .rrhh-jornada-history-row { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 9px 0; border-bottom: 1px solid var(--rosa); font-size: 0.9rem; }
 .rrhh-jornada-history-row strong { flex-basis: 100%; }
 .rrhh-employee-jornada { font-size: 0.8rem; color: var(--texto-light); }
@@ -493,6 +494,13 @@ form[data-async-action] .btn:active { transform: scale(.97); }
     overflow-x: auto;
     position: relative;
     scrollbar-gutter: stable;
+  }
+
+  @supports (width: 100cqw) {
+    .rrhh-employee-table-shell {
+      container-type: inline-size;
+      --rrhh-table-viewport: 100cqw;
+    }
   }
 
   .rrhh-table th,

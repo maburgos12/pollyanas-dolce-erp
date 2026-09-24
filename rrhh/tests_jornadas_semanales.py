@@ -348,7 +348,46 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertIn(".rrhh-edit-panel > summary", css)
         self.assertIn(".rrhh-jornada-history > summary", css)
         self.assertIn(".main-content[data-hallmark-scope=\"erp\"] .rrhh-jornada .input-field", css)
-        self.assertIn("jornadas-semanales-v3", html)
+        self.assertIn("jornadas-semanales-v4", html)
+
+    def test_guardado_html_abre_solo_su_ficha_sin_necesitar_js_y_conserva_filtro(self):
+        empleado, _ = self.empleado_con_jornada()
+        otro = Empleado.objects.create(nombre="Otra persona", codigo="JORNADA-OTRA")
+        url_filtrada = f"{self.url}?q=JORNADA-"
+        response = self.client.post(url_filtrada, self.datos_edicion(
+            empleado, jornada_id=str(self.jornada.pk), jornada_fecha_inicio="", jornada_motivo="",
+        ))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{self.url}?q=JORNADA-&open_employee={empleado.pk}#empleado-{empleado.pk}")
+        pantalla = self.client.get(response["Location"].split("#")[0])
+        self.assertEqual(pantalla.context["open_employee_id"], empleado.pk)
+        html = pantalla.content.decode()
+        propia = re.search(rf'<tr class="rrhh-edit-row" id="empleado-{empleado.pk}">.*?<details class="rrhh-edit-panel"(.*?)>', html, re.S)
+        ajena = re.search(rf'<tr class="rrhh-edit-row" id="empleado-{otro.pk}">.*?<details class="rrhh-edit-panel"(.*?)>', html, re.S)
+        self.assertIsNotNone(propia)
+        self.assertIsNotNone(ajena)
+        self.assertIn("open", propia.group(1))
+        self.assertNotIn("open", ajena.group(1))
+
+    def test_open_employee_hostil_o_fuera_del_filtro_no_abre_ficha(self):
+        empleado, _ = self.empleado_con_jornada()
+        otro = Empleado.objects.create(nombre="Otra persona", codigo="JORNADA-OTRA")
+        for raw in ("abc", "-1", "9" * 100, str(otro.pk)):
+            with self.subTest(raw=raw):
+                pantalla = self.client.get(f"{self.url}?q=JORNADA-FICHA&open_employee={raw}")
+                self.assertEqual(pantalla.status_code, 200)
+                self.assertIsNone(pantalla.context["open_employee_id"])
+                self.assertNotContains(pantalla, '<details class="rrhh-edit-panel" open>')
+        self.assertTrue(Empleado.objects.filter(pk=empleado.pk).exists())
+
+    def test_historial_conserva_marcador_nativo_y_blanco_tactil(self):
+        css = (Path(__file__).resolve().parents[1] /
+               "static/css/template_modules/rrhh-templates-rrhh-empleados.css").read_text()
+        self.assertIn(".rrhh-jornada-history > summary", css)
+        self.assertIn("display: list-item", css)
+        self.assertIn("min-height: 44px", css)
+        self.assertIn("container-type: inline-size", css)
+        self.assertIn("--rrhh-table-viewport: 100cqw", css)
 
     def test_ficha_consulta_muestra_jornada_sin_edicion(self):
         empleado, _ = self.empleado_con_jornada()
@@ -565,7 +604,7 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         empleado = Empleado.objects.get(codigo="JORNADA-FICHA")
         asignacion = empleado.jornadas_asignadas.get()
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(response["Location"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertEqual(response["Location"], f"{self.url}?open_employee={empleado.pk}#empleado-{empleado.pk}")
         self.assertEqual(asignacion.jornada, self.jornada)
         self.assertEqual(asignacion.fecha_inicio, date(2026, 9, 1))
 
@@ -585,7 +624,7 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ok"])
         self.assertEqual(response.json()["toast"]["type"], "success")
-        self.assertEqual(response.json()["redirect"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertEqual(response.json()["redirect"], f"{self.url}?open_employee={empleado.pk}#empleado-{empleado.pk}")
         self.assertTrue(response.json()["reload"])
 
     def test_cliente_antiguo_no_cambia_jornada(self):
@@ -675,7 +714,7 @@ class JornadaDesdeFichaEmpleadoTests(TestCase):
         primera = self.client.post(self.url, datos)
         segunda = self.client.post(self.url, datos)
         inicial.refresh_from_db()
-        self.assertEqual(primera["Location"], f"{self.url}#empleado-{empleado.pk}")
+        self.assertEqual(primera["Location"], f"{self.url}?open_employee={empleado.pk}#empleado-{empleado.pk}")
         self.assertEqual(segunda.status_code, 302)
         self.assertEqual(inicial.fecha_fin, date(2026, 9, 14))
         self.assertEqual(empleado.jornadas_asignadas.count(), 1)

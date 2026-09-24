@@ -1341,7 +1341,7 @@ def _errores_longitud_borrador(borrador):
     return errores
 
 
-def _url_ficha_empleado(request, empleado=None):
+def _url_ficha_empleado(request, empleado=None, *, abrir_empleado=False):
     filtros = {
         clave: request.GET[clave] for clave in ("q", "estado", "enterprise_focus")
         if clave in request.GET
@@ -1351,6 +1351,8 @@ def _url_ficha_empleado(request, empleado=None):
         pendiente_pk = _safe_int(pendiente)
         if pendiente_pk is not None:
             filtros["alta_pendiente"] = pendiente_pk
+    if abrir_empleado and empleado:
+        filtros["open_employee"] = empleado.pk
     query = f"?{urlencode(filtros)}" if filtros else ""
     fragmento = (
         f"empleado-{empleado.pk}" if empleado else
@@ -1360,7 +1362,7 @@ def _url_ficha_empleado(request, empleado=None):
 
 
 def _respuesta_ficha_empleado(request, *, empleado=None, mensaje="", error=None):
-    redirect_url = _url_ficha_empleado(request, empleado)
+    redirect_url = _url_ficha_empleado(request, empleado, abrir_empleado=error is None)
     if error is not None:
         errores = error.message_dict if hasattr(error, "message_dict") else {"jornada": error.messages}
         borrador = _borrador_ficha_desde_post(request.POST)
@@ -1765,6 +1767,10 @@ def empleados(request):
             empleado_borrador = qs_base.filter(pk=borrador_id).first()
             if empleado_borrador:
                 empleados_page.append(empleado_borrador)
+    open_employee_pk = _safe_int(request.GET.get("open_employee"))
+    open_employee_id = (
+        open_employee_pk if any(empleado.pk == open_employee_pk for empleado in empleados_page) else None
+    )
     hoy = timezone.localdate()
     for empleado in empleados_page:
         empleado.jornada_historial = list(empleado.jornadas_asignadas.all())
@@ -1989,6 +1995,7 @@ def empleados(request):
         "alta_prefill_jornada_fecha": alta_prefill_jornada_fecha,
         "alta_form_draft": alta_form_draft,
         "ficha_error_empleado_id": ficha_error_flash.get("empleado_id") if ficha_error_flash else None,
+        "open_employee_id": open_employee_id,
         "alta_prefill_sucursal_id": _sucursal_form_id(
             sucursal_ref_id=None,
             sucursal_texto=alta_prefill.get("sucursal", ""),

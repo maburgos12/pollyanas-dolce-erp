@@ -5,7 +5,7 @@
 {% block page_title %}RRHH · Empleados{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales-v3">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-empleados.css?v=20260923-jornadas-semanales-v4">
 {% endblock %}
 
 {% block content %}
@@ -766,7 +766,7 @@
             <tr class="rrhh-edit-row" id="empleado-{{ e.id }}">
               <td colspan="15">
                 {% with e.form_values|default:e as e %}
-                <details class="rrhh-edit-panel" {% if ficha_error_empleado_id == e.id %}open{% endif %}>
+                <details class="rrhh-edit-panel" {% if ficha_error_empleado_id == e.id or open_employee_id == e.id %}open{% endif %}>
                   <summary>{% if can_manage_rrhh %}Editar{% else %}Ver jornada de{% endif %} {{ e.nombre }}</summary>
                   <section class="rrhh-jornada-current" tabindex="-1" aria-label="Jornada semanal actual">
                     <h3>Jornada semanal</h3>
