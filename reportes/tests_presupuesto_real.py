@@ -1,6 +1,6 @@
 """Pruebas de consolidación del real en el presupuesto maestro."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone as tz
 from decimal import Decimal
 from io import StringIO
 
@@ -18,6 +18,7 @@ from reportes.models import (
     CategoriaGasto,
     CentroCosto,
     EmpresaResultadoMensual,
+    ExpedienteISN,
     GastoOperativoMensual,
     LineaPresupuestoMensual,
     ReglaFuenteRubro,
@@ -29,6 +30,7 @@ from reportes.services_presupuesto_real import (
     migrar_fuentes_legadas,
 )
 from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from sat_client.models import CfdiDescargado
 
 
 class PresupuestoRealConsolidacionTests(TestCase):
@@ -103,6 +105,76 @@ class PresupuestoRealConsolidacionTests(TestCase):
 
     def consolidar(self, **kwargs):
         return PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo, **kwargs)
+
+    def crear_expediente_isn(self, *, estado=ExpedienteISN.ESTADO_APLICADO, importe="16168.00"):
+        cfdi = CfdiDescargado.objects.create(
+            uuid=f"ISN-{estado}-{ExpedienteISN.objects.count()}",
+            rfc_emisor="GES8101015I7",
+            rfc_receptor="GEF211230KR2",
+            subtotal=Decimal(importe),
+            total=Decimal(importe),
+            tipo_cfdi="recibido",
+            tipo_comprobante="I",
+            estatus="vigente",
+            moneda="MXN",
+            xml_raw='<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"/>',
+            fecha_emision=datetime(2026, 4, 1, tzinfo=tz.utc),
+        )
+        return ExpedienteISN.objects.create(
+            periodo=self.periodo,
+            revision=ExpedienteISN.objects.count() + 1,
+            uuid=cfdi.uuid,
+            cfdi=cfdi,
+            importe_pagado=Decimal(importe),
+            base_gravada_calculada=Decimal("600000.00"),
+            estado=estado,
+            aplicado_en=(
+                datetime(2026, 4, 2, tzinfo=tz.utc)
+                if estado in (ExpedienteISN.ESTADO_APLICADO, ExpedienteISN.ESTADO_REEMPLAZADO)
+                else None
+            ),
+        )
+
+    def test_isn_cfdi_publica_solo_expediente_aplicado_en_fila_corporativa(self):
+        rubro, linea = self.crear_linea(concepto="Impuesto sobre nómina")
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn(estado=ExpedienteISN.ESTADO_VALIDO, importe="999.00")
+        aplicado = self.crear_expediente_isn()
+        presupuesto_original = linea.monto_presupuesto
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(rubro.sucursal)
+        self.assertEqual(linea.monto_presupuesto, presupuesto_original)
+        self.assertEqual(linea.monto_real, aplicado.importe_pagado)
+        self.assertEqual(linea.fuente_real, "AUTO:ISN_CFDI")
+        self.assertEqual(summary.actualizadas, 1)
+
+    def test_isn_cfdi_respeta_captura_manual(self):
+        rubro, linea = self.crear_linea(
+            concepto="Impuesto sobre nómina manual",
+            monto_real=Decimal("777.00"),
+            fuente_real="MANUAL:yesenia",
+        )
+        linea.metadata = {"captura": "humana"}
+        linea.save(update_fields=["metadata"])
+        ReglaFuenteRubro.objects.create(
+            rubro=rubro,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_ISN_CFDI,
+        )
+        self.crear_expediente_isn()
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("777.00"))
+        self.assertEqual(linea.fuente_real, "MANUAL:yesenia")
+        self.assertEqual(linea.metadata, {"captura": "humana"})
+        self.assertEqual(summary.protegidas_manual, 1)
 
     def test_gasto_operativo_suma_solo_reales_del_periodo_categoria_y_sucursal(self):
         """GASTO_OPERATIVO ignora presupuesto, otros meses, categorías y sucursales."""
@@ -399,8 +471,13 @@ class PresupuestoRealConsolidacionTests(TestCase):
             codigo="RENTA", nombre="Renta sucursal", capa_objetivo=CategoriaGasto.CAPA_EMPRESA
         )
         nomina = AreaPresupuesto.objects.create(nombre="Nómina seed", codigo="nomina")
+        administracion = AreaPresupuesto.objects.create(nombre="Administración seed", codigo="administracion")
         ventas = AreaPresupuesto.objects.create(nombre="Ventas seed", codigo="ventas")
         sueldo, _ = self.crear_linea(concepto="SUELDO", area=nomina)
+        isn, _ = self.crear_linea(concepto="Impuesto sobre nómina", area=administracion)
+        isn_sucursal, _ = self.crear_linea(
+            concepto="Impuesto sobre nómina", area=administracion, sucursal=self.sucursal
+        )
         venta, _ = self.crear_linea(
             concepto="BOLLO · CHOCOLATE", area=ventas, sucursal=self.sucursal, tipo=RubroPresupuesto.TIPO_INGRESO
         )
@@ -432,6 +509,16 @@ class PresupuestoRealConsolidacionTests(TestCase):
         self.assertTrue(
             ReglaFuenteRubro.objects.filter(
                 rubro=sueldo, origen=ReglaFuenteRubro.ORIGEN_SEED, tipo_fuente=ReglaFuenteRubro.FUENTE_NOMINA
+            ).exists()
+        )
+        regla_isn = ReglaFuenteRubro.objects.get(rubro=isn, origen=ReglaFuenteRubro.ORIGEN_SEED)
+        self.assertEqual(regla_isn.tipo_fuente, ReglaFuenteRubro.FUENTE_ISN_CFDI)
+        self.assertIsNone(isn.sucursal)
+        self.assertEqual(regla_isn.filtros, {})
+        self.assertFalse(
+            ReglaFuenteRubro.objects.filter(
+                rubro=isn_sucursal,
+                origen=ReglaFuenteRubro.ORIGEN_SEED,
             ).exists()
         )
         regla_venta = ReglaFuenteRubro.objects.get(rubro=venta, origen=ReglaFuenteRubro.ORIGEN_SEED)

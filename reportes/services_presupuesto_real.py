@@ -28,6 +28,7 @@ from django.utils import timezone
 from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de
 from .models import (
     GastoOperativoMensual,
+    ExpedienteISN,
     LineaPresupuestoMensual,
     ObligacionGasto,
     ReglaFuenteRubro,
@@ -265,6 +266,16 @@ class PresupuestoRealConsolidacionService:
             if "nomina_concepto" not in indices:
                 indices["nomina_concepto"] = self._build_nomina_concepto_index(periodo)
             return self._monto_nomina_concepto(regla, indices["nomina_concepto"])
+        if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_ISN_CFDI:
+            if "isn" not in indices:
+                indices["isn"] = {
+                    row["periodo"]: row["importe_pagado"]
+                    for row in ExpedienteISN.objects.filter(
+                        estado=ExpedienteISN.ESTADO_APLICADO,
+                        periodo=periodo,
+                    ).values("periodo", "importe_pagado")
+                }
+            return (indices["isn"].get(periodo, Decimal("0")), periodo in indices["isn"])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_VENTA_POS:
             if "ventas" not in indices:
                 indices["ventas"] = self._build_ventas_index(periodo)

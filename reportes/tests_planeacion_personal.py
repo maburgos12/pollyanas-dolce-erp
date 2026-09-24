@@ -12,6 +12,7 @@ from sat_client.models import CfdiDescargado
 from reportes.models import (
     AreaPresupuesto,
     ExpedienteCedulaIMSS,
+    ExpedienteISN,
     LineaPresupuestoMensual,
     RubroPresupuesto,
 )
@@ -140,6 +141,44 @@ class PersonnelPlanTests(TestCase):
         result = build_personnel_plan()
         self.assertEqual(result['months'][6]['isn'], D(16737))
         self.assertIsNone(result['months'][7]['isn'])
+        source = next(item for item in result['months'][6]['sources'] if item['reference'] == 'isn')
+        self.assertFalse(source['reconciled'])
+
+    def test_isn_applied_dossier_replaces_raw_cfdi_once_and_preserves_provenance(self, _):
+        xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+               '<c:Concepto Descripcion="Empresarial decl.Nomina" '
+               'NoIdentificacion="202608 2-003" Importe="999"/>'
+               '</c:Conceptos></c:Comprobante>')
+        cfdi = self.invoice(
+            '22339E4C-AC86-47DF-A874-434F6B7CFC69',
+            xml,
+            tipo_cfdi='recibido',
+            tipo_comprobante='I',
+            rfc_emisor='GES8101015I7',
+            rfc_receptor=RFC,
+        )
+        expediente = ExpedienteISN.objects.create(
+            periodo=date(2026, 8, 1),
+            revision=1,
+            uuid=cfdi.uuid,
+            cfdi=cfdi,
+            importe_pagado=D('16168.00'),
+            base_gravada_calculada=D('600000.00'),
+            estado=ExpedienteISN.ESTADO_APLICADO,
+            aplicado_en=datetime(2026, 9, 8, tzinfo=tz.utc),
+        )
+
+        agosto = build_personnel_plan()['months'][-1]
+
+        self.assertEqual(agosto['isn'], D('16168.00'))
+        sources = [item for item in agosto['sources'] if item['kind'].startswith('ISN')]
+        self.assertEqual(sources, [{
+            'kind': 'ISN · expediente aplicado',
+            'id': expediente.pk,
+            'reference': cfdi.uuid,
+            'amount': D('16168.00'),
+            'reconciled': True,
+        }])
 
     def test_unrecognized_service_is_not_silently_treated_as_zero(self, _):
         invoice = self.invoice('unknown-service',

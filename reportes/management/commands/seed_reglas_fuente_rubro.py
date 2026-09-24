@@ -161,6 +161,10 @@ class Command(BaseCommand):
                     for r in RubroPresupuesto.objects.filter(area__codigo=area, activo=True)
                     if normalize_header_text(r.concepto) == concepto
                     and (
+                        tipo != ReglaFuenteRubro.FUENTE_ISN_CFDI
+                        or r.sucursal_id is None
+                    )
+                    and (
                         not solo_sucursal
                         or solo_sucursal in normalize_header_text(getattr(r.sucursal, "nombre", "") or "")
                     )

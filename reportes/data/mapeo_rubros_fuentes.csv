@@ -40,7 +40,7 @@ administracion,Imss,MANUAL,,,Sin fuente en ERP
 administracion,Infonavit,MANUAL,,,Sin fuente en ERP
 administracion,Infonavit-RCV,MANUAL,,,Sin fuente en ERP
 administracion,ISR,MANUAL,,,Sin fuente en ERP
-administracion,Impuesto sobre Nómina,MANUAL,,,Sin fuente en ERP
+administracion,Impuesto sobre Nómina,ISN_CFDI,,,Expediente fiscal ISN aplicado; fila corporativa
 administracion,Otras retenciones,MANUAL,,,Sin fuente en ERP
 administracion,PTU,MANUAL,,,Sin fuente en ERP
 administracion,Dias festivos,MANUAL,,,Sin fuente en ERP
