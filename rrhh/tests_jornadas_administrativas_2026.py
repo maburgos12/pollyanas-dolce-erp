@@ -339,6 +339,65 @@ class AplicacionJornadasAdministrativasTests(TestCase):
         self.assertEqual(segundo["aplicadas"], [])
         self.assertFalse(AuditLog.objects.filter(action="REVIEW").exists())
 
+    def test_cambio_de_salida_sin_cambiar_acciones_invalida_huella(self):
+        turno = Turno.objects.create(
+            nombre="Administrativa 2026 08:00-16:30", hora_entrada=time(8),
+            hora_salida=time(16, 30), deteccion_por_checada=False,
+        )
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha, turno=turno,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 10))),
+        )
+        previa = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(previa["pendientes_a_reconciliar"], [])
+        asistencia.salida = timezone.make_aware(datetime.combine(fecha, time(17, 15)))
+        asistencia.save(update_fields=["salida"])
+        nueva = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual(nueva["pendientes_a_reconciliar"], [])
+        self.assertNotEqual(previa["fingerprint"], nueva["fingerprint"])
+        with self.assertRaisesMessage(ConfiguracionJornadasError, "huella"):
+            configurar_jornadas_administrativas_2026(
+                aplicar=True, hoy=fecha, actor=self.actor,
+                expected_fingerprint=previa["fingerprint"],
+            )
+        self.assertFalse(JornadaSemanal.objects.exists())
+
+    def test_cancelacion_de_automatica_sin_notas_queda_en_un_solo_apply(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(17, 19))),
+        )
+        [pendiente] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            horas=Decimal("1.00"), notas="",
+        )])
+        aplicar(actor=self.actor, hoy=fecha)
+        pendiente.refresh_from_db()
+        self.assertEqual(pendiente.estado, HoraExtra.ESTADO_CANCELADO)
+        self.assertEqual(configurar_jornadas_administrativas_2026(hoy=fecha)["extras_resueltas_con_diferencia"], [])
+        self.assertEqual(aplicar(actor=self.actor, hoy=fecha)["aplicadas"], [])
+        self.assertFalse(AuditLog.objects.filter(action="REVIEW").exists())
+
+    def test_cancelada_preexistente_con_marcadores_y_saldo_positivo_se_reporta(self):
+        fecha = date(2026, 9, 17)
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado_id=3, fecha=fecha,
+            entrada=timezone.make_aware(datetime.combine(fecha, time(8))),
+            salida=timezone.make_aware(datetime.combine(fecha, time(18, 30))),
+        )
+        [cancelada] = HoraExtra.objects.bulk_create([HoraExtra(
+            empleado_id=3, asistencia=asistencia, fecha=fecha,
+            horas=Decimal("1.00"), estado=HoraExtra.ESTADO_CANCELADO,
+            notas="[Detección automática] previa\n[Saldo automático cubierto o checada corregida]",
+        )])
+        plan = configurar_jornadas_administrativas_2026(hoy=fecha)
+        self.assertEqual([r["id"] for r in plan["extras_resueltas_con_diferencia"]], [cancelada.pk])
+        self.assertEqual(plan["extras_resueltas_con_diferencia"][0]["detectado_minutos"], 120)
+
     def test_asistencia_cambia_solo_en_rango_y_descanso_queda_sin_turno(self):
         viejo = Turno.objects.create(nombre="Viejo", hora_entrada=time(7), hora_salida=time(15))
         fechas = [date(2026, 8, 31), date(2026, 9, 17), date(2026, 9, 19),

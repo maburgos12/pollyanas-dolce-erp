@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, time, timedelta
+from dataclasses import asdict
 from decimal import Decimal
 import hashlib
 import json
@@ -165,6 +166,13 @@ def _plan(hoy: date, *, bloquear=False):
     extras_db = filas(HoraExtra.objects.filter(
         empleado_id__in=ids, fecha__range=(INICIO, limite),
     )) if limite >= INICIO else []
+    cancelaciones_auditadas = set(AuditLog.objects.filter(
+        action="UPDATE", model="rrhh.HoraExtra",
+        object_id__in=[str(he.pk) for he in extras_db if he.estado == HoraExtra.ESTADO_CANCELADO],
+        payload__motivo=MOTIVO,
+        payload__antes__estado=HoraExtra.ESTADO_PENDIENTE,
+        payload__despues__estado=HoraExtra.ESTADO_CANCELADO,
+    ).values_list("object_id", flat=True))
 
     conflictos = []
     personas = []
@@ -268,6 +276,7 @@ def _plan(hoy: date, *, bloquear=False):
     pendientes = []
     resueltas = []
     incidencias = []
+    asistencias_evaluadas = []
     for a in asistencias_db:
         key = (a.empleado_id, a.fecha)
         if key not in fechas_examinar:
@@ -275,6 +284,20 @@ def _plan(hoy: date, *, bloquear=False):
         nombre_turno = PERFILES[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
         turno = turnos_obj[nombre_turno] if nombre_turno else None
         diagnostico = diagnosticar_horas_extra(_asistencia_proyectada(a, turno))
+        asistencias_evaluadas.append({
+            "id": a.pk, "empleado_id": a.empleado_id, "fecha": a.fecha.isoformat(),
+            "turno_id": a.turno_id, "turno_programado": nombre_turno,
+            "fuente": a.fuente,
+            "entrada": a.entrada.isoformat() if a.entrada else None,
+            "salida_comida": a.salida_comida.isoformat() if a.salida_comida else None,
+            "regreso_comida": a.regreso_comida.isoformat() if a.regreso_comida else None,
+            "salida": a.salida.isoformat() if a.salida else None,
+            "minutos_comida": a.minutos_comida,
+            "minutos_trabajados": a.minutos_trabajados,
+            "modalidad_marcaje": a.empleado.modalidad_marcaje,
+            "puesto_operativo": a.empleado.puesto_operativo,
+            "diagnostico_extra": asdict(diagnostico),
+        })
         registros = extras_por_fecha.get(key, [])
         vinculado = next((he for he in registros if he.asistencia_id == a.pk), None)
         pendientes_antes = len(pendientes)
@@ -313,12 +336,12 @@ def _plan(hoy: date, *, bloquear=False):
             if he.estado not in {HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO,
                                  HoraExtra.ESTADO_RECHAZADO, HoraExtra.ESTADO_CANCELADO}:
                 continue
-            if (he.estado == HoraExtra.ESTADO_CANCELADO
-                    and he.notas.startswith(NOTA_EXTRA_AUTOMATICA)
-                    and he.notas.endswith(NOTA_SALDO_CUBIERTO)):
-                # La propia cancelación ya quedó en AuditLog; no necesita una
-                # segunda aplicación para abrir REVIEW humano espurio.
-                continue
+            if he.estado == HoraExtra.ESTADO_CANCELADO and str(he.pk) in cancelaciones_auditadas:
+                saldo_actual = saldo_automatico_esperado(diagnostico, registros, he)
+                if saldo_actual is not None and saldo_actual <= 0:
+                    # Esta cancelación ya fue auditada por la carga y continúa
+                    # cubierta; una nueva diferencia positiva sí requiere review.
+                    continue
             if diagnostico.minutos is None or diagnostico.minutos != horas_a_minutos(he.horas):
                 resueltas.append({"id": he.pk, "empleado_id": a.empleado_id,
                                   "fecha": a.fecha.isoformat(), "estado": he.estado,
@@ -345,6 +368,7 @@ def _plan(hoy: date, *, bloquear=False):
     plan = {
         "modo": "preview", "personas_objetivo": 6, "personas": personas,
         "turnos": turnos, "jornadas": jornadas, "asignaciones": asignaciones,
+        "asistencias_evaluadas": asistencias_evaluadas,
         "asistencias_a_actualizar": asistencias_a_actualizar,
         "incidencias_a_reconciliar": incidencias,
         "pendientes_a_reconciliar": pendientes,
