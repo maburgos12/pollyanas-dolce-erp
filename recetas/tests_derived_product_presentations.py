@@ -7,7 +7,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import connection
 from django.test import Client, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -39,6 +41,7 @@ from recetas.models import (
 )
 from recetas.utils.costeo_versionado import calcular_costeo_receta
 from recetas.utils.costeo_snapshot import resolve_line_snapshot_cost, resolve_preparation_recipe_for_insumo
+from recetas.utils.derived_product_presentations import get_total_cost_map
 from recetas.views.plan import (
     _apply_plan_consumption,
     _build_point_waste_summary,
@@ -147,6 +150,80 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(breakdown.costo_indirecto, Decimal("0.000000"))
         self.assertEqual(breakdown.snapshot_payload["costos"]["derived_parent_unit_cost"], "13.333333")
         self.assertEqual(breakdown.snapshot_payload["costos"]["direct_components_cost"], "2.000000")
+
+    def test_shared_preparation_cost_is_resolved_once_per_map(self):
+        unit = UnidadMedida.objects.create(
+            codigo="pza-batch",
+            nombre="Pieza batch",
+            tipo=UnidadMedida.TIPO_PIEZA,
+            factor_to_base=Decimal("1"),
+        )
+        raw = Insumo.objects.create(
+            codigo="RAW-BATCH",
+            nombre="Materia prima batch",
+            tipo_item=Insumo.TIPO_MATERIA_PRIMA,
+            unidad_base=unit,
+        )
+        preparation = Receta.objects.create(
+            nombre="Preparacion compartida batch",
+            tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="prep-compartida-batch",
+            rendimiento_cantidad=Decimal("4"),
+            rendimiento_unidad=unit,
+        )
+        LineaReceta.objects.create(
+            receta=preparation,
+            posicion=1,
+            insumo=raw,
+            insumo_texto=raw.nombre,
+            cantidad=Decimal("1"),
+            unidad=unit,
+            unidad_texto=unit.codigo,
+            costo_unitario_snapshot=Decimal("40"),
+            match_status=LineaReceta.STATUS_AUTO,
+            match_method=LineaReceta.MATCH_EXACT,
+        )
+        internal_inputs = [
+            Insumo.objects.create(
+                codigo=f"INTERNAL-BATCH-{index}",
+                nombre=preparation.nombre,
+                tipo_item=Insumo.TIPO_INTERNO,
+                unidad_base=unit,
+            )
+            for index in range(2)
+        ]
+        product = Receta.objects.create(
+            nombre="Producto con preparacion compartida batch",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="producto-prep-compartida-batch",
+        )
+        for index, insumo in enumerate(internal_inputs, start=1):
+            LineaReceta.objects.create(
+                receta=product,
+                posicion=index,
+                insumo=insumo,
+                insumo_texto=insumo.nombre,
+                cantidad=Decimal(index),
+                unidad=unit,
+                unidad_texto=unit.codigo,
+                costo_unitario_snapshot=Decimal("0"),
+                match_status=LineaReceta.STATUS_AUTO,
+                match_method=LineaReceta.MATCH_EXACT,
+            )
+
+        from recetas.utils import derived_product_presentations as costs_module
+
+        with patch.object(
+            costs_module,
+            "resolve_preparation_recipe_unit_cost",
+            wraps=costs_module.resolve_preparation_recipe_unit_cost,
+        ) as resolve_preparation:
+            with CaptureQueriesContext(connection) as queries:
+                costs = get_total_cost_map([product.id])
+
+        self.assertEqual(costs[product.id], Decimal("30"))
+        self.assertEqual(resolve_preparation.call_count, 1)
+        self.assertLessEqual(len(queries), 12)
 
     def test_total_cost_falls_back_to_live_cost_when_snapshot_is_missing(self):
         raw = Insumo.objects.create(

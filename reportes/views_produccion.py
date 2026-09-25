@@ -24,7 +24,6 @@ from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
 from pos_bridge.models import (
     PointConversionLine,
-    PointInventorySnapshot,
     PointProductionLine,
     PointWasteLine,
 )
@@ -495,7 +494,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             key=lambda recipe: (_category_sort_key(recipe.categoria), recipe.nombre.lower()),
         )
 
-        cost_map = get_total_cost_map([recipe.id for recipe in recipes])
+        cost_recipe_ids = [
+            recipe.id
+            for recipe in recipes
+            if balance.rows[recipe.id].waste != ZERO
+        ]
+        cost_map = get_total_cost_map(cost_recipe_ids)
         rows = [
             self._build_row(recipe, balance.rows[recipe.id], cost_map, balance.sources)
             for recipe in recipes
@@ -828,7 +832,6 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             (PointConversionLine, "movement_at"),
             (PointWasteLine, "movement_at"),
             (MermaMensualSucursal, "periodo"),
-            (PointInventorySnapshot, "captured_at"),
         ):
             values = (
                 model.objects.annotate(report_month=TruncMonth(field))
