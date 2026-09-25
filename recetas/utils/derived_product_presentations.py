@@ -140,6 +140,7 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
     direct_cost_by_recipe: dict[int, Decimal] = {}
     relation_by_recipe: dict[int, tuple[int, Decimal]] = {}
     insumo_cost_cache: dict[int, tuple[Decimal | None, object | None, str]] = {}
+    preparation_cost_cache: dict[int, tuple[Decimal | None, object | None, str]] = {}
 
     def prime_insumo_cost_cache(lineas: list[LineaReceta]) -> None:
         missing_insumos = {
@@ -211,7 +212,13 @@ def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> di
                         candidate = prep_by_id.get(int(parts[2]))
                         if preparation_recipe_matches_insumo(candidate, insumo):
                             prep_recipe = candidate
-            prep_cost, prep_unit, prep_label = resolve_preparation_recipe_unit_cost(prep_recipe)
+            if prep_recipe is None:
+                prep_cost, prep_unit, prep_label = (None, None, "NO_PREPARACION")
+            else:
+                prep_key = int(prep_recipe.id)
+                if prep_key not in preparation_cost_cache:
+                    preparation_cost_cache[prep_key] = resolve_preparation_recipe_unit_cost(prep_recipe)
+                prep_cost, prep_unit, prep_label = preparation_cost_cache[prep_key]
             if prep_cost is not None and prep_cost > 0:
                 insumo_cost_cache[insumo_id] = (
                     Decimal(str(prep_cost)),

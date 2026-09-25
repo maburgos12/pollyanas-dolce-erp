@@ -6,7 +6,9 @@ import re
 from types import SimpleNamespace
 from unittest.mock import call, patch
 
+from django.db import connection
 from django.test import RequestFactory, TestCase
+from django.test.utils import CaptureQueriesContext
 from django.template.loader import render_to_string
 from django.contrib.auth.models import AnonymousUser
 from django.utils import timezone
@@ -531,6 +533,38 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
 
         self.assertIn("2026-07", periodos)
         self.assertIn("2026-06", periodos)
+
+    def test_available_periods_do_not_scan_raw_inventory_snapshots(self):
+        with CaptureQueriesContext(connection) as queries:
+            periodos = ProducidoVsVendidoMermaView()._available_periods(selected="2026-01")
+
+        self.assertIn("2026-01", periodos)
+        self.assertFalse(
+            any("pos_bridge_inventory_snapshots" in query["sql"].lower() for query in queries),
+            "El selector de meses no debe recorrer snapshots crudos de Point.",
+        )
+
+    def test_context_calculates_costs_only_for_recipes_with_waste(self):
+        balance = canonical_balance(
+            MonthlyPointBalanceRow(
+                receta_id=self.parent.id,
+                waste=Decimal("2"),
+                status="COINCIDE",
+            ),
+            MonthlyPointBalanceRow(
+                receta_id=self.slice.id,
+                waste=ZERO,
+                status="COINCIDE",
+            ),
+        )
+
+        with patch("reportes.views_produccion.get_total_cost_map", return_value={self.parent.id: Decimal("3")}) as costs:
+            context, _service = self._context(balance)
+
+        costs.assert_called_once_with([self.parent.id])
+        rows = {row["receta_id"]: row for group in context["groups"] for row in group["rows"]}
+        self.assertEqual(rows[self.parent.id]["costo_merma"], Decimal("6"))
+        self.assertEqual(rows[self.slice.id]["costo_merma"], ZERO)
 
     def test_template_explains_difference_sign_and_only_shows_conversion_origin_for_activity(self):
         context, _ = self._context(
