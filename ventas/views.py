@@ -28,15 +28,12 @@ from ventas.services.pronostico_engine import (
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
 )
-from ventas.services.pronostico_engine import calcular_pronostico
+from ventas.services.pronostico_engine import calcular_pronostico, forecastable_point_product_ids
 from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
-from ventas.tasks import calcular_y_guardar_pronostico
-
-
 EXCLUDED_PRODUCT_CATEGORIES = {
     "COCA-COLA",
     "CLARITA",
@@ -203,8 +200,22 @@ def _selected_branch_ids(request, *, source: str = "GET") -> set[int]:
     return (selected & active) if selected else set(active)
 
 
-def _selected_product_skus(request) -> list[str]:
-    return [value.strip() for value in request.POST.getlist("productos_incluidos") if value.strip()]
+def _selected_point_product_ids(request) -> list[int]:
+    selected = []
+    seen = set()
+    for value in request.POST.getlist("productos_incluidos"):
+        raw = str(value).strip()
+        if not raw.isdigit():
+            continue
+        product_id = int(raw)
+        if product_id > 0 and product_id not in seen:
+            seen.add(product_id)
+            selected.append(product_id)
+    return selected
+
+
+def _catalog_point_product_ids(catalog: OrderedDict[str, list[dict]]) -> set[int]:
+    return {int(product["id"]) for products in catalog.values() for product in products}
 
 
 def _projection_presets() -> list[dict[str, str | int]]:
@@ -222,11 +233,11 @@ def _projection_presets() -> list[dict[str, str | int]]:
 
 def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
     hace_30 = timezone.localdate() - timedelta(days=30)
-    skus_vigentes = set(
+    recent_product_ids = set(
         PointSalesDailyProductFact.objects.filter(
             sale_date__gte=hace_30,
             point_product__active=True,
-            point_product__sku__gt="",
+            point_product_id__isnull=False,
         )
         .exclude(point_product__name__istartswith="TOPPING")
         .exclude(point_product__name__icontains="topping")
@@ -234,46 +245,38 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
         .exclude(point_product__name__icontains="servicio domicilio")
         .exclude(point_product__name__icontains="extra 100")
         .exclude(point_product__name__icontains="media plancha")
-        .values_list("point_product__sku", flat=True)
+        .values_list("point_product_id", flat=True)
         .distinct()
         )
 
-    if not skus_vigentes:
-        # Si no hay ventas recientes, mostramos el catálogo activo completo para no bloquear el pronóstico.
-        skus_vigentes = set(
-            PointProduct.objects.filter(active=True, sku__gt="")
-            .exclude(name__istartswith="TOPPING")
-            .exclude(name__icontains="topping")
-            .exclude(name__icontains="tarjeta de regalo")
-            .exclude(name__icontains="servicio domicilio")
-            .exclude(name__icontains="extra 100")
-            .exclude(name__icontains="media plancha")
-            .values_list("sku", flat=True)
-            .distinct()
-        )
-    pay_durazno_skus = set(
+    forecastable_product_ids = forecastable_point_product_ids()
+    eligible_product_ids = recent_product_ids & forecastable_product_ids
+    if not recent_product_ids:
+        eligible_product_ids = forecastable_product_ids
+
+    pay_durazno_product_ids = set(
         PointSalesDailyProductFact.objects.filter(
             sale_date__gte=timezone.localdate() - timedelta(days=90),
             point_product__active=True,
             point_product__name__icontains="Pay de Queso con Durazno",
         )
-        .values("point_product__sku")
+        .values("point_product_id")
         .annotate(dias=Count("sale_date", distinct=True))
         .filter(dias__lte=3)
-        .values_list("point_product__sku", flat=True)
+        .values_list("point_product_id", flat=True)
     )
     categorias_raw: dict[str, list[dict]] = defaultdict(list)
     products = (
-        PointProduct.objects.filter(active=True, sku__in=skus_vigentes)
+        PointProduct.objects.filter(active=True, id__in=eligible_product_ids)
         .exclude(name__istartswith="TOPPING")
         .exclude(name__icontains="topping")
         .only("id", "sku", "name", "category")
-        .order_by("category", "name")
+        .order_by("category", "name", "id")
     )
     for product in products:
         if _is_excluded_product_name(product.name):
             continue
-        if product.sku in pay_durazno_skus:
+        if product.id in pay_durazno_product_ids:
             continue
         category = _category_for_catalog_product(product)
         if _is_excluded_product_category(category):
@@ -283,6 +286,8 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
                 "id": product.id,
                 "nombre": product.name,
                 "sku": product.sku,
+                "categoria_point": _clean_category_label(product.category),
+                "grupo_operativo": category,
             }
         )
 
@@ -449,6 +454,25 @@ def _product_day_value(product: dict, fecha_iso: str, escenario: str = "recomend
     return _int_from_json(day_data.get(escenario, 0))
 
 
+def _ordered_result_categories(categories: list[dict]) -> list[dict]:
+    preferred_index = {
+        _clean_category_label(category).casefold(): index
+        for index, category in enumerate(ORDEN_CATEGORIAS)
+    }
+
+    def sort_key(row: dict) -> tuple[int, int, str]:
+        label = _clean_category_label(row.get("categoria"))
+        index = preferred_index.get(label.casefold())
+        if index is not None:
+            return (0, index, label.casefold())
+        return (1, len(preferred_index), label.casefold())
+
+    return sorted(
+        categories,
+        key=sort_key,
+    )
+
+
 def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str], categorias: list[dict]):
     ws["A1"] = title
     ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
@@ -467,11 +491,8 @@ def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str],
     grand_total_pieces = 0
     grand_total_income = Decimal("0")
 
-    category_map = {category.get("categoria"): category for category in categorias}
-    for category_name in ORDEN_CATEGORIAS:
-        category = category_map.get(category_name)
-        if not category:
-            continue
+    for category in _ordered_result_categories(categorias):
+        category_name = category.get("categoria") or "Sin categoría"
 
         subtotal_by_day = {fecha: 0 for fecha in fechas}
         subtotal_pieces = 0
@@ -533,11 +554,8 @@ def _write_escenarios_sheet(ws, *, title: str, subtitle: str, categorias: list[d
     ws.freeze_panes = "A5"
 
     current_row = 5
-    category_map = {category.get("categoria"): category for category in categorias}
-    for category_name in ORDEN_CATEGORIAS:
-        category = category_map.get(category_name)
-        if not category:
-            continue
+    for category in _ordered_result_categories(categorias):
+        category_name = category.get("categoria") or "Sin categoría"
         for product in category.get("productos") or []:
             escenarios = product.get("escenarios") or {}
             price = _decimal_from_json(product.get("precio"))
@@ -832,14 +850,24 @@ def _calcular_y_guardar_sync(
     fecha_fin,
     sucursal_ids,
     usuario,
-    skus_incluidos=None,
+    point_product_ids=None,
     ajustes_post=None,
     tipo="pronosticos",
 ):
     if tipo == "proyecciones":
-        resultado = calcular_proyeccion_operativa(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+        resultado = calcular_proyeccion_operativa(
+            fecha_inicio,
+            fecha_fin,
+            set(sucursal_ids),
+            point_product_ids=point_product_ids or None,
+        )
     else:
-        resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+        resultado = calcular_pronostico(
+            fecha_inicio,
+            fecha_fin,
+            set(sucursal_ids),
+            point_product_ids=point_product_ids or None,
+        )
     if ajustes_post:
         resultado, _totals = _apply_manual_adjustments(resultado, ajustes_post)
     resumen = resultado.get("resumen") or {}
@@ -888,17 +916,24 @@ def PronosticoVentasView(request):
     fecha_fin_raw = (data.get("fecha_fin") or "").strip()
     selected_branch_ids = _selected_branch_ids(request, source=source)
     categorias_productos = _catalogo_productos_por_categoria()
-    available_skus = {product["sku"] for products in categorias_productos.values() for product in products}
-    selected_product_skus = _selected_product_skus(request) if request.method == "POST" else sorted(available_skus)
+    available_product_ids = _catalog_point_product_ids(categorias_productos)
+    selected_product_ids = (
+        _selected_point_product_ids(request) if request.method == "POST" else sorted(available_product_ids)
+    )
     form_errors = []
     resultados_preview = {}
 
     if request.method == "POST":
         fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
-        selected_product_skus = [sku for sku in selected_product_skus if sku in available_skus]
+        invalid_product_ids = set(selected_product_ids) - available_product_ids
+        if invalid_product_ids:
+            form_errors.append(
+                "La selección contiene productos que no están disponibles para pronóstico. "
+                "Actualiza la pantalla e inténtalo de nuevo."
+            )
         if not selected_branch_ids:
             form_errors.append("Selecciona al menos una sucursal activa.")
-        if not selected_product_skus:
+        if not selected_product_ids:
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
             _warn_stale_sales_forecast(request)
@@ -907,14 +942,14 @@ def PronosticoVentasView(request):
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_skus,
+                    point_product_ids=selected_product_ids,
                 )
             else:
                 resultados_preview = calcular_pronostico(
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_skus,
+                    point_product_ids=selected_product_ids,
                 )
         for error in form_errors:
             messages.error(request, error)
@@ -929,7 +964,7 @@ def PronosticoVentasView(request):
         "fecha_fin": fecha_fin_raw,
         "categorias_productos": categorias_productos,
         "categorias_principales": {category.upper() for category in CATALOG_CATEGORY_ORDER},
-        "selected_product_skus": set(selected_product_skus),
+        "selected_product_ids": set(selected_product_ids),
         "projection_presets": _projection_presets(),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
@@ -975,10 +1010,18 @@ def PronosticoGuardarView(request):
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
     fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
     selected_branch_ids = _selected_branch_ids(request, source="POST")
-    selected_product_skus = _selected_product_skus(request)
+    categorias_productos = _catalogo_productos_por_categoria()
+    available_product_ids = _catalog_point_product_ids(categorias_productos)
+    selected_product_ids = _selected_point_product_ids(request)
+    invalid_product_ids = set(selected_product_ids) - available_product_ids
+    if invalid_product_ids:
+        errors.append(
+            "La selección contiene productos que no están disponibles para pronóstico. "
+            "Actualiza la pantalla e inténtalo de nuevo."
+        )
     if not selected_branch_ids:
         errors.append("Selecciona al menos una sucursal activa.")
-    if not selected_product_skus:
+    if not selected_product_ids:
         errors.append("Selecciona al menos un producto para guardar la proyeccion.")
     if errors:
         for error in errors:
@@ -996,7 +1039,7 @@ def PronosticoGuardarView(request):
         fecha_fin=fecha_fin,
         sucursal_ids=sorted(selected_branch_ids),
         usuario=request.user,
-        skus_incluidos=selected_product_skus,
+        point_product_ids=selected_product_ids,
         ajustes_post=request.POST,
         tipo=active_tab,
     )

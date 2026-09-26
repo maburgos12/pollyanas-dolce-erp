@@ -2,14 +2,19 @@ from datetime import date, timedelta
 from decimal import Decimal
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+from django.contrib.auth import get_user_model
+from django.http import QueryDict
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from ventas.services.pronostico_engine import (
     _apply_special_context_forecast,
+    _forecastable_queryset,
     _simple_average_forecast,
     _special_context_comparable_days,
     _special_context_explanations,
@@ -21,8 +26,14 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
-from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
+from ventas.services.proyecciones_engine import (
+    _context_uplift_lookup,
+    _season_name,
+    _selected_recipe_ids,
+    calcular_proyeccion_operativa,
+)
 from core.models import Sucursal
+from pos_bridge.models import PointBranch, PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
 from reportes.models import FactVentaDiaria
 import ventas.views as ventas_views
@@ -88,6 +99,11 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn("data-forecast-loading-form", template)
         self.assertIn("Preparando matriz de ajustes por día", template)
         self.assertIn("No cierres esta ventana", template)
+        self.assertIn('value="{{ prod.id }}"', template)
+        self.assertIn("prod.id in selected_product_ids", template)
+        self.assertIn("Categoría Point: {{ prod.categoria_point }}", template)
+        self.assertNotIn('value="{{ prod.sku }}"', template)
+        self.assertNotIn("selected_product_skus", template)
 
         presets = _projection_presets()
         self.assertEqual([preset["label"] for preset in presets], ["Semana", "15 días", "30 días"])
@@ -486,6 +502,133 @@ class VentasModuleTests(SimpleTestCase):
         delay.assert_not_called()
 
 
+class VentasPointIdentityTests(TestCase):
+    def setUp(self):
+        self.allowed_user = get_user_model().objects.create_superuser(
+            username="ventas_point_identity",
+            email="ventas-point-identity@example.com",
+            password="test12345",
+        )
+        self.branch = Sucursal.objects.create(codigo="POINT-ID", nombre="Point identidad", activa=True)
+        self.point_branch = PointBranch.objects.create(
+            external_id="POINT-ID",
+            name="Point identidad",
+            erp_branch=self.branch,
+        )
+        self.recipe = Receta.objects.create(
+            nombre="Bollo Lotus",
+            codigo_point="0160",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Bollo",
+            categoria="Bollo",
+            hash_contenido="ventas-point-id-bollo-lotus",
+        )
+        self.bollo = PointProduct.objects.create(
+            external_id="point-bollo-lotus",
+            sku="0160",
+            name="Bollo Lotus",
+            category="Bollo",
+        )
+        self.glow = PointProduct.objects.create(
+            external_id="point-glow-2",
+            sku="0160",
+            name="Glow 2",
+            category="Glow",
+        )
+        PointSalesDailyProductFact.objects.create(
+            branch=self.point_branch,
+            sale_date=timezone.localdate() - timedelta(days=1),
+            sucursal_nombre=self.branch.nombre,
+            categoria="Bollo",
+            producto_nombre_historico="Bollo Lotus",
+            point_product=self.bollo,
+            receta=self.recipe,
+            match_catalogo_status="EXACT_CODE",
+            total_cantidad=Decimal("5"),
+            total_venta=Decimal("500"),
+            total_venta_neta=Decimal("500"),
+        )
+
+    def test_selector_uses_the_sold_point_product_id_not_every_product_with_the_sku(self):
+        catalog = ventas_views._catalogo_productos_por_categoria()
+        products = [product for rows in catalog.values() for product in rows]
+
+        self.assertEqual([product["id"] for product in products], [self.bollo.id])
+        self.assertEqual(products[0]["categoria_point"], "Bollo")
+        self.assertEqual(products[0]["grupo_operativo"], "Bollo")
+
+    def test_selected_point_product_ids_accepts_positive_ids_once(self):
+        request = SimpleNamespace(
+            POST=QueryDict("productos_incluidos=12&productos_incluidos=12&productos_incluidos=x")
+        )
+
+        self.assertEqual(ventas_views._selected_point_product_ids(request), [12])
+
+    def test_preview_rejects_point_product_outside_the_visible_catalog(self):
+        self.client.force_login(self.allowed_user)
+
+        response = self.client.post(
+            reverse("ventas:pronostico"),
+            {
+                "tab": "pronosticos",
+                "fecha_inicio": "2026-10-01",
+                "fecha_fin": "2026-10-02",
+                "sucursales": [self.branch.id],
+                "productos_incluidos": [self.glow.id],
+            },
+        )
+
+        self.assertContains(
+            response,
+            "La selección contiene productos que no están disponibles para pronóstico",
+        )
+
+    def test_projection_recipe_resolution_does_not_expand_a_shared_sku(self):
+        self.assertEqual(_selected_recipe_ids([self.bollo.id]), {self.recipe.id})
+        self.assertEqual(_selected_recipe_ids([self.glow.id]), set())
+
+    def test_forecast_queryset_filters_the_exact_point_product(self):
+        queryset = _forecastable_queryset({self.branch.id}, {self.bollo.id})
+
+        self.assertEqual(
+            set(queryset.values_list("point_product_id", flat=True)),
+            {self.bollo.id},
+        )
+
+    @patch("ventas.tasks.calcular_pronostico", return_value={"resumen": {}})
+    def test_background_forecast_task_passes_exact_point_product_ids(self, calcular):
+        from ventas.tasks import calcular_y_guardar_pronostico
+
+        calcular_y_guardar_pronostico.run(
+            nombre="Pronóstico Point exacto",
+            fecha_inicio_str="2026-10-01",
+            fecha_fin_str="2026-10-02",
+            sucursal_ids=[self.branch.id],
+            usuario_id=self.allowed_user.id,
+            point_product_ids=[self.bollo.id],
+        )
+
+        calcular.assert_called_once_with(
+            date(2026, 10, 1),
+            date(2026, 10, 2),
+            {self.branch.id},
+            point_product_ids=[self.bollo.id],
+        )
+
+    def test_result_category_order_keeps_unknown_point_categories(self):
+        categories = [
+            {"categoria": "Cake Topper", "productos": []},
+            {"categoria": "Bollo", "productos": []},
+        ]
+
+        ordered = ventas_views._ordered_result_categories(categories)
+
+        self.assertEqual(
+            [row["categoria"] for row in ordered],
+            ["Bollo", "Cake Topper"],
+        )
+
+
 class VentasProjectionEngineTests(TestCase):
     def test_projection_uses_operational_daily_forecast_with_three_week_lookback(self):
         branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
@@ -520,7 +663,7 @@ class VentasProjectionEngineTests(TestCase):
                 date(2026, 6, 19),
                 date(2026, 6, 20),
                 {branch.id},
-                skus_incluidos=None,
+                point_product_ids=None,
             )
 
         self.assertEqual(calls, [(date(2026, 6, 19), 3, None), (date(2026, 6, 20), 3, None)])
@@ -622,7 +765,7 @@ class VentasProjectionEngineTests(TestCase):
                 date(2026, 6, 19),
                 date(2026, 6, 21),
                 {branch.id},
-                skus_incluidos=None,
+                point_product_ids=None,
             )
 
         self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas+uplift-evento")
