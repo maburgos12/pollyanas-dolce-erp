@@ -15,6 +15,7 @@ from ventas.services.pronostico_engine import (
     _special_context_explanations,
     _previous_special_context_day,
     _special_day_name,
+    categoria_producto,
 )
 from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
@@ -104,6 +105,44 @@ class VentasModuleTests(SimpleTestCase):
         forecast = _simple_average_forecast(pd.Series(values, index=index), 7).round(0).astype(int).tolist()
 
         self.assertEqual(forecast, [10, 10, 10, 10, 10, 30, 30])
+
+    def test_forecast_category_prefers_the_sold_point_product_over_duplicate_recipe_skus(self):
+        collisions = [
+            ("Bollo", "0160", "Glow"),
+            ("Vasos Preparados Grande", "0147", "Viva party"),
+            ("Vasos Preparados Grande", "0148", "Viva party"),
+        ]
+
+        for point_category, recipe_sku, colliding_category in collisions:
+            with self.subTest(recipe_sku=recipe_sku):
+                category = categoria_producto(
+                    point_category=point_category,
+                    familia=point_category,
+                    receta_codigo_point=recipe_sku,
+                    category_by_sku={recipe_sku: colliding_category},
+                )
+
+                self.assertEqual(category, point_category)
+
+    def test_forecast_category_uses_recipe_sku_only_when_point_category_is_empty(self):
+        category = categoria_producto(
+            point_category="  ",
+            familia="Vasos Preparados",
+            receta_codigo_point="01284",
+            category_by_sku={"01284": "Vasos Preparados Grande"},
+        )
+
+        self.assertEqual(category, "Vasos Preparados Grande")
+
+    def test_forecast_category_uses_recipe_family_as_last_fallback(self):
+        category = categoria_producto(
+            point_category="",
+            familia="Bollo",
+            receta_codigo_point="0160",
+            category_by_sku={},
+        )
+
+        self.assertEqual(category, "Bollo")
 
     def test_forecast_adjustment_rows_apply_manual_delta(self):
         rows, totals = _build_adjustment_rows(

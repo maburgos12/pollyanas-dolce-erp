@@ -520,15 +520,15 @@ def categoria_producto(
     receta_codigo_point: str | None = None,
     category_by_sku: dict[str, str] | None = None,
 ) -> str:
+    category = _clean_label(point_category)
+    if category:
+        return category
+
     codigo_point = _clean_label(receta_codigo_point)
     if codigo_point and category_by_sku:
         category = _clean_label(category_by_sku.get(codigo_point))
         if category:
             return category
-
-    category = _clean_label(point_category)
-    if category:
-        return category
 
     fallback = _clean_label(familia)
     return fallback or "Sin categoría"
