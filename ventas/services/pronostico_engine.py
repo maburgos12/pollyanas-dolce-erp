@@ -864,7 +864,7 @@ def _apply_special_context_forecast(
     return adjusted
 
 
-def _forecastable_queryset(branch_ids: set[int], skus_incluidos: set[str] | None = None):
+def _forecastable_queryset(branch_ids: set[int], point_product_ids: set[int] | None = None):
     forecastable_filter = Q(receta__tipo=Receta.TIPO_PRODUCTO_FINAL)
     for term in FORECASTABLE_TERMS:
         forecastable_filter |= Q(point_product__name__icontains=term) | Q(point_product__category__icontains=term)
@@ -887,8 +887,8 @@ def _forecastable_queryset(branch_ids: set[int], skus_incluidos: set[str] | None
             | Q(receta__nombre__icontains=" sp")
         )
     )
-    if skus_incluidos is not None:
-        queryset = queryset.filter(point_product__sku__in=skus_incluidos)
+    if point_product_ids is not None:
+        queryset = queryset.filter(point_product_id__in=point_product_ids)
     return queryset
 
 
@@ -907,13 +907,15 @@ def calcular_pronostico(
     fecha_inicio: date,
     fecha_fin: date,
     sucursal_ids: set[int] | list[int] | None = None,
-    skus_incluidos: set[str] | list[str] | None = None,
+    point_product_ids: set[int] | list[int] | None = None,
 ) -> dict:
     selected_days = list(_date_range(fecha_inicio, fecha_fin))
     if not selected_days:
         return _empty_result(fecha_inicio, fecha_fin)
-    selected_skus = {str(value).strip() for value in (skus_incluidos or []) if str(value).strip()}
-    sku_filter = selected_skus if skus_incluidos is not None else None
+    selected_product_ids = {
+        int(value) for value in (point_product_ids or []) if str(value).isdigit()
+    }
+    product_filter = selected_product_ids if point_product_ids is not None else None
 
     active_branches = Sucursal.objects.filter(activa=True).order_by("nombre")
     active_branch_ids = set(active_branches.values_list("id", flat=True))
@@ -928,7 +930,7 @@ def calcular_pronostico(
         branch.id: branch
         for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre").order_by("nombre")
     }
-    base_qs = _forecastable_queryset(branch_ids, sku_filter)
+    base_qs = _forecastable_queryset(branch_ids, product_filter)
     sale_bounds = base_qs.filter(sale_date__lt=fecha_inicio).aggregate(
         min_date=Min("sale_date"),
         max_date=Max("sale_date"),

@@ -34,9 +34,6 @@ from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
-from ventas.tasks import calcular_y_guardar_pronostico
-
-
 EXCLUDED_PRODUCT_CATEGORIES = {
     "COCA-COLA",
     "CLARITA",
@@ -840,14 +837,24 @@ def _calcular_y_guardar_sync(
     fecha_fin,
     sucursal_ids,
     usuario,
-    skus_incluidos=None,
+    point_product_ids=None,
     ajustes_post=None,
     tipo="pronosticos",
 ):
     if tipo == "proyecciones":
-        resultado = calcular_proyeccion_operativa(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+        resultado = calcular_proyeccion_operativa(
+            fecha_inicio,
+            fecha_fin,
+            set(sucursal_ids),
+            point_product_ids=point_product_ids or None,
+        )
     else:
-        resultado = calcular_pronostico(fecha_inicio, fecha_fin, set(sucursal_ids), skus_incluidos=skus_incluidos or None)
+        resultado = calcular_pronostico(
+            fecha_inicio,
+            fecha_fin,
+            set(sucursal_ids),
+            point_product_ids=point_product_ids or None,
+        )
     if ajustes_post:
         resultado, _totals = _apply_manual_adjustments(resultado, ajustes_post)
     resumen = resultado.get("resumen") or {}
@@ -922,14 +929,14 @@ def PronosticoVentasView(request):
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_ids,
+                    point_product_ids=selected_product_ids,
                 )
             else:
                 resultados_preview = calcular_pronostico(
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_ids,
+                    point_product_ids=selected_product_ids,
                 )
         for error in form_errors:
             messages.error(request, error)
@@ -1019,7 +1026,7 @@ def PronosticoGuardarView(request):
         fecha_fin=fecha_fin,
         sucursal_ids=sorted(selected_branch_ids),
         usuario=request.user,
-        skus_incluidos=selected_product_ids,
+        point_product_ids=selected_product_ids,
         ajustes_post=request.POST,
         tipo=active_tab,
     )

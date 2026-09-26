@@ -14,6 +14,7 @@ from django.utils import timezone
 
 from ventas.services.pronostico_engine import (
     _apply_special_context_forecast,
+    _forecastable_queryset,
     _simple_average_forecast,
     _special_context_comparable_days,
     _special_context_explanations,
@@ -25,7 +26,12 @@ from ventas.services.sales_freshness import (
     build_forecast_sales_freshness,
     queue_forecast_sales_refresh_if_needed,
 )
-from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
+from ventas.services.proyecciones_engine import (
+    _context_uplift_lookup,
+    _season_name,
+    _selected_recipe_ids,
+    calcular_proyeccion_operativa,
+)
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
@@ -572,6 +578,38 @@ class VentasPointIdentityTests(TestCase):
             "La selección contiene productos que no están disponibles para pronóstico",
         )
 
+    def test_projection_recipe_resolution_does_not_expand_a_shared_sku(self):
+        self.assertEqual(_selected_recipe_ids([self.bollo.id]), {self.recipe.id})
+        self.assertEqual(_selected_recipe_ids([self.glow.id]), set())
+
+    def test_forecast_queryset_filters_the_exact_point_product(self):
+        queryset = _forecastable_queryset({self.branch.id}, {self.bollo.id})
+
+        self.assertEqual(
+            set(queryset.values_list("point_product_id", flat=True)),
+            {self.bollo.id},
+        )
+
+    @patch("ventas.tasks.calcular_pronostico", return_value={"resumen": {}})
+    def test_background_forecast_task_passes_exact_point_product_ids(self, calcular):
+        from ventas.tasks import calcular_y_guardar_pronostico
+
+        calcular_y_guardar_pronostico.run(
+            nombre="Pronóstico Point exacto",
+            fecha_inicio_str="2026-10-01",
+            fecha_fin_str="2026-10-02",
+            sucursal_ids=[self.branch.id],
+            usuario_id=self.allowed_user.id,
+            point_product_ids=[self.bollo.id],
+        )
+
+        calcular.assert_called_once_with(
+            date(2026, 10, 1),
+            date(2026, 10, 2),
+            {self.branch.id},
+            point_product_ids=[self.bollo.id],
+        )
+
 
 class VentasProjectionEngineTests(TestCase):
     def test_projection_uses_operational_daily_forecast_with_three_week_lookback(self):
@@ -607,7 +645,7 @@ class VentasProjectionEngineTests(TestCase):
                 date(2026, 6, 19),
                 date(2026, 6, 20),
                 {branch.id},
-                skus_incluidos=None,
+                point_product_ids=None,
             )
 
         self.assertEqual(calls, [(date(2026, 6, 19), 3, None), (date(2026, 6, 20), 3, None)])
@@ -709,7 +747,7 @@ class VentasProjectionEngineTests(TestCase):
                 date(2026, 6, 19),
                 date(2026, 6, 21),
                 {branch.id},
-                skus_incluidos=None,
+                point_product_ids=None,
             )
 
         self.assertEqual(result["resumen"]["metodo"], "forecast-operativo-3-semanas+uplift-evento")
