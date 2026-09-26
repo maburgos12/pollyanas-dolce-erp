@@ -661,6 +661,7 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
             "  overflow: visible;",
             stylesheet,
         )
+        self.assertIn("overflow: visible !important;", template)
         self.assertIn("max-height: calc(100dvh - 112px);", stylesheet)
         self.assertIn("position: sticky;", stylesheet)
         self.assertIn(".production-table-wrap .table thead th.text-end", stylesheet)
