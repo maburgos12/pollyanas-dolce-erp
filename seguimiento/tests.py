@@ -524,7 +524,9 @@ class SeguimientoColaboradorTests(TestCase):
         dg_user.groups.add(dg_group)
         self.client.force_login(dg_user)
 
-        response = self.client.get("/seguimiento/panel/?estado=activos")
+        response = self.client.get(
+            f"/seguimiento/panel/?tab={self.item.tipo}&estado=activos"
+        )
 
         self.assertContains(response, 'class="bi-pill pill-listo_cerrar">Listo para entregar</span>')
 

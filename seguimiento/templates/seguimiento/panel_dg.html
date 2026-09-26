@@ -7,7 +7,7 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260529-panel-dg-v2">
-<link rel="stylesheet" href="{% static 'css/template_modules/seguimiento-templates-seguimiento-panel-dg.css' %}?v=20260825-cierre-claro-v1">
+<link rel="stylesheet" href="{% static 'css/template_modules/seguimiento-templates-seguimiento-panel-dg.css' %}?v=20260926-tipos-estados-v2">
 {% endblock %}
 
 {% block content %}
@@ -16,33 +16,33 @@
     <div>
       <div class="bi-kicker">Dirección General</div>
       <h1>Panel de acuerdos</h1>
-      <p>Minutas, proyectos y compromisos de tu equipo.</p>
+      <p>Consulta cada tipo de acuerdo con sus propios estados y responsables.</p>
     </div>
     <button class="btn btn-secondary panel-dg-new-button" type="button" data-panel-dialog-open {% if not writeback_activo %}disabled{% endif %}>
       <i class="ti ti-plus" aria-hidden="true"></i><span>Nuevo acuerdo</span>
     </button>
   </header>
 
-  <section class="panel-dg-mini-dashboard" aria-label="Resumen ejecutivo">
-    <a href="{% for state in state_nav %}{% if state.key == 'activos' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
-      <i class="ti ti-progress-check panel-dg-mini-icon" aria-hidden="true"></i>
-      <span>Activos</span><strong>{{ dashboard_counts.activos }}</strong><small>Abiertos</small>
+  <nav class="panel-dg-type-nav" aria-label="Tipo de acuerdo">
+    {% for type in type_nav %}
+    <a href="{{ type.url }}" class="panel-dg-type-link {% if active_tab == type.key %}is-active{% endif %}" data-panel-type="{{ type.key }}" {% if active_tab == type.key %}aria-current="page"{% endif %}>
+      <span class="panel-dg-type-initial" aria-hidden="true">{{ type.label|slice:":1" }}</span>
+      <span class="panel-dg-type-copy"><strong>{{ type.label }}</strong><small>Ver estados y responsables</small></span>
+      <span class="panel-dg-type-count">{{ type.count }}</span>
     </a>
-    <a href="{% for state in state_nav %}{% if state.key == 'revision' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
-      <i class="ti ti-user-check panel-dg-mini-icon is-warning" aria-hidden="true"></i>
-      <span>Por aprobar</span><strong class="is-warning">{{ dashboard_counts.revision }}</strong><small>En revisión</small>
-    </a>
-    <a href="{% for state in state_nav %}{% if state.key == 'prorrogas' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
-      <i class="ti ti-calendar-time panel-dg-mini-icon is-warning" aria-hidden="true"></i>
-      <span>Prórrogas</span><strong class="is-warning">{{ dashboard_counts.prorrogas }}</strong><small>Pendientes</small>
-    </a>
-    <a href="{% for state in state_nav %}{% if state.key == 'completados' %}{{ state.url }}{% endif %}{% endfor %}" class="panel-dg-mini-cell">
-      <i class="ti ti-circle-check panel-dg-mini-icon is-success" aria-hidden="true"></i>
-      <span>Completados</span><strong class="is-success">{{ dashboard_counts.completados }}</strong><small>Cerrados</small>
-    </a>
+    {% endfor %}
+  </nav>
+
+  <section class="panel-dg-type-summary" aria-labelledby="panel-dg-type-title">
+    <div>
+      <div class="bi-kicker">Tipo seleccionado</div>
+      <h2 id="panel-dg-type-title">{{ active_type_label }}</h2>
+      <p>Los estados siguientes corresponden exclusivamente a {{ active_type_label|lower }}.</p>
+    </div>
+    <strong><span>{{ active_type_count }}</span><small>total</small></strong>
   </section>
 
-  <nav class="panel-dg-state-nav" aria-label="Filtrar acuerdos por estado">
+  <nav class="panel-dg-state-nav" aria-label="Estados de {{ active_type_label }}">
     {% for state in state_nav %}
     <a href="{{ state.url }}" class="panel-dg-state-link {% if active_estado == state.key %}is-active{% endif %}" data-panel-state="{{ state.key }}" {% if active_estado == state.key %}aria-current="page"{% endif %}>
       <span>{{ state.label }}</span><strong>{{ state.count }}</strong>
@@ -53,10 +53,10 @@
   <section class="panel-dg-people" aria-labelledby="panel-dg-people-title">
     <div class="panel-dg-list-heading">
       <div>
-        <div class="bi-kicker">{{ active_estado_label }}</div>
+        <div class="bi-kicker">{{ active_type_label }} · {{ active_estado_label }}</div>
         <h2 id="panel-dg-people-title">Por persona</h2>
       </div>
-      <span>{{ items_estado|length }} acuerdo{{ items_estado|length|pluralize:"s" }}</span>
+      <span>{{ items_estado|length }} en este estado</span>
     </div>
 
     {% if items_estado %}
@@ -65,7 +65,7 @@
         <summary>
           <span class="panel-dg-alert-icon" aria-hidden="true"><i class="ti ti-alert-triangle"></i></span>
           <span class="panel-dg-row-copy">
-            <strong>{{ items_estado|length }} acuerdo{{ items_estado|length|pluralize:"s" }} {{ active_estado_label|lower }}</strong>
+            <strong>{{ items_estado|length }} {{ active_type_label|lower }} en {{ active_estado_label|lower }}</strong>
             <small>Abre la lista completa o selecciona una persona.</small>
           </span>
           <span class="btn btn-secondary btn-sm panel-dg-open-label">Abrir lista</span>
@@ -86,7 +86,7 @@
         <summary>
           <span class="panel-dg-avatar" aria-hidden="true">{{ colab.iniciales }}</span>
           <span class="panel-dg-row-copy">
-            <strong>{{ colab.nombre }} · <em>{{ colab.count }} {{ active_estado_label|lower }}</em></strong>
+            <strong>{{ colab.nombre }} · <em>{{ colab.count }} {{ active_type_label|lower }}</em></strong>
             <small>{% with first=colab.items.0 %}{% if first.fecha_limite %}Fecha más próxima: {{ first.fecha_limite|date:"d/m/Y" }}{% else %}Sin fecha límite registrada{% endif %}{% endwith %}</small>
           </span>
           <i class="ti ti-chevron-down panel-dg-chevron" aria-hidden="true"></i>
@@ -105,8 +105,8 @@
     {% else %}
     <div class="panel-dg-empty">
       <i class="ti ti-circle-check" aria-hidden="true"></i>
-      <strong>Sin acuerdos {{ active_estado_label|lower }}</strong>
-      <span>No hay personas que mostrar en este estado.</span>
+      <strong>No hay {{ active_type_label|lower }} en {{ active_estado_label|lower }}</strong>
+      <span>Cambia de estado o selecciona otro tipo de acuerdo.</span>
     </div>
     {% endif %}
   </section>
@@ -115,15 +115,15 @@
     <summary><span><i class="ti ti-adjustments" aria-hidden="true"></i> Filtros y auditoría</span><i class="ti ti-chevron-down" aria-hidden="true"></i></summary>
     <div class="panel-dg-tools-body">
       <form class="bi-filterbar panel-dg-filterbar" method="get" id="filtros-form">
-        <div class="bi-control"><label for="f-tipo">Tipo</label><select id="f-tipo" name="tipo"><option value="">Todos</option>{% for val, label in tipo_choices %}<option value="{{ val }}" {% if filtro_tipo == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
         <div class="bi-control"><label for="f-estatus">Estatus técnico</label><select id="f-estatus" name="estatus"><option value="">Todos</option>{% for val, label in estatus_choices %}<option value="{{ val }}" {% if filtro_estatus == val %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
         <div class="bi-control"><label for="f-colab">Colaborador</label><input id="f-colab" type="text" name="colaborador" value="{{ filtro_colaborador }}" placeholder="Nombre o usuario"></div>
-        <div class="panel-dg-filter-actions"><button class="btn btn-primary btn-sm" type="submit">Aplicar</button><a href="{% url 'seguimiento:panel_dg' %}?estado={{ active_estado }}" class="btn btn-secondary btn-sm">Limpiar</a></div>
+        <div class="panel-dg-filter-actions"><button class="btn btn-primary btn-sm" type="submit">Aplicar</button><a href="{% url 'seguimiento:panel_dg' %}?tab={{ active_tab }}&amp;estado={{ active_estado }}" class="btn btn-secondary btn-sm">Limpiar</a></div>
+        <input type="hidden" name="tab" value="{{ active_tab }}">
         <input type="hidden" name="estado" value="{{ active_estado }}">
       </form>
       <nav class="panel-dg-audit-links" aria-label="Estados de auditoría de la app">
-        <a href="?bucket=desfases&estado=activos">Desfases app ({{ bucket_counts.desfases }})</a>
-        <a href="?bucket=historico&estado=completados">Histórico finalizado ({{ bucket_counts.historico }})</a>
+        <a href="?tab={{ active_tab }}&amp;bucket=desfases&amp;estado=activos">Desfases app ({{ bucket_counts.desfases }})</a>
+        <a href="?tab={{ active_tab }}&amp;bucket=historico&amp;estado=completados">Histórico finalizado ({{ bucket_counts.historico }})</a>
       </nav>
     </div>
   </details>
