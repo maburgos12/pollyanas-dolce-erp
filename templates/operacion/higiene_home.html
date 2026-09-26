@@ -243,11 +243,15 @@
                             <p class="integration-note">La foto y descripción se enviarán una sola vez al módulo de Fallas.</p>
                             <section class="failure-match" data-failure-match aria-live="polite" hidden>
                               <div class="failure-match-heading">
-                                <strong>Fallas activas relacionadas</strong>
+                                <strong>Consulta de continuidad</strong>
                                 <span data-match-state>Completa la clasificación para buscar coincidencias.</span>
+                                <button type="button" data-match-retry hidden>Reintentar búsqueda</button>
                               </div>
                               <div class="failure-match-results" data-match-results hidden>
-                                <div class="failure-report-options" data-match-reports></div>
+                                <fieldset class="failure-report-options" data-match-reports>
+                                  <legend>Fallas activas relacionadas</legend>
+                                  <div class="failure-report-list" data-match-report-list></div>
+                                </fieldset>
                                 <fieldset class="failure-decision">
                                   <legend>¿Qué ocurre hoy?</legend>
                                   <label>
@@ -260,7 +264,7 @@
                                   </label>
                                   <label>
                                     <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="DISTINTA">
-                                    <span><b>Es otro problema</b><small>Abrir una falla nueva conservando la referencia.</small></span>
+                                    <span><b>Es otro problema</b><small>Abrir una falla nueva.</small></span>
                                   </label>
                                   <label>
                                     <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="CORRECCION_PENDIENTE">

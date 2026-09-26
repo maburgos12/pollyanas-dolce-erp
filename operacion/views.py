@@ -549,6 +549,11 @@ def higiene_home(request):
 @login_required
 @require_GET
 def higiene_fallas_coincidentes(request):
+    if not puede_capturar_higiene(request.user):
+        return JsonResponse(
+            {"error": "Tu sesión no puede capturar revisiones de higiene."},
+            status=403,
+        )
     sucursal = sucursal_higiene_usuario(request.user)
     if not sucursal:
         return JsonResponse(
@@ -612,6 +617,7 @@ def higiene_guardar(request):
         return JsonResponse(
             {
                 "error": str(exc),
+                "punto_clave": exc.punto_clave,
                 "existing_reports": [
                     {
                         "id": reporte.pk,

@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
 from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connections, transaction
@@ -446,6 +447,7 @@ class HigieneDiariaTests(TestCase):
             }
 
             self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["punto_clave"], "bano_sanitario")
             self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
             self.assertEqual(RegistroHigiene.objects.count(), 1)
             self.assertEqual(RespuestaHigiene.objects.count(), 1)
@@ -496,6 +498,7 @@ class HigieneDiariaTests(TestCase):
                         )
 
             self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["punto_clave"], "bano_sanitario")
             self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
             self.assertEqual(RegistroHigiene.objects.count(), baseline["registros"])
             self.assertEqual(RespuestaHigiene.objects.count(), baseline["respuestas"])
@@ -964,6 +967,25 @@ class HigieneDiariaTests(TestCase):
         self.client.force_login(self.operadora)
         self.assertEqual(self.client.post(url).status_code, 405)
 
+    def test_fallas_coincidentes_rechaza_repartidor_aunque_tenga_sucursal(self):
+        repartidor = User.objects.create_user(username="repartidor.higiene", password="test12345")
+        UserProfile.objects.create(user=repartidor, sucursal=self.payan)
+        repartidor.groups.add(Group.objects.create(name="repartidor"))
+        self.client.force_login(repartidor)
+
+        response = self.client.get(
+            reverse("operacion:higiene_fallas_coincidentes"),
+            {
+                "tipo": "BANOS",
+                "punto_clave": "bano_sanitario",
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": self.categoria_instalacion.pk,
+                "area_instalacion": "Baños",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
     def test_captura_incluye_decision_asistida_y_nombres_aislados_por_bitacora(self):
         self.client.force_login(self.operadora)
 
@@ -977,18 +999,32 @@ class HigieneDiariaTests(TestCase):
         self.assertContains(captura, 'value="DISTINTA"')
         self.assertContains(captura, 'value="CORRECCION_PENDIENTE"')
         self.assertContains(captura, 'name="failure_decision_BANOS_bano_sanitario"')
+        self.assertContains(captura, '<fieldset class="failure-report-options"', html=False)
+        self.assertContains(captura, "<legend>Fallas activas relacionadas</legend>", html=True)
+        self.assertContains(captura, 'data-match-retry')
+        self.assertContains(captura, "Reintentar búsqueda")
+        self.assertNotContains(captura, "conservando la referencia")
 
     def test_estaticos_higiene_conservan_contrato_de_decision_y_conflicto(self):
         js_path = finders.find("operacion/higiene.js")
         self.assertIsNotNone(js_path)
         script = Path(js_path).read_text(encoding="utf-8")
 
-        self.assertIn("function loadFailureMatches(point)", script)
+        self.assertIn("async function loadFailureMatches(point, options)", script)
         self.assertIn("function failureDecision(point)", script)
         self.assertIn("answer.falla_decision", script)
         self.assertIn("answer.reporte_falla_id", script)
         self.assertIn("response.status === 409", script)
         self.assertIn("loadFailureMatches", script[script.index("response.status === 409") :])
+        conflict_handler = script[script.index("response.status === 409") :]
+        self.assertIn("payload.punto_clave", conflict_handler)
+        self.assertIn("CSS.escape(payload.punto_clave)", conflict_handler)
+        self.assertNotIn("Promise.all(followUpPoints.map(loadFailureMatches))", conflict_handler)
+        self.assertIn("preserveSelection", conflict_handler)
+        self.assertIn('decision.falla_decision === "DISTINTA"', script)
+        self.assertIn('decision.reporte_falla_id = ""', script)
+        self.assertIn('retry.addEventListener("click"', script)
+        self.assertIn('panel.setAttribute("aria-busy", status === "loading" ? "true" : "false")', script)
         self.assertNotIn("form.reset()", script)
 
     def test_higiene_actualiza_cache_y_versiones_de_assets(self):
@@ -1003,6 +1039,9 @@ class HigieneDiariaTests(TestCase):
             'const CACHE_NAME = "pollyanas-app-operativa-pwa-v46-higiene-falla-continuidad";',
             sw_source,
         )
+        bypass = 'if (url.pathname === "/app/higiene/fallas-coincidentes/") return;'
+        self.assertIn(bypass, sw_source)
+        self.assertLess(sw_source.index(bypass), sw_source.index("caches.match(event.request)"))
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

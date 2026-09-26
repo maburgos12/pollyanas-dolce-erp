@@ -774,6 +774,20 @@ input[type="file"] {
   font-weight: 900;
 }
 
+.failure-match-heading button {
+  min-height: 44px;
+  margin-top: 10px;
+  border: 1px solid var(--vino);
+  border-radius: 9px;
+  background: var(--surface);
+  padding: 8px 12px;
+  color: var(--vino);
+  font-size: 0.76rem;
+  font-weight: 900;
+  cursor: pointer;
+  transition: background-color 160ms ease-out, transform 120ms ease-out;
+}
+
 .failure-match[data-match-status="loading"] .failure-match-heading span::before {
   content: "…";
 }
@@ -801,6 +815,19 @@ input[type="file"] {
 }
 
 .failure-report-options {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.failure-report-options legend {
+  margin-bottom: 8px;
+  color: var(--texto);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.failure-report-list {
   display: grid;
   gap: 8px;
 }
@@ -1293,7 +1320,8 @@ input[type="file"] {
 }
 
 .failure-report-option span:active,
-.failure-decision span:active {
+.failure-decision span:active,
+.failure-match-heading button:active {
   transform: scale(0.97);
 }
 

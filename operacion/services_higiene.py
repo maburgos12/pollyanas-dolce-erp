@@ -286,7 +286,7 @@ def _preflight_fallas_higiene(*, normalizadas):
                         item["clave"],
                     )
                 if candidatos:
-                    raise FallaHigieneConflict(candidatos)
+                    raise FallaHigieneConflict(candidatos, punto_clave=item["clave"])
                 if not item["evidencia_disponible"]:
                     _error(
                         "Agrega una foto para registrar la reincidencia de la falla cerrada.",
@@ -295,7 +295,7 @@ def _preflight_fallas_higiene(*, normalizadas):
                 plan["crear_reporte"] = True
         elif decision == "AUTO":
             if candidatos:
-                raise FallaHigieneConflict(candidatos)
+                raise FallaHigieneConflict(candidatos, punto_clave=item["clave"])
             plan["crear_reporte"] = True
         else:
             plan["crear_reporte"] = True

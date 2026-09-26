@@ -21,8 +21,9 @@ ESTATUS_ACTIVOS = (
 
 
 class FallaHigieneConflict(Exception):
-    def __init__(self, candidatos):
+    def __init__(self, candidatos, *, punto_clave=None):
         self.candidatos = list(candidatos)
+        self.punto_clave = punto_clave
         super().__init__("Ya existe una falla activa para este punto.")
 
 

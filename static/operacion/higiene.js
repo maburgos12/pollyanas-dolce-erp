@@ -64,7 +64,7 @@
   }
 
   function clearFailureChoices(point) {
-    const reports = point.querySelector("[data-match-reports]");
+    const reports = point.querySelector("[data-match-report-list]");
     if (reports) reports.replaceChildren();
     point.querySelectorAll("[data-failure-decision]").forEach(function (radio) {
       radio.checked = false;
@@ -76,10 +76,13 @@
     if (!panel) return;
     panel.hidden = !isFailureFollowUp(point);
     panel.dataset.matchStatus = status;
+    panel.setAttribute("aria-busy", status === "loading" ? "true" : "false");
     const state = panel.querySelector("[data-match-state]");
     const results = panel.querySelector("[data-match-results]");
+    const retry = panel.querySelector("[data-match-retry]");
     if (state) state.textContent = message;
     if (results) results.hidden = status !== "results";
+    if (retry) retry.hidden = status !== "error";
   }
 
   function invalidateFailureMatches(point) {
@@ -113,7 +116,7 @@
   }
 
   function renderFailureReports(point, reports) {
-    const container = point.querySelector("[data-match-reports]");
+    const container = point.querySelector("[data-match-report-list]");
     if (!container) return;
     const identity = currentFailureIdentity(point);
     const groupName = "failure_report_" + identity.tipo + "_" + point.dataset.key;
@@ -137,19 +140,44 @@
     });
   }
 
-  async function loadFailureMatches(point) {
+  function selectedFailureContext(point) {
+    return {
+      reporteId: selectedValue(point, "[data-failure-report]"),
+      decision: selectedValue(point, "[data-failure-decision]")
+    };
+  }
+
+  function restoreFailureContext(point, context) {
+    if (!context) return;
+    const reports = Array.from(point.querySelectorAll("[data-failure-report]"));
+    const previousReport = reports.find(function (radio) {
+      return radio.value === context.reporteId;
+    });
+    if (previousReport) previousReport.checked = true;
+    const decisions = Array.from(point.querySelectorAll("[data-failure-decision]"));
+    const previousDecision = decisions.find(function (radio) {
+      return radio.value === context.decision;
+    });
+    if (previousDecision && (context.decision === "DISTINTA" || previousReport)) {
+      previousDecision.checked = true;
+    }
+  }
+
+  async function loadFailureMatches(point, options) {
     if (!failureClassificationComplete(point)) {
       invalidateFailureMatches(point);
       updateWorkflow(point.closest("form"));
       return [];
     }
 
+    const preserveSelection = Boolean(options && options.preserveSelection);
+    const previousSelection = preserveSelection ? selectedFailureContext(point) : null;
     const previous = failureRequests.get(point);
     if (previous && previous.controller) previous.controller.abort();
     const requestId = previous ? previous.requestId + 1 : 1;
     const controller = new AbortController();
     failureRequests.set(point, { requestId: requestId, controller: controller });
-    clearFailureChoices(point);
+    if (!preserveSelection) clearFailureChoices(point);
     setFailureMatchState(point, "loading", "Buscando fallas activas relacionadas…");
     updateWorkflow(point.closest("form"));
 
@@ -171,13 +199,16 @@
       }
       const reports = Array.isArray(payload.reportes) ? payload.reportes : [];
       if (!reports.length) {
+        if (preserveSelection) clearFailureChoices(point);
         setFailureMatchState(
           point,
           "empty",
           "No hay una falla activa igual. Al guardar se abrirá un reporte nuevo."
         );
       } else {
+        if (preserveSelection) clearFailureChoices(point);
         renderFailureReports(point, reports);
+        restoreFailureContext(point, previousSelection);
         setFailureMatchState(
           point,
           "results",
@@ -195,7 +226,7 @@
       setFailureMatchState(
         point,
         "error",
-        "No pudimos buscar coincidencias. Revisa tu conexión o cambia la clasificación para reintentar."
+        "No pudimos buscar coincidencias. Revisa tu conexión y usa Reintentar búsqueda."
       );
       updateWorkflow(form);
       return [];
@@ -217,10 +248,12 @@
     const status = panel ? panel.dataset.matchStatus : "idle";
     if (status === "empty") return { falla_decision: "AUTO", reporte_falla_id: "" };
     if (status !== "results") return null;
-    return {
+    const decision = {
       falla_decision: selectedValue(point, "[data-failure-decision]"),
       reporte_falla_id: selectedValue(point, "[data-failure-report]")
     };
+    if (decision.falla_decision === "DISTINTA") decision.reporte_falla_id = "";
+    return decision;
   }
 
   function pointHasEvidence(point) {
@@ -247,7 +280,9 @@
     if (matchStatus === "empty") return pointHasEvidence(point);
     if (matchStatus !== "results") return false;
     const decision = failureDecision(point);
-    if (!decision || !decision.falla_decision || !decision.reporte_falla_id) return false;
+    if (!decision || !decision.falla_decision) return false;
+    if (decision.falla_decision === "DISTINTA") return pointHasEvidence(point);
+    if (!decision.reporte_falla_id) return false;
     return decision.falla_decision === "MISMA" || pointHasEvidence(point);
   }
 
@@ -396,17 +431,21 @@
         const panel = point.querySelector("[data-failure-match]");
         const matchStatus = panel ? panel.dataset.matchStatus : "idle";
         if (matchStatus === "loading") return "Espera a que termine la búsqueda de fallas activas.";
-        if (matchStatus === "error") return "No se pudo buscar fallas activas. Cambia la clasificación para reintentar.";
+        if (matchStatus === "error") return "No se pudo buscar fallas activas. Usa Reintentar búsqueda.";
         if (matchStatus === "idle") return "Espera a que se busquen fallas activas relacionadas.";
         if (matchStatus === "empty" && !pointHasEvidence(point)) {
           return "Agrega una foto para abrir la nueva falla.";
         }
         const decision = failureDecision(point);
-        if (matchStatus === "results" && (!decision || !decision.reporte_falla_id)) {
-          return "Elige la falla activa que corresponde a este hallazgo.";
+        if (matchStatus === "results" && (!decision || !decision.falla_decision)) {
+          return "Elige qué ocurre hoy con este hallazgo.";
         }
-        if (matchStatus === "results" && !decision.falla_decision) {
-          return "Elige qué ocurre hoy con la falla seleccionada.";
+        if (
+          matchStatus === "results" &&
+          decision.falla_decision !== "DISTINTA" &&
+          !decision.reporte_falla_id
+        ) {
+          return "Elige la falla activa que corresponde a este hallazgo.";
         }
         if (decision && decision.falla_decision !== "MISMA" && !pointHasEvidence(point)) {
           return "Agrega una foto para documentar el cambio, el problema distinto o la corrección.";
@@ -556,6 +595,12 @@
         scheduleFailureMatches(point);
       });
     }
+    const retry = point.querySelector("[data-match-retry]");
+    if (retry) {
+      retry.addEventListener("click", function () {
+        loadFailureMatches(point, { preserveSelection: true });
+      });
+    }
 
     point.querySelectorAll("input, select, textarea").forEach(function (control) {
       control.addEventListener("input", function () {
@@ -659,11 +704,33 @@
         const payload = await response.json();
         if (response.status === 409) {
           const followUpPoints = points.filter(isFailureFollowUp);
-          await Promise.all(followUpPoints.map(loadFailureMatches));
-          const conflicted = followUpPoints.find(function (point) {
-            const panel = point.querySelector("[data-failure-match]");
-            return panel && panel.dataset.matchStatus === "results";
-          }) || followUpPoints[0];
+          let conflicted = payload.punto_clave
+            ? form.querySelector(
+              '[data-review-point][data-key="' + CSS.escape(payload.punto_clave) + '"]'
+            )
+            : null;
+          if (conflicted && isFailureFollowUp(conflicted)) {
+            await loadFailureMatches(conflicted);
+          } else {
+            conflicted = null;
+            const conflictIds = new Set((payload.existing_reports || []).map(function (report) {
+              return String(report.id);
+            }));
+            for (const point of followUpPoints) {
+              const reports = await loadFailureMatches(point, { preserveSelection: true });
+              if (!conflicted && reports.some(function (report) {
+                return conflictIds.has(String(report.id));
+              })) {
+                conflicted = point;
+              }
+            }
+            if (!conflicted) {
+              conflicted = followUpPoints.find(function (point) {
+                const panel = point.querySelector("[data-failure-match]");
+                return panel && panel.dataset.matchStatus === "results";
+              }) || followUpPoints[0];
+            }
+          }
           if (conflicted) {
             const section = conflicted.closest("[data-review-section]");
             showSection(form, Number(section.dataset.sectionIndex), true);
