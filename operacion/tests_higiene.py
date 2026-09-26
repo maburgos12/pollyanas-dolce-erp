@@ -17,8 +17,8 @@ from django.utils import timezone
 
 from activos.models import Activo
 from core.access import ACCESS_MANAGE
-from core.models import Sucursal, UserModuleAccess, UserProfile
-from fallas.models import CategoriaFalla, ReporteFalla
+from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
+from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
 from operacion.services_fallas import notificar_evento_higiene
 
@@ -448,6 +448,66 @@ class HigieneDiariaTests(TestCase):
             self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
             self.assertEqual(RegistroHigiene.objects.count(), 1)
             self.assertEqual(RespuestaHigiene.objects.count(), 1)
+            self.assertEqual(archivos_despues, archivos_antes)
+
+    def test_preflight_multipunto_no_deja_blob_si_un_punto_posterior_conflictua(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+            principal = self._crear_falla_higiene_abierta()
+            baseline = {
+                "registros": RegistroHigiene.objects.count(),
+                "respuestas": RespuestaHigiene.objects.count(),
+                "reportes": ReporteFalla.objects.count(),
+                "bitacora": BitacoraFalla.objects.count(),
+                "notificaciones": Notificacion.objects.count(),
+            }
+            archivos_antes = {
+                path.relative_to(media_root)
+                for path in Path(media_root).rglob("*")
+                if path.is_file()
+            }
+
+            with mock.patch(
+                "operacion.services_fallas.notificar_falla_mantenimiento"
+            ) as notificar_nueva, mock.patch(
+                "operacion.services_fallas.notificar_evento_higiene"
+            ) as notificar_continuidad:
+                with self.captureOnCommitCallbacks(execute=True):
+                    with mock.patch(
+                        "operacion.services_higiene.timezone.localdate",
+                        return_value=date(2026, 9, 26),
+                    ):
+                        response = self._guardar(
+                            tipo="BANOS",
+                            clave_instancia="multipunto-conflictivo",
+                            respuestas=[
+                                self._hallazgo_banos(
+                                    key="bano_pisos",
+                                    observacion="Piso roto junto a la puerta",
+                                    decision="DISTINTA",
+                                ),
+                                self._hallazgo_banos(),
+                            ],
+                            archivos={
+                                "evidencia_bano_pisos": self._foto("previa.png"),
+                                "evidencia_bano_sanitario": self._foto("conflicto.png"),
+                            },
+                        )
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
+            self.assertEqual(RegistroHigiene.objects.count(), baseline["registros"])
+            self.assertEqual(RespuestaHigiene.objects.count(), baseline["respuestas"])
+            self.assertEqual(ReporteFalla.objects.count(), baseline["reportes"])
+            self.assertEqual(BitacoraFalla.objects.count(), baseline["bitacora"])
+            self.assertEqual(Notificacion.objects.count(), baseline["notificaciones"])
+            self.assertFalse(notificar_nueva.called)
+            self.assertFalse(notificar_continuidad.called)
+            archivos_despues = {
+                path.relative_to(media_root)
+                for path in Path(media_root).rglob("*")
+                if path.is_file()
+            }
             self.assertEqual(archivos_despues, archivos_antes)
 
     def test_misma_activa_de_otro_punto_rechaza_sin_degradar_a_auto(self):

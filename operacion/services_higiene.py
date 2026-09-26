@@ -222,6 +222,75 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
     return normalizadas
 
 
+def _preflight_fallas_higiene(*, normalizadas, sucursal):
+    identidades_por_lock = {
+        item["identidad"].lock_key: item["identidad"]
+        for item in normalizadas
+        if item["seguimiento"] and item["identidad"] is not None
+    }
+    for lock_key in sorted(identidades_por_lock):
+        bloquear_identidad(identidades_por_lock[lock_key])
+
+    planes = []
+    for item in normalizadas:
+        plan = {
+            "reporte": None,
+            "continuidad": None,
+            "crear_reporte": False,
+        }
+        if not item["seguimiento"] or item["identidad"] is None:
+            planes.append(plan)
+            continue
+
+        identidad = item["identidad"]
+        candidatos = list(fallas_coincidentes(identidad))
+        decision = item["falla_decision"]
+        if decision in DECISIONES_CON_REPORTE:
+            plan["reporte"] = next(
+                (
+                    candidato
+                    for candidato in candidatos
+                    if candidato.pk == item["reporte_falla_id"]
+                ),
+                None,
+            )
+            if plan["reporte"]:
+                plan["continuidad"] = {
+                    "MISMA": RespuestaHigiene.CONTINUIDAD_IGUAL,
+                    "CAMBIO": RespuestaHigiene.CONTINUIDAD_CAMBIO,
+                    "CORRECCION_PENDIENTE": RespuestaHigiene.CONTINUIDAD_CORRECCION,
+                }[decision]
+            else:
+                solicitado = ReporteFalla.objects.filter(
+                    pk=item["reporte_falla_id"],
+                    sucursal=sucursal,
+                ).first()
+                if not solicitado or solicitado.estatus != ReporteFalla.ESTATUS_CERRADO:
+                    _error(
+                        "La falla seleccionada no corresponde a este punto o ya no admite continuidad.",
+                        item["clave"],
+                    )
+                if not reporte_coincide_identidad(solicitado, identidad):
+                    _error(
+                        "La falla cerrada no corresponde a la identidad de este hallazgo.",
+                        item["clave"],
+                    )
+                if not item["evidencia_disponible"]:
+                    _error(
+                        "Agrega una foto para registrar la reincidencia de la falla cerrada.",
+                        item["clave"],
+                    )
+                plan["crear_reporte"] = True
+        elif decision == "AUTO":
+            if candidatos:
+                raise FallaHigieneConflict(candidatos)
+            plan["crear_reporte"] = True
+        else:
+            plan["crear_reporte"] = True
+        planes.append(plan)
+    return planes
+
+
 @transaction.atomic
 def guardar_registro_higiene(
     *,
@@ -276,59 +345,12 @@ def guardar_registro_higiene(
         registro.notas = str(notas or registro.notas).strip()
         registro.save(update_fields=["hora", "tipo_bano", "uso_bano", "notas", "actualizado_en"])
 
+    planes_falla = _preflight_fallas_higiene(
+        normalizadas=normalizadas,
+        sucursal=sucursal,
+    )
     reporte_ids = []
-    for item in normalizadas:
-        reporte_planeado = None
-        continuidad_planeada = None
-        crear_reporte_nuevo = False
-        if item["seguimiento"] and item["identidad"] is not None:
-            identidad = item["identidad"]
-            bloquear_identidad(identidad)
-            candidatos = list(fallas_coincidentes(identidad))
-            decision = item["falla_decision"]
-            if decision in DECISIONES_CON_REPORTE:
-                reporte_planeado = next(
-                    (
-                        candidato
-                        for candidato in candidatos
-                        if candidato.pk == item["reporte_falla_id"]
-                    ),
-                    None,
-                )
-                if reporte_planeado:
-                    continuidad_planeada = {
-                        "MISMA": RespuestaHigiene.CONTINUIDAD_IGUAL,
-                        "CAMBIO": RespuestaHigiene.CONTINUIDAD_CAMBIO,
-                        "CORRECCION_PENDIENTE": RespuestaHigiene.CONTINUIDAD_CORRECCION,
-                    }[decision]
-                else:
-                    solicitado = ReporteFalla.objects.filter(
-                        pk=item["reporte_falla_id"],
-                        sucursal=sucursal,
-                    ).first()
-                    if not solicitado or solicitado.estatus != ReporteFalla.ESTATUS_CERRADO:
-                        _error(
-                            "La falla seleccionada no corresponde a este punto o ya no admite continuidad.",
-                            item["clave"],
-                        )
-                    if not reporte_coincide_identidad(solicitado, identidad):
-                        _error(
-                            "La falla cerrada no corresponde a la identidad de este hallazgo.",
-                            item["clave"],
-                        )
-                    if not item["evidencia_disponible"]:
-                        _error(
-                            "Agrega una foto para registrar la reincidencia de la falla cerrada.",
-                            item["clave"],
-                        )
-                    crear_reporte_nuevo = True
-            elif decision == "AUTO":
-                if candidatos:
-                    raise FallaHigieneConflict(candidatos)
-                crear_reporte_nuevo = True
-            else:
-                crear_reporte_nuevo = True
-
+    for item, plan_falla in zip(normalizadas, planes_falla, strict=True):
         respuesta, _ = RespuestaHigiene.objects.update_or_create(
             registro=registro,
             punto_clave=item["clave"],
@@ -349,14 +371,14 @@ def guardar_registro_higiene(
         if item["archivo"]:
             respuesta.evidencia = item["archivo"]
             respuesta.save(update_fields=["evidencia"])
-        if reporte_planeado:
+        if plan_falla["reporte"]:
             registrar_constatacion(
                 respuesta=respuesta,
-                reporte=reporte_planeado,
-                decision=continuidad_planeada,
+                reporte=plan_falla["reporte"],
+                decision=plan_falla["continuidad"],
                 usuario=user,
             )
-        elif crear_reporte_nuevo:
+        elif plan_falla["crear_reporte"]:
             evidencia = respuesta.evidencia.name if respuesta.evidencia else None
             reporte = crear_reporte_falla(
                 sucursal=sucursal,
