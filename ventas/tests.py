@@ -615,6 +615,19 @@ class VentasPointIdentityTests(TestCase):
             point_product_ids=[self.bollo.id],
         )
 
+    def test_result_category_order_keeps_unknown_point_categories(self):
+        categories = [
+            {"categoria": "Cake Topper", "productos": []},
+            {"categoria": "Bollo", "productos": []},
+        ]
+
+        ordered = ventas_views._ordered_result_categories(categories)
+
+        self.assertEqual(
+            [row["categoria"] for row in ordered],
+            ["Bollo", "Cake Topper"],
+        )
+
 
 class VentasProjectionEngineTests(TestCase):
     def test_projection_uses_operational_daily_forecast_with_three_week_lookback(self):

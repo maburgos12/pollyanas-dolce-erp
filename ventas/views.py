@@ -454,6 +454,25 @@ def _product_day_value(product: dict, fecha_iso: str, escenario: str = "recomend
     return _int_from_json(day_data.get(escenario, 0))
 
 
+def _ordered_result_categories(categories: list[dict]) -> list[dict]:
+    preferred_index = {
+        _clean_category_label(category).casefold(): index
+        for index, category in enumerate(ORDEN_CATEGORIAS)
+    }
+
+    def sort_key(row: dict) -> tuple[int, int, str]:
+        label = _clean_category_label(row.get("categoria"))
+        index = preferred_index.get(label.casefold())
+        if index is not None:
+            return (0, index, label.casefold())
+        return (1, len(preferred_index), label.casefold())
+
+    return sorted(
+        categories,
+        key=sort_key,
+    )
+
+
 def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str], categorias: list[dict]):
     ws["A1"] = title
     ws["A1"].font = Font(color="7B1A48", bold=True, size=14)
@@ -472,11 +491,8 @@ def _write_pronostico_sheet(ws, *, title: str, subtitle: str, fechas: list[str],
     grand_total_pieces = 0
     grand_total_income = Decimal("0")
 
-    category_map = {category.get("categoria"): category for category in categorias}
-    for category_name in ORDEN_CATEGORIAS:
-        category = category_map.get(category_name)
-        if not category:
-            continue
+    for category in _ordered_result_categories(categorias):
+        category_name = category.get("categoria") or "Sin categoría"
 
         subtotal_by_day = {fecha: 0 for fecha in fechas}
         subtotal_pieces = 0
@@ -538,11 +554,8 @@ def _write_escenarios_sheet(ws, *, title: str, subtitle: str, categorias: list[d
     ws.freeze_panes = "A5"
 
     current_row = 5
-    category_map = {category.get("categoria"): category for category in categorias}
-    for category_name in ORDEN_CATEGORIAS:
-        category = category_map.get(category_name)
-        if not category:
-            continue
+    for category in _ordered_result_categories(categorias):
+        category_name = category.get("categoria") or "Sin categoría"
         for product in category.get("productos") or []:
             escenarios = product.get("escenarios") or {}
             price = _decimal_from_json(product.get("precio"))
