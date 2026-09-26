@@ -3,6 +3,8 @@
 
   const toast = document.querySelector(".higiene-toast");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const failureRequests = new WeakMap();
+  const failureTimers = new WeakMap();
   let toastTimer;
 
   function showToast(message, tone) {
@@ -36,6 +38,196 @@
     return selected ? selected.value : "";
   }
 
+  function isFailureFollowUp(point) {
+    return selectedValue(point, "[data-resolution]") === "SEGUIMIENTO";
+  }
+
+  function failureClassificationComplete(point) {
+    if (!isFailureFollowUp(point)) return false;
+    const target = point.querySelector("[data-target-type]").value;
+    const category = point.querySelector("[data-category]").value;
+    if (!target || !category) return false;
+    if (target === "EQUIPO") return Boolean(point.querySelector("[data-asset]").value);
+    return Boolean(point.querySelector("[data-area]").value.trim());
+  }
+
+  function currentFailureIdentity(point) {
+    const form = point.closest("form");
+    return {
+      tipo: form.querySelector("[name=tipo]").value,
+      punto_clave: point.dataset.key,
+      tipo_objetivo: point.querySelector("[data-target-type]").value,
+      categoria_id: point.querySelector("[data-category]").value,
+      activo_id: point.querySelector("[data-asset]").value,
+      area_instalacion: point.querySelector("[data-area]").value.trim()
+    };
+  }
+
+  function clearFailureChoices(point) {
+    const reports = point.querySelector("[data-match-reports]");
+    if (reports) reports.replaceChildren();
+    point.querySelectorAll("[data-failure-decision]").forEach(function (radio) {
+      radio.checked = false;
+    });
+  }
+
+  function setFailureMatchState(point, status, message) {
+    const panel = point.querySelector("[data-failure-match]");
+    if (!panel) return;
+    panel.hidden = !isFailureFollowUp(point);
+    panel.dataset.matchStatus = status;
+    const state = panel.querySelector("[data-match-state]");
+    const results = panel.querySelector("[data-match-results]");
+    if (state) state.textContent = message;
+    if (results) results.hidden = status !== "results";
+  }
+
+  function invalidateFailureMatches(point) {
+    const request = failureRequests.get(point);
+    if (request && request.controller) request.controller.abort();
+    failureRequests.set(point, {
+      requestId: request ? request.requestId + 1 : 1,
+      controller: null
+    });
+    const timer = failureTimers.get(point);
+    if (timer) clearTimeout(timer);
+    failureTimers.delete(point);
+    clearFailureChoices(point);
+    setFailureMatchState(
+      point,
+      "idle",
+      isFailureFollowUp(point)
+        ? "Completa la clasificación para buscar coincidencias."
+        : ""
+    );
+  }
+
+  function formatFailureDate(value) {
+    if (!value) return "Sin confirmaciones previas";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Fecha no disponible";
+    return new Intl.DateTimeFormat("es-MX", {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(date);
+  }
+
+  function renderFailureReports(point, reports) {
+    const container = point.querySelector("[data-match-reports]");
+    if (!container) return;
+    const identity = currentFailureIdentity(point);
+    const groupName = "failure_report_" + identity.tipo + "_" + point.dataset.key;
+    reports.forEach(function (report) {
+      const label = document.createElement("label");
+      label.className = "failure-report-option";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = groupName;
+      input.value = String(report.id);
+      input.dataset.failureReport = "";
+      const copy = document.createElement("span");
+      const title = document.createElement("b");
+      title.textContent = "Falla #" + report.id + " · " + report.titulo;
+      const detail = document.createElement("small");
+      detail.textContent = report.estatus + " · Última confirmación: " +
+        formatFailureDate(report.ultima_confirmacion || report.fecha_reporte);
+      copy.append(title, detail);
+      label.append(input, copy);
+      container.append(label);
+    });
+  }
+
+  async function loadFailureMatches(point) {
+    if (!failureClassificationComplete(point)) {
+      invalidateFailureMatches(point);
+      updateWorkflow(point.closest("form"));
+      return [];
+    }
+
+    const previous = failureRequests.get(point);
+    if (previous && previous.controller) previous.controller.abort();
+    const requestId = previous ? previous.requestId + 1 : 1;
+    const controller = new AbortController();
+    failureRequests.set(point, { requestId: requestId, controller: controller });
+    clearFailureChoices(point);
+    setFailureMatchState(point, "loading", "Buscando fallas activas relacionadas…");
+    updateWorkflow(point.closest("form"));
+
+    const form = point.closest("form");
+    const params = new URLSearchParams(currentFailureIdentity(point));
+    try {
+      const response = await fetch(form.dataset.failureMatchesUrl + "?" + params.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+        signal: controller.signal
+      });
+      const payload = await response.json();
+      const current = failureRequests.get(point);
+      if (!current || current.requestId !== requestId) return [];
+      if (!response.ok) {
+        const details = payload.fields ? Object.values(payload.fields).flat().join(" ") : "";
+        throw new Error(details || payload.error || "No fue posible buscar fallas relacionadas.");
+      }
+      const reports = Array.isArray(payload.reportes) ? payload.reportes : [];
+      if (!reports.length) {
+        setFailureMatchState(
+          point,
+          "empty",
+          "No hay una falla activa igual. Al guardar se abrirá un reporte nuevo."
+        );
+      } else {
+        renderFailureReports(point, reports);
+        setFailureMatchState(
+          point,
+          "results",
+          reports.length === 1
+            ? "Encontramos una falla activa. Elige qué ocurre hoy."
+            : "Encontramos " + reports.length + " fallas activas. Elige una y confirma qué ocurre hoy."
+        );
+      }
+      updateWorkflow(form);
+      return reports;
+    } catch (error) {
+      if (error.name === "AbortError") return [];
+      const current = failureRequests.get(point);
+      if (!current || current.requestId !== requestId) return [];
+      setFailureMatchState(
+        point,
+        "error",
+        "No pudimos buscar coincidencias. Revisa tu conexión o cambia la clasificación para reintentar."
+      );
+      updateWorkflow(form);
+      return [];
+    }
+  }
+
+  function scheduleFailureMatches(point) {
+    const timer = failureTimers.get(point);
+    if (timer) clearTimeout(timer);
+    failureTimers.set(point, setTimeout(function () {
+      failureTimers.delete(point);
+      loadFailureMatches(point);
+    }, 180));
+  }
+
+  function failureDecision(point) {
+    if (!isFailureFollowUp(point)) return null;
+    const panel = point.querySelector("[data-failure-match]");
+    const status = panel ? panel.dataset.matchStatus : "idle";
+    if (status === "empty") return { falla_decision: "AUTO", reporte_falla_id: "" };
+    if (status !== "results") return null;
+    return {
+      falla_decision: selectedValue(point, "[data-failure-decision]"),
+      reporte_falla_id: selectedValue(point, "[data-failure-report]")
+    };
+  }
+
+  function pointHasEvidence(point) {
+    const input = point.querySelector('input[type="file"]');
+    return Boolean(input && input.files && input.files.length);
+  }
+
   function pointIsComplete(point, includeFindingDetail) {
     if (point.dataset.kind === "NUMERICA") {
       return Boolean(point.querySelector("[data-numeric]").value);
@@ -49,11 +241,14 @@
     if (!observation || !resolution) return false;
     if (resolution !== "SEGUIMIENTO") return true;
 
-    const target = point.querySelector("[data-target-type]").value;
-    const category = point.querySelector("[data-category]").value;
-    if (!target || !category) return false;
-    if (target === "EQUIPO") return Boolean(point.querySelector("[data-asset]").value);
-    return Boolean(point.querySelector("[data-area]").value.trim());
+    if (!failureClassificationComplete(point)) return false;
+    const panel = point.querySelector("[data-failure-match]");
+    const matchStatus = panel ? panel.dataset.matchStatus : "idle";
+    if (matchStatus === "empty") return pointHasEvidence(point);
+    if (matchStatus !== "results") return false;
+    const decision = failureDecision(point);
+    if (!decision || !decision.falla_decision || !decision.reporte_falla_id) return false;
+    return decision.falla_decision === "MISMA" || pointHasEvidence(point);
   }
 
   function updatePointState(point) {
@@ -195,7 +390,27 @@
       const resolution = selectedValue(point, "[data-resolution]");
       if (!resolution) return "Indica si se corrigió o debe enviarse a Fallas.";
       if (resolution === "SEGUIMIENTO") {
-        return "Completa los datos necesarios para enviar el reporte a Fallas.";
+        if (!failureClassificationComplete(point)) {
+          return "Completa el tipo, la categoría y el equipo o área de la falla.";
+        }
+        const panel = point.querySelector("[data-failure-match]");
+        const matchStatus = panel ? panel.dataset.matchStatus : "idle";
+        if (matchStatus === "loading") return "Espera a que termine la búsqueda de fallas activas.";
+        if (matchStatus === "error") return "No se pudo buscar fallas activas. Cambia la clasificación para reintentar.";
+        if (matchStatus === "idle") return "Espera a que se busquen fallas activas relacionadas.";
+        if (matchStatus === "empty" && !pointHasEvidence(point)) {
+          return "Agrega una foto para abrir la nueva falla.";
+        }
+        const decision = failureDecision(point);
+        if (matchStatus === "results" && (!decision || !decision.reporte_falla_id)) {
+          return "Elige la falla activa que corresponde a este hallazgo.";
+        }
+        if (matchStatus === "results" && !decision.falla_decision) {
+          return "Elige qué ocurre hoy con la falla seleccionada.";
+        }
+        if (decision && decision.falla_decision !== "MISMA" && !pointHasEvidence(point)) {
+          return "Agrega una foto para documentar el cambio, el problema distinto o la corrección.";
+        }
       }
     }
     return "Completa este punto antes de continuar.";
@@ -296,6 +511,7 @@
         point.classList.toggle("has-finding", finding);
         const detail = point.querySelector("[data-finding-detail]");
         if (detail) detail.hidden = !finding;
+        if (!finding) invalidateFailureMatches(point);
         updateWorkflow(point.closest("form"));
       });
     });
@@ -304,6 +520,11 @@
       input.addEventListener("change", function () {
         const fields = point.querySelector("[data-failure-fields]");
         if (fields) fields.hidden = input.value !== "SEGUIMIENTO";
+        if (input.value === "SEGUIMIENTO") {
+          loadFailureMatches(point);
+        } else {
+          invalidateFailureMatches(point);
+        }
         updateWorkflow(point.closest("form"));
       });
     });
@@ -319,7 +540,20 @@
         category.querySelectorAll("[data-category-type]").forEach(function (option) {
           option.hidden = option.dataset.categoryType !== type;
         });
+        invalidateFailureMatches(point);
         updateWorkflow(point.closest("form"));
+      });
+    }
+
+    const category = point.querySelector("[data-category]");
+    const asset = point.querySelector("[data-asset]");
+    const area = point.querySelector("[data-area]");
+    if (category) category.addEventListener("change", function () { loadFailureMatches(point); });
+    if (asset) asset.addEventListener("change", function () { loadFailureMatches(point); });
+    if (area) {
+      area.addEventListener("input", function () {
+        invalidateFailureMatches(point);
+        scheduleFailureMatches(point);
       });
     }
 
@@ -343,6 +577,7 @@
         point.classList.remove("has-finding");
         const detail = point.querySelector("[data-finding-detail]");
         if (detail) detail.hidden = true;
+        invalidateFailureMatches(point);
       });
       updateWorkflow(fieldset.closest("form"));
       showToast("Área marcada como cumple.", "success");
@@ -368,6 +603,13 @@
             answer.activo_id = point.querySelector("[data-asset]").value;
             answer.categoria_id = point.querySelector("[data-category]").value;
             answer.prioridad = point.querySelector("[data-priority]").value;
+            const decision = failureDecision(point);
+            if (decision) {
+              answer.falla_decision = decision.falla_decision;
+              if (decision.reporte_falla_id) {
+                answer.reporte_falla_id = decision.reporte_falla_id;
+              }
+            }
           }
         }
       }
@@ -379,6 +621,7 @@
   document.querySelectorAll("form[data-higiene-form]").forEach(function (form) {
     form.addEventListener("submit", async function (event) {
       event.preventDefault();
+      if (form.dataset.submitting === "true" || form.dataset.saved === "true") return;
       if (!form.reportValidity()) return;
       const points = Array.from(form.querySelectorAll("[data-review-point]"));
       const incomplete = points.find(function (point) {
@@ -402,6 +645,7 @@
           form.querySelector("[data-bathroom]").value + "-" + form.querySelector("[data-round]").value;
       }
       form.querySelector("[name=respuestas]").value = JSON.stringify(buildAnswers(form));
+      form.dataset.submitting = "true";
       button.disabled = true;
       button.textContent = "Guardando…";
 
@@ -413,11 +657,34 @@
           credentials: "same-origin"
         });
         const payload = await response.json();
+        if (response.status === 409) {
+          const followUpPoints = points.filter(isFailureFollowUp);
+          await Promise.all(followUpPoints.map(loadFailureMatches));
+          const conflicted = followUpPoints.find(function (point) {
+            const panel = point.querySelector("[data-failure-match]");
+            return panel && panel.dataset.matchStatus === "results";
+          }) || followUpPoints[0];
+          if (conflicted) {
+            const section = conflicted.closest("[data-review-section]");
+            showSection(form, Number(section.dataset.sectionIndex), true);
+            conflicted.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
+            const usefulControl = conflicted.querySelector("[data-failure-report]") ||
+              conflicted.querySelector("[data-failure-decision]") ||
+              conflicted.querySelector("[data-category]");
+            if (usefulControl) usefulControl.focus({ preventScroll: true });
+          }
+          showToast(
+            payload.error || "La falla cambió mientras guardabas. Revisa la coincidencia y vuelve a guardar.",
+            "warning"
+          );
+          return;
+        }
         if (!response.ok) {
           const details = payload.fields ? Object.values(payload.fields).flat().join(" ") : "";
           throw new Error(details || payload.error || "No fue posible guardar.");
         }
         const failures = payload.reporte_falla_ids || [];
+        form.dataset.saved = "true";
         showToast(
           payload.mensaje +
             (failures.length ? " Falla #" + failures.join(", #") + " enviada a Mantenimiento." : ""),
@@ -428,6 +695,8 @@
         }, 900);
       } catch (error) {
         showToast(error.message, "error");
+      } finally {
+        form.dataset.submitting = "false";
         button.disabled = false;
         button.innerHTML = original;
       }

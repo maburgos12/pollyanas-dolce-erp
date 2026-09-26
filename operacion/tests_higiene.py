@@ -9,6 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.staticfiles import finders
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections, connections, transaction
 from django.test import Client, TestCase, TransactionTestCase, override_settings
@@ -843,6 +844,165 @@ class HigieneDiariaTests(TestCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(self.client.get(reverse(name)).status_code, 403)
+
+    def test_fallas_coincidentes_solo_devuelve_reportes_de_la_sucursal_operativa(self):
+        self.client.force_login(self.operadora)
+        propia = self._crear_falla_higiene_abierta()
+        registro_ajeno = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_BANOS,
+            sucursal=self.leyva,
+            fecha=date(2026, 9, 25),
+            clave_instancia="clientes-ajena",
+            plantilla_version="2026.1",
+            creado_por=self.otra_operadora,
+        )
+        ajena = ReporteFalla.objects.create(
+            sucursal=self.leyva,
+            categoria=self.categoria_instalacion,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Sanitario de otra sucursal",
+            descripcion="No descarga agua.",
+            justificacion_sin_foto="Prueba automatizada.",
+            reportado_por=self.otra_operadora,
+        )
+        RespuestaHigiene.objects.create(
+            registro=registro_ajeno,
+            punto_clave="bano_sanitario",
+            seccion="Limpieza de baños",
+            punto_revision="Sanitario limpio y funcional",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            requiere_seguimiento=True,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            reporte_falla=ajena,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
+        )
+
+        response = self.client.get(
+            reverse("operacion:higiene_fallas_coincidentes"),
+            {
+                "tipo": "BANOS",
+                "punto_clave": "bano_sanitario",
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": self.categoria_instalacion.pk,
+                "area_instalacion": "Baños",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([item["id"] for item in response.json()["reportes"]], [propia.pk])
+        self.assertNotContains(response, "Sanitario de otra sucursal")
+
+    def test_fallas_coincidentes_serializa_estado_y_fechas_iso(self):
+        self.client.force_login(self.operadora)
+        reporte = self._crear_falla_higiene_abierta()
+
+        response = self.client.get(
+            reverse("operacion:higiene_fallas_coincidentes"),
+            {
+                "tipo_checklist": "BANOS",
+                "punto_clave": "bano_sanitario",
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": self.categoria_instalacion.pk,
+                "area_instalacion": "Baños",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["reportes"]), 1)
+        item = response.json()["reportes"][0]
+        self.assertEqual(
+            set(item),
+            {"id", "titulo", "estatus", "fecha_reporte", "ultima_confirmacion"},
+        )
+        self.assertEqual(item["id"], reporte.pk)
+        self.assertEqual(item["estatus"], reporte.get_estatus_display())
+        self.assertEqual(item["fecha_reporte"], reporte.fecha_reporte.isoformat())
+        self.assertEqual(
+            item["ultima_confirmacion"],
+            reporte.constataciones_higiene.get().registro.creado_en.isoformat(),
+        )
+
+    def test_fallas_coincidentes_rechaza_usuario_sin_sucursal_operativa(self):
+        self.client.force_login(self.supervisora)
+
+        response = self.client.get(
+            reverse("operacion:higiene_fallas_coincidentes"),
+            {
+                "tipo": "BANOS",
+                "punto_clave": "bano_sanitario",
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": self.categoria_instalacion.pk,
+                "area_instalacion": "Baños",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_fallas_coincidentes_rechaza_parametros_invalidos(self):
+        self.client.force_login(self.operadora)
+
+        response = self.client.get(
+            reverse("operacion:higiene_fallas_coincidentes"),
+            {
+                "tipo": "BANOS",
+                "punto_clave": "punto-inexistente",
+                "tipo_objetivo": "INSTALACION",
+                "categoria_id": self.categoria_instalacion.pk,
+                "area_instalacion": "Baños",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())
+
+    def test_fallas_coincidentes_requiere_autenticacion_y_solo_admite_get(self):
+        url = reverse("operacion:higiene_fallas_coincidentes")
+        self.assertEqual(self.client.get(url).status_code, 302)
+
+        self.client.force_login(self.operadora)
+        self.assertEqual(self.client.post(url).status_code, 405)
+
+    def test_captura_incluye_decision_asistida_y_nombres_aislados_por_bitacora(self):
+        self.client.force_login(self.operadora)
+
+        captura = self.client.get(reverse("operacion:higiene_home"))
+
+        self.assertContains(captura, 'data-failure-match')
+        self.assertContains(captura, 'aria-live="polite"')
+        self.assertContains(captura, "¿Qué ocurre hoy?")
+        self.assertContains(captura, 'value="MISMA"')
+        self.assertContains(captura, 'value="CAMBIO"')
+        self.assertContains(captura, 'value="DISTINTA"')
+        self.assertContains(captura, 'value="CORRECCION_PENDIENTE"')
+        self.assertContains(captura, 'name="failure_decision_BANOS_bano_sanitario"')
+
+    def test_estaticos_higiene_conservan_contrato_de_decision_y_conflicto(self):
+        js_path = finders.find("operacion/higiene.js")
+        self.assertIsNotNone(js_path)
+        script = Path(js_path).read_text(encoding="utf-8")
+
+        self.assertIn("function loadFailureMatches(point)", script)
+        self.assertIn("function failureDecision(point)", script)
+        self.assertIn("answer.falla_decision", script)
+        self.assertIn("answer.reporte_falla_id", script)
+        self.assertIn("response.status === 409", script)
+        self.assertIn("loadFailureMatches", script[script.index("response.status === 409") :])
+        self.assertNotIn("form.reset()", script)
+
+    def test_higiene_actualiza_cache_y_versiones_de_assets(self):
+        self.client.force_login(self.operadora)
+        captura = self.client.get(reverse("operacion:higiene_home"))
+        sw_path = finders.find("operacion/sw.js")
+        self.assertIsNotNone(sw_path)
+        sw_source = Path(sw_path).read_text(encoding="utf-8")
+
+        self.assertContains(captura, "20260926-higiene-continuidad-v1", count=2)
+        self.assertIn(
+            'const CACHE_NAME = "pollyanas-app-operativa-pwa-v46-higiene-falla-continuidad";',
+            sw_source,
+        )
 
 
 @override_settings(SECURE_SSL_REDIRECT=False)

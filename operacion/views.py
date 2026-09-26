@@ -14,6 +14,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.contrib.staticfiles import finders
 from django.core.paginator import Paginator
 from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db.models import Max
 from django.db.models.functions import Trim, Upper
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
@@ -68,7 +69,11 @@ from .services_higiene import (
     require_higiene_access,
     sucursal_higiene_usuario,
 )
-from .services_higiene_fallas import FallaHigieneConflict
+from .services_higiene_fallas import (
+    FallaHigieneConflict,
+    fallas_coincidentes,
+    identidad_desde_consulta,
+)
 from .services_bitacoras_inventory import (
     registrar_apertura_inicial,
     cerrar_hornos,
@@ -538,6 +543,50 @@ def higiene_home(request):
             ),
             "registros_recientes": _filtrar_historial_higiene(request)[:5],
         },
+    )
+
+
+@login_required
+@require_GET
+def higiene_fallas_coincidentes(request):
+    sucursal = sucursal_higiene_usuario(request.user)
+    if not sucursal:
+        return JsonResponse(
+            {"error": "Tu sesión no tiene una sucursal operativa asignada."},
+            status=403,
+        )
+    try:
+        identidad = identidad_desde_consulta(sucursal=sucursal, params=request.GET)
+    except ValidationError as exc:
+        fields = getattr(exc, "message_dict", None)
+        return JsonResponse(
+            {
+                "error": "Completa una clasificación válida para buscar fallas activas.",
+                "fields": fields or {"consulta": exc.messages},
+            },
+            status=400,
+        )
+
+    reportes = fallas_coincidentes(identidad).annotate(
+        ultima_confirmacion=Max("constataciones_higiene__registro__creado_en")
+    )
+    return JsonResponse(
+        {
+            "reportes": [
+                {
+                    "id": reporte.pk,
+                    "titulo": reporte.titulo,
+                    "estatus": reporte.get_estatus_display(),
+                    "fecha_reporte": reporte.fecha_reporte.isoformat(),
+                    "ultima_confirmacion": (
+                        reporte.ultima_confirmacion.isoformat()
+                        if reporte.ultima_confirmacion
+                        else None
+                    ),
+                }
+                for reporte in reportes
+            ]
+        }
     )
 
 
