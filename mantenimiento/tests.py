@@ -1351,9 +1351,9 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
         # La versión del shell global cambia con cada entrega y debe coincidir
         # entre la URL de registro y el nombre de caché servido.
-        self.assertIn("20260923-jornadas-semanales-v4", base)
+        self.assertIn("20260926-seguimiento-panel-tipos-v5", base)
         self.assertIn(
-            'const CACHE_NAME = "pollyanas-erp-shell-20260923-jornadas-semanales-v4";',
+            'const CACHE_NAME = "pollyanas-erp-shell-20260926-seguimiento-panel-tipos-v5";',
             service_worker,
         )
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
