@@ -106,8 +106,10 @@ class SalesPublicationGuardTests(SimpleTestCase):
     class _ChainStub:
         def __init__(self, value):
             self.value = value
+            self.filter_calls = []
 
-        def filter(self, **_kwargs):
+        def filter(self, **kwargs):
+            self.filter_calls.append(kwargs)
             return self
 
         def order_by(self, *_args):
@@ -174,6 +176,7 @@ class SalesPublicationGuardTests(SimpleTestCase):
         build_yoy_mock,
     ):
         cutoff = date(2026, 9, 25)
+        reference = date(2026, 9, 26)
         point_daily_sale_mock.objects = self._ChainStub(cutoff)
         fact_venta_diaria_mock.objects = self._ChainStub(cutoff)
         visible_cut_mock.return_value = cutoff
@@ -185,12 +188,14 @@ class SalesPublicationGuardTests(SimpleTestCase):
             "hero_row": {"amount": None},
             "coverage_note": "Faltan datos de Sucursal Leyva (2026-09-24).",
         }
-        result = scan_sales_publication_gap(reference_date=cutoff)
+        result = scan_sales_publication_gap(reference_date=reference)
 
         self.assertTrue(result.has_gap)
         self.assertFalse(result.comparison_ready)
         self.assertIn("Leyva", result.comparison_coverage_note)
         self.assertIn("comparativo mensual", result.reason)
+        self.assertIn({"sale_date__lt": reference}, point_daily_sale_mock.objects.filter_calls)
+        self.assertIn({"fecha__lt": reference}, fact_venta_diaria_mock.objects.filter_calls)
 
 
 class QualityFindingLoopTests(TestCase):
