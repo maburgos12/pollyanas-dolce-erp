@@ -200,6 +200,12 @@ PANEL_ESTADOS = {
     "completados": "Completados",
 }
 
+PANEL_TIPOS = {
+    SeguimientoItem.TIPO_MINUTA: "Minutas",
+    SeguimientoItem.TIPO_COMPROMISO: "Compromisos",
+    SeguimientoItem.TIPO_PROYECTO: "Proyectos",
+}
+
 
 def _item_en_estado_panel(item: SeguimientoItem, estado: str) -> bool:
     if estado == "vencidos":
@@ -1121,7 +1127,14 @@ def panel_dg(request):
     now = timezone.now()
 
     # Filtros desde GET
-    filtro_tipo = (request.GET.get("tipo") or "").strip().upper()
+    active_tab = (
+        request.GET.get("tab")
+        or request.GET.get("tipo")
+        or SeguimientoItem.TIPO_MINUTA
+    ).strip().upper()
+    if active_tab not in PANEL_TIPOS:
+        active_tab = SeguimientoItem.TIPO_MINUTA
+    filtro_tipo = active_tab
     filtro_estatus = (request.GET.get("estatus") or "").strip().upper()
     filtro_colaborador = (request.GET.get("colaborador") or "").strip()
     filtro_vencidos = request.GET.get("vencidos") == "1"
@@ -1135,8 +1148,6 @@ def panel_dg(request):
         .order_by("estatus", "fecha_limite", "-updated_at")
     )
 
-    if filtro_tipo and filtro_tipo in dict(SeguimientoItem.TIPO_CHOICES):
-        qs = qs.filter(tipo=filtro_tipo)
     if filtro_estatus and filtro_estatus in dict(SeguimientoItem.ESTATUS_CHOICES):
         qs = qs.filter(estatus=filtro_estatus)
     if filtro_colaborador:
@@ -1172,13 +1183,6 @@ def panel_dg(request):
 
     vista = request.GET.get("vista", "tabla")
 
-    bucket_counts = {bucket: sum(1 for i in items_base if i.visual_bucket == bucket) for bucket in PANEL_BUCKETS}
-    bucket_nav = [
-        {"key": bucket, "label": label, "count": bucket_counts[bucket]}
-        for bucket, label in PANEL_BUCKETS.items()
-    ]
-    items_scope = [i for i in items_base if i.visual_bucket == active_bucket] if active_bucket else list(items_base)
-
     active_estado = (request.GET.get("estado") or "").strip().lower()
     if active_estado not in PANEL_ESTADOS:
         active_estado = {
@@ -1187,6 +1191,38 @@ def panel_dg(request):
             "revision": "revision",
             "desfases": "activos",
         }.get(active_bucket, "vencidos")
+
+    type_counts = {
+        tipo: sum(1 for item in items_base if item.tipo == tipo)
+        for tipo in PANEL_TIPOS
+    }
+    type_nav = []
+    for tipo, label in PANEL_TIPOS.items():
+        params = request.GET.copy()
+        params.pop("tipo", None)
+        params["tab"] = tipo
+        params["estado"] = active_estado
+        type_nav.append({
+            "key": tipo,
+            "label": label,
+            "count": type_counts[tipo],
+            "url": f"?{params.urlencode()}",
+        })
+
+    items_tipo = [item for item in items_base if item.tipo == active_tab]
+    bucket_counts = {
+        bucket: sum(1 for item in items_tipo if item.visual_bucket == bucket)
+        for bucket in PANEL_BUCKETS
+    }
+    bucket_nav = [
+        {"key": bucket, "label": label, "count": bucket_counts[bucket]}
+        for bucket, label in PANEL_BUCKETS.items()
+    ]
+    items_scope = (
+        [item for item in items_tipo if item.visual_bucket == active_bucket]
+        if active_bucket
+        else items_tipo
+    )
 
     dashboard_counts = {
         estado: sum(1 for item in items_scope if _item_en_estado_panel(item, estado))
@@ -1197,6 +1233,8 @@ def panel_dg(request):
         params = request.GET.copy()
         params.pop("bucket", None)
         params.pop("vencidos", None)
+        params.pop("tipo", None)
+        params["tab"] = active_tab
         params["estado"] = estado
         state_nav.append({
             "key": estado,
@@ -1207,17 +1245,10 @@ def panel_dg(request):
 
     items = [i for i in items_scope if _item_en_estado_panel(i, active_estado)]
 
-    active_tab = (request.GET.get("tab") or "").strip().upper()
-    items_for_type_counts = list(items)
-    if active_tab and active_tab in dict(SeguimientoItem.TIPO_CHOICES):
-        items = [i for i in items if i.tipo == active_tab]
-    else:
-        active_tab = ""
-
-    count_compromisos = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_COMPROMISO)
-    count_minutas = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_MINUTA)
-    count_proyectos = sum(1 for i in items_for_type_counts if i.tipo == SeguimientoItem.TIPO_PROYECTO)
-    count_todos_tipo = len(items_for_type_counts)
+    count_compromisos = type_counts[SeguimientoItem.TIPO_COMPROMISO]
+    count_minutas = type_counts[SeguimientoItem.TIPO_MINUTA]
+    count_proyectos = type_counts[SeguimientoItem.TIPO_PROYECTO]
+    count_todos_tipo = sum(type_counts.values())
 
     total = len(items)
     abiertos = sum(1 for i in items if not i.esta_cerrado)
@@ -1279,6 +1310,11 @@ def panel_dg(request):
         "colaboradores_estado": colaboradores_resumen,
         "active_estado": active_estado,
         "active_estado_label": PANEL_ESTADOS[active_estado],
+        "active_type_label": PANEL_TIPOS[active_tab],
+        "active_type_singular": dict(SeguimientoItem.TIPO_CHOICES)[active_tab],
+        "active_type_count": type_counts[active_tab],
+        "type_nav": type_nav,
+        "type_counts": type_counts,
         "state_nav": state_nav,
         "dashboard_counts": dashboard_counts,
         "pendientes_accion": pendientes_accion,

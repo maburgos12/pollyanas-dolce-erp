@@ -524,7 +524,9 @@ class SeguimientoColaboradorTests(TestCase):
         dg_user.groups.add(dg_group)
         self.client.force_login(dg_user)
 
-        response = self.client.get("/seguimiento/panel/?estado=activos")
+        response = self.client.get(
+            f"/seguimiento/panel/?tab={self.item.tipo}&estado=activos"
+        )
 
         self.assertContains(response, 'class="bi-pill pill-listo_cerrar">Listo para entregar</span>')
 
@@ -578,7 +580,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertContains(response, "Desfase app")
         self.assertNotContains(response, ">10%</span>")
 
-    def test_panel_dg_renderiza_resumen_compacto_y_estados_ejecutivos(self):
+    def test_panel_dg_renderiza_tipos_antes_de_estados(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
         dg_user = get_user_model().objects.create_user(username="mauricio.resumen", password="test12345")
         dg_user.groups.add(dg_group)
@@ -587,18 +589,69 @@ class SeguimientoColaboradorTests(TestCase):
         response = self.client.get("/seguimiento/panel/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'class="panel-dg-mini-dashboard"')
-        self.assertContains(response, "Nuevo acuerdo")
-        self.assertContains(response, 'data-panel-state="vencidos"')
-        self.assertContains(response, 'data-panel-state="activos"')
-        self.assertContains(response, 'data-panel-state="revision"')
-        self.assertContains(response, 'data-panel-state="prorrogas"')
-        self.assertContains(response, 'data-panel-state="completados"')
-        self.assertContains(response, 'ti-progress-check')
-        self.assertContains(response, 'ti-user-check')
-        self.assertContains(response, 'ti-calendar-time')
-        self.assertContains(response, 'ti-circle-check')
-        self.assertNotContains(response, 'class="bi-hero-status-grid"')
+        self.assertEqual(response.context["active_tab"], SeguimientoItem.TIPO_MINUTA)
+        self.assertContains(response, 'class="panel-dg-type-nav"')
+        self.assertContains(response, 'data-panel-type="MINUTA"')
+        self.assertContains(response, 'data-panel-type="COMPROMISO"')
+        self.assertContains(response, 'data-panel-type="PROYECTO"')
+        self.assertContains(response, 'aria-label="Estados de Minutas"')
+        self.assertNotContains(response, 'class="panel-dg-mini-dashboard"')
+        self.assertNotContains(response, "¿Qué quieres revisar?")
+
+    def test_panel_dg_calcula_estados_solo_para_el_tipo_activo(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.tipos", password="test12345")
+        dg_user.groups.add(dg_group)
+        now = timezone.now()
+        minuta_vencida = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_MINUTA,
+            titulo="Minuta vencida separada",
+            fecha_limite=now - timedelta(days=2),
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+        )
+        compromiso_vencido = SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_COMPROMISO,
+            titulo="Compromiso vencido separado",
+            fecha_limite=now - timedelta(days=3),
+            estatus=SeguimientoItem.ESTATUS_PENDIENTE,
+        )
+        SeguimientoItem.objects.create(
+            tipo=SeguimientoItem.TIPO_PROYECTO,
+            titulo="Proyecto activo separado",
+            fecha_limite=now + timedelta(days=5),
+            estatus=SeguimientoItem.ESTATUS_EN_PROCESO,
+        )
+        self.client.force_login(dg_user)
+
+        minutas = self.client.get("/seguimiento/panel/?tab=MINUTA&estado=vencidos")
+        compromisos = self.client.get("/seguimiento/panel/?tab=COMPROMISO&estado=vencidos")
+
+        self.assertEqual(minutas.context["dashboard_counts"]["vencidos"], 1)
+        self.assertEqual([item.pk for item in minutas.context["items_estado"]], [minuta_vencida.pk])
+        self.assertContains(minutas, "Minuta vencida separada")
+        self.assertNotContains(minutas, "Compromiso vencido separado")
+        self.assertEqual(compromisos.context["dashboard_counts"]["vencidos"], 1)
+        self.assertEqual(
+            [item.pk for item in compromisos.context["items_estado"]],
+            [compromiso_vencido.pk],
+        )
+
+    def test_panel_dg_navegacion_tipo_y_estado_conserva_contexto(self):
+        dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
+        dg_user = get_user_model().objects.create_user(username="mauricio.urls.tipos", password="test12345")
+        dg_user.groups.add(dg_group)
+        self.client.force_login(dg_user)
+
+        response = self.client.get("/seguimiento/panel/?tab=PROYECTO&estado=activos")
+
+        self.assertEqual(response.context["active_tab"], SeguimientoItem.TIPO_PROYECTO)
+        self.assertEqual(response.context["active_estado"], "activos")
+        state_urls = {item["key"]: item["url"] for item in response.context["state_nav"]}
+        type_urls = {item["key"]: item["url"] for item in response.context["type_nav"]}
+        self.assertIn("tab=PROYECTO", state_urls["vencidos"])
+        self.assertIn("estado=vencidos", state_urls["vencidos"])
+        self.assertIn("tab=COMPROMISO", type_urls[SeguimientoItem.TIPO_COMPROMISO])
+        self.assertIn("estado=activos", type_urls[SeguimientoItem.TIPO_COMPROMISO])
 
     def test_panel_dg_filtra_cada_estado_y_lo_desglosa_por_persona(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
