@@ -47,6 +47,12 @@ def run_quality_guards(
     )
 
 
+def run_sales_publication_quality_loop(*, reference_date: date | None = None) -> dict[str, object]:
+    """Run the lightweight runtime guard used after each sales publication."""
+    gap_result = scan_sales_publication_gap(reference_date=reference_date)
+    return sync_sales_publication_gap_finding(gap_result=gap_result)
+
+
 def sync_quality_guards(run_result: QualityGuardRunResult) -> dict[str, object]:
     point_summary = sync_pointdailysale_guard_findings(scan_result=run_result.point_scan)
     protected_summary = sync_protected_sales_reader_findings(scan_result=run_result.protected_scan)

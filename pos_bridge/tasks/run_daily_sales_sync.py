@@ -5,6 +5,7 @@ from datetime import date
 import logging
 
 from core.audit import log_event
+from orquestacion.services.quality_guard_runner import run_sales_publication_quality_loop
 from pos_bridge.management.commands.sync_product_facts_from_daily_sales import sync_product_facts_for_range
 from pos_bridge.models import PointSyncJob
 from reportes.analytics_service import refresh_incremental
@@ -108,6 +109,12 @@ def run_daily_sales_sync(
             "lag_days_before": int(freshness.lag_days_before or 0),
             "lag_days_after": int(freshness.lag_days_after or 0),
         }
+        try:
+            quality_summary = run_sales_publication_quality_loop(reference_date=end_date)
+        except Exception as exc:
+            logger.warning("sales publication quality loop falló (no crítico): %s", exc)
+            quality_summary = {"error": str(exc)}
+        result_summary["sales_publication_quality_loop"] = quality_summary
         sync_job.result_summary = result_summary
         sync_job.save(update_fields=["result_summary", "updated_at"])
         log_event(

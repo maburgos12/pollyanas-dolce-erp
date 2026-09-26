@@ -331,6 +331,7 @@ def sync_sales_publication_gap_finding(*, gap_result: SalesPublicationGapScanRes
                 "reportes/sales_dashboard_freshness.py",
                 "reportes/analytics_service.py",
                 "reportes/dashboard_sales_dataset.py",
+                "reportes/closed_sales.py",
             ],
             details={
                 "reference_date": gap_result.reference_date.isoformat(),
@@ -340,6 +341,8 @@ def sync_sales_publication_gap_finding(*, gap_result: SalesPublicationGapScanRes
                 "visible_cut_date": gap_result.visible_cut_date.isoformat() if gap_result.visible_cut_date else "",
                 "fact_lag_days": gap_result.fact_lag_days,
                 "visible_lag_days": gap_result.visible_lag_days,
+                "comparison_ready": gap_result.comparison_ready,
+                "comparison_coverage_note": gap_result.comparison_coverage_note,
                 "suggestion": gap_result.suggestion,
             },
             is_blocking=gap_result.is_blocking,
@@ -354,9 +357,11 @@ def sync_sales_publication_gap_finding(*, gap_result: SalesPublicationGapScanRes
                 "reportes/analytics_service.py",
                 "reportes/sales_dashboard_freshness.py",
                 "reportes/dashboard_sales_dataset.py",
+                "reportes/closed_sales.py",
             ],
             suggested_tests=[
                 f"./.venv/bin/python manage.py refresh_analytics_layer --date {gap_result.target_date.isoformat()} --lookback-days {max(gap_result.fact_lag_days, gap_result.visible_lag_days, 2) + 1}",
+                "./.venv/bin/python manage.py test reportes.tests_closed_sales orquestacion.tests_quality_loop",
                 "./.venv/bin/python manage.py run_quality_guards",
             ],
             suggested_fix=gap_result.suggestion,
