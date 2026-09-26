@@ -164,6 +164,28 @@ El contrato compartido que cambia es la selección interna de SKU a ID de produc
 Point. No se modifica una API pública. No se requieren migraciones de base de
 datos para el diseño principal.
 
+## Reutilización confirmada en el ERP
+
+- `PointProduct.id` ya es la identidad interna inequívoca; `external_id` conserva
+  la identidad externa única de Point. No se creará otro identificador.
+- `PointProduct.name` y `PointProduct.category` ya contienen el nombre y la
+  categoría replicados desde Point. No se agregarán campos equivalentes.
+- `PointSalesDailyProductFact.point_product` y
+  `PointSalesDailyProductFact.receta` ya expresan la relación entre producto y
+  receta. Proyecciones reutilizará esa relación en vez de crear un mapeo nuevo.
+- `_category_for_catalog_product` ya contiene la agrupación auxiliar usada por
+  el selector. Se conservará como cálculo de presentación con un nombre
+  semántico claro; no se persistirá otro catálogo de grupos.
+- `_forecastable_queryset` ya centraliza qué ventas puede consumir el motor. Se
+  expondrá una consulta reutilizable para construir el selector, evitando
+  duplicar sus reglas en la vista.
+- `ORDEN_CATEGORIAS` seguirá siendo el orden preferido. La exportación agregará
+  categorías desconocidas del resultado sin crear una segunda lista maestra.
+
+La implementación no incluye modelos, tablas, migraciones ni catálogos maestros
+nuevos. El cambio reduce duplicación al apoyar identidad, categoría,
+pronosticabilidad y relación con receta en las fuentes que ya existen.
+
 ## Límites de entrega
 
 La fase local termina con una demostración verificable, diff revisado y pruebas.
