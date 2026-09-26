@@ -65,7 +65,7 @@
         <summary>
           <span class="panel-dg-alert-icon" aria-hidden="true"><i class="ti ti-alert-triangle"></i></span>
           <span class="panel-dg-row-copy">
-            <strong>{{ items_estado|length }} {{ active_type_label|lower }} en {{ active_estado_label|lower }}</strong>
+            <strong>{{ items_estado|length }} {{ active_type_singular|lower }}{{ items_estado|length|pluralize:"s" }} · {{ active_estado_label }}</strong>
             <small>Abre la lista completa o selecciona una persona.</small>
           </span>
           <span class="btn btn-secondary btn-sm panel-dg-open-label">Abrir lista</span>
@@ -86,7 +86,7 @@
         <summary>
           <span class="panel-dg-avatar" aria-hidden="true">{{ colab.iniciales }}</span>
           <span class="panel-dg-row-copy">
-            <strong>{{ colab.nombre }} · <em>{{ colab.count }} {{ active_type_label|lower }}</em></strong>
+            <strong>{{ colab.nombre }} · <em>{{ colab.count }} {{ active_type_singular|lower }}{{ colab.count|pluralize:"s" }}</em></strong>
             <small>{% with first=colab.items.0 %}{% if first.fecha_limite %}Fecha más próxima: {{ first.fecha_limite|date:"d/m/Y" }}{% else %}Sin fecha límite registrada{% endif %}{% endwith %}</small>
           </span>
           <i class="ti ti-chevron-down panel-dg-chevron" aria-hidden="true"></i>

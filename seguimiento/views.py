@@ -1311,6 +1311,7 @@ def panel_dg(request):
         "active_estado": active_estado,
         "active_estado_label": PANEL_ESTADOS[active_estado],
         "active_type_label": PANEL_TIPOS[active_tab],
+        "active_type_singular": dict(SeguimientoItem.TIPO_CHOICES)[active_tab],
         "active_type_count": type_counts[active_tab],
         "type_nav": type_nav,
         "type_counts": type_counts,
