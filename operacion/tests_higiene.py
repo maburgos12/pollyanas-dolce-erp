@@ -1,16 +1,16 @@
 import base64
 import json
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
-from threading import Barrier
+from threading import Barrier, Event
 from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connections
+from django.db import close_old_connections, connections, transaction
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -726,6 +726,77 @@ class HigieneDiariaTests(TestCase):
         self.assertFalse(RegistroHigiene.objects.exists())
         self.assertFalse(ReporteFalla.objects.exists())
 
+    def test_ids_externos_de_categoria_y_activo_rechazan_tipos_no_enteros(self):
+        self.client.force_login(self.operadora)
+        hallazgo_equipo = {
+            "key": "produccion_equipos_limpios",
+            "respuesta": "NO_CUMPLE",
+            "observacion": "No enfría",
+            "corregido": False,
+            "requiere_seguimiento": True,
+            "tipo_objetivo": "EQUIPO",
+            "categoria_id": self.categoria_equipo.pk,
+            "prioridad": "alta",
+            "falla_decision": "AUTO",
+        }
+        casos = (
+            (
+                "categoria-bool",
+                {
+                    **self._hallazgo_banos(),
+                    "categoria_id": True,
+                },
+            ),
+            (
+                "categoria-float",
+                {
+                    **self._hallazgo_banos(),
+                    "categoria_id": float(self.categoria_instalacion.pk) + 0.9,
+                },
+            ),
+            (
+                "categoria-decimal",
+                {
+                    **self._hallazgo_banos(),
+                    "categoria_id": "1.9",
+                },
+            ),
+            (
+                "categoria-exponente",
+                {
+                    **self._hallazgo_banos(),
+                    "categoria_id": "1e2",
+                },
+            ),
+            (
+                "activo-bool",
+                {**hallazgo_equipo, "activo_id": True},
+            ),
+            (
+                "activo-float",
+                {**hallazgo_equipo, "activo_id": float(self.refrigerador.pk) + 0.9},
+            ),
+            (
+                "activo-decimal",
+                {**hallazgo_equipo, "activo_id": "1.9"},
+            ),
+            (
+                "activo-exponente",
+                {**hallazgo_equipo, "activo_id": "1e2"},
+            ),
+        )
+        for nombre, hallazgo in casos:
+            with self.subTest(nombre=nombre):
+                response = self._guardar(
+                    tipo="LIMPIEZA",
+                    clave_instancia=nombre,
+                    respuestas=[hallazgo],
+                    archivos={f"evidencia_{hallazgo['key']}": self._foto(f"{nombre}.png")},
+                )
+                self.assertEqual(response.status_code, 400)
+        self.assertFalse(RegistroHigiene.objects.exists())
+        self.assertFalse(ReporteFalla.objects.exists())
+
     def test_sucursal_solo_ve_su_historial_y_supervision_puede_filtrar_e_imprimir(self):
         RegistroHigiene.objects.create(
             tipo="BANOS", sucursal=self.payan, fecha="2026-07-30", clave_instancia="clientes-ronda-1",
@@ -800,6 +871,15 @@ class HigieneConcurrenciaTests(TransactionTestCase):
                 access=ACCESS_MANAGE,
             )
             self.usuarios.append(usuario)
+        self.usuario_mantenimiento = User.objects.create_user(
+            username="mantenimiento.concurrente",
+            password="test12345",
+        )
+        UserModuleAccess.objects.create(
+            user=self.usuario_mantenimiento,
+            module="mantenimiento",
+            access=ACCESS_MANAGE,
+        )
 
     def _hallazgo(self, *, decision="AUTO", reporte_id=None):
         hallazgo = {
@@ -835,7 +915,7 @@ class HigieneConcurrenciaTests(TransactionTestCase):
                     PNG_1PX,
                     content_type="image/png",
                 )
-            barrier.wait()
+            barrier.wait(timeout=5)
             return cliente.post(
                 reverse("operacion:higiene_guardar"),
                 data,
@@ -843,6 +923,15 @@ class HigieneConcurrenciaTests(TransactionTestCase):
             ).status_code
         finally:
             connections.close_all()
+
+    def _resultados_futuros(self, futuros, *, barrier=None):
+        try:
+            return [futuro.result(timeout=10) for futuro in futuros]
+        finally:
+            if barrier is not None:
+                barrier.abort()
+            for futuro in futuros:
+                futuro.cancel()
 
     def test_dos_auto_simultaneos_crean_un_principal(self):
         barrier = Barrier(2)
@@ -858,7 +947,7 @@ class HigieneConcurrenciaTests(TransactionTestCase):
                 )
                 for indice, usuario in enumerate(self.usuarios, start=1)
             ]
-            statuses = sorted(futuro.result() for futuro in futuros)
+            statuses = sorted(self._resultados_futuros(futuros, barrier=barrier))
 
         self.assertEqual(statuses, [201, 409])
         self.assertEqual(ReporteFalla.objects.filter(duplicado_de__isnull=True).count(), 1)
@@ -896,7 +985,208 @@ class HigieneConcurrenciaTests(TransactionTestCase):
                 )
                 for indice, usuario in enumerate(self.usuarios, start=1)
             ]
-            statuses = sorted(futuro.result() for futuro in futuros)
+            statuses = sorted(self._resultados_futuros(futuros, barrier=barrier))
 
         self.assertEqual(statuses, [201, 201])
         self.assertEqual(principal.constataciones_higiene.count(), 3)
+
+    def _crear_principal_directo(self):
+        reporte = ReporteFalla.objects.create(
+            sucursal=self.sucursal,
+            categoria=self.categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Sanitario sin descarga",
+            descripcion="No descarga agua.",
+            prioridad=ReporteFalla.PRIORIDAD_ALTA,
+            justificacion_sin_foto="Prueba concurrente.",
+            reportado_por=self.usuarios[0],
+        )
+        registro = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_BANOS,
+            sucursal=self.sucursal,
+            fecha=timezone.localdate() - timedelta(days=1),
+            clave_instancia="principal-directo",
+            plantilla_version="2026.1",
+            creado_por=self.usuarios[0],
+        )
+        RespuestaHigiene.objects.create(
+            registro=registro,
+            punto_clave="bano_sanitario",
+            seccion="Interior",
+            punto_revision="Sanitario limpio y funcional",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="No descarga agua",
+            requiere_seguimiento=True,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            reporte_falla=reporte,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
+        )
+        return reporte
+
+    def _cerrar_reporte_bloqueado(self, *, reporte_id, bloqueado, liberar):
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                reporte = ReporteFalla.objects.select_for_update().get(pk=reporte_id)
+                reporte.estatus = ReporteFalla.ESTATUS_CERRADO
+                reporte.fecha_cierre = timezone.now()
+                reporte.save(update_fields=["estatus", "fecha_cierre"])
+                bloqueado.set()
+                if not liberar.wait(timeout=5):
+                    raise TimeoutError("No se liberó el cierre concurrente.")
+            return reporte_id
+        finally:
+            connections.close_all()
+
+    def _post_misma_sin_foto(self, *, reporte_id, iniciado, terminado):
+        close_old_connections()
+        try:
+            cliente = Client()
+            cliente.force_login(User.objects.get(pk=self.usuarios[1].pk))
+            iniciado.set()
+            response = cliente.post(
+                reverse("operacion:higiene_guardar"),
+                {
+                    "tipo": "BANOS",
+                    "clave_instancia": "misma-durante-cierre",
+                    "hora": "09:30",
+                    "respuestas": json.dumps(
+                        [self._hallazgo(decision="MISMA", reporte_id=reporte_id)]
+                    ),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+            return response.status_code
+        finally:
+            terminado.set()
+            connections.close_all()
+
+    def test_cierre_concurrente_se_serializa_y_no_enlaza_reporte_cerrado(self):
+        principal = self._crear_principal_directo()
+        cierre_bloqueado = Event()
+        liberar_cierre = Event()
+        higiene_iniciada = Event()
+        higiene_terminada = Event()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            cierre = executor.submit(
+                self._cerrar_reporte_bloqueado,
+                reporte_id=principal.pk,
+                bloqueado=cierre_bloqueado,
+                liberar=liberar_cierre,
+            )
+            higiene = None
+            try:
+                self.assertTrue(cierre_bloqueado.wait(timeout=5))
+                higiene = executor.submit(
+                    self._post_misma_sin_foto,
+                    reporte_id=principal.pk,
+                    iniciado=higiene_iniciada,
+                    terminado=higiene_terminada,
+                )
+                self.assertTrue(higiene_iniciada.wait(timeout=5))
+                self.assertFalse(higiene_terminada.wait(timeout=0.5))
+            finally:
+                liberar_cierre.set()
+            self.assertIsNotNone(higiene)
+            resultados = self._resultados_futuros([cierre, higiene])
+            self.assertEqual(resultados, [principal.pk, 400])
+
+        principal.refresh_from_db()
+        self.assertEqual(principal.estatus, ReporteFalla.ESTATUS_CERRADO)
+        self.assertEqual(principal.constataciones_higiene.count(), 1)
+
+    def _respuestas_umbral(self):
+        reporte = ReporteFalla.objects.create(
+            sucursal=self.sucursal,
+            categoria=self.categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Fuga persistente",
+            descripcion="Fuga de agua.",
+            justificacion_sin_foto="Prueba de avisos.",
+            reportado_por=self.usuarios[0],
+            fecha_reporte=timezone.now() - timedelta(days=3),
+        )
+        respuestas = []
+        for ronda in (1, 2):
+            registro = RegistroHigiene.objects.create(
+                tipo=RegistroHigiene.TIPO_BANOS,
+                sucursal=self.sucursal,
+                fecha=timezone.localdate(),
+                clave_instancia=f"umbral-ronda-{ronda}",
+                plantilla_version="2026.1",
+                creado_por=self.usuarios[ronda - 1],
+            )
+            respuestas.append(
+                RespuestaHigiene.objects.create(
+                    registro=registro,
+                    punto_clave="bano_sanitario",
+                    seccion="Interior",
+                    punto_revision="Sanitario limpio y funcional",
+                    respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                    observacion=f"Sigue igual ronda {ronda}",
+                    requiere_seguimiento=True,
+                    reporte_falla=reporte,
+                    continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+                )
+            )
+        return reporte, respuestas
+
+    def _notificar_respuesta_concurrente(self, *, respuesta_id, barrier):
+        close_old_connections()
+        try:
+            respuesta = RespuestaHigiene.objects.select_related(
+                "registro", "reporte_falla__sucursal"
+            ).get(pk=respuesta_id)
+            barrier.wait(timeout=5)
+            notificar_evento_higiene(
+                respuesta.reporte_falla,
+                respuesta,
+                self.usuarios[0],
+            )
+        finally:
+            connections.close_all()
+
+    def test_avisos_umbral_concurrentes_y_reintento_no_duplican(self):
+        reporte, respuestas = self._respuestas_umbral()
+        barrier = Barrier(2)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = [
+                executor.submit(
+                    self._notificar_respuesta_concurrente,
+                    respuesta_id=respuesta.pk,
+                    barrier=barrier,
+                )
+                for respuesta in respuestas
+            ]
+            self._resultados_futuros(futuros, barrier=barrier)
+
+        filtro = Notificacion.objects.filter(
+            usuario=self.usuario_mantenimiento,
+            objeto_tipo="ReporteFalla",
+            objeto_id=str(reporte.pk),
+            titulo__startswith="Falla sin resolver por 3 días",
+        )
+        self.assertEqual(filtro.count(), 1)
+        notificar_evento_higiene(reporte, respuestas[0], self.usuarios[0])
+        self.assertEqual(filtro.count(), 1)
+
+    def test_avisos_cambio_deduplican_reintento_pero_no_otro_evento(self):
+        reporte, respuestas = self._respuestas_umbral()
+        for respuesta in respuestas:
+            respuesta.continuidad_falla = RespuestaHigiene.CONTINUIDAD_CAMBIO
+            respuesta.save(update_fields=["continuidad_falla"])
+            notificar_evento_higiene(reporte, respuesta, self.usuarios[0])
+            notificar_evento_higiene(reporte, respuesta, self.usuarios[0])
+
+        self.assertEqual(
+            Notificacion.objects.filter(
+                usuario=self.usuario_mantenimiento,
+                objeto_tipo="ReporteFalla",
+                objeto_id=str(reporte.pk),
+                titulo__startswith="Falla cambió o empeoró",
+            ).count(),
+            2,
+        )

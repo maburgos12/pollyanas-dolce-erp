@@ -6,18 +6,20 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from activos.models import Activo
 from core.access import can_manage_submodule, is_admin_or_dg, is_repartidor_only
-from fallas.models import CategoriaFalla, ReporteFalla
+from fallas.models import ReporteFalla
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 
 from .higiene_catalog import PLANTILLA_VERSION, plantilla_higiene, punto_higiene
 from .models import RegistroHigiene, RespuestaHigiene
 from .services_fallas import crear_reporte_falla
 from .services_higiene_fallas import (
+    ESTATUS_ACTIVOS,
     FallaHigieneConflict,
     bloquear_identidad,
+    bloquear_reportes,
     fallas_coincidentes,
+    id_positivo_estricto,
     identidad_desde_consulta,
     registrar_constatacion,
     reporte_coincide_identidad,
@@ -76,20 +78,6 @@ def _as_bool(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
 
 
-def _id_positivo_estricto(value, *, clave):
-    if isinstance(value, bool):
-        _error("Selecciona la falla a la que darás continuidad.", clave)
-    if isinstance(value, int):
-        parsed = value
-    elif isinstance(value, str) and value and all("0" <= char <= "9" for char in value):
-        parsed = int(value)
-    else:
-        _error("Selecciona la falla a la que darás continuidad.", clave)
-    if parsed <= 0:
-        _error("Selecciona la falla a la que darás continuidad.", clave)
-    return parsed
-
-
 def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, sucursal):
     if not isinstance(respuestas, list) or not respuestas:
         _error("Captura al menos un punto de revisión.", "respuestas")
@@ -104,6 +92,8 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
             else []
         )
     }
+    categorias_cache = {}
+    activos_cache = {}
     for raw in respuestas:
         if not isinstance(raw, dict):
             _error("Cada punto de revisión debe tener una respuesta válida.", "respuestas")
@@ -139,9 +129,10 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
             _error("Selecciona una decisión válida para el seguimiento.", clave)
         reporte_falla_id = None
         if falla_decision in DECISIONES_CON_REPORTE:
-            reporte_falla_id = _id_positivo_estricto(
+            reporte_falla_id = id_positivo_estricto(
                 raw.get("reporte_falla_id"),
-                clave=clave,
+                campo=clave,
+                mensaje="Selecciona la falla a la que darás continuidad.",
             )
         existente = existentes.get(clave)
         reporte_existente = bool(existente and existente.reporte_falla_id)
@@ -187,10 +178,12 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
                     "tipo_objetivo": tipo_objetivo,
                     "area_instalacion": area_instalacion,
                 },
+                categorias_cache=categorias_cache,
+                activos_cache=activos_cache,
             )
-            categoria = CategoriaFalla.objects.get(pk=identidad.categoria_id)
+            categoria = categorias_cache[identidad.categoria_id]
             activo = (
-                Activo.objects.get(pk=identidad.activo_id)
+                activos_cache[(sucursal.pk, identidad.activo_id)]
                 if identidad.activo_id is not None
                 else None
             )
@@ -222,7 +215,7 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
     return normalizadas
 
 
-def _preflight_fallas_higiene(*, normalizadas, sucursal):
+def _preflight_fallas_higiene(*, normalizadas):
     identidades_por_lock = {
         item["identidad"].lock_key: item["identidad"]
         for item in normalizadas
@@ -230,6 +223,17 @@ def _preflight_fallas_higiene(*, normalizadas, sucursal):
     }
     for lock_key in sorted(identidades_por_lock):
         bloquear_identidad(identidades_por_lock[lock_key])
+
+    reportes_relevantes_ids = set()
+    for identidad in identidades_por_lock.values():
+        candidatos_ids = list(fallas_coincidentes(identidad).values_list("pk", flat=True))
+        reportes_relevantes_ids.update(candidatos_ids)
+    reportes_relevantes_ids.update(
+        item["reporte_falla_id"]
+        for item in normalizadas
+        if item["reporte_falla_id"] is not None
+    )
+    reportes_bloqueados = bloquear_reportes(reportes_relevantes_ids)
 
     planes = []
     for item in normalizadas:
@@ -243,7 +247,16 @@ def _preflight_fallas_higiene(*, normalizadas, sucursal):
             continue
 
         identidad = item["identidad"]
-        candidatos = list(fallas_coincidentes(identidad))
+        candidatos = sorted(
+            (
+                reporte
+                for reporte in reportes_bloqueados.values()
+                if reporte.estatus in ESTATUS_ACTIVOS
+                and reporte.duplicado_de_id is None
+                and reporte_coincide_identidad(reporte, identidad)
+            ),
+            key=lambda reporte: (reporte.fecha_reporte, reporte.pk),
+        )
         decision = item["falla_decision"]
         if decision in DECISIONES_CON_REPORTE:
             plan["reporte"] = next(
@@ -261,10 +274,7 @@ def _preflight_fallas_higiene(*, normalizadas, sucursal):
                     "CORRECCION_PENDIENTE": RespuestaHigiene.CONTINUIDAD_CORRECCION,
                 }[decision]
             else:
-                solicitado = ReporteFalla.objects.filter(
-                    pk=item["reporte_falla_id"],
-                    sucursal=sucursal,
-                ).first()
+                solicitado = reportes_bloqueados.get(item["reporte_falla_id"])
                 if not solicitado or solicitado.estatus != ReporteFalla.ESTATUS_CERRADO:
                     _error(
                         "La falla seleccionada no corresponde a este punto o ya no admite continuidad.",
@@ -345,10 +355,7 @@ def guardar_registro_higiene(
         registro.notas = str(notas or registro.notas).strip()
         registro.save(update_fields=["hora", "tipo_bano", "uso_bano", "notas", "actualizado_en"])
 
-    planes_falla = _preflight_fallas_higiene(
-        normalizadas=normalizadas,
-        sucursal=sucursal,
-    )
+    planes_falla = _preflight_fallas_higiene(normalizadas=normalizadas)
     reporte_ids = []
     for item, plan_falla in zip(normalizadas, planes_falla, strict=True):
         respuesta, _ = RespuestaHigiene.objects.update_or_create(

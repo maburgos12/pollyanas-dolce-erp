@@ -82,11 +82,50 @@ def fallas_coincidentes(identidad: IdentidadFallaHigiene):
     return queryset.distinct().order_by("fecha_reporte", "id")
 
 
+def id_positivo_estricto(value, *, campo: str, mensaje: str) -> int:
+    if isinstance(value, bool):
+        raise ValidationError({campo: mensaje})
+    if isinstance(value, int):
+        parsed = value
+    elif isinstance(value, str) and value and all("0" <= char <= "9" for char in value):
+        parsed = int(value)
+    else:
+        raise ValidationError({campo: mensaje})
+    if parsed <= 0:
+        raise ValidationError({campo: mensaje})
+    return parsed
+
+
 def reporte_coincide_identidad(reporte: ReporteFalla, identidad: IdentidadFallaHigiene) -> bool:
-    return _filtrar_identidad(
-        ReporteFalla.objects.filter(pk=reporte.pk),
-        identidad,
+    if (
+        reporte.sucursal_id != identidad.sucursal_id
+        or reporte.categoria_id != identidad.categoria_id
+        or reporte.tipo_objetivo != identidad.tipo_objetivo
+    ):
+        return False
+    if identidad.tipo_objetivo == ReporteFalla.OBJETIVO_EQUIPO:
+        if reporte.activo_relacionado_id != identidad.activo_id:
+            return False
+    elif (
+        reporte.activo_relacionado_id is not None
+        or reporte.area_instalacion.strip().casefold()
+        != identidad.area_instalacion.strip().casefold()
+    ):
+        return False
+    return reporte.constataciones_higiene.filter(
+        registro__tipo=identidad.tipo_checklist,
+        punto_clave=identidad.punto_clave,
     ).exists()
+
+
+def bloquear_reportes(reportes_ids) -> dict[int, ReporteFalla]:
+    ids = sorted(set(reportes_ids))
+    return {
+        reporte.pk: reporte
+        for reporte in ReporteFalla.objects.select_for_update()
+        .filter(pk__in=ids)
+        .order_by("pk")
+    }
 
 
 def bloquear_identidad(identidad: IdentidadFallaHigiene) -> None:
@@ -94,7 +133,13 @@ def bloquear_identidad(identidad: IdentidadFallaHigiene) -> None:
         cursor.execute("SELECT pg_advisory_xact_lock(%s)", [identidad.lock_key])
 
 
-def identidad_desde_consulta(*, sucursal, params) -> IdentidadFallaHigiene:
+def identidad_desde_consulta(
+    *,
+    sucursal,
+    params,
+    categorias_cache: dict[int, CategoriaFalla | None] | None = None,
+    activos_cache: dict[tuple[int, int], Activo | None] | None = None,
+) -> IdentidadFallaHigiene:
     tipo_checklist = str(params.get("tipo_checklist") or params.get("tipo") or "").strip().upper()
     punto_clave = str(params.get("punto_clave") or params.get("key") or "").strip()
     if not tipo_checklist:
@@ -106,11 +151,18 @@ def identidad_desde_consulta(*, sucursal, params) -> IdentidadFallaHigiene:
             {punto_clave: "El punto no pertenece a la plantilla de higiene vigente."}
         )
 
-    try:
-        categoria_id = int(params.get("categoria_id"))
-    except (TypeError, ValueError):
-        raise ValidationError({punto_clave: "Selecciona una categoría activa para el reporte."})
-    categoria = CategoriaFalla.objects.filter(pk=categoria_id, activo=True).first()
+    categoria_id = id_positivo_estricto(
+        params.get("categoria_id"),
+        campo=punto_clave,
+        mensaje="Selecciona una categoría activa para el reporte.",
+    )
+    categorias_cache = categorias_cache if categorias_cache is not None else {}
+    if categoria_id not in categorias_cache:
+        categorias_cache[categoria_id] = CategoriaFalla.objects.filter(
+            pk=categoria_id,
+            activo=True,
+        ).first()
+    categoria = categorias_cache[categoria_id]
     if not categoria:
         raise ValidationError({punto_clave: "Selecciona una categoría activa para el reporte."})
 
@@ -118,15 +170,20 @@ def identidad_desde_consulta(*, sucursal, params) -> IdentidadFallaHigiene:
     activo_id = None
     area_instalacion = str(params.get("area_instalacion") or "").strip()
     if tipo_objetivo == ReporteFalla.OBJETIVO_EQUIPO:
-        try:
-            activo_id_consulta = int(params.get("activo_id"))
-        except (TypeError, ValueError):
-            raise ValidationError({punto_clave: "Selecciona un equipo de tu sucursal."})
-        activo = Activo.objects.filter(
-            pk=activo_id_consulta,
-            sucursal=sucursal,
-            activo=True,
-        ).first()
+        activo_id_consulta = id_positivo_estricto(
+            params.get("activo_id"),
+            campo=punto_clave,
+            mensaje="Selecciona un equipo de tu sucursal.",
+        )
+        activos_cache = activos_cache if activos_cache is not None else {}
+        activo_cache_key = (sucursal.pk, activo_id_consulta)
+        if activo_cache_key not in activos_cache:
+            activos_cache[activo_cache_key] = Activo.objects.filter(
+                pk=activo_id_consulta,
+                sucursal=sucursal,
+                activo=True,
+            ).first()
+        activo = activos_cache[activo_cache_key]
         if not activo:
             raise ValidationError({punto_clave: "El equipo seleccionado no pertenece a tu sucursal."})
         if categoria.tipo != CategoriaFalla.TIPO_EQUIPO:

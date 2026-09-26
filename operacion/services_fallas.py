@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
+from core.models import Notificacion
 from core.notificaciones import crear_notificaciones
 from fallas.models import BitacoraFalla, ReporteFalla
 from mantenimiento.services_access import can_access_mantenimiento
@@ -51,22 +54,45 @@ def notificar_evento_higiene(reporte: ReporteFalla, respuesta: RespuestaHigiene,
         if dias not in {3, 6}:
             return
         titulo = f"Falla sin resolver por {dias} días en {reporte.sucursal.nombre}"
+        evento = f"igual-{dias}"
     elif continuidad == RespuestaHigiene.CONTINUIDAD_CAMBIO:
         titulo = f"Falla cambió o empeoró en {reporte.sucursal.nombre}"
+        evento = f"cambio-{respuesta.pk}"
     elif continuidad == RespuestaHigiene.CONTINUIDAD_CORRECCION:
         titulo = f"Validar corrección en {reporte.sucursal.nombre}"
+        evento = f"correccion-{respuesta.pk}"
     else:
         return
 
-    crear_notificaciones(
-        _usuarios_mantenimiento(),
-        titulo=titulo,
-        mensaje=f"{reporte.titulo} · {respuesta.observacion}",
-        url=f"/mantenimiento/?open=falla:{reporte.pk}",
-        actor=actor,
-        objeto_tipo="ReporteFalla",
-        objeto_id=reporte.pk,
+    url = f"/mantenimiento/?open=falla:{reporte.pk}&evento=higiene-{evento}"
+    lock_value = f"higiene-evento|{reporte.pk}|{evento}"
+    lock_key = int.from_bytes(
+        hashlib.blake2b(lock_value.encode("utf-8"), digest_size=8).digest(),
+        byteorder="big",
+        signed=True,
     )
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_key])
+        usuarios = _usuarios_mantenimiento()
+        usuarios_notificados = set(
+            Notificacion.objects.filter(
+                usuario_id__in=[usuario.pk for usuario in usuarios],
+                objeto_tipo="ReporteFalla",
+                objeto_id=str(reporte.pk),
+                titulo=titulo,
+                url=url,
+            ).values_list("usuario_id", flat=True)
+        )
+        crear_notificaciones(
+            [usuario for usuario in usuarios if usuario.pk not in usuarios_notificados],
+            titulo=titulo,
+            mensaje=f"{reporte.titulo} · {respuesta.observacion}",
+            url=url,
+            actor=actor,
+            objeto_tipo="ReporteFalla",
+            objeto_id=reporte.pk,
+        )
 
 
 def crear_reporte_falla(
