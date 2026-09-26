@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 from django.utils import timezone
 
@@ -41,16 +41,16 @@ class SalesPublicationGapScanResult:
 
 
 def scan_sales_publication_gap(*, reference_date: date | None = None) -> SalesPublicationGapScanResult:
-    effective_reference = reference_date or (timezone.localdate() - timedelta(days=1))
+    effective_reference = reference_date or timezone.localdate()
     point_latest_date = (
-        PointDailySale.objects.filter(sale_date__lte=effective_reference)
+        PointDailySale.objects.filter(sale_date__lt=effective_reference)
         .order_by("-sale_date")
         .values_list("sale_date", flat=True)
         .first()
     )
-    target_date = min(point_latest_date, effective_reference) if point_latest_date else None
+    target_date = point_latest_date
     fact_latest_date = (
-        FactVentaDiaria.objects.filter(fecha__lte=effective_reference)
+        FactVentaDiaria.objects.filter(fecha__lt=effective_reference)
         .order_by("-fecha")
         .values_list("fecha", flat=True)
         .first()
