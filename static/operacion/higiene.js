@@ -261,6 +261,40 @@
     return Boolean(input && input.files && input.files.length);
   }
 
+  function firstVisibleControl(point, selectors) {
+    for (const selector of selectors) {
+      const control = Array.from(point.querySelectorAll(selector)).find(function (control) {
+        return !control.hidden && !control.disabled && !control.closest("[hidden]");
+      });
+      if (control) return control;
+    }
+    return null;
+  }
+
+  function usefulFailureControl(point) {
+    const panel = point.querySelector("[data-failure-match]");
+    const matchStatus = panel ? panel.dataset.matchStatus : "idle";
+    if (matchStatus === "error") {
+      return firstVisibleControl(point, ["[data-match-retry]"]);
+    }
+    if (matchStatus === "results") {
+      return firstVisibleControl(point, [
+        "[data-failure-report]:checked",
+        "[data-failure-report]",
+        "[data-failure-decision]:checked",
+        "[data-failure-decision]"
+      ]);
+    }
+    if (matchStatus === "empty") {
+      return firstVisibleControl(point, [
+        'input[type="file"]',
+        "[data-category]",
+        "[data-target-type]"
+      ]);
+    }
+    return firstVisibleControl(point, ["[data-category]", "[data-target-type]"]);
+  }
+
   function pointIsComplete(point, includeFindingDetail) {
     if (point.dataset.kind === "NUMERICA") {
       return Boolean(point.querySelector("[data-numeric]").value);
@@ -735,9 +769,7 @@
             const section = conflicted.closest("[data-review-section]");
             showSection(form, Number(section.dataset.sectionIndex), true);
             conflicted.scrollIntoView({ block: "center", behavior: reduceMotion ? "auto" : "smooth" });
-            const usefulControl = conflicted.querySelector("[data-failure-report]") ||
-              conflicted.querySelector("[data-failure-decision]") ||
-              conflicted.querySelector("[data-category]");
+            const usefulControl = usefulFailureControl(conflicted);
             if (usefulControl) usefulControl.focus({ preventScroll: true });
           }
           showToast(

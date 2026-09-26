@@ -1025,6 +1025,16 @@ class HigieneDiariaTests(TestCase):
         self.assertIn('decision.reporte_falla_id = ""', script)
         self.assertIn('retry.addEventListener("click"', script)
         self.assertIn('panel.setAttribute("aria-busy", status === "loading" ? "true" : "false")', script)
+        self.assertIn("function usefulFailureControl(point)", script)
+        self.assertIn('matchStatus === "error"', script)
+        self.assertIn('matchStatus === "results"', script)
+        self.assertIn('matchStatus === "empty"', script)
+        self.assertIn('!control.closest("[hidden]")', script)
+        self.assertIn("const usefulControl = usefulFailureControl(conflicted);", conflict_handler)
+        self.assertNotIn(
+            'conflicted.querySelector("[data-failure-decision]") ||',
+            conflict_handler,
+        )
         self.assertNotIn("form.reset()", script)
 
     def test_higiene_actualiza_cache_y_versiones_de_assets(self):
