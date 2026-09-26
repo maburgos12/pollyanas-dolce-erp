@@ -6,7 +6,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from core.models import Sucursal
-from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointExtractionLog, PointSyncJob
 from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
 from reportes.models import CorteOficialDiario
 
@@ -135,6 +135,67 @@ class ClosedSalesTests(TestCase):
         self.assertEqual(row['prev_amount'], Decimal('0'))
         self.assertIsNone(row['amount_delta_pct'])
         self.assertIn('venta cero', row['coverage_note'])
+
+    def test_official_zero_row_backfill_completes_current_month_coverage(self):
+        current = date(2026, 9, 1)
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        PointExtractionLog.objects.create(
+            sync_job=sync_job,
+            level=PointExtractionLog.LEVEL_INFO,
+            message=f'Backfill oficial {self.branches[1].external_id} {current.isoformat()}',
+            context={
+                'branch_external_id': self.branches[1].external_id,
+                'sale_date': current.isoformat(),
+                'rows_imported': 0,
+                'reports_downloaded': 1,
+            },
+        )
+
+        from reportes.closed_sales import closed_month_comparison
+        with patch('reportes.closed_sales.get_daily_sales_bulk', return_value={'dates': {
+            current.isoformat(): self.day_payload('90', self.branches[:1]),
+        }}):
+            row = closed_month_comparison(
+                cutoff=current,
+                previous_totals={'amount': Decimal('100'), 'quantity': Decimal('2')},
+            )
+
+        self.assertEqual(row['amount'], Decimal('90'))
+        self.assertEqual(row['quantity'], Decimal('1'))
+        self.assertNotIn(self.branches[1].name, row['coverage_note'])
+
+    def test_official_log_without_downloaded_report_does_not_invent_zero_sales(self):
+        current = date(2026, 9, 1)
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_PARTIAL,
+        )
+        PointExtractionLog.objects.create(
+            sync_job=sync_job,
+            level=PointExtractionLog.LEVEL_INFO,
+            message=f'Backfill oficial {self.branches[1].external_id} {current.isoformat()}',
+            context={
+                'branch_external_id': self.branches[1].external_id,
+                'sale_date': current.isoformat(),
+                'rows_imported': 0,
+                'reports_downloaded': 0,
+            },
+        )
+
+        from reportes.closed_sales import closed_month_comparison
+        with patch('reportes.closed_sales.get_daily_sales_bulk', return_value={'dates': {
+            current.isoformat(): self.day_payload('90', self.branches[:1]),
+        }}):
+            row = closed_month_comparison(
+                cutoff=current,
+                previous_totals={'amount': Decimal('100'), 'quantity': Decimal('2')},
+            )
+
+        self.assertIsNone(row['amount'])
+        self.assertIn(self.branches[1].name, row['coverage_note'])
 
     def test_leap_day_uses_equal_days_in_both_years(self):
         from reportes.closed_sales import closed_month_comparison

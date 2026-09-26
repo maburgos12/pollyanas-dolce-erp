@@ -7,10 +7,10 @@ from itertools import groupby
 from django.db.models import F
 from django.utils import timezone
 
-from pos_bridge.models import PointDailyBranchIndicator, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointExtractionLog, PointSyncJob
 from ventas.services.sales_read_service import get_daily_sales_bulk
 
-CLOSED_SALES_VERSION = 'closed-sales-v2-network-total'
+CLOSED_SALES_VERSION = 'closed-sales-v3-official-zero-evidence'
 MONTHS = ('', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
 
 
@@ -29,6 +29,39 @@ def closed_indicator_evidence():
         sync_job__started_at__date__gt=F('indicator_date'),
         updated_at__date__gt=F('indicator_date'),
     ).exclude(branch__erp_branch_id__isnull=True)
+
+
+def official_backfill_evidence(days: list[date], expected_branch_ids: set[int]) -> set[tuple[date, int]]:
+    """Return branch-days proven by a successfully downloaded official report."""
+    if not days or not expected_branch_ids:
+        return set()
+    branch_ids_by_external = {
+        str(branch.external_id): int(branch.erp_branch_id)
+        for branch in PointBranch.objects.filter(erp_branch_id__in=expected_branch_ids)
+        .exclude(erp_branch_id__isnull=True)
+        if branch.external_id
+    }
+    if not branch_ids_by_external:
+        return set()
+    contexts = PointExtractionLog.objects.filter(
+        sync_job__job_type=PointSyncJob.JOB_TYPE_SALES,
+        level=PointExtractionLog.LEVEL_INFO,
+        message__startswith="Backfill oficial ",
+        context__sale_date__in=[day.isoformat() for day in days],
+        context__has_key="rows_imported",
+    ).values_list("context", flat=True)
+    evidence: set[tuple[date, int]] = set()
+    for context in contexts:
+        payload = context or {}
+        branch_id = branch_ids_by_external.get(str(payload.get("branch_external_id") or "").strip())
+        try:
+            sale_date = date.fromisoformat(str(payload.get("sale_date") or ""))
+            reports_downloaded = int(payload.get("reports_downloaded") or 0)
+        except (TypeError, ValueError):
+            continue
+        if branch_id is not None and reports_downloaded > 0:
+            evidence.add((sale_date, branch_id))
+    return evidence
 
 
 def latest_closed_sales_date(*, today: date | None = None) -> date | None:
@@ -63,6 +96,7 @@ def closed_month_comparison(*, cutoff: date, previous_totals: dict | None = None
         indicator_date__in=read_days,
         branch__erp_branch_id__in=expected, total_amount=0,
     ).values_list('indicator_date', 'branch__erp_branch_id'))
+    confirmed_zeros.update(official_backfill_evidence(read_days, expected))
 
     def totals(days):
         amount = quantity = Decimal('0')

@@ -203,6 +203,15 @@ class PointSalesSyncTaskRoutingTests(TestCase):
                     lag_days_after=0,
                 ),
             ) as freshness_mock,
+            patch(
+                "pos_bridge.tasks.run_daily_sales_sync.run_sales_publication_quality_loop",
+                return_value={
+                    "violations": 0,
+                    "findings_created": 0,
+                    "findings_updated": 0,
+                    "findings_resolved": 1,
+                },
+            ) as quality_loop_mock,
             patch("pos_bridge.tasks.run_daily_sales_sync.log_event") as log_mock,
         ):
             result = run_daily_sales_sync(
@@ -219,6 +228,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             triggered_by=None,
             trigger="point_daily_sales_sync",
         )
+        quality_loop_mock.assert_called_once_with(reference_date=date(2025, 9, 4))
         self.assertEqual(
             fake_job.result_summary["analytics_refresh"],
             {
@@ -245,6 +255,15 @@ class PointSalesSyncTaskRoutingTests(TestCase):
                 "catchup_succeeded": True,
                 "lag_days_before": 2,
                 "lag_days_after": 0,
+            },
+        )
+        self.assertEqual(
+            fake_job.result_summary["sales_publication_quality_loop"],
+            {
+                "violations": 0,
+                "findings_created": 0,
+                "findings_updated": 0,
+                "findings_resolved": 1,
             },
         )
         log_mock.assert_called_once()

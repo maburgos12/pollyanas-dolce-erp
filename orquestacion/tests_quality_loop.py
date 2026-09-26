@@ -122,6 +122,7 @@ class SalesPublicationGuardTests(SimpleTestCase):
         def first(self):
             return self.value
 
+    @patch("orquestacion.services.sales_publication_guard.build_closed_yoy_panel")
     @patch("orquestacion.services.sales_publication_guard.PointSyncJob")
     @patch("orquestacion.services.sales_publication_guard._visible_cut_for")
     @patch("orquestacion.services.sales_publication_guard.FactVentaDiaria")
@@ -132,6 +133,7 @@ class SalesPublicationGuardTests(SimpleTestCase):
         fact_venta_diaria_mock,
         visible_cut_mock,
         point_sync_job_mock,
+        build_yoy_mock,
     ):
         point_daily_sale_mock.objects = self._ChainStub(date(2026, 4, 11))
         fact_venta_diaria_mock.objects = self._ChainStub(date(2026, 4, 10))
@@ -150,12 +152,45 @@ class SalesPublicationGuardTests(SimpleTestCase):
                 },
             )()
         )
+        build_yoy_mock.return_value = {"hero_row": {"amount": None}, "coverage_note": "Comparativo pendiente"}
 
         result = scan_sales_publication_gap(reference_date=date(2026, 4, 12))
 
         self.assertTrue(result.deferred_by_active_sync)
         self.assertFalse(result.has_gap)
         self.assertEqual(result.sync_job_status, "RUNNING")
+
+    @patch("orquestacion.services.sales_publication_guard.build_closed_yoy_panel")
+    @patch("orquestacion.services.sales_publication_guard.PointSyncJob")
+    @patch("orquestacion.services.sales_publication_guard._visible_cut_for")
+    @patch("orquestacion.services.sales_publication_guard.FactVentaDiaria")
+    @patch("orquestacion.services.sales_publication_guard.PointDailySale")
+    def test_scan_sales_publication_gap_detects_incomplete_month_comparison(
+        self,
+        point_daily_sale_mock,
+        fact_venta_diaria_mock,
+        visible_cut_mock,
+        point_sync_job_mock,
+        build_yoy_mock,
+    ):
+        cutoff = date(2026, 9, 25)
+        point_daily_sale_mock.objects = self._ChainStub(cutoff)
+        fact_venta_diaria_mock.objects = self._ChainStub(cutoff)
+        visible_cut_mock.return_value = cutoff
+        point_sync_job_mock.JOB_TYPE_SALES = "sales"
+        point_sync_job_mock.STATUS_PENDING = "PENDING"
+        point_sync_job_mock.STATUS_RUNNING = "RUNNING"
+        point_sync_job_mock.objects = self._ChainStub(None)
+        build_yoy_mock.return_value = {
+            "hero_row": {"amount": None},
+            "coverage_note": "Faltan datos de Sucursal Leyva (2026-09-24).",
+        }
+        result = scan_sales_publication_gap(reference_date=cutoff)
+
+        self.assertTrue(result.has_gap)
+        self.assertFalse(result.comparison_ready)
+        self.assertIn("Leyva", result.comparison_coverage_note)
+        self.assertIn("comparativo mensual", result.reason)
 
 
 class QualityFindingLoopTests(TestCase):
@@ -268,6 +303,8 @@ class QualityFindingLoopTests(TestCase):
             sync_job_started_at="",
             sync_job_finished_at="",
             deferred_by_active_sync=False,
+            comparison_ready=False,
+            comparison_coverage_note="Faltan datos de Sucursal Leyva (2026-09-24).",
         )
 
         first_summary = sync_sales_publication_gap_finding(gap_result=gap_result)
@@ -278,6 +315,8 @@ class QualityFindingLoopTests(TestCase):
         self.assertFalse(finding.is_blocking)
         self.assertEqual(remediation.status, RemediationProposal.STATUS_ACCEPTED)
         self.assertIsNone(finding.memory_proposal)
+        self.assertEqual(finding.details_json.get("comparison_ready"), False)
+        self.assertIn("Leyva", finding.details_json.get("comparison_coverage_note", ""))
 
         clean_result = SalesPublicationGapScanResult(
             reference_date=gap_result.reference_date,
