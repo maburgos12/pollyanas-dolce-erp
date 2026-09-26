@@ -207,6 +207,41 @@ class HigieneDiariaTests(TestCase):
         self.assertEqual(primera.json()["reporte_falla_ids"], [reporte.id])
         self.assertEqual(segunda.json()["reporte_falla_ids"], [reporte.id])
 
+    def test_varias_revisiones_pueden_apuntar_a_la_misma_falla(self):
+        reporte = ReporteFalla.objects.create(
+            sucursal=self.payan,
+            categoria=self.categoria_instalacion,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Sanitario sin funcionar",
+            descripcion="No descarga agua.",
+            justificacion_sin_foto="Prueba automatizada.",
+            reportado_por=self.operadora,
+        )
+        for fecha in ("2026-09-25", "2026-09-26"):
+            registro = RegistroHigiene.objects.create(
+                tipo=RegistroHigiene.TIPO_BANOS,
+                sucursal=self.payan,
+                fecha=fecha,
+                clave_instancia=f"clientes-{fecha}",
+                plantilla_version="2026.1",
+                creado_por=self.operadora,
+            )
+            RespuestaHigiene.objects.create(
+                registro=registro,
+                punto_clave="banos_sanitario",
+                seccion="Limpieza de baños",
+                punto_revision="Sanitario limpio y funcional",
+                respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                requiere_seguimiento=True,
+                tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+                area_instalacion="Baños",
+                reporte_falla=reporte,
+                continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+            )
+
+        self.assertEqual(reporte.constataciones_higiene.count(), 2)
+
     def test_falla_de_equipo_solo_admite_activo_de_la_sucursal(self):
         activo_ajeno = Activo.objects.create(nombre="Equipo Leyva", sucursal=self.leyva)
         self.client.force_login(self.operadora)
