@@ -4,10 +4,13 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.mail import send_mail
 from django.db import transaction
+from django.utils import timezone
 
 from core.notificaciones import crear_notificaciones
 from fallas.models import BitacoraFalla, ReporteFalla
 from mantenimiento.services_access import can_access_mantenimiento
+
+from .models import RespuestaHigiene
 
 
 def _usuarios_mantenimiento():
@@ -38,6 +41,32 @@ def notificar_falla_mantenimiento(reporte: ReporteFalla, actor) -> None:
             recipient_list=emails,
             fail_silently=False,
         )
+
+
+def notificar_evento_higiene(reporte: ReporteFalla, respuesta: RespuestaHigiene, actor) -> None:
+    continuidad = respuesta.continuidad_falla
+    if continuidad == RespuestaHigiene.CONTINUIDAD_IGUAL:
+        fecha_reporte = timezone.localdate(reporte.fecha_reporte)
+        dias = (respuesta.registro.fecha - fecha_reporte).days
+        if dias not in {3, 6}:
+            return
+        titulo = f"Falla sin resolver por {dias} días en {reporte.sucursal.nombre}"
+    elif continuidad == RespuestaHigiene.CONTINUIDAD_CAMBIO:
+        titulo = f"Falla cambió o empeoró en {reporte.sucursal.nombre}"
+    elif continuidad == RespuestaHigiene.CONTINUIDAD_CORRECCION:
+        titulo = f"Validar corrección en {reporte.sucursal.nombre}"
+    else:
+        return
+
+    crear_notificaciones(
+        _usuarios_mantenimiento(),
+        titulo=titulo,
+        mensaje=f"{reporte.titulo} · {respuesta.observacion}",
+        url=f"/mantenimiento/?open=falla:{reporte.pk}",
+        actor=actor,
+        objeto_tipo="ReporteFalla",
+        objeto_id=reporte.pk,
+    )
 
 
 def crear_reporte_falla(

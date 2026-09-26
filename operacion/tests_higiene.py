@@ -1,17 +1,24 @@
 import base64
 import json
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from decimal import Decimal
+from threading import Barrier
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, connections
+from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from activos.models import Activo
 from core.access import ACCESS_MANAGE
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from fallas.models import CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
+from operacion.services_fallas import notificar_evento_higiene
 
 
 User = get_user_model()
@@ -61,6 +68,40 @@ class HigieneDiariaTests(TestCase):
             data,
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
+
+    def _hallazgo_banos(
+        self,
+        *,
+        observacion="El sanitario no descarga agua",
+        decision="AUTO",
+        reporte_id=None,
+    ):
+        hallazgo = {
+            "key": "bano_sanitario",
+            "respuesta": "NO_CUMPLE",
+            "observacion": observacion,
+            "corregido": False,
+            "requiere_seguimiento": True,
+            "tipo_objetivo": "INSTALACION",
+            "categoria_id": self.categoria_instalacion.id,
+            "area_instalacion": "Baños",
+            "prioridad": "alta",
+            "falla_decision": decision,
+        }
+        if reporte_id is not None:
+            hallazgo["reporte_falla_id"] = reporte_id
+        return hallazgo
+
+    def _crear_falla_higiene_abierta(self, *, fecha=date(2026, 9, 25)):
+        with mock.patch("operacion.services_higiene.timezone.localdate", return_value=fecha):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia=f"clientes-{fecha.isoformat()}",
+                respuestas=[self._hallazgo_banos()],
+                archivos={"evidencia_bano_sanitario": self._foto(f"sanitario-{fecha}.png")},
+            )
+        self.assertEqual(response.status_code, 201)
+        return ReporteFalla.objects.get()
 
     def test_app_muestra_higiene_a_sucursal_y_catalogo_versionado(self):
         self.client.force_login(self.operadora)
@@ -242,6 +283,258 @@ class HigieneDiariaTests(TestCase):
 
         self.assertEqual(reporte.constataciones_higiene.count(), 2)
 
+    def test_sigue_igual_en_otro_dia_reutiliza_la_falla(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+
+        with mock.patch(
+            "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+        ):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="clientes-2026-09-26",
+                respuestas=[
+                    self._hallazgo_banos(decision="MISMA", reporte_id=principal.pk)
+                ],
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+        self.assertEqual(principal.constataciones_higiene.count(), 2)
+
+    def test_problema_distinto_crea_otro_reporte_aunque_coincida_el_punto(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+
+        with mock.patch(
+            "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+        ):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="clientes-2026-09-26",
+                respuestas=[
+                    self._hallazgo_banos(
+                        observacion="Ahora también se desprendió la puerta",
+                        decision="DISTINTA",
+                        reporte_id=principal.pk,
+                    )
+                ],
+                archivos={"evidencia_bano_sanitario": self._foto("puerta.png")},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(ReporteFalla.objects.count(), 2)
+
+    def test_reporte_cerrado_no_acepta_continuidad_y_se_convierte_en_reincidencia(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_cierre = timezone.now()
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+
+        with mock.patch(
+            "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+        ):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="clientes-2026-09-26",
+                respuestas=[
+                    self._hallazgo_banos(decision="MISMA", reporte_id=principal.pk)
+                ],
+                archivos={"evidencia_bano_sanitario": self._foto("reincidencia.png")},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(ReporteFalla.objects.count(), 2)
+
+    def test_reporte_cerrado_sin_evidencia_rechaza_y_revierte_la_captura(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_cierre = timezone.now()
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+
+        with mock.patch(
+            "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+        ):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="clientes-2026-09-26",
+                respuestas=[
+                    self._hallazgo_banos(decision="MISMA", reporte_id=principal.pk)
+                ],
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+        self.assertEqual(RegistroHigiene.objects.count(), 1)
+        self.assertEqual(RespuestaHigiene.objects.count(), 1)
+
+    def test_cambio_y_correccion_enlazan_la_falla_activa(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+
+        for fecha, decision in (
+            (date(2026, 9, 26), "CAMBIO"),
+            (date(2026, 9, 27), "CORRECCION_PENDIENTE"),
+        ):
+            with mock.patch(
+                "operacion.services_higiene.timezone.localdate", return_value=fecha
+            ):
+                response = self._guardar(
+                    tipo="BANOS",
+                    clave_instancia=f"clientes-{fecha}",
+                    respuestas=[
+                        self._hallazgo_banos(
+                            observacion=f"Constatación {decision}",
+                            decision=decision,
+                            reporte_id=principal.pk,
+                        )
+                    ],
+                    archivos={
+                        "evidencia_bano_sanitario": self._foto(f"{decision}.png")
+                    },
+                )
+            self.assertEqual(response.status_code, 201)
+
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+        self.assertEqual(
+            list(
+                principal.constataciones_higiene.order_by("registro__fecha").values_list(
+                    "continuidad_falla", flat=True
+                )
+            ),
+            [
+                RespuestaHigiene.CONTINUIDAD_INICIAL,
+                RespuestaHigiene.CONTINUIDAD_CAMBIO,
+                RespuestaHigiene.CONTINUIDAD_CORRECCION,
+            ],
+        )
+
+    def test_auto_con_coincidencia_responde_409_y_revierte_el_registro(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+
+        with mock.patch(
+            "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+        ):
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="clientes-2026-09-26",
+                respuestas=[self._hallazgo_banos()],
+                archivos={"evidencia_bano_sanitario": self._foto("duplicada.png")},
+            )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
+        self.assertEqual(RegistroHigiene.objects.count(), 1)
+        self.assertEqual(RespuestaHigiene.objects.count(), 1)
+
+    def test_constatacion_difiere_notificacion_hasta_commit(self):
+        self.client.force_login(self.operadora)
+        principal = self._crear_falla_higiene_abierta()
+
+        with mock.patch(
+            "operacion.services_fallas.notificar_evento_higiene"
+        ) as notificar:
+            with self.captureOnCommitCallbacks(execute=True):
+                with mock.patch(
+                    "operacion.services_higiene.timezone.localdate",
+                    return_value=date(2026, 9, 26),
+                ):
+                    response = self._guardar(
+                        tipo="BANOS",
+                        clave_instancia="clientes-2026-09-26",
+                        respuestas=[
+                            self._hallazgo_banos(decision="MISMA", reporte_id=principal.pk)
+                        ],
+                    )
+                self.assertEqual(response.status_code, 201)
+                notificar.assert_not_called()
+            notificar.assert_called_once()
+
+    def test_sigue_igual_no_avisa_diario_solo_en_dias_tres_y_seis(self):
+        self.client.force_login(self.operadora)
+        reporte = self._crear_falla_higiene_abierta()
+        reporte.fecha_reporte = timezone.make_aware(
+            timezone.datetime(2026, 9, 25, 9, 0)
+        )
+        reporte.save(update_fields=["fecha_reporte"])
+
+        with mock.patch("operacion.services_fallas._usuarios_mantenimiento", return_value=[]), mock.patch(
+            "operacion.services_fallas.crear_notificaciones"
+        ) as crear:
+            for fecha in (date(2026, 9, 26), date(2026, 9, 28), date(2026, 10, 1)):
+                registro = RegistroHigiene.objects.create(
+                    tipo=RegistroHigiene.TIPO_BANOS,
+                    sucursal=self.payan,
+                    fecha=fecha,
+                    clave_instancia=f"aviso-{fecha}",
+                    plantilla_version="2026.1",
+                    creado_por=self.operadora,
+                )
+                respuesta = RespuestaHigiene.objects.create(
+                    registro=registro,
+                    punto_clave="bano_sanitario",
+                    seccion="Interior",
+                    punto_revision="Sanitario limpio y funcional",
+                    respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                    observacion="Sigue sin descargar",
+                    requiere_seguimiento=True,
+                    reporte_falla=reporte,
+                    continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+                )
+                notificar_evento_higiene(reporte, respuesta, self.operadora)
+
+        self.assertEqual(crear.call_count, 2)
+        self.assertEqual(
+            [llamada.kwargs["titulo"] for llamada in crear.call_args_list],
+            [
+                "Falla sin resolver por 3 días en Payán",
+                "Falla sin resolver por 6 días en Payán",
+            ],
+        )
+
+    def test_cambio_y_correccion_generan_avisos_especificos(self):
+        self.client.force_login(self.operadora)
+        reporte = self._crear_falla_higiene_abierta()
+        registro = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_BANOS,
+            sucursal=self.payan,
+            fecha=date(2026, 9, 26),
+            clave_instancia="avisos-decision",
+            plantilla_version="2026.1",
+            creado_por=self.operadora,
+        )
+
+        with mock.patch("operacion.services_fallas._usuarios_mantenimiento", return_value=[]), mock.patch(
+            "operacion.services_fallas.crear_notificaciones"
+        ) as crear:
+            for continuidad in (
+                RespuestaHigiene.CONTINUIDAD_CAMBIO,
+                RespuestaHigiene.CONTINUIDAD_CORRECCION,
+            ):
+                respuesta = RespuestaHigiene.objects.create(
+                    registro=registro,
+                    punto_clave=f"bano_sanitario_{continuidad}",
+                    seccion="Interior",
+                    punto_revision="Sanitario limpio y funcional",
+                    respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                    observacion="Revisión del estado",
+                    requiere_seguimiento=True,
+                    reporte_falla=reporte,
+                    continuidad_falla=continuidad,
+                )
+                notificar_evento_higiene(reporte, respuesta, self.operadora)
+
+        self.assertEqual(
+            [llamada.kwargs["titulo"] for llamada in crear.call_args_list],
+            [
+                "Falla cambió o empeoró en Payán",
+                "Validar corrección en Payán",
+            ],
+        )
+
     def test_falla_de_equipo_solo_admite_activo_de_la_sucursal(self):
         activo_ajeno = Activo.objects.create(nombre="Equipo Leyva", sucursal=self.leyva)
         self.client.force_login(self.operadora)
@@ -312,3 +605,125 @@ class HigieneDiariaTests(TestCase):
         ):
             with self.subTest(name=name):
                 self.assertEqual(self.client.get(reverse(name)).status_code, 403)
+
+
+@override_settings(SECURE_SSL_REDIRECT=False)
+class HigieneConcurrenciaTests(TransactionTestCase):
+    def setUp(self):
+        self.sucursal = Sucursal.objects.create(codigo="CONC-H", nombre="Concurrencia")
+        self.categoria = CategoriaFalla.objects.create(
+            nombre="Plomería concurrente",
+            tipo=CategoriaFalla.TIPO_INSTALACION,
+        )
+        self.usuarios = []
+        for numero in (1, 2):
+            usuario = User.objects.create_user(
+                username=f"higiene.concurrente.{numero}",
+                password="test12345",
+            )
+            UserProfile.objects.create(user=usuario, sucursal=self.sucursal)
+            UserModuleAccess.objects.create(
+                user=usuario,
+                module="fallas",
+                access=ACCESS_MANAGE,
+            )
+            self.usuarios.append(usuario)
+
+    def _hallazgo(self, *, decision="AUTO", reporte_id=None):
+        hallazgo = {
+            "key": "bano_sanitario",
+            "respuesta": "NO_CUMPLE",
+            "observacion": "Sanitario sin descarga",
+            "corregido": False,
+            "requiere_seguimiento": True,
+            "tipo_objetivo": "INSTALACION",
+            "categoria_id": self.categoria.pk,
+            "area_instalacion": "Baños",
+            "prioridad": "alta",
+            "falla_decision": decision,
+        }
+        if reporte_id is not None:
+            hallazgo["reporte_falla_id"] = reporte_id
+        return hallazgo
+
+    def _post_concurrente(self, *, usuario_id, instancia, barrier, hallazgo, con_foto):
+        close_old_connections()
+        try:
+            cliente = Client()
+            cliente.force_login(User.objects.get(pk=usuario_id))
+            data = {
+                "tipo": "BANOS",
+                "clave_instancia": instancia,
+                "hora": "09:30",
+                "respuestas": json.dumps([hallazgo]),
+            }
+            if con_foto:
+                data["evidencia_bano_sanitario"] = SimpleUploadedFile(
+                    f"{instancia}.png",
+                    PNG_1PX,
+                    content_type="image/png",
+                )
+            barrier.wait()
+            return cliente.post(
+                reverse("operacion:higiene_guardar"),
+                data,
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            ).status_code
+        finally:
+            connections.close_all()
+
+    def test_dos_auto_simultaneos_crean_un_principal(self):
+        barrier = Barrier(2)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = [
+                executor.submit(
+                    self._post_concurrente,
+                    usuario_id=usuario.pk,
+                    instancia=f"auto-{indice}",
+                    barrier=barrier,
+                    hallazgo=self._hallazgo(),
+                    con_foto=True,
+                )
+                for indice, usuario in enumerate(self.usuarios, start=1)
+            ]
+            statuses = sorted(futuro.result() for futuro in futuros)
+
+        self.assertEqual(statuses, [201, 409])
+        self.assertEqual(ReporteFalla.objects.filter(duplicado_de__isnull=True).count(), 1)
+
+    def test_dos_misma_simultaneos_reutilizan_el_principal(self):
+        cliente = Client()
+        cliente.force_login(self.usuarios[0])
+        principal_response = cliente.post(
+            reverse("operacion:higiene_guardar"),
+            {
+                "tipo": "BANOS",
+                "clave_instancia": "principal",
+                "hora": "09:30",
+                "respuestas": json.dumps([self._hallazgo()]),
+                "evidencia_bano_sanitario": SimpleUploadedFile(
+                    "principal.png", PNG_1PX, content_type="image/png"
+                ),
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(principal_response.status_code, 201)
+        principal = ReporteFalla.objects.get()
+
+        barrier = Barrier(2)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = [
+                executor.submit(
+                    self._post_concurrente,
+                    usuario_id=usuario.pk,
+                    instancia=f"misma-{indice}",
+                    barrier=barrier,
+                    hallazgo=self._hallazgo(decision="MISMA", reporte_id=principal.pk),
+                    con_foto=False,
+                )
+                for indice, usuario in enumerate(self.usuarios, start=1)
+            ]
+            statuses = sorted(futuro.result() for futuro in futuros)
+
+        self.assertEqual(statuses, [201, 201])
+        self.assertEqual(principal.constataciones_higiene.count(), 3)

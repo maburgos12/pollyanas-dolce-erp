@@ -14,6 +14,24 @@ from mantenimiento.evidence_validation import EvidenceValidationError, validate_
 from .higiene_catalog import PLANTILLA_VERSION, plantilla_higiene, punto_higiene
 from .models import RegistroHigiene, RespuestaHigiene
 from .services_fallas import crear_reporte_falla
+from .services_higiene_fallas import (
+    FallaHigieneConflict,
+    bloquear_identidad,
+    fallas_coincidentes,
+    identidad_desde_consulta,
+    registrar_constatacion,
+)
+
+
+DECISIONES_FALLA = {
+    "AUTO",
+    "MISMA",
+    "CAMBIO",
+    "DISTINTA",
+    "CORRECCION_PENDIENTE",
+}
+DECISIONES_CON_REPORTE = {"MISMA", "CAMBIO", "CORRECCION_PENDIENTE"}
+DECISIONES_CON_EVIDENCIA = {"AUTO", "DISTINTA", "CAMBIO", "CORRECCION_PENDIENTE"}
 
 
 def sucursal_higiene_usuario(user):
@@ -101,6 +119,15 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
         observacion = str(raw.get("observacion") or "").strip()
         corregido = _as_bool(raw.get("corregido"))
         seguimiento = _as_bool(raw.get("requiere_seguimiento"))
+        falla_decision = str(raw.get("falla_decision") or "AUTO").strip().upper()
+        if falla_decision not in DECISIONES_FALLA:
+            _error("Selecciona una decisión válida para el seguimiento.", clave)
+        reporte_falla_id = None
+        if falla_decision in DECISIONES_CON_REPORTE:
+            try:
+                reporte_falla_id = int(raw.get("reporte_falla_id"))
+            except (TypeError, ValueError):
+                _error("Selecciona la falla a la que darás continuidad.", clave)
         existente = existentes.get(clave)
         reporte_existente = bool(existente and existente.reporte_falla_id)
         if reporte_existente:
@@ -132,28 +159,28 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
             tipo_objetivo = existente.tipo_objetivo
             area_instalacion = existente.area_instalacion
             activo = existente.activo_relacionado
+        identidad = None
         if seguimiento and not (existente and existente.reporte_falla_id):
-            if not evidencia_disponible:
+            if falla_decision in DECISIONES_CON_EVIDENCIA and not evidencia_disponible:
                 _error("Agrega una foto para enviar el hallazgo a Mantenimiento.", clave)
-            categoria = CategoriaFalla.objects.filter(pk=raw.get("categoria_id"), activo=True).first()
-            if not categoria:
-                _error("Selecciona una categoría activa para el reporte.", clave)
-            if tipo_objetivo == ReporteFalla.OBJETIVO_EQUIPO:
-                activo = Activo.objects.filter(
-                    pk=raw.get("activo_id"), sucursal=sucursal, activo=True
-                ).first()
-                if not activo:
-                    _error("El equipo seleccionado no pertenece a tu sucursal.", clave)
-                if categoria.tipo != CategoriaFalla.TIPO_EQUIPO:
-                    _error("Selecciona una categoría de equipo.", clave)
-                area_instalacion = ""
-            elif tipo_objetivo == ReporteFalla.OBJETIVO_INSTALACION:
-                if not area_instalacion:
-                    _error("Indica el área de la instalación.", clave)
-                if categoria.tipo != CategoriaFalla.TIPO_INSTALACION:
-                    _error("Selecciona una categoría de instalaciones.", clave)
-            else:
-                _error("Clasifica el seguimiento como equipo o instalación.", clave)
+            identidad = identidad_desde_consulta(
+                sucursal=sucursal,
+                params={
+                    **raw,
+                    "tipo_checklist": tipo,
+                    "punto_clave": clave,
+                    "tipo_objetivo": tipo_objetivo,
+                    "area_instalacion": area_instalacion,
+                },
+            )
+            categoria = CategoriaFalla.objects.get(pk=identidad.categoria_id)
+            activo = (
+                Activo.objects.get(pk=identidad.activo_id)
+                if identidad.activo_id is not None
+                else None
+            )
+            tipo_objetivo = identidad.tipo_objetivo
+            area_instalacion = identidad.area_instalacion
 
         normalizadas.append(
             {
@@ -172,6 +199,9 @@ def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, su
                 "tipo_objetivo": tipo_objetivo,
                 "area_instalacion": area_instalacion,
                 "prioridad": prioridad,
+                "falla_decision": falla_decision,
+                "reporte_falla_id": reporte_falla_id,
+                "identidad": identidad,
             }
         )
     return normalizadas
@@ -254,28 +284,78 @@ def guardar_registro_higiene(
             respuesta.evidencia = item["archivo"]
             respuesta.save(update_fields=["evidencia"])
         if item["seguimiento"] and not respuesta.reporte_falla_id:
-            evidencia = respuesta.evidencia.name if respuesta.evidencia else None
-            reporte = crear_reporte_falla(
-                sucursal=sucursal,
-                usuario=user,
-                categoria=item["categoria"],
-                tipo_objetivo=item["tipo_objetivo"],
-                activo_relacionado=item["activo"],
-                area_instalacion=item["area_instalacion"],
-                titulo=f"{plantilla['titulo']} · {item['punto']['etiqueta']}",
-                descripcion=(
-                    f"Hallazgo detectado en higiene diaria ({item['punto']['seccion']}): "
-                    f"{item['observacion']}"
-                ),
-                prioridad=item["prioridad"],
-                evidencia=evidencia,
-                comentario_bitacora=(
-                    f"Reporte creado automáticamente desde Higiene diaria, registro #{registro.pk}. "
-                    "La evidencia se capturó una sola vez."
-                ),
-            )
-            respuesta.reporte_falla = reporte
-            respuesta.save(update_fields=["reporte_falla"])
+            identidad = item["identidad"]
+            bloquear_identidad(identidad)
+            candidatos = list(fallas_coincidentes(identidad))
+            decision = item["falla_decision"]
+            reporte = None
+            if decision in DECISIONES_CON_REPORTE:
+                reporte = next(
+                    (
+                        candidato
+                        for candidato in candidatos
+                        if candidato.pk == item["reporte_falla_id"]
+                    ),
+                    None,
+                )
+                if reporte:
+                    continuidad = {
+                        "MISMA": RespuestaHigiene.CONTINUIDAD_IGUAL,
+                        "CAMBIO": RespuestaHigiene.CONTINUIDAD_CAMBIO,
+                        "CORRECCION_PENDIENTE": RespuestaHigiene.CONTINUIDAD_CORRECCION,
+                    }[decision]
+                    registrar_constatacion(
+                        respuesta=respuesta,
+                        reporte=reporte,
+                        decision=continuidad,
+                        usuario=user,
+                    )
+                else:
+                    solicitado_cerrado = ReporteFalla.objects.filter(
+                        pk=item["reporte_falla_id"],
+                        sucursal=sucursal,
+                        estatus=ReporteFalla.ESTATUS_CERRADO,
+                    ).exists()
+                    if solicitado_cerrado:
+                        if not respuesta.evidencia:
+                            _error(
+                                "Agrega una foto para registrar la reincidencia de la falla cerrada.",
+                                item["clave"],
+                            )
+                        decision = "DISTINTA"
+                    else:
+                        decision = "AUTO"
+
+            if reporte is None and decision == "AUTO" and candidatos:
+                raise FallaHigieneConflict(candidatos)
+
+            if reporte is None:
+                evidencia = respuesta.evidencia.name if respuesta.evidencia else None
+                reporte = crear_reporte_falla(
+                    sucursal=sucursal,
+                    usuario=user,
+                    categoria=item["categoria"],
+                    tipo_objetivo=item["tipo_objetivo"],
+                    activo_relacionado=item["activo"],
+                    area_instalacion=item["area_instalacion"],
+                    titulo=f"{plantilla['titulo']} · {item['punto']['etiqueta']}",
+                    descripcion=(
+                        f"Hallazgo detectado en higiene diaria ({item['punto']['seccion']}): "
+                        f"{item['observacion']}"
+                    ),
+                    prioridad=item["prioridad"],
+                    evidencia=evidencia,
+                    comentario_bitacora=(
+                        f"Reporte creado automáticamente desde Higiene diaria, registro #{registro.pk}. "
+                        "La evidencia se capturó una sola vez."
+                    ),
+                )
+                registrar_constatacion(
+                    respuesta=respuesta,
+                    reporte=reporte,
+                    decision=RespuestaHigiene.CONTINUIDAD_INICIAL,
+                    usuario=user,
+                )
         if respuesta.reporte_falla_id:
             reporte_ids.append(respuesta.reporte_falla_id)
     return registro, creado, sorted(set(reporte_ids))

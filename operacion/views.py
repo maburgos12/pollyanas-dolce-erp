@@ -68,6 +68,7 @@ from .services_higiene import (
     require_higiene_access,
     sucursal_higiene_usuario,
 )
+from .services_higiene_fallas import FallaHigieneConflict
 from .services_bitacoras_inventory import (
     registrar_apertura_inicial,
     cerrar_hornos,
@@ -558,6 +559,21 @@ def higiene_guardar(request):
         )
     except json.JSONDecodeError:
         return JsonResponse({"error": "La captura no contiene respuestas válidas."}, status=400)
+    except FallaHigieneConflict as exc:
+        return JsonResponse(
+            {
+                "error": str(exc),
+                "existing_reports": [
+                    {
+                        "id": reporte.pk,
+                        "titulo": reporte.titulo,
+                        "estatus": reporte.get_estatus_display(),
+                    }
+                    for reporte in exc.candidatos
+                ],
+            },
+            status=409,
+        )
     except ValidationError as exc:
         fields = getattr(exc, "message_dict", None)
         return JsonResponse(
