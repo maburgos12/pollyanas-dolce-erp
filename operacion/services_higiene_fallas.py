@@ -53,13 +53,11 @@ class IdentidadFallaHigiene:
         return int.from_bytes(digest, byteorder="big", signed=True)
 
 
-def fallas_coincidentes(identidad: IdentidadFallaHigiene):
-    queryset = ReporteFalla.objects.filter(
+def _filtrar_identidad(queryset, identidad: IdentidadFallaHigiene):
+    queryset = queryset.filter(
         sucursal_id=identidad.sucursal_id,
         categoria_id=identidad.categoria_id,
         tipo_objetivo=identidad.tipo_objetivo,
-        estatus__in=ESTATUS_ACTIVOS,
-        duplicado_de__isnull=True,
         constataciones_higiene__registro__tipo=identidad.tipo_checklist,
         constataciones_higiene__punto_clave=identidad.punto_clave,
     )
@@ -70,7 +68,25 @@ def fallas_coincidentes(identidad: IdentidadFallaHigiene):
             activo_relacionado__isnull=True,
             area_instalacion__iexact=identidad.area_instalacion.strip(),
         )
+    return queryset
+
+
+def fallas_coincidentes(identidad: IdentidadFallaHigiene):
+    queryset = _filtrar_identidad(
+        ReporteFalla.objects.filter(
+            estatus__in=ESTATUS_ACTIVOS,
+            duplicado_de__isnull=True,
+        ),
+        identidad,
+    )
     return queryset.distinct().order_by("fecha_reporte", "id")
+
+
+def reporte_coincide_identidad(reporte: ReporteFalla, identidad: IdentidadFallaHigiene) -> bool:
+    return _filtrar_identidad(
+        ReporteFalla.objects.filter(pk=reporte.pk),
+        identidad,
+    ).exists()
 
 
 def bloquear_identidad(identidad: IdentidadFallaHigiene) -> None:

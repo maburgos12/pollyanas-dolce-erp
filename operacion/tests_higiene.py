@@ -3,7 +3,9 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 from threading import Barrier
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -30,6 +32,11 @@ PNG_1PX = base64.b64decode(
 @override_settings(SECURE_SSL_REDIRECT=False)
 class HigieneDiariaTests(TestCase):
     def setUp(self):
+        self.media_tmp = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_tmp.name)
+        self.media_override.enable()
+        self.addCleanup(self.media_tmp.cleanup)
+        self.addCleanup(self.media_override.disable)
         self.payan = Sucursal.objects.create(codigo="PAYAN-H", nombre="Payán")
         self.leyva = Sucursal.objects.create(codigo="LEYVA-H", nombre="Leyva")
         self.operadora = User.objects.create_user(username="higiene.payan", password="test12345")
@@ -75,9 +82,10 @@ class HigieneDiariaTests(TestCase):
         observacion="El sanitario no descarga agua",
         decision="AUTO",
         reporte_id=None,
+        key="bano_sanitario",
     ):
         hallazgo = {
-            "key": "bano_sanitario",
+            "key": key,
             "respuesta": "NO_CUMPLE",
             "observacion": observacion,
             "corregido": False,
@@ -412,23 +420,122 @@ class HigieneDiariaTests(TestCase):
         )
 
     def test_auto_con_coincidencia_responde_409_y_revierte_el_registro(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+            principal = self._crear_falla_higiene_abierta()
+            archivos_antes = {
+                path.relative_to(media_root)
+                for path in Path(media_root).rglob("*")
+                if path.is_file()
+            }
+
+            with mock.patch(
+                "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+            ):
+                response = self._guardar(
+                    tipo="BANOS",
+                    clave_instancia="clientes-2026-09-26",
+                    respuestas=[self._hallazgo_banos()],
+                    archivos={"evidencia_bano_sanitario": self._foto("duplicada.png")},
+                )
+            archivos_despues = {
+                path.relative_to(media_root)
+                for path in Path(media_root).rglob("*")
+                if path.is_file()
+            }
+
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
+            self.assertEqual(RegistroHigiene.objects.count(), 1)
+            self.assertEqual(RespuestaHigiene.objects.count(), 1)
+            self.assertEqual(archivos_despues, archivos_antes)
+
+    def test_misma_activa_de_otro_punto_rechaza_sin_degradar_a_auto(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+            principal = self._crear_falla_higiene_abierta()
+            archivos_antes = set(Path(media_root).rglob("*.png"))
+
+            with mock.patch(
+                "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+            ):
+                response = self._guardar(
+                    tipo="BANOS",
+                    clave_instancia="clientes-otro-punto",
+                    respuestas=[
+                        self._hallazgo_banos(
+                            key="bano_pisos",
+                            decision="MISMA",
+                            reporte_id=principal.pk,
+                        )
+                    ],
+                    archivos={"evidencia_bano_pisos": self._foto("otro-punto.png")},
+                )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(ReporteFalla.objects.count(), 1)
+            self.assertEqual(RegistroHigiene.objects.count(), 1)
+            self.assertEqual(RespuestaHigiene.objects.count(), 1)
+            self.assertEqual(set(Path(media_root).rglob("*.png")), archivos_antes)
+
+    def test_reporte_cerrado_de_otro_punto_no_crea_reincidencia(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+            principal = self._crear_falla_higiene_abierta()
+            principal.estatus = ReporteFalla.ESTATUS_CERRADO
+            principal.fecha_cierre = timezone.now()
+            principal.save(update_fields=["estatus", "fecha_cierre"])
+            archivos_antes = set(Path(media_root).rglob("*.png"))
+
+            with mock.patch(
+                "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
+            ):
+                response = self._guardar(
+                    tipo="BANOS",
+                    clave_instancia="clientes-cerrado-otro-punto",
+                    respuestas=[
+                        self._hallazgo_banos(
+                            key="bano_pisos",
+                            decision="MISMA",
+                            reporte_id=principal.pk,
+                        )
+                    ],
+                    archivos={"evidencia_bano_pisos": self._foto("cerrado-otro-punto.png")},
+                )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(ReporteFalla.objects.count(), 1)
+            self.assertEqual(RegistroHigiene.objects.count(), 1)
+            self.assertEqual(RespuestaHigiene.objects.count(), 1)
+            self.assertEqual(set(Path(media_root).rglob("*.png")), archivos_antes)
+
+    def _assert_reporte_falla_id_invalido(self, valor):
         self.client.force_login(self.operadora)
         principal = self._crear_falla_higiene_abierta()
-
         with mock.patch(
             "operacion.services_higiene.timezone.localdate", return_value=date(2026, 9, 26)
         ):
             response = self._guardar(
                 tipo="BANOS",
-                clave_instancia="clientes-2026-09-26",
-                respuestas=[self._hallazgo_banos()],
-                archivos={"evidencia_bano_sanitario": self._foto("duplicada.png")},
+                clave_instancia=f"id-invalido-{type(valor).__name__}",
+                respuestas=[
+                    self._hallazgo_banos(decision="MISMA", reporte_id=valor)
+                ],
             )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json()["existing_reports"][0]["id"], principal.pk)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(ReporteFalla.objects.count(), 1)
         self.assertEqual(RegistroHigiene.objects.count(), 1)
         self.assertEqual(RespuestaHigiene.objects.count(), 1)
+        self.assertEqual(principal.constataciones_higiene.count(), 1)
+
+    def test_reporte_falla_id_booleano_es_invalido(self):
+        self._assert_reporte_falla_id_invalido(True)
+
+    def test_reporte_falla_id_float_es_invalido(self):
+        self._assert_reporte_falla_id_invalido(1.9)
+
+    def test_reporte_falla_id_decimal_en_texto_es_invalido(self):
+        self._assert_reporte_falla_id_invalido("1.9")
 
     def test_constatacion_difiere_notificacion_hasta_commit(self):
         self.client.force_login(self.operadora)
@@ -610,6 +717,11 @@ class HigieneDiariaTests(TestCase):
 @override_settings(SECURE_SSL_REDIRECT=False)
 class HigieneConcurrenciaTests(TransactionTestCase):
     def setUp(self):
+        self.media_tmp = TemporaryDirectory()
+        self.media_override = override_settings(MEDIA_ROOT=self.media_tmp.name)
+        self.media_override.enable()
+        self.addCleanup(self.media_tmp.cleanup)
+        self.addCleanup(self.media_override.disable)
         self.sucursal = Sucursal.objects.create(codigo="CONC-H", nombre="Concurrencia")
         self.categoria = CategoriaFalla.objects.create(
             nombre="Plomería concurrente",
@@ -690,6 +802,7 @@ class HigieneConcurrenciaTests(TransactionTestCase):
 
         self.assertEqual(statuses, [201, 409])
         self.assertEqual(ReporteFalla.objects.filter(duplicado_de__isnull=True).count(), 1)
+        self.assertEqual(len(list(Path(self.media_tmp.name).rglob("*.png"))), 1)
 
     def test_dos_misma_simultaneos_reutilizan_el_principal(self):
         cliente = Client()
