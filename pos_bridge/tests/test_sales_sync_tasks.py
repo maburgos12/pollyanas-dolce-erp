@@ -228,7 +228,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             triggered_by=None,
             trigger="point_daily_sales_sync",
         )
-        quality_loop_mock.assert_called_once_with(reference_date=date(2025, 9, 4))
+        quality_loop_mock.assert_called_once_with(reference_date=date(2025, 9, 5))
         self.assertEqual(
             fake_job.result_summary["analytics_refresh"],
             {
