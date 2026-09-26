@@ -18,7 +18,7 @@ from .services_higiene_fallas import (
     FallaHigieneConflict,
     bloquear_identidad,
     bloquear_reportes,
-    fallas_coincidentes,
+    fallas_misma_identidad,
     id_positivo_estricto,
     identidad_desde_consulta,
     registrar_constatacion,
@@ -226,7 +226,7 @@ def _preflight_fallas_higiene(*, normalizadas):
 
     reportes_relevantes_ids = set()
     for identidad in identidades_por_lock.values():
-        candidatos_ids = list(fallas_coincidentes(identidad).values_list("pk", flat=True))
+        candidatos_ids = list(fallas_misma_identidad(identidad).values_list("pk", flat=True))
         reportes_relevantes_ids.update(candidatos_ids)
     reportes_relevantes_ids.update(
         item["reporte_falla_id"]

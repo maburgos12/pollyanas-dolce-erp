@@ -1063,6 +1063,45 @@ class HigieneConcurrenciaTests(TransactionTestCase):
             terminado.set()
             connections.close_all()
 
+    def _reabrir_reporte_bloqueado(self, *, reporte_id, bloqueado, liberar):
+        close_old_connections()
+        try:
+            with transaction.atomic():
+                reporte = ReporteFalla.objects.select_for_update().get(pk=reporte_id)
+                reporte.estatus = ReporteFalla.ESTATUS_ABIERTO
+                reporte.fecha_cierre = None
+                reporte.save(update_fields=["estatus", "fecha_cierre"])
+                bloqueado.set()
+                if not liberar.wait(timeout=5):
+                    raise TimeoutError("No se liberó la reapertura concurrente.")
+            return reporte_id
+        finally:
+            connections.close_all()
+
+    def _post_auto_con_foto(self, *, iniciado, terminado):
+        close_old_connections()
+        try:
+            cliente = Client()
+            cliente.force_login(User.objects.get(pk=self.usuarios[1].pk))
+            iniciado.set()
+            response = cliente.post(
+                reverse("operacion:higiene_guardar"),
+                {
+                    "tipo": "BANOS",
+                    "clave_instancia": "auto-durante-reapertura",
+                    "hora": "09:30",
+                    "respuestas": json.dumps([self._hallazgo()]),
+                    "evidencia_bano_sanitario": SimpleUploadedFile(
+                        "reapertura-auto.png", PNG_1PX, content_type="image/png"
+                    ),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+            return response.status_code
+        finally:
+            terminado.set()
+            connections.close_all()
+
     def test_cierre_concurrente_se_serializa_y_no_enlaza_reporte_cerrado(self):
         principal = self._crear_principal_directo()
         cierre_bloqueado = Event()
@@ -1096,6 +1135,48 @@ class HigieneConcurrenciaTests(TransactionTestCase):
         principal.refresh_from_db()
         self.assertEqual(principal.estatus, ReporteFalla.ESTATUS_CERRADO)
         self.assertEqual(principal.constataciones_higiene.count(), 1)
+
+    def test_reapertura_concurrente_bloquea_auto_y_evita_segundo_principal(self):
+        principal = self._crear_principal_directo()
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_cierre = timezone.now()
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+        archivos_antes = set(Path(self.media_tmp.name).rglob("*.png"))
+        reapertura_bloqueada = Event()
+        liberar_reapertura = Event()
+        higiene_iniciada = Event()
+        higiene_terminada = Event()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            reapertura = executor.submit(
+                self._reabrir_reporte_bloqueado,
+                reporte_id=principal.pk,
+                bloqueado=reapertura_bloqueada,
+                liberar=liberar_reapertura,
+            )
+            higiene = None
+            try:
+                self.assertTrue(reapertura_bloqueada.wait(timeout=5))
+                higiene = executor.submit(
+                    self._post_auto_con_foto,
+                    iniciado=higiene_iniciada,
+                    terminado=higiene_terminada,
+                )
+                self.assertTrue(higiene_iniciada.wait(timeout=5))
+                self.assertFalse(higiene_terminada.wait(timeout=0.5))
+            finally:
+                liberar_reapertura.set()
+            self.assertIsNotNone(higiene)
+            resultados = self._resultados_futuros([reapertura, higiene])
+            self.assertEqual(resultados, [principal.pk, 409])
+
+        principal.refresh_from_db()
+        self.assertEqual(principal.estatus, ReporteFalla.ESTATUS_ABIERTO)
+        self.assertEqual(ReporteFalla.objects.filter(duplicado_de__isnull=True).count(), 1)
+        self.assertEqual(principal.constataciones_higiene.count(), 1)
+        self.assertEqual(RegistroHigiene.objects.count(), 1)
+        self.assertEqual(RespuestaHigiene.objects.count(), 1)
+        self.assertEqual(set(Path(self.media_tmp.name).rglob("*.png")), archivos_antes)
 
     def _respuestas_umbral(self):
         reporte = ReporteFalla.objects.create(
@@ -1172,6 +1253,24 @@ class HigieneConcurrenciaTests(TransactionTestCase):
         self.assertEqual(filtro.count(), 1)
         notificar_evento_higiene(reporte, respuestas[0], self.usuarios[0])
         self.assertEqual(filtro.count(), 1)
+
+    def test_aviso_umbral_no_duplica_si_cambia_nombre_de_sucursal(self):
+        reporte, respuestas = self._respuestas_umbral()
+        notificar_evento_higiene(reporte, respuestas[0], self.usuarios[0])
+        Sucursal.objects.filter(pk=self.sucursal.pk).update(nombre="Sucursal renombrada")
+        reporte.refresh_from_db()
+
+        notificar_evento_higiene(reporte, respuestas[0], self.usuarios[0])
+
+        self.assertEqual(
+            Notificacion.objects.filter(
+                usuario=self.usuario_mantenimiento,
+                objeto_tipo="ReporteFalla",
+                objeto_id=str(reporte.pk),
+                url=f"/mantenimiento/?open=falla:{reporte.pk}&evento=higiene-igual-3",
+            ).count(),
+            1,
+        )
 
     def test_avisos_cambio_deduplican_reintento_pero_no_otro_evento(self):
         reporte, respuestas = self._respuestas_umbral()

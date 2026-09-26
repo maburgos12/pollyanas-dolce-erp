@@ -78,9 +78,9 @@ def notificar_evento_higiene(reporte: ReporteFalla, respuesta: RespuestaHigiene,
         usuarios_notificados = set(
             Notificacion.objects.filter(
                 usuario_id__in=[usuario.pk for usuario in usuarios],
+                tipo=Notificacion.TIPO_SISTEMA,
                 objeto_tipo="ReporteFalla",
                 objeto_id=str(reporte.pk),
-                titulo=titulo,
                 url=url,
             ).values_list("usuario_id", flat=True)
         )

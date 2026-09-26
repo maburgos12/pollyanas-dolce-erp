@@ -71,15 +71,18 @@ def _filtrar_identidad(queryset, identidad: IdentidadFallaHigiene):
     return queryset
 
 
-def fallas_coincidentes(identidad: IdentidadFallaHigiene):
+def fallas_misma_identidad(identidad: IdentidadFallaHigiene):
     queryset = _filtrar_identidad(
         ReporteFalla.objects.filter(
-            estatus__in=ESTATUS_ACTIVOS,
             duplicado_de__isnull=True,
         ),
         identidad,
     )
     return queryset.distinct().order_by("fecha_reporte", "id")
+
+
+def fallas_coincidentes(identidad: IdentidadFallaHigiene):
+    return fallas_misma_identidad(identidad).filter(estatus__in=ESTATUS_ACTIVOS)
 
 
 def id_positivo_estricto(value, *, campo: str, mensaje: str) -> int:
