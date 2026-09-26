@@ -7265,6 +7265,9 @@ body.ui-compact .quick-action-card { padding: 12px 10px; min-height: 68px; }
   max-height: calc(100dvh - 112px);
   -webkit-overflow-scrolling: touch;
 }
+.table-responsive.production-table-wrap {
+  overflow-y: auto !important;
+}
 .production-table-wrap > table.table {
   width: max-content;
   table-layout: auto;
