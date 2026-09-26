@@ -7,6 +7,7 @@ from datetime import timezone as dt_timezone
 from pathlib import Path
 from urllib.parse import urljoin
 
+import requests
 from django.utils import timezone
 
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
@@ -54,22 +55,48 @@ class PointWasteExtractor:
         branch_token = safe_slug(branch_filter or "all")
         return self.settings.raw_exports_dir / f"{token}_point_waste_{start_date.isoformat()}_{end_date.isoformat()}_{branch_token}.json"
 
+    def _read_rows(self, *, auth_session, path: str, params: dict, label: str):
+        attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
+        for attempt in range(1, attempts + 1):
+            try:
+                response = auth_session.session.get(
+                    urljoin(self.settings.base_url.rstrip("/") + "/", path.lstrip("/")),
+                    params=params,
+                    timeout=self.settings.timeout_ms / 1000,
+                )
+                response.raise_for_status()
+                payload = json.loads(response.text)
+                if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
+                    raise ExtractionError(
+                        f"Point devolvió {label} con formato inesperado.",
+                        context={"path": path, "payload_type": type(payload).__name__},
+                    )
+                return payload, auth_session
+            except (json.JSONDecodeError, ExtractionError, requests.RequestException) as exc:
+                if attempt == attempts:
+                    if isinstance(exc, ExtractionError):
+                        raise
+                    raise ExtractionError(f"No fue posible leer {label} desde Point.") from exc
+                try:
+                    auth_session.session.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                auth_session = self.http_session_service.create()
+
+        raise ExtractionError(f"No fue posible leer {label} desde Point.")
+
     def extract(self, *, start_date: date, end_date: date, branch_filter: str | None = None) -> list[ExtractedWasteLine]:
         auth_session = self.http_session_service.create()
-        response = auth_session.session.get(
-            urljoin(self.settings.base_url.rstrip("/") + "/", self.LIST_PATH.lstrip("/")),
+        movements, auth_session = self._read_rows(
+            auth_session=auth_session,
+            path=self.LIST_PATH,
             params={
                 "sucursal": branch_filter or "null",
                 "fechaini": str(self._to_epoch_ms(start_date)),
                 "fechafin": str(self._to_epoch_ms(end_date)),
             },
-            timeout=self.settings.timeout_ms / 1000,
+            label="el listado de mermas",
         )
-        response.raise_for_status()
-        try:
-            movements = json.loads(response.text)
-        except json.JSONDecodeError as exc:
-            raise ExtractionError("Point devolvió un listado de mermas inválido.") from exc
 
         extracted: list[ExtractedWasteLine] = []
         raw_export = {
@@ -88,20 +115,18 @@ class PointWasteExtractor:
                 movement_at = movement_at.replace(tzinfo=dt_timezone.utc)
             branch_name = str(movement.get("Sucursal") or movement.get("Sucursal_corto") or "").strip()
             responsible = str(movement.get("Responsable") or "").strip()
-            justification_response = auth_session.session.get(
-                urljoin(self.settings.base_url.rstrip("/") + "/", self.JUSTIFICATION_PATH.lstrip("/")),
+            justifications, auth_session = self._read_rows(
+                auth_session=auth_session,
+                path=self.JUSTIFICATION_PATH,
                 params={"id_mov": movement_id},
-                timeout=self.settings.timeout_ms / 1000,
+                label=f"las justificaciones de la merma {movement_id}",
             )
-            justification_response.raise_for_status()
-            detail_response = auth_session.session.get(
-                urljoin(self.settings.base_url.rstrip("/") + "/", self.DETAIL_PATH.lstrip("/")),
+            details, auth_session = self._read_rows(
+                auth_session=auth_session,
+                path=self.DETAIL_PATH,
                 params={"pk_movimiento": movement_id},
-                timeout=self.settings.timeout_ms / 1000,
+                label=f"el detalle de la merma {movement_id}",
             )
-            detail_response.raise_for_status()
-            justifications = json.loads(justification_response.text)
-            details = json.loads(detail_response.text)
             justification_text = " | ".join(
                 {
                     str(item.get("Justificacion") or "").strip()
