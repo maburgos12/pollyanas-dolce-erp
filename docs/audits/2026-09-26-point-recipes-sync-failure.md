@@ -1,6 +1,6 @@
 # Auditoría read-only: fallas de sincronización de recetas Point
 
-Fecha de revisión: 2026-09-26  
+Fecha de revisión: 2026-09-26
 Alcance: diagnóstico solamente; no se reintentó ningún job y no se modificaron datos, recetas, Point ni producción.
 
 ## Evidencia operativa
@@ -53,4 +53,3 @@ No se recomienda reintentar el job en producción mientras el conflicto del cód
 3. No capturar una `IntegrityError` dentro de un bloque `atomic` para luego continuar consultando; debe propagarse o aislarse en un savepoint interno que termine antes de continuar.
 4. Persistir en el job la excepción raíz y el contexto mínimo sanitizado —receta, código Point y etapa— para evitar que `TransactionManagementError` oculte la causa real.
 5. Verificar localmente y después realizar un único reintento controlado, con lectura antes/después del insumo `50181900` y del job generado.
-
