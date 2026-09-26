@@ -3,6 +3,14 @@
 
 {% block title %}Producido vs Vendido - ERP{% endblock %}
 {% block body_class %}page-reportes-produccion{% endblock %}
+{% block extra_css %}
+<style>
+  /* Cloudflare ignora la versión en query de styles.css; este override crítico debe viajar con el HTML. */
+  .production-table-wrap > table.table {
+    overflow: visible !important;
+  }
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="container production-report">
