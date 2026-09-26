@@ -203,8 +203,22 @@ def _selected_branch_ids(request, *, source: str = "GET") -> set[int]:
     return (selected & active) if selected else set(active)
 
 
-def _selected_product_skus(request) -> list[str]:
-    return [value.strip() for value in request.POST.getlist("productos_incluidos") if value.strip()]
+def _selected_point_product_ids(request) -> list[int]:
+    selected = []
+    seen = set()
+    for value in request.POST.getlist("productos_incluidos"):
+        raw = str(value).strip()
+        if not raw.isdigit():
+            continue
+        product_id = int(raw)
+        if product_id > 0 and product_id not in seen:
+            seen.add(product_id)
+            selected.append(product_id)
+    return selected
+
+
+def _catalog_point_product_ids(catalog: OrderedDict[str, list[dict]]) -> set[int]:
+    return {int(product["id"]) for products in catalog.values() for product in products}
 
 
 def _projection_presets() -> list[dict[str, str | int]]:
@@ -882,17 +896,24 @@ def PronosticoVentasView(request):
     fecha_fin_raw = (data.get("fecha_fin") or "").strip()
     selected_branch_ids = _selected_branch_ids(request, source=source)
     categorias_productos = _catalogo_productos_por_categoria()
-    available_skus = {product["sku"] for products in categorias_productos.values() for product in products}
-    selected_product_skus = _selected_product_skus(request) if request.method == "POST" else sorted(available_skus)
+    available_product_ids = _catalog_point_product_ids(categorias_productos)
+    selected_product_ids = (
+        _selected_point_product_ids(request) if request.method == "POST" else sorted(available_product_ids)
+    )
     form_errors = []
     resultados_preview = {}
 
     if request.method == "POST":
         fecha_inicio, fecha_fin, form_errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
-        selected_product_skus = [sku for sku in selected_product_skus if sku in available_skus]
+        invalid_product_ids = set(selected_product_ids) - available_product_ids
+        if invalid_product_ids:
+            form_errors.append(
+                "La selección contiene productos que no están disponibles para pronóstico. "
+                "Actualiza la pantalla e inténtalo de nuevo."
+            )
         if not selected_branch_ids:
             form_errors.append("Selecciona al menos una sucursal activa.")
-        if not selected_product_skus:
+        if not selected_product_ids:
             form_errors.append("Selecciona al menos un producto para incluir en el pronostico.")
         if not form_errors and fecha_inicio and fecha_fin:
             _warn_stale_sales_forecast(request)
@@ -901,14 +922,14 @@ def PronosticoVentasView(request):
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_skus,
+                    skus_incluidos=selected_product_ids,
                 )
             else:
                 resultados_preview = calcular_pronostico(
                     fecha_inicio,
                     fecha_fin,
                     selected_branch_ids,
-                    skus_incluidos=selected_product_skus,
+                    skus_incluidos=selected_product_ids,
                 )
         for error in form_errors:
             messages.error(request, error)
@@ -923,7 +944,7 @@ def PronosticoVentasView(request):
         "fecha_fin": fecha_fin_raw,
         "categorias_productos": categorias_productos,
         "categorias_principales": {category.upper() for category in CATALOG_CATEGORY_ORDER},
-        "selected_product_skus": set(selected_product_skus),
+        "selected_product_ids": set(selected_product_ids),
         "projection_presets": _projection_presets(),
         "form_errors": form_errors,
         "pronosticos_guardados": _pronosticos_for_user(request.user)[:10],
@@ -969,10 +990,18 @@ def PronosticoGuardarView(request):
     fecha_fin_raw = (request.POST.get("fecha_fin") or "").strip()
     fecha_inicio, fecha_fin, errors = _validate_dates(fecha_inicio_raw, fecha_fin_raw)
     selected_branch_ids = _selected_branch_ids(request, source="POST")
-    selected_product_skus = _selected_product_skus(request)
+    categorias_productos = _catalogo_productos_por_categoria()
+    available_product_ids = _catalog_point_product_ids(categorias_productos)
+    selected_product_ids = _selected_point_product_ids(request)
+    invalid_product_ids = set(selected_product_ids) - available_product_ids
+    if invalid_product_ids:
+        errors.append(
+            "La selección contiene productos que no están disponibles para pronóstico. "
+            "Actualiza la pantalla e inténtalo de nuevo."
+        )
     if not selected_branch_ids:
         errors.append("Selecciona al menos una sucursal activa.")
-    if not selected_product_skus:
+    if not selected_product_ids:
         errors.append("Selecciona al menos un producto para guardar la proyeccion.")
     if errors:
         for error in errors:
@@ -990,7 +1019,7 @@ def PronosticoGuardarView(request):
         fecha_fin=fecha_fin,
         sucursal_ids=sorted(selected_branch_ids),
         usuario=request.user,
-        skus_incluidos=selected_product_skus,
+        skus_incluidos=selected_product_ids,
         ajustes_post=request.POST,
         tipo=active_tab,
     )

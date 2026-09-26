@@ -546,6 +546,32 @@ class VentasPointIdentityTests(TestCase):
         self.assertEqual(products[0]["categoria_point"], "Bollo")
         self.assertEqual(products[0]["grupo_operativo"], "Bollo")
 
+    def test_selected_point_product_ids_accepts_positive_ids_once(self):
+        request = SimpleNamespace(
+            POST=QueryDict("productos_incluidos=12&productos_incluidos=12&productos_incluidos=x")
+        )
+
+        self.assertEqual(ventas_views._selected_point_product_ids(request), [12])
+
+    def test_preview_rejects_point_product_outside_the_visible_catalog(self):
+        self.client.force_login(self.allowed_user)
+
+        response = self.client.post(
+            reverse("ventas:pronostico"),
+            {
+                "tab": "pronosticos",
+                "fecha_inicio": "2026-10-01",
+                "fecha_fin": "2026-10-02",
+                "sucursales": [self.branch.id],
+                "productos_incluidos": [self.glow.id],
+            },
+        )
+
+        self.assertContains(
+            response,
+            "La selección contiene productos que no están disponibles para pronóstico",
+        )
+
 
 class VentasProjectionEngineTests(TestCase):
     def test_projection_uses_operational_daily_forecast_with_three_week_lookback(self):
