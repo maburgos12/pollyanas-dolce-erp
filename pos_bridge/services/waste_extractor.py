@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time as time_module
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 from datetime import timezone as dt_timezone
@@ -55,6 +56,18 @@ class PointWasteExtractor:
         branch_token = safe_slug(branch_filter or "all")
         return self.settings.raw_exports_dir / f"{token}_point_waste_{start_date.isoformat()}_{end_date.isoformat()}_{branch_token}.json"
 
+    def _create_auth_session(self):
+        attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self.http_session_service.create()
+            except (ExtractionError, requests.RequestException) as exc:
+                last_error = exc
+                if attempt < attempts:
+                    time_module.sleep(min(2 ** (attempt - 1), 5))
+        raise ExtractionError("No fue posible abrir una sesión de Point para consultar mermas.") from last_error
+
     def _read_rows(self, *, auth_session, path: str, params: dict, label: str):
         attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
         for attempt in range(1, attempts + 1):
@@ -81,12 +94,12 @@ class PointWasteExtractor:
                     auth_session.session.close()
                 except Exception:  # noqa: BLE001
                     pass
-                auth_session = self.http_session_service.create()
+                auth_session = self._create_auth_session()
 
         raise ExtractionError(f"No fue posible leer {label} desde Point.")
 
     def extract(self, *, start_date: date, end_date: date, branch_filter: str | None = None) -> list[ExtractedWasteLine]:
-        auth_session = self.http_session_service.create()
+        auth_session = self._create_auth_session()
         movements, auth_session = self._read_rows(
             auth_session=auth_session,
             path=self.LIST_PATH,

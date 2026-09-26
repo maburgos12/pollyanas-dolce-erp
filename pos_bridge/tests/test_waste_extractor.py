@@ -4,6 +4,7 @@ import json
 from datetime import date, timezone
 from types import SimpleNamespace
 
+import requests
 from django.test import SimpleTestCase
 
 from pos_bridge.config import load_point_bridge_settings
@@ -88,6 +89,16 @@ class _RetryHttpSessionService:
         )
 
 
+class _ReloginFailureHttpSessionService(_RetryHttpSessionService):
+    def create(self):
+        self.create_count += 1
+        if self.create_count == 2:
+            raise requests.HTTPError("Point no pudo seleccionar la cuenta")
+        return SimpleNamespace(
+            session=_RetrySession(invalid_detail=self.create_count == 1),
+        )
+
+
 class PointWasteExtractorTests(SimpleTestCase):
     def test_extract_treats_naive_point_timestamp_as_utc(self):
         extractor = PointWasteExtractor(
@@ -113,3 +124,15 @@ class PointWasteExtractorTests(SimpleTestCase):
         self.assertEqual(http_session_service.create_count, 2)
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].item_name, "Bollo Zanahoria")
+
+    def test_extract_retries_when_reauthentication_temporarily_fails(self):
+        http_session_service = _ReloginFailureHttpSessionService()
+        extractor = PointWasteExtractor(
+            bridge_settings=load_point_bridge_settings(),
+            http_session_service=http_session_service,
+        )
+
+        rows = extractor.extract(start_date=date(2026, 3, 20), end_date=date(2026, 3, 20))
+
+        self.assertEqual(http_session_service.create_count, 3)
+        self.assertEqual(len(rows), 1)
