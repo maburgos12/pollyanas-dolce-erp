@@ -351,7 +351,7 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn('data-period-autosubmit', rendered)
         self.assertIn('Periodo mostrado: Agosto 2026', rendered)
         self.assertIn('requestSubmit()', rendered)
-        self.assertIn('styles.css?v=20260926-production-table-v2', rendered)
+        self.assertIn('styles.css?v=20260926-production-table-v3', rendered)
 
     def test_partial_point_data_is_summarized_without_exposing_technical_wall(self):
         sources = canonical_balance().sources
@@ -654,6 +654,11 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn(
             ".table-responsive.production-table-wrap {\n"
             "  overflow-y: auto !important;",
+            stylesheet,
+        )
+        self.assertIn(
+            ".production-table-wrap > table.table {\n"
+            "  overflow: visible;",
             stylesheet,
         )
         self.assertIn("max-height: calc(100dvh - 112px);", stylesheet)
