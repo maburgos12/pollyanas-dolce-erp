@@ -1,15 +1,24 @@
 """Reportes repetidos ligados al que ya se está atendiendo."""
 
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
+from threading import Barrier
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.db import close_old_connections, connection, connections, transaction
+from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
+from django.utils import timezone
 
 from core.access import ACCESS_MANAGE
-from core.models import Sucursal, UserModuleAccess
+from core.models import Sucursal, UserModuleAccess, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from fallas.services_duplicados import DuplicadoInvalido, marcar_duplicado, principal_de
+from operacion.models import RegistroHigiene, RespuestaHigiene
+from operacion.services_higiene import _preflight_fallas_higiene
+from operacion.services_higiene_fallas import FallaHigieneConflict, IdentidadFallaHigiene
 
 
 class DuplicadosFallasTests(TestCase):
@@ -47,6 +56,24 @@ class DuplicadosFallasTests(TestCase):
         self.assertEqual(principal.duplicados.count(), 1)
         self.assertTrue(BitacoraFalla.objects.filter(reporte=principal, comentario__contains=str(repetido.pk)).exists())
         self.assertTrue(BitacoraFalla.objects.filter(reporte=repetido, comentario__contains=str(principal.pk)).exists())
+
+    def test_bloquea_ambos_reportes_en_una_consulta_ordenada(self):
+        repetido = self._falla("Repetido")
+        principal = self._falla("Principal")
+
+        with CaptureQueriesContext(connection) as consultas:
+            marcar_duplicado(repetido, principal, self.gestor)
+
+        bloqueos = [
+            consulta["sql"]
+            for consulta in consultas.captured_queries
+            if "fallas_reportefalla" in consulta["sql"] and "FOR UPDATE" in consulta["sql"]
+        ]
+        self.assertEqual(len(bloqueos), 1)
+        self.assertIn("ORDER BY", bloqueos[0])
+        self.assertIn('"fallas_reportefalla"."id" ASC', bloqueos[0])
+        repetido.refresh_from_db()
+        self.assertEqual(repetido.duplicado_de_id, principal.pk)
 
     def test_cerrar_el_principal_arrastra_a_los_repetidos(self):
         principal = self._falla("Llantas de la unidad 3")
@@ -155,3 +182,118 @@ class DuplicadosFallasTests(TestCase):
         repetido.refresh_from_db()
         self.assertEqual(ok.status_code, 200)
         self.assertEqual(repetido.duplicado_de_id, principal.id)
+
+
+class DuplicadosHigieneConcurrenciaTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        user_model = get_user_model()
+        self.usuario = user_model.objects.create_user(
+            username="duplicados.higiene.concurrente",
+            password="test12345",
+        )
+        self.sucursal = Sucursal.objects.create(
+            codigo="DUP-HIG",
+            nombre="Duplicados Higiene",
+            activa=True,
+        )
+        UserProfile.objects.create(user=self.usuario, sucursal=self.sucursal)
+        self.categoria = CategoriaFalla.objects.create(
+            nombre="Instalación duplicados higiene",
+            tipo=CategoriaFalla.TIPO_INSTALACION,
+        )
+        self.reportes = [self._falla_higiene(f"Falla {indice}", indice) for indice in (1, 2)]
+        self.identidad = IdentidadFallaHigiene(
+            sucursal_id=self.sucursal.pk,
+            tipo_checklist="BANOS",
+            punto_clave="bano_sanitario",
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            categoria_id=self.categoria.pk,
+            activo_id=None,
+            area_instalacion="Baños",
+        )
+
+    def _falla_higiene(self, titulo, indice):
+        reporte = ReporteFalla.objects.create(
+            sucursal=self.sucursal,
+            categoria=self.categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo=titulo,
+            descripcion="Sanitario sin descarga.",
+            justificacion_sin_foto="Prueba concurrente.",
+            reportado_por=self.usuario,
+        )
+        registro = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_BANOS,
+            sucursal=self.sucursal,
+            fecha=timezone.localdate() - timedelta(days=indice),
+            clave_instancia=f"duplicado-{indice}",
+            plantilla_version="2026.1",
+            creado_por=self.usuario,
+        )
+        RespuestaHigiene.objects.create(
+            registro=registro,
+            punto_clave="bano_sanitario",
+            seccion="Interior",
+            punto_revision="Sanitario limpio y funcional",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="Sanitario sin descarga",
+            requiere_seguimiento=True,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            reporte_falla=reporte,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
+        )
+        return reporte
+
+    def _marcar_concurrente(self, barrier):
+        close_old_connections()
+        try:
+            barrier.wait(timeout=5)
+            marcar_duplicado(self.reportes[1], self.reportes[0], self.usuario)
+            return "duplicado"
+        finally:
+            connections.close_all()
+
+    def _preflight_concurrente(self, barrier):
+        close_old_connections()
+        try:
+            barrier.wait(timeout=5)
+            with transaction.atomic():
+                with self.assertRaises(FallaHigieneConflict):
+                    _preflight_fallas_higiene(
+                        normalizadas=[
+                            {
+                                "seguimiento": True,
+                                "identidad": self.identidad,
+                                "reporte_falla_id": None,
+                                "falla_decision": "AUTO",
+                                "clave": "bano_sanitario",
+                                "evidencia_disponible": True,
+                            }
+                        ]
+                    )
+            return "conflicto"
+        finally:
+            connections.close_all()
+
+    def test_marcar_duplicado_y_preflight_terminan_sin_deadlock(self):
+        barrier = Barrier(2)
+        with mock.patch("fallas.tasks.notificar_duplicado_vinculado.delay"):
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futuros = [
+                    executor.submit(self._marcar_concurrente, barrier),
+                    executor.submit(self._preflight_concurrente, barrier),
+                ]
+                try:
+                    resultados = sorted(futuro.result(timeout=10) for futuro in futuros)
+                finally:
+                    barrier.abort()
+                    for futuro in futuros:
+                        futuro.cancel()
+
+        self.assertEqual(resultados, ["conflicto", "duplicado"])
+        self.reportes[1].refresh_from_db()
+        self.assertEqual(self.reportes[1].duplicado_de_id, self.reportes[0].pk)

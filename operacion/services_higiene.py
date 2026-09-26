@@ -285,6 +285,8 @@ def _preflight_fallas_higiene(*, normalizadas):
                         "La falla cerrada no corresponde a la identidad de este hallazgo.",
                         item["clave"],
                     )
+                if candidatos:
+                    raise FallaHigieneConflict(candidatos)
                 if not item["evidencia_disponible"]:
                     _error(
                         "Agrega una foto para registrar la reincidencia de la falla cerrada.",

@@ -1102,6 +1102,31 @@ class HigieneConcurrenciaTests(TransactionTestCase):
             terminado.set()
             connections.close_all()
 
+    def _post_reincidencia_concurrente(self, *, reporte_id, instancia, barrier):
+        close_old_connections()
+        try:
+            cliente = Client()
+            cliente.force_login(User.objects.get(pk=self.usuarios[0].pk))
+            barrier.wait(timeout=5)
+            response = cliente.post(
+                reverse("operacion:higiene_guardar"),
+                {
+                    "tipo": "BANOS",
+                    "clave_instancia": instancia,
+                    "hora": "09:30",
+                    "respuestas": json.dumps(
+                        [self._hallazgo(decision="MISMA", reporte_id=reporte_id)]
+                    ),
+                    "evidencia_bano_sanitario": SimpleUploadedFile(
+                        f"{instancia}.png", PNG_1PX, content_type="image/png"
+                    ),
+                },
+                HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            )
+            return response.status_code
+        finally:
+            connections.close_all()
+
     def test_cierre_concurrente_se_serializa_y_no_enlaza_reporte_cerrado(self):
         principal = self._crear_principal_directo()
         cierre_bloqueado = Event()
@@ -1177,6 +1202,43 @@ class HigieneConcurrenciaTests(TransactionTestCase):
         self.assertEqual(RegistroHigiene.objects.count(), 1)
         self.assertEqual(RespuestaHigiene.objects.count(), 1)
         self.assertEqual(set(Path(self.media_tmp.name).rglob("*.png")), archivos_antes)
+
+    def test_dos_reincidencias_del_mismo_cerrado_crean_una_activa(self):
+        principal = self._crear_principal_directo()
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_cierre = timezone.now()
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+        archivos_antes = set(Path(self.media_tmp.name).rglob("*.png"))
+        barrier = Barrier(2)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = [
+                executor.submit(
+                    self._post_reincidencia_concurrente,
+                    reporte_id=principal.pk,
+                    instancia=f"reincidencia-{indice}",
+                    barrier=barrier,
+                )
+                for indice in (1, 2)
+            ]
+            statuses = sorted(self._resultados_futuros(futuros, barrier=barrier))
+
+        self.assertEqual(statuses, [201, 409])
+        self.assertEqual(ReporteFalla.objects.filter(duplicado_de__isnull=True).count(), 2)
+        self.assertEqual(
+            ReporteFalla.objects.filter(
+                duplicado_de__isnull=True,
+                estatus__in=(
+                    ReporteFalla.ESTATUS_ABIERTO,
+                    ReporteFalla.ESTATUS_REVISION,
+                    ReporteFalla.ESTATUS_PROCESO,
+                ),
+            ).count(),
+            1,
+        )
+        self.assertEqual(RegistroHigiene.objects.count(), 2)
+        self.assertEqual(RespuestaHigiene.objects.count(), 2)
+        self.assertEqual(len(set(Path(self.media_tmp.name).rglob("*.png")) - archivos_antes), 1)
 
     def _respuestas_umbral(self):
         reporte = ReporteFalla.objects.create(
