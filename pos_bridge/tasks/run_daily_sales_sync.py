@@ -110,7 +110,10 @@ def run_daily_sales_sync(
             "lag_days_after": int(freshness.lag_days_after or 0),
         }
         try:
-            quality_summary = run_sales_publication_quality_loop(reference_date=end_date)
+            # The guard's reference date means "today". Passing the closed
+            # end_date would make the dashboard correctly exclude that same
+            # date as still open and report a false one-day publication gap.
+            quality_summary = run_sales_publication_quality_loop(reference_date=anchor_date)
         except Exception as exc:
             logger.warning("sales publication quality loop falló (no crítico): %s", exc)
             quality_summary = {"error": str(exc)}
