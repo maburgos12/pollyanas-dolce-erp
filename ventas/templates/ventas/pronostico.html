@@ -133,8 +133,11 @@
             <div class="forecast-product-grid">
               {% for prod in products %}
               <label class="forecast-product-option">
-                <input type="checkbox" name="productos_incluidos" value="{{ prod.sku }}" {% if prod.sku in selected_product_skus %}checked{% endif %}>
-                <span title="{{ prod.nombre }}">{{ prod.nombre }}</span>
+                <input type="checkbox" name="productos_incluidos" value="{{ prod.id }}" {% if prod.id in selected_product_ids %}checked{% endif %}>
+                <span title="{{ prod.nombre }} — Categoría Point: {{ prod.categoria_point }}">
+                  {{ prod.nombre }}
+                  <small class="text-muted d-block">Categoría Point: {{ prod.categoria_point }}</small>
+                </span>
               </label>
               {% endfor %}
             </div>
@@ -309,8 +312,8 @@
       <input type="hidden" name="sucursales" value="{{ branch.id }}">
       {% endif %}
       {% endfor %}
-      {% for sku in selected_product_skus %}
-      <input type="hidden" name="productos_incluidos" value="{{ sku }}">
+      {% for product_id in selected_product_ids %}
+      <input type="hidden" name="productos_incluidos" value="{{ product_id }}">
       {% endfor %}
       <div class="forecast-save-name">
         <label class="form-label" for="forecast-name">Nombre del consolidado</label>

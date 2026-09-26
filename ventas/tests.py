@@ -99,6 +99,11 @@ class VentasModuleTests(SimpleTestCase):
         self.assertIn("data-forecast-loading-form", template)
         self.assertIn("Preparando matriz de ajustes por día", template)
         self.assertIn("No cierres esta ventana", template)
+        self.assertIn('value="{{ prod.id }}"', template)
+        self.assertIn("prod.id in selected_product_ids", template)
+        self.assertIn("Categoría Point: {{ prod.categoria_point }}", template)
+        self.assertNotIn('value="{{ prod.sku }}"', template)
+        self.assertNotIn("selected_product_skus", template)
 
         presets = _projection_presets()
         self.assertEqual([preset["label"] for preset in presets], ["Semana", "15 días", "30 días"])
