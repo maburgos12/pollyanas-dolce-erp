@@ -351,7 +351,7 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn('data-period-autosubmit', rendered)
         self.assertIn('Periodo mostrado: Agosto 2026', rendered)
         self.assertIn('requestSubmit()', rendered)
-        self.assertIn('styles.css?v=20260903-report-point-v1', rendered)
+        self.assertIn('styles.css?v=20260926-production-table-v1', rendered)
 
     def test_partial_point_data_is_summarized_without_exposing_technical_wall(self):
         sources = canonical_balance().sources
@@ -644,6 +644,18 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertNotIn("Sobrante físico", template)
         self.assertNotIn("Faltante no explicado", template)
         self.assertNotIn("Inventario físico", template)
+
+    def test_operational_table_keeps_headers_visible_and_aligned_with_columns(self):
+        template = Path("reportes/templates/reportes/producido_vs_vendido.html").read_text()
+        stylesheet = Path("static/css/styles.css").read_text()
+
+        self.assertEqual(template.count('scope="col"'), 15)
+        self.assertIn('<th class="text-center" title="Estado" scope="col">Est.</th>', template)
+        self.assertIn("overflow-y: auto;", stylesheet)
+        self.assertIn("max-height: calc(100dvh - 112px);", stylesheet)
+        self.assertIn("position: sticky;", stylesheet)
+        self.assertIn(".production-table-wrap .table thead th.text-end", stylesheet)
+        self.assertIn(".production-table-wrap .table thead th.text-center", stylesheet)
 
     def test_csv_export_uses_canonical_point_labels_sign_status_and_sin_dato(self):
         context, _ = self._context(
