@@ -28,7 +28,7 @@ from ventas.services.pronostico_engine import (
     ORDEN_CATEGORIAS,
     WEEKDAYS_ES,
 )
-from ventas.services.pronostico_engine import calcular_pronostico
+from ventas.services.pronostico_engine import calcular_pronostico, forecastable_point_product_ids
 from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 from ventas.services.sales_freshness import (
     get_forecast_sales_freshness,
@@ -222,11 +222,11 @@ def _projection_presets() -> list[dict[str, str | int]]:
 
 def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
     hace_30 = timezone.localdate() - timedelta(days=30)
-    skus_vigentes = set(
+    recent_product_ids = set(
         PointSalesDailyProductFact.objects.filter(
             sale_date__gte=hace_30,
             point_product__active=True,
-            point_product__sku__gt="",
+            point_product_id__isnull=False,
         )
         .exclude(point_product__name__istartswith="TOPPING")
         .exclude(point_product__name__icontains="topping")
@@ -234,46 +234,38 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
         .exclude(point_product__name__icontains="servicio domicilio")
         .exclude(point_product__name__icontains="extra 100")
         .exclude(point_product__name__icontains="media plancha")
-        .values_list("point_product__sku", flat=True)
+        .values_list("point_product_id", flat=True)
         .distinct()
         )
 
-    if not skus_vigentes:
-        # Si no hay ventas recientes, mostramos el catálogo activo completo para no bloquear el pronóstico.
-        skus_vigentes = set(
-            PointProduct.objects.filter(active=True, sku__gt="")
-            .exclude(name__istartswith="TOPPING")
-            .exclude(name__icontains="topping")
-            .exclude(name__icontains="tarjeta de regalo")
-            .exclude(name__icontains="servicio domicilio")
-            .exclude(name__icontains="extra 100")
-            .exclude(name__icontains="media plancha")
-            .values_list("sku", flat=True)
-            .distinct()
-        )
-    pay_durazno_skus = set(
+    forecastable_product_ids = forecastable_point_product_ids()
+    eligible_product_ids = recent_product_ids & forecastable_product_ids
+    if not recent_product_ids:
+        eligible_product_ids = forecastable_product_ids
+
+    pay_durazno_product_ids = set(
         PointSalesDailyProductFact.objects.filter(
             sale_date__gte=timezone.localdate() - timedelta(days=90),
             point_product__active=True,
             point_product__name__icontains="Pay de Queso con Durazno",
         )
-        .values("point_product__sku")
+        .values("point_product_id")
         .annotate(dias=Count("sale_date", distinct=True))
         .filter(dias__lte=3)
-        .values_list("point_product__sku", flat=True)
+        .values_list("point_product_id", flat=True)
     )
     categorias_raw: dict[str, list[dict]] = defaultdict(list)
     products = (
-        PointProduct.objects.filter(active=True, sku__in=skus_vigentes)
+        PointProduct.objects.filter(active=True, id__in=eligible_product_ids)
         .exclude(name__istartswith="TOPPING")
         .exclude(name__icontains="topping")
         .only("id", "sku", "name", "category")
-        .order_by("category", "name")
+        .order_by("category", "name", "id")
     )
     for product in products:
         if _is_excluded_product_name(product.name):
             continue
-        if product.sku in pay_durazno_skus:
+        if product.id in pay_durazno_product_ids:
             continue
         category = _category_for_catalog_product(product)
         if _is_excluded_product_category(category):
@@ -283,6 +275,8 @@ def _catalogo_productos_por_categoria() -> OrderedDict[str, list[dict]]:
                 "id": product.id,
                 "nombre": product.name,
                 "sku": product.sku,
+                "categoria_point": _clean_category_label(product.category),
+                "grupo_operativo": category,
             }
         )
 

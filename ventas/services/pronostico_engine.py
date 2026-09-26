@@ -892,6 +892,17 @@ def _forecastable_queryset(branch_ids: set[int], skus_incluidos: set[str] | None
     return queryset
 
 
+def forecastable_point_product_ids(branch_ids: set[int] | None = None) -> set[int]:
+    selected_branch_ids = branch_ids or set(Sucursal.objects.filter(activa=True).values_list("id", flat=True))
+    if not selected_branch_ids:
+        return set()
+    return set(
+        _forecastable_queryset(selected_branch_ids)
+        .values_list("point_product_id", flat=True)
+        .distinct()
+    )
+
+
 def calcular_pronostico(
     fecha_inicio: date,
     fecha_fin: date,

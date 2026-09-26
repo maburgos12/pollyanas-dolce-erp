@@ -2,11 +2,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
+from django.contrib.auth import get_user_model
+from django.http import QueryDict
 from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from ventas.services.pronostico_engine import (
     _apply_special_context_forecast,
@@ -23,6 +27,7 @@ from ventas.services.sales_freshness import (
 )
 from ventas.services.proyecciones_engine import _context_uplift_lookup, _season_name, calcular_proyeccion_operativa
 from core.models import Sucursal
+from pos_bridge.models import PointBranch, PointProduct, PointSalesDailyProductFact
 from recetas.models import Receta
 from reportes.models import FactVentaDiaria
 import ventas.views as ventas_views
@@ -484,6 +489,62 @@ class VentasModuleTests(SimpleTestCase):
 
         self.assertTrue(freshness.is_fresh)
         delay.assert_not_called()
+
+
+class VentasPointIdentityTests(TestCase):
+    def setUp(self):
+        self.allowed_user = get_user_model().objects.create_superuser(
+            username="ventas_point_identity",
+            email="ventas-point-identity@example.com",
+            password="test12345",
+        )
+        self.branch = Sucursal.objects.create(codigo="POINT-ID", nombre="Point identidad", activa=True)
+        self.point_branch = PointBranch.objects.create(
+            external_id="POINT-ID",
+            name="Point identidad",
+            erp_branch=self.branch,
+        )
+        self.recipe = Receta.objects.create(
+            nombre="Bollo Lotus",
+            codigo_point="0160",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            familia="Bollo",
+            categoria="Bollo",
+            hash_contenido="ventas-point-id-bollo-lotus",
+        )
+        self.bollo = PointProduct.objects.create(
+            external_id="point-bollo-lotus",
+            sku="0160",
+            name="Bollo Lotus",
+            category="Bollo",
+        )
+        self.glow = PointProduct.objects.create(
+            external_id="point-glow-2",
+            sku="0160",
+            name="Glow 2",
+            category="Glow",
+        )
+        PointSalesDailyProductFact.objects.create(
+            branch=self.point_branch,
+            sale_date=timezone.localdate() - timedelta(days=1),
+            sucursal_nombre=self.branch.nombre,
+            categoria="Bollo",
+            producto_nombre_historico="Bollo Lotus",
+            point_product=self.bollo,
+            receta=self.recipe,
+            match_catalogo_status="EXACT_CODE",
+            total_cantidad=Decimal("5"),
+            total_venta=Decimal("500"),
+            total_venta_neta=Decimal("500"),
+        )
+
+    def test_selector_uses_the_sold_point_product_id_not_every_product_with_the_sku(self):
+        catalog = ventas_views._catalogo_productos_por_categoria()
+        products = [product for rows in catalog.values() for product in rows]
+
+        self.assertEqual([product["id"] for product in products], [self.bollo.id])
+        self.assertEqual(products[0]["categoria_point"], "Bollo")
+        self.assertEqual(products[0]["grupo_operativo"], "Bollo")
 
 
 class VentasProjectionEngineTests(TestCase):
