@@ -17,6 +17,7 @@ from django.utils import timezone
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.models import PointBranch, PointConversionLine, PointSyncJob
 from pos_bridge.services.point_http_client import PointHttpSessionClient
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, months_in_range
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import Receta
@@ -385,24 +386,27 @@ def sync_conversion_lines(
         },
     )
     try:
-        with PointHttpSessionClient(settings) as client:
-            client.login()
-            report = _find_ready_report(client, date_from=date_from, date_to=date_to)
-            if report is None:
-                created_after = timezone.now()
-                create_response = _create_report(client, date_from=date_from, date_to=date_to)
-                logger.info("Reporte conversion disparado: %s", create_response.text[:200])
-                report = _poll_report(
-                    client,
-                    created_after=created_after,
-                    expected_report_pk=_created_report_pk(create_response),
-                )
-            else:
-                logger.info("Se reutiliza reporte de conversión exacto ya listo: %s", report.get("PK_Reporte"))
-            pk_reporte = str(report.get("PK_Reporte") or "").strip()
-            if not pk_reporte:
-                raise ValueError("Point no devolvió PK_Reporte para descargar conversiones.")
-            rows = _read_report_rows(_download_report(client, pk_reporte=pk_reporte, settings=settings))
+        with point_account_session_lock(wait=True) as acquired:
+            if not acquired:
+                raise TimeoutError("Point está ocupado con otra sincronización de cuenta.")
+            with PointHttpSessionClient(settings) as client:
+                client.login()
+                report = _find_ready_report(client, date_from=date_from, date_to=date_to)
+                if report is None:
+                    created_after = timezone.now()
+                    create_response = _create_report(client, date_from=date_from, date_to=date_to)
+                    logger.info("Reporte conversion disparado: %s", create_response.text[:200])
+                    report = _poll_report(
+                        client,
+                        created_after=created_after,
+                        expected_report_pk=_created_report_pk(create_response),
+                    )
+                else:
+                    logger.info("Se reutiliza reporte de conversión exacto ya listo: %s", report.get("PK_Reporte"))
+                pk_reporte = str(report.get("PK_Reporte") or "").strip()
+                if not pk_reporte:
+                    raise ValueError("Point no devolvió PK_Reporte para descargar conversiones.")
+                rows = _read_report_rows(_download_report(client, pk_reporte=pk_reporte, settings=settings))
 
         branch_map = _build_branch_map()
         recipe_map = _build_recipe_map()

@@ -101,6 +101,14 @@ class PointConversionRerunAuthorityTests(TestCase):
                 branch_filter=branch_filter,
             )
 
+    def test_conversion_sync_holds_the_shared_point_session_lock(self):
+        with patch("pos_bridge.services.conversion_sync_service.point_account_session_lock") as session_lock:
+            session_lock.return_value.__enter__.return_value = True
+
+            self._sync()
+
+        session_lock.assert_called_once_with(wait=True)
+
     def _conversion_authority(self):
         service = MonthlyPointProductBalanceService()
         service._build_conversion_cache = {}

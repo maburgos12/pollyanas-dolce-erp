@@ -5,6 +5,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 
+from unittest.mock import patch
+
 from django.test import TestCase
 
 from control.models import MermaPOS
@@ -112,6 +114,16 @@ class PointMovementSyncServiceTests(TestCase):
             defaults={"nombre": "CEDIS", "activa": True},
         )
         self.branch_produccion_crucero = Sucursal.objects.create(codigo="PRODUCCION_CRUCERO", nombre="Produccion Crucero")
+
+    @patch("pos_bridge.services.movement_sync_service.point_account_session_lock")
+    def test_waste_sync_holds_the_shared_point_session_lock(self, session_lock):
+        session_lock.return_value.__enter__.return_value = True
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([]))
+
+        job = service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+
+        self.assertEqual(job.status, "SUCCESS")
+        session_lock.assert_called_once_with(wait=True)
 
     def test_point_branch_matches_unique_sucursal_name_fragment(self):
         leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Sucursal Leyva")
