@@ -136,7 +136,8 @@
 }
 
 .hig-consolidation__table-wrap {
-  overflow-x: auto;
+  max-height: min(65vh, 44rem);
+  overflow: auto;
 }
 
 .hig-consolidation__table-wrap:focus-visible {
@@ -229,6 +230,7 @@
   }
 
   .hig-consolidation__table-wrap {
+    max-height: none;
     overflow: visible;
   }
 

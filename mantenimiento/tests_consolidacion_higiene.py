@@ -1,5 +1,7 @@
 from datetime import date, datetime
+from pathlib import Path
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -113,6 +115,32 @@ class ConsolidacionHigieneViewTests(TestCase):
         )
         self.assertContains(response, "Revisión manual; no se aplicarán")
         self.assertContains(response, "data-async-action", html=False)
+
+    def test_formulario_declara_restauracion_local_de_foco_para_reintento(self):
+        self.client.force_login(self.dg)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "data-restore-focus-on-error", html=False)
+        self.assertContains(response, "new MutationObserver", html=False)
+        self.assertContains(
+            response, "submitter.focus({ preventScroll: true })", html=False
+        )
+        self.assertContains(
+            response, 'attributeFilter: ["data-action-pending"]', html=False
+        )
+
+    def test_tablas_limitan_altura_en_escritorio_y_conservan_tarjetas_moviles(self):
+        css = (
+            Path(settings.BASE_DIR)
+            / "static/css/template_modules/mantenimiento-consolidacion-higiene.css"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("max-height: min(65vh, 44rem);", css)
+        self.assertIn("overflow: auto;", css)
+        bloque_movil = css.split("@media (max-width: 760px)", maxsplit=1)[1]
+        self.assertIn("max-height: none;", bloque_movil)
+        self.assertIn("display: block;", bloque_movil)
 
     def test_post_async_devuelve_toast_y_redirect_estable(self):
         self.client.force_login(self.dg)

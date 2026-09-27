@@ -6,7 +6,7 @@
 {% block body_class %}page-mantenimiento-consolidacion-higiene{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/template_modules/mantenimiento-consolidacion-higiene.css' %}?v=20260927-1">
+<link rel="stylesheet" href="{% static 'css/template_modules/mantenimiento-consolidacion-higiene.css' %}?v=20260927-2">
 {% endblock %}
 
 {% block content %}
@@ -40,6 +40,7 @@
     <form
       method="post"
       data-async-action
+      data-restore-focus-on-error
       data-confirm-message="Se vincularán únicamente las coincidencias exactas seleccionadas. La evidencia y los estados se conservarán. ¿Continuar?"
     >
       {% csrf_token %}
@@ -130,4 +131,35 @@
     </div>
   </section>
 </main>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  "use strict";
+
+  var form = document.querySelector("form[data-async-action][data-restore-focus-on-error]");
+  if (!form || !window.MutationObserver) return;
+
+  var submitter = null;
+  var confirmDialog = document.getElementById("erp-confirm-dialog");
+
+  form.addEventListener("submit", function (event) {
+    submitter = event.submitter || form.querySelector('[type="submit"]');
+  });
+
+  var observer = new MutationObserver(function () {
+    if (form.dataset.actionPending !== "false") return;
+    if (!submitter || submitter.disabled || !submitter.isConnected) return;
+    if (!submitter.getClientRects().length) return;
+    if (confirmDialog && !confirmDialog.hidden) return;
+    submitter.focus({ preventScroll: true });
+  });
+
+  observer.observe(form, {
+    attributes: true,
+    attributeFilter: ["data-action-pending"]
+  });
+})();
+</script>
 {% endblock %}
