@@ -152,3 +152,16 @@ class PointLiveInventoryLookupServiceTests(TestCase):
         )
 
         self.assertIn("pickup_live_point:v2:", key)
+
+    @patch("pos_bridge.services.live_inventory_lookup_service.point_account_session_lock")
+    def test_live_lookup_does_not_open_a_session_while_monthly_sync_owns_point(self, session_lock):
+        session_lock.return_value.__enter__.return_value = False
+
+        with self.assertRaisesMessage(PointLiveInventoryLookupError, "sincronización"):
+            self._service().get_stock(
+                product_codes=["PASTEL-1"],
+                sucursal=self.sucursal,
+                point_branch=self.point_branch,
+            )
+
+        self.client_factory.assert_not_called()

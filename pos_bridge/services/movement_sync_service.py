@@ -37,11 +37,12 @@ from pos_bridge.services.inventory_baseline import (
     point_transfer_origin_exit_hash,
 )
 from pos_bridge.services.movement_matching_service import PointMovementMatchingService
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.production_entry_extractor import PointProductionEntryExtractor
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.transfer_extractor import PointTransferExtractor
 from pos_bridge.services.waste_extractor import PointWasteExtractor
-from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
+from pos_bridge.utils.exceptions import ExtractionError, PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
 from pos_bridge.utils.source_retry import source_error_metadata
@@ -868,7 +869,14 @@ class PointMovementSyncService:
         sync_job = self.create_job(job_type=PointSyncJob.JOB_TYPE_WASTE, triggered_by=triggered_by, parameters=parameters)
         self.record_log(sync_job, PointExtractionLog.LEVEL_INFO, "Inicio de sincronización Point mermas.", context=parameters)
         try:
-            lines = self.waste_extractor.extract(start_date=start_date, end_date=end_date, branch_filter=branch_filter)
+            with point_account_session_lock(wait=True) as acquired:
+                if not acquired:
+                    raise ExtractionError("Point está ocupado con otra sincronización de cuenta.")
+                lines = self.waste_extractor.extract(
+                    start_date=start_date,
+                    end_date=end_date,
+                    branch_filter=branch_filter,
+                )
             summary = self.persist_waste_lines(sync_job, lines)
             return self._mark_success(sync_job, summary)
         except PosBridgeError as exc:

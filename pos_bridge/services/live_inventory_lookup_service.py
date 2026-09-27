@@ -13,6 +13,7 @@ from core.models import Sucursal
 from maestros.models import Insumo
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import PointBranch
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.point_http_client import PointHttpSessionClient
 from pos_bridge.utils.exceptions import AuthenticationError, ConfigurationError, ExtractionError
 from pos_bridge.utils.helpers import normalize_text
@@ -95,26 +96,31 @@ class PointLiveInventoryLookupService:
 
         settings = load_point_bridge_settings()
         try:
-            with self.client_factory(settings) as client:
-                client.login(branch_hint=sucursal.nombre or sucursal.codigo)
-                product = self._find_product(client=client, codes=codes)
-                product_id = _first_present(product, ("PK", "PK_Producto", "id", "Id"))
-                if product_id is None:
-                    raise PointLiveInventoryLookupError("Point no devolvió PK para el producto de stock.")
-                if self._is_insumo(product):
-                    branch_row = self._find_official_insumo_stock(
-                        client=client,
-                        product=product,
-                        codes=codes,
-                        point_branch=point_branch,
+            with point_account_session_lock(wait=False) as acquired:
+                if not acquired:
+                    raise PointLiveInventoryLookupError(
+                        "Point está ocupado con una sincronización; se usará la existencia persistida."
                     )
-                else:
-                    stock_rows = client.get_product_stock(product_id, timeout=self.timeout_seconds)
-                    branch_row = self._find_branch_row(
-                        stock_rows=stock_rows,
-                        sucursal=sucursal,
-                        point_branch=point_branch,
-                    )
+                with self.client_factory(settings) as client:
+                    client.login(branch_hint=sucursal.nombre or sucursal.codigo)
+                    product = self._find_product(client=client, codes=codes)
+                    product_id = _first_present(product, ("PK", "PK_Producto", "id", "Id"))
+                    if product_id is None:
+                        raise PointLiveInventoryLookupError("Point no devolvió PK para el producto de stock.")
+                    if self._is_insumo(product):
+                        branch_row = self._find_official_insumo_stock(
+                            client=client,
+                            product=product,
+                            codes=codes,
+                            point_branch=point_branch,
+                        )
+                    else:
+                        stock_rows = client.get_product_stock(product_id, timeout=self.timeout_seconds)
+                        branch_row = self._find_branch_row(
+                            stock_rows=stock_rows,
+                            sucursal=sucursal,
+                            point_branch=point_branch,
+                        )
         except (AuthenticationError, ConfigurationError, ExtractionError, OSError, TimeoutError) as exc:
             raise PointLiveInventoryLookupError(str(exc)) from exc
 
