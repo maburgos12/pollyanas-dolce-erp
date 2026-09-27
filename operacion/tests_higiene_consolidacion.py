@@ -1,12 +1,12 @@
 from datetime import date, datetime
 from tempfile import TemporaryDirectory
-from threading import Barrier, Thread
+from threading import Barrier, Event, Thread
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -705,6 +705,74 @@ class ConsolidacionHigieneTests(TestCase):
         self.assertIsNone(repetido.duplicado_de_id)
         self.assertFalse(AuditLog.objects.filter(action="CONSOLIDATE").exists())
 
+    def test_repetido_con_descendientes_no_aparece_ni_se_aplica_automaticamente(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        descendiente = ReporteFalla.objects.create(
+            sucursal=self.sucursal,
+            categoria=self.categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Falla ya enlazada",
+            descripcion="Evidencia histórica independiente.",
+            justificacion_sin_foto="Prueba automatizada.",
+            reportado_por=self.operadora,
+            duplicado_de=repetido,
+        )
+
+        preview = proponer_consolidacion_higiene()
+        resultado = aplicar_consolidacion_higiene(
+            [(principal.id, repetido.id)], actor=self.dg
+        )
+
+        self.assertNotIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in preview.exactas},
+        )
+        repetido.refresh_from_db()
+        descendiente.refresh_from_db()
+        self.assertEqual(resultado.aplicados, 0)
+        self.assertEqual(resultado.omitidos, 1)
+        self.assertIsNone(repetido.duplicado_de_id)
+        self.assertEqual(descendiente.duplicado_de_id, repetido.id)
+        self.assertFalse(AuditLog.objects.filter(action="CONSOLIDATE").exists())
+        self.assertFalse(
+            BitacoraFalla.objects.filter(
+                reporte_id__in=[principal.id, repetido.id, descendiente.id]
+            ).exists()
+        )
+
+    def test_aplicar_bloquea_respuestas_y_registros_fuente_en_orden(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+
+        with CaptureQueriesContext(connection) as consultas:
+            aplicar_consolidacion_higiene(
+                [(principal.id, repetido.id)], actor=self.dg
+            )
+
+        bloqueos = [
+            consulta["sql"].upper()
+            for consulta in consultas.captured_queries
+            if "FOR UPDATE" in consulta["sql"].upper()
+        ]
+        self.assertTrue(
+            any(
+                '"OPERACION_RESPUESTAHIGIENE"' in sql and "ORDER BY" in sql
+                for sql in bloqueos
+            ),
+            bloqueos,
+        )
+        self.assertTrue(
+            any(
+                '"OPERACION_REGISTROHIGIENE"' in sql and "ORDER BY" in sql
+                for sql in bloqueos
+            ),
+            bloqueos,
+        )
+
     def test_aplicar_deduplica_la_misma_seleccion_en_una_solicitud(self):
         principal, repetido, _, _ = self.crear_repeticiones(
             observaciones=("No descarga agua", "No descarga agua"),
@@ -777,6 +845,7 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
             tipo=CategoriaFalla.TIPO_INSTALACION,
         )
         reportes = []
+        respuestas = []
         for indice, fecha in enumerate((date(2026, 9, 25), date(2026, 9, 26)), 1):
             reporte = ReporteFalla.objects.create(
                 sucursal=sucursal,
@@ -799,7 +868,7 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
                 plantilla_version="2026.1",
                 creado_por=operadora,
             )
-            RespuestaHigiene.objects.create(
+            respuesta = RespuestaHigiene.objects.create(
                 registro=registro,
                 punto_clave="banos_sanitario",
                 seccion="Limpieza de baños",
@@ -813,7 +882,9 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
                 continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
             )
             reportes.append(reporte)
+            respuestas.append(respuesta)
         self.pair = (reportes[0].id, reportes[1].id)
+        self.respuesta_repetida_id = respuestas[1].id
 
     def test_dos_aplicaciones_concurrentes_generan_un_solo_enlace_y_una_auditoria(self):
         barrier = Barrier(2)
@@ -845,3 +916,74 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
         self.assertEqual(sum(row.omitidos for row in resultados), 1)
         self.assertEqual(AuditLog.objects.filter(action="CONSOLIDATE").count(), 1)
         self.assertEqual(BitacoraFalla.objects.count(), 2)
+
+    def test_cambio_concurrente_de_fuente_se_confirma_antes_de_revalidar_sin_deadlock(self):
+        actualizacion_lista = Event()
+        aplicacion_iniciada = Event()
+        resultados = []
+        errores = []
+
+        registro_alterno = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_LIMPIEZA,
+            sucursal=ReporteFalla.objects.get(pk=self.pair[1]).sucursal,
+            fecha=date(2026, 9, 27),
+            clave_instancia="programa-alterno",
+            plantilla_version="2026.1",
+            creado_por_id=self.dg.id,
+        )
+
+        def cambiar_fuente():
+            close_old_connections()
+            try:
+                with transaction.atomic():
+                    respuesta = RespuestaHigiene.objects.select_for_update().get(
+                        pk=self.respuesta_repetida_id
+                    )
+                    respuesta.observacion = "Ahora pierde agua"
+                    respuesta.punto_clave = "programa_lamparas"
+                    respuesta.registro = registro_alterno
+                    respuesta.save(
+                        update_fields=["observacion", "punto_clave", "registro"]
+                    )
+                    actualizacion_lista.set()
+                    if not aplicacion_iniciada.wait(timeout=5):
+                        raise AssertionError("La aplicación concurrente no inició")
+            except Exception as exc:  # pragma: no cover - se afirma fuera del hilo
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        def aplicar():
+            close_old_connections()
+            try:
+                if not actualizacion_lista.wait(timeout=5):
+                    raise AssertionError("La actualización concurrente no quedó lista")
+                actor = get_user_model().objects.get(pk=self.dg.pk)
+                aplicacion_iniciada.set()
+                resultados.append(
+                    aplicar_consolidacion_higiene([self.pair], actor=actor)
+                )
+            except Exception as exc:  # pragma: no cover - se afirma fuera del hilo
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        threads = [Thread(target=cambiar_fuente), Thread(target=aplicar)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertFalse(errores)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(len(resultados), 1)
+        self.assertEqual(resultados[0].aplicados, 0)
+        self.assertEqual(resultados[0].omitidos, 1)
+        repetido = ReporteFalla.objects.get(pk=self.pair[1])
+        respuesta = RespuestaHigiene.objects.get(pk=self.respuesta_repetida_id)
+        self.assertIsNone(repetido.duplicado_de_id)
+        self.assertEqual(respuesta.observacion, "Ahora pierde agua")
+        self.assertEqual(respuesta.punto_clave, "programa_lamparas")
+        self.assertEqual(respuesta.registro_id, registro_alterno.id)
+        self.assertFalse(AuditLog.objects.filter(action="CONSOLIDATE").exists())
+        self.assertFalse(BitacoraFalla.objects.exists())

@@ -4,14 +4,14 @@ import unicodedata
 
 from django.core.exceptions import PermissionDenied
 from django.db import connection, transaction
-from django.db.models import F, OuterRef, Prefetch, Subquery
+from django.db.models import Exists, F, OuterRef, Prefetch, Q, Subquery
 from django.utils import timezone
 
 from core.access import is_admin_or_dg
 from core.duplicados import enlazar_duplicado
 from core.models import AuditLog
 from fallas.models import BitacoraFalla, ReporteFalla
-from operacion.models import RespuestaHigiene
+from operacion.models import RegistroHigiene, RespuestaHigiene
 
 
 @dataclass(frozen=True)
@@ -143,12 +143,16 @@ def proponer_consolidacion_higiene():
         .order_by("id")
         .values("id")[:1]
     )
+    tiene_duplicados = ReporteFalla.objects.filter(
+        duplicado_de_id=OuterRef("reporte_falla_id")
+    )
     respuestas_consultadas = list(
         RespuestaHigiene.objects.filter(
             reporte_falla__isnull=False,
             reporte_falla__duplicado_de__isnull=True,
             id=Subquery(primera_respuesta),
         )
+        .annotate(_tiene_duplicados=Exists(tiene_duplicados))
         .select_related(
             "registro",
             "reporte_falla",
@@ -187,6 +191,8 @@ def proponer_consolidacion_higiene():
     for rows in grupos.values():
         principales = [rows[0]]
         for candidata in rows[1:]:
+            if candidata._tiene_duplicados:
+                continue
             principales_activas = [
                 principal
                 for principal in principales
@@ -262,6 +268,23 @@ def _normalizar_pares(pares):
     return tuple(unicos)
 
 
+def _bloquear_fuentes_higiene(reporte_ids):
+    """Bloquea las filas que determinan identidad y exactitud, siempre por PK."""
+
+    respuestas = list(
+        RespuestaHigiene.objects.select_for_update()
+        .filter(reporte_falla_id__in=reporte_ids)
+        .order_by("pk")
+    )
+    registro_ids = sorted({respuesta.registro_id for respuesta in respuestas})
+    if registro_ids:
+        list(
+            RegistroHigiene.objects.select_for_update()
+            .filter(pk__in=registro_ids)
+            .order_by("pk")
+        )
+
+
 @transaction.atomic
 def aplicar_consolidacion_higiene(pares, *, actor):
     """Vincula únicamente pares que siguen exactos al momento de aplicar."""
@@ -274,12 +297,22 @@ def aplicar_consolidacion_higiene(pares, *, actor):
 
     _bloquear_aplicaciones_concurrentes()
     ids = sorted({reporte_id for par in pares for reporte_id in par})
+    reportes_bloqueados = list(
+        ReporteFalla.objects.select_for_update()
+        .filter(Q(pk__in=ids) | Q(duplicado_de_id__in=ids))
+        .order_by("pk")
+    )
     reportes = {
         reporte.pk: reporte
-        for reporte in ReporteFalla.objects.select_for_update()
-        .filter(pk__in=ids)
-        .order_by("pk")
+        for reporte in reportes_bloqueados
+        if reporte.pk in ids
     }
+    padres_con_hijos = {
+        reporte.duplicado_de_id
+        for reporte in reportes_bloqueados
+        if reporte.duplicado_de_id in ids
+    }
+    _bloquear_fuentes_higiene(ids)
 
     preview = proponer_consolidacion_higiene()
     propuestas = {
@@ -294,7 +327,11 @@ def aplicar_consolidacion_higiene(pares, *, actor):
         if propuesta is None or principal is None or repetido is None:
             omitidos += 1
             continue
-        if principal.duplicado_de_id is not None or repetido.duplicado_de_id is not None:
+        if (
+            principal.duplicado_de_id is not None
+            or repetido.duplicado_de_id is not None
+            or repetido_id in padres_con_hijos
+        ):
             omitidos += 1
             continue
 
