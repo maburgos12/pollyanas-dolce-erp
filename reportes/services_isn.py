@@ -696,6 +696,8 @@ def _validar_o_enriquecer_existente(
     base_declarada: Decimal | None,
     diferencia_base: Decimal | None,
     estado_previsto: str,
+    diferencia_isn_aceptada: bool,
+    motivo_diferencia_isn: str,
 ) -> ExpedienteISN:
     conflictos = []
     if existente.periodo != preview.periodo:
@@ -711,6 +713,10 @@ def _validar_o_enriquecer_existente(
         conflictos.append("ISN calculado")
     if metadata_existente.get("diferencia_isn") != str(preview.diferencia_isn):
         conflictos.append("diferencia ISN")
+    if bool(metadata_existente.get("diferencia_isn_aceptada")) != diferencia_isn_aceptada:
+        conflictos.append("aceptacion de diferencia ISN")
+    if (metadata_existente.get("motivo_diferencia_isn") or "") != motivo_diferencia_isn:
+        conflictos.append("motivo de diferencia ISN")
     politica_preview = {
         codigo: str(proporcion)
         for codigo, proporcion in preview.politica_exenciones
@@ -771,6 +777,8 @@ def _validar_o_enriquecer_existente(
                 "isn_calculado": str(preview.isn_calculado),
                 "diferencia_isn": str(preview.diferencia_isn),
                 "tolerancia_isn": str(TOLERANCIA_ISN_CALCULADO),
+                "diferencia_isn_aceptada": diferencia_isn_aceptada,
+                "motivo_diferencia_isn": motivo_diferencia_isn,
                 "politica_exenciones": politica_preview,
             }
         )
@@ -786,6 +794,8 @@ def _aplicar_expediente_isn_una_vez(
     base_declarada: Decimal | None,
     diferencia_base: Decimal | None,
     estado_previsto: str,
+    diferencia_isn_aceptada: bool,
+    motivo_diferencia_isn: str,
     aplicado_por=None,
 ) -> ExpedienteISN:
     with transaction.atomic():
@@ -850,6 +860,8 @@ def _aplicar_expediente_isn_una_vez(
                 base_declarada=base_declarada,
                 diferencia_base=diferencia_base,
                 estado_previsto=estado_previsto,
+                diferencia_isn_aceptada=diferencia_isn_aceptada,
+                motivo_diferencia_isn=motivo_diferencia_isn,
             )
 
         if estado_previsto == ExpedienteISN.ESTADO_APLICADO:
@@ -882,6 +894,8 @@ def _aplicar_expediente_isn_una_vez(
                 "isn_calculado": str(preview.isn_calculado),
                 "diferencia_isn": str(preview.diferencia_isn),
                 "tolerancia_isn": str(TOLERANCIA_ISN_CALCULADO),
+                "diferencia_isn_aceptada": diferencia_isn_aceptada,
+                "motivo_diferencia_isn": motivo_diferencia_isn,
                 "politica_exenciones": {
                     codigo: str(proporcion)
                     for codigo, proporcion in preview.politica_exenciones
@@ -926,6 +940,8 @@ def aplicar_expediente_isn(
     *,
     base_declarada: Decimal | None = None,
     aplicado_por=None,
+    aceptar_diferencia_isn: bool = False,
+    motivo_diferencia_isn: str = "",
 ) -> ExpedienteISN:
     _validar_preview(preview)
     if base_declarada is not None and preview.base_declarada is not None:
@@ -938,8 +954,22 @@ def aplicar_expediente_isn(
         preview.base_gravada_total,
         base_a_conciliar,
     )
-    if abs(preview.diferencia_isn) > TOLERANCIA_ISN_CALCULADO:
+    diferencia_material = abs(preview.diferencia_isn) > TOLERANCIA_ISN_CALCULADO
+    motivo_diferencia_isn = (motivo_diferencia_isn or "").strip()
+    if aceptar_diferencia_isn:
+        if not diferencia_material:
+            raise ValueError("No existe una diferencia material de ISN que aceptar.")
+        if not motivo_diferencia_isn:
+            raise ValueError("Aceptar una diferencia de ISN requiere un motivo explicito.")
+        if estado_previsto == ExpedienteISN.ESTADO_DISCREPANCIA:
+            raise ValueError(
+                "La aceptacion de diferencia ISN no sustituye una discrepancia de base declarada."
+            )
+    elif diferencia_material:
         estado_previsto = ExpedienteISN.ESTADO_DISCREPANCIA
+
+    if not aceptar_diferencia_isn:
+        motivo_diferencia_isn = ""
 
     ultimo_error = None
     for _ in range(3):
@@ -949,6 +979,8 @@ def aplicar_expediente_isn(
                 base_declarada=base_declarada,
                 diferencia_base=diferencia_base,
                 estado_previsto=estado_previsto,
+                diferencia_isn_aceptada=aceptar_diferencia_isn,
+                motivo_diferencia_isn=motivo_diferencia_isn,
                 aplicado_por=aplicado_por,
             )
         except IntegrityError as exc:

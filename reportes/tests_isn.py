@@ -1377,6 +1377,70 @@ class ISNApplicationTests(TestCase):
         )
         self.assertEqual(ExpedienteISN.objects.count(), 2)
 
+    def test_diferencia_historica_aceptada_aplica_pago_y_conserva_observacion(self):
+        empleado = self._crear_empleado("E-HIST-OBS")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-HISTORICO-OBSERVADO", "110.00")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        expediente = aplicar_expediente_isn(
+            preview,
+            aceptar_diferencia_isn=True,
+            motivo_diferencia_isn=(
+                "Regularizacion historica: CFDI pagado sin base declarada disponible."
+            ),
+        )
+        reintento = aplicar_expediente_isn(
+            preview,
+            aceptar_diferencia_isn=True,
+            motivo_diferencia_isn=(
+                "Regularizacion historica: CFDI pagado sin base declarada disponible."
+            ),
+        )
+
+        self.assertEqual(reintento.pk, expediente.pk)
+        self.assertEqual(ExpedienteISN.objects.count(), 1)
+        self.assertEqual(expediente.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertIsNotNone(expediente.aplicado_en)
+        self.assertTrue(expediente.metadata["diferencia_isn_aceptada"])
+        self.assertEqual(expediente.metadata["diferencia_isn"], "14.00")
+        self.assertIn("sin base declarada", expediente.metadata["motivo_diferencia_isn"])
+        self.assertEqual(
+            expediente.distribuciones.aggregate(total=Sum("monto_isn"))["total"],
+            D("110.00"),
+        )
+
+    def test_aceptar_diferencia_historica_exige_motivo_explicito(self):
+        empleado = self._crear_empleado("E-HIST-SIN-MOT")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-HISTORICO-SIN-MOTIVO", "110.00")
+        preview = preparar_expediente_isn(self.PERIODO, uuid=cfdi.uuid)
+
+        with self.assertRaisesMessage(ValueError, "motivo"):
+            aplicar_expediente_isn(preview, aceptar_diferencia_isn=True)
+
+        self.assertEqual(ExpedienteISN.objects.count(), 0)
+
+    def test_comando_aplica_diferencia_historica_solo_con_bandera_y_motivo(self):
+        empleado = self._crear_empleado("E-CMD-HIST-OBS")
+        self._crear_nomina_completa(((empleado, D("4000.00")),))
+        cfdi = self._crear_cfdi("CFDI-ISN-CMD-HISTORICO-OBSERVADO", "110.00")
+        stdout = StringIO()
+
+        call_command(
+            "materializar_isn",
+            periodo="2026-08",
+            uuid=cfdi.uuid,
+            apply=True,
+            aceptar_diferencia_isn=True,
+            motivo_diferencia_isn="CFDI historico pagado; base estatal no disponible.",
+            stdout=stdout,
+        )
+
+        expediente = ExpedienteISN.objects.get(uuid=cfdi.uuid)
+        self.assertEqual(expediente.estado, ExpedienteISN.ESTADO_APLICADO)
+        self.assertIn(f"APLICADO expediente={expediente.pk}", stdout.getvalue())
+
     def test_comando_reporta_estado_real_del_expediente(self):
         empleado = self._crear_empleado("E-ESTADO-COMANDO")
         self._crear_nomina_completa(((empleado, D("4000.00")),))
