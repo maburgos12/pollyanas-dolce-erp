@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from control.models import MermaMensualSucursal
 from core.models import Sucursal
+from maestros.models import Insumo
 from pos_bridge.models import (
     PointBranch,
     PointConversionLine,
@@ -591,11 +592,12 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             sync_job=sync_job,
         )
 
-    def _waste(self, recipe, quantity, when, suffix, *, sync_job=None):
+    def _waste(self, recipe, quantity, when, suffix, *, sync_job=None, insumo=None):
         return PointWasteLine.objects.create(
             branch=self.branch,
             erp_branch=self.sucursal,
             receta=recipe,
+            insumo=insumo,
             movement_external_id=f"waste-{suffix}",
             source_hash=f"waste-hash-{suffix}",
             movement_at=timezone.make_aware(when, timezone.get_current_timezone()),
@@ -604,6 +606,44 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             quantity=Decimal(quantity),
             sync_job=sync_job,
         )
+
+    def test_dual_mapped_internal_waste_does_not_enter_finished_product_balance(self):
+        internal_recipe = self._recipe("Pan interno CEDIS", "PAN-INTERNO")
+        internal_input = Insumo.objects.create(
+            nombre=internal_recipe.nombre,
+            nombre_point=internal_recipe.nombre,
+            codigo_point=internal_recipe.codigo_point,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        final_input = Insumo.objects.create(
+            nombre=self.parent.nombre,
+            nombre_point=self.parent.nombre,
+            codigo_point=self.parent.codigo_point,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "9", datetime(2026, 7, 31, 8))
+        self._waste(
+            internal_recipe,
+            "2",
+            datetime(2026, 7, 10, 12),
+            "internal-input",
+            insumo=internal_input,
+        )
+        self._waste(
+            self.parent,
+            "1",
+            datetime(2026, 7, 10, 13),
+            "finished-product",
+            insumo=final_input,
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        self.assertNotIn(internal_recipe.id, balance.rows)
+        self.assertEqual(balance.rows[self.parent.id].waste, Decimal("1"))
+        self.assertEqual(balance.sources["waste"]["internal_input_rows_excluded"], 1)
 
     def _movement_job(
         self,
