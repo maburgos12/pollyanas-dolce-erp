@@ -211,3 +211,37 @@ class ConsolidacionHigieneViewTests(TestCase):
         payload = response.json()
         self.assertFalse(payload["ok"])
         self.assertTrue(payload["toast"]["persistent"])
+
+    def test_post_html_rechaza_id_sobredimensionado_sin_reflejarlo(self):
+        self.client.force_login(self.dg)
+        par_sobredimensionado = f"{'9' * 4301}:1"
+
+        response = self.client.post(
+            self.url,
+            {"pares": [par_sobredimensionado]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        contenido = response.content.decode()
+        self.assertIn('id="exactas-title"', contenido)
+        self.assertNotIn(par_sobredimensionado, contenido)
+        self.assertNotIn("Internal Server Error", contenido)
+
+    def test_post_async_rechaza_id_sobredimensionado_con_error_controlado(self):
+        self.client.force_login(self.dg)
+        par_sobredimensionado = f"{'9' * 4301}:1"
+
+        response = self.client.post(
+            self.url,
+            {"pares": [par_sobredimensionado]},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(
+            payload["toast"]["message"],
+            "La selección contiene un par de fallas no válido.",
+        )
+        self.assertNotIn(par_sobredimensionado, response.content.decode())

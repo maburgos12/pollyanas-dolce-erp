@@ -14,7 +14,8 @@ from operacion.services_higiene_consolidacion import (
 )
 
 
-PATRON_PAR = re.compile(r"([1-9]\d*):([1-9]\d*)\Z")
+PATRON_PAR = re.compile(r"([1-9]\d{0,18}):([1-9]\d{0,18})\Z")
+MAX_ID_BD = 9_223_372_036_854_775_807
 MAX_PARES_POR_SOLICITUD = 500
 ANCLA_EXACTAS = "#exactas-title"
 
@@ -24,10 +25,17 @@ def _es_async(request):
 
 
 def _normalizar_par(valor):
+    if not isinstance(valor, str):
+        return None
     coincidencia = PATRON_PAR.fullmatch(valor.strip())
     if not coincidencia:
         return None
-    par = tuple(int(item) for item in coincidencia.groups())
+    try:
+        par = tuple(int(item) for item in coincidencia.groups())
+    except ValueError:
+        return None
+    if any(item > MAX_ID_BD for item in par):
+        return None
     return par if par[0] != par[1] else None
 
 
