@@ -1,6 +1,6 @@
 const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";
-const CACHE_VERSION = "20260927-higiene-open-falla-v2";
-const CACHE_NAME = `${CACHE_PREFIX}v23-${CACHE_VERSION}`;
+const CACHE_VERSION = "20260927-higiene-open-seguro-v3";
+const CACHE_NAME = `${CACHE_PREFIX}v24-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   "/static/mantenimiento/manifest.json?v=20260707-workflow-icon-v5",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",

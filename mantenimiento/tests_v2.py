@@ -1401,6 +1401,72 @@ class MaintenanceDetailV2Tests(TestCase):
         self.assertEqual(detail.json()["continuidad"]["ultima_fecha"], "2026-09-26")
         self.assertEqual(len(detail.json()["constataciones_higiene"]), 2)
 
+    def test_falla_detail_no_expone_constatacion_ligada_desde_otra_sucursal(self):
+        outsider = get_user_model().objects.create_user(
+            "persona-ajena", password="test", first_name="Persona", last_name="Ajena"
+        )
+        cross_branch_duplicate = ReporteFalla.objects.create(
+            sucursal=self.other_branch,
+            categoria=self.report.categoria,
+            titulo="Ligada indebidamente",
+            descripcion="No debe exponerse",
+            reportado_por=outsider,
+            duplicado_de=self.report,
+        )
+        registro = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_LIMPIEZA,
+            sucursal=self.other_branch,
+            fecha="2020-01-02",
+            clave_instancia="cross-branch",
+            plantilla_version="2026.1",
+            creado_por=outsider,
+        )
+        respuesta = RespuestaHigiene.objects.create(
+            registro=registro,
+            punto_clave="dato_ajeno",
+            seccion="Ajena",
+            punto_revision="Punto confidencial ajeno",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="Observación confidencial ajena",
+            reporte_falla=cross_branch_duplicate,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+        )
+        respuesta.evidencia.save(
+            "evidencia-ajena.jpg", ContentFile(b"image"), save=True
+        )
+
+        self.client.force_login(self.user)
+        inbox = self.client.get(
+            "/api/mantenimiento/v2/bandeja/",
+            {"estado": "abiertos", "periodo": "todo", "origen": "sucursales"},
+        ).json()
+        inbox_row = next(
+            row for row in inbox["results"] if row["uid"] == f"falla:{self.report.pk}"
+        )
+        self.assertEqual(inbox_row["constataciones_total"], 0)
+        self.assertIsNone(inbox_row["primera_constatacion"])
+        self.assertIsNone(inbox_row["ultima_constatacion"])
+
+        response = self.client.get(
+            f"/api/mantenimiento/v2/items/falla/{self.report.pk}/"
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["continuidad"]["total"], 0)
+        self.assertEqual(payload["constataciones_higiene"], [])
+        serialized = response.content.decode()
+        self.assertNotIn("Observación confidencial ajena", serialized)
+        self.assertNotIn("Persona Ajena", serialized)
+        self.assertNotIn("2020-01-02", serialized)
+        self.assertNotIn("evidencia-ajena.jpg", serialized)
+        self.assertEqual(
+            self.client.get(
+                f"/api/mantenimiento/v2/evidencias/higiene_constatacion/{respuesta.pk}/"
+            ).status_code,
+            404,
+        )
+
     def test_detail_rejects_anonymous_permissionless_other_branch_unknown_type_and_missing_id(self):
         self.client.logout()
         self.assertIn(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, {401, 403})

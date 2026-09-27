@@ -95,11 +95,12 @@ def _in_period(value, start, end):
     return (start is None or event >= start) and event < end
 
 
-def continuidad_por_principal(report_ids):
+def continuidad_por_principal(report_ids, *, user):
     rows = (
         RespuestaHigiene.objects.filter(
             Q(reporte_falla_id__in=report_ids)
-            | Q(reporte_falla__duplicado_de_id__in=report_ids)
+            | Q(reporte_falla__duplicado_de_id__in=report_ids),
+            reporte_falla_id__in=authorized_fallas(user).values("pk"),
         )
         .annotate(
             principal_id=Case(
@@ -135,7 +136,9 @@ def inbox_rows(user, *, period, origin):
                 "fecha_resolucion", "fecha_cierre", "foto_evidencia", "sucursal_id", "sucursal__nombre",
             )
         )
-        continuidad = continuidad_por_principal([row["id"] for row in fallas])
+        continuidad = continuidad_por_principal(
+            [row["id"] for row in fallas], user=user
+        )
         for row in fallas:
             state = {
                 ReporteFalla.ESTATUS_ABIERTO: "abierto",
@@ -495,7 +498,8 @@ def item_detail(user, kind, pk):
             raise Http404
         constataciones = list(
             RespuestaHigiene.objects.filter(
-                Q(reporte_falla=report) | Q(reporte_falla__duplicado_de=report)
+                Q(reporte_falla=report) | Q(reporte_falla__duplicado_de=report),
+                reporte_falla_id__in=authorized_fallas(user).values("pk"),
             )
             .select_related("registro", "registro__creado_por", "reporte_falla")
             .order_by("registro__fecha", "registro__hora", "id")

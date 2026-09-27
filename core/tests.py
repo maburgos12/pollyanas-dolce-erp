@@ -5,9 +5,10 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from django.conf import settings
 from django.core.management import call_command
-from django.db import OperationalError
+from django.db import OperationalError, connection
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.client import RequestFactory
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -38,6 +39,7 @@ from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddlewa
 from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
+from core.notificaciones_bandeja import agrupar_notificaciones, contar_grupos_pendientes
 from fallas.models import CategoriaFalla, ReporteFalla
 from core.hallmark_ui_audit import new_issues_against_baseline, scan_hallmark_ui
 from core.views import (
@@ -549,6 +551,34 @@ class NotificacionesTests(TestCase):
         response = self.client.get("/notificaciones/")
         self.assertEqual(response.context["pendientes_count"], 1)
         self.assertContains(response, "2 avisos agrupados")
+
+    def test_contador_pendiente_equivale_a_grupos_sin_materializar_historial(self):
+        principal, notificaciones = self._grupo_falla_notificable()
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_cierre = timezone.now()
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+        notificaciones[0].leida = True
+        notificaciones[0].leido_en = timezone.now()
+        notificaciones[0].save(update_fields=["leida", "leido_en"])
+        Notificacion.objects.create(usuario=self.user, titulo="Aviso independiente")
+        Notificacion.objects.create(
+            usuario=self.user,
+            titulo="Aviso ya leído",
+            leida=True,
+            leido_en=timezone.now(),
+        )
+
+        esperado = sum(not row.grupo_leida for row in agrupar_notificaciones(self.user))
+        with CaptureQueriesContext(connection) as queries:
+            actual = contar_grupos_pendientes(self.user)
+
+        self.assertEqual(actual, esperado)
+        self.assertEqual(actual, 2)
+        self.assertEqual(len(queries), 2)
+        sql = " ".join(query["sql"] for query in queries)
+        self.assertNotIn('"core_notificacion"."mensaje"', sql)
+        self.assertNotIn('JOIN "auth_user"', sql)
+        self.assertIn('NOT "core_notificacion"."leida"', sql)
 
     def test_abrir_grupo_marca_todos_sus_avisos_como_leidos(self):
         principal, notificaciones = self._grupo_falla_notificable()

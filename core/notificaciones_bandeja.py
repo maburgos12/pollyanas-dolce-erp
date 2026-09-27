@@ -48,7 +48,25 @@ def agrupar_notificaciones(user):
 
 
 def contar_grupos_pendientes(user):
-    return sum(not row.grupo_leida for row in agrupar_notificaciones(user))
+    rows = list(
+        Notificacion.objects.filter(usuario=user, leida=False).values_list(
+            "pk", "objeto_tipo", "objeto_id"
+        )
+    )
+    report_ids = {
+        int(objeto_id)
+        for _, objeto_tipo, objeto_id in rows
+        if objeto_tipo == "ReporteFalla" and objeto_id.isdigit()
+    }
+    principales = _principal_ids(report_ids)
+    pendientes = set()
+    for notification_id, objeto_tipo, objeto_id in rows:
+        if objeto_tipo == "ReporteFalla" and objeto_id.isdigit():
+            report_id = int(objeto_id)
+            pendientes.add(("ReporteFalla", principales.get(report_id, report_id)))
+        else:
+            pendientes.add(("Notificacion", notification_id))
+    return len(pendientes)
 
 
 def marcar_grupo_leido(user, notificacion):

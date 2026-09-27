@@ -1053,6 +1053,7 @@ function requireElements(scope, elementMap) {
   const assetCreate = document.getElementById("mantDrawerAssetCreate");
   const assetCreateInputs = assetCreate ? assetCreate.querySelectorAll("input, select") : [];
   const boardSearch = document.getElementById("mantBoardSearch");
+  let drawerTrigger = null;
 
   function filterBoard() {
     const query = (boardSearch.value || "").trim().toLowerCase();
@@ -1089,6 +1090,7 @@ function requireElements(scope, elementMap) {
   }
 
   function openDrawer(button) {
+    drawerTrigger = button;
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
     const hasLinkedAsset = Boolean(button.dataset.assetId);
     const hideAssets = button.dataset.type === "unidad";
@@ -1155,6 +1157,17 @@ function requireElements(scope, elementMap) {
     drawer.classList.add("is-open");
   }
 
+  function closeDrawer() {
+    if (!drawer.classList.contains("is-open")) return;
+    drawer.classList.remove("is-open");
+    const fallback = document.querySelector('[data-tab="tab-seguimiento"]');
+    const returnTarget = drawerTrigger?.isConnected && !drawerTrigger.closest(".is-hidden")
+      ? drawerTrigger
+      : fallback;
+    drawerTrigger = null;
+    returnTarget?.focus({preventScroll: true});
+  }
+
   if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
   document.addEventListener("click", (event) => {
@@ -1176,14 +1189,14 @@ function requireElements(scope, elementMap) {
     drawer.querySelector("[data-close-drawer]")?.focus({preventScroll: true});
   }
   document.querySelectorAll("[data-close-drawer]").forEach((button) => {
-    button.addEventListener("click", () => drawer.classList.remove("is-open"));
+    button.addEventListener("click", closeDrawer);
   });
   drawer.addEventListener("click", (event) => {
-    if (event.target === drawer) drawer.classList.remove("is-open");
+    if (event.target === drawer) closeDrawer();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-	      drawer.classList.remove("is-open");
+	      closeDrawer();
 	      document.getElementById("modalNuevaFalla").classList.remove("is-open");
 	      document.getElementById("modalOrdenServicio").classList.remove("is-open");
 	      document.getElementById("mantCancelarModal").classList.remove("is-open");
