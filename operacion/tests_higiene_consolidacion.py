@@ -58,10 +58,12 @@ class ConsolidacionHigieneTests(TestCase):
         respuesta_tipo_objetivo=None,
         respuesta_activo=None,
         respuesta_area_instalacion=None,
+        reporte_sucursal=None,
+        registro_sucursal=None,
     ):
         categoria = categoria or self.categoria
         reporte = ReporteFalla.objects.create(
-            sucursal=self.sucursal,
+            sucursal=reporte_sucursal or self.sucursal,
             categoria=categoria,
             tipo_objetivo=tipo_objetivo,
             activo_relacionado=activo,
@@ -75,7 +77,7 @@ class ConsolidacionHigieneTests(TestCase):
         )
         registro = RegistroHigiene.objects.create(
             tipo=RegistroHigiene.TIPO_BANOS,
-            sucursal=self.sucursal,
+            sucursal=registro_sucursal or self.sucursal,
             fecha=fecha,
             clave_instancia=f"clientes-ronda-{indice}",
             plantilla_version="2026.1",
@@ -233,6 +235,60 @@ class ConsolidacionHigieneTests(TestCase):
         self.assertNotIn(
             (principal.id, repetido.id),
             {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
+    def test_reportes_de_distinta_sucursal_no_agrupan_aunque_compartan_sucursal_de_registro(self):
+        otra_sucursal = Sucursal.objects.create(
+            codigo="HIG-OTRA",
+            nombre="Otra sucursal",
+            activa=True,
+        )
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            reporte_sucursal=otra_sucursal,
+            registro_sucursal=self.sucursal,
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertNotIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
+    def test_discrepancia_entre_sucursal_de_reporte_y_registro_nunca_es_exacta_automatica(self):
+        otra_sucursal = Sucursal.objects.create(
+            codigo="HIG-MANUAL",
+            nombre="Sucursal revisión manual",
+            activa=True,
+        )
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+            reporte_sucursal=otra_sucursal,
+            registro_sucursal=self.sucursal,
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            reporte_sucursal=otra_sucursal,
+            registro_sucursal=self.sucursal,
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertNotIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
         )
 
     def test_reaparicion_despues_del_cierre_inicia_otro_ciclo(self):
@@ -421,6 +477,78 @@ class ConsolidacionHigieneTests(TestCase):
             {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
             {(primero.id, repetido.id)},
         )
+
+    def test_estado_desconocido_no_reabre_un_ciclo_automaticamente(self):
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 25, 8, 0)),
+        )
+        cierre = timezone.make_aware(datetime(2026, 9, 25, 12, 0))
+        estado_legado = timezone.make_aware(datetime(2026, 9, 26, 8, 0))
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_ABIERTO,
+            nuevo=ReporteFalla.ESTATUS_CERRADO,
+            cuando=cierre,
+        )
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_CERRADO,
+            nuevo="estado_legado",
+            cuando=estado_legado,
+        )
+        principal.fecha_cierre = cierre
+        principal.estatus = "estado_legado"
+        principal.save(update_fields=["fecha_cierre", "estatus"])
+        posterior, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 26, 9, 0)),
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertNotIn(
+            (principal.id, posterior.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
+    def test_eventos_sin_transicion_no_alteran_ciclo_y_se_filtran_en_sql(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        BitacoraFalla.objects.create(
+            reporte=principal,
+            usuario=self.dg,
+            estatus_anterior=ReporteFalla.ESTATUS_ABIERTO,
+            estatus_nuevo=ReporteFalla.ESTATUS_ABIERTO,
+            comentario="Constatación sin cambio de estado.",
+            timestamp=timezone.make_aware(datetime(2026, 9, 25, 12, 0)),
+        )
+        BitacoraFalla.objects.create(
+            reporte=principal,
+            usuario=self.dg,
+            estatus_anterior="",
+            estatus_nuevo="",
+            comentario="Comentario operativo sin transición.",
+            timestamp=timezone.make_aware(datetime(2026, 9, 25, 13, 0)),
+        )
+
+        with CaptureQueriesContext(connection) as consultas:
+            propuestas = proponer_consolidacion_higiene()
+
+        self.assertIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
+        )
+        self.assertEqual(len(consultas), 2)
+        consulta_bitacora = consultas.captured_queries[1]["sql"].upper()
+        self.assertIn("ESTATUS_NUEVO", consulta_bitacora)
+        self.assertIn("ESTATUS_ANTERIOR", consulta_bitacora)
+        self.assertIn("NOT", consulta_bitacora)
 
     @override_settings(TIME_ZONE="America/Mazatlan")
     def test_fechas_del_preview_se_muestran_en_fecha_local(self):

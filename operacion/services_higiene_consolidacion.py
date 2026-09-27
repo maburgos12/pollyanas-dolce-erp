@@ -2,7 +2,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
-from django.db.models import OuterRef, Prefetch, Subquery
+from django.db.models import F, OuterRef, Prefetch, Subquery
 from django.utils import timezone
 
 from fallas.models import BitacoraFalla, ReporteFalla
@@ -45,6 +45,8 @@ def normalizar_texto(value):
 
 def clave_identidad(respuesta):
     reporte = respuesta.reporte_falla
+    if respuesta.registro.sucursal_id != reporte.sucursal_id:
+        return None
     if reporte.tipo_objetivo == ReporteFalla.OBJETIVO_EQUIPO:
         activo_id = reporte.activo_relacionado_id or 0
         area_instalacion = ""
@@ -69,6 +71,21 @@ ESTATUS_TERMINALES = frozenset(
         ReporteFalla.ESTATUS_CANCELADO,
     }
 )
+ESTATUS_ACTIVOS = frozenset(
+    {
+        ReporteFalla.ESTATUS_ABIERTO,
+        ReporteFalla.ESTATUS_REVISION,
+        ReporteFalla.ESTATUS_PROCESO,
+    }
+)
+
+
+def estado_activo_conocido(estatus):
+    if estatus in ESTATUS_ACTIVOS:
+        return True
+    if estatus in ESTATUS_TERMINALES:
+        return False
+    return None
 
 
 def reporte_activo_en(reporte, momento):
@@ -81,7 +98,7 @@ def reporte_activo_en(reporte, momento):
         if evento.estatus_nuevo and evento.estatus_nuevo != evento.estatus_anterior
     ]
     eventos = [
-        (evento.timestamp, evento.id, evento.estatus_nuevo not in ESTATUS_TERMINALES)
+        (evento.timestamp, evento.id, estado_activo_conocido(evento.estatus_nuevo))
         for evento in transiciones
     ]
     fechas_terminales = [
@@ -90,7 +107,7 @@ def reporte_activo_en(reporte, momento):
         if fecha is not None
     ]
     eventos.extend((fecha, 0, False) for fecha in fechas_terminales)
-    if not eventos and reporte.estatus in ESTATUS_TERMINALES:
+    if not eventos and reporte.estatus not in ESTATUS_ACTIVOS:
         return False
 
     activo = True
@@ -98,7 +115,7 @@ def reporte_activo_en(reporte, momento):
         if timestamp > momento:
             break
         activo = nuevo_activo
-    return activo
+    return activo is True
 
 
 def fecha_local_iso(value):
@@ -119,20 +136,25 @@ def proponer_consolidacion_higiene():
         )
         .select_related(
             "registro",
-            "registro__sucursal",
             "reporte_falla",
             "reporte_falla__categoria",
+            "reporte_falla__sucursal",
         )
         .prefetch_related(
             Prefetch(
                 "reporte_falla__bitacora",
-                queryset=BitacoraFalla.objects.only(
-                    "id",
-                    "reporte_id",
-                    "estatus_anterior",
-                    "estatus_nuevo",
-                    "timestamp",
-                ).order_by("timestamp", "id"),
+                queryset=(
+                    BitacoraFalla.objects.exclude(estatus_nuevo="")
+                    .exclude(estatus_nuevo=F("estatus_anterior"))
+                    .only(
+                        "id",
+                        "reporte_id",
+                        "estatus_anterior",
+                        "estatus_nuevo",
+                        "timestamp",
+                    )
+                    .order_by("timestamp", "id")
+                ),
                 to_attr="_historial_consolidacion",
             )
         )
@@ -141,7 +163,9 @@ def proponer_consolidacion_higiene():
 
     grupos = {}
     for respuesta in respuestas_consultadas:
-        grupos.setdefault(clave_identidad(respuesta), []).append(respuesta)
+        identidad = clave_identidad(respuesta)
+        if identidad is not None:
+            grupos.setdefault(identidad, []).append(respuesta)
 
     exactas = []
     ambiguas = []
@@ -169,7 +193,7 @@ def proponer_consolidacion_higiene():
                 repetido_id=candidata.reporte_falla_id,
                 respuesta_principal_id=principal.id,
                 respuesta_repetida_id=candidata.id,
-                sucursal=principal.registro.sucursal.nombre,
+                sucursal=principal.reporte_falla.sucursal.nombre,
                 punto=principal.punto_revision,
                 fecha_principal=fecha_local_iso(principal.reporte_falla.fecha_reporte),
                 fecha_repetida=fecha_local_iso(candidata.reporte_falla.fecha_reporte),
