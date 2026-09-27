@@ -82,13 +82,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260927-higiene-continuidad-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260927-higiene-open-falla-v2", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v22-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v23-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -214,6 +214,36 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'class="mant-money-prefix"')
         self.assertContains(response, 'v=20260721-mantenimiento-pruebas-v3')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
+
+    def test_dashboard_consumes_open_para_enfocar_la_falla_principal(self):
+        branch = Sucursal.objects.create(codigo="OPEN-MANT", nombre="Abrir mantenimiento")
+        category = CategoriaFalla.objects.create(nombre="Abrir desde notificación")
+        report = ReporteFalla.objects.create(
+            sucursal=branch,
+            categoria=category,
+            titulo="Sanitario",
+            descripcion="No descarga agua",
+            reportado_por=self.mantenimiento,
+        )
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get(
+            reverse("mantenimiento:dashboard"),
+            {"open": f"falla:{report.pk}"},
+        )
+
+        self.assertEqual(response.context["open_item_uid"], f"falla:{report.pk}")
+        self.assertContains(response, f'data-maintenance-uid="falla:{report.pk}"')
+        self.assertContains(response, 'const openUid = board?.dataset.openUid || "";')
+        self.assertContains(response, 'seguimientoTab?.click();')
+        self.assertContains(response, 'openDrawer(target);')
+        self.assertContains(response, 'target.scrollIntoView({block: "center"});')
+
+        unsafe = self.client.get(
+            reverse("mantenimiento:dashboard"),
+            {"open": 'falla:1" autofocus onfocus="alert(1)'},
+        )
+        self.assertEqual(unsafe.context["open_item_uid"], "")
 
     def test_pwa_shows_order_traceability_fields(self):
         self.client.force_login(self.mantenimiento)
@@ -1464,7 +1494,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20260927-higiene-continuidad-v1", sw)
+        self.assertIn("20260927-higiene-open-falla-v2", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):

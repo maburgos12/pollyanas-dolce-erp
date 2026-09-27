@@ -1853,6 +1853,12 @@ def dashboard(request):
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
     items = _unified_items(origen)
+    requested_open = (request.GET.get("open") or "").strip()
+    open_item_uid = (
+        requested_open
+        if requested_open and any(item["uid"] == requested_open for item in items)
+        else ""
+    )
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     puede_crear_proveedor = _can_write_mantenimiento(request.user)
     proveedores_todos = list(ProveedorServicio.objects.order_by("nombre"))
@@ -1909,6 +1915,7 @@ def dashboard(request):
         "mantenimiento/dashboard.html",
         {
             "items": items,
+            "open_item_uid": open_item_uid,
             "kanban_columns": _kanban_columns(items),
             "summary": _dashboard_summary(items),
             "provider_options": provider_options,

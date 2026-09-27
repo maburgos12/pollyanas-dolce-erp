@@ -115,7 +115,7 @@
         <input class="mant-input" id="mantBoardSearch" type="search" placeholder="Filtrar por sucursal, unidad, activo o descripción...">
         <span class="mant-board-help">El filtro no duplica reportes; solo reduce las tarjetas visibles.</span>
       </div>
-      <div class="mant-board">
+      <div class="mant-board" data-open-uid="{{ open_item_uid }}">
         {% for column in kanban_columns %}
           <article class="mant-col">
             <div class="mant-col-head">
@@ -165,6 +165,7 @@
                   {% endif %}
                   <div class="mant-ticket-actions">
                     <button class="btn btn-secondary btn-sm" type="button" data-open-follow
+                      data-maintenance-uid="{{ item.uid }}"
                       data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
                       data-type="{{ item.tipo }}" data-status="{{ item.estatus }}"
                       data-provider="{{ item.proveedor|default:'' }}"
@@ -1161,6 +1162,19 @@ function requireElements(scope, elementMap) {
     if (!button) return;
     openDrawer(button);
   });
+
+  const board = document.querySelector(".mant-board");
+  const openUid = board?.dataset.openUid || "";
+  const target = Array.from(
+    document.querySelectorAll("[data-open-follow][data-maintenance-uid]")
+  ).find((button) => button.dataset.maintenanceUid === openUid);
+  if (target) {
+    const seguimientoTab = document.querySelector('[data-tab="tab-seguimiento"]');
+    seguimientoTab?.click();
+    target.scrollIntoView({block: "center"});
+    openDrawer(target);
+    drawer.querySelector("[data-close-drawer]")?.focus({preventScroll: true});
+  }
   document.querySelectorAll("[data-close-drawer]").forEach((button) => {
     button.addEventListener("click", () => drawer.classList.remove("is-open"));
   });
