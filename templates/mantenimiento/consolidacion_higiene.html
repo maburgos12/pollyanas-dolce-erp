@@ -67,6 +67,7 @@
                     name="pares"
                     value="{{ row.principal_id }}:{{ row.repetido_id }}"
                     aria-label="Unir falla {{ row.repetido_id }} con {{ row.principal_id }}"
+                    {% if row.valor_par in pares_seleccionados %}checked{% endif %}
                   >
                 </td>
                 <td data-label="Principal"><strong>#{{ row.principal_id }}</strong></td>

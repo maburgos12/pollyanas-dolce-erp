@@ -16,10 +16,19 @@ from operacion.services_higiene_consolidacion import (
 
 PATRON_PAR = re.compile(r"([1-9]\d*):([1-9]\d*)\Z")
 MAX_PARES_POR_SOLICITUD = 500
+ANCLA_EXACTAS = "#exactas-title"
 
 
 def _es_async(request):
     return request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+
+def _normalizar_par(valor):
+    coincidencia = PATRON_PAR.fullmatch(valor.strip())
+    if not coincidencia:
+        return None
+    par = tuple(int(item) for item in coincidencia.groups())
+    return par if par[0] != par[1] else None
 
 
 def _parsear_pares(valores):
@@ -32,25 +41,32 @@ def _parsear_pares(valores):
     pares = []
     vistos = set()
     for valor in valores:
-        coincidencia = PATRON_PAR.fullmatch(valor.strip())
-        if not coincidencia:
+        par = _normalizar_par(valor)
+        if par is None:
             raise ValueError("La selección contiene un par de fallas no válido.")
-        par = tuple(int(item) for item in coincidencia.groups())
-        if par[0] == par[1]:
-            raise ValueError("Una falla no puede consolidarse consigo misma.")
         if par not in vistos:
             vistos.add(par)
             pares.append(par)
     return tuple(pares)
 
 
-def _contexto(preview=None):
+def _pares_validos_para_reintento(valores):
+    pares = set()
+    for valor in valores[:MAX_PARES_POR_SOLICITUD]:
+        par = _normalizar_par(valor)
+        if par is not None:
+            pares.add(f"{par[0]}:{par[1]}")
+    return frozenset(pares)
+
+
+def _contexto(preview=None, *, pares_seleccionados=()):
     preview = preview or proponer_consolidacion_higiene()
     return {
         "exactas": preview.exactas,
         "ambiguas": preview.ambiguas,
         "total_exactas": len(preview.exactas),
         "total_ambiguas": len(preview.ambiguas),
+        "pares_seleccionados": pares_seleccionados,
     }
 
 
@@ -66,8 +82,9 @@ def consolidacion_higiene(request):
             _contexto(),
         )
 
+    valores = request.POST.getlist("pares")
     try:
-        pares = _parsear_pares(request.POST.getlist("pares"))
+        pares = _parsear_pares(valores)
     except ValueError as exc:
         if _es_async(request):
             return JsonResponse(
@@ -85,7 +102,9 @@ def consolidacion_higiene(request):
         return render(
             request,
             "mantenimiento/consolidacion_higiene.html",
-            _contexto(),
+            _contexto(
+                pares_seleccionados=_pares_validos_para_reintento(valores)
+            ),
             status=400,
         )
 
@@ -98,7 +117,7 @@ def consolidacion_higiene(request):
     payload = {
         "ok": True,
         "toast": {"type": tipo, "message": mensaje},
-        "redirect": request.path,
+        "redirect": f"{request.path}{ANCLA_EXACTAS}",
     }
     if _es_async(request):
         return JsonResponse(payload)
@@ -106,4 +125,4 @@ def consolidacion_higiene(request):
         messages.success(request, mensaje)
     else:
         messages.warning(request, mensaje)
-    return redirect(request.path)
+    return redirect(f"{request.path}{ANCLA_EXACTAS}")

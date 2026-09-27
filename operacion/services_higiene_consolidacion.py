@@ -31,6 +31,10 @@ class PropuestaConsolidacion:
     exacta: bool
     motivo: str
 
+    @property
+    def valor_par(self):
+        return f"{self.principal_id}:{self.repetido_id}"
+
 
 @dataclass(frozen=True)
 class ResultadoPreview:

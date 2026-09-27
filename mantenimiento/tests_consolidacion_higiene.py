@@ -125,7 +125,7 @@ class ConsolidacionHigieneViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["toast"]["type"], "success")
-        self.assertEqual(response.json()["redirect"], self.url)
+        self.assertEqual(response.json()["redirect"], f"{self.url}#exactas-title")
         self.repetido.refresh_from_db()
         self.assertEqual(self.repetido.duplicado_de_id, self.principal.id)
 
@@ -137,7 +137,25 @@ class ConsolidacionHigieneViewTests(TestCase):
             {"pares": [f"{self.principal.id}:{self.repetido.id}"]},
         )
 
-        self.assertRedirects(response, self.url)
+        self.assertRedirects(response, f"{self.url}#exactas-title")
+
+    def test_error_html_conserva_solo_los_pares_validos_sin_reflejar_entrada_insegura(self):
+        self.client.force_login(self.dg)
+        par_valido = f"{self.principal.id}:{self.repetido.id}"
+        entrada_insegura = '<img src=x onerror="alert(1)">'
+
+        response = self.client.post(
+            self.url,
+            {"pares": [par_valido, entrada_insegura]},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        contenido = response.content.decode()
+        self.assertRegex(contenido, rf'value="{par_valido}"[^>]*checked')
+        self.assertNotIn("onerror", contenido)
+        self.assertNotIn("<img src=x", contenido)
+        self.repetido.refresh_from_db()
+        self.assertIsNone(self.repetido.duplicado_de_id)
 
     def test_post_manipulado_no_aplica_una_coincidencia_ambigua(self):
         self.client.force_login(self.dg)
