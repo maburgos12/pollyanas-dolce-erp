@@ -6,15 +6,16 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import close_old_connections, connection, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from activos.models import Activo
-from core.models import AuditLog, Notificacion, Sucursal
+from core.models import AuditLog, Notificacion, Sucursal, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
+from operacion.services_higiene import guardar_registro_higiene
 from operacion.services_higiene_consolidacion import (
     aplicar_consolidacion_higiene,
     proponer_consolidacion_higiene,
@@ -743,7 +744,7 @@ class ConsolidacionHigieneTests(TestCase):
             ).exists()
         )
 
-    def test_aplicar_bloquea_respuestas_y_registros_fuente_en_orden(self):
+    def test_aplicar_bloquea_registros_reportes_y_respuestas_en_orden_global(self):
         principal, repetido, _, _ = self.crear_repeticiones(
             observaciones=("No descarga agua", "No descarga agua"),
         )
@@ -765,6 +766,23 @@ class ConsolidacionHigieneTests(TestCase):
             ),
             bloqueos,
         )
+        indice_registro = next(
+            indice
+            for indice, sql in enumerate(bloqueos)
+            if '"OPERACION_REGISTROHIGIENE"' in sql
+        )
+        indice_reporte = next(
+            indice
+            for indice, sql in enumerate(bloqueos)
+            if '"FALLAS_REPORTEFALLA"' in sql
+        )
+        indice_respuesta = next(
+            indice
+            for indice, sql in enumerate(bloqueos)
+            if '"OPERACION_RESPUESTAHIGIENE"' in sql
+        )
+        self.assertLess(indice_registro, indice_reporte)
+        self.assertLess(indice_reporte, indice_respuesta)
         self.assertTrue(
             any(
                 '"OPERACION_REGISTROHIGIENE"' in sql and "ORDER BY" in sql
@@ -844,6 +862,10 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
             nombre="Plomería concurrencia",
             tipo=CategoriaFalla.TIPO_INSTALACION,
         )
+        UserProfile.objects.create(user=operadora, sucursal=sucursal)
+        self.operadora_id = operadora.id
+        self.categoria_id = categoria.id
+        self.sucursal_id = sucursal.id
         reportes = []
         respuestas = []
         for indice, fecha in enumerate((date(2026, 9, 25), date(2026, 9, 26)), 1):
@@ -885,6 +907,7 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
             respuestas.append(respuesta)
         self.pair = (reportes[0].id, reportes[1].id)
         self.respuesta_repetida_id = respuestas[1].id
+        self.registro_repetido_id = respuestas[1].registro_id
 
     def test_dos_aplicaciones_concurrentes_generan_un_solo_enlace_y_una_auditoria(self):
         barrier = Barrier(2)
@@ -987,3 +1010,141 @@ class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
         self.assertEqual(respuesta.registro_id, registro_alterno.id)
         self.assertFalse(AuditLog.objects.filter(action="CONSOLIDATE").exists())
         self.assertFalse(BitacoraFalla.objects.exists())
+
+    def test_guardado_diario_y_consolidacion_comparten_orden_global_sin_deadlock(self):
+        repetido = ReporteFalla.objects.get(pk=self.pair[1])
+        registro_repetido = RegistroHigiene.objects.get(pk=self.registro_repetido_id)
+        RespuestaHigiene.objects.create(
+            registro=registro_repetido,
+            punto_clave="bano_pisos",
+            seccion="Interior",
+            punto_revision="Pisos limpios",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="Piso mojado",
+            requiere_seguimiento=True,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            reporte_falla=repetido,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+        )
+        registro_captura = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_BANOS,
+            sucursal_id=self.sucursal_id,
+            fecha=timezone.localdate(),
+            clave_instancia="captura-concurrente",
+            plantilla_version="2026.1",
+            creado_por_id=self.operadora_id,
+        )
+        RespuestaHigiene.objects.create(
+            registro=registro_captura,
+            punto_clave="bano_paredes",
+            seccion="Interior",
+            punto_revision="Paredes limpias",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="Pared húmeda",
+            requiere_seguimiento=True,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            reporte_falla=repetido,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+        )
+
+        registro_bloqueado = Event()
+        consolidacion_iniciada = Event()
+        resultados = []
+        errores = []
+
+        from operacion import services_higiene
+
+        preflight_real = services_higiene._preflight_fallas_higiene
+
+        def preflight_sincronizado(*, normalizadas):
+            registro_bloqueado.set()
+            if not consolidacion_iniciada.wait(timeout=5):
+                raise AssertionError("La consolidación concurrente no inició")
+            Event().wait(0.2)
+            return preflight_real(normalizadas=normalizadas)
+
+        def guardar():
+            close_old_connections()
+            try:
+                usuario = get_user_model().objects.get(pk=self.operadora_id)
+                resultados.append(
+                    (
+                        "guardar",
+                        guardar_registro_higiene(
+                            user=usuario,
+                            tipo=RegistroHigiene.TIPO_BANOS,
+                            clave_instancia="captura-concurrente",
+                            respuestas=[
+                                {
+                                    "key": "bano_pisos",
+                                    "respuesta": "NO_CUMPLE",
+                                    "observacion": "Piso sigue mojado",
+                                    "corregido": False,
+                                    "requiere_seguimiento": True,
+                                    "tipo_objetivo": "INSTALACION",
+                                    "categoria_id": self.categoria_id,
+                                    "area_instalacion": "Baños",
+                                    "prioridad": "alta",
+                                    "falla_decision": "MISMA",
+                                    "reporte_falla_id": self.pair[1],
+                                }
+                            ],
+                            archivos={},
+                        ),
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - se afirma fuera del hilo
+                errores.append(("guardar", exc))
+            finally:
+                close_old_connections()
+
+        def consolidar():
+            close_old_connections()
+            try:
+                if not registro_bloqueado.wait(timeout=5):
+                    raise AssertionError("El guardado no bloqueó el registro")
+                actor = get_user_model().objects.get(pk=self.dg.pk)
+                consolidacion_iniciada.set()
+                resultados.append(
+                    (
+                        "consolidar",
+                        aplicar_consolidacion_higiene([self.pair], actor=actor),
+                    )
+                )
+            except Exception as exc:  # pragma: no cover - se afirma fuera del hilo
+                errores.append(("consolidar", exc))
+            finally:
+                close_old_connections()
+
+        with patch(
+            "operacion.services_higiene._preflight_fallas_higiene",
+            side_effect=preflight_sincronizado,
+        ):
+            threads = [Thread(target=guardar), Thread(target=consolidar)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=10)
+
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertFalse(
+            [(origen, exc) for origen, exc in errores if isinstance(exc, DatabaseError)],
+            errores,
+        )
+        self.assertFalse(errores, errores)
+
+        repetido.refresh_from_db()
+        nueva_respuesta = RespuestaHigiene.objects.filter(
+            registro=registro_captura,
+            punto_clave="bano_pisos",
+        ).first()
+        resultado_consolidacion = next(
+            resultado for origen, resultado in resultados if origen == "consolidar"
+        )
+        self.assertIsNotNone(nueva_respuesta)
+        self.assertEqual(nueva_respuesta.reporte_falla_id, repetido.id)
+        self.assertIsNone(repetido.duplicado_de_id)
+        self.assertEqual(resultado_consolidacion.aplicados, 0)
+        self.assertEqual(resultado_consolidacion.omitidos, 1)

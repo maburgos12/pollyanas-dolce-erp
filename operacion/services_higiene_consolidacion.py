@@ -268,21 +268,91 @@ def _normalizar_pares(pares):
     return tuple(unicos)
 
 
-def _bloquear_fuentes_higiene(reporte_ids):
-    """Bloquea las filas que determinan identidad y exactitud, siempre por PK."""
+def _descubrir_fuentes_higiene(reporte_ids):
+    """Descubre candidatos para locks; este snapshot nunca autoriza aplicar."""
 
-    respuestas = list(
+    return tuple(
+        RespuestaHigiene.objects.filter(reporte_falla_id__in=reporte_ids)
+        .order_by("pk")
+        .values_list(
+            "pk",
+            "registro_id",
+            "reporte_falla_id",
+            "punto_clave",
+            "punto_revision",
+            "observacion",
+            "registro__sucursal_id",
+            "registro__tipo",
+            "reporte_falla__sucursal_id",
+            "reporte_falla__tipo_objetivo",
+            "reporte_falla__categoria_id",
+            "reporte_falla__activo_relacionado_id",
+            "reporte_falla__area_instalacion",
+            "reporte_falla__duplicado_de_id",
+            "reporte_falla__estatus",
+            "reporte_falla__fecha_reporte",
+            "reporte_falla__fecha_resolucion",
+            "reporte_falla__fecha_cierre",
+        )
+    )
+
+
+def _bloquear_registros_higiene(fuentes_descubiertas):
+    registro_ids = sorted({fuente[1] for fuente in fuentes_descubiertas})
+    if registro_ids:
+        return {
+            registro.pk: registro
+            for registro in (
+                RegistroHigiene.objects.select_for_update()
+                .filter(pk__in=registro_ids)
+                .order_by("pk")
+            )
+        }
+    return {}
+
+
+def _bloquear_respuestas_higiene(reporte_ids):
+    return list(
         RespuestaHigiene.objects.select_for_update()
         .filter(reporte_falla_id__in=reporte_ids)
         .order_by("pk")
     )
-    registro_ids = sorted({respuesta.registro_id for respuesta in respuestas})
-    if registro_ids:
-        list(
-            RegistroHigiene.objects.select_for_update()
-            .filter(pk__in=registro_ids)
-            .order_by("pk")
+
+
+def _fuentes_siguen_estables(
+    fuentes_descubiertas,
+    *,
+    registros_bloqueados,
+    reportes_bloqueados,
+    respuestas_bloqueadas,
+):
+    reportes_por_id = {reporte.pk: reporte for reporte in reportes_bloqueados}
+    actuales = tuple(
+        (
+            respuesta.pk,
+            respuesta.registro_id,
+            respuesta.reporte_falla_id,
+            respuesta.punto_clave,
+            respuesta.punto_revision,
+            respuesta.observacion,
+            registros_bloqueados[respuesta.registro_id].sucursal_id,
+            registros_bloqueados[respuesta.registro_id].tipo,
+            reportes_por_id[respuesta.reporte_falla_id].sucursal_id,
+            reportes_por_id[respuesta.reporte_falla_id].tipo_objetivo,
+            reportes_por_id[respuesta.reporte_falla_id].categoria_id,
+            reportes_por_id[respuesta.reporte_falla_id].activo_relacionado_id,
+            reportes_por_id[respuesta.reporte_falla_id].area_instalacion,
+            reportes_por_id[respuesta.reporte_falla_id].duplicado_de_id,
+            reportes_por_id[respuesta.reporte_falla_id].estatus,
+            reportes_por_id[respuesta.reporte_falla_id].fecha_reporte,
+            reportes_por_id[respuesta.reporte_falla_id].fecha_resolucion,
+            reportes_por_id[respuesta.reporte_falla_id].fecha_cierre,
         )
+        for respuesta in respuestas_bloqueadas
+        if respuesta.registro_id in registros_bloqueados
+        and respuesta.reporte_falla_id in reportes_por_id
+    )
+    return actuales == fuentes_descubiertas
 
 
 @transaction.atomic
@@ -297,6 +367,8 @@ def aplicar_consolidacion_higiene(pares, *, actor):
 
     _bloquear_aplicaciones_concurrentes()
     ids = sorted({reporte_id for par in pares for reporte_id in par})
+    fuentes_descubiertas = _descubrir_fuentes_higiene(ids)
+    registros_bloqueados = _bloquear_registros_higiene(fuentes_descubiertas)
     reportes_bloqueados = list(
         ReporteFalla.objects.select_for_update()
         .filter(Q(pk__in=ids) | Q(duplicado_de_id__in=ids))
@@ -312,7 +384,14 @@ def aplicar_consolidacion_higiene(pares, *, actor):
         for reporte in reportes_bloqueados
         if reporte.duplicado_de_id in ids
     }
-    _bloquear_fuentes_higiene(ids)
+    respuestas_bloqueadas = _bloquear_respuestas_higiene(ids)
+    if not _fuentes_siguen_estables(
+        fuentes_descubiertas,
+        registros_bloqueados=registros_bloqueados,
+        reportes_bloqueados=reportes_bloqueados,
+        respuestas_bloqueadas=respuestas_bloqueadas,
+    ):
+        return ResultadoAplicacion(aplicados=0, omitidos=len(pares))
 
     preview = proponer_consolidacion_higiene()
     propuestas = {
