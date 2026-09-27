@@ -215,6 +215,37 @@ class PersonnelPlanTests(TestCase):
         }])
         self.assertTrue(agosto['reconciled_components'])
 
+    def test_isn_aplicado_con_diferencia_publica_pago_sin_ocultar_observacion(self, _):
+        self.add_complete_non_isn_components(8)
+        xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+               '<c:Concepto Descripcion="Empresarial decl.Nomina" '
+               'NoIdentificacion="202608 2-003" Importe="999"/>'
+               '</c:Conceptos></c:Comprobante>')
+        cfdi = self.invoice(
+            'isn-observado', xml, tipo_cfdi='recibido', tipo_comprobante='I',
+            rfc_emisor='GES8101015I7', rfc_receptor=RFC,
+        )
+        expediente = ExpedienteISN.objects.create(
+            periodo=date(2026, 8, 1), revision=1, uuid=cfdi.uuid, cfdi=cfdi,
+            importe_pagado=D('16168.00'), base_gravada_calculada=D('640000.00'),
+            estado=ExpedienteISN.ESTADO_APLICADO,
+            aplicado_en=datetime(2026, 9, 8, tzinfo=tz.utc),
+            metadata={
+                'diferencia_isn': '528.00',
+                'diferencia_isn_aceptada': True,
+                'motivo_diferencia_isn': 'CFDI pagado sin base declarada disponible.',
+            },
+        )
+
+        agosto = build_personnel_plan()['months'][-1]
+
+        self.assertEqual(agosto['isn'], D('16168.00'))
+        source = next(item for item in agosto['sources'] if item['id'] == expediente.pk)
+        self.assertEqual(source['kind'], 'ISN · expediente aplicado con diferencia')
+        self.assertFalse(source['reconciled'])
+        self.assertTrue(any('diferencia aceptada' in error for error in agosto['errors']))
+        self.assertFalse(agosto['reconciled_components'])
+
     def test_isn_aplicado_con_cfdi_cancelado_deja_periodo_sin_dato_y_advierte(self, _):
         self.add_complete_non_isn_components(8)
         cfdi = self.invoice(
