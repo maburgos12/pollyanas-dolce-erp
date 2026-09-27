@@ -174,7 +174,9 @@ class PointMovementSyncService:
 
     def _supersede_stale_waste_rows(self, *, sync_job: PointSyncJob, current_hashes: set[str]) -> tuple[int, int]:
         """Replace a complete Point waste period without touching partial branch syncs."""
-        parameters = sync_job.parameters or {}
+        parameters = getattr(sync_job, "parameters", {}) or {}
+        if not parameters.get("start_date") or not parameters.get("end_date"):
+            return 0, 0
         if str(parameters.get("branch_filter") or "").strip():
             return 0, 0
 
@@ -593,7 +595,7 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_waste_lines(self, sync_job: PointSyncJob, extracted_lines: list) -> dict:
-        parameters = sync_job.parameters or {}
+        parameters = getattr(sync_job, "parameters", {}) or {}
         scope_dates = [
             date.fromisoformat(str(parameters[key]))
             for key in ("start_date", "end_date")
