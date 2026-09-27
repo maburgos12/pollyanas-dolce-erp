@@ -2,7 +2,20 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.utils import timezone
-from django.db.models import Case, Exists, F, OuterRef, Prefetch, Q, When
+from django.db.models import (
+    Case,
+    Count,
+    DateField,
+    Exists,
+    F,
+    IntegerField,
+    Max,
+    Min,
+    OuterRef,
+    Prefetch,
+    Q,
+    When,
+)
 from django.db.models.functions import Coalesce
 from django.http import Http404
 
@@ -13,6 +26,7 @@ from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services,
 )
+from operacion.models import RespuestaHigiene
 
 
 MAZATLAN = ZoneInfo("America/Mazatlan")
@@ -81,14 +95,49 @@ def _in_period(value, start, end):
     return (start is None or event >= start) and event < end
 
 
+def continuidad_por_principal(report_ids, *, user):
+    rows = (
+        RespuestaHigiene.objects.filter(
+            Q(reporte_falla_id__in=report_ids)
+            | Q(reporte_falla__duplicado_de_id__in=report_ids),
+            reporte_falla_id__in=authorized_fallas(user).values("pk"),
+        )
+        .annotate(
+            principal_id=Case(
+                When(
+                    reporte_falla__duplicado_de_id__isnull=False,
+                    then=F("reporte_falla__duplicado_de_id"),
+                ),
+                default=F("reporte_falla_id"),
+                output_field=IntegerField(),
+            )
+        )
+        .values("principal_id")
+        .annotate(
+            constataciones_total=Count("id"),
+            primera_constatacion=Min("registro__fecha", output_field=DateField()),
+            ultima_constatacion=Max("registro__fecha", output_field=DateField()),
+        )
+    )
+    return {row["principal_id"]: row for row in rows}
+
+
 def inbox_rows(user, *, period, origin):
     """Return authorized, normalized inbox rows with a fixed query count."""
     start, end = period_bounds(period)
     rows = []
     if origin in {"sucursales", "todos"}:
-        fallas = authorized_fallas(user).exclude(estatus=ReporteFalla.ESTATUS_CANCELADO).values(
-            "id", "titulo", "descripcion", "prioridad", "estatus", "fecha_reporte",
-            "fecha_resolucion", "fecha_cierre", "foto_evidencia", "sucursal_id", "sucursal__nombre",
+        fallas = list(
+            authorized_fallas(user)
+            .filter(duplicado_de__isnull=True)
+            .exclude(estatus=ReporteFalla.ESTATUS_CANCELADO)
+            .values(
+                "id", "titulo", "descripcion", "prioridad", "estatus", "fecha_reporte",
+                "fecha_resolucion", "fecha_cierre", "foto_evidencia", "sucursal_id", "sucursal__nombre",
+            )
+        )
+        continuidad = continuidad_por_principal(
+            [row["id"] for row in fallas], user=user
         )
         for row in fallas:
             state = {
@@ -100,13 +149,20 @@ def inbox_rows(user, *, period, origin):
             }.get(row["estatus"])
             event = (row["fecha_cierre"] or row["fecha_resolucion"]) if state == "cerrado" else row["fecha_reporte"]
             if state and _in_period(event, start, end):
-                rows.append(_row_payload(
+                payload = _row_payload(
                     uid=f"falla:{row['id']}", pk=row["id"], kind="falla", origin="sucursales",
                     state=state, critical=row["prioridad"] == ReporteFalla.PRIORIDAD_CRITICA,
                     event=event, title=row["titulo"], description=row["descripcion"],
                     branch_id=row["sucursal_id"], branch_name=row["sucursal__nombre"],
                     initial_photo=_evidence_payload("falla_inicial", row["id"], row["foto_evidencia"]),
-                ))
+                )
+                metrics = continuidad.get(row["id"], {})
+                payload.update(
+                    constataciones_total=metrics.get("constataciones_total", 0),
+                    primera_constatacion=metrics.get("primera_constatacion"),
+                    ultima_constatacion=metrics.get("ultima_constatacion"),
+                )
+                rows.append(payload)
 
         orders = authorized_orders(user).exclude(estatus=OrdenMantenimiento.ESTATUS_CANCELADA).values(
             "id", "folio", "descripcion", "prioridad", "estatus", "creado_en", "fecha_cierre",
@@ -440,6 +496,39 @@ def item_detail(user, kind, pk):
         ).prefetch_related(Prefetch("bitacora", queryset=log_qs)).filter(pk=pk).first()
         if report is None:
             raise Http404
+        constataciones = list(
+            RespuestaHigiene.objects.filter(
+                Q(reporte_falla=report) | Q(reporte_falla__duplicado_de=report),
+                reporte_falla_id__in=authorized_fallas(user).values("pk"),
+            )
+            .select_related("registro", "registro__creado_por", "reporte_falla")
+            .order_by("registro__fecha", "registro__hora", "id")
+        )
+        fechas = [row.registro.fecha for row in constataciones]
+        continuidad = {
+            "total": len(constataciones),
+            "primera_fecha": fechas[0].isoformat() if fechas else None,
+            "ultima_fecha": fechas[-1].isoformat() if fechas else None,
+        }
+        constataciones_payload = [
+            {
+                "id": row.pk,
+                "fecha": row.registro.fecha.isoformat(),
+                "hora": row.registro.hora.isoformat() if row.registro.hora else None,
+                "persona": _person(row.registro.creado_por),
+                "punto": row.punto_revision,
+                "observacion": row.observacion,
+                "tipo": row.continuidad_falla,
+                "tipo_etiqueta": (
+                    row.get_continuidad_falla_display() if row.continuidad_falla else ""
+                ),
+                "evidencia": _evidence_payload(
+                    "higiene_constatacion", row.pk, row.evidencia
+                ),
+                "reporte_origen_id": row.reporte_falla_id,
+            }
+            for row in constataciones
+        ]
         state = {
             ReporteFalla.ESTATUS_ABIERTO: "abierto", ReporteFalla.ESTATUS_REVISION: "en_proceso",
             ReporteFalla.ESTATUS_PROCESO: "en_proceso", ReporteFalla.ESTATUS_RESUELTO: "cerrado",
@@ -461,6 +550,8 @@ def item_detail(user, kind, pk):
             "fechas": {"reporte": _iso(report.fecha_reporte), "asignacion": _iso(report.fecha_asignacion),
                        "resolucion": _iso(report.fecha_resolucion), "cierre": _iso(report.fecha_cierre)},
             "responsables": {"asignado_a": _person(report.asignado_a), "cerrado_por": _person(report.cerrado_por)},
+            "continuidad": continuidad,
+            "constataciones_higiene": constataciones_payload,
             "seguimiento": [{
                 "id": row.pk, "fecha": _iso(row.timestamp), "usuario": _person(row.usuario),
                 "estatus_anterior": row.estatus_anterior or "", "estatus_nuevo": row.estatus_nuevo or "",

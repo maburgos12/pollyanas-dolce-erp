@@ -150,6 +150,16 @@ class RespuestaHigiene(models.Model):
         (RESPUESTA_NO_CUMPLE, "No cumple"),
         (RESPUESTA_NA, "No aplica"),
     ]
+    CONTINUIDAD_INICIAL = "INICIAL"
+    CONTINUIDAD_IGUAL = "IGUAL"
+    CONTINUIDAD_CAMBIO = "CAMBIO"
+    CONTINUIDAD_CORRECCION = "CORRECCION_PENDIENTE"
+    CONTINUIDAD_CHOICES = [
+        (CONTINUIDAD_INICIAL, "Detección inicial"),
+        (CONTINUIDAD_IGUAL, "Sigue igual"),
+        (CONTINUIDAD_CAMBIO, "Cambió o empeoró"),
+        (CONTINUIDAD_CORRECCION, "Corrección pendiente de validar"),
+    ]
 
     registro = models.ForeignKey(
         RegistroHigiene,
@@ -179,12 +189,19 @@ class RespuestaHigiene(models.Model):
         related_name="revisiones_higiene",
     )
     area_instalacion = models.CharField(max_length=120, blank=True, default="")
-    reporte_falla = models.OneToOneField(
+    reporte_falla = models.ForeignKey(
         "fallas.ReporteFalla",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="origen_higiene",
+        related_name="constataciones_higiene",
+    )
+    continuidad_falla = models.CharField(
+        max_length=24,
+        choices=CONTINUIDAD_CHOICES,
+        blank=True,
+        default="",
+        db_index=True,
     )
 
     class Meta:

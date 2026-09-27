@@ -73,6 +73,7 @@ from inventario.canonical_point_inventory import (
     canonical_point_inventory_report_rows,
 )
 from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile, sucursales_operativas
+from core.notificaciones_bandeja import agrupar_notificaciones, marcar_grupo_leido
 from core.audit import log_event
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
 from crm.models import PedidoCliente
@@ -4861,23 +4862,25 @@ def users_access_view(request: HttpRequest) -> HttpResponse:
 @login_required
 def notificaciones_view(request):
     estado = request.GET.get("estado", "pendientes")
-    qs = Notificacion.objects.filter(usuario=request.user).select_related("actor")
+    grupos = agrupar_notificaciones(request.user)
+    pendientes_count = sum(not row.grupo_leida for row in grupos)
+    leidas_count = sum(row.grupo_leida for row in grupos)
     if estado == "leidas":
-        qs = qs.filter(leida=True)
+        rows = [row for row in grupos if row.grupo_leida]
     elif estado == "todas":
-        pass
+        rows = grupos
     else:
         estado = "pendientes"
-        qs = qs.filter(leida=False)
-    page = Paginator(qs, 30).get_page(request.GET.get("page"))
+        rows = [row for row in grupos if not row.grupo_leida]
+    page = Paginator(rows, 30).get_page(request.GET.get("page"))
     return render(
         request,
         "core/notificaciones.html",
         {
             "page": page,
             "estado": estado,
-            "pendientes_count": Notificacion.objects.filter(usuario=request.user, leida=False).count(),
-            "leidas_count": Notificacion.objects.filter(usuario=request.user, leida=True).count(),
+            "pendientes_count": pendientes_count,
+            "leidas_count": leidas_count,
         },
     )
 
@@ -4886,8 +4889,8 @@ def notificaciones_view(request):
 @require_POST
 def notificacion_leer_view(request, pk):
     notificacion = get_object_or_404(Notificacion, pk=pk, usuario=request.user)
-    notificacion.marcar_leida()
-    return redirect(notificacion.url or "notificaciones")
+    url = marcar_grupo_leido(request.user, notificacion)
+    return redirect(url or "notificaciones")
 
 
 @login_required

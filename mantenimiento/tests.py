@@ -14,7 +14,7 @@ from django.utils import timezone
 
 from activos.models import Activo, OrdenMantenimiento, PlanMantenimiento
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
-from core.models import AuditLog, Sucursal, UserModuleAccess
+from core.models import AuditLog, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from fallas.models import BitacoraFalla, CategoriaFalla, EvidenciaSeguimientoFalla, ReporteFalla
 from logistica.models import Repartidor, ReporteUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
@@ -82,13 +82,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260911-proveedor-sin-contacto-v4", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260927-higiene-consolidacion-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v21-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v25-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -214,6 +214,176 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(response, 'class="mant-money-prefix"')
         self.assertContains(response, 'v=20260721-mantenimiento-pruebas-v3')
         self.assertContains(response, 'evidence.classList.add("is-without-photo");')
+
+    def test_dashboard_consumes_open_para_enfocar_la_falla_principal(self):
+        branch = Sucursal.objects.create(codigo="OPEN-MANT", nombre="Abrir mantenimiento")
+        category = CategoriaFalla.objects.create(nombre="Abrir desde notificación")
+        report = ReporteFalla.objects.create(
+            sucursal=branch,
+            categoria=category,
+            titulo="Sanitario",
+            descripcion="No descarga agua",
+            reportado_por=self.mantenimiento,
+        )
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get(
+            reverse("mantenimiento:dashboard"),
+            {"open": f"falla:{report.pk}"},
+        )
+
+        self.assertEqual(response.context["open_item_uid"], f"falla:{report.pk}")
+        self.assertContains(response, f'data-maintenance-uid="falla:{report.pk}"')
+        self.assertContains(response, 'const openUid = board?.dataset.openUid || "";')
+        self.assertContains(response, 'seguimientoTab?.click();')
+        self.assertContains(response, 'openDrawer(target);')
+        self.assertContains(response, 'target.scrollIntoView({block: "center"});')
+        self.assertContains(response, "drawerTrigger = button;")
+        self.assertContains(response, "function closeDrawer()")
+        self.assertContains(response, "returnTarget?.focus({preventScroll: true});")
+        self.assertContains(response, 'document.querySelector(\'[data-tab="tab-seguimiento"]\')')
+
+        unsafe = self.client.get(
+            reverse("mantenimiento:dashboard"),
+            {"open": 'falla:1" autofocus onfocus="alert(1)'},
+        )
+        self.assertEqual(unsafe.context["open_item_uid"], "")
+
+    def test_dashboard_open_incluye_falla_cerrada_autorizada(self):
+        branch = Sucursal.objects.create(codigo="OPEN-CLOSED", nombre="Cerrada")
+        category = CategoriaFalla.objects.create(nombre="Abrir cerrada")
+        report = ReporteFalla.objects.create(
+            sucursal=branch,
+            categoria=category,
+            titulo="Falla ya cerrada",
+            descripcion="Debe conservar acceso desde el aviso",
+            estatus=ReporteFalla.ESTATUS_CERRADO,
+            fecha_cierre=timezone.now(),
+            reportado_por=self.mantenimiento,
+        )
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get(
+            reverse("mantenimiento:dashboard"), {"open": f"falla:{report.pk}"}
+        )
+
+        self.assertEqual(response.context["open_item_uid"], f"falla:{report.pk}")
+        self.assertContains(response, "Falla ya cerrada")
+        self.assertContains(response, f'data-maintenance-uid="falla:{report.pk}"')
+
+    def test_dashboard_open_incluye_falla_antigua_fuera_del_top_80(self):
+        branch = Sucursal.objects.create(codigo="OPEN-OLD", nombre="Antigua")
+        category = CategoriaFalla.objects.create(nombre="Abrir antigua")
+        old_report = ReporteFalla.objects.create(
+            sucursal=branch,
+            categoria=category,
+            titulo="Falla antigua solicitada",
+            descripcion="Debe cargarse de forma acotada",
+            reportado_por=self.mantenimiento,
+        )
+        ReporteFalla.objects.filter(pk=old_report.pk).update(
+            fecha_reporte=timezone.now() - timedelta(days=365)
+        )
+        ReporteFalla.objects.bulk_create(
+            [
+                ReporteFalla(
+                    sucursal=branch,
+                    categoria=category,
+                    titulo=f"Falla reciente {index}",
+                    descripcion="Ocupa bandeja",
+                    reportado_por=self.mantenimiento,
+                )
+                for index in range(80)
+            ]
+        )
+        self.client.force_login(self.mantenimiento)
+
+        response = self.client.get(
+            reverse("mantenimiento:dashboard"), {"open": f"falla:{old_report.pk}"}
+        )
+
+        self.assertEqual(response.context["open_item_uid"], f"falla:{old_report.pk}")
+        self.assertContains(response, "Falla antigua solicitada")
+        self.assertContains(response, f'data-maintenance-uid="falla:{old_report.pk}"')
+
+    def test_dashboard_open_no_expone_falla_fuera_del_alcance(self):
+        own_branch = Sucursal.objects.create(codigo="OPEN-OWN", nombre="Propia")
+        other_branch = Sucursal.objects.create(codigo="OPEN-OTHER", nombre="Ajena")
+        category = CategoriaFalla.objects.create(nombre="Abrir con alcance")
+        limited = get_user_model().objects.create_user("open-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=own_branch)
+        UserModuleAccess.objects.create(
+            user=limited,
+            module="mantenimiento.dashboard",
+            access=ACCESS_VIEW,
+        )
+        other_report = ReporteFalla.objects.create(
+            sucursal=other_branch,
+            categoria=category,
+            titulo="Falla ajena confidencial",
+            descripcion="No debe renderizarse",
+            reportado_por=self.mantenimiento,
+        )
+        self.client.force_login(limited)
+
+        response = self.client.get(
+            reverse("mantenimiento:dashboard"),
+            {"open": f"falla:{other_report.pk}"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["open_item_uid"], "")
+        self.assertNotContains(response, "Falla ajena confidencial")
+
+    def test_dashboard_no_cuenta_duplicado_ligado_fuera_del_alcance(self):
+        own_branch = Sucursal.objects.create(codigo="COUNT-OWN", nombre="Propia contador")
+        other_branch = Sucursal.objects.create(codigo="COUNT-OTHER", nombre="Ajena contador")
+        category = CategoriaFalla.objects.create(nombre="Conteo con alcance")
+        limited = get_user_model().objects.create_user("count-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=own_branch)
+        UserModuleAccess.objects.create(
+            user=limited,
+            module="mantenimiento.dashboard",
+            access=ACCESS_VIEW,
+        )
+        principal = ReporteFalla.objects.create(
+            sucursal=own_branch,
+            categoria=category,
+            titulo="Falla principal visible",
+            descripcion="Debe contar solo actividad propia",
+            reportado_por=self.mantenimiento,
+        )
+        ReporteFalla.objects.create(
+            sucursal=own_branch,
+            categoria=category,
+            titulo="Repetición propia",
+            descripcion="Visible para el usuario",
+            reportado_por=self.mantenimiento,
+            duplicado_de=principal,
+        )
+        ReporteFalla.objects.create(
+            sucursal=other_branch,
+            categoria=category,
+            titulo="Repetición ajena confidencial",
+            descripcion="No debe alterar el contador",
+            reportado_por=self.mantenimiento,
+            duplicado_de=principal,
+        )
+        self.client.force_login(limited)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+        visible = next(
+            item
+            for column in response.context["kanban_columns"]
+            for item in column["items"]
+            if item["uid"] == f"falla:{principal.pk}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(visible["duplicados_total"], 1)
+        self.assertContains(response, "Reportado 2 veces")
+        self.assertNotContains(response, "Reportado 3 veces")
+        self.assertNotContains(response, "Repetición ajena confidencial")
 
     def test_pwa_shows_order_traceability_fields(self):
         self.client.force_login(self.mantenimiento)
@@ -1464,7 +1634,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20260911-proveedor-sin-contacto-v4", sw)
+        self.assertIn("20260927-higiene-consolidacion-v1", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):

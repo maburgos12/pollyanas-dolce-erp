@@ -24,8 +24,19 @@ ESTATUS_CERRADOS = (ReporteFalla.ESTATUS_CERRADO, ReporteFalla.ESTATUS_CANCELADO
 def marcar_duplicado(reporte: ReporteFalla, principal: ReporteFalla, usuario) -> ReporteFalla:
     """Liga `reporte` al `principal` y devuelve el principal efectivo."""
 
-    reporte = ReporteFalla.objects.select_for_update().get(pk=reporte.pk)
-    principal = ReporteFalla.objects.select_for_update().get(pk=principal.pk)
+    bloqueados = {
+        bloqueado.pk: bloqueado
+        for bloqueado in ReporteFalla.objects.select_for_update()
+        .filter(pk__in=(reporte.pk, principal.pk))
+        .order_by("pk")
+    }
+    try:
+        reporte = bloqueados[reporte.pk]
+        principal = bloqueados[principal.pk]
+    except KeyError as exc:
+        raise ReporteFalla.DoesNotExist(
+            "ReporteFalla matching query does not exist."
+        ) from exc
 
     destino = enlazar_duplicado(reporte, principal, estatus_cerrados=ESTATUS_CERRADOS)
 

@@ -39,6 +39,7 @@ from mantenimiento.services_access import (
 )
 from mantenimiento.services_history import canonical_status, period_bounds
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
+from operacion.models import RegistroHigiene, RespuestaHigiene
 
 
 # El post_save de ReporteUnidad (logistica.signals) encola una notificación
@@ -720,6 +721,59 @@ class MaintenanceInboxV2Tests(TestCase):
         self.assertEqual(payload["pagination"]["total"], 3)
         self.assertTrue(payload["pagination"]["has_next"])
 
+    def test_fallas_ligadas_comparten_fila_y_metricas_de_continuidad(self):
+        principal = ReporteFalla.objects.create(
+            sucursal=self.branch,
+            categoria=self.category,
+            titulo="Sanitario",
+            descripcion="No descarga agua",
+            reportado_por=self.reporter,
+        )
+        duplicada = ReporteFalla.objects.create(
+            sucursal=self.branch,
+            categoria=self.category,
+            titulo="Sanitario otra vez",
+            descripcion="Sigue sin descargar",
+            reportado_por=self.reporter,
+            duplicado_de=principal,
+        )
+        for indice, reporte in enumerate((principal, duplicada), start=1):
+            registro = RegistroHigiene.objects.create(
+                tipo=RegistroHigiene.TIPO_LIMPIEZA,
+                sucursal=self.branch,
+                fecha=f"2026-09-2{indice + 4}",
+                clave_instancia=f"inbox-{indice}",
+                plantilla_version="2026.1",
+                creado_por=self.reporter,
+            )
+            RespuestaHigiene.objects.create(
+                registro=registro,
+                punto_clave="bano_sanitario",
+                seccion="Baños",
+                punto_revision="Sanitario limpio y funcional",
+                respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                reporte_falla=reporte,
+                continuidad_falla=(
+                    RespuestaHigiene.CONTINUIDAD_INICIAL
+                    if indice == 1
+                    else RespuestaHigiene.CONTINUIDAD_IGUAL
+                ),
+            )
+
+        payload = self.client.get(
+            "/api/mantenimiento/v2/bandeja/",
+            {"estado": "abiertos", "periodo": "todo", "origen": "sucursales"},
+        ).json()
+
+        rows = [row for row in payload["results"] if row["uid"].startswith("falla:")]
+        self.assertEqual([row["uid"] for row in rows], [f"falla:{principal.pk}"])
+        self.assertEqual(rows[0]["constataciones_total"], 2)
+        self.assertEqual(rows[0]["ultima_constatacion"], "2026-09-26")
+
+        dashboard = self.client.get("/mantenimiento/", {"origen": "sucursales"})
+        self.assertEqual(dashboard.status_code, 200)
+        self.assertContains(dashboard, "2 revisiones · última 26/09/2026")
+
     def test_unit_report_uses_real_close_date_not_old_report_date(self):
         report = self._closed_unit_report(2, reported_days_ago=45)
 
@@ -1311,6 +1365,108 @@ class MaintenanceDetailV2Tests(TestCase):
         self.assertEqual([row["nombre"] for row in data["seguimiento"][0]["evidencias"]], ["avance.jpg", "dos.pdf"])
         self.assertNotIn("notas_internas", data)
 
+    def test_falla_detail_incluye_constataciones_diarias(self):
+        for indice, fecha in enumerate(("2026-09-25", "2026-09-26"), start=1):
+            registro = RegistroHigiene.objects.create(
+                tipo=RegistroHigiene.TIPO_LIMPIEZA,
+                sucursal=self.branch,
+                fecha=fecha,
+                clave_instancia=f"diaria-{indice}",
+                plantilla_version="2026.1",
+                creado_por=self.reporter,
+            )
+            RespuestaHigiene.objects.create(
+                registro=registro,
+                punto_clave="produccion_equipos_limpios",
+                seccion="Producción",
+                punto_revision="Equipos limpios",
+                respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                observacion="El horno sigue sin encender",
+                requiere_seguimiento=True,
+                tipo_objetivo=ReporteFalla.OBJETIVO_EQUIPO,
+                activo_relacionado=self.report.activo_relacionado,
+                reporte_falla=self.report,
+                continuidad_falla=(
+                    RespuestaHigiene.CONTINUIDAD_INICIAL
+                    if indice == 1
+                    else RespuestaHigiene.CONTINUIDAD_IGUAL
+                ),
+            )
+
+        self.client.force_login(self.user)
+        detail = self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["continuidad"]["total"], 2)
+        self.assertEqual(detail.json()["continuidad"]["primera_fecha"], "2026-09-25")
+        self.assertEqual(detail.json()["continuidad"]["ultima_fecha"], "2026-09-26")
+        self.assertEqual(len(detail.json()["constataciones_higiene"]), 2)
+
+    def test_falla_detail_no_expone_constatacion_ligada_desde_otra_sucursal(self):
+        outsider = get_user_model().objects.create_user(
+            "persona-ajena", password="test", first_name="Persona", last_name="Ajena"
+        )
+        cross_branch_duplicate = ReporteFalla.objects.create(
+            sucursal=self.other_branch,
+            categoria=self.report.categoria,
+            titulo="Ligada indebidamente",
+            descripcion="No debe exponerse",
+            reportado_por=outsider,
+            duplicado_de=self.report,
+        )
+        registro = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_LIMPIEZA,
+            sucursal=self.other_branch,
+            fecha="2020-01-02",
+            clave_instancia="cross-branch",
+            plantilla_version="2026.1",
+            creado_por=outsider,
+        )
+        respuesta = RespuestaHigiene.objects.create(
+            registro=registro,
+            punto_clave="dato_ajeno",
+            seccion="Ajena",
+            punto_revision="Punto confidencial ajeno",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            observacion="Observación confidencial ajena",
+            reporte_falla=cross_branch_duplicate,
+            continuidad_falla=RespuestaHigiene.CONTINUIDAD_IGUAL,
+        )
+        respuesta.evidencia.save(
+            "evidencia-ajena.jpg", ContentFile(b"image"), save=True
+        )
+
+        self.client.force_login(self.user)
+        inbox = self.client.get(
+            "/api/mantenimiento/v2/bandeja/",
+            {"estado": "abiertos", "periodo": "todo", "origen": "sucursales"},
+        ).json()
+        inbox_row = next(
+            row for row in inbox["results"] if row["uid"] == f"falla:{self.report.pk}"
+        )
+        self.assertEqual(inbox_row["constataciones_total"], 0)
+        self.assertIsNone(inbox_row["primera_constatacion"])
+        self.assertIsNone(inbox_row["ultima_constatacion"])
+
+        response = self.client.get(
+            f"/api/mantenimiento/v2/items/falla/{self.report.pk}/"
+        )
+        payload = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(payload["continuidad"]["total"], 0)
+        self.assertEqual(payload["constataciones_higiene"], [])
+        serialized = response.content.decode()
+        self.assertNotIn("Observación confidencial ajena", serialized)
+        self.assertNotIn("Persona Ajena", serialized)
+        self.assertNotIn("2020-01-02", serialized)
+        self.assertNotIn("evidencia-ajena.jpg", serialized)
+        self.assertEqual(
+            self.client.get(
+                f"/api/mantenimiento/v2/evidencias/higiene_constatacion/{respuesta.pk}/"
+            ).status_code,
+            404,
+        )
+
     def test_detail_rejects_anonymous_permissionless_other_branch_unknown_type_and_missing_id(self):
         self.client.logout()
         self.assertIn(self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/").status_code, {401, 403})
@@ -1376,12 +1532,12 @@ class MaintenanceDetailV2Tests(TestCase):
 
     def test_multiple_timeline_rows_keep_fixed_query_budget(self):
         self.client.force_login(self.user)
-        with self.assertNumQueries(10):
+        with self.assertNumQueries(11):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
         for index in range(5):
             row = BitacoraFalla.objects.create(reporte=self.report, usuario=self.user, comentario=str(index))
             EvidenciaSeguimientoFalla.objects.create(bitacora=row, archivo=f"fallas/seguimiento/{index}.jpg", subido_por=self.user)
-        with self.assertNumQueries(10):
+        with self.assertNumQueries(11):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
 
 
@@ -1566,6 +1722,41 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
         own_service.archivo_factura.save("servicio.pdf", ContentFile(b"%PDF-service"), save=True)
         other_service.archivo_factura.save("servicio-ajeno.pdf", ContentFile(b"%PDF-other"), save=True)
 
+        own_hygiene_record = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_LIMPIEZA,
+            sucursal=self.branch,
+            fecha="2026-09-26",
+            clave_instancia="evidence-own",
+            plantilla_version="2026.1",
+            creado_por=self.reporter,
+        )
+        other_hygiene_record = RegistroHigiene.objects.create(
+            tipo=RegistroHigiene.TIPO_LIMPIEZA,
+            sucursal=self.other_branch,
+            fecha="2026-09-26",
+            clave_instancia="evidence-other",
+            plantilla_version="2026.1",
+            creado_por=self.reporter,
+        )
+        own_hygiene = RespuestaHigiene.objects.create(
+            registro=own_hygiene_record,
+            punto_clave="equipo",
+            seccion="Producción",
+            punto_revision="Equipo",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            reporte_falla=self.report,
+        )
+        other_hygiene = RespuestaHigiene.objects.create(
+            registro=other_hygiene_record,
+            punto_clave="equipo",
+            seccion="Producción",
+            punto_revision="Equipo",
+            respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+            reporte_falla=self.other_report,
+        )
+        own_hygiene.evidencia.save("higiene.jpg", ContentFile(b"image"), save=True)
+        other_hygiene.evidencia.save("higiene-ajena.jpg", ContentFile(b"image"), save=True)
+
         cases = [
             ("seguimiento_falla", self.evidence.pk, other_timeline_evidence.pk),
             ("falla_inicial", self.report.pk, self.other_report.pk),
@@ -1574,6 +1765,7 @@ class MaintenanceEvidenceV2Tests(MaintenanceDetailV2Tests):
             ("reparacion_factura", own_repair.pk, other_repair.pk),
             ("reparacion_foto", own_repair.pk, other_repair.pk),
             ("servicio_unidad_factura", own_service.pk, other_service.pk),
+            ("higiene_constatacion", own_hygiene.pk, other_hygiene.pk),
         ]
         for kind, own_pk, other_pk in cases:
             with self.subTest(kind=kind, access="own"):

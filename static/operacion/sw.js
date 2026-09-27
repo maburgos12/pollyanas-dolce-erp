@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-app-operativa-pwa-v45-conteos-captura-compacta";
+const CACHE_NAME = "pollyanas-app-operativa-pwa-v46-higiene-falla-continuidad";
 const SHELL_ASSETS = [
   "/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4",
   "/static/operacion/app-icon-192.png?v=20260707-workflow-icon-v5",
@@ -23,6 +23,9 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.pathname.startsWith("/app/conteos/") || url.pathname.startsWith("/inventario/conteos-sucursales/")) return;
   if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/app/api/")) return;
+  // Consulta dinámica autenticada: nunca compartir ni conservar coincidencias
+  // de una sucursal o sesión anterior.
+  if (url.pathname === "/app/higiene/fallas-coincidentes/") return;
   // El pasaporte y la búsqueda manual son respuestas autenticadas y con alcance
   // por usuario: servirlas desde caché mostraría datos vencidos como vigentes, o
   // los de otra sesión en un teléfono compartido.
