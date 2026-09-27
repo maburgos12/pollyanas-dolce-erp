@@ -38,6 +38,7 @@ from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddlewa
 from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
 from core.navigation import build_nav_groups
 from core.notificaciones import notificar_permiso_solicitado, notificar_prestamo_solicitado, usuarios_por_grupo
+from fallas.models import CategoriaFalla, ReporteFalla
 from core.hallmark_ui_audit import new_issues_against_baseline, scan_hallmark_ui
 from core.views import (
     _build_canonical_inventory_dashboard_metrics,
@@ -493,6 +494,75 @@ class NotificacionesTests(TestCase):
         self.user = User.objects.create_user(username="carolina.cayetano", password="test12345")
         self.actor = User.objects.create_user(username="paula.lugo", password="test12345")
         self.client.force_login(self.user)
+
+    def _falla_notificable(self, titulo):
+        sucursal, _ = Sucursal.objects.get_or_create(
+            codigo="NOTIF-FALLA",
+            defaults={"nombre": "Las Glorias", "activa": True},
+        )
+        categoria, _ = CategoriaFalla.objects.get_or_create(
+            nombre="Instalaciones notificación",
+            defaults={"tipo": CategoriaFalla.TIPO_INSTALACION},
+        )
+        return ReporteFalla.objects.create(
+            sucursal=sucursal,
+            categoria=categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo=titulo,
+            descripcion="No descarga agua.",
+            justificacion_sin_foto="Prueba automatizada.",
+            reportado_por=self.actor,
+        )
+
+    def _grupo_falla_notificable(self):
+        principal = self._falla_notificable("Sanitario")
+        repetida = self._falla_notificable("Sanitario otra vez")
+        repetida.duplicado_de = principal
+        repetida.save(update_fields=["duplicado_de"])
+        notificaciones = [
+            Notificacion.objects.create(
+                usuario=self.user,
+                titulo="Nueva falla en Las Glorias",
+                objeto_tipo="ReporteFalla",
+                objeto_id=str(reporte.pk),
+                url="/mantenimiento/",
+            )
+            for reporte in (principal, repetida)
+        ]
+        return principal, notificaciones
+
+    def test_notificaciones_de_reportes_ligados_cuentan_como_un_grupo(self):
+        principal = self._falla_notificable("Sanitario")
+        repetida = self._falla_notificable("Sanitario otra vez")
+        repetida.duplicado_de = principal
+        repetida.save(update_fields=["duplicado_de"])
+        for reporte in (principal, repetida):
+            Notificacion.objects.create(
+                usuario=self.user,
+                titulo="Nueva falla en Las Glorias",
+                objeto_tipo="ReporteFalla",
+                objeto_id=str(reporte.pk),
+                url="/mantenimiento/",
+            )
+
+        response = self.client.get("/notificaciones/")
+        self.assertEqual(response.context["pendientes_count"], 1)
+        self.assertContains(response, "2 avisos agrupados")
+
+    def test_abrir_grupo_marca_todos_sus_avisos_como_leidos(self):
+        principal, notificaciones = self._grupo_falla_notificable()
+        response = self.client.post(f"/notificaciones/{notificaciones[0].pk}/leer/")
+        self.assertRedirects(
+            response,
+            f"/mantenimiento/?open=falla:{principal.pk}",
+            fetch_redirect_response=False,
+        )
+        self.assertFalse(
+            Notificacion.objects.filter(
+                pk__in=[row.pk for row in notificaciones], leida=False
+            ).exists()
+        )
 
     def test_bandeja_marca_notificacion_como_leida_y_redirige(self):
         notificacion = Notificacion.objects.create(

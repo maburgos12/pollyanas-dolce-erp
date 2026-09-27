@@ -32,11 +32,14 @@
 
 <section class="notif-list">
   {% for notificacion in page.object_list %}
-  <article class="notif-card {% if not notificacion.leida %}is-unread{% endif %}">
+  <article class="notif-card {% if not notificacion.grupo_leida %}is-unread{% endif %}">
     <div>
       <div class="pd-u-ab3659c67f">
         <span class="notif-badge">{{ notificacion.get_tipo_display }}</span>
         {% if notificacion.prioridad == "alta" %}<span class="notif-badge">Alta</span>{% endif %}
+        {% if notificacion.grupo_total > 1 %}
+          <span class="notif-badge">{{ notificacion.grupo_total }} avisos agrupados</span>
+        {% endif %}
       </div>
       <div class="notif-title">{{ notificacion.titulo }}</div>
       <div class="notif-meta">
@@ -51,7 +54,7 @@
         {% csrf_token %}
         <button class="btn btn-primary" type="submit">Abrir</button>
       </form>
-      {% elif not notificacion.leida %}
+      {% elif not notificacion.grupo_leida %}
       <form method="post" action="{% url 'notificacion_leer' notificacion.id %}">
         {% csrf_token %}
         <button class="btn btn-secondary" type="submit">Marcar leída</button>

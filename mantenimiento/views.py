@@ -33,6 +33,7 @@ from mantenimiento.services_access import (
     authorized_unit_services,
     can_access_mantenimiento,
 )
+from mantenimiento.services_history import continuidad_por_principal
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -328,6 +329,9 @@ def _branch_falla_item(reporte):
         "semaforo": _semaforo(dias),
         "asignado": bool(getattr(reporte, "asignado_a_id", None)),
         "duplicados_total": getattr(reporte, "duplicados_total", 0),
+        "constataciones_total": getattr(reporte, "constataciones_total", 0),
+        "primera_constatacion": getattr(reporte, "primera_constatacion", None),
+        "ultima_constatacion": getattr(reporte, "ultima_constatacion", None),
     }
 
 
@@ -415,6 +419,12 @@ def _unified_items(origen=""):
         )
         for falla in fallas:
             falla.bitacora_total = len(getattr(falla, "bitacora_reciente", []))
+        continuidad = continuidad_por_principal([falla.pk for falla in fallas])
+        for falla in fallas:
+            metrics = continuidad.get(falla.pk, {})
+            falla.constataciones_total = metrics.get("constataciones_total", 0)
+            falla.primera_constatacion = metrics.get("primera_constatacion")
+            falla.ultima_constatacion = metrics.get("ultima_constatacion")
         ordenes = (
             OrdenMantenimiento.objects.filter(estatus__in=_order_open_statuses())
             .select_related("activo_ref", "activo_ref__sucursal", "creado_por", "proveedor_servicio")

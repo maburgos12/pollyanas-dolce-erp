@@ -130,6 +130,11 @@
                     <span class="mant-badge">{{ item.prioridad }}</span>
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
                     {% if item.duplicados_total %}<span class="mant-badge is-warning" title="Otros reportes del mismo problema, ligados a este">Reportado {{ item.duplicados_total|add:1 }} veces</span>{% endif %}
+                    {% if item.constataciones_total %}
+                      <span class="mant-badge is-warning">
+                        {{ item.constataciones_total }} revisiones · última {{ item.ultima_constatacion|date:"d/m/Y" }}
+                      </span>
+                    {% endif %}
                     {% if item.reafirmaciones_total %}<span class="mant-badge is-warning" title="El repartidor volvió a verlo en la inspección diaria">Insistido {{ item.reafirmaciones_total }}×</span>{% endif %}
                     <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                   </div>
