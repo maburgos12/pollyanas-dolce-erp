@@ -164,6 +164,91 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(merma.fuente, PointMovementSyncService.WASTE_SOURCE)
         self.assertEqual(merma.responsable_texto, "Alondra Alvarado")
 
+    def test_full_waste_rerun_replaces_stale_point_rows_in_requested_period(self):
+        receta = Receta.objects.create(
+            nombre="Pastel reemplazo mensual",
+            codigo_point="REEMP-MES",
+            hash_contenido="hash-receta-waste-replacement",
+        )
+        base = FakeWasteLine(
+            branch={"external_id": "Matriz", "name": "Matriz", "status": "ACTIVE", "metadata": {}},
+            movement_external_id="waste-current",
+            movement_at=datetime(2026, 8, 15, 12, 0),
+            responsible="Operación",
+            item_name=receta.nombre,
+            item_code="REEMP-MES",
+            quantity=Decimal("1.000"),
+            unit="PZA",
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("10"),
+            justification="Prueba",
+            raw_payload={"detail": {"Articulo": receta.nombre}},
+            source_hash="waste-current-hash",
+        )
+        stale = replace(
+            base,
+            movement_external_id="waste-stale",
+            source_hash="waste-stale-hash",
+        )
+        outside_period = replace(
+            base,
+            movement_external_id="waste-july",
+            movement_at=datetime(2026, 7, 31, 12, 0),
+            source_hash="waste-july-hash",
+        )
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([base, stale]))
+        service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+        service.waste_extractor = FakeWasteExtractor([outside_period])
+        service.run_waste_sync(start_date=date(2026, 7, 31), end_date=date(2026, 7, 31))
+
+        service.waste_extractor = FakeWasteExtractor([base])
+        job = service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(job.result_summary["waste_lines_superseded"], 1)
+        self.assertEqual(job.result_summary["mermas_superseded"], 1)
+        self.assertFalse(PointWasteLine.objects.filter(source_hash="waste-stale-hash").exists())
+        self.assertFalse(MermaPOS.objects.filter(source_hash="waste-stale-hash").exists())
+        self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-current-hash").exists())
+        self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-july-hash").exists())
+        self.assertTrue(MermaPOS.objects.filter(source_hash="waste-july-hash").exists())
+
+    def test_filtered_waste_rerun_does_not_supersede_other_point_rows(self):
+        receta = Receta.objects.create(
+            nombre="Pastel sincronización parcial",
+            codigo_point="SYNC-PARCIAL",
+            hash_contenido="hash-receta-waste-partial",
+        )
+        stale = FakeWasteLine(
+            branch={"external_id": "Matriz", "name": "Matriz", "status": "ACTIVE", "metadata": {}},
+            movement_external_id="waste-other-branch",
+            movement_at=datetime(2026, 8, 15, 12, 0),
+            responsible="Operación",
+            item_name=receta.nombre,
+            item_code="SYNC-PARCIAL",
+            quantity=Decimal("1.000"),
+            unit="PZA",
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("10"),
+            justification="Prueba",
+            raw_payload={"detail": {"Articulo": receta.nombre}},
+            source_hash="waste-other-branch-hash",
+        )
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([stale]))
+        service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+
+        service.waste_extractor = FakeWasteExtractor([])
+        job = service.run_waste_sync(
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 31),
+            branch_filter="Sucursal Leyva",
+        )
+
+        self.assertEqual(job.result_summary["waste_lines_superseded"], 0)
+        self.assertEqual(job.result_summary["mermas_superseded"], 0)
+        self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-other-branch-hash").exists())
+        self.assertTrue(MermaPOS.objects.filter(source_hash="waste-other-branch-hash").exists())
+
     def test_run_waste_sync_uses_local_operational_date_for_aware_timestamp(self):
         receta = Receta.objects.create(nombre="Bollo Red Velvet", codigo_point="BOLLO-RV", hash_contenido="hash-receta-waste-tz")
         waste_line = FakeWasteLine(

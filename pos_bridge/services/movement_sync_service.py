@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
@@ -171,6 +171,37 @@ class PointMovementSyncService:
         }
         _, created = MermaPOS.objects.update_or_create(source_hash=line.source_hash, defaults=defaults)
         return created
+
+    def _supersede_stale_waste_rows(self, *, sync_job: PointSyncJob, current_hashes: set[str]) -> tuple[int, int]:
+        """Replace a complete Point waste period without touching partial branch syncs."""
+        parameters = getattr(sync_job, "parameters", {}) or {}
+        if not parameters.get("start_date") or not parameters.get("end_date"):
+            return 0, 0
+        if str(parameters.get("branch_filter") or "").strip():
+            return 0, 0
+
+        start_date = date.fromisoformat(str(parameters["start_date"]))
+        end_date = date.fromisoformat(str(parameters["end_date"]))
+        current_tz = timezone.get_current_timezone()
+        start_at = timezone.make_aware(datetime.combine(start_date, datetime.min.time()), current_tz)
+        end_at = timezone.make_aware(
+            datetime.combine(end_date + timedelta(days=1), datetime.min.time()),
+            current_tz,
+        )
+        stale_rows = PointWasteLine.objects.select_for_update().filter(
+            movement_at__gte=start_at,
+            movement_at__lt=end_at,
+        ).exclude(source_hash__in=current_hashes)
+        stale_hashes = list(stale_rows.values_list("source_hash", flat=True))
+        if not stale_hashes:
+            return 0, 0
+
+        merma_count, _ = MermaPOS.objects.filter(
+            source_hash__in=stale_hashes,
+            fuente=self.WASTE_SOURCE,
+        ).delete()
+        waste_count, _ = stale_rows.delete()
+        return waste_count, merma_count
 
     def _point_inventory_location(self, branch: PointBranch | None) -> str | None:
         if branch is None:
@@ -564,7 +595,13 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_waste_lines(self, sync_job: PointSyncJob, extracted_lines: list) -> dict:
-        lock_product_month_sources(item.movement_at for item in extracted_lines)
+        parameters = getattr(sync_job, "parameters", {}) or {}
+        scope_dates = [
+            date.fromisoformat(str(parameters[key]))
+            for key in ("start_date", "end_date")
+            if parameters.get(key)
+        ]
+        lock_product_month_sources([*scope_dates, *(item.movement_at for item in extracted_lines)])
         staged_created = 0
         staged_updated = 0
         ledger_created = 0
@@ -614,12 +651,18 @@ class PointMovementSyncService:
                     nombre=item.item_name,
                     payload=item.raw_payload,
                 )
+        waste_lines_superseded, mermas_superseded = self._supersede_stale_waste_rows(
+            sync_job=sync_job,
+            current_hashes={item.source_hash for item in extracted_lines},
+        )
         return {
             "waste_lines_seen": len(extracted_lines),
             "waste_lines_created": staged_created,
             "waste_lines_updated": staged_updated,
             "mermas_created": ledger_created,
             "mermas_updated": ledger_updated,
+            "waste_lines_superseded": waste_lines_superseded,
+            "mermas_superseded": mermas_superseded,
             "unmatched_items": unresolved,
         }
 

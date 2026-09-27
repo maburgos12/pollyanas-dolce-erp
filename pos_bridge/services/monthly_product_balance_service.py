@@ -372,10 +372,6 @@ class MonthlyPointProductBalanceService:
                 else bool(refresh_official_sales)
             ),
         )
-        waste, waste_meta, waste_unresolved = self._load_waste(
-            month_start=month_start,
-            month_end=data_through,
-        )
         (
             conversion_rows,
             unresolved_conversions,
@@ -383,6 +379,17 @@ class MonthlyPointProductBalanceService:
             conversion_counts,
             conversion_meta,
         ) = self._load_conversions(month_start=month_start, month_end=data_through)
+        waste, waste_meta, waste_unresolved = self._load_waste(
+            month_start=month_start,
+            month_end=data_through,
+            finished_product_recipe_ids=(
+                set(opening)
+                | set(closing)
+                | set(production)
+                | set(sales)
+                | set(conversion_rows)
+            ),
+        )
 
         receta_ids = set(opening) | set(closing) | set(production) | set(sales) | set(waste) | set(conversion_rows)
         rows: dict[int, _MutableBalanceRow] = {
@@ -1346,7 +1353,13 @@ class MonthlyPointProductBalanceService:
             **{key: value for key, value in authority.items() if key != "authoritative"},
         }, fact_unresolved
 
-    def _load_waste(self, *, month_start: date, month_end: date):
+    def _load_waste(
+        self,
+        *,
+        month_start: date,
+        month_end: date,
+        finished_product_recipe_ids: set[int] | None = None,
+    ):
         lower_bound, upper_bound = self._date_datetime_bounds(month_start, month_end)
         point_rows = list(
             PointWasteLine.objects.filter(
@@ -1378,7 +1391,19 @@ class MonthlyPointProductBalanceService:
             row_job_ids=[row.sync_job_id for row in point_rows],
         )
         if point_rows or authority["authoritative"]:
-            matched = [row for row in point_rows if row.receta_id is not None]
+            finished_product_recipe_ids = finished_product_recipe_ids or set()
+            matched = [
+                row
+                for row in point_rows
+                if row.receta_id is not None
+                and (row.insumo_id is None or row.receta_id in finished_product_recipe_ids)
+            ]
+            internal_input_rows_excluded = sum(
+                row.receta_id is not None
+                and row.insumo_id is not None
+                and row.receta_id not in finished_product_recipe_ids
+                for row in point_rows
+            )
             unresolved = [
                 MonthlyPointUnresolvedMovement(
                     source="point_waste",
@@ -1401,6 +1426,7 @@ class MonthlyPointProductBalanceService:
                 "source_present": bool(point_rows) or bool(authority["authoritative"]),
                 "rows_read": len(point_rows),
                 "unresolved_rows": len(unresolved),
+                "internal_input_rows_excluded": internal_input_rows_excluded,
                 **authority,
             }, unresolved
 
