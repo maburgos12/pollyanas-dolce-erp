@@ -1,3 +1,4 @@
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO
@@ -12,6 +13,7 @@ from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointConversionLine, PointSyncJob
 from pos_bridge.services.conversion_sync_service import (
     _created_report_pk,
+    _find_ready_report,
     _normalize_inventory_report_rows,
     _poll_report,
     _read_report_rows,
@@ -642,6 +644,61 @@ class PointConversionRerunAuthorityTests(TestCase):
 
         self.assertEqual(_created_report_pk(scalar), "")
         self.assertEqual(_created_report_pk(mapping), "")
+
+    def test_sync_reuses_ready_report_with_the_exact_requested_filters(self):
+        ready_report = {
+            "PK_Reporte": "AUGUST-READY",
+            "Nombre_reporte": "MOVIMIENTOS DE INVENTARIOS",
+            "Modulo": "Movimientos de inventarios",
+            "Status": 1,
+            "Status_descripcion": "Creado",
+            "Fecha_creacion": "2026-09-26T20:50:41.733",
+            "Filtros": json.dumps({
+                "Sucursal": "TODAS LAS SUCURSALES",
+                "FK_Sucursal": None,
+                "Fecha_Inicio": "08-01-2026",
+                "Fecha_Fin": "08-31-2026",
+                "FK_TipoMovimiento": "21",
+                "TipoMovimiento": "ENTRADA POR CONVERSIÓN",
+            }),
+        }
+        response = MagicMock()
+        response.json.return_value = [ready_report]
+        client = MagicMock()
+        client._request.return_value = response
+
+        selected = _find_ready_report(
+            client,
+            date_from=date(2026, 8, 1),
+            date_to=date(2026, 8, 31),
+        )
+
+        self.assertEqual(selected["PK_Reporte"], "AUGUST-READY")
+
+    def test_ready_report_from_another_month_is_not_reused(self):
+        response = MagicMock()
+        response.json.return_value = [{
+            "PK_Reporte": "JULY-READY",
+            "Nombre_reporte": "MOVIMIENTOS DE INVENTARIOS",
+            "Modulo": "Movimientos de inventarios",
+            "Status": 1,
+            "Status_descripcion": "Creado",
+            "Filtros": json.dumps({
+                "Fecha_Inicio": "07-01-2026",
+                "Fecha_Fin": "07-31-2026",
+                "FK_TipoMovimiento": "21",
+            }),
+        }]
+        client = MagicMock()
+        client._request.return_value = response
+
+        selected = _find_ready_report(
+            client,
+            date_from=date(2026, 8, 1),
+            date_to=date(2026, 8, 31),
+        )
+
+        self.assertIsNone(selected)
 
     def test_failed_success_transition_rolls_back_relinks_and_new_rows(self):
         stale_recipe = Receta.objects.create(
