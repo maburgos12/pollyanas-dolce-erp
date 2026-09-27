@@ -1,19 +1,24 @@
 from datetime import date, datetime
 from tempfile import TemporaryDirectory
+from threading import Barrier, Thread
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import connection
-from django.test import TestCase, override_settings
+from django.db import close_old_connections, connection
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from activos.models import Activo
-from core.models import Notificacion, Sucursal
+from core.models import AuditLog, Notificacion, Sucursal
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
-from operacion.services_higiene_consolidacion import proponer_consolidacion_higiene
+from operacion.services_higiene_consolidacion import (
+    aplicar_consolidacion_higiene,
+    proponer_consolidacion_higiene,
+)
 
 
 class ConsolidacionHigieneTests(TestCase):
@@ -632,6 +637,108 @@ class ConsolidacionHigieneTests(TestCase):
             },
         )
 
+    def test_aplicar_par_conserva_campos_evidencia_estado_y_es_idempotente(self):
+        principal, repetido, _, respuesta_repetida = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        repetido.refresh_from_db()
+        evidencia = respuesta_repetida.evidencia.name
+        snapshot = {
+            field.attname: getattr(repetido, field.attname)
+            for field in repetido._meta.concrete_fields
+            if field.name != "duplicado_de"
+        }
+
+        primero = aplicar_consolidacion_higiene(
+            [(principal.id, repetido.id)], actor=self.dg
+        )
+        segundo = aplicar_consolidacion_higiene(
+            [(principal.id, repetido.id)], actor=self.dg
+        )
+
+        repetido.refresh_from_db()
+        respuesta_repetida.refresh_from_db()
+        self.assertEqual(repetido.duplicado_de_id, principal.id)
+        self.assertEqual(primero.aplicados, 1)
+        self.assertEqual(primero.omitidos, 0)
+        self.assertEqual(segundo.aplicados, 0)
+        self.assertEqual(segundo.omitidos, 1)
+        self.assertEqual(respuesta_repetida.evidencia.name, evidencia)
+        self.assertEqual(
+            {
+                field.attname: getattr(repetido, field.attname)
+                for field in repetido._meta.concrete_fields
+                if field.name != "duplicado_de"
+            },
+            snapshot,
+        )
+        self.assertEqual(
+            BitacoraFalla.objects.filter(
+                reporte_id__in=[principal.id, repetido.id]
+            ).count(),
+            2,
+        )
+        self.assertEqual(
+            AuditLog.objects.filter(
+                action="CONSOLIDATE",
+                model="fallas.ReporteFalla",
+                object_id=str(repetido.id),
+            ).count(),
+            1,
+        )
+
+    def test_aplicar_revalida_preview_y_omite_par_que_dejo_de_ser_exacto(self):
+        principal, repetido, _, respuesta_repetida = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        self.assertEqual(len(proponer_consolidacion_higiene().exactas), 1)
+        respuesta_repetida.observacion = "Ahora también pierde agua"
+        respuesta_repetida.save(update_fields=["observacion"])
+
+        resultado = aplicar_consolidacion_higiene(
+            [(principal.id, repetido.id)], actor=self.dg
+        )
+
+        repetido.refresh_from_db()
+        self.assertEqual(resultado.aplicados, 0)
+        self.assertEqual(resultado.omitidos, 1)
+        self.assertIsNone(repetido.duplicado_de_id)
+        self.assertFalse(AuditLog.objects.filter(action="CONSOLIDATE").exists())
+
+    def test_aplicar_deduplica_la_misma_seleccion_en_una_solicitud(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        pair = (principal.id, repetido.id)
+
+        resultado = aplicar_consolidacion_higiene([pair, pair], actor=self.dg)
+
+        self.assertEqual(resultado.aplicados, 1)
+        self.assertEqual(resultado.omitidos, 0)
+        self.assertEqual(AuditLog.objects.filter(action="CONSOLIDATE").count(), 1)
+
+    def test_aplicar_revierte_enlace_y_bitacoras_si_falla_la_auditoria(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+
+        with patch(
+            "operacion.services_higiene_consolidacion.AuditLog.objects.create",
+            side_effect=RuntimeError("auditoría no disponible"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "auditoría no disponible"):
+                aplicar_consolidacion_higiene(
+                    [(principal.id, repetido.id)], actor=self.dg
+                )
+
+        repetido.refresh_from_db()
+        self.assertIsNone(repetido.duplicado_de_id)
+        self.assertFalse(
+            BitacoraFalla.objects.filter(
+                reporte_id__in=[principal.id, repetido.id]
+            ).exists()
+        )
+
     @staticmethod
     def _estado_persistido():
         return {
@@ -651,3 +758,90 @@ class ConsolidacionHigieneTests(TestCase):
                 )
             ),
         }
+
+
+class ConsolidacionHigieneConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        users = get_user_model()
+        self.dg = users.objects.create_superuser(
+            username="dg.concurrencia", password="test"
+        )
+        operadora = users.objects.create_user(username="higiene.concurrencia")
+        sucursal = Sucursal.objects.create(
+            codigo="HIG-CONCUR",
+            nombre="Sucursal concurrencia",
+            activa=True,
+        )
+        categoria = CategoriaFalla.objects.create(
+            nombre="Plomería concurrencia",
+            tipo=CategoriaFalla.TIPO_INSTALACION,
+        )
+        reportes = []
+        for indice, fecha in enumerate((date(2026, 9, 25), date(2026, 9, 26)), 1):
+            reporte = ReporteFalla.objects.create(
+                sucursal=sucursal,
+                categoria=categoria,
+                tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+                area_instalacion="Baños",
+                titulo="Limpieza de baños · Sanitario limpio y funcional",
+                descripcion="Hallazgo de higiene: No descarga agua",
+                justificacion_sin_foto="Prueba automatizada.",
+                reportado_por=operadora,
+                fecha_reporte=timezone.make_aware(
+                    datetime.combine(fecha, datetime.min.time())
+                ),
+            )
+            registro = RegistroHigiene.objects.create(
+                tipo=RegistroHigiene.TIPO_BANOS,
+                sucursal=sucursal,
+                fecha=fecha,
+                clave_instancia=f"clientes-ronda-{indice}",
+                plantilla_version="2026.1",
+                creado_por=operadora,
+            )
+            RespuestaHigiene.objects.create(
+                registro=registro,
+                punto_clave="banos_sanitario",
+                seccion="Limpieza de baños",
+                punto_revision="Sanitario limpio y funcional",
+                respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                observacion="No descarga agua",
+                requiere_seguimiento=True,
+                tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+                area_instalacion="Baños",
+                reporte_falla=reporte,
+                continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
+            )
+            reportes.append(reporte)
+        self.pair = (reportes[0].id, reportes[1].id)
+
+    def test_dos_aplicaciones_concurrentes_generan_un_solo_enlace_y_una_auditoria(self):
+        barrier = Barrier(2)
+        resultados = []
+        errores = []
+
+        def aplicar():
+            close_old_connections()
+            try:
+                actor = get_user_model().objects.get(pk=self.dg.pk)
+                barrier.wait(timeout=5)
+                resultados.append(
+                    aplicar_consolidacion_higiene([self.pair], actor=actor)
+                )
+            except Exception as exc:  # pragma: no cover - se afirma fuera del hilo
+                errores.append(exc)
+            finally:
+                close_old_connections()
+
+        threads = [Thread(target=aplicar), Thread(target=aplicar)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        self.assertFalse(errores)
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+        self.assertEqual(sum(row.aplicados for row in resultados), 1)
+        self.assertEqual(sum(row.omitidos for row in resultados), 1)
+        self.assertEqual(AuditLog.objects.filter(action="CONSOLIDATE").count(), 1)
+        self.assertEqual(BitacoraFalla.objects.count(), 2)

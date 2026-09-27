@@ -2,9 +2,14 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
+from django.core.exceptions import PermissionDenied
+from django.db import connection, transaction
 from django.db.models import F, OuterRef, Prefetch, Subquery
 from django.utils import timezone
 
+from core.access import is_admin_or_dg
+from core.duplicados import enlazar_duplicado
+from core.models import AuditLog
 from fallas.models import BitacoraFalla, ReporteFalla
 from operacion.models import RespuestaHigiene
 
@@ -35,6 +40,12 @@ class ResultadoPreview:
     @property
     def todas(self):
         return self.exactas + self.ambiguas
+
+
+@dataclass(frozen=True)
+class ResultadoAplicacion:
+    aplicados: int
+    omitidos: int
 
 
 def normalizar_texto(value):
@@ -211,3 +222,112 @@ def proponer_consolidacion_higiene():
             (exactas if exacta else ambiguas).append(propuesta)
 
     return ResultadoPreview(tuple(exactas), tuple(ambiguas))
+
+
+def _bloquear_aplicaciones_concurrentes():
+    """Serializa esta operación; los bloqueos de filas protegen cada reporte."""
+
+    if connection.vendor != "postgresql":  # Defensa para herramientas de inspección.
+        return
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [0x48494743])
+
+
+def _normalizar_pares(pares):
+    unicos = []
+    vistos = set()
+    for par in pares:
+        if not isinstance(par, (tuple, list)) or len(par) != 2:
+            raise ValueError("Cada selección debe indicar una falla principal y una repetida.")
+        principal_id, repetido_id = par
+        if isinstance(principal_id, bool) or isinstance(repetido_id, bool):
+            raise ValueError("Los folios seleccionados no son válidos.")
+        try:
+            normalizado = (int(principal_id), int(repetido_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Los folios seleccionados no son válidos.") from exc
+        if (
+            normalizado[0] <= 0
+            or normalizado[1] <= 0
+            or normalizado[0] == normalizado[1]
+        ):
+            raise ValueError("Los folios seleccionados no son válidos.")
+        if normalizado not in vistos:
+            vistos.add(normalizado)
+            unicos.append(normalizado)
+    return tuple(unicos)
+
+
+@transaction.atomic
+def aplicar_consolidacion_higiene(pares, *, actor):
+    """Vincula únicamente pares que siguen exactos al momento de aplicar."""
+
+    if not is_admin_or_dg(actor):
+        raise PermissionDenied
+    pares = _normalizar_pares(pares)
+    if not pares:
+        return ResultadoAplicacion(aplicados=0, omitidos=0)
+
+    _bloquear_aplicaciones_concurrentes()
+    ids = sorted({reporte_id for par in pares for reporte_id in par})
+    reportes = {
+        reporte.pk: reporte
+        for reporte in ReporteFalla.objects.select_for_update()
+        .filter(pk__in=ids)
+        .order_by("pk")
+    }
+
+    preview = proponer_consolidacion_higiene()
+    propuestas = {
+        (row.principal_id, row.repetido_id): row for row in preview.exactas
+    }
+    aplicados = 0
+    omitidos = 0
+    for principal_id, repetido_id in pares:
+        propuesta = propuestas.get((principal_id, repetido_id))
+        principal = reportes.get(principal_id)
+        repetido = reportes.get(repetido_id)
+        if propuesta is None or principal is None or repetido is None:
+            omitidos += 1
+            continue
+        if principal.duplicado_de_id is not None or repetido.duplicado_de_id is not None:
+            omitidos += 1
+            continue
+
+        destino = enlazar_duplicado(repetido, principal, estatus_cerrados=())
+        BitacoraFalla.objects.bulk_create(
+            [
+                BitacoraFalla(
+                    reporte=repetido,
+                    usuario=actor,
+                    comentario=(
+                        "Consolidación histórica: mismo ciclo que la falla "
+                        f"#{destino.pk}."
+                    ),
+                ),
+                BitacoraFalla(
+                    reporte=destino,
+                    usuario=actor,
+                    comentario=(
+                        "Consolidación histórica: se vinculó la falla "
+                        f"#{repetido.pk} sin eliminar evidencia ni cambiar su estado."
+                    ),
+                ),
+            ]
+        )
+        AuditLog.objects.create(
+            user=actor,
+            action="CONSOLIDATE",
+            model="fallas.ReporteFalla",
+            object_id=str(repetido.pk),
+            payload={
+                "principal_id": destino.pk,
+                "repetido_id": repetido.pk,
+                "respuesta_principal_id": propuesta.respuesta_principal_id,
+                "respuesta_repetida_id": propuesta.respuesta_repetida_id,
+                "origen": "higiene_preview_exacto",
+            },
+        )
+        aplicados += 1
+
+    return ResultadoAplicacion(aplicados=aplicados, omitidos=omitidos)

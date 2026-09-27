@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Consolidación histórica de higiene{% endblock %}
+{% block page_title %}Consolidación histórica{% endblock %}
+{% block body_class %}page-mantenimiento-consolidacion-higiene{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/template_modules/mantenimiento-consolidacion-higiene.css' %}?v=20260927-1">
+{% endblock %}
+
+{% block content %}
+<main class="hig-consolidation">
+  <nav class="hig-consolidation__breadcrumb" aria-label="Ruta de navegación">
+    <a href="{% url 'mantenimiento:dashboard' %}">Mantenimiento</a>
+    <span aria-hidden="true">/</span>
+    <span aria-current="page">Consolidación histórica</span>
+  </nav>
+
+  <header class="hig-consolidation__header">
+    <div>
+      <h1>Revisar reportes históricos repetidos</h1>
+      <p>Esta revisión vincula reportes del mismo ciclo sin borrar fotos, observaciones, estados ni responsables.</p>
+    </div>
+    <dl class="hig-consolidation__summary" aria-label="Resumen de la revisión">
+      <div><dt>Exactas</dt><dd>{{ total_exactas }}</dd></div>
+      <div><dt>Manuales</dt><dd>{{ total_ambiguas }}</dd></div>
+    </dl>
+  </header>
+
+  <section class="hig-consolidation__section" aria-labelledby="exactas-title">
+    <div class="hig-consolidation__section-heading">
+      <div>
+        <h2 id="exactas-title">Coincidencias exactas</h2>
+        <p>Selecciona únicamente los pares que deseas vincular. El servidor volverá a validarlos antes de aplicar.</p>
+      </div>
+      <span class="hig-consolidation__count">{{ total_exactas }} disponible{{ total_exactas|pluralize:"s" }}</span>
+    </div>
+
+    <form
+      method="post"
+      data-async-action
+      data-confirm-message="Se vincularán únicamente las coincidencias exactas seleccionadas. La evidencia y los estados se conservarán. ¿Continuar?"
+    >
+      {% csrf_token %}
+      <div class="table-responsive hig-consolidation__table-wrap" tabindex="0" role="region" aria-label="Coincidencias exactas seleccionables">
+        <table class="hig-consolidation__table">
+          <thead>
+            <tr>
+              <th scope="col">Aplicar</th>
+              <th scope="col">Principal</th>
+              <th scope="col">Repetido</th>
+              <th scope="col">Sucursal</th>
+              <th scope="col">Punto</th>
+              <th scope="col">Fechas</th>
+              <th scope="col">Estados</th>
+              <th scope="col">Observaciones</th>
+              <th scope="col">Motivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in exactas %}
+              <tr>
+                <td data-label="Aplicar">
+                  <input
+                    type="checkbox"
+                    name="pares"
+                    value="{{ row.principal_id }}:{{ row.repetido_id }}"
+                    aria-label="Unir falla {{ row.repetido_id }} con {{ row.principal_id }}"
+                  >
+                </td>
+                <td data-label="Principal"><strong>#{{ row.principal_id }}</strong></td>
+                <td data-label="Repetido">#{{ row.repetido_id }}</td>
+                <td data-label="Sucursal">{{ row.sucursal }}</td>
+                <td data-label="Punto">{{ row.punto }}</td>
+                <td data-label="Fechas"><time datetime="{{ row.fecha_principal }}">{{ row.fecha_principal }}</time> → <time datetime="{{ row.fecha_repetida }}">{{ row.fecha_repetida }}</time></td>
+                <td data-label="Estados">{{ row.estatus_principal }} / {{ row.estatus_repetido }}</td>
+                <td data-label="Observaciones"><span>{{ row.observacion_principal }}</span><span>{{ row.observacion_repetida }}</span></td>
+                <td data-label="Motivo"><span class="hig-consolidation__status">Exacta</span> {{ row.motivo }}</td>
+              </tr>
+            {% empty %}
+              <tr class="hig-consolidation__empty"><td colspan="9">No hay coincidencias exactas pendientes. La revisión está al día.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="hig-consolidation__actions">
+        <p>Las filas ambiguas nunca se incluyen en esta acción.</p>
+        <button class="btn btn-primary" type="submit" data-pending-label="Aplicando…" {% if not exactas %}disabled{% endif %}>Aplicar seleccionadas</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="hig-consolidation__section hig-consolidation__section--manual" aria-labelledby="ambiguas-title">
+    <div class="hig-consolidation__section-heading">
+      <div>
+        <h2 id="ambiguas-title">Revisión manual; no se aplicarán</h2>
+        <p>Comparten identidad operativa, pero sus observaciones difieren. Se muestran para análisis, sin controles de aplicación.</p>
+      </div>
+      <span class="hig-consolidation__count">{{ total_ambiguas }} por revisar</span>
+    </div>
+    <div class="table-responsive hig-consolidation__table-wrap" tabindex="0" role="region" aria-label="Coincidencias ambiguas de solo lectura">
+      <table class="hig-consolidation__table">
+        <thead>
+          <tr>
+            <th scope="col">Principal</th>
+            <th scope="col">Posible repetido</th>
+            <th scope="col">Sucursal</th>
+            <th scope="col">Punto</th>
+            <th scope="col">Observaciones</th>
+            <th scope="col">Motivo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in ambiguas %}
+            <tr>
+              <td data-label="Principal"><strong>#{{ row.principal_id }}</strong></td>
+              <td data-label="Posible repetido">#{{ row.repetido_id }}</td>
+              <td data-label="Sucursal">{{ row.sucursal }}</td>
+              <td data-label="Punto">{{ row.punto }}</td>
+              <td data-label="Observaciones"><span>{{ row.observacion_principal }}</span><span>{{ row.observacion_repetida }}</span></td>
+              <td data-label="Motivo"><span class="hig-consolidation__status hig-consolidation__status--manual">Manual</span> {{ row.motivo }}</td>
+            </tr>
+          {% empty %}
+            <tr class="hig-consolidation__empty"><td colspan="6">No hay coincidencias ambiguas pendientes.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+{% endblock %}
