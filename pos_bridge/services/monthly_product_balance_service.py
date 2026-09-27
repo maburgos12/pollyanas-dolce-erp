@@ -35,6 +35,7 @@ from recetas.models import (
     VentaHistorica,
 )
 from recetas.utils.normalizacion import normalizar_nombre
+from ventas.models import VentaAutoritativaPoint
 from ventas.services.sales_canonical_source import (
     legacy_point_sales_row_count_for_range,
     official_point_sales_rows_for_range,
@@ -1630,6 +1631,16 @@ class MonthlyPointProductBalanceService:
                 daily_rows=daily_rows,
             )
             if daily_rows_read or daily_authoritative:
+                if daily_authoritative and daily_evidence.get("materialized_bridge_reconciled"):
+                    bridge_rows = list(
+                        VentaHistorica.objects.filter(
+                            fecha__gte=month_start,
+                            fecha__lte=month_end,
+                            fuente=POINT_BRIDGE_SALES_SOURCE,
+                            receta__isnull=False,
+                        ).only("receta_id", "cantidad")
+                    )
+                    daily = self._aggregate_rows(bridge_rows, "cantidad")
                 return daily, self._sales_meta(
                     {
                         "source": OFFICIAL_POINT_DAILY_SOURCE,
@@ -2050,6 +2061,7 @@ class MonthlyPointProductBalanceService:
                 }
             )
         materialized_bridge_reconciled = False
+        authoritative_overlay_count = 0
         bridge_unresolved_count = sum(row.receta_id is None for row in bridge_rows)
         if bridge_unresolved_count:
             issues.append(ISSUE_BRIDGE_UNRESOLVED)
@@ -2061,6 +2073,16 @@ class MonthlyPointProductBalanceService:
                     continue
                 key = (row.receta_id, getattr(row.branch, "erp_branch_id", None), row.sale_date)
                 daily_totals[key] = daily_totals.get(key, ZERO) + Decimal(row.quantity)
+            authoritative_rows = VentaAutoritativaPoint.objects.filter(
+                sale_date__gte=month_start,
+                sale_date__lte=month_end,
+                branch__isnull=False,
+                product__isnull=False,
+            ).only("product_id", "branch_id", "sale_date", "quantity").order_by("id")
+            for row in authoritative_rows:
+                key = (row.product_id, row.branch_id, row.sale_date)
+                daily_totals[key] = Decimal(row.quantity)
+                authoritative_overlay_count += 1
             bridge_totals: dict[tuple[int, int | None, date], Decimal] = {}
             for row in bridge_rows:
                 key = (row.receta_id, row.sucursal_id, row.fecha)
@@ -2118,6 +2140,7 @@ class MonthlyPointProductBalanceService:
                 )
             ),
             "materialized_bridge_reconciled": materialized_bridge_reconciled,
+            "authoritative_overlay_row_count": authoritative_overlay_count,
             "bridge_unresolved_row_count": bridge_unresolved_count,
             "authority_issues": tuple(dict.fromkeys(issues)),
             "rejected_provenance": tuple(rejected_provenance),

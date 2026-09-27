@@ -223,9 +223,9 @@
               {% endif %}
             </td>
             <td class="text-end">{% if group.total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if group.total.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ group.total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-subtotal">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
@@ -273,9 +273,9 @@
               {% endif %}
             </td>
             <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Coincide' %}is-success{% elif row.estado_inventario == 'Point mayor' %}is-warning{% elif row.estado_inventario == 'Point menor' %}is-danger{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
@@ -319,9 +319,9 @@
               {% endif %}
             </td>
             <td class="text-end">{% if grand_total.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted">Sin dato</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if grand_total.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ grand_total.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-total">Total</span></td>
           </tr>
         </tbody>

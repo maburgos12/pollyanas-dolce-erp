@@ -17,6 +17,7 @@ from django.utils import timezone
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.models import PointBranch, PointConversionLine, PointSyncJob
 from pos_bridge.services.point_http_client import PointHttpSessionClient
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, months_in_range
 from pos_bridge.utils.helpers import normalize_text
 from recetas.models import Receta
@@ -274,6 +275,54 @@ def _report_is_ready(report: dict) -> bool:
     return status in {True, 1, 2}
 
 
+def _report_filters(report: dict) -> dict:
+    raw = report.get("Filtros")
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(str(raw or "{}"))
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _report_matches_request(report: dict, *, date_from: date, date_to: date) -> bool:
+    name = str(report.get("Nombre_reporte") or "").upper()
+    module = str(report.get("Modulo") or "").lower()
+    filters = _report_filters(report)
+    return bool(
+        "movimiento" in module
+        and "MOVIMIENTOS" in name
+        and _report_is_ready(report)
+        and str(filters.get("Fecha_Inicio") or "") == date_from.strftime("%m-%d-%Y")
+        and str(filters.get("Fecha_Fin") or "") == date_to.strftime("%m-%d-%Y")
+        and str(filters.get("FK_TipoMovimiento") or "") == CONVERSION_TIPO_MOVIMIENTO
+    )
+
+
+def _find_ready_report(
+    client: PointHttpSessionClient,
+    *,
+    date_from: date,
+    date_to: date,
+) -> dict | None:
+    response = client._request("GET", "/Report/get_ReporteLargobyFecha")
+    reports = _parse_json_response(response, default=[])
+    candidates = [
+        report
+        for report in reports
+        if isinstance(report, dict) and _report_matches_request(report, date_from=date_from, date_to=date_to)
+    ]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda report: _coerce_datetime(report.get("Fecha_creacion"), default_date=date_to)
+        or timezone.make_aware(datetime.min, timezone.get_current_timezone()),
+        reverse=True,
+    )
+    return candidates[0]
+
+
 def _poll_report(
     client: PointHttpSessionClient,
     *,
@@ -337,20 +386,27 @@ def sync_conversion_lines(
         },
     )
     try:
-        with PointHttpSessionClient(settings) as client:
-            client.login()
-            created_after = timezone.now()
-            create_response = _create_report(client, date_from=date_from, date_to=date_to)
-            logger.info("Reporte conversion disparado: %s", create_response.text[:200])
-            report = _poll_report(
-                client,
-                created_after=created_after,
-                expected_report_pk=_created_report_pk(create_response),
-            )
-            pk_reporte = str(report.get("PK_Reporte") or "").strip()
-            if not pk_reporte:
-                raise ValueError("Point no devolvió PK_Reporte para descargar conversiones.")
-            rows = _read_report_rows(_download_report(client, pk_reporte=pk_reporte, settings=settings))
+        with point_account_session_lock(wait=True) as acquired:
+            if not acquired:
+                raise TimeoutError("Point está ocupado con otra sincronización de cuenta.")
+            with PointHttpSessionClient(settings) as client:
+                client.login()
+                report = _find_ready_report(client, date_from=date_from, date_to=date_to)
+                if report is None:
+                    created_after = timezone.now()
+                    create_response = _create_report(client, date_from=date_from, date_to=date_to)
+                    logger.info("Reporte conversion disparado: %s", create_response.text[:200])
+                    report = _poll_report(
+                        client,
+                        created_after=created_after,
+                        expected_report_pk=_created_report_pk(create_response),
+                    )
+                else:
+                    logger.info("Se reutiliza reporte de conversión exacto ya listo: %s", report.get("PK_Reporte"))
+                pk_reporte = str(report.get("PK_Reporte") or "").strip()
+                if not pk_reporte:
+                    raise ValueError("Point no devolvió PK_Reporte para descargar conversiones.")
+                rows = _read_report_rows(_download_report(client, pk_reporte=pk_reporte, settings=settings))
 
         branch_map = _build_branch_map()
         recipe_map = _build_recipe_map()

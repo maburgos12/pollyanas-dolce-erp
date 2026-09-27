@@ -391,6 +391,41 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn("Ver diagnóstico técnico", rendered)
         self.assertIn("falta job Point del mes", rendered)
 
+    def test_confirmed_closings_name_the_opening_reference_and_visible_calculation_blockers(self):
+        sources = canonical_balance().sources
+        sources["waste"].update({
+            "authoritative": False,
+            "job_status": "FAILED",
+            "authority_issues": ("WASTE_SYNC_JOB_FAILED",),
+        })
+        sources["conversions"].update({
+            "authoritative": False,
+            "job_status": "FAILED",
+            "authority_issues": ("CONVERSION_SYNC_JOB_FAILED",),
+        })
+        balance = canonical_balance(
+            MonthlyPointBalanceRow(
+                receta_id=self.parent.id,
+                opening_point=Decimal("16"),
+                calculated_closing=None,
+                closing_point=Decimal("14"),
+                difference_point=None,
+                status="REVISAR_FUENTE",
+            ),
+            sources=sources,
+            issues=("CALCULATED_CLOSING_MISSING", "MONTH_SOURCE_INCOMPLETE"),
+        )
+        context, _ = self._context(balance)
+
+        rendered = self._render(context)
+
+        self.assertIn("Cierres confirmados; conciliación pendiente", rendered)
+        self.assertIn("Agosto 2026 inicia contra el cierre Point del 31/07/2026", rendered)
+        self.assertIn("cierre Point final del 31/08/2026", rendered)
+        self.assertIn("Falta validar merma y conversiones del mes", rendered)
+        self.assertIn("Pendiente por fuentes", rendered)
+        self.assertNotIn("Cierres Point disponibles", rendered)
+
     def test_current_month_does_not_report_the_future_closing_as_missing(self):
         sources = canonical_balance().sources
         sources["opening_snapshot"].update({

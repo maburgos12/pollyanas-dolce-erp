@@ -4,6 +4,7 @@ import json
 from datetime import date, timezone
 from types import SimpleNamespace
 
+import requests
 from django.test import SimpleTestCase
 
 from pos_bridge.config import load_point_bridge_settings
@@ -64,6 +65,40 @@ class _FakeHttpSessionService:
         return SimpleNamespace(session=_FakeSession())
 
 
+class _RetrySession(_FakeSession):
+    def __init__(self, *, invalid_detail=False):
+        self.invalid_detail = invalid_detail
+
+    def get(self, url, params=None, timeout=None):
+        if self.invalid_detail and url.endswith("/Mermas/get_detalle"):
+            return _FakeResponse({"redirectToUrl": "/Account/Login"})
+        return super().get(url, params=params, timeout=timeout)
+
+    def close(self):
+        return None
+
+
+class _RetryHttpSessionService:
+    def __init__(self):
+        self.create_count = 0
+
+    def create(self):
+        self.create_count += 1
+        return SimpleNamespace(
+            session=_RetrySession(invalid_detail=self.create_count == 1),
+        )
+
+
+class _ReloginFailureHttpSessionService(_RetryHttpSessionService):
+    def create(self):
+        self.create_count += 1
+        if self.create_count == 2:
+            raise requests.HTTPError("Point no pudo seleccionar la cuenta")
+        return SimpleNamespace(
+            session=_RetrySession(invalid_detail=self.create_count == 1),
+        )
+
+
 class PointWasteExtractorTests(SimpleTestCase):
     def test_extract_treats_naive_point_timestamp_as_utc(self):
         extractor = PointWasteExtractor(
@@ -76,3 +111,28 @@ class PointWasteExtractorTests(SimpleTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].movement_at.tzinfo, timezone.utc)
         self.assertEqual(rows[0].movement_at.isoformat(), "2026-03-21T02:13:03.940000+00:00")
+
+    def test_extract_reauthenticates_when_point_returns_non_list_payload(self):
+        http_session_service = _RetryHttpSessionService()
+        extractor = PointWasteExtractor(
+            bridge_settings=load_point_bridge_settings(),
+            http_session_service=http_session_service,
+        )
+
+        rows = extractor.extract(start_date=date(2026, 3, 20), end_date=date(2026, 3, 20))
+
+        self.assertEqual(http_session_service.create_count, 2)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].item_name, "Bollo Zanahoria")
+
+    def test_extract_retries_when_reauthentication_temporarily_fails(self):
+        http_session_service = _ReloginFailureHttpSessionService()
+        extractor = PointWasteExtractor(
+            bridge_settings=load_point_bridge_settings(),
+            http_session_service=http_session_service,
+        )
+
+        rows = extractor.extract(start_date=date(2026, 3, 20), end_date=date(2026, 3, 20))
+
+        self.assertEqual(http_session_service.create_count, 3)
+        self.assertEqual(len(rows), 1)

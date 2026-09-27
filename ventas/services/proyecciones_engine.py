@@ -124,21 +124,19 @@ def _empty_result(fecha_inicio: date, fecha_fin: date, sucursales: int = 0) -> d
     }
 
 
-def _selected_recipe_ids(skus_incluidos: set[str] | list[str] | None) -> set[int] | None:
-    if skus_incluidos is None:
+def _selected_recipe_ids(point_product_ids: set[int] | list[int] | None) -> set[int] | None:
+    if point_product_ids is None:
         return None
-    skus = {str(value).strip() for value in skus_incluidos if str(value).strip()}
-    if not skus:
+    selected_ids = {int(value) for value in point_product_ids if str(value).isdigit()}
+    if not selected_ids:
         return set()
 
-    recipe_ids = set(
+    return set(
         PointSalesDailyProductFact.objects.filter(
-            point_product__sku__in=skus,
+            point_product_id__in=selected_ids,
             receta_id__isnull=False,
         ).values_list("receta_id", flat=True).distinct()
     )
-    recipe_ids.update(Receta.objects.filter(codigo_point__in=skus).values_list("id", flat=True))
-    return {int(value) for value in recipe_ids if value}
 
 
 def _build_categories(products: list[dict]) -> list[dict]:
@@ -352,7 +350,7 @@ def calcular_proyeccion_operativa(
     fecha_inicio: date,
     fecha_fin: date,
     sucursal_ids: set[int] | list[int] | None = None,
-    skus_incluidos: set[str] | list[str] | None = None,
+    point_product_ids: set[int] | list[int] | None = None,
 ) -> dict:
     selected_days = list(_date_range(fecha_inicio, fecha_fin))
     if not selected_days:
@@ -367,7 +365,7 @@ def calcular_proyeccion_operativa(
         branch.id: branch
         for branch in Sucursal.objects.filter(id__in=branch_ids).only("id", "codigo", "nombre").order_by("nombre")
     }
-    selected_recipes = _selected_recipe_ids(skus_incluidos)
+    selected_recipes = _selected_recipe_ids(point_product_ids)
     if selected_recipes == set():
         return _empty_result(fecha_inicio, fecha_fin, len(branch_ids))
 

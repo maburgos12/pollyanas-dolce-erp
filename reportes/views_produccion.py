@@ -507,7 +507,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         groups, grand_total = self._group_rows(rows)
         fuentes = self._canonical_sources(balance)
         banners = self._canonical_banners(balance, fuentes)
-        operational_summary = self._operational_summary(balance)
+        operational_summary = self._operational_summary(balance, period_label=period.label)
         periodos = self._available_periods(selected=period.value)
 
         return {
@@ -761,7 +761,29 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return list(dict.fromkeys(banners))
 
     @staticmethod
-    def _operational_summary(balance) -> dict[str, str]:
+    def _calculation_blockers(balance) -> list[str]:
+        blockers = []
+        for key, label in (
+            ("sales", "ventas"),
+            ("production", "producción"),
+            ("waste", "merma"),
+            ("conversions", "conversiones"),
+        ):
+            source = balance.sources.get(key) or {}
+            if source.get("source_present") is False or not source.get("authoritative"):
+                blockers.append(label)
+        if not blockers and "CALCULATED_CLOSING_MISSING" in set(balance.issues):
+            blockers.append("productos sin todos sus movimientos o saldos")
+        return blockers
+
+    @staticmethod
+    def _join_spanish(items: list[str]) -> str:
+        if len(items) < 2:
+            return "".join(items)
+        return f"{', '.join(items[:-1])} y {items[-1]}"
+
+    @classmethod
+    def _operational_summary(cls, balance, *, period_label: str = "El periodo") -> dict[str, str]:
         opening_meta = balance.sources.get("opening_snapshot") or {}
         closing_meta = balance.sources.get("closing_snapshot") or {}
         opening_target = opening_meta.get("target_date")
@@ -787,10 +809,26 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             }
 
         if opening_date and closing_date:
+            blockers = cls._calculation_blockers(balance)
+            if blockers:
+                blocker_text = cls._join_spanish(blockers)
+                return {
+                    "tone": "warning",
+                    "title": "Cierres confirmados; conciliación pendiente",
+                    "message": (
+                        f"{period_label} inicia contra el cierre Point del {display(opening_date)} "
+                        f"y compara contra el cierre Point final del {display(closing_date)}. "
+                        f"Falta validar {blocker_text} del mes para calcular el saldo y la diferencia."
+                    ),
+                    "closing_label": display(closing_date),
+                }
             return {
                 "tone": "success",
-                "title": "Cierres Point disponibles",
-                "message": f"Inicial del {display(opening_date)} y final del {display(closing_date)}.",
+                "title": "Conciliación Point completa",
+                "message": (
+                    f"{period_label} inicia contra el cierre Point del {display(opening_date)} "
+                    f"y compara contra el cierre Point final del {display(closing_date)}."
+                ),
                 "closing_label": display(closing_date),
             }
         if not opening_date and closing_date:

@@ -89,7 +89,7 @@ def build_personnel_plan(cutoff=None):
         periodo__lt=end,
         estado=ExpedienteISN.ESTADO_APLICADO,
     ).select_related('cfdi').only(
-        'id', 'periodo', 'uuid', 'importe_pagado', 'cfdi__estatus'
+        'id', 'periodo', 'uuid', 'importe_pagado', 'metadata', 'cfdi__estatus'
     )
     periodos_isn_aplicados = set()
     for expediente in expedientes_isn:
@@ -103,12 +103,24 @@ def build_personnel_plan(cutoff=None):
             continue
         periodos_isn_aplicados.add(expediente.periodo)
         row['isn'] = expediente.importe_pagado
+        diferencia_aceptada = bool(
+            (expediente.metadata or {}).get('diferencia_isn_aceptada')
+        )
+        if diferencia_aceptada:
+            row['errors'].append(
+                'ISN con diferencia aceptada contra la base reconstruida: '
+                f"{(expediente.metadata or {}).get('diferencia_isn', 'N/D')}."
+            )
         row['sources'].append(dict(
-            kind='ISN · expediente aplicado',
+            kind=(
+                'ISN · expediente aplicado con diferencia'
+                if diferencia_aceptada
+                else 'ISN · expediente aplicado'
+            ),
             id=expediente.pk,
             reference=expediente.uuid,
             amount=expediente.importe_pagado,
-            reconciled=True,
+            reconciled=not diferencia_aceptada,
         ))
 
     # Una sola entidad; el receptor individual nunca se exporta.
