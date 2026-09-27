@@ -1,11 +1,15 @@
 from datetime import date, datetime
 from tempfile import TemporaryDirectory
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
+from activos.models import Activo
 from core.models import Notificacion, Sucursal
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
@@ -40,17 +44,34 @@ class ConsolidacionHigieneTests(TestCase):
             tipo=CategoriaFalla.TIPO_INSTALACION,
         )
 
-    def _crear_reporte_respuesta(self, *, fecha, observacion, indice):
+    def _crear_reporte_respuesta(
+        self,
+        *,
+        fecha,
+        observacion,
+        indice,
+        fecha_reporte=None,
+        categoria=None,
+        tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+        activo=None,
+        area_instalacion="Baños",
+        respuesta_tipo_objetivo=None,
+        respuesta_activo=None,
+        respuesta_area_instalacion=None,
+    ):
+        categoria = categoria or self.categoria
         reporte = ReporteFalla.objects.create(
             sucursal=self.sucursal,
-            categoria=self.categoria,
-            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
-            area_instalacion="Baños",
+            categoria=categoria,
+            tipo_objetivo=tipo_objetivo,
+            activo_relacionado=activo,
+            area_instalacion=area_instalacion,
             titulo="Limpieza de baños · Sanitario limpio y funcional",
             descripcion=f"Hallazgo de higiene: {observacion}",
             justificacion_sin_foto="Prueba automatizada.",
             reportado_por=self.operadora,
-            fecha_reporte=timezone.make_aware(datetime.combine(fecha, datetime.min.time())),
+            fecha_reporte=fecha_reporte
+            or timezone.make_aware(datetime.combine(fecha, datetime.min.time())),
         )
         registro = RegistroHigiene.objects.create(
             tipo=RegistroHigiene.TIPO_BANOS,
@@ -73,12 +94,27 @@ class ConsolidacionHigieneTests(TestCase):
                 content_type="image/png",
             ),
             requiere_seguimiento=True,
-            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
-            area_instalacion="Baños",
+            tipo_objetivo=respuesta_tipo_objetivo or tipo_objetivo,
+            activo_relacionado=respuesta_activo,
+            area_instalacion=(
+                area_instalacion
+                if respuesta_area_instalacion is None
+                else respuesta_area_instalacion
+            ),
             reporte_falla=reporte,
             continuidad_falla=RespuestaHigiene.CONTINUIDAD_INICIAL,
         )
         return reporte, respuesta
+
+    def _transicion(self, reporte, *, anterior, nuevo, cuando):
+        return BitacoraFalla.objects.create(
+            reporte=reporte,
+            usuario=self.dg,
+            estatus_anterior=anterior,
+            estatus_nuevo=nuevo,
+            comentario="Transición histórica de prueba.",
+            timestamp=cuando,
+        )
 
     def crear_repeticiones(self, *, observaciones):
         principal, respuesta_principal = self._crear_reporte_respuesta(
@@ -131,6 +167,74 @@ class ConsolidacionHigieneTests(TestCase):
         self.assertEqual(propuestas.ambiguas[0].repetido_id, repetido.id)
         self.assertFalse(propuestas.ambiguas[0].exacta)
 
+    def test_identidad_usa_clasificacion_del_reporte_aunque_la_respuesta_sea_inconsistente(self):
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+            respuesta_tipo_objetivo=ReporteFalla.OBJETIVO_EQUIPO,
+            respuesta_area_instalacion="",
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            respuesta_tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            respuesta_area_instalacion="Área capturada incorrectamente",
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertEqual(
+            {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
+            {(principal.id, repetido.id)},
+        )
+
+    def test_identidad_no_agrupa_reportes_de_equipos_distintos(self):
+        categoria_equipo = CategoriaFalla.objects.create(
+            nombre="Equipo consolidación",
+            tipo=CategoriaFalla.TIPO_EQUIPO,
+        )
+        activo_uno = Activo.objects.create(
+            codigo="HIG-EQ-1",
+            nombre="Equipo uno",
+            sucursal=self.sucursal,
+            creado_por=self.dg,
+        )
+        activo_dos = Activo.objects.create(
+            codigo="HIG-EQ-2",
+            nombre="Equipo dos",
+            sucursal=self.sucursal,
+            creado_por=self.dg,
+        )
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No enciende",
+            indice=1,
+            categoria=categoria_equipo,
+            tipo_objetivo=ReporteFalla.OBJETIVO_EQUIPO,
+            activo=activo_uno,
+            area_instalacion="",
+            respuesta_activo=None,
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No enciende",
+            indice=2,
+            categoria=categoria_equipo,
+            tipo_objetivo=ReporteFalla.OBJETIVO_EQUIPO,
+            activo=activo_dos,
+            area_instalacion="",
+            respuesta_activo=None,
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertNotIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
     def test_reaparicion_despues_del_cierre_inicia_otro_ciclo(self):
         principal, posterior = self.crear_repeticiones_con_cierre_intermedio()
 
@@ -139,6 +243,232 @@ class ConsolidacionHigieneTests(TestCase):
         self.assertNotIn(
             (principal.id, posterior.id),
             {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
+    def test_resuelto_y_luego_cerrado_corta_el_ciclo_en_la_primera_transicion_terminal(self):
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 25, 8, 0)),
+        )
+        resolucion = timezone.make_aware(datetime(2026, 9, 25, 12, 0))
+        cierre = timezone.make_aware(datetime(2026, 9, 26, 18, 0))
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_PROCESO,
+            nuevo=ReporteFalla.ESTATUS_RESUELTO,
+            cuando=resolucion,
+        )
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_RESUELTO,
+            nuevo=ReporteFalla.ESTATUS_CERRADO,
+            cuando=cierre,
+        )
+        principal.estatus = ReporteFalla.ESTATUS_CERRADO
+        principal.fecha_resolucion = resolucion
+        principal.fecha_cierre = cierre
+        principal.save(update_fields=["estatus", "fecha_resolucion", "fecha_cierre"])
+        posterior, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 26, 9, 0)),
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertNotIn(
+            (principal.id, posterior.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+        )
+
+    def test_reapertura_reactiva_el_ciclo_desde_su_transicion(self):
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=1,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 25, 8, 0)),
+        )
+        cierre = timezone.make_aware(datetime(2026, 9, 25, 12, 0))
+        reapertura = timezone.make_aware(datetime(2026, 9, 26, 8, 0))
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_PROCESO,
+            nuevo=ReporteFalla.ESTATUS_CERRADO,
+            cuando=cierre,
+        )
+        self._transicion(
+            principal,
+            anterior=ReporteFalla.ESTATUS_CERRADO,
+            nuevo=ReporteFalla.ESTATUS_ABIERTO,
+            cuando=reapertura,
+        )
+        principal.estatus = ReporteFalla.ESTATUS_ABIERTO
+        principal.fecha_cierre = cierre
+        principal.save(update_fields=["estatus", "fecha_cierre"])
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=2,
+            fecha_reporte=timezone.make_aware(datetime(2026, 9, 26, 9, 0)),
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertIn(
+            (principal.id, repetido.id),
+            {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
+        )
+
+    def test_varios_ciclos_eligen_como_principal_el_inicio_del_ciclo_activo(self):
+        primero, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 23),
+            observacion="No descarga agua",
+            indice=1,
+        )
+        primer_cierre = timezone.make_aware(datetime(2026, 9, 23, 18, 0))
+        self._transicion(
+            primero,
+            anterior=ReporteFalla.ESTATUS_ABIERTO,
+            nuevo=ReporteFalla.ESTATUS_CERRADO,
+            cuando=primer_cierre,
+        )
+        primero.fecha_cierre = primer_cierre
+        primero.estatus = ReporteFalla.ESTATUS_CERRADO
+        primero.save(update_fields=["fecha_cierre", "estatus"])
+
+        segundo, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 24),
+            observacion="No descarga agua",
+            indice=2,
+        )
+        segundo_cierre = timezone.make_aware(datetime(2026, 9, 24, 18, 0))
+        self._transicion(
+            segundo,
+            anterior=ReporteFalla.ESTATUS_ABIERTO,
+            nuevo=ReporteFalla.ESTATUS_RESUELTO,
+            cuando=segundo_cierre,
+        )
+        segundo.fecha_resolucion = segundo_cierre
+        segundo.estatus = ReporteFalla.ESTATUS_RESUELTO
+        segundo.save(update_fields=["fecha_resolucion", "estatus"])
+
+        tercero, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=3,
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=4,
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+        pares = {(row.principal_id, row.repetido_id) for row in propuestas.exactas}
+
+        self.assertEqual(pares, {(tercero.id, repetido.id)})
+
+    def test_reapertura_recupera_un_ciclo_anterior_tras_otro_ciclo_ya_terminado(self):
+        primero, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 22),
+            observacion="No descarga agua",
+            indice=1,
+        )
+        cierre_primero = timezone.make_aware(datetime(2026, 9, 22, 18, 0))
+        self._transicion(
+            primero,
+            anterior=ReporteFalla.ESTATUS_ABIERTO,
+            nuevo=ReporteFalla.ESTATUS_CERRADO,
+            cuando=cierre_primero,
+        )
+        primero.fecha_cierre = cierre_primero
+        primero.save(update_fields=["fecha_cierre"])
+
+        intermedio, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 23),
+            observacion="No descarga agua",
+            indice=2,
+        )
+        cierre_intermedio = timezone.make_aware(datetime(2026, 9, 23, 18, 0))
+        self._transicion(
+            intermedio,
+            anterior=ReporteFalla.ESTATUS_ABIERTO,
+            nuevo=ReporteFalla.ESTATUS_RESUELTO,
+            cuando=cierre_intermedio,
+        )
+        intermedio.fecha_resolucion = cierre_intermedio
+        intermedio.save(update_fields=["fecha_resolucion"])
+
+        reapertura = timezone.make_aware(datetime(2026, 9, 24, 8, 0))
+        self._transicion(
+            primero,
+            anterior=ReporteFalla.ESTATUS_CERRADO,
+            nuevo=ReporteFalla.ESTATUS_ABIERTO,
+            cuando=reapertura,
+        )
+        repetido, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=3,
+        )
+
+        propuestas = proponer_consolidacion_higiene()
+
+        self.assertEqual(
+            {(row.principal_id, row.repetido_id) for row in propuestas.exactas},
+            {(primero.id, repetido.id)},
+        )
+
+    @override_settings(TIME_ZONE="America/Mazatlan")
+    def test_fechas_del_preview_se_muestran_en_fecha_local(self):
+        principal, repetido, _, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        principal.fecha_reporte = datetime(2026, 9, 26, 0, 30, tzinfo=ZoneInfo("UTC"))
+        repetido.fecha_reporte = datetime(2026, 9, 27, 0, 30, tzinfo=ZoneInfo("UTC"))
+        principal.save(update_fields=["fecha_reporte"])
+        repetido.save(update_fields=["fecha_reporte"])
+
+        propuesta = proponer_consolidacion_higiene().exactas[0]
+
+        self.assertEqual(propuesta.fecha_principal, "2026-09-25")
+        self.assertEqual(propuesta.fecha_repetida, "2026-09-26")
+
+    def test_selecciona_una_sola_respuesta_deterministica_por_reporte_en_sql(self):
+        principal, repetido, respuesta_principal, _ = self.crear_repeticiones(
+            observaciones=("No descarga agua", "No descarga agua"),
+        )
+        RespuestaHigiene.objects.bulk_create(
+            [
+                RespuestaHigiene(
+                    registro=respuesta_principal.registro,
+                    punto_clave=f"otro-punto-{indice}",
+                    seccion="Otra sección",
+                    punto_revision=f"Otro punto {indice}",
+                    respuesta=RespuestaHigiene.RESPUESTA_NO_CUMPLE,
+                    observacion="Otra observación",
+                    reporte_falla=principal,
+                )
+                for indice in range(25)
+            ]
+        )
+
+        with CaptureQueriesContext(connection) as consultas:
+            propuestas = proponer_consolidacion_higiene()
+
+        self.assertEqual(len(consultas), 2)
+        self.assertEqual(propuestas.exactas[0].respuesta_principal_id, respuesta_principal.id)
+        self.assertEqual(
+            {(row.principal_id, row.repetido_id) for row in propuestas.todas},
+            {(principal.id, repetido.id)},
+        )
+        consulta_respuestas = consultas.captured_queries[0]["sql"].upper()
+        self.assertTrue(
+            "DISTINCT ON" in consulta_respuestas or "SELECT U0." in consulta_respuestas,
+            consulta_respuestas,
         )
 
     def test_dos_previews_no_cambian_registros_vinculos_bitacoras_ni_notificaciones(self):

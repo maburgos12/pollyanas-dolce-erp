@@ -2,6 +2,10 @@ from dataclasses import dataclass
 import re
 import unicodedata
 
+from django.db.models import OuterRef, Prefetch, Subquery
+from django.utils import timezone
+
+from fallas.models import BitacoraFalla, ReporteFalla
 from operacion.models import RespuestaHigiene
 
 
@@ -41,26 +45,77 @@ def normalizar_texto(value):
 
 def clave_identidad(respuesta):
     reporte = respuesta.reporte_falla
+    if reporte.tipo_objetivo == ReporteFalla.OBJETIVO_EQUIPO:
+        activo_id = reporte.activo_relacionado_id or 0
+        area_instalacion = ""
+    else:
+        activo_id = 0
+        area_instalacion = reporte.area_instalacion.strip().casefold()
     return (
         respuesta.registro.sucursal_id,
         respuesta.registro.tipo,
         respuesta.punto_clave,
-        respuesta.tipo_objetivo,
+        reporte.tipo_objetivo,
         reporte.categoria_id,
-        respuesta.activo_relacionado_id or 0,
-        normalizar_texto(respuesta.area_instalacion),
+        activo_id,
+        area_instalacion,
     )
 
 
-def fecha_fin(reporte):
-    return reporte.fecha_cierre or reporte.fecha_resolucion
+ESTATUS_TERMINALES = frozenset(
+    {
+        ReporteFalla.ESTATUS_RESUELTO,
+        ReporteFalla.ESTATUS_CERRADO,
+        ReporteFalla.ESTATUS_CANCELADO,
+    }
+)
+
+
+def reporte_activo_en(reporte, momento):
+    if momento < reporte.fecha_reporte:
+        return False
+
+    transiciones = [
+        evento
+        for evento in getattr(reporte, "_historial_consolidacion", ())
+        if evento.estatus_nuevo and evento.estatus_nuevo != evento.estatus_anterior
+    ]
+    eventos = [
+        (evento.timestamp, evento.id, evento.estatus_nuevo not in ESTATUS_TERMINALES)
+        for evento in transiciones
+    ]
+    fechas_terminales = [
+        fecha
+        for fecha in (reporte.fecha_resolucion, reporte.fecha_cierre)
+        if fecha is not None
+    ]
+    eventos.extend((fecha, 0, False) for fecha in fechas_terminales)
+    if not eventos and reporte.estatus in ESTATUS_TERMINALES:
+        return False
+
+    activo = True
+    for timestamp, _, nuevo_activo in sorted(eventos):
+        if timestamp > momento:
+            break
+        activo = nuevo_activo
+    return activo
+
+
+def fecha_local_iso(value):
+    return timezone.localtime(value).date().isoformat()
 
 
 def proponer_consolidacion_higiene():
+    primera_respuesta = (
+        RespuestaHigiene.objects.filter(reporte_falla_id=OuterRef("reporte_falla_id"))
+        .order_by("id")
+        .values("id")[:1]
+    )
     respuestas_consultadas = list(
         RespuestaHigiene.objects.filter(
             reporte_falla__isnull=False,
             reporte_falla__duplicado_de__isnull=True,
+            id=Subquery(primera_respuesta),
         )
         .select_related(
             "registro",
@@ -68,26 +123,43 @@ def proponer_consolidacion_higiene():
             "reporte_falla",
             "reporte_falla__categoria",
         )
+        .prefetch_related(
+            Prefetch(
+                "reporte_falla__bitacora",
+                queryset=BitacoraFalla.objects.only(
+                    "id",
+                    "reporte_id",
+                    "estatus_anterior",
+                    "estatus_nuevo",
+                    "timestamp",
+                ).order_by("timestamp", "id"),
+                to_attr="_historial_consolidacion",
+            )
+        )
         .order_by("reporte_falla__fecha_reporte", "reporte_falla_id", "id")
     )
 
-    por_reporte = {}
-    for respuesta in respuestas_consultadas:
-        por_reporte.setdefault(respuesta.reporte_falla_id, respuesta)
-
     grupos = {}
-    for respuesta in por_reporte.values():
+    for respuesta in respuestas_consultadas:
         grupos.setdefault(clave_identidad(respuesta), []).append(respuesta)
 
     exactas = []
     ambiguas = []
     for rows in grupos.values():
-        principal = rows[0]
+        principales = [rows[0]]
         for candidata in rows[1:]:
-            cierre = fecha_fin(principal.reporte_falla)
-            if cierre and cierre < candidata.reporte_falla.fecha_reporte:
-                principal = candidata
+            principales_activas = [
+                principal
+                for principal in principales
+                if reporte_activo_en(
+                    principal.reporte_falla,
+                    candidata.reporte_falla.fecha_reporte,
+                )
+            ]
+            if len(principales_activas) != 1:
+                principales.append(candidata)
                 continue
+            principal = principales_activas[0]
 
             exacta = normalizar_texto(principal.observacion) == normalizar_texto(
                 candidata.observacion
@@ -99,8 +171,8 @@ def proponer_consolidacion_higiene():
                 respuesta_repetida_id=candidata.id,
                 sucursal=principal.registro.sucursal.nombre,
                 punto=principal.punto_revision,
-                fecha_principal=principal.reporte_falla.fecha_reporte.date().isoformat(),
-                fecha_repetida=candidata.reporte_falla.fecha_reporte.date().isoformat(),
+                fecha_principal=fecha_local_iso(principal.reporte_falla.fecha_reporte),
+                fecha_repetida=fecha_local_iso(candidata.reporte_falla.fecha_reporte),
                 estatus_principal=principal.reporte_falla.get_estatus_display(),
                 estatus_repetido=candidata.reporte_falla.get_estatus_display(),
                 observacion_principal=principal.observacion,
