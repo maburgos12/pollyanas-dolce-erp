@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
+import logging
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from core.access import can_manage_submodule, is_admin_or_dg, is_repartidor_only
@@ -35,6 +37,7 @@ DECISIONES_FALLA = {
 }
 DECISIONES_CON_REPORTE = {"MISMA", "CAMBIO", "CORRECCION_PENDIENTE"}
 DECISIONES_CON_EVIDENCIA = {"AUTO", "DISTINTA", "CAMBIO", "CORRECCION_PENDIENTE"}
+logger = logging.getLogger(__name__)
 
 
 def sucursal_higiene_usuario(user):
@@ -76,6 +79,17 @@ def _as_bool(value) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "si", "sí"}
+
+
+def _bloquear_registro_higiene(*, sucursal_id, fecha, tipo, clave_instancia) -> None:
+    valor = f"registro-higiene|{sucursal_id}|{fecha.isoformat()}|{tipo}|{clave_instancia}"
+    lock_key = int.from_bytes(
+        hashlib.blake2b(valor.encode("utf-8"), digest_size=8).digest(),
+        byteorder="big",
+        signed=True,
+    )
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [lock_key])
 
 
 def _normalizar_respuestas(*, tipo, respuestas, registro_existente, archivos, sucursal):
@@ -303,6 +317,117 @@ def _preflight_fallas_higiene(*, normalizadas):
     return planes
 
 
+def _datos_reporte_higiene(*, item, plantilla, sucursal, user):
+    return {
+        "sucursal": sucursal,
+        "usuario": user,
+        "categoria": item["categoria"],
+        "tipo_objetivo": item["tipo_objetivo"],
+        "activo_relacionado": item["activo"],
+        "area_instalacion": item["area_instalacion"],
+        "titulo": f"{plantilla['titulo']} · {item['punto']['etiqueta']}",
+        "descripcion": (
+            f"Hallazgo detectado en higiene diaria ({item['punto']['seccion']}): "
+            f"{item['observacion']}"
+        ),
+        "prioridad": item["prioridad"],
+    }
+
+
+def _prevalidar_captura(
+    *,
+    normalizadas,
+    planes_falla,
+    plantilla,
+    sucursal,
+    user,
+    fecha,
+    tipo,
+    clave_instancia,
+    hora,
+    tipo_bano,
+    uso_bano,
+    notas,
+):
+    registro_prueba = RegistroHigiene(
+        sucursal=sucursal,
+        fecha=fecha,
+        tipo=tipo,
+        clave_instancia=clave_instancia,
+        hora=hora or None,
+        plantilla_version=PLANTILLA_VERSION,
+        plantilla_snapshot=plantilla,
+        tipo_bano=str(tipo_bano or "").strip(),
+        uso_bano=str(uso_bano or "").strip(),
+        notas=str(notas or "").strip(),
+        creado_por=user,
+    )
+    registro_prueba.full_clean(validate_unique=False, validate_constraints=False)
+
+    for item, plan_falla in zip(normalizadas, planes_falla, strict=True):
+        continuidad = plan_falla["continuidad"] or (
+            RespuestaHigiene.CONTINUIDAD_INICIAL if plan_falla["crear_reporte"] else ""
+        )
+        respuesta_prueba = RespuestaHigiene(
+            punto_clave=item["clave"],
+            seccion=item["punto"]["seccion"],
+            punto_revision=item["punto"]["etiqueta"],
+            orden=item["orden"],
+            respuesta=item["respuesta"],
+            valor_numerico=item["valor_numerico"],
+            observacion=item["observacion"],
+            evidencia=item["archivo"] or item["evidencia_disponible"],
+            corregido_en_momento=item["corregido"],
+            requiere_seguimiento=item["seguimiento"],
+            tipo_objetivo=item["tipo_objetivo"],
+            activo_relacionado=item["activo"],
+            area_instalacion=item["area_instalacion"],
+            continuidad_falla=continuidad,
+        )
+        respuesta_prueba.full_clean(
+            exclude=("registro", "reporte_falla"),
+            validate_unique=False,
+            validate_constraints=False,
+        )
+        if not plan_falla["crear_reporte"]:
+            continue
+
+        datos_reporte = _datos_reporte_higiene(
+            item=item,
+            plantilla=plantilla,
+            sucursal=sucursal,
+            user=user,
+        )
+        evidencia = item["archivo"] or item["evidencia_disponible"]
+        reporte_prueba = ReporteFalla(
+            sucursal=datos_reporte["sucursal"],
+            reportado_por=datos_reporte["usuario"],
+            categoria=datos_reporte["categoria"],
+            tipo_objetivo=datos_reporte["tipo_objetivo"],
+            activo_relacionado=datos_reporte["activo_relacionado"],
+            area_instalacion=datos_reporte["area_instalacion"],
+            titulo=datos_reporte["titulo"],
+            descripcion=datos_reporte["descripcion"],
+            prioridad=datos_reporte["prioridad"],
+            foto_evidencia=evidencia,
+        )
+        reporte_prueba.full_clean()
+        plan_falla["datos_reporte"] = datos_reporte
+
+
+def _limpiar_blobs_creados(blobs_creados) -> None:
+    eliminados = set()
+    for storage, nombre in reversed(blobs_creados):
+        clave = (id(storage), nombre)
+        if not nombre or clave in eliminados:
+            continue
+        eliminados.add(clave)
+        try:
+            storage.delete(nombre)
+        except Exception:
+            logger.exception("No se pudo limpiar evidencia de higiene abortada: %s", nombre)
+
+
 @transaction.atomic
 def guardar_registro_higiene(
     *,
@@ -326,23 +451,20 @@ def guardar_registro_higiene(
     if not clave_instancia:
         _error("Identifica la toma o ronda.", "clave_instancia")
 
-    registro, creado = RegistroHigiene.objects.get_or_create(
-        sucursal=sucursal,
-        fecha=timezone.localdate(),
+    fecha_registro = timezone.localdate()
+    _bloquear_registro_higiene(
+        sucursal_id=sucursal.pk,
+        fecha=fecha_registro,
         tipo=tipo,
         clave_instancia=clave_instancia,
-        defaults={
-            "hora": hora or None,
-            "plantilla_version": PLANTILLA_VERSION,
-            "plantilla_snapshot": plantilla,
-            "tipo_bano": str(tipo_bano or "").strip(),
-            "uso_bano": str(uso_bano or "").strip(),
-            "notas": str(notas or "").strip(),
-            "creado_por": user,
-        },
     )
-    if not creado:
-        registro = RegistroHigiene.objects.select_for_update().get(pk=registro.pk)
+    registro = RegistroHigiene.objects.select_for_update().filter(
+        sucursal=sucursal,
+        fecha=fecha_registro,
+        tipo=tipo,
+        clave_instancia=clave_instancia,
+    ).first()
+    creado = registro is None
     normalizadas = _normalizar_respuestas(
         tipo=tipo,
         respuestas=respuestas,
@@ -350,70 +472,101 @@ def guardar_registro_higiene(
         archivos=archivos,
         sucursal=sucursal,
     )
-    if not creado:
+    planes_falla = _preflight_fallas_higiene(normalizadas=normalizadas)
+    _prevalidar_captura(
+        normalizadas=normalizadas,
+        planes_falla=planes_falla,
+        plantilla=plantilla,
+        sucursal=sucursal,
+        user=user,
+        fecha=fecha_registro,
+        tipo=tipo,
+        clave_instancia=clave_instancia,
+        hora=hora,
+        tipo_bano=tipo_bano,
+        uso_bano=uso_bano,
+        notas=notas,
+    )
+
+    if creado:
+        registro = RegistroHigiene.objects.create(
+            sucursal=sucursal,
+            fecha=fecha_registro,
+            tipo=tipo,
+            clave_instancia=clave_instancia,
+            hora=hora or None,
+            plantilla_version=PLANTILLA_VERSION,
+            plantilla_snapshot=plantilla,
+            tipo_bano=str(tipo_bano or "").strip(),
+            uso_bano=str(uso_bano or "").strip(),
+            notas=str(notas or "").strip(),
+            creado_por=user,
+        )
+    else:
         registro.hora = hora or registro.hora
         registro.tipo_bano = str(tipo_bano or registro.tipo_bano).strip()
         registro.uso_bano = str(uso_bano or registro.uso_bano).strip()
         registro.notas = str(notas or registro.notas).strip()
         registro.save(update_fields=["hora", "tipo_bano", "uso_bano", "notas", "actualizado_en"])
 
-    planes_falla = _preflight_fallas_higiene(normalizadas=normalizadas)
     reporte_ids = []
-    for item, plan_falla in zip(normalizadas, planes_falla, strict=True):
-        respuesta, _ = RespuestaHigiene.objects.update_or_create(
-            registro=registro,
-            punto_clave=item["clave"],
-            defaults={
-                "seccion": item["punto"]["seccion"],
-                "punto_revision": item["punto"]["etiqueta"],
-                "orden": item["orden"],
-                "respuesta": item["respuesta"],
-                "valor_numerico": item["valor_numerico"],
-                "observacion": item["observacion"],
-                "corregido_en_momento": item["corregido"],
-                "requiere_seguimiento": item["seguimiento"],
-                "tipo_objetivo": item["tipo_objetivo"],
-                "activo_relacionado": item["activo"],
-                "area_instalacion": item["area_instalacion"],
-            },
-        )
-        if item["archivo"]:
-            respuesta.evidencia = item["archivo"]
-            respuesta.save(update_fields=["evidencia"])
-        if plan_falla["reporte"]:
-            registrar_constatacion(
-                respuesta=respuesta,
-                reporte=plan_falla["reporte"],
-                decision=plan_falla["continuidad"],
-                usuario=user,
+    blobs_creados = []
+    try:
+        for item, plan_falla in zip(normalizadas, planes_falla, strict=True):
+            respuesta, _ = RespuestaHigiene.objects.update_or_create(
+                registro=registro,
+                punto_clave=item["clave"],
+                defaults={
+                    "seccion": item["punto"]["seccion"],
+                    "punto_revision": item["punto"]["etiqueta"],
+                    "orden": item["orden"],
+                    "respuesta": item["respuesta"],
+                    "valor_numerico": item["valor_numerico"],
+                    "observacion": item["observacion"],
+                    "corregido_en_momento": item["corregido"],
+                    "requiere_seguimiento": item["seguimiento"],
+                    "tipo_objetivo": item["tipo_objetivo"],
+                    "activo_relacionado": item["activo"],
+                    "area_instalacion": item["area_instalacion"],
+                },
             )
-        elif plan_falla["crear_reporte"]:
-            evidencia = respuesta.evidencia.name if respuesta.evidencia else None
-            reporte = crear_reporte_falla(
-                sucursal=sucursal,
-                usuario=user,
-                categoria=item["categoria"],
-                tipo_objetivo=item["tipo_objetivo"],
-                activo_relacionado=item["activo"],
-                area_instalacion=item["area_instalacion"],
-                titulo=f"{plantilla['titulo']} · {item['punto']['etiqueta']}",
-                descripcion=(
-                    f"Hallazgo detectado en higiene diaria ({item['punto']['seccion']}): "
-                    f"{item['observacion']}"
-                ),
-                prioridad=item["prioridad"],
-                evidencia=evidencia,
-                comentario_bitacora=(
-                    f"Reporte creado automáticamente desde Higiene diaria, registro #{registro.pk}. "
-                    "La evidencia se capturó una sola vez."
-                ),
-            )
-            registrar_constatacion(
-                respuesta=respuesta,
-                reporte=reporte,
-                decision=RespuestaHigiene.CONTINUIDAD_INICIAL,
-                usuario=user,
-            )
-        if respuesta.reporte_falla_id:
-            reporte_ids.append(respuesta.reporte_falla_id)
+            if item["archivo"]:
+                respuesta.evidencia = item["archivo"]
+                try:
+                    respuesta.save(update_fields=["evidencia"])
+                finally:
+                    evidencia_guardada = respuesta.evidencia
+                    if getattr(evidencia_guardada, "_committed", False):
+                        blobs_creados.append(
+                            (evidencia_guardada.storage, evidencia_guardada.name)
+                        )
+            if plan_falla["reporte"]:
+                registrar_constatacion(
+                    respuesta=respuesta,
+                    reporte=plan_falla["reporte"],
+                    decision=plan_falla["continuidad"],
+                    usuario=user,
+                )
+            elif plan_falla["crear_reporte"]:
+                datos_reporte = plan_falla["datos_reporte"]
+                evidencia = respuesta.evidencia.name if respuesta.evidencia else None
+                reporte = crear_reporte_falla(
+                    **datos_reporte,
+                    evidencia=evidencia,
+                    comentario_bitacora=(
+                        f"Reporte creado automáticamente desde Higiene diaria, registro #{registro.pk}. "
+                        "La evidencia se capturó una sola vez."
+                    ),
+                )
+                registrar_constatacion(
+                    respuesta=respuesta,
+                    reporte=reporte,
+                    decision=RespuestaHigiene.CONTINUIDAD_INICIAL,
+                    usuario=user,
+                )
+            if respuesta.reporte_falla_id:
+                reporte_ids.append(respuesta.reporte_falla_id)
+    except BaseException:
+        _limpiar_blobs_creados(blobs_creados)
+        raise
     return registro, creado, sorted(set(reporte_ids))

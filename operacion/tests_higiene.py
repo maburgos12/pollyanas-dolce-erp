@@ -22,7 +22,8 @@ from core.access import ACCESS_MANAGE
 from core.models import Notificacion, Sucursal, UserModuleAccess, UserProfile
 from fallas.models import BitacoraFalla, CategoriaFalla, ReporteFalla
 from operacion.models import RegistroHigiene, RespuestaHigiene
-from operacion.services_fallas import notificar_evento_higiene
+from operacion.services_fallas import crear_reporte_falla, notificar_evento_higiene
+from operacion.services_higiene import guardar_registro_higiene
 
 
 User = get_user_model()
@@ -257,6 +258,101 @@ class HigieneDiariaTests(TestCase):
         self.assertIn("Programa de limpieza", reporte.titulo)
         self.assertEqual(primera.json()["reporte_falla_ids"], [reporte.id])
         self.assertEqual(segunda.json()["reporte_falla_ids"], [reporte.id])
+
+    def test_prioridad_invalida_no_deja_registro_ni_blob(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+            hallazgo = self._hallazgo_banos()
+            hallazgo["prioridad"] = "urgente"
+
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="prioridad-invalida",
+                respuestas=[hallazgo],
+                archivos={"evidencia_bano_sanitario": self._foto("prioridad-invalida.png")},
+            )
+
+            self.assertEqual(response.status_code, 400)
+            self.assertFalse(RegistroHigiene.objects.exists())
+            self.assertFalse(RespuestaHigiene.objects.exists())
+            self.assertFalse(ReporteFalla.objects.exists())
+            self.assertEqual(list(Path(media_root).rglob("*.*")), [])
+
+    def test_fallo_posterior_limpia_solo_blobs_creados_por_la_operacion(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            hoy = timezone.localdate()
+            compartido = (
+                Path(media_root)
+                / "operacion"
+                / "higiene"
+                / "evidencias"
+                / f"{hoy:%Y}"
+                / f"{hoy:%m}"
+                / "primer-punto.png"
+            )
+            compartido.parent.mkdir(parents=True)
+            compartido.write_bytes(PNG_1PX)
+            llamadas = 0
+
+            def crear_y_fallar_en_segundo(**kwargs):
+                nonlocal llamadas
+                llamadas += 1
+                if llamadas == 2:
+                    raise RuntimeError("fallo inyectado en el segundo punto")
+                return crear_reporte_falla(**kwargs)
+
+            with mock.patch(
+                "operacion.services_higiene.crear_reporte_falla",
+                side_effect=crear_y_fallar_en_segundo,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "segundo punto"):
+                    guardar_registro_higiene(
+                        user=self.operadora,
+                        tipo="BANOS",
+                        clave_instancia="fallo-posterior",
+                        respuestas=[
+                            self._hallazgo_banos(
+                                key="bano_pisos",
+                                observacion="Piso roto",
+                                decision="DISTINTA",
+                            ),
+                            self._hallazgo_banos(
+                                observacion="Sanitario roto",
+                                decision="DISTINTA",
+                            ),
+                        ],
+                        archivos={
+                            "evidencia_bano_pisos": self._foto("primer-punto.png"),
+                            "evidencia_bano_sanitario": self._foto("segundo-punto.png"),
+                        },
+                        hora="09:30",
+                    )
+
+            self.assertEqual(llamadas, 2)
+            self.assertFalse(RegistroHigiene.objects.exists())
+            self.assertFalse(RespuestaHigiene.objects.exists())
+            self.assertFalse(ReporteFalla.objects.exists())
+            self.assertEqual(
+                {path.relative_to(media_root) for path in Path(media_root).rglob("*.*")},
+                {compartido.relative_to(media_root)},
+            )
+
+    def test_captura_exitosa_conserva_el_blob_creado(self):
+        with TemporaryDirectory() as media_root, self.settings(MEDIA_ROOT=media_root):
+            self.client.force_login(self.operadora)
+
+            response = self._guardar(
+                tipo="BANOS",
+                clave_instancia="evidencia-exitosa",
+                respuestas=[self._hallazgo_banos()],
+                archivos={"evidencia_bano_sanitario": self._foto("exitosa.png")},
+            )
+
+            self.assertEqual(response.status_code, 201)
+            self.assertEqual(RegistroHigiene.objects.count(), 1)
+            self.assertEqual(RespuestaHigiene.objects.count(), 1)
+            self.assertEqual(ReporteFalla.objects.count(), 1)
+            self.assertEqual(len(list(Path(media_root).rglob("*.png"))), 1)
 
     def test_varias_revisiones_pueden_apuntar_a_la_misma_falla(self):
         reporte = ReporteFalla.objects.create(
