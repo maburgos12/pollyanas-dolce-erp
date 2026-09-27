@@ -192,6 +192,7 @@ def proponer_consolidacion_higiene():
         principales = [rows[0]]
         for candidata in rows[1:]:
             if candidata._tiene_duplicados:
+                principales.append(candidata)
                 continue
             principales_activas = [
                 principal

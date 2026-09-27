@@ -744,6 +744,42 @@ class ConsolidacionHigieneTests(TestCase):
             ).exists()
         )
 
+    def test_reporte_activo_con_descendientes_bloquea_inferencia_del_siguiente(self):
+        principal, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 24),
+            observacion="No descarga agua",
+            indice=1,
+        )
+        bloqueador, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 25),
+            observacion="No descarga agua",
+            indice=2,
+        )
+        ReporteFalla.objects.create(
+            sucursal=self.sucursal,
+            categoria=self.categoria,
+            tipo_objetivo=ReporteFalla.OBJETIVO_INSTALACION,
+            area_instalacion="Baños",
+            titulo="Falla ya enlazada al bloqueador",
+            descripcion="Evidencia histórica independiente.",
+            justificacion_sin_foto="Prueba automatizada.",
+            reportado_por=self.operadora,
+            duplicado_de=bloqueador,
+        )
+        posterior, _ = self._crear_reporte_respuesta(
+            fecha=date(2026, 9, 26),
+            observacion="No descarga agua",
+            indice=3,
+        )
+
+        preview = proponer_consolidacion_higiene()
+
+        pares_exactos = {
+            (row.principal_id, row.repetido_id) for row in preview.exactas
+        }
+        self.assertNotIn((principal.id, bloqueador.id), pares_exactos)
+        self.assertNotIn((principal.id, posterior.id), pares_exactos)
+
     def test_aplicar_bloquea_registros_reportes_y_respuestas_en_orden_global(self):
         principal, repetido, _, _ = self.crear_repeticiones(
             observaciones=("No descarga agua", "No descarga agua"),
