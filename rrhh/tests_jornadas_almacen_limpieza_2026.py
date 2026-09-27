@@ -98,6 +98,12 @@ class JornadasAlmacenLimpieza2026Tests(TestCase):
         self.assertEqual(AsignacionJornadaEmpleado.objects.count(), 4)
 
     def test_regulariza_solo_extras_automaticas_pendientes(self):
+        fecha_sin_propuesta = date(2026, 9, 15)
+        sin_propuesta = AsistenciaEmpleado.objects.create(
+            empleado_id=23, fecha=fecha_sin_propuesta,
+            entrada=marca(fecha_sin_propuesta, time(8)),
+            salida=marca(fecha_sin_propuesta, time(17)),
+        )
         corta = AsistenciaEmpleado.objects.create(
             empleado_id=43, fecha=self.fecha,
             entrada=marca(self.fecha, time(8)), salida=marca(self.fecha, time(16, 20)),
@@ -137,7 +143,8 @@ class JornadasAlmacenLimpieza2026Tests(TestCase):
         self.assertEqual(larga_extra.horas, Decimal("1.00"))
         self.assertEqual(resuelta.estado, HoraExtra.ESTADO_AUTORIZADO)
         self.assertEqual(resuelta.horas, Decimal("0.75"))
-        self.assertEqual(AsistenciaEmpleado.objects.filter(turno__hora_entrada=time(8)).count(), 3)
+        self.assertFalse(HoraExtra.objects.filter(asistencia=sin_propuesta).exists())
+        self.assertEqual(AsistenciaEmpleado.objects.filter(turno__hora_entrada=time(8)).count(), 4)
 
     def test_conflicto_de_identidad_o_traslape_impide_aplicar(self):
         empleado = Empleado.objects.get(pk=23)
