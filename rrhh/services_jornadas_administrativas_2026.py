@@ -51,6 +51,7 @@ class ConfiguracionJornadasSpec:
     perfiles: dict
     modelo_auditoria: str
     reutilizar_turnos_compatibles: bool = True
+    crear_extras_faltantes: bool = True
 
 
 INICIO = date(2026, 9, 1)
@@ -370,7 +371,7 @@ def _plan(hoy: date, *, bloquear=False, spec=SPEC_ADMINISTRATIVAS):
                                    "jefe_anterior_id": vinculado.jefe_directo_id,
                                    "jefe_nuevo_id": jefe_nuevo_id,
                                    "accion": accion})
-        elif not vinculado:
+        elif not vinculado and spec.crear_extras_faltantes:
             saldo = saldo_automatico_esperado(diagnostico, registros)
             if saldo and saldo > 0:
                 pendientes.append({"id": None, "asistencia_id": a.pk,
@@ -386,7 +387,8 @@ def _plan(hoy: date, *, bloquear=False, spec=SPEC_ADMINISTRATIVAS):
                                and saldo_crudo >= UMBRAL_SOLICITUD_EXTRA_MINUTOS)
         extra_conciliada = (diagnostico.minutos is not None and diagnostico.minutos > 0
                             and saldo_autorizado >= diagnostico.minutos)
-        if reevaluar and (saldo_supera_umbral or extra_conciliada):
+        if (reevaluar and (saldo_supera_umbral or extra_conciliada)
+                and (spec.crear_extras_faltantes or vinculado)):
             tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
             existente = incidencias_por_fecha.get((a.empleado_id, a.fecha, tipo))
             if existente is None or (

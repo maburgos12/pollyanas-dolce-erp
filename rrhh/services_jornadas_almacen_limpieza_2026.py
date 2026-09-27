@@ -26,6 +26,7 @@ SPEC_ALMACEN_LIMPIEZA = ConfiguracionJornadasSpec(
     perfiles={NOMBRE_JORNADA: (NOMBRE_TURNO,) * 6 + (None,)},
     modelo_auditoria="rrhh.JornadasAlmacenLimpieza2026",
     reutilizar_turnos_compatibles=False,
+    crear_extras_faltantes=False,
 )
 
 
