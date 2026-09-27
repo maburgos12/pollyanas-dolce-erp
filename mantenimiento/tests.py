@@ -335,6 +335,56 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertEqual(response.context["open_item_uid"], "")
         self.assertNotContains(response, "Falla ajena confidencial")
 
+    def test_dashboard_no_cuenta_duplicado_ligado_fuera_del_alcance(self):
+        own_branch = Sucursal.objects.create(codigo="COUNT-OWN", nombre="Propia contador")
+        other_branch = Sucursal.objects.create(codigo="COUNT-OTHER", nombre="Ajena contador")
+        category = CategoriaFalla.objects.create(nombre="Conteo con alcance")
+        limited = get_user_model().objects.create_user("count-limited", password="test")
+        UserProfile.objects.create(user=limited, sucursal=own_branch)
+        UserModuleAccess.objects.create(
+            user=limited,
+            module="mantenimiento.dashboard",
+            access=ACCESS_VIEW,
+        )
+        principal = ReporteFalla.objects.create(
+            sucursal=own_branch,
+            categoria=category,
+            titulo="Falla principal visible",
+            descripcion="Debe contar solo actividad propia",
+            reportado_por=self.mantenimiento,
+        )
+        ReporteFalla.objects.create(
+            sucursal=own_branch,
+            categoria=category,
+            titulo="Repetición propia",
+            descripcion="Visible para el usuario",
+            reportado_por=self.mantenimiento,
+            duplicado_de=principal,
+        )
+        ReporteFalla.objects.create(
+            sucursal=other_branch,
+            categoria=category,
+            titulo="Repetición ajena confidencial",
+            descripcion="No debe alterar el contador",
+            reportado_por=self.mantenimiento,
+            duplicado_de=principal,
+        )
+        self.client.force_login(limited)
+
+        response = self.client.get(reverse("mantenimiento:dashboard"))
+        visible = next(
+            item
+            for column in response.context["kanban_columns"]
+            for item in column["items"]
+            if item["uid"] == f"falla:{principal.pk}"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(visible["duplicados_total"], 1)
+        self.assertContains(response, "Reportado 2 veces")
+        self.assertNotContains(response, "Reportado 3 veces")
+        self.assertNotContains(response, "Repetición ajena confidencial")
+
     def test_pwa_shows_order_traceability_fields(self):
         self.client.force_login(self.mantenimiento)
 

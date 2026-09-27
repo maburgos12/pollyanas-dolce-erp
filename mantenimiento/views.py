@@ -404,7 +404,14 @@ def _logistica_item(reporte):
 def _branch_fallas(queryset, *, user, limit=80):
     queryset = (
         queryset.filter(duplicado_de__isnull=True)
-        .annotate(duplicados_total=Count("duplicados"))
+        .annotate(
+            duplicados_total=Count(
+                "duplicados",
+                filter=Q(
+                    duplicados__pk__in=authorized_fallas(user).values("pk")
+                ),
+            )
+        )
         .select_related("sucursal", "categoria", "activo_relacionado", "reportado_por")
         .prefetch_related(
             Prefetch(
