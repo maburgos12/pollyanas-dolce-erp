@@ -173,7 +173,7 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertContains(pagina, "20260911-pasaporte-qr-v2")
         self.assertContains(
             pagina,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260927-higiene-continuidad-v1"',
         )
         self.assertContains(pagina, 'updateViaCache: "none"')
         self.assertContains(pagina, "La existencia se consulta directamente en Point")
