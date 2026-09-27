@@ -28,6 +28,7 @@ from pos_bridge.services.monthly_product_balance_service import MonthlyPointProd
 from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada, VentaHistorica
 from reportes.models import FactProduccionDiaria
+from ventas.models import VentaAutoritativaPoint
 
 
 class MonthlyProductBalanceConversionTests(TestCase):
@@ -1732,6 +1733,44 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
         self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+
+    def test_authoritative_product_overlay_is_a_valid_materialization_and_sales_source(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "official", sync_job=job)
+        VentaAutoritativaPoint.objects.create(
+            branch=self.sucursal,
+            product=self.slice,
+            sale_date=date(2026, 7, 3),
+            product_code=self.slice.codigo_point,
+            point_name=self.slice.nombre,
+            quantity=Decimal("4"),
+        )
+        VentaHistorica.objects.bulk_create([
+            VentaHistorica(
+                receta=self.parent,
+                sucursal=self.sucursal,
+                fecha=date(2026, 7, 3),
+                cantidad=Decimal("3"),
+                fuente="POINT_BRIDGE_SALES",
+            ),
+            VentaHistorica(
+                receta=self.slice,
+                sucursal=self.sucursal,
+                fecha=date(2026, 7, 3),
+                cantidad=Decimal("4"),
+                fuente="POINT_BRIDGE_SALES",
+            ),
+        ])
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+        self.assertEqual(balance.rows[self.slice.id].sales, Decimal("4"))
+        self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
 
     def test_divergent_or_unmatched_bridge_rows_block_daily_sales_authority(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
