@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+import hashlib
+import json
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from django.utils import timezone
 
@@ -12,6 +16,77 @@ from pos_bridge.utils.helpers import normalize_text
 
 
 CEDIS_TOKENS = {"cedis", "almacen", "almacen central", "produccion", "centro distribucion"}
+OPEN_TRANSFER_MANIFEST_KEY = "open_transfer_manifest"
+OPEN_TRANSFER_CLOSE_TIME = time(1, 1)
+OPEN_TRANSFER_CLOSE_WINDOW = timedelta(hours=6)
+OPEN_TRANSFER_TIME_ZONE = ZoneInfo("America/Mazatlan")
+
+
+def open_transfer_close_window(operational_date: date) -> tuple[datetime, datetime]:
+    next_day = operational_date + timedelta(days=1)
+    cutoff = datetime.combine(next_day, OPEN_TRANSFER_CLOSE_TIME, tzinfo=OPEN_TRANSFER_TIME_ZONE)
+    return cutoff, cutoff + OPEN_TRANSFER_CLOSE_WINDOW
+
+
+def _canonical_decimal(value) -> str:
+    try:
+        decimal_value = Decimal(str(value or 0))
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value or "")
+    if not decimal_value:
+        return "0"
+    return format(decimal_value.normalize(), "f")
+
+
+def _canonical_datetime(value) -> str:
+    if value is None:
+        return ""
+    if timezone.is_naive(value):
+        value = timezone.make_aware(value, OPEN_TRANSFER_TIME_ZONE)
+    return value.astimezone(OPEN_TRANSFER_TIME_ZONE).isoformat()
+
+
+def build_open_transfer_manifest(
+    lines,
+    *,
+    operational_date: date,
+    captured_at: datetime,
+) -> dict:
+    stable_rows = []
+    for line in lines:
+        stable_rows.append(
+            {
+                "source_hash": str(line.source_hash or ""),
+                "transfer_external_id": str(line.transfer_external_id or ""),
+                "detail_external_id": str(line.detail_external_id or ""),
+                "registered_at": _canonical_datetime(line.registered_at),
+                "sent_at": _canonical_datetime(line.sent_at),
+                "received_at": _canonical_datetime(line.received_at),
+                "requested_quantity": _canonical_decimal(line.requested_quantity),
+                "sent_quantity": _canonical_decimal(line.sent_quantity),
+                "received_quantity": _canonical_decimal(line.received_quantity),
+                "is_insumo": bool(line.is_insumo),
+                "is_received": bool(line.is_received),
+                "is_cancelled": bool(line.is_cancelled),
+                "is_finalized": bool(line.is_finalized),
+                "is_open": bool(line.is_open),
+            }
+        )
+    stable_rows.sort(
+        key=lambda row: (
+            row["source_hash"],
+            row["transfer_external_id"],
+            row["detail_external_id"],
+            json.dumps(row, sort_keys=True, separators=(",", ":")),
+        )
+    )
+    serialized = json.dumps(stable_rows, sort_keys=True, separators=(",", ":"))
+    return {
+        "sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        "row_count": len(stable_rows),
+        "operational_date": operational_date.isoformat(),
+        "captured_at": captured_at.isoformat(),
+    }
 
 
 def is_cedis_like_name(value: str) -> bool:
@@ -87,6 +162,12 @@ class OpenTransferSyncService:
                     "sucursales_sin_solicitud": max(0, len(active_branch_ids - branch_ids)),
                 }
             )
+            if not str(branch_filter or "").strip():
+                summary[OPEN_TRANSFER_MANIFEST_KEY] = build_open_transfer_manifest(
+                    lines,
+                    operational_date=fecha,
+                    captured_at=timezone.now(),
+                )
             return self.movement_service._mark_success(sync_job, summary)
         except PosBridgeError as exc:
             return self.movement_service._mark_failure(sync_job, exc)

@@ -8,6 +8,7 @@ from decimal import Decimal
 from types import MappingProxyType
 
 from django.db.models import Q
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -24,6 +25,10 @@ from pos_bridge.models import (
 from pos_bridge.models.product import _normalize_name
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
+)
+from pos_bridge.services.open_transfer_sync_service import (
+    OPEN_TRANSFER_MANIFEST_KEY,
+    open_transfer_close_window,
 )
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
@@ -633,6 +638,7 @@ class BranchInventoryTraceabilityService:
                 "job_type",
                 "status",
                 "started_at",
+                "finished_at",
                 "parameters",
                 "result_summary",
             )
@@ -666,6 +672,7 @@ class BranchInventoryTraceabilityService:
                 "job_type",
                 "status",
                 "started_at",
+                "finished_at",
                 "parameters",
                 "result_summary",
             )
@@ -676,16 +683,34 @@ class BranchInventoryTraceabilityService:
             for job in open_jobs
             if not str((job.parameters or {}).get("branch_filter") or "").strip()
         ]
-        selected_open_job = (
-            unrestricted_open_jobs[0]
-            if unrestricted_open_jobs
-            else (open_jobs[0] if open_jobs else None)
+        evaluated_open_jobs = [
+            (
+                job,
+                cls._open_transfer_job_contract_issues(
+                    job,
+                    operational_date=month_end,
+                ),
+            )
+            for job in unrestricted_open_jobs
+        ]
+        valid_open_job = next(
+            (job for job, job_issues in evaluated_open_jobs if not job_issues),
+            None,
         )
-        open_job_issues = (
-            ["OPEN_TRANSFER_SYNC_JOB_MISSING"]
-            if selected_open_job is None
-            else cls._open_transfer_job_contract_issues(selected_open_job)
-        )
+        if valid_open_job is not None:
+            selected_open_job = valid_open_job
+            open_job_issues = []
+        elif evaluated_open_jobs:
+            selected_open_job, open_job_issues = evaluated_open_jobs[0]
+        elif open_jobs:
+            selected_open_job = open_jobs[0]
+            open_job_issues = cls._open_transfer_job_contract_issues(
+                selected_open_job,
+                operational_date=month_end,
+            )
+        else:
+            selected_open_job = None
+            open_job_issues = ["OPEN_TRANSFER_SYNC_JOB_MISSING"]
         issues.extend(open_job_issues)
         relevant_rows = [
             row
@@ -709,7 +734,15 @@ class BranchInventoryTraceabilityService:
         if missing_job_ids:
             known_jobs.update(
                 PointSyncJob.objects.filter(id__in=missing_job_ids)
-                .only("id", "job_type", "status", "parameters", "result_summary")
+                .only(
+                    "id",
+                    "job_type",
+                    "status",
+                    "started_at",
+                    "finished_at",
+                    "parameters",
+                    "result_summary",
+                )
                 .in_bulk()
             )
         invalid_provenance_row_ids = []
@@ -721,7 +754,8 @@ class BranchInventoryTraceabilityService:
                 provenance_issues = ["TRANSFER_ROW_PROVENANCE_JOB_MISSING"]
             elif (provenance_job.parameters or {}).get("mode") == "open_transfers":
                 provenance_issues = cls._open_transfer_job_contract_issues(
-                    provenance_job
+                    provenance_job,
+                    operational_date=month_end,
                 )
             else:
                 provenance_issues = cls._transfer_job_contract_issues(
@@ -796,7 +830,7 @@ class BranchInventoryTraceabilityService:
         return issues
 
     @classmethod
-    def _open_transfer_job_contract_issues(cls, job):
+    def _open_transfer_job_contract_issues(cls, job, *, operational_date):
         issues = cls._transfer_job_contract_issues(
             job,
             prefix="OPEN_TRANSFER_SYNC",
@@ -817,6 +851,44 @@ class BranchInventoryTraceabilityService:
             or seen != new_rows + updated_rows
         ):
             issues.append("OPEN_TRANSFER_SYNC_COUNT_MISMATCH")
+
+        manifest = summary.get(OPEN_TRANSFER_MANIFEST_KEY)
+        if not isinstance(manifest, dict):
+            issues.append("OPEN_TRANSFER_SYNC_MANIFEST_INCOMPLETE")
+            return list(dict.fromkeys(issues))
+        try:
+            manifest_count = int(manifest["row_count"])
+            manifest_hash = str(manifest["sha256"])
+            manifest_date = date.fromisoformat(str(manifest["operational_date"]))
+            captured_at = parse_datetime(str(manifest["captured_at"]))
+        except (KeyError, TypeError, ValueError):
+            issues.append("OPEN_TRANSFER_SYNC_MANIFEST_INCOMPLETE")
+            return list(dict.fromkeys(issues))
+        if (
+            manifest_count < 0
+            or manifest_count != seen
+            or len(manifest_hash) != 64
+            or any(character not in "0123456789abcdef" for character in manifest_hash)
+            or manifest_date != operational_date
+            or captured_at is None
+            or timezone.is_naive(captured_at)
+        ):
+            issues.append("OPEN_TRANSFER_SYNC_MANIFEST_INVALID")
+
+        cutoff, window_end = open_transfer_close_window(operational_date)
+        started_at = job.started_at
+        finished_at = job.finished_at
+        if (
+            started_at is None
+            or finished_at is None
+            or timezone.is_naive(started_at)
+            or timezone.is_naive(finished_at)
+            or captured_at is None
+            or timezone.is_naive(captured_at)
+            or not cutoff <= started_at <= finished_at <= window_end
+            or not started_at <= captured_at <= finished_at
+        ):
+            issues.append("OPEN_TRANSFER_SYNC_CAPTURE_WINDOW_INVALID")
         return list(dict.fromkeys(issues))
 
     @staticmethod

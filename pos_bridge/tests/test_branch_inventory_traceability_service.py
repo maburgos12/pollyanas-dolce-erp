@@ -108,6 +108,12 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                     "transfer_lines_updated": 0,
                     "lineas_nuevas": rows_seen,
                     "lineas_actualizadas": 0,
+                    "open_transfer_manifest": {
+                        "sha256": "a" * 64,
+                        "row_count": rows_seen,
+                        "operational_date": "2026-08-31",
+                        "captured_at": "2026-09-01T02:04:00-07:00",
+                    },
                 }
             )
         if family == "conversions":
@@ -127,12 +133,18 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                     "report_pk": f"report-{PointSyncJob.objects.count() + 1}",
                 }
             )
-        return PointSyncJob.objects.create(
+        job = PointSyncJob.objects.create(
             job_type=job_type,
             status=status,
             parameters=parameters,
             result_summary=result_summary,
         )
+        if family == "open_transfers":
+            local_tz = timezone.get_current_timezone()
+            job.started_at = datetime(2026, 9, 1, 2, 0, tzinfo=local_tz)
+            job.finished_at = datetime(2026, 9, 1, 2, 5, tzinfo=local_tz)
+            job.save(update_fields=["started_at", "finished_at"])
+        return job
 
     def _sales_job(self, *, status=PointSyncJob.STATUS_SUCCESS, branch_filter=""):
         job = PointSyncJob.objects.create(
@@ -207,6 +219,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def _increment_movement_job(job, count_key):
         summary = dict(job.result_summary or {})
         summary[count_key] = int(summary.get(count_key) or 0) + 1
+        if count_key == "transfer_lines_seen" and "open_transfer_manifest" in summary:
+            manifest = dict(summary["open_transfer_manifest"])
+            manifest["row_count"] = summary[count_key]
+            summary["open_transfer_manifest"] = manifest
         job.result_summary = summary
         job.save(update_fields=["result_summary", "updated_at"])
 
@@ -1481,6 +1497,87 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 self.open_transfer_job.parameters = original_parameters
                 self.open_transfer_job.result_summary = original_summary
                 self.open_transfer_job.save()
+
+    def test_open_transfer_snapshot_rejects_same_day_capture_before_close_cutoff(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        local_tz = timezone.get_current_timezone()
+        self.open_transfer_job.started_at = datetime(2026, 8, 31, 22, 5, tzinfo=local_tz)
+        self.open_transfer_job.finished_at = datetime(2026, 8, 31, 22, 10, tzinfo=local_tz)
+        self.open_transfer_job.save(update_fields=["started_at", "finished_at"])
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(result.source_complete)
+        self.assertIn(
+            "OPEN_TRANSFER_SYNC_CAPTURE_WINDOW_INVALID",
+            " ".join(issue.message for issue in result.global_issues),
+        )
+
+    def test_open_transfer_snapshot_rejects_late_rerun_and_missing_manifest(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        local_tz = timezone.get_current_timezone()
+        cases = (
+            (
+                datetime(2026, 9, 2, 2, 0, tzinfo=local_tz),
+                dict(self.open_transfer_job.result_summary),
+                "OPEN_TRANSFER_SYNC_CAPTURE_WINDOW_INVALID",
+            ),
+            (
+                datetime(2026, 9, 1, 2, 0, tzinfo=local_tz),
+                {
+                    key: value
+                    for key, value in self.open_transfer_job.result_summary.items()
+                    if key != "open_transfer_manifest"
+                },
+                "OPEN_TRANSFER_SYNC_MANIFEST_INCOMPLETE",
+            ),
+        )
+        for started_at, summary, expected in cases:
+            with self.subTest(expected=expected):
+                self.open_transfer_job.started_at = started_at
+                self.open_transfer_job.finished_at = started_at + timedelta(minutes=5)
+                self.open_transfer_job.result_summary = summary
+                self.open_transfer_job.save(
+                    update_fields=["started_at", "finished_at", "result_summary"]
+                )
+
+                result = self.service.build(month=date(2026, 8, 1))
+
+                self.assertFalse(result.source_complete)
+                self.assertIn(
+                    expected,
+                    " ".join(issue.message for issue in result.global_issues),
+                )
+
+    def test_open_transfer_snapshot_accepts_bounded_post_cutoff_manifest(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
+
+    def test_late_rerun_does_not_hide_qualifying_close_snapshot(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        late_job = self._movement_job("open_transfers")
+        local_tz = timezone.get_current_timezone()
+        late_job.started_at = datetime(2026, 9, 2, 2, 0, tzinfo=local_tz)
+        late_job.finished_at = datetime(2026, 9, 2, 2, 5, tzinfo=local_tz)
+        late_job.result_summary = {
+            **late_job.result_summary,
+            "open_transfer_manifest": {
+                **late_job.result_summary["open_transfer_manifest"],
+                "captured_at": "2026-09-02T02:04:00-07:00",
+            },
+        }
+        late_job.save(update_fields=["started_at", "finished_at", "result_summary"])
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
 
     def test_received_transfer_job_must_cover_received_operational_date(self):
         unrelated_job = PointSyncJob.objects.create(
