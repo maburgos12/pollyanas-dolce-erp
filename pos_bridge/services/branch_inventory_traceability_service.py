@@ -4,6 +4,8 @@ from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
+from types import MappingProxyType
+from typing import Mapping
 
 from pos_bridge.models import (
     PointBranch,
@@ -41,7 +43,7 @@ class BranchProductBalance:
     expected_closing: Decimal
     point_closing: Decimal
     difference: Decimal
-    source_trace: dict[str, tuple[int, ...]]
+    source_trace: Mapping[str, tuple[int, ...]]
     issues: tuple[TraceSourceIssue, ...]
 
 
@@ -65,13 +67,16 @@ class BranchInventoryTraceabilityService:
             monthrange(month_start.year, month_start.month)[1],
         )
 
+        opening_closing = self._select_closing(opening_date)
+        point_closing = self._select_closing(closing_date)
+        selected_closings = {
+            opening_date: opening_closing,
+            closing_date: point_closing,
+        }
         missing_dates = [
             required_date
-            for required_date in (opening_date, closing_date)
-            if not PointHistoricalInventoryClosing.objects.filter(
-                operational_date=required_date,
-                status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
-            ).exists()
+            for required_date, selected in selected_closings.items()
+            if selected is None
         ]
         if missing_dates:
             issues = tuple(
@@ -90,8 +95,35 @@ class BranchInventoryTraceabilityService:
                 source_complete=False,
             )
 
-        opening = self._load_closing(opening_date)
-        closing = self._load_closing(closing_date)
+        opening = self._load_closing(opening_closing)
+        closing = self._load_closing(point_closing)
+        incomplete_manifests = [
+            (required_date, selected, balances)
+            for required_date, selected, balances in (
+                (opening_date, opening_closing, opening),
+                (closing_date, point_closing, closing),
+            )
+            if not self._coverage_complete(selected, balances)
+        ]
+        if incomplete_manifests:
+            return BranchInventoryTraceability(
+                month=month_start,
+                lines=(),
+                global_issues=tuple(
+                    TraceSourceIssue(
+                        code="SOURCE_INCOMPLETE",
+                        message=(
+                            "El cierre Point verificado tiene cobertura incompleta para "
+                            f"{required_date.isoformat()}."
+                        ),
+                        source_ids=(selected.id,),
+                    )
+                    for required_date, selected, _balances in incomplete_manifests
+                ),
+                company_difference=ZERO,
+                exception_count=0,
+                source_complete=False,
+            )
         keys = sorted(opening.keys() | closing.keys())
         branches = PointBranch.objects.in_bulk({branch_id for branch_id, _ in keys})
         products = PointProduct.objects.in_bulk({product_id for _, product_id in keys})
@@ -118,7 +150,9 @@ class BranchInventoryTraceabilityService:
                     expected_closing=expected_closing,
                     point_closing=point_closing,
                     difference=difference,
-                    source_trace={"opening": opening_ids, "closing": closing_ids},
+                    source_trace=MappingProxyType(
+                        {"opening": opening_ids, "closing": closing_ids}
+                    ),
                     issues=(),
                 )
             )
@@ -134,16 +168,40 @@ class BranchInventoryTraceabilityService:
         )
 
     @staticmethod
+    def _coverage_complete(
+        closing: PointHistoricalInventoryClosing,
+        balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]],
+    ) -> bool:
+        expected_branch_ids = {int(value) for value in (closing.expected_branch_ids or [])}
+        expected_product_ids = {int(value) for value in (closing.expected_product_ids or [])}
+        expected_keys = {
+            (branch_id, product_id)
+            for branch_id in expected_branch_ids
+            for product_id in expected_product_ids
+        }
+        return bool(expected_branch_ids and expected_product_ids and balances.keys() == expected_keys)
+
+    @staticmethod
+    def _select_closing(operational_date: date) -> PointHistoricalInventoryClosing | None:
+        return (
+            PointHistoricalInventoryClosing.objects.filter(
+                operational_date=operational_date,
+                status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+            )
+            .order_by("-id")
+            .first()
+        )
+
+    @staticmethod
     def _load_closing(
-        operational_date: date,
+        closing: PointHistoricalInventoryClosing,
     ) -> dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]]:
         balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
-        lines = PointHistoricalInventoryClosingLine.objects.filter(
-            closing__operational_date=operational_date,
-            closing__status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
-        ).select_related("branch", "product")
-        for line in lines:
-            key = (line.branch_id, line.product_id)
+        lines = PointHistoricalInventoryClosingLine.objects.filter(closing=closing).values_list(
+            "id", "branch_id", "product_id", "stock"
+        )
+        for line_id, branch_id, product_id, line_stock in lines:
+            key = (branch_id, product_id)
             stock, source_ids = balances.get(key, (ZERO, ()))
-            balances[key] = (stock + line.stock, (*source_ids, line.id))
+            balances[key] = (stock + line_stock, (*source_ids, line_id))
         return balances
