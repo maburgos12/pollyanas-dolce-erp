@@ -95,6 +95,36 @@ def _validate_product_inventory_audit_source_issues(source_issues) -> None:
             )
 
 
+def _validate_product_inventory_audit_issue_codes(issue_codes) -> None:
+    if not isinstance(issue_codes, list) or not all(
+        isinstance(code, str) and code.strip() for code in issue_codes
+    ):
+        raise ValidationError(
+            {"issue_codes": "Debe ser una lista de códigos de texto no vacíos."}
+        )
+
+
+def _validate_product_inventory_audit_source_trace(source_trace) -> None:
+    if not isinstance(source_trace, dict):
+        raise ValidationError({"source_trace": "Debe ser un objeto."})
+
+
+class _NoBulkMutationQuerySet(models.QuerySet):
+    _BULK_OPERATION_ERROR = (
+        "Este registro no admite operaciones masivas; "
+        "debe guardarse individualmente con validación."
+    )
+
+    def update(self, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+
 class CentroCosto(models.Model):
     TIPO_PRODUCCION = "PRODUCCION"
     TIPO_SUCURSAL = "SUCURSAL_VENTA"
@@ -3379,6 +3409,10 @@ class DistribucionISNEmpleado(models.Model):
         ]
 
 
+class ProductInventoryAuditRunQuerySet(_NoBulkMutationQuerySet):
+    pass
+
+
 class ProductInventoryAuditRun(models.Model):
     class Status(models.TextChoices):
         READY = "READY", "Lista"
@@ -3397,6 +3431,7 @@ class ProductInventoryAuditRun(models.Model):
     last_successful_rebuild_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = ProductInventoryAuditRunQuerySet.as_manager()
 
     class Meta:
         ordering = ["-month", "-created_at"]
@@ -3416,8 +3451,17 @@ class ProductInventoryAuditRun(models.Model):
         _validate_product_inventory_audit_source_issues(self.source_issues)
         _validate_product_inventory_audit_summary(self.summary)
 
+    def save(self, *args, **kwargs):
+        _validate_product_inventory_audit_source_issues(self.source_issues)
+        _validate_product_inventory_audit_summary(self.summary)
+        return super().save(*args, **kwargs)
+
     def __str__(self) -> str:
         return f"Auditoría de inventario {self.month:%Y-%m}"
+
+
+class ProductInventoryAuditCaseQuerySet(_NoBulkMutationQuerySet):
+    pass
 
 
 class ProductInventoryAuditCase(models.Model):
@@ -3484,6 +3528,7 @@ class ProductInventoryAuditCase(models.Model):
     rebuilt_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    objects = ProductInventoryAuditCaseQuerySet.as_manager()
 
     class Meta:
         ordering = ["month", "branch_id", "product_id"]
@@ -3520,35 +3565,29 @@ class ProductInventoryAuditCase(models.Model):
             self.month = self.month.replace(day=1)
         if self.run_id and self.month and self.run.month != self.month:
             raise ValidationError({"month": "Debe coincidir con el mes de la corrida."})
-        if not isinstance(self.issue_codes, list):
-            raise ValidationError({"issue_codes": "Debe ser una lista."})
-        if not isinstance(self.source_trace, dict):
-            raise ValidationError({"source_trace": "Debe ser un objeto."})
+        _validate_product_inventory_audit_issue_codes(self.issue_codes)
+        _validate_product_inventory_audit_source_trace(self.source_trace)
+
+    def save(self, *args, **kwargs):
+        _validate_product_inventory_audit_issue_codes(self.issue_codes)
+        _validate_product_inventory_audit_source_trace(self.source_trace)
+        return super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.month:%Y-%m} · {self.branch} · {self.product}"
 
 
-class ProductInventoryAuditEventQuerySet(models.QuerySet):
+class ProductInventoryAuditEventQuerySet(_NoBulkMutationQuerySet):
     _BULK_OPERATION_ERROR = (
         "Los eventos de auditoría no admiten operaciones masivas; "
         "deben registrarse individualmente."
     )
 
     def update(self, **kwargs):
-        if set(kwargs) == {"actor"} and kwargs["actor"] is None:
-            return super().update(**kwargs)
         raise ValidationError(self._BULK_OPERATION_ERROR)
 
     def delete(self):
         raise ValidationError(self._BULK_OPERATION_ERROR)
-
-    def bulk_create(self, objs, **kwargs):
-        raise ValidationError(self._BULK_OPERATION_ERROR)
-
-    def bulk_update(self, objs, fields, batch_size=None):
-        raise ValidationError(self._BULK_OPERATION_ERROR)
-
 
 class ProductInventoryAuditEvent(models.Model):
     class Action(models.TextChoices):
@@ -3590,7 +3629,6 @@ class ProductInventoryAuditEvent(models.Model):
 
     class Meta:
         ordering = ["created_at", "id"]
-        base_manager_name = "objects"
         default_manager_name = "objects"
         indexes = [
             models.Index(fields=["case", "created_at"], name="inv_audit_event_case_idx"),
