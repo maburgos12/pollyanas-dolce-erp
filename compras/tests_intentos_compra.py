@@ -11,6 +11,7 @@ from django.utils import timezone
 from compras.models import (
     CompraRealizadaDepartamental,
     CompromisoCompraDepartamental,
+    CotizacionCompraDepartamental,
     IntentoCompraDepartamental,
     LineaOrdenCompraDepartamental,
     OrdenCompraDepartamental,
@@ -24,6 +25,14 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         return IntentoCompraDepartamental.objects.create(
             item=self.item, cotizacion=self.quote, estado=estado,
         )
+
+    def otra_cotizacion(self):
+        otro_item = self.solicitud.items.create(descripcion="Artículo ajeno", cantidad=1)
+        cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=otro_item, proveedor=self.proveedor,
+            cantidad_ofertada=Decimal("1"), costo_unitario=Decimal("50"),
+        )
+        return otro_item, cotizacion
 
     def test_historial_numera_intentos_y_expone_unico_vigente(self):
         primero = self.crear_intento(IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO)
@@ -56,6 +65,56 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         otro_item = self.solicitud.items.create(descripcion="Otro", cantidad=1)
         with self.assertRaises(ValidationError):
             IntentoCompraDepartamental(item=otro_item, cotizacion=self.quote).full_clean()
+
+    def test_intento_create_y_save_rechazan_cotizacion_de_otro_item(self):
+        _, cotizacion_ajena = self.otra_cotizacion()
+        with self.assertRaises(ValidationError):
+            IntentoCompraDepartamental.objects.create(item=self.item, cotizacion=cotizacion_ajena)
+        intento = self.crear_intento()
+        intento.cotizacion = cotizacion_ajena
+        with self.assertRaises(ValidationError):
+            intento.save(update_fields=["cotizacion"])
+
+    def test_linea_create_y_save_rechazan_relaciones_cruzadas(self):
+        intento = self.crear_intento()
+        otro_item, cotizacion_ajena = self.otra_cotizacion()
+        orden = OrdenCompraDepartamental.objects.create(proveedor=self.proveedor, creado_por=self.user)
+        datos = dict(
+            orden=orden, intento=intento, cantidad=Decimal("2"),
+            costo_unitario=Decimal("100"), total=Decimal("200"),
+        )
+        with self.assertRaises(ValidationError):
+            LineaOrdenCompraDepartamental.objects.create(item=otro_item, cotizacion=self.quote, **datos)
+        linea = LineaOrdenCompraDepartamental.objects.create(
+            item=self.item, cotizacion=self.quote, **datos,
+        )
+        linea.cotizacion = cotizacion_ajena
+        with self.assertRaises(ValidationError):
+            linea.save(update_fields=["cotizacion"])
+        linea.total = Decimal("180")
+        linea.save(update_fields=["total"])
+        linea.refresh_from_db()
+        self.assertEqual(linea.cotizacion, self.quote)
+        self.assertEqual(linea.total, Decimal("180"))
+
+    def test_compra_create_rechaza_cotizacion_de_otro_intento(self):
+        intento = self.crear_intento()
+        _, cotizacion_ajena = self.otra_cotizacion()
+        with self.assertRaises(ValidationError):
+            CompraRealizadaDepartamental.objects.create(
+                intento=intento, item=self.item, cotizacion=cotizacion_ajena,
+                fecha_compra=timezone.localdate(), importe_final=Decimal("200"),
+                comprobante="compras/prueba.pdf", registrado_por=self.user,
+            )
+
+    def test_compromiso_create_rechaza_item_de_otro_intento(self):
+        intento = self.crear_intento()
+        otro_item, _ = self.otra_cotizacion()
+        with self.assertRaises(ValidationError):
+            CompromisoCompraDepartamental.objects.create(
+                intento=intento, item=otro_item, cotizacion=self.quote,
+                monto=Decimal("200"), activo=False,
+            )
 
     def test_lineas_y_compras_historicas_se_vinculan_a_intentos_distintos(self):
         primero = self.crear_intento(IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO)
@@ -111,12 +170,11 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         )
         self.assertEqual(intento.total_reembolsado, Decimal("550"))
         self.assertEqual(intento.saldo_reembolso, Decimal("450"))
-        with self.assertRaises(IntegrityError):
-            with transaction.atomic():
-                ReembolsoCompraDepartamental.objects.create(
-                    intento=intento, importe=Decimal("0"), fecha=timezone.localdate(),
-                    registrado_por=self.user,
-                )
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.create(
+                intento=intento, importe=Decimal("0"), fecha=timezone.localdate(),
+                registrado_por=self.user,
+            )
         primero.referencia = "CAMBIO"
         with self.assertRaises(ValidationError):
             primero.save(update_fields=["referencia"])
@@ -126,6 +184,27 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
             ReembolsoCompraDepartamental.objects.filter(pk=primero.pk).update(referencia="CAMBIO")
         with self.assertRaises(ValidationError):
             ReembolsoCompraDepartamental.objects.filter(pk=primero.pk).delete()
+
+    def test_reembolso_no_excede_solicitud_y_permite_completarla(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        datos = dict(intento=intento, fecha=timezone.localdate(), registrado_por=self.user)
+        ReembolsoCompraDepartamental.objects.create(importe=Decimal("400"), **datos)
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.create(importe=Decimal("700"), **datos)
+        self.assertEqual(intento.total_reembolsado, Decimal("400"))
+        ReembolsoCompraDepartamental.objects.create(importe=Decimal("600"), **datos)
+        self.assertEqual(intento.total_reembolsado, Decimal("1000"))
+        self.assertEqual(intento.saldo_reembolso, Decimal("0"))
+
+    def test_reembolso_rechaza_solicitud_ausente(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.create(
+                intento=intento, importe=Decimal("100"), fecha=timezone.localdate(),
+                registrado_por=self.user,
+            )
 
 
 class MigracionIntentosCompraTests(TransactionTestCase):
@@ -243,6 +322,41 @@ class MigracionIntentosCompraTests(TransactionTestCase):
         with self.assertRaisesMessage(RuntimeError, f"compra departamental {compra.pk}"):
             MigrationExecutor(connection).migrate([self.migrate_to])
         compra.delete()
+
+    def test_backfill_rechaza_compra_con_otra_cotizacion_del_mismo_item(self):
+        user, proveedor, solicitud = self._datos_base()
+        item, _, _, _ = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="COMPRADO", folio="OCD-MIG-6",
+        )
+        Cotizacion = self.apps_0015.get_model("compras", "CotizacionCompraDepartamental")
+        Compra = self.apps_0015.get_model("compras", "CompraRealizadaDepartamental")
+        alternativa = Cotizacion.objects.create(
+            item=item, proveedor=proveedor, cantidad_ofertada=2, costo_unitario=Decimal("90"),
+        )
+        compra = Compra.objects.create(
+            item=item, cotizacion=alternativa, fecha_compra=timezone.localdate(),
+            importe_final=Decimal("180"), comprobante="compras/historico.pdf", registrado_por=user,
+        )
+        with self.assertRaisesMessage(RuntimeError, f"compra {compra.pk}"):
+            MigrationExecutor(connection).migrate([self.migrate_to])
+        compra.delete()
+
+    def test_backfill_rechaza_compromiso_con_otra_cotizacion_del_mismo_item(self):
+        user, proveedor, solicitud = self._datos_base()
+        item, cotizacion, _, compromiso = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="ORDENADO", folio="OCD-MIG-7",
+        )
+        Cotizacion = self.apps_0015.get_model("compras", "CotizacionCompraDepartamental")
+        Compromiso = self.apps_0015.get_model("compras", "CompromisoCompraDepartamental")
+        alternativa = Cotizacion.objects.create(
+            item=item, proveedor=proveedor, cantidad_ofertada=2, costo_unitario=Decimal("90"),
+        )
+        Compromiso.objects.filter(pk=compromiso.pk).update(cotizacion_id=alternativa.pk)
+        with self.assertRaisesMessage(RuntimeError, f"compromiso {compromiso.pk}"):
+            MigrationExecutor(connection).migrate([self.migrate_to])
+        Compromiso.objects.filter(pk=compromiso.pk).update(cotizacion_id=cotizacion.pk)
 
     def test_reversa_rechaza_reembolso_nuevo_que_0015_no_puede_conservar(self):
         user, proveedor, solicitud = self._datos_base()

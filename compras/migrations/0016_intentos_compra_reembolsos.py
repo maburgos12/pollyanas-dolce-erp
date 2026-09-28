@@ -12,13 +12,31 @@ def crear_intentos_historicos(apps, schema_editor):
     Compromiso = apps.get_model("compras", "CompromisoCompraDepartamental")
     db = schema_editor.connection.alias
 
-    lineas_item = set(Linea.objects.using(db).values_list("item_id", flat=True))
-    compra_huerfana = Compra.objects.using(db).exclude(item_id__in=lineas_item).order_by("pk").first()
-    if compra_huerfana is not None:
-        raise RuntimeError(
-            "No se puede migrar la compra departamental "
-            f"{compra_huerfana.pk}: su artículo {compra_huerfana.item_id} no tiene línea de orden."
+    lineas_por_item = {
+        item_id: (linea_id, cotizacion_id)
+        for linea_id, item_id, cotizacion_id in Linea.objects.using(db).values_list(
+            "pk", "item_id", "cotizacion_id"
         )
+    }
+    for compra in Compra.objects.using(db).order_by("pk"):
+        linea = lineas_por_item.get(compra.item_id)
+        if linea is None:
+            raise RuntimeError(
+                "No se puede migrar la compra departamental "
+                f"{compra.pk}: su artículo {compra.item_id} no tiene línea de orden."
+            )
+        if compra.cotizacion_id != linea[1]:
+            raise RuntimeError(
+                f"No se puede migrar la compra {compra.pk}: cotización {compra.cotizacion_id} "
+                f"distinta de la línea {linea[0]} (cotización {linea[1]})."
+            )
+    for compromiso in Compromiso.objects.using(db).order_by("pk"):
+        linea = lineas_por_item.get(compromiso.item_id)
+        if linea is not None and compromiso.cotizacion_id != linea[1]:
+            raise RuntimeError(
+                f"No se puede migrar el compromiso {compromiso.pk}: cotización {compromiso.cotizacion_id} "
+                f"distinta de la línea {linea[0]} (cotización {linea[1]})."
+            )
 
     versiones = {}
     for linea in Linea.objects.using(db).select_related("item", "orden").order_by("item_id", "pk"):
@@ -86,14 +104,17 @@ def comprobar_reversa_segura(apps, schema_editor):
             raise RuntimeError(f"No se puede volver a compras 0015: el número del intento {intento.pk} no es reconstruible.")
         if intento.creado_en != linea.orden.creado_en or intento.actualizado_en != linea.orden.creado_en:
             raise RuntimeError(f"No se puede volver a compras 0015: las fechas del intento {intento.pk} no son reconstruibles.")
-        esperados_por_item[linea.item_id] = intento.pk
+        esperados_por_item[linea.item_id] = (intento.pk, linea.cotizacion_id)
     if intentos:
         raise RuntimeError("No se puede volver a compras 0015: existen intentos sin línea reconstruible.")
     for compra in Compra.objects.using(db).all():
-        if compra.intento_id != esperados_por_item.get(compra.item_id):
+        if (compra.intento_id, compra.cotizacion_id) != esperados_por_item.get(compra.item_id):
             raise RuntimeError(f"No se puede volver a compras 0015: la compra {compra.pk} apunta a otro intento.")
     for compromiso in Compromiso.objects.using(db).all():
-        if compromiso.intento_id != esperados_por_item.get(compromiso.item_id):
+        esperado = esperados_por_item.get(compromiso.item_id)
+        if compromiso.intento_id != (esperado[0] if esperado else None) or (
+            esperado and compromiso.cotizacion_id != esperado[1]
+        ):
             raise RuntimeError(f"No se puede volver a compras 0015: el compromiso {compromiso.pk} apunta a otro intento.")
     for nombre in ("LineaOrdenCompraDepartamental", "CompraRealizadaDepartamental", "CompromisoCompraDepartamental"):
         Modelo = apps.get_model("compras", nombre)

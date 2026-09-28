@@ -440,6 +440,41 @@ class HistorialCotizacionDepartamental(models.Model):
         ordering = ["-creado_en", "-pk"]
 
 
+def _ids_relacion_efectivos(instancia, campos, args, kwargs):
+    """Usar valores persistidos para relaciones omitidas de update_fields."""
+    update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+    valores = {campo: getattr(instancia, f"{campo}_id") for campo in campos}
+    if not instancia._state.adding and update_fields is not None:
+        incluidos = set(update_fields)
+        omitidos = [
+            campo for campo in campos
+            if campo not in incluidos and f"{campo}_id" not in incluidos
+        ]
+        if omitidos:
+            db = kwargs.get("using") or instancia._state.db or "default"
+            guardados = type(instancia)._base_manager.using(db).values(
+                *(f"{campo}_id" for campo in omitidos)
+            ).get(pk=instancia.pk)
+            valores.update({campo: guardados[f"{campo}_id"] for campo in omitidos})
+    return valores
+
+
+def _validar_vinculos_compra(item_id, cotizacion_id, intento_id=None, *, using="default"):
+    if not item_id or not cotizacion_id:
+        return
+    item_cotizado = CotizacionCompraDepartamental.objects.using(using).filter(
+        pk=cotizacion_id
+    ).values_list("item_id", flat=True).first()
+    if item_cotizado is not None and item_cotizado != item_id:
+        raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo."})
+    if intento_id is not None:
+        intento = IntentoCompraDepartamental.objects.using(using).filter(
+            pk=intento_id
+        ).values("item_id", "cotizacion_id").first()
+        if intento is not None and (intento["item_id"] != item_id or intento["cotizacion_id"] != cotizacion_id):
+            raise ValidationError("El artículo y la cotización deben corresponder al intento de compra.")
+
+
 class IntentoCompraDepartamental(models.Model):
     ESTADO_VIGENTE = "VIGENTE"
     ESTADO_CANCELADO_SIN_PAGO = "CANCELADO_SIN_PAGO"
@@ -505,6 +540,11 @@ class IntentoCompraDepartamental(models.Model):
             raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo del intento."})
 
     def save(self, *args, **kwargs):
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
         if self._state.adding and not self.numero:
             with transaction.atomic():
                 ItemCompraDepartamental.objects.select_for_update().get(pk=self.item_id)
@@ -551,7 +591,20 @@ class ReembolsoCompraDepartamental(models.Model):
     def save(self, *args, **kwargs):
         if not self._state.adding:
             raise ValidationError("Los reembolsos registrados no pueden modificarse.")
-        return super().save(*args, **kwargs)
+        if self.importe is None or self.importe <= 0:
+            raise ValidationError({"importe": "El reembolso debe ser mayor que cero."})
+        db = kwargs.get("using") or self._state.db or "default"
+        with transaction.atomic(using=db):
+            intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=self.intento_id)
+            solicitado = intento.reembolso_solicitado
+            if solicitado is None:
+                raise ValidationError("El intento no tiene un reembolso solicitado.")
+            recibido = type(self).objects.using(db).filter(intento_id=self.intento_id).exclude(
+                pk=self.pk
+            ).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+            if recibido + self.importe > solicitado:
+                raise ValidationError({"importe": "El reembolso supera el saldo solicitado."})
+            return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         raise ValidationError("Los reembolsos registrados no pueden eliminarse.")
@@ -577,6 +630,14 @@ class CompraRealizadaDepartamental(models.Model):
             raise ValidationError({"importe_final": "El importe final debe ser mayor que cero."})
         if self.cotizacion_id and self.item_id and self.cotizacion.item_id != self.item_id:
             raise ValidationError("La cotización debe corresponder al artículo comprado.")
+
+    def save(self, *args, **kwargs):
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
 
 
 class HistorialCompraDepartamental(models.Model):
@@ -624,6 +685,14 @@ class CompromisoCompraDepartamental(models.Model):
             ),
         ]
 
+    def save(self, *args, **kwargs):
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
+
 
 class OrdenCompraDepartamental(models.Model):
     folio = models.CharField(max_length=24, unique=True, blank=True)
@@ -653,6 +722,14 @@ class LineaOrdenCompraDepartamental(models.Model):
     cantidad = models.DecimalField(max_digits=12, decimal_places=3)
     costo_unitario = models.DecimalField(max_digits=14, decimal_places=2)
     total = models.DecimalField(max_digits=14, decimal_places=2)
+
+    def save(self, *args, **kwargs):
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
 
 
 class RecepcionItemDepartamental(models.Model):
