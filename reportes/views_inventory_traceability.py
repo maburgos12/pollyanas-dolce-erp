@@ -1,23 +1,47 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date
 from html import escape
+from pathlib import Path
+from uuid import uuid4
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.files.storage import FileSystemStorage
 from django.db import transaction
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.utils.text import get_valid_filename
 from django.views.decorators.http import require_GET, require_POST
 
 from core.access import ACCESS_MANAGE, can_view_reportes, get_module_access
+from mantenimiento.evidence_validation import (
+    EvidenceValidationError,
+    validate_evidence_files,
+)
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
     ProductInventoryAuditRun,
 )
+
+MAX_EVIDENCE_SIZE = 10 * 1024 * 1024
+MAX_NOTES_LENGTH = 4000
+
+
+def _evidence_storage() -> FileSystemStorage:
+    return FileSystemStorage(
+        location=getattr(
+            settings,
+            "INVENTORY_AUDIT_PRIVATE_ROOT",
+            Path(settings.BASE_DIR) / "storage" / "inventory_audit_evidence",
+        )
+    )
 
 
 def _require_report_access(request: HttpRequest) -> None:
@@ -115,7 +139,16 @@ def _action_response(
                 "persistent": not ok,
             },
             "target": target,
-            "html": _case_fragment(case),
+            "html": (
+                _case_fragment(case)
+                if ok
+                else _action_form_fragment(
+                    request,
+                    case=case,
+                    message=message,
+                    fields=fields or {},
+                )
+            ),
         }
         if fields is not None:
             payload["fields"] = fields
@@ -125,15 +158,54 @@ def _action_response(
         messages.success(request, message)
         return redirect(_case_url(case))
 
-    preserved = fields or {}
-    body = (
-        f'<section id="inventory-audit-action-error" role="alert">'
-        f"<p>{escape(message)}</p>"
-        f'<input name="reason_code" value="{escape(preserved.get("reason_code", ""))}">'
-        f'<textarea name="notes">{escape(preserved.get("notes", ""))}</textarea>'
-        "</section>"
+    return HttpResponse(
+        _action_form_fragment(
+            request,
+            case=case,
+            message=message,
+            fields=fields or {},
+        ),
+        status=status,
     )
-    return HttpResponse(body, status=status)
+
+
+def _action_form_fragment(
+    request: HttpRequest,
+    *,
+    case: ProductInventoryAuditCase,
+    message: str,
+    fields: dict[str, str],
+) -> str:
+    reason_code = escape(fields.get("reason_code", ""))
+    notes = escape(fields.get("notes", ""))
+    action_url = escape(request.path)
+    csrf_token = escape(get_token(request))
+    evidence_field = ""
+    if (
+        request.resolver_match
+        and request.resolver_match.url_name == "inventory_audit_explain"
+    ):
+        evidence_field = (
+            '<label>Evidencia opcional '
+            '<input type="file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.webp">'
+            "</label>"
+        )
+    return (
+        f'<article id="inventory-audit-case-{case.pk}">'
+        '<section id="inventory-audit-action-error" role="alert">'
+        f"<p>{escape(message)}</p>"
+        f'<form method="post" action="{action_url}" enctype="multipart/form-data" '
+        'data-async-action>'
+        f'<input type="hidden" name="csrfmiddlewaretoken" value="{csrf_token}">'
+        '<label>Causa '
+        f'<input name="reason_code" maxlength="80" value="{reason_code}"></label>'
+        '<label>Notas '
+        f'<textarea name="notes" maxlength="{MAX_NOTES_LENGTH}">{notes}</textarea>'
+        "</label>"
+        f"{evidence_field}"
+        '<button type="submit">Reintentar</button>'
+        "</form></section></article>"
+    )
 
 
 def _locked_case(pk: int) -> ProductInventoryAuditCase:
@@ -147,8 +219,10 @@ def _locked_case(pk: int) -> ProductInventoryAuditCase:
         raise Http404("Caso de auditoría no encontrado.") from None
 
 
-def _latest_explanation(case: ProductInventoryAuditCase) -> ProductInventoryAuditEvent | None:
-    latest = case.events.select_related("actor").order_by("-created_at", "-id").first()
+def _latest_explanation(
+    case: ProductInventoryAuditCase,
+) -> ProductInventoryAuditEvent | None:
+    latest = case.events.order_by("-created_at", "-id").first()
     if latest is None or latest.action != ProductInventoryAuditEvent.Action.EXPLAIN:
         return None
     return latest
@@ -158,6 +232,33 @@ def _posted_fields(request: HttpRequest) -> dict[str, str]:
     return {
         "reason_code": request.POST.get("reason_code", ""),
         "notes": request.POST.get("notes", ""),
+    }
+
+
+def _validate_evidence(uploaded) -> str | None:
+    if uploaded is None:
+        return None
+    if uploaded.size > MAX_EVIDENCE_SIZE:
+        raise EvidenceValidationError(
+            [f"{Path(uploaded.name or 'Archivo').name}: excede el límite de 10 MB."]
+        )
+    validate_evidence_files([uploaded])
+    return Path(uploaded.name).suffix.lower()
+
+
+def _store_evidence(uploaded, suffix: str) -> tuple[str, dict[str, object]]:
+    digest = hashlib.sha256()
+    for chunk in uploaded.chunks():
+        digest.update(chunk)
+    uploaded.seek(0)
+    storage = _evidence_storage()
+    stored_name = storage.save(f"{uuid4()}{suffix}", uploaded)
+    original_name = get_valid_filename(Path(uploaded.name).name) or "evidencia"
+    return stored_name, {
+        "evidence_original_name": original_name,
+        "evidence_sha256": digest.hexdigest(),
+        "evidence_size": uploaded.size,
+        "evidence_content_type": uploaded.content_type,
     }
 
 
@@ -206,7 +307,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
     try:
         case = (
             ProductInventoryAuditCase.objects.select_related("branch", "product", "run")
-            .prefetch_related("events__actor")
+            .prefetch_related("events")
             .get(pk=pk)
         )
     except ProductInventoryAuditCase.DoesNotExist:
@@ -221,6 +322,14 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "actor_id": event.actor_id,
             "related_event_id": event.related_event_id,
             "created_at": event.created_at.isoformat(),
+            "evidence_download_url": (
+                reverse(
+                    "reportes:inventory_audit_evidence",
+                    args=[case.pk, event.pk],
+                )
+                if event.evidence
+                else None
+            ),
         }
         for event in case.events.all()
     ]
@@ -237,44 +346,79 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
     fields = _posted_fields(request)
     reason_code = fields["reason_code"].strip()
     notes = fields["notes"].strip()
-    with transaction.atomic():
-        case = _locked_case(pk)
-        _require_case_custody(request.user, case)
-        if not reason_code or not notes or len(reason_code) > 80:
+    stored_name = None
+    try:
+        with transaction.atomic():
+            case = _locked_case(pk)
+            _require_case_custody(request.user, case)
+            if (
+                not reason_code
+                or not notes
+                or len(reason_code) > 80
+                or len(notes) > MAX_NOTES_LENGTH
+            ):
+                return _action_response(
+                    request,
+                    case=case,
+                    ok=False,
+                    message=(
+                        "Indica una causa y una explicación de hasta "
+                        f"{MAX_NOTES_LENGTH} caracteres antes de guardar."
+                    ),
+                    status=400,
+                    fields=fields,
+                )
+            if (
+                case.movement_status
+                != ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
+            ):
+                return _action_response(
+                    request,
+                    case=case,
+                    ok=False,
+                    message="El caso ya cambió de estado. Recarga antes de continuar.",
+                    status=409,
+                    fields=fields,
+                )
+            uploaded = request.FILES.get("evidence")
+            try:
+                suffix = _validate_evidence(uploaded)
+            except EvidenceValidationError as exc:
+                return _action_response(
+                    request,
+                    case=case,
+                    ok=False,
+                    message=str(exc),
+                    status=400,
+                    fields=fields,
+                )
+            evidence_metadata: dict[str, object] = {}
+            if uploaded is not None and suffix is not None:
+                stored_name, evidence_metadata = _store_evidence(uploaded, suffix)
+            ProductInventoryAuditEvent.objects.create(
+                case=case,
+                action=ProductInventoryAuditEvent.Action.EXPLAIN,
+                reason_code=reason_code,
+                notes=notes,
+                evidence=stored_name,
+                actor=request.user,
+                metadata={
+                    "custody_branch_id": case.branch_id,
+                    **evidence_metadata,
+                },
+            )
+            case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+            case.save(update_fields=["movement_status", "updated_at"])
             return _action_response(
                 request,
                 case=case,
-                ok=False,
-                message="Indica una causa y una explicación antes de guardar.",
-                status=400,
-                fields=fields,
+                ok=True,
+                message="La explicación quedó pendiente de aprobación.",
             )
-        if case.movement_status != ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION:
-            return _action_response(
-                request,
-                case=case,
-                ok=False,
-                message="El caso ya cambió de estado. Recarga antes de continuar.",
-                status=409,
-                fields=fields,
-            )
-        ProductInventoryAuditEvent.objects.create(
-            case=case,
-            action=ProductInventoryAuditEvent.Action.EXPLAIN,
-            reason_code=reason_code,
-            notes=notes,
-            evidence=request.FILES.get("evidence"),
-            actor=request.user,
-            metadata={"custody_branch_id": case.branch_id},
-        )
-        case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
-        case.save(update_fields=["movement_status", "updated_at"])
-        return _action_response(
-            request,
-            case=case,
-            ok=True,
-            message="La explicación quedó pendiente de aprobación.",
-        )
+    except Exception:
+        if stored_name:
+            _evidence_storage().delete(stored_name)
+        raise
 
 
 def _review_case(
@@ -293,7 +437,11 @@ def _review_case(
     with transaction.atomic():
         case = _locked_case(pk)
         _require_case_custody(request.user, case)
-        if not reason_code or len(reason_code) > 80:
+        if (
+            not reason_code
+            or len(reason_code) > 80
+            or len(notes) > MAX_NOTES_LENGTH
+        ):
             return _action_response(
                 request,
                 case=case,
@@ -302,7 +450,10 @@ def _review_case(
                 status=400,
                 fields=fields,
             )
-        if case.movement_status != ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL:
+        if (
+            case.movement_status
+            != ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+        ):
             return _action_response(
                 request,
                 case=case,
@@ -312,7 +463,7 @@ def _review_case(
                 fields=fields,
             )
         explanation = _latest_explanation(case)
-        if explanation is None:
+        if explanation is None or explanation.actor_id is None:
             return _action_response(
                 request,
                 case=case,
@@ -373,3 +524,37 @@ def reject_case(request: HttpRequest, pk: int) -> HttpResponse:
         pk=pk,
         action=ProductInventoryAuditEvent.Action.REJECT,
     )
+
+
+@login_required
+@require_GET
+def download_evidence(request: HttpRequest, pk: int, event_id: int) -> HttpResponse:
+    _require_report_access(request)
+    try:
+        case = ProductInventoryAuditCase.objects.select_related("branch").get(pk=pk)
+    except ProductInventoryAuditCase.DoesNotExist:
+        raise Http404("Caso de auditoría no encontrado.") from None
+    _require_case_custody(request.user, case)
+    try:
+        event = case.events.get(
+            pk=event_id,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+        )
+    except ProductInventoryAuditEvent.DoesNotExist:
+        raise Http404("Evidencia no encontrada.") from None
+    name = event.evidence.name if event.evidence else ""
+    if not name or Path(name).name != name:
+        raise Http404("Evidencia no encontrada.")
+    storage = _evidence_storage()
+    if not storage.exists(name):
+        raise Http404("Archivo no disponible.")
+    filename = event.metadata.get("evidence_original_name") or "evidencia"
+    filename = get_valid_filename(Path(str(filename)).name) or "evidencia"
+    response = FileResponse(
+        storage.open(name, "rb"),
+        as_attachment=True,
+        filename=filename,
+    )
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response

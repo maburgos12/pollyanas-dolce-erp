@@ -1,11 +1,13 @@
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -20,6 +22,14 @@ from reportes.models import (
 
 class InventoryTraceabilityViewsTests(TestCase):
     def setUp(self):
+        self.private_evidence_directory = TemporaryDirectory()
+        self.addCleanup(self.private_evidence_directory.cleanup)
+        private_settings = override_settings(
+            INVENTORY_AUDIT_PRIVATE_ROOT=self.private_evidence_directory.name,
+            DATA_UPLOAD_MAX_MEMORY_SIZE=12 * 1024 * 1024,
+        )
+        private_settings.enable()
+        self.addCleanup(private_settings.disable)
         self.erp_branch = Sucursal.objects.create(
             codigo="AUD-VIEW-1",
             nombre="Sucursal auditoría vistas",
@@ -169,20 +179,139 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(event.notes, "Falta recepción.")
 
     def test_explanation_accepts_optional_evidence(self):
+        evidence_content = b"%PDF-1.4\nPrivate inventory audit evidence"
         self.client.force_login(self.explainer)
         response = self.client.post(
             reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
             {
                 "reason_code": "PHYSICAL_EVIDENCE",
                 "notes": "Se adjunta evidencia de custodia.",
-                "evidence": SimpleUploadedFile("evidencia.txt", b"evidencia"),
+                "evidence": SimpleUploadedFile(
+                    "evidencia.pdf",
+                    evidence_content,
+                    content_type="application/pdf",
+                ),
             },
         )
 
         self.assertEqual(response.status_code, 302)
-        evidence = self.case.events.get().evidence
-        self.assertIn("reportes/inventory-audit/", evidence.name)
-        self.assertEqual(evidence.read(), b"evidencia")
+        event = self.case.events.get()
+        stored_name = event.evidence.name
+        self.assertNotEqual(stored_name, "evidencia.pdf")
+        self.assertEqual(Path(stored_name).parent, Path("."))
+        self.assertEqual(event.metadata["evidence_original_name"], "evidencia.pdf")
+        stored_path = Path(self.private_evidence_directory.name, stored_name)
+        self.assertTrue(stored_path.is_file())
+        self.assertEqual(stored_path.read_bytes(), evidence_content)
+
+        download = self.client.get(
+            reverse(
+                "reportes:inventory_audit_evidence",
+                args=[self.case.pk, event.pk],
+            )
+        )
+        self.assertEqual(download.status_code, 200)
+        self.assertEqual(b"".join(download.streaming_content), evidence_content)
+        self.assertIn(
+            'attachment; filename="evidencia.pdf"',
+            download["Content-Disposition"],
+        )
+        self.assertEqual(download["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(download["Cache-Control"], "private, no-store")
+
+    def test_evidence_rejects_disguised_or_oversized_files_without_writing(self):
+        self.client.force_login(self.explainer)
+        url = reverse("reportes:inventory_audit_explain", args=[self.case.pk])
+
+        disguised = self.client.post(
+            url,
+            {
+                "reason_code": "PHYSICAL_EVIDENCE",
+                "notes": "Archivo con extensión falsa.",
+                "evidence": SimpleUploadedFile(
+                    "evidencia.png",
+                    b"this is not a png",
+                    content_type="image/png",
+                ),
+            },
+        )
+        oversized = self.client.post(
+            url,
+            {
+                "reason_code": "PHYSICAL_EVIDENCE",
+                "notes": "Archivo demasiado grande.",
+                "evidence": SimpleUploadedFile(
+                    "evidencia.pdf",
+                    b"%PDF-" + (b"x" * (10 * 1024 * 1024)),
+                    content_type="application/pdf",
+                ),
+            },
+        )
+
+        self.assertEqual(disguised.status_code, 400)
+        self.assertContains(disguised, "contenido no coincide", status_code=400)
+        self.assertEqual(oversized.status_code, 400)
+        self.assertContains(oversized, "excede el límite de 10 MB", status_code=400)
+        self.assertFalse(self.case.events.exists())
+        self.assertEqual(list(Path(self.private_evidence_directory.name).iterdir()), [])
+
+    def test_private_evidence_download_requires_report_and_case_custody(self):
+        self.client.force_login(self.explainer)
+        self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
+            {
+                "reason_code": "PHYSICAL_EVIDENCE",
+                "notes": "Evidencia privada.",
+                "evidence": SimpleUploadedFile(
+                    "private.pdf",
+                    b"%PDF-1.4\nprivate",
+                    content_type="application/pdf",
+                ),
+            },
+        )
+        event = self.case.events.get()
+        url = reverse(
+            "reportes:inventory_audit_evidence", args=[self.case.pk, event.pk]
+        )
+
+        self.client.logout()
+        self.assertEqual(self.client.get(url).status_code, 302)
+        self.client.force_login(self.outsider)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.client.force_login(self.viewer)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        UserProfile.objects.update_or_create(
+            user=self.viewer, defaults={"sucursal": self.other_erp_branch}
+        )
+        self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_failed_transaction_removes_private_evidence(self):
+        self.client.force_login(self.explainer)
+        uploaded = SimpleUploadedFile(
+            "rollback.pdf",
+            b"%PDF-1.4\nrollback",
+            content_type="application/pdf",
+        )
+
+        with patch.object(
+            ProductInventoryAuditCase,
+            "save",
+            side_effect=RuntimeError("forced rollback"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post(
+                    reverse(
+                        "reportes:inventory_audit_explain", args=[self.case.pk]
+                    ),
+                    {
+                        "reason_code": "PHYSICAL_EVIDENCE",
+                        "notes": "Debe revertir archivo y base.",
+                        "evidence": uploaded,
+                    },
+                )
+
+        self.assertFalse(self.case.events.exists())
+        self.assertEqual(list(Path(self.private_evidence_directory.name).iterdir()), [])
 
     def test_explanation_requires_change_permission(self):
         response = self._explain(user=self.viewer)
@@ -214,10 +343,39 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(
             html_response, "Comentario conservado", status_code=400
         )
+        self.assertContains(html_response, f'action="{url}"', status_code=400)
+        self.assertContains(html_response, 'method="post"', status_code=400)
+        self.assertContains(html_response, 'enctype="multipart/form-data"', status_code=400)
+        self.assertContains(html_response, 'name="csrfmiddlewaretoken"', status_code=400)
+        self.assertContains(html_response, 'name="evidence"', status_code=400)
+        self.assertContains(html_response, 'type="submit"', status_code=400)
+        self.assertContains(
+            html_response,
+            f'id="inventory-audit-case-{self.case.pk}"',
+            status_code=400,
+        )
         self.assertEqual(json_response.status_code, 400)
         self.assertEqual(json_response.json()["fields"]["reason_code"], "CAUSA")
         self.assertEqual(json_response.json()["fields"]["notes"], "")
+        self.assertIn('name="reason_code"', json_response.json()["html"])
+        self.assertIn('value="CAUSA"', json_response.json()["html"])
+        self.assertIn('name="evidence"', json_response.json()["html"])
         self.assertEqual(self.case.events.count(), 0)
+
+    def test_notes_length_is_bounded_for_explanations_and_reviews(self):
+        long_notes = "x" * 4001
+        explanation = self._explain(notes=long_notes)
+        self.assertEqual(explanation.status_code, 400)
+        self.assertFalse(self.case.events.exists())
+
+        self._explain()
+        self.client.force_login(self.approver)
+        review = self.client.post(
+            reverse("reportes:inventory_audit_approve", args=[self.case.pk]),
+            {"reason_code": "REVIEWED", "notes": long_notes},
+        )
+        self.assertEqual(review.status_code, 400)
+        self.assertEqual(self.case.events.count(), 1)
 
     def test_approver_needs_custom_permission_and_cannot_be_explainer(self):
         self._explain()
@@ -282,6 +440,57 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(self.case.events.count(), 2)
         rejection = self.case.events.get(action=ProductInventoryAuditEvent.Action.REJECT)
         self.assertEqual(rejection.related_event, explanation)
+
+    def test_review_fails_closed_when_current_explanation_has_no_actor(self):
+        self.case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+        self.case.save(update_fields=["movement_status"])
+        ProductInventoryAuditEvent.objects.create(
+            case=self.case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="LEGACY",
+            notes="Explicación histórica sin actor.",
+            actor=None,
+        )
+        self.client.force_login(self.approver)
+
+        for route_name in (
+            "inventory_audit_approve",
+            "inventory_audit_reject",
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.post(
+                    reverse(f"reportes:{route_name}", args=[self.case.pk]),
+                    {"reason_code": "REVIEWED", "notes": "No debe avanzar."},
+                )
+                self.assertEqual(response.status_code, 409)
+
+        self.case.refresh_from_db()
+        self.assertEqual(
+            self.case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        )
+        self.assertEqual(self.case.events.count(), 1)
+
+    def test_action_endpoints_reject_get_and_enforce_csrf(self):
+        self.client.force_login(self.explainer)
+        action_urls = [
+            reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
+            reverse("reportes:inventory_audit_approve", args=[self.case.pk]),
+            reverse("reportes:inventory_audit_reject", args=[self.case.pk]),
+        ]
+        for url in action_urls:
+            with self.subTest(url=url):
+                self.assertEqual(self.client.get(url).status_code, 405)
+
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.explainer)
+        response = csrf_client.post(
+            action_urls[0],
+            {"reason_code": "CAUSE", "notes": "Sin token"},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("login"))
+        self.assertFalse(self.case.events.exists())
 
     def test_async_action_returns_toast_target_and_updated_case_fragment(self):
         self.client.force_login(self.explainer)

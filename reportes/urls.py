@@ -37,6 +37,11 @@ urlpatterns = [
         views_inventory_traceability.reject_case,
         name="inventory_audit_reject",
     ),
+    path(
+        "auditoria-inventario/casos/<int:pk>/evidencias/<int:event_id>/",
+        views_inventory_traceability.download_evidence,
+        name="inventory_audit_evidence",
+    ),
     path("planeacion-personal/", views_planeacion_personal.planeacion_personal, name="planeacion_personal"),
     path("", views.consumo, name="home"),
     path(
