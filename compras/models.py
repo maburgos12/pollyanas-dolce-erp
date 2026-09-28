@@ -376,6 +376,15 @@ class ItemCompraDepartamental(models.Model):
             return None
         return self.cantidad * self.costo_unitario_estimado
 
+    @property
+    def intento_vigente(self):
+        intentos = getattr(self, "intentos_compra_prefetched", None)
+        if intentos is not None:
+            return next((intento for intento in intentos if intento.estado == "VIGENTE"), None)
+        return self.intentos_compra.filter(estado="VIGENTE").select_related(
+            "cotizacion__proveedor", "linea_orden", "compra"
+        ).first()
+
     def clean(self):
         super().clean()
         if self.rubro_id and self.solicitud_id and self.rubro.area_id != self.solicitud.area_id:
@@ -431,9 +440,127 @@ class HistorialCotizacionDepartamental(models.Model):
         ordering = ["-creado_en", "-pk"]
 
 
+class IntentoCompraDepartamental(models.Model):
+    ESTADO_VIGENTE = "VIGENTE"
+    ESTADO_CANCELADO_SIN_PAGO = "CANCELADO_SIN_PAGO"
+    ESTADO_REEMBOLSO_SOLICITADO = "REEMBOLSO_SOLICITADO"
+    ESTADO_REEMBOLSADO = "REEMBOLSADO"
+    ESTADO_ENTREGADO = "ENTREGADO"
+    ESTADO_CHOICES = [
+        (ESTADO_VIGENTE, "Vigente"),
+        (ESTADO_CANCELADO_SIN_PAGO, "Cancelado sin pago"),
+        (ESTADO_REEMBOLSO_SOLICITADO, "Reembolso solicitado"),
+        (ESTADO_REEMBOLSADO, "Reembolsado"),
+        (ESTADO_ENTREGADO, "Entregado"),
+    ]
+    MOTIVO_PROVEEDOR_CANCELO = "PROVEEDOR_CANCELO"
+    MOTIVO_NO_ENTREGO = "NO_ENTREGO"
+    MOTIVO_OTRO = "OTRO"
+    MOTIVO_CHOICES = [
+        (MOTIVO_PROVEEDOR_CANCELO, "Proveedor canceló"),
+        (MOTIVO_NO_ENTREGO, "Proveedor no entregó"),
+        (MOTIVO_OTRO, "Otro"),
+    ]
+
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="intentos_compra")
+    cotizacion = models.ForeignKey(
+        CotizacionCompraDepartamental, on_delete=models.PROTECT, related_name="intentos_compra"
+    )
+    numero = models.PositiveIntegerField(editable=False)
+    version = models.PositiveIntegerField(default=1)
+    estado = models.CharField(max_length=30, choices=ESTADO_CHOICES, default=ESTADO_VIGENTE, db_index=True)
+    motivo_cancelacion = models.CharField(max_length=30, choices=MOTIVO_CHOICES, blank=True, default="")
+    detalle_cancelacion = models.TextField(blank=True, default="")
+    cancelado_en = models.DateTimeField(null=True, blank=True)
+    cancelado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="intentos_compra_cancelados",
+    )
+    reembolso_solicitado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    reembolso_solicitado_en = models.DateField(null=True, blank=True)
+    evidencia_solicitud_reembolso = models.FileField(
+        upload_to="compras/departamentales/reembolsos/solicitudes/%Y/%m/", null=True, blank=True
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["numero", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item"], condition=models.Q(estado="VIGENTE"),
+                name="comp_dept_un_intento_vigente",
+            ),
+            models.UniqueConstraint(fields=["item", "numero"], name="comp_dept_intento_numero_unico"),
+            models.CheckConstraint(check=models.Q(numero__gt=0), name="comp_dept_intento_numero_positivo"),
+            models.CheckConstraint(
+                check=models.Q(reembolso_solicitado__isnull=True) | models.Q(reembolso_solicitado__gt=0),
+                name="comp_dept_solicitud_reembolso_positiva",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.item_id and self.cotizacion_id and self.cotizacion.item_id != self.item_id:
+            raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo del intento."})
+
+    def save(self, *args, **kwargs):
+        if self._state.adding and not self.numero:
+            with transaction.atomic():
+                ItemCompraDepartamental.objects.select_for_update().get(pk=self.item_id)
+                ultimo = type(self).objects.filter(item_id=self.item_id).aggregate(models.Max("numero"))["numero__max"]
+                self.numero = (ultimo or 0) + 1
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
+
+    @property
+    def total_reembolsado(self):
+        return self.reembolsos.aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+
+    @property
+    def saldo_reembolso(self):
+        return max((self.reembolso_solicitado or Decimal("0")) - self.total_reembolsado, Decimal("0"))
+
+
+class ReembolsoCompraQuerySet(models.QuerySet):
+    def update(self, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+
+    def delete(self):
+        raise ValidationError("Los reembolsos registrados no pueden eliminarse.")
+
+
+class ReembolsoCompraDepartamental(models.Model):
+    intento = models.ForeignKey(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="reembolsos")
+    importe = models.DecimalField(max_digits=14, decimal_places=2)
+    fecha = models.DateField()
+    referencia = models.CharField(max_length=160, blank=True, default="")
+    comprobante = models.FileField(
+        upload_to="compras/departamentales/reembolsos/recibidos/%Y/%m/", null=True, blank=True
+    )
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+    objects = ReembolsoCompraQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["creado_en", "pk"]
+        constraints = [
+            models.CheckConstraint(check=models.Q(importe__gt=0), name="comp_dept_reembolso_positivo"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden eliminarse.")
+
+
 class CompraRealizadaDepartamental(models.Model):
     version = models.PositiveIntegerField(default=1)
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compra_realizada")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compras_realizadas")
+    intento = models.OneToOneField(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="compra")
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     fecha_compra = models.DateField()
     importe_final = models.DecimalField(max_digits=14, decimal_places=2)
@@ -474,7 +601,10 @@ class HistorialCompraDepartamental(models.Model):
 
 
 class CompromisoCompraDepartamental(models.Model):
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.CASCADE, related_name="compromiso")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.CASCADE, related_name="compromisos")
+    intento = models.OneToOneField(
+        IntentoCompraDepartamental, null=True, blank=True, on_delete=models.PROTECT, related_name="compromiso"
+    )
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     monto = models.DecimalField(max_digits=14, decimal_places=2)
     activo = models.BooleanField(default=True, db_index=True)
@@ -485,6 +615,14 @@ class CompromisoCompraDepartamental(models.Model):
         help_text="Se llena al generar la orden; antes de eso el monto es una reserva presupuestal.",
     )
     liberado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item"], condition=models.Q(activo=True, intento__isnull=True),
+                name="comp_dept_una_reserva_preorden_activa",
+            ),
+        ]
 
 
 class OrdenCompraDepartamental(models.Model):
@@ -509,7 +647,8 @@ class OrdenCompraDepartamental(models.Model):
 
 class LineaOrdenCompraDepartamental(models.Model):
     orden = models.ForeignKey(OrdenCompraDepartamental, on_delete=models.CASCADE, related_name="lineas")
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="linea_orden")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="lineas_orden")
+    intento = models.OneToOneField(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="linea_orden")
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=12, decimal_places=3)
     costo_unitario = models.DecimalField(max_digits=14, decimal_places=2)
