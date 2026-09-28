@@ -12,7 +12,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
-from core.access import can_view_reportes
+from core.access import ACCESS_MANAGE, can_view_reportes, get_module_access
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -23,6 +23,24 @@ from reportes.models import (
 def _require_report_access(request: HttpRequest) -> None:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
+
+
+def _has_global_custody_access(user) -> bool:
+    return bool(
+        user.is_superuser
+        or get_module_access(user, "reportes") == ACCESS_MANAGE
+    )
+
+
+def _require_case_custody(user, case: ProductInventoryAuditCase) -> None:
+    if _has_global_custody_access(user):
+        return
+    erp_branch_id = case.branch.erp_branch_id
+    profile = getattr(user, "userprofile", None)
+    if erp_branch_id is None or profile is None or profile.sucursal_id != erp_branch_id:
+        raise PermissionDenied(
+            "El caso pertenece a una ubicación fuera de tu custodia autorizada."
+        )
 
 
 def _wants_json(request: HttpRequest) -> bool:
@@ -221,6 +239,7 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
     notes = fields["notes"].strip()
     with transaction.atomic():
         case = _locked_case(pk)
+        _require_case_custody(request.user, case)
         if not reason_code or not notes or len(reason_code) > 80:
             return _action_response(
                 request,
@@ -273,6 +292,7 @@ def _review_case(
     notes = fields["notes"].strip()
     with transaction.atomic():
         case = _locked_case(pk)
+        _require_case_custody(request.user, case)
         if not reason_code or len(reason_code) > 80:
             return _action_response(
                 request,

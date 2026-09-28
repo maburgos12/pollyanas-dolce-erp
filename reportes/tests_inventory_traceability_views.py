@@ -9,7 +9,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import UserModuleAccess
+from core.models import Sucursal, UserModuleAccess, UserProfile
 from pos_bridge.models import PointBranch, PointProduct
 from reportes.models import (
     ProductInventoryAuditCase,
@@ -20,9 +20,18 @@ from reportes.models import (
 
 class InventoryTraceabilityViewsTests(TestCase):
     def setUp(self):
+        self.erp_branch = Sucursal.objects.create(
+            codigo="AUD-VIEW-1",
+            nombre="Sucursal auditoría vistas",
+        )
+        self.other_erp_branch = Sucursal.objects.create(
+            codigo="AUD-VIEW-2",
+            nombre="Otra sucursal auditoría",
+        )
         self.branch = PointBranch.objects.create(
             external_id="audit-view-branch",
             name="Sucursal auditoría vistas",
+            erp_branch=self.erp_branch,
         )
         self.product = PointProduct.objects.create(
             external_id="audit-view-product",
@@ -56,6 +65,14 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.explainer.user_permissions.add(change_permission)
         self.explainer.user_permissions.add(approve_permission)
         self.approver.user_permissions.add(approve_permission)
+        UserProfile.objects.update_or_create(
+            user=self.explainer,
+            defaults={"sucursal": self.erp_branch},
+        )
+        UserProfile.objects.update_or_create(
+            user=self.approver,
+            defaults={"sucursal": self.erp_branch},
+        )
 
     def _case(self, **overrides):
         values = {
@@ -306,3 +323,159 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(first.status_code, 302)
         self.assertEqual(second.status_code, 409)
         self.assertEqual(self.case.events.count(), 2)
+
+    def test_operational_user_cannot_explain_case_from_another_custody(self):
+        other_point_branch = PointBranch.objects.create(
+            external_id="audit-view-other-branch",
+            name="Otra sucursal Point",
+            erp_branch=self.other_erp_branch,
+        )
+        other_case = self._case(
+            branch=other_point_branch,
+            calculation_fingerprint="e" * 64,
+        )
+        self.client.force_login(self.explainer)
+
+        response = self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[other_case.pk]),
+            {"reason_code": "TRANSFER_PENDING", "notes": "No es mi custodia"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        other_case.refresh_from_db()
+        self.assertEqual(
+            other_case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+        )
+        self.assertFalse(other_case.events.exists())
+
+    def test_approver_cannot_review_case_from_another_custody(self):
+        self._explain()
+        UserProfile.objects.update_or_create(
+            user=self.approver,
+            defaults={"sucursal": self.other_erp_branch},
+        )
+        self.client.force_login(self.approver)
+
+        response = self.client.post(
+            reverse("reportes:inventory_audit_approve", args=[self.case.pk]),
+            {"reason_code": "REVIEWED", "notes": "Fuera de custodia"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.case.refresh_from_db()
+        self.assertEqual(
+            self.case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        )
+        self.assertEqual(self.case.events.count(), 1)
+
+    def test_unmapped_cedis_and_returns_fail_closed_for_ordinary_user(self):
+        for suffix, name in (
+            ("cedis", "CEDIS"),
+            ("returns", "Devoluciones"),
+        ):
+            with self.subTest(location=name):
+                point_branch = PointBranch.objects.create(
+                    external_id=f"audit-view-{suffix}",
+                    name=name,
+                )
+                case = self._case(
+                    branch=point_branch,
+                    calculation_fingerprint=("f" if suffix == "cedis" else "1") * 64,
+                )
+                self.client.force_login(self.explainer)
+
+                response = self.client.post(
+                    reverse("reportes:inventory_audit_explain", args=[case.pk]),
+                    {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión"},
+                )
+
+                self.assertEqual(response.status_code, 403)
+                self.assertFalse(case.events.exists())
+
+    def test_explicit_global_report_manager_can_act_on_unmapped_custody(self):
+        global_user = get_user_model().objects.create_user(username="audit.global")
+        UserModuleAccess.objects.create(
+            user=global_user,
+            module="reportes",
+            access=UserModuleAccess.ACCESS_MANAGE,
+        )
+        global_user.user_permissions.add(
+            Permission.objects.get(codename="change_productinventoryauditcase")
+        )
+        unmapped_branch = PointBranch.objects.create(
+            external_id="audit-view-global-unmapped",
+            name="Devoluciones sin enlace ERP",
+        )
+        case = self._case(
+            branch=unmapped_branch,
+            calculation_fingerprint="2" * 64,
+        )
+        self.client.force_login(global_user)
+
+        response = self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[case.pk]),
+            {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión global"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        case.refresh_from_db()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        )
+
+    def test_submodule_manager_is_not_treated_as_global_custody_authority(self):
+        limited_manager = get_user_model().objects.create_user(
+            username="audit.limited-manager"
+        )
+        UserModuleAccess.objects.create(
+            user=limited_manager,
+            module="reportes.financiero",
+            access=UserModuleAccess.ACCESS_MANAGE,
+        )
+        limited_manager.user_permissions.add(
+            Permission.objects.get(codename="change_productinventoryauditcase")
+        )
+        unmapped_branch = PointBranch.objects.create(
+            external_id="audit-view-limited-unmapped",
+            name="CEDIS fuera del submódulo",
+        )
+        case = self._case(
+            branch=unmapped_branch,
+            calculation_fingerprint="4" * 64,
+        )
+        self.client.force_login(limited_manager)
+
+        response = self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[case.pk]),
+            {"reason_code": "CUSTODY_REVIEW", "notes": "Fuera de alcance"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(case.events.exists())
+
+    def test_superuser_can_act_on_unmapped_custody(self):
+        superuser = get_user_model().objects.create_superuser(
+            username="audit.superuser",
+            email="audit.superuser@example.com",
+            password="test12345",
+        )
+        unmapped_branch = PointBranch.objects.create(
+            external_id="audit-view-super-unmapped",
+            name="CEDIS sin enlace ERP",
+        )
+        case = self._case(
+            branch=unmapped_branch,
+            calculation_fingerprint="3" * 64,
+        )
+        self.client.force_login(superuser)
+
+        response = self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[case.pk]),
+            {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión DG"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(case.events.filter(actor=superuser).exists())
