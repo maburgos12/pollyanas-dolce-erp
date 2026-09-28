@@ -7,20 +7,25 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 
+from django.db.models import Q
 from django.utils import timezone
 
 from pos_bridge.models import (
     PointBranch,
+    PointConversionLine,
     PointHistoricalInventoryClosing,
     PointHistoricalInventoryClosingLine,
     PointProduct,
     PointProductionLine,
+    PointSyncJob,
+    PointTransferLine,
     PointWasteLine,
 )
 from pos_bridge.models.product import _normalize_name
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
 )
+from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 
 ZERO = Decimal("0")
@@ -149,6 +154,10 @@ class BranchInventoryTraceabilityService:
             sales,
             production,
             waste,
+            transfer_in,
+            transfer_out,
+            conversion_in,
+            conversion_out,
             movement_issues,
             authority_issues,
         ) = self._load_direct_movements(
@@ -171,6 +180,10 @@ class BranchInventoryTraceabilityService:
             | sales.keys()
             | production.keys()
             | waste.keys()
+            | transfer_in.keys()
+            | transfer_out.keys()
+            | conversion_in.keys()
+            | conversion_out.keys()
         )
         branches = PointBranch.objects.in_bulk({branch_id for branch_id, _ in keys})
         products_by_id = {product.id: product for product in products}
@@ -198,8 +211,27 @@ class BranchInventoryTraceabilityService:
             )
             sales_quantity, sales_ids = sales.get((branch_id, product_id), (ZERO, ()))
             waste_quantity, waste_ids = waste.get((branch_id, product_id), (ZERO, ()))
+            transfer_in_quantity, transfer_in_ids = transfer_in.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            transfer_out_quantity, transfer_out_ids = transfer_out.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            conversion_in_quantity, conversion_in_ids = conversion_in.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            conversion_out_quantity, conversion_out_ids = conversion_out.get(
+                (branch_id, product_id), (ZERO, ())
+            )
             expected_closing = (
-                opening_stock + production_quantity - sales_quantity - waste_quantity
+                opening_stock
+                + production_quantity
+                + transfer_in_quantity
+                + conversion_in_quantity
+                - sales_quantity
+                - waste_quantity
+                - transfer_out_quantity
+                - conversion_out_quantity
             )
             difference = point_closing - expected_closing
             trace_values = {
@@ -208,8 +240,12 @@ class BranchInventoryTraceabilityService:
                 "sales": sales_ids,
                 "production": production_ids,
                 "waste": waste_ids,
-                "transfers": (),
-                "conversions": (),
+                "transfers": tuple(
+                    dict.fromkeys((*transfer_in_ids, *transfer_out_ids))
+                ),
+                "conversions": tuple(
+                    dict.fromkeys((*conversion_in_ids, *conversion_out_ids))
+                ),
                 "adjustments": (),
             }
             lines.append(
@@ -220,10 +256,10 @@ class BranchInventoryTraceabilityService:
                     production=production_quantity,
                     sales=sales_quantity,
                     waste=waste_quantity,
-                    transfer_in=ZERO,
-                    transfer_out=ZERO,
-                    conversion_in=ZERO,
-                    conversion_out=ZERO,
+                    transfer_in=transfer_in_quantity,
+                    transfer_out=transfer_out_quantity,
+                    conversion_in=conversion_in_quantity,
+                    conversion_out=conversion_out_quantity,
                     identified_adjustment=ZERO,
                     expected_closing=expected_closing,
                     point_closing=point_closing,
@@ -336,6 +372,56 @@ class BranchInventoryTraceabilityService:
             )
             .order_by("id")
         )
+        transfer_rows = list(
+            PointTransferLine.objects.filter(
+                Q(sent_at__gte=lower_bound, sent_at__lt=upper_bound)
+                | Q(received_at__gte=lower_bound, received_at__lt=upper_bound)
+                | Q(
+                    sent_at__isnull=True,
+                    is_finalized=True,
+                    registered_at__gte=lower_bound,
+                    registered_at__lt=upper_bound,
+                )
+            )
+            .only(
+                "id",
+                "origin_branch_id",
+                "destination_branch_id",
+                "sync_job_id",
+                "transfer_external_id",
+                "detail_external_id",
+                "registered_at",
+                "sent_at",
+                "received_at",
+                "item_code",
+                "item_name",
+                "sent_quantity",
+                "received_quantity",
+                "is_insumo",
+                "is_received",
+                "is_cancelled",
+                "is_finalized",
+                "is_current_snapshot",
+            )
+            .order_by("id")
+        )
+        conversion_rows = list(
+            PointConversionLine.objects.filter(
+                movement_at__gte=lower_bound,
+                movement_at__lt=upper_bound,
+            )
+            .only(
+                "id",
+                "branch_id",
+                "sync_job_id",
+                "item_code",
+                "item_name",
+                "quantity",
+                "source_item_code",
+                "source_item_name",
+            )
+            .order_by("id")
+        )
 
         authority_service = MonthlyPointProductBalanceService()
         sales_authoritative, sales_authority, _sales_authority_movements = (
@@ -358,6 +444,17 @@ class BranchInventoryTraceabilityService:
             month_end=closing_date,
             row_job_ids=[row.sync_job_id for row in waste_rows],
         )
+        transfer_authority = self._validate_transfer_authority(
+            month_start=month_start,
+            month_end=closing_date,
+            row_job_ids=[row.sync_job_id for row in transfer_rows],
+        )
+        conversion_authority = authority_service._validate_month_movement_job(
+            family="conversions",
+            month_start=month_start,
+            month_end=closing_date,
+            row_job_ids=[row.sync_job_id for row in conversion_rows],
+        )
         authorities = {
             "sales": {
                 **sales_authority,
@@ -368,6 +465,8 @@ class BranchInventoryTraceabilityService:
             },
             "production": production_authority,
             "waste": waste_authority,
+            "transfers": transfer_authority,
+            "conversions": conversion_authority,
         }
         authority_issues = [
             TraceSourceIssue(
@@ -385,6 +484,10 @@ class BranchInventoryTraceabilityService:
         sales: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         production: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         waste: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        transfer_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        transfer_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        conversion_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        conversion_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         issues: list[TraceSourceIssue] = []
 
         for row in sales_rows:
@@ -433,7 +536,346 @@ class BranchInventoryTraceabilityService:
                 issue_code=issue_code,
                 quantity=row.quantity,
             )
-        return sales, production, waste, tuple(issues), tuple(authority_issues)
+        self._apply_transfers(
+            rows=transfer_rows,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            product_indexes=product_indexes,
+            transfer_in=transfer_in,
+            transfer_out=transfer_out,
+            issues=issues,
+        )
+        self._apply_conversions(
+            rows=conversion_rows,
+            product_indexes=product_indexes,
+            conversion_in=conversion_in,
+            conversion_out=conversion_out,
+            issues=issues,
+        )
+        return (
+            sales,
+            production,
+            waste,
+            transfer_in,
+            transfer_out,
+            conversion_in,
+            conversion_out,
+            tuple(issues),
+            tuple(authority_issues),
+        )
+
+    @staticmethod
+    def _validate_transfer_authority(*, month_start, month_end, row_job_ids):
+        jobs = list(
+            PointSyncJob.objects.filter(
+                job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+                parameters__start_date=month_start.isoformat(),
+                parameters__end_date=month_end.isoformat(),
+            )
+            .only("id", "status", "started_at", "parameters", "result_summary")
+            .order_by("-started_at", "-id")
+        )
+        if not jobs:
+            return {
+                "authoritative": False,
+                "selected_sync_job_ids": (),
+                "authority_issues": ("TRANSFER_SYNC_JOB_MISSING",),
+            }
+        unrestricted = [
+            job
+            for job in jobs
+            if not str((job.parameters or {}).get("branch_filter") or "").strip()
+        ]
+        selected = unrestricted[0] if unrestricted else jobs[0]
+        issues = []
+        if selected.status == PointSyncJob.STATUS_FAILED:
+            issues.append("TRANSFER_SYNC_JOB_FAILED")
+        elif selected.status == PointSyncJob.STATUS_PARTIAL:
+            issues.append("TRANSFER_SYNC_JOB_PARTIAL")
+        elif selected.status != PointSyncJob.STATUS_SUCCESS:
+            issues.append("TRANSFER_SYNC_JOB_INCOMPLETE")
+        if selected not in unrestricted:
+            issues.append("TRANSFER_SYNC_JOB_RESTRICTED")
+        expected_count = (selected.result_summary or {}).get("transfer_lines_seen")
+        try:
+            expected_count = int(expected_count)
+        except (TypeError, ValueError):
+            issues.append("TRANSFER_SYNC_CONTRACT_INCOMPLETE")
+        else:
+            if expected_count != sum(job_id == selected.id for job_id in row_job_ids):
+                issues.append("TRANSFER_SYNC_COUNT_MISMATCH")
+        foreign_job_ids = {
+            job_id for job_id in row_job_ids if job_id is not None and job_id != selected.id
+        }
+        if foreign_job_ids:
+            issues.append("TRANSFER_SYNC_JOB_MIXED")
+        return {
+            "authoritative": not issues,
+            "selected_sync_job_ids": (selected.id,),
+            "authority_issues": tuple(dict.fromkeys(issues)),
+        }
+
+    def _apply_transfers(
+        self,
+        *,
+        rows,
+        lower_bound,
+        upper_bound,
+        product_indexes,
+        transfer_in,
+        transfer_out,
+        issues,
+    ):
+        for row in rows:
+            if row.is_cancelled or not row.is_current_snapshot or row.is_insumo:
+                continue
+            product_id, issue_code = self._resolve_product(row, product_indexes)
+            origin_at = row.sent_at
+            used_fallback = False
+            if origin_at is None and row.is_finalized:
+                origin_at = row.registered_at
+                used_fallback = True
+            origin_in_month = origin_at is not None and lower_bound <= origin_at < upper_bound
+            destination_in_month = (
+                row.is_received
+                and row.received_at is not None
+                and lower_bound <= row.received_at < upper_bound
+            )
+            if product_id is None:
+                issues.append(
+                    TraceSourceIssue(
+                        code=issue_code or "UNRESOLVED_PRODUCT",
+                        message=(
+                            f"No fue posible asignar la transferencia "
+                            f"{row.transfer_external_id}/{row.detail_external_id} "
+                            "a un único producto Point."
+                        ),
+                        branch_id=row.origin_branch_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            if origin_in_month:
+                self._add_balance(
+                    transfer_out,
+                    (row.origin_branch_id, product_id),
+                    row.sent_quantity,
+                    row.id,
+                )
+                if used_fallback:
+                    issues.append(
+                        self._transfer_issue(
+                            row,
+                            product_id,
+                            "TRANSFER_DATE_FALLBACK",
+                            "se fechó con registered_at porque no tiene sent_at",
+                        )
+                    )
+                if not row.is_received:
+                    issues.append(
+                        self._transfer_issue(
+                            row,
+                            product_id,
+                            "INCOMPLETE_TRANSFER",
+                            "fue enviada pero aún no tiene recepción",
+                        )
+                    )
+                if issue_code:
+                    issues.append(
+                        TraceSourceIssue(
+                            code=issue_code,
+                            message=f"La transferencia {row.id} se asignó por coincidencia secundaria.",
+                            branch_id=row.origin_branch_id,
+                            product_id=product_id,
+                            source_ids=(row.id,),
+                        )
+                    )
+            if destination_in_month:
+                self._add_balance(
+                    transfer_in,
+                    (row.destination_branch_id, product_id),
+                    row.received_quantity,
+                    row.id,
+                )
+
+    @staticmethod
+    def _transfer_issue(row, product_id, code, detail):
+        return TraceSourceIssue(
+            code=code,
+            message=(
+                f"La transferencia {row.transfer_external_id}/"
+                f"{row.detail_external_id} {detail}."
+            ),
+            branch_id=row.origin_branch_id,
+            product_id=product_id,
+            source_ids=(row.id,),
+        )
+
+    def _apply_conversions(
+        self,
+        *,
+        rows,
+        product_indexes,
+        conversion_in,
+        conversion_out,
+        issues,
+    ):
+        recipe_indexes = self._build_recipe_indexes()
+        relations = self._conversion_relations()
+        for row in rows:
+            destination_id, destination_issue = self._resolve_product(
+                row, product_indexes
+            )
+            if destination_id is None:
+                issues.append(
+                    TraceSourceIssue(
+                        code="MISSING_CONVERSION_DESTINATION",
+                        message=f"La conversión {row.id} no tiene producto destino homologado.",
+                        branch_id=row.branch_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            self._add_balance(
+                conversion_in,
+                (row.branch_id, destination_id),
+                row.quantity,
+                row.id,
+            )
+            if destination_issue:
+                issues.append(
+                    TraceSourceIssue(
+                        code=destination_issue,
+                        message=f"El destino de la conversión {row.id} se asignó por coincidencia secundaria.",
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+            destination_recipe_id = self._resolve_recipe_identity(
+                row.item_code, row.item_name, recipe_indexes
+            )
+            origin_id, _origin_issue = self._resolve_product_identity(
+                row.source_item_code,
+                row.source_item_name,
+                product_indexes,
+            )
+            if origin_id is None:
+                issues.append(
+                    TraceSourceIssue(
+                        code="MISSING_CONVERSION_ORIGIN",
+                        message=f"La conversión {row.id} no tiene producto origen homologado.",
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            origin_recipe_id = self._resolve_recipe_identity(
+                row.source_item_code, row.source_item_name, recipe_indexes
+            )
+            relation = relations.get(destination_recipe_id)
+            if (
+                relation is None
+                or origin_recipe_id is None
+                or relation[0] != origin_recipe_id
+                or relation[1] <= ZERO
+            ):
+                issues.append(
+                    TraceSourceIssue(
+                        code="CONVERSION_EQUIVALENCE_MISMATCH",
+                        message=(
+                            f"La conversión {row.id} no coincide con una equivalencia "
+                            "activa entre su origen y destino."
+                        ),
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            self._add_balance(
+                conversion_out,
+                (row.branch_id, origin_id),
+                Decimal(row.quantity) / relation[1],
+                row.id,
+            )
+
+    @staticmethod
+    def _add_balance(balances, key, quantity, source_id):
+        current, source_ids = balances.get(key, (ZERO, []))
+        source_ids.append(source_id)
+        balances[key] = (current + Decimal(quantity), source_ids)
+
+    @staticmethod
+    def _build_recipe_indexes():
+        code_candidates = {}
+        name_candidates = {}
+        for recipe in Receta.objects.only("id", "codigo_point", "nombre_normalizado"):
+            code = recipe.codigo_point.strip()
+            if code:
+                code_candidates.setdefault(code, []).append(recipe.id)
+            name = recipe.nombre_normalizado.strip()
+            if name:
+                name_candidates.setdefault(name, []).append(recipe.id)
+        return {
+            "code": {key: tuple(value) for key, value in code_candidates.items()},
+            "name": {key: tuple(value) for key, value in name_candidates.items()},
+        }
+
+    @staticmethod
+    def _conversion_relations():
+        relations = {
+            row.receta_porcion_id: (
+                row.receta_padre_id,
+                Decimal(row.factor_conversion),
+            )
+            for row in RecetaEquivalencia.objects.filter(
+                activo=True,
+                tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+            ).only("receta_porcion_id", "receta_padre_id", "factor_conversion")
+        }
+        for row in RecetaPresentacionDerivada.objects.filter(
+            activo=True,
+            tipo_derivado=RecetaPresentacionDerivada.TIPO_REBANADA,
+            receta_derivada_id__isnull=False,
+        ).only("receta_derivada_id", "receta_padre_id", "unidades_por_padre"):
+            relations.setdefault(
+                row.receta_derivada_id,
+                (row.receta_padre_id, Decimal(row.unidades_por_padre)),
+            )
+        return relations
+
+    @staticmethod
+    def _resolve_recipe_identity(code, name, indexes):
+        code_matches = indexes["code"].get(str(code or "").strip(), ())
+        if len(code_matches) == 1:
+            return int(code_matches[0])
+        name_matches = indexes["name"].get(_normalize_name(str(name or "")), ())
+        if len(name_matches) == 1:
+            return int(name_matches[0])
+        return None
+
+    @staticmethod
+    def _resolve_product_identity(code, name, indexes):
+        item_code = str(code or "").strip()
+        if item_code:
+            external_match = indexes["external_id"].get(item_code)
+            if external_match is not None:
+                return int(external_match), None
+            sku_matches = indexes["sku"].get(item_code, ())
+            if len(sku_matches) == 1:
+                return int(sku_matches[0]), "PRODUCT_RESOLVED_BY_SKU"
+            if len(sku_matches) > 1:
+                return None, "AMBIGUOUS_PRODUCT"
+        name_matches = indexes["normalized_name"].get(
+            _normalize_name(str(name or "")), ()
+        )
+        if len(name_matches) == 1:
+            return int(name_matches[0]), "PRODUCT_RESOLVED_BY_NAME"
+        if len(name_matches) > 1:
+            return None, "AMBIGUOUS_PRODUCT"
+        return None, "UNRESOLVED_PRODUCT"
 
     @staticmethod
     def _resolve_product(row, indexes) -> tuple[int | None, str | None]:
