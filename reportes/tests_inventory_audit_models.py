@@ -1,11 +1,19 @@
 from datetime import date
 from decimal import Decimal
+from queue import Queue
+from threading import Event, Thread
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, connection, transaction
-from django.test import TestCase
+from django.db import (
+    IntegrityError,
+    close_old_connections,
+    connection,
+    connections,
+    transaction,
+)
+from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from pos_bridge.models import PointBranch, PointProduct
@@ -618,3 +626,110 @@ class ProductInventoryAuditModelsTests(TestCase):
         )
 
         self.assertEqual(permission.name, "Puede aprobar auditorías de inventario")
+
+
+class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
+    def setUp(self):
+        self.run = ProductInventoryAuditRun.objects.create(
+            month=date(2026, 8, 1),
+            calculation_fingerprint="7" * 64,
+        )
+        self.branch = PointBranch.objects.create(
+            external_id="branch-audit-concurrency",
+            name="Sucursal concurrencia",
+        )
+        self.product = PointProduct.objects.create(
+            external_id="product-audit-concurrency",
+            sku="AUDIT-CONCURRENCY",
+            name="Producto concurrencia",
+        )
+
+    def test_case_insert_serializes_against_concurrent_run_month_update(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("La garantía concurrente usa locks de fila PostgreSQL.")
+
+        case_inserted = Event()
+        release_case_commit = Event()
+        update_started = Event()
+        update_finished = Event()
+        insert_errors = Queue()
+        update_errors = Queue()
+
+        def insert_case():
+            close_old_connections()
+            try:
+                with transaction.atomic(using="default"):
+                    ProductInventoryAuditCase.objects.create(
+                        run_id=self.run.pk,
+                        month=date(2026, 8, 1),
+                        branch_id=self.branch.pk,
+                        product_id=self.product.pk,
+                        opening_point=Decimal("0"),
+                        production=Decimal("0"),
+                        sales=Decimal("0"),
+                        waste=Decimal("0"),
+                        transfer_in=Decimal("0"),
+                        transfer_out=Decimal("0"),
+                        conversion_in=Decimal("0"),
+                        conversion_out=Decimal("0"),
+                        identified_adjustment=Decimal("0"),
+                        expected_closing=Decimal("0"),
+                        point_closing=Decimal("0"),
+                        difference=Decimal("0"),
+                        calculation_fingerprint="8" * 64,
+                        rebuilt_at=timezone.now(),
+                    )
+                    case_inserted.set()
+                    if not release_case_commit.wait(timeout=3):
+                        raise TimeoutError("No se liberó el commit del caso.")
+            except Exception as exc:  # pragma: no cover - asserted in main thread
+                insert_errors.put(exc)
+            finally:
+                close_old_connections()
+
+        def update_run_month():
+            close_old_connections()
+            try:
+                if not case_inserted.wait(timeout=3):
+                    raise TimeoutError("El caso no alcanzó el punto de sincronización.")
+                with transaction.atomic(using="default"):
+                    with connections["default"].cursor() as cursor:
+                        cursor.execute("SET LOCAL lock_timeout = '3s'")
+                        update_started.set()
+                        cursor.execute(
+                            "UPDATE reportes_productinventoryauditrun "
+                            "SET month = %s WHERE id = %s",
+                            [date(2026, 9, 1), self.run.pk],
+                        )
+            except Exception as exc:  # pragma: no cover - asserted in main thread
+                update_errors.put(exc)
+            finally:
+                update_finished.set()
+                close_old_connections()
+
+        insert_thread = Thread(target=insert_case, daemon=True)
+        update_thread = Thread(target=update_run_month, daemon=True)
+        insert_thread.start()
+        update_thread.start()
+
+        try:
+            self.assertTrue(update_started.wait(timeout=3))
+            self.assertFalse(
+                update_finished.wait(timeout=0.3),
+                "La actualización del mes no esperó el lock del caso.",
+            )
+        finally:
+            release_case_commit.set()
+            insert_thread.join(timeout=5)
+            update_thread.join(timeout=5)
+
+        self.assertFalse(insert_thread.is_alive())
+        self.assertFalse(update_thread.is_alive())
+        self.assertTrue(insert_errors.empty(), list(insert_errors.queue))
+        self.assertEqual(update_errors.qsize(), 1)
+        self.assertIsInstance(update_errors.get(), IntegrityError)
+
+        self.run.refresh_from_db()
+        case = ProductInventoryAuditCase.objects.get(run=self.run)
+        self.assertEqual(self.run.month, date(2026, 8, 1))
+        self.assertEqual(case.month, self.run.month)
