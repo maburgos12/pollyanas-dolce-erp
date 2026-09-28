@@ -751,6 +751,29 @@ def task_open_transfer_sync(
 
 
 @shared_task(
+    name="pos_bridge.open_transfer_closing_snapshot",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+    time_limit=1800,
+)
+def task_open_transfer_closing_snapshot(
+    self,
+    *,
+    triggered_by_id: int | None = None,
+):
+    operational_date = timezone.localdate() - timedelta(days=1)
+    user = _resolve_user(triggered_by_id)
+    job = OpenTransferSyncService().sync_open_transfers(
+        fecha=operational_date,
+        branch_filter=None,
+        triggered_by=user,
+    )
+    return _serialize_job(job)
+
+
+@shared_task(
     name="reportes.analytics_refresh_cycle",
     bind=True,
     max_retries=1,

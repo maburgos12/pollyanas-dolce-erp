@@ -342,6 +342,25 @@ class Command(BaseCommand):
             },
         )
 
+        open_transfer_closing_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="10",
+            hour="1",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="pos_bridge: evidencia cierre transferencias abiertas diario",
+            defaults={
+                "task": "pos_bridge.open_transfer_closing_snapshot",
+                "crontab": open_transfer_closing_cron,
+                "interval": None,
+                "kwargs": json.dumps({}),
+                "enabled": True,
+            },
+        )
+
         cedis_consolidado_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="22",
