@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -19,6 +19,7 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     BranchProductBalance,
     TraceSourceIssue,
 )
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -505,7 +506,7 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
     def test_same_month_rebuilds_serialize_before_building_source_snapshot(self):
         first_build_entered = Event()
         release_first_build = Event()
-        second_lock_attempted = Event()
+        second_backend_ready = Event()
         build_order_lock = Lock()
         build_order = []
         errors = []
@@ -530,16 +531,13 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
                     build_order.append("second")
                 return second_result
 
-        class ObservableSecondMaterializer(InventoryAuditMaterializer):
-            def _acquire_month_lock(inner_self, month):
-                connection.ensure_connection()
-                second_backend_pid["pid"] = connection.connection.get_backend_pid()
-                second_lock_attempted.set()
-                return super()._acquire_month_lock(month)
-
-        def run_materializer(name, materializer):
+        def run_materializer(name, materializer, *, backend_pid=None, ready=None):
             close_old_connections()
             try:
+                if backend_pid is not None:
+                    connection.ensure_connection()
+                    backend_pid["pid"] = connection.connection.get_backend_pid()
+                    ready.set()
                 results[name] = materializer.rebuild(MONTH)
             except BaseException as exc:  # pragma: no cover - surfaced below
                 errors.append(exc)
@@ -554,14 +552,18 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
             target=run_materializer,
             args=(
                 "second",
-                ObservableSecondMaterializer(traceability_service=SecondService()),
+                InventoryAuditMaterializer(traceability_service=SecondService()),
             ),
+            kwargs={
+                "backend_pid": second_backend_pid,
+                "ready": second_backend_ready,
+            },
         )
 
         first_thread.start()
         self.assertTrue(first_build_entered.wait(timeout=10))
         second_thread.start()
-        self.assertTrue(second_lock_attempted.wait(timeout=10))
+        self.assertTrue(second_backend_ready.wait(timeout=10))
         self._wait_until_advisory_lock_is_blocked(second_backend_pid["pid"])
         self.assertEqual(build_order, ["first"])
 
@@ -581,6 +583,81 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
         self.assertEqual(case.run_id, run.id)
         self.assertEqual(run.summary, dict(results["second"]))
         self.assertEqual(run.status, ProductInventoryAuditRun.Status.READY)
+
+    def test_materializer_and_canonical_writer_cannot_cross_source_snapshot(self):
+        build_entered = Event()
+        release_build = Event()
+        writer_backend_ready = Event()
+        writer_entered = Event()
+        source_guard = Lock()
+        source = {"closing": Decimal("11")}
+        observations = []
+        errors = []
+        writer_backend_pid = {}
+
+        class CoordinatedSourceService:
+            def build(inner_self, month):
+                with source_guard:
+                    observations.append(source["closing"])
+                build_entered.set()
+                if not release_build.wait(timeout=10):
+                    raise AssertionError("No se liberó la lectura de fuentes.")
+                with source_guard:
+                    observations.append(source["closing"])
+                    closing = source["closing"]
+                return self._result(self._line(closing=closing))
+
+        def materialize():
+            close_old_connections()
+            try:
+                InventoryAuditMaterializer(
+                    traceability_service=CoordinatedSourceService()
+                ).rebuild(MONTH)
+            except BaseException as exc:  # pragma: no cover - surfaced below
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        def write_source():
+            close_old_connections()
+            try:
+                connection.ensure_connection()
+                writer_backend_pid["pid"] = connection.connection.get_backend_pid()
+                writer_backend_ready.set()
+                with transaction.atomic():
+                    lock_product_month_sources([MONTH])
+                    writer_entered.set()
+                    with source_guard:
+                        source["closing"] = Decimal("12")
+            except BaseException as exc:  # pragma: no cover - surfaced below
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        materializer_thread = Thread(target=materialize)
+        writer_thread = Thread(target=write_source)
+        materializer_thread.start()
+        self.assertTrue(build_entered.wait(timeout=10))
+        writer_thread.start()
+        self.assertTrue(writer_backend_ready.wait(timeout=10))
+        self._wait_until_advisory_lock_is_blocked(writer_backend_pid["pid"])
+        self.assertFalse(writer_entered.is_set())
+        self.assertEqual(observations, [Decimal("11")])
+
+        release_build.set()
+        materializer_thread.join(timeout=10)
+        writer_thread.join(timeout=10)
+
+        self.assertFalse(materializer_thread.is_alive())
+        self.assertFalse(writer_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(observations, [Decimal("11"), Decimal("11")])
+        self.assertTrue(writer_entered.is_set())
+        self.assertEqual(source["closing"], Decimal("12"))
+        self.assertEqual(
+            ProductInventoryAuditCase.objects.get().point_closing,
+            Decimal("11.0000"),
+        )
 
     def _wait_until_advisory_lock_is_blocked(self, backend_pid):
         deadline = monotonic() + 10

@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
-from django.db import connection, transaction
+from django.db import transaction
 from django.utils import timezone
 
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
     TraceSourceIssue,
+)
+from pos_bridge.services.product_month_source_mutex import (
+    lock_product_month_sources,
 )
 from reportes.models import (
     PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS,
@@ -22,7 +25,6 @@ from reportes.models import (
 
 _QUANTITY = Decimal("0.0001")
 _MISSING_CASE_ISSUE = "CASE_MISSING_FROM_REBUILD"
-_MONTH_LOCK_NAMESPACE = 1_096_107_081  # Stable signed int32: ASCII "AUDI".
 
 
 class InventoryAuditRebuildCounts(dict):
@@ -95,7 +97,7 @@ class InventoryAuditMaterializer:
             # two rebuilds can read interleaved snapshots and apply them in reverse order.
             # Dry runs take the same lock so their preview is comparable; the xact lock
             # is released automatically and never persists data.
-            self._acquire_month_lock(month_start)
+            self._lock_source_months(month_start)
             traceability = self.traceability_service.build(month_start)
             source_built_at = timezone.now()
 
@@ -182,13 +184,12 @@ class InventoryAuditMaterializer:
             return counts
 
     @staticmethod
-    def _acquire_month_lock(month: date) -> None:
-        month_key = (month.year * 12) + month.month
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT pg_advisory_xact_lock(%s, %s)",
-                [_MONTH_LOCK_NAMESPACE, month_key],
-            )
+    def _lock_source_months(month: date) -> tuple[date, ...]:
+        previous_month = (month - timedelta(days=1)).replace(day=1)
+        # The opening close belongs to the prior month; movements and the final
+        # close belong to the requested month. The shared helper sorts both locks,
+        # matching every canonical writer's acquisition order and avoiding deadlocks.
+        return lock_product_month_sources([previous_month, month])
 
     def _record_incomplete_run(
         self,
