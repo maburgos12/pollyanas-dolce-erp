@@ -615,6 +615,39 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(line.source_trace["waste"], (finished_waste.id,))
         self.assertNotIn(ingredient_waste.id, line.source_trace["waste"])
 
+    def test_dual_mapped_waste_uses_exact_point_product_evidence(self):
+        recipe = Receta.objects.create(
+            nombre=self.product.name,
+            codigo_point=self.product.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="traceability-dual-mapped-product",
+        )
+        synchronizer_input = Insumo.objects.create(
+            nombre=self.product.name,
+            nombre_point=self.product.name,
+            codigo_point=self.product.external_id,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("8")})
+        dual_mapped_waste = self._waste(
+            item_code=self.product.external_id,
+            item_name=self.product.name,
+            quantity="2",
+            receta=recipe,
+            insumo=synchronizer_input,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        line = result.lines[0]
+        self.assertTrue(result.source_complete)
+        self.assertEqual(result.global_issues, ())
+        self.assertEqual(line.waste, Decimal("2"))
+        self.assertEqual(line.expected_closing, Decimal("8"))
+        self.assertEqual(line.difference, Decimal("0"))
+        self.assertEqual(line.source_trace["waste"], (dual_mapped_waste.id,))
+
     def test_unresolved_product_is_global_issue_and_not_added_to_product_lines(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})

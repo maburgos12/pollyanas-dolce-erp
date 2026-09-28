@@ -413,29 +413,16 @@ class BranchInventoryTraceabilityService:
                 issue_code=issue_code,
                 quantity=row.produced_quantity,
             )
-        finished_product_recipe_ids = (
-            {row.receta_id for row in sales_rows if row.receta_id is not None}
-            | {
-                row.receta_id
-                for row in production_rows
-                if not row.is_insumo and row.receta_id is not None
-            }
-            | {
-                row.receta_id
-                for row in waste_rows
-                if row.receta_id is not None and row.insumo_id is None
-            }
-        )
         for row in waste_rows:
             if row.receta_id is None and row.insumo_id is not None:
                 continue
+            product_id, issue_code = self._resolve_product(row, product_indexes)
             if (
                 row.receta_id is not None
                 and row.insumo_id is not None
-                and row.receta_id not in finished_product_recipe_ids
+                and product_id is None
             ):
                 continue
-            product_id, issue_code = self._resolve_product(row, product_indexes)
             self._record_direct_row(
                 balances=waste,
                 issues=issues,
