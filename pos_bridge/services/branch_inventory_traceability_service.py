@@ -1,21 +1,36 @@
 from __future__ import annotations
 
 from calendar import monthrange
+from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Mapping
+
+from django.utils import timezone
 
 from pos_bridge.models import (
     PointBranch,
     PointHistoricalInventoryClosing,
     PointHistoricalInventoryClosingLine,
     PointProduct,
+    PointProductionLine,
+    PointWasteLine,
 )
-
+from pos_bridge.models.product import _normalize_name
+from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 
 ZERO = Decimal("0")
+TRACE_SOURCE_NAMES = (
+    "opening",
+    "closing",
+    "sales",
+    "production",
+    "waste",
+    "transfers",
+    "conversions",
+    "adjustments",
+)
 
 
 @dataclass(frozen=True)
@@ -124,24 +139,69 @@ class BranchInventoryTraceabilityService:
                 exception_count=0,
                 source_complete=False,
             )
-        keys = sorted(opening.keys() | closing.keys())
+
+        products = list(PointProduct.objects.all().order_by("id"))
+        product_indexes = self._build_product_indexes(products)
+        sales, production, waste, movement_issues = self._load_direct_movements(
+            month_start=month_start,
+            closing_date=closing_date,
+            product_indexes=product_indexes,
+        )
+        keys = sorted(
+            opening.keys()
+            | closing.keys()
+            | sales.keys()
+            | production.keys()
+            | waste.keys()
+        )
         branches = PointBranch.objects.in_bulk({branch_id for branch_id, _ in keys})
-        products = PointProduct.objects.in_bulk({product_id for _, product_id in keys})
+        products_by_id = {product.id: product for product in products}
+
+        global_issues = []
+        issues_by_key: dict[tuple[int, int], list[TraceSourceIssue]] = {}
+        for issue in movement_issues:
+            if issue.branch_id is not None and issue.product_id is not None:
+                issues_by_key.setdefault(
+                    (issue.branch_id, issue.product_id), []
+                ).append(issue)
+            else:
+                global_issues.append(issue)
 
         lines = []
         for branch_id, product_id in keys:
-            opening_stock, opening_ids = opening.get((branch_id, product_id), (ZERO, ()))
-            point_closing, closing_ids = closing.get((branch_id, product_id), (ZERO, ()))
-            expected_closing = opening_stock
+            opening_stock, opening_ids = opening.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            point_closing, closing_ids = closing.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            production_quantity, production_ids = production.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            sales_quantity, sales_ids = sales.get((branch_id, product_id), (ZERO, ()))
+            waste_quantity, waste_ids = waste.get((branch_id, product_id), (ZERO, ()))
+            expected_closing = (
+                opening_stock + production_quantity - sales_quantity - waste_quantity
+            )
             difference = point_closing - expected_closing
+            trace_values = {
+                "opening": opening_ids,
+                "closing": closing_ids,
+                "sales": sales_ids,
+                "production": production_ids,
+                "waste": waste_ids,
+                "transfers": (),
+                "conversions": (),
+                "adjustments": (),
+            }
             lines.append(
                 BranchProductBalance(
                     branch=branches[branch_id],
-                    product=products[product_id],
+                    product=products_by_id[product_id],
                     opening=opening_stock,
-                    production=ZERO,
-                    sales=ZERO,
-                    waste=ZERO,
+                    production=production_quantity,
+                    sales=sales_quantity,
+                    waste=waste_quantity,
                     transfer_in=ZERO,
                     transfer_out=ZERO,
                     conversion_in=ZERO,
@@ -151,9 +211,12 @@ class BranchInventoryTraceabilityService:
                     point_closing=point_closing,
                     difference=difference,
                     source_trace=MappingProxyType(
-                        {"opening": opening_ids, "closing": closing_ids}
+                        {
+                            source_name: tuple(trace_values[source_name])
+                            for source_name in TRACE_SOURCE_NAMES
+                        }
                     ),
-                    issues=(),
+                    issues=tuple(issues_by_key.get((branch_id, product_id), ())),
                 )
             )
 
@@ -161,10 +224,193 @@ class BranchInventoryTraceabilityService:
         return BranchInventoryTraceability(
             month=month_start,
             lines=frozen_lines,
-            global_issues=(),
+            global_issues=tuple(global_issues),
             company_difference=sum((line.difference for line in frozen_lines), ZERO),
             exception_count=sum(line.difference != ZERO for line in frozen_lines),
-            source_complete=True,
+            source_complete=not global_issues and not issues_by_key,
+        )
+
+    @staticmethod
+    def _build_product_indexes(
+        products: list[PointProduct],
+    ) -> Mapping[str, Mapping[object, tuple[int, ...] | int]]:
+        by_id = {product.id: product.id for product in products}
+        by_external_id = {
+            product.external_id.strip(): product.id
+            for product in products
+            if product.external_id.strip()
+        }
+        sku_candidates: dict[str, list[int]] = {}
+        name_candidates: dict[str, list[int]] = {}
+        for product in products:
+            sku = product.sku.strip()
+            if sku:
+                sku_candidates.setdefault(sku, []).append(product.id)
+            normalized_name = product.normalized_name.strip()
+            if normalized_name:
+                name_candidates.setdefault(normalized_name, []).append(product.id)
+        return MappingProxyType(
+            {
+                "id": MappingProxyType(by_id),
+                "external_id": MappingProxyType(by_external_id),
+                "sku": MappingProxyType(
+                    {key: tuple(value) for key, value in sku_candidates.items()}
+                ),
+                "normalized_name": MappingProxyType(
+                    {key: tuple(value) for key, value in name_candidates.items()}
+                ),
+            }
+        )
+
+    def _load_direct_movements(self, *, month_start, closing_date, product_indexes):
+        lower_bound, upper_bound = self._month_datetime_bounds(month_start)
+        sales_rows = list(
+            official_point_sales_rows_for_range(
+                start_date=month_start, end_date=closing_date
+            )
+            .select_related("branch", "product")
+            .only("id", "branch_id", "product_id", "quantity")
+            .order_by("id")
+        )
+        production_rows = list(
+            PointProductionLine.objects.filter(
+                production_date__gte=month_start,
+                production_date__lte=closing_date,
+            )
+            .select_related("branch")
+            .only(
+                "id",
+                "branch_id",
+                "item_code",
+                "item_name",
+                "produced_quantity",
+            )
+            .order_by("id")
+        )
+        waste_rows = list(
+            PointWasteLine.objects.filter(
+                movement_at__gte=lower_bound,
+                movement_at__lt=upper_bound,
+            )
+            .select_related("branch")
+            .only("id", "branch_id", "item_code", "item_name", "quantity")
+            .order_by("id")
+        )
+
+        sales: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
+        production: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
+        waste: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
+        issues: list[TraceSourceIssue] = []
+
+        for row in sales_rows:
+            product_id, issue_code = self._resolve_product(row, product_indexes)
+            self._record_direct_row(
+                balances=sales,
+                issues=issues,
+                source_name="sales",
+                row=row,
+                branch_id=row.branch_id,
+                product_id=product_id,
+                issue_code=issue_code,
+                quantity=row.quantity,
+            )
+        for row in production_rows:
+            product_id, issue_code = self._resolve_product(row, product_indexes)
+            self._record_direct_row(
+                balances=production,
+                issues=issues,
+                source_name="production",
+                row=row,
+                branch_id=row.branch_id,
+                product_id=product_id,
+                issue_code=issue_code,
+                quantity=row.produced_quantity,
+            )
+        for row in waste_rows:
+            product_id, issue_code = self._resolve_product(row, product_indexes)
+            self._record_direct_row(
+                balances=waste,
+                issues=issues,
+                source_name="waste",
+                row=row,
+                branch_id=row.branch_id,
+                product_id=product_id,
+                issue_code=issue_code,
+                quantity=row.quantity,
+            )
+        return sales, production, waste, tuple(issues)
+
+    @staticmethod
+    def _resolve_product(row, indexes) -> tuple[int | None, str | None]:
+        direct_product_id = getattr(row, "product_id", None)
+        if direct_product_id in indexes["id"]:
+            return int(direct_product_id), None
+
+        item_code = str(getattr(row, "item_code", "") or "").strip()
+        if item_code:
+            external_match = indexes["external_id"].get(item_code)
+            if external_match is not None:
+                return int(external_match), None
+            sku_matches = indexes["sku"].get(item_code, ())
+            if len(sku_matches) == 1:
+                return int(sku_matches[0]), None
+            if len(sku_matches) > 1:
+                return None, "AMBIGUOUS_PRODUCT"
+
+        normalized_name = _normalize_name(str(getattr(row, "item_name", "") or ""))
+        name_matches = indexes["normalized_name"].get(normalized_name, ())
+        if len(name_matches) == 1:
+            return int(name_matches[0]), None
+        if len(name_matches) > 1:
+            return None, "AMBIGUOUS_PRODUCT"
+        return None, "UNRESOLVED_PRODUCT"
+
+    @staticmethod
+    def _record_direct_row(
+        *,
+        balances,
+        issues,
+        source_name,
+        row,
+        branch_id,
+        product_id,
+        issue_code,
+        quantity,
+    ) -> None:
+        if product_id is None:
+            issues.append(
+                TraceSourceIssue(
+                    code=issue_code or "UNRESOLVED_PRODUCT",
+                    message=(
+                        f"No fue posible asignar la fila {row.id} de {source_name} "
+                        "a un único producto Point."
+                    ),
+                    branch_id=branch_id,
+                    source_ids=(row.id,),
+                )
+            )
+            return
+        key = (branch_id, product_id)
+        current_quantity, source_ids = balances.get(key, (ZERO, ()))
+        balances[key] = (current_quantity + Decimal(quantity), (*source_ids, row.id))
+
+    @staticmethod
+    def _month_datetime_bounds(month_start: date):
+        next_month = (
+            date(month_start.year + 1, 1, 1)
+            if month_start.month == 12
+            else date(month_start.year, month_start.month + 1, 1)
+        )
+        current_timezone = timezone.get_current_timezone()
+        return (
+            timezone.make_aware(
+                datetime.combine(month_start, time.min),
+                current_timezone,
+            ),
+            timezone.make_aware(
+                datetime.combine(next_month, time.min),
+                current_timezone,
+            ),
         )
 
     @staticmethod
@@ -172,17 +418,27 @@ class BranchInventoryTraceabilityService:
         closing: PointHistoricalInventoryClosing,
         balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]],
     ) -> bool:
-        expected_branch_ids = {int(value) for value in (closing.expected_branch_ids or [])}
-        expected_product_ids = {int(value) for value in (closing.expected_product_ids or [])}
+        expected_branch_ids = {
+            int(value) for value in (closing.expected_branch_ids or [])
+        }
+        expected_product_ids = {
+            int(value) for value in (closing.expected_product_ids or [])
+        }
         expected_keys = {
             (branch_id, product_id)
             for branch_id in expected_branch_ids
             for product_id in expected_product_ids
         }
-        return bool(expected_branch_ids and expected_product_ids and balances.keys() == expected_keys)
+        return bool(
+            expected_branch_ids
+            and expected_product_ids
+            and balances.keys() == expected_keys
+        )
 
     @staticmethod
-    def _select_closing(operational_date: date) -> PointHistoricalInventoryClosing | None:
+    def _select_closing(
+        operational_date: date,
+    ) -> PointHistoricalInventoryClosing | None:
         return (
             PointHistoricalInventoryClosing.objects.filter(
                 operational_date=operational_date,
@@ -197,9 +453,9 @@ class BranchInventoryTraceabilityService:
         closing: PointHistoricalInventoryClosing,
     ) -> dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]]:
         balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
-        lines = PointHistoricalInventoryClosingLine.objects.filter(closing=closing).values_list(
-            "id", "branch_id", "product_id", "stock"
-        )
+        lines = PointHistoricalInventoryClosingLine.objects.filter(
+            closing=closing
+        ).values_list("id", "branch_id", "product_id", "stock")
         for line_id, branch_id, product_id, line_stock in lines:
             key = (branch_id, product_id)
             stock, source_ids = balances.get(key, (ZERO, ()))
