@@ -765,11 +765,33 @@ def task_open_transfer_closing_snapshot(
 ):
     operational_date = timezone.localdate() - timedelta(days=1)
     user = _resolve_user(triggered_by_id)
-    job = OpenTransferSyncService().sync_open_transfers(
-        fecha=operational_date,
-        branch_filter=None,
-        triggered_by=user,
-    )
+    try:
+        with point_account_session_lock(wait=True) as acquired:
+            if not acquired:
+                raise TimeoutError(
+                    "Point está ocupado con otra sincronización de cuenta."
+                )
+            job = OpenTransferSyncService().sync_open_transfers(
+                fecha=operational_date,
+                branch_filter=None,
+                triggered_by=user,
+            )
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        raise
+
+    if job.status != PointSyncJob.STATUS_SUCCESS:
+        if self.request.retries < self.max_retries:
+            raise self.retry(
+                exc=RuntimeError(
+                    job.error_message
+                    or (
+                        "La captura de transferencias abiertas no terminó "
+                        f"correctamente: {job.status}."
+                    )
+                )
+            )
     return _serialize_job(job)
 
 
