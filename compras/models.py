@@ -475,6 +475,23 @@ def _validar_vinculos_compra(item_id, cotizacion_id, intento_id=None, *, using="
             raise ValidationError("El artículo y la cotización deben corresponder al intento de compra.")
 
 
+class IntentoCompraQuerySet(models.QuerySet):
+    CAMPOS_REEMBOLSO = frozenset({
+        "reembolso_solicitado", "reembolso_solicitado_en", "evidencia_solicitud_reembolso",
+    })
+
+    def update(self, **kwargs):
+        if self.CAMPOS_REEMBOLSO.intersection(kwargs):
+            raise ValidationError("Use save() o el servicio para modificar la solicitud de reembolso.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        fields = tuple(fields)
+        if self.CAMPOS_REEMBOLSO.intersection(fields):
+            raise ValidationError("Use save() o el servicio para modificar la solicitud de reembolso.")
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
 class IntentoCompraDepartamental(models.Model):
     ESTADO_VIGENTE = "VIGENTE"
     ESTADO_CANCELADO_SIN_PAGO = "CANCELADO_SIN_PAGO"
@@ -518,6 +535,7 @@ class IntentoCompraDepartamental(models.Model):
     )
     creado_en = models.DateTimeField(default=timezone.now)
     actualizado_en = models.DateTimeField(auto_now=True)
+    objects = IntentoCompraQuerySet.as_manager()
 
     class Meta:
         ordering = ["numero", "pk"]
@@ -540,6 +558,10 @@ class IntentoCompraDepartamental(models.Model):
             raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo del intento."})
 
     def save(self, *args, **kwargs):
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = tuple(kwargs["update_fields"])
+        elif len(args) > 3 and args[3] is not None:
+            args = (*args[:3], tuple(args[3]), *args[4:])
         db = kwargs.get("using") or self._state.db or "default"
         relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion"), args, kwargs)
         _validar_vinculos_compra(
@@ -619,6 +641,8 @@ class ReembolsoCompraDepartamental(models.Model):
         db = kwargs.get("using") or self._state.db or "default"
         with transaction.atomic(using=db):
             intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=self.intento_id)
+            if self.pk is not None and type(self).objects.using(db).filter(pk=self.pk).exists():
+                raise ValidationError("Un reembolso registrado no puede reemplazarse.")
             solicitado = intento.reembolso_solicitado
             if solicitado is None:
                 raise ValidationError("El intento no tiene un reembolso solicitado.")
@@ -627,6 +651,10 @@ class ReembolsoCompraDepartamental(models.Model):
             ).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
             if recibido + self.importe > solicitado:
                 raise ValidationError({"importe": "El reembolso supera el saldo solicitado."})
+            if args:
+                args = (True, *args[1:])
+            else:
+                kwargs["force_insert"] = True
             return super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):

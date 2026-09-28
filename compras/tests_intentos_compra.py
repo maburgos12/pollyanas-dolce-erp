@@ -271,6 +271,56 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(segundo.importe, Decimal("600.0"))
         self.assertEqual(intento.total_reembolsado, Decimal("1000"))
 
+    def test_reembolso_con_pk_existente_no_reescribe_el_historial(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        datos = dict(intento=intento, fecha=timezone.localdate(), registrado_por=self.user)
+        original = ReembolsoCompraDepartamental.objects.create(importe=Decimal("400"), **datos)
+        reemplazo = ReembolsoCompraDepartamental(pk=original.pk, importe=Decimal("900"), **datos)
+        with self.assertRaises(ValidationError):
+            reemplazo.save()
+        original.refresh_from_db()
+        self.assertEqual(original.importe, Decimal("400"))
+
+    def test_actualizaciones_masivas_no_alteran_campos_financieros_del_intento(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        ReembolsoCompraDepartamental.objects.create(
+            intento=intento, importe=Decimal("600"), fecha=timezone.localdate(),
+            registrado_por=self.user,
+        )
+        with self.assertRaises(ValidationError):
+            IntentoCompraDepartamental.objects.filter(pk=intento.pk).update(reembolso_solicitado=Decimal("500"))
+        intento.reembolso_solicitado = Decimal("500")
+        with self.assertRaises(ValidationError):
+            IntentoCompraDepartamental.objects.bulk_update([intento], ["reembolso_solicitado"])
+        for campo, valor in (
+            ("reembolso_solicitado_en", timezone.localdate()),
+            ("evidencia_solicitud_reembolso", "compras/solicitud.pdf"),
+        ):
+            with self.subTest(campo=campo), self.assertRaises(ValidationError):
+                IntentoCompraDepartamental.objects.filter(pk=intento.pk).update(**{campo: valor})
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("1000"))
+        IntentoCompraDepartamental.objects.filter(pk=intento.pk).update(estado=IntentoCompraDepartamental.ESTADO_REEMBOLSADO)
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_REEMBOLSADO)
+
+    def test_update_fields_generador_persiste_solicitud_validada(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        ReembolsoCompraDepartamental.objects.create(
+            intento=intento, importe=Decimal("600"), fecha=timezone.localdate(),
+            registrado_por=self.user,
+        )
+        intento.reembolso_solicitado = Decimal("700")
+        intento.save(update_fields=(campo for campo in ("reembolso_solicitado",)))
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("700"))
+
 
 class MigracionIntentosCompraTests(TransactionTestCase):
     migrate_from = ("compras", "0015_comprarealizadadepartamental_version_and_more")
