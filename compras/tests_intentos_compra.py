@@ -262,3 +262,33 @@ class MigracionIntentosCompraTests(TransactionTestCase):
         with self.assertRaisesMessage(RuntimeError, "reembolsos"):
             MigrationExecutor(connection).migrate([self.migrate_from])
         Reembolso.objects.filter(pk=reembolso.pk).delete()
+
+    def test_reversa_rechaza_estado_entregado_que_item_no_reconstruye(self):
+        user, proveedor, solicitud = self._datos_base()
+        item, _, _, _ = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="COMPRADO", folio="OCD-MIG-4",
+        )
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        Intento = executor.loader.project_state([self.migrate_to]).apps.get_model(
+            "compras", "IntentoCompraDepartamental"
+        )
+        Intento.objects.filter(item_id=item.pk).update(estado="ENTREGADO")
+        with self.assertRaisesMessage(RuntimeError, "estado"):
+            MigrationExecutor(connection).migrate([self.migrate_from])
+
+    def test_reversa_rechaza_numero_que_backfill_no_reconstruye(self):
+        user, proveedor, solicitud = self._datos_base()
+        item, _, _, _ = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="COMPRADO", folio="OCD-MIG-5",
+        )
+        executor = MigrationExecutor(connection)
+        executor.migrate([self.migrate_to])
+        Intento = executor.loader.project_state([self.migrate_to]).apps.get_model(
+            "compras", "IntentoCompraDepartamental"
+        )
+        Intento.objects.filter(item_id=item.pk).update(numero=2)
+        with self.assertRaisesMessage(RuntimeError, "número"):
+            MigrationExecutor(connection).migrate([self.migrate_from])

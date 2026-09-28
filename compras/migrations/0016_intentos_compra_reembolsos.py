@@ -35,16 +35,21 @@ def crear_intentos_historicos(apps, schema_editor):
             estado=estado,
             creado_en=linea.orden.creado_en,
         )
+        # auto_now usa el reloj de la migración; fijarlo al origen permite una reversa verificable.
+        Intento.objects.using(db).filter(pk=intento.pk).update(actualizado_en=linea.orden.creado_en)
         Linea.objects.using(db).filter(pk=linea.pk).update(intento_id=intento.pk)
         Compra.objects.using(db).filter(item_id=linea.item_id).update(intento_id=intento.pk)
         Compromiso.objects.using(db).filter(item_id=linea.item_id).update(intento_id=intento.pk)
 
 
 def comprobar_reversa_segura(apps, schema_editor):
-    """0015 exige relaciones uno a uno: rechazar una reversa con historia múltiple."""
+    """Revertir solo datos que 0015 permitiría reconstruir sin pérdida."""
     db = schema_editor.connection.alias
     Intento = apps.get_model("compras", "IntentoCompraDepartamental")
     Reembolso = apps.get_model("compras", "ReembolsoCompraDepartamental")
+    Linea = apps.get_model("compras", "LineaOrdenCompraDepartamental")
+    Compra = apps.get_model("compras", "CompraRealizadaDepartamental")
+    Compromiso = apps.get_model("compras", "CompromisoCompraDepartamental")
     if Reembolso.objects.using(db).exists():
         raise RuntimeError("No se puede volver a compras 0015: existen reembolsos que se perderían.")
     if Intento.objects.using(db).filter(linea_orden__isnull=True).exists():
@@ -58,6 +63,38 @@ def comprobar_reversa_segura(apps, schema_editor):
     ) & (models.Q(evidencia_solicitud_reembolso="") | models.Q(evidencia_solicitud_reembolso__isnull=True))
     if Intento.objects.using(db).exclude(sin_cambios).exists():
         raise RuntimeError("No se puede volver a compras 0015: existen datos nuevos de cancelación o reembolso.")
+
+    intentos = {intento.pk: intento for intento in Intento.objects.using(db).all()}
+    esperados_por_item = {}
+    numeros_por_item = {}
+    for linea in Linea.objects.using(db).select_related("item", "orden").order_by("item_id", "pk"):
+        intento = intentos.pop(linea.intento_id, None)
+        if intento is None:
+            raise RuntimeError(f"No se puede volver a compras 0015: la línea {linea.pk} no tiene intento único.")
+        numeros_por_item[linea.item_id] = numeros_por_item.get(linea.item_id, 0) + 1
+        numero_esperado = numeros_por_item[linea.item_id]
+        estado_esperado = (
+            "ENTREGADO"
+            if linea.item.estado in ("PENDIENTE_CONFIRMACION", "RECIBIDO_CONFORME")
+            else "VIGENTE"
+        )
+        if intento.item_id != linea.item_id or intento.cotizacion_id != linea.cotizacion_id:
+            raise RuntimeError(f"No se puede volver a compras 0015: el intento {intento.pk} no coincide con su línea.")
+        if intento.estado != estado_esperado:
+            raise RuntimeError(f"No se puede volver a compras 0015: el estado del intento {intento.pk} no es reconstruible.")
+        if intento.numero != numero_esperado:
+            raise RuntimeError(f"No se puede volver a compras 0015: el número del intento {intento.pk} no es reconstruible.")
+        if intento.creado_en != linea.orden.creado_en or intento.actualizado_en != linea.orden.creado_en:
+            raise RuntimeError(f"No se puede volver a compras 0015: las fechas del intento {intento.pk} no son reconstruibles.")
+        esperados_por_item[linea.item_id] = intento.pk
+    if intentos:
+        raise RuntimeError("No se puede volver a compras 0015: existen intentos sin línea reconstruible.")
+    for compra in Compra.objects.using(db).all():
+        if compra.intento_id != esperados_por_item.get(compra.item_id):
+            raise RuntimeError(f"No se puede volver a compras 0015: la compra {compra.pk} apunta a otro intento.")
+    for compromiso in Compromiso.objects.using(db).all():
+        if compromiso.intento_id != esperados_por_item.get(compromiso.item_id):
+            raise RuntimeError(f"No se puede volver a compras 0015: el compromiso {compromiso.pk} apunta a otro intento.")
     for nombre in ("LineaOrdenCompraDepartamental", "CompraRealizadaDepartamental", "CompromisoCompraDepartamental"):
         Modelo = apps.get_model("compras", nombre)
         repetido = (
