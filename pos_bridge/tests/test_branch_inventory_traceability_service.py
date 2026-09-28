@@ -84,6 +84,13 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             "branch_filter": branch_filter,
         }
         result_summary = {count_key: rows_seen}
+        if family == "transfers":
+            result_summary.update(
+                {
+                    "transfer_lines_created": rows_seen,
+                    "transfer_lines_updated": 0,
+                }
+            )
         if family == "conversions":
             parameters = {
                 "source": "point_conversion_lines",
@@ -395,6 +402,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
         if sync_job == self.transfer_job:
             self._increment_movement_job(self.transfer_job, "transfer_lines_seen")
+            self._increment_movement_job(self.transfer_job, "transfer_lines_created")
         return row
 
     def _conversion(
@@ -1254,6 +1262,88 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertNotIn("PLAZA", by_branch)
         self.assertEqual(by_branch["CENTRO"].source_trace["transfers"], (transfer.id,))
 
+    def test_exact_month_transfer_contract_is_independent_of_later_operational_legs(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        self._transfer(
+            sent_at=datetime(2026, 9, 2, 9, 0, tzinfo=timezone.get_current_timezone()),
+            received_at=datetime(2026, 9, 2, 12, 0, tzinfo=timezone.get_current_timezone()),
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
+        self.assertEqual(result.lines[0].transfer_in, Decimal("0"))
+        self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_cross_month_origin_accepts_row_rebound_to_another_full_transfer_job(self):
+        september_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "branch_filter": "",
+            },
+            result_summary={
+                "transfer_lines_seen": 1,
+                "transfer_lines_created": 0,
+                "transfer_lines_updated": 1,
+            },
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(
+            sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=timezone.get_current_timezone()),
+            received_at=datetime(2026, 9, 1, 0, 5, tzinfo=timezone.get_current_timezone()),
+            sync_job=september_job,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
+        line = result.lines[0]
+        self.assertEqual(line.transfer_out, Decimal("4"))
+        self.assertEqual(line.source_trace["transfers"], (transfer.id,))
+
+    def test_operational_transfer_without_sync_provenance_blocks_calculation(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(sync_job=None)
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(result.source_complete)
+        self.assertEqual(result.lines, ())
+        issue = next(
+            issue
+            for issue in result.global_issues
+            if "TRANSFER_ROW_PROVENANCE_MISSING" in issue.message
+        )
+        self.assertEqual(issue.source_ids, (transfer.id,))
+
+    def test_received_flag_without_received_date_keeps_origin_incomplete(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(
+            is_received=True,
+            received_at=None,
+            sent_quantity="4",
+            received_quantity="4",
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        by_branch = {line.branch.external_id: line for line in result.lines}
+        self.assertEqual(by_branch["CENTRO"].transfer_out, Decimal("4"))
+        self.assertNotIn("PLAZA", by_branch)
+        issue = next(
+            issue
+            for issue in by_branch["CENTRO"].issues
+            if issue.code == "INCOMPLETE_TRANSFER"
+        )
+        self.assertEqual(issue.source_ids, (transfer.id,))
+
     def test_conversion_uses_configured_equivalence_for_both_product_legs(self):
         whole = PointProduct.objects.create(
             external_id="WHOLE-001", sku="WHOLE-001", name="Pastel entero"
@@ -1428,7 +1518,11 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def test_transfer_and_conversion_authority_failures_stop_calculation(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
-        self.transfer_job.result_summary = {"transfer_lines_seen": 1}
+        self.transfer_job.result_summary = {
+            "transfer_lines_seen": 1,
+            "transfer_lines_created": 0,
+            "transfer_lines_updated": 0,
+        }
         self.transfer_job.save(update_fields=["result_summary", "updated_at"])
         self.conversion_job.status = PointSyncJob.STATUS_PARTIAL
         self.conversion_job.save(update_fields=["status", "updated_at"])

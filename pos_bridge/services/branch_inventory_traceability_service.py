@@ -447,7 +447,7 @@ class BranchInventoryTraceabilityService:
         transfer_authority = self._validate_transfer_authority(
             month_start=month_start,
             month_end=closing_date,
-            row_job_ids=[row.sync_job_id for row in transfer_rows],
+            rows=transfer_rows,
         )
         conversion_authority = authority_service._validate_month_movement_job(
             family="conversions",
@@ -475,7 +475,11 @@ class BranchInventoryTraceabilityService:
                     f"La fuente requerida {family} no es autoritativa: "
                     f"{', '.join(authority.get('authority_issues') or ())}."
                 ),
-                source_ids=tuple(authority.get("selected_sync_job_ids") or ()),
+                source_ids=tuple(
+                    authority.get("source_ids")
+                    or authority.get("selected_sync_job_ids")
+                    or ()
+                ),
             )
             for family, authority in authorities.items()
             if not authority.get("authoritative")
@@ -564,15 +568,22 @@ class BranchInventoryTraceabilityService:
             tuple(authority_issues),
         )
 
-    @staticmethod
-    def _validate_transfer_authority(*, month_start, month_end, row_job_ids):
+    @classmethod
+    def _validate_transfer_authority(cls, *, month_start, month_end, rows):
         jobs = list(
             PointSyncJob.objects.filter(
                 job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
                 parameters__start_date=month_start.isoformat(),
                 parameters__end_date=month_end.isoformat(),
             )
-            .only("id", "status", "started_at", "parameters", "result_summary")
+            .only(
+                "id",
+                "job_type",
+                "status",
+                "started_at",
+                "parameters",
+                "result_summary",
+            )
             .order_by("-started_at", "-id")
         )
         if not jobs:
@@ -587,33 +598,99 @@ class BranchInventoryTraceabilityService:
             if not str((job.parameters or {}).get("branch_filter") or "").strip()
         ]
         selected = unrestricted[0] if unrestricted else jobs[0]
-        issues = []
-        if selected.status == PointSyncJob.STATUS_FAILED:
-            issues.append("TRANSFER_SYNC_JOB_FAILED")
-        elif selected.status == PointSyncJob.STATUS_PARTIAL:
-            issues.append("TRANSFER_SYNC_JOB_PARTIAL")
-        elif selected.status != PointSyncJob.STATUS_SUCCESS:
-            issues.append("TRANSFER_SYNC_JOB_INCOMPLETE")
-        if selected not in unrestricted:
-            issues.append("TRANSFER_SYNC_JOB_RESTRICTED")
-        expected_count = (selected.result_summary or {}).get("transfer_lines_seen")
-        try:
-            expected_count = int(expected_count)
-        except (TypeError, ValueError):
-            issues.append("TRANSFER_SYNC_CONTRACT_INCOMPLETE")
-        else:
-            if expected_count != sum(job_id == selected.id for job_id in row_job_ids):
-                issues.append("TRANSFER_SYNC_COUNT_MISMATCH")
-        foreign_job_ids = {
-            job_id for job_id in row_job_ids if job_id is not None and job_id != selected.id
+        exact_job_issues = cls._transfer_job_contract_issues(
+            selected,
+            prefix="TRANSFER_SYNC",
+        )
+        issues = list(exact_job_issues)
+        relevant_rows = [
+            row
+            for row in rows
+            if not row.is_cancelled
+            and row.is_current_snapshot
+            and not row.is_insumo
+        ]
+        unbound_row_ids = [row.id for row in relevant_rows if row.sync_job_id is None]
+        if unbound_row_ids:
+            issues.append("TRANSFER_ROW_PROVENANCE_MISSING")
+
+        provenance_job_ids = {
+            row.sync_job_id for row in relevant_rows if row.sync_job_id is not None
         }
-        if foreign_job_ids:
-            issues.append("TRANSFER_SYNC_JOB_MIXED")
+        known_jobs = {job.id: job for job in jobs if job.id in provenance_job_ids}
+        missing_job_ids = provenance_job_ids - known_jobs.keys()
+        if missing_job_ids:
+            known_jobs.update(
+                PointSyncJob.objects.filter(id__in=missing_job_ids)
+                .only("id", "job_type", "status", "parameters", "result_summary")
+                .in_bulk()
+            )
+        invalid_provenance_row_ids = []
+        for row in relevant_rows:
+            if row.sync_job_id is None:
+                continue
+            provenance_job = known_jobs.get(row.sync_job_id)
+            provenance_issues = (
+                ["TRANSFER_ROW_PROVENANCE_JOB_MISSING"]
+                if provenance_job is None
+                else cls._transfer_job_contract_issues(
+                    provenance_job,
+                    prefix="TRANSFER_ROW_PROVENANCE",
+                )
+            )
+            if (
+                provenance_job is not None
+                and provenance_job.job_type != PointSyncJob.JOB_TYPE_TRANSFERS
+            ):
+                provenance_issues.append("TRANSFER_ROW_PROVENANCE_JOB_TYPE_INVALID")
+            if provenance_issues:
+                invalid_provenance_row_ids.append(row.id)
+                issues.extend(provenance_issues)
+        source_ids = tuple(
+            dict.fromkeys(
+                (
+                    *((selected.id,) if exact_job_issues else ()),
+                    *unbound_row_ids,
+                    *invalid_provenance_row_ids,
+                )
+            )
+        )
         return {
             "authoritative": not issues,
             "selected_sync_job_ids": (selected.id,),
             "authority_issues": tuple(dict.fromkeys(issues)),
+            "source_ids": source_ids,
         }
+
+    @staticmethod
+    def _transfer_job_contract_issues(job, *, prefix):
+        issues = []
+        if job.status == PointSyncJob.STATUS_FAILED:
+            issues.append(f"{prefix}_JOB_FAILED")
+        elif job.status == PointSyncJob.STATUS_PARTIAL:
+            issues.append(f"{prefix}_JOB_PARTIAL")
+        elif job.status != PointSyncJob.STATUS_SUCCESS:
+            issues.append(f"{prefix}_JOB_INCOMPLETE")
+        if str((job.parameters or {}).get("branch_filter") or "").strip():
+            issues.append(f"{prefix}_JOB_RESTRICTED")
+
+        summary = job.result_summary or {}
+        required_keys = (
+            "transfer_lines_seen",
+            "transfer_lines_created",
+            "transfer_lines_updated",
+        )
+        if any(key not in summary for key in required_keys):
+            issues.append(f"{prefix}_CONTRACT_INCOMPLETE")
+            return issues
+        try:
+            seen, created, updated = (int(summary[key]) for key in required_keys)
+        except (TypeError, ValueError):
+            issues.append(f"{prefix}_CONTRACT_INCOMPLETE")
+            return issues
+        if min(seen, created, updated) < 0 or seen != created + updated:
+            issues.append(f"{prefix}_COUNT_MISMATCH")
+        return issues
 
     def _apply_transfers(
         self,
@@ -671,7 +748,7 @@ class BranchInventoryTraceabilityService:
                             "se fechó con registered_at porque no tiene sent_at",
                         )
                     )
-                if not row.is_received:
+                if not row.is_received or row.received_at is None:
                     issues.append(
                         self._transfer_issue(
                             row,
