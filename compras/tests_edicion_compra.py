@@ -3,6 +3,7 @@ from decimal import Decimal
 from tempfile import TemporaryDirectory
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -10,8 +11,12 @@ from django.utils import timezone
 
 from compras.models import (CotizacionCompraDepartamental, ItemCompraDepartamental,
                             SolicitudCompraDepartamental, RecepcionItemDepartamental,
-                            CompraRealizadaDepartamental, HistorialCotizacionDepartamental)
+                            CompraRealizadaDepartamental, CompromisoCompraDepartamental,
+                            HistorialCotizacionDepartamental, IntentoCompraDepartamental)
 from compras.services_departamentales import seleccionar_cotizacion, generar_ordenes_departamentales
+from compras.services_edicion_compra import (corregir_compra_realizada, registrar_compra_realizada,
+                                             sincronizar_linea_orden, tiene_compra_o_recepcion, validar_edicion,
+                                             tiene_recepcion_historica)
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 
@@ -59,6 +64,14 @@ class _CompraDepartamentalBase:
         generar_ordenes_departamentales([self.item],actor=self.user)
         self.item.refresh_from_db()
 
+    def compromiso_actual(self):
+        intento = self.item.intento_vigente
+        return (intento.compromiso if intento else self.item.compromisos.filter(intento__isnull=True).order_by('-pk').first())
+
+    def linea_actual(self):
+        intento = self.item.intento_vigente
+        return intento.linea_orden if intento else None
+
 class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
     def test_edicion_de_texto_audita_sin_perder_autorizacion(self):
         response=self.editar()
@@ -85,12 +98,12 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
                 self.assertNotContains(response, '10,000.00')
                 self.item.refresh_from_db()
                 self.assertEqual(self.item.estado, estado)
-                self.assertTrue(self.item.compromiso.activo)
+                self.assertTrue(self.compromiso_actual().activo)
         self.assertEqual(self.editar(costo_unitario='90').status_code, 200)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado, 'ORDENADO')
-        self.assertEqual(self.item.linea_orden.total, Decimal('180'))
-        self.assertTrue(self.item.compromiso.activo)
+        self.assertEqual(self.linea_actual().total, Decimal('180'))
+        self.assertTrue(self.compromiso_actual().activo)
 
     def test_compra_realizada_sin_rubro_no_se_altera_al_consultar(self):
         self.assertEqual(self.comprar().status_code, 200)
@@ -102,7 +115,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado, 'COMPRADO')
         self.assertEqual(CompraRealizadaDepartamental.objects.get(item=self.item).pk, compra.pk)
-        self.assertTrue(self.item.compromiso.activo)
+        self.assertTrue(self.compromiso_actual().activo)
 
     def test_sin_rubro_texto_preserva_autorizacion_pero_incremento_requiere_dg(self):
         self.item.rubro = None
@@ -113,7 +126,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(self.editar(costo_unitario='150', version='2').status_code, 200)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado, 'ESPERANDO_DG')
-        self.assertFalse(self.item.compromiso.activo)
+        self.assertFalse(self.compromiso_actual().activo)
 
     def test_real_desconocido_visible_sin_inventar_disponibilidad(self):
         LineaPresupuestoMensual.objects.filter(rubro=self.rubro).update(monto_real=None)
@@ -139,7 +152,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(self.editar(costo_unitario='150').status_code,200)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ESPERANDO_DG')
-        self.assertFalse(self.item.compromiso.activo)
+        self.assertFalse(self.compromiso_actual().activo)
         self.assertGreaterEqual(self.comprar(importe_final='300').status_code,400)
         self.assertFalse(CompraRealizadaDepartamental.objects.exists())
 
@@ -159,17 +172,17 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
 
     def test_orden_existente_se_corrige_sin_duplicar(self):
         self.ordenar()
-        line_pk=self.item.linea_orden.pk
+        line_pk=self.linea_actual().pk
         self.assertEqual(self.editar(costo_unitario='90').status_code,200)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ORDENADO')
-        self.assertEqual(self.item.linea_orden.pk,line_pk)
-        self.assertEqual(self.item.linea_orden.total,Decimal('180'))
+        self.assertEqual(self.linea_actual().pk,line_pk)
+        self.assertEqual(self.linea_actual().total,Decimal('180'))
         self.assertEqual(self.comprar(importe_final='180').status_code,200)
 
     def test_reautorizacion_actualiza_orden_existente(self):
         self.ordenar()
-        line_pk=self.item.linea_orden.pk
+        line_pk=self.linea_actual().pk
         self.assertEqual(self.editar(costo_unitario='150').status_code,200)
         response=self.client.post(reverse('compras:departamental_decidir',args=[self.item.pk]),
                                   {'decision':'AUTORIZAR','cotizacion_id':self.quote.pk,
@@ -177,8 +190,8 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(response.status_code,200,response.content)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ORDENADO')
-        self.assertEqual(self.item.linea_orden.pk,line_pk)
-        self.assertEqual(self.item.linea_orden.total,Decimal('300'))
+        self.assertEqual(self.linea_actual().pk,line_pk)
+        self.assertEqual(self.linea_actual().total,Decimal('300'))
         self.assertEqual(self.comprar(importe_final='300').status_code,200)
 
     def test_orden_no_permite_cambiar_proveedor_o_cantidad(self):
@@ -196,9 +209,9 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(compra.registrado_por,self.user)
         self.assertEqual(self.item.estado,'COMPRADO')
         self.assertEqual(self.item.monto_gastado,0)
-        self.assertTrue(hasattr(self.item,'linea_orden'))
+        self.assertIsNotNone(self.linea_actual())
         self.assertFalse(RecepcionItemDepartamental.objects.exists())
-        self.assertEqual(self.item.compromiso.monto,Decimal('200'))
+        self.assertEqual(self.compromiso_actual().monto,Decimal('200'))
 
     def test_compra_duplicada_no_crea_segundo_registro(self):
         self.assertEqual(self.comprar().status_code,200)
@@ -225,7 +238,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
 
     def test_recepcion_historica_bloquea_editar(self):
         self.ordenar()
-        RecepcionItemDepartamental.objects.create(linea_orden=self.item.linea_orden,cantidad_recibida=1,registrado_por=self.user)
+        RecepcionItemDepartamental.objects.create(linea_orden=self.linea_actual(),cantidad_recibida=1,registrado_por=self.user)
         self.assertGreaterEqual(self.editar().status_code,400)
 
     def test_entrega_posterior_a_compra_se_registra_por_separado(self):
@@ -278,7 +291,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.item.refresh_from_db(); seleccionada.refresh_from_db()
         self.assertTrue(seleccionada.seleccionada)
         self.assertEqual(self.item.estado,'AUTORIZADO')
-        self.assertEqual(self.item.compromiso.monto,Decimal('200'))
+        self.assertEqual(self.compromiso_actual().monto,Decimal('200'))
 
     def test_cotizacion_aumentada_no_se_aprueba_con_cambio_de_texto(self):
         self.assertEqual(self.editar(costo_unitario='150').status_code,200)
@@ -342,7 +355,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(response.status_code,409,response.content)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ESPERANDO_DG')
-        self.assertFalse(self.item.compromiso.activo)
+        self.assertFalse(self.compromiso_actual().activo)
 
     def test_compra_fraccionaria_acepta_precio_redondeado_a_centavos(self):
         self.quote.refresh_from_db()
@@ -383,7 +396,7 @@ class CorreccionCompraRegistradaTests(_CompraDepartamentalBase, TestCase):
         self.assertIn('precio por pieza', historial.motivo)
         self.assertTrue(self.item.eventos.filter(tipo='COMPRA_CORREGIDA').exists())
         # El importe comprometido sigue a lo realmente pagado.
-        self.assertEqual(self.item.compromiso.monto, Decimal('296.62'))
+        self.assertEqual(self.compromiso_actual().monto, Decimal('296.62'))
 
     def test_corregir_por_arriba_de_la_cotizacion_es_valido(self):
         """Registrar exige no superar la cotización; corregir existe justo porque
@@ -427,3 +440,129 @@ class CorreccionCompraRegistradaTests(_CompraDepartamentalBase, TestCase):
         respuesta = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
         self.assertContains(respuesta, 'Corregir esta compra')
         self.assertContains(respuesta, 'precio por pieza')
+
+
+class FlujoPorIntentoTests(_CompraDepartamentalBase, TestCase):
+    def registrar(self):
+        return registrar_compra_realizada(
+            self.item, fecha_compra=timezone.localdate(), importe_final=Decimal('200'),
+            numero_pedido='PEDIDO-PRUEBA',
+            comprobante=SimpleUploadedFile('prueba.pdf', b'%PDF-1.4\n%%EOF'),
+            actor=self.user, cotizacion_id=self.quote.pk, version=self.quote.version,
+        )
+
+    def test_segundo_intento_usa_linea_y_compra_vigentes_sin_alterar_historial(self):
+        self.ordenar()
+        primera = self.item.intento_vigente
+        compra_vieja = self.registrar()
+        linea_vieja = primera.linea_orden
+        primera.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSADO
+        primera.save(update_fields=['estado'])
+        primera.compromiso.activo = False
+        primera.compromiso.save(update_fields=['activo'])
+        self.item.estado = ItemCompraDepartamental.ESTADO_AUTORIZADO
+        self.item.save(update_fields=['estado'])
+        CompromisoCompraDepartamental.objects.create(
+            item=self.item, cotizacion=self.quote, monto=Decimal('200'), activo=True,
+        )
+        self.assertFalse(tiene_compra_o_recepcion(self.item))
+        self.assertIsNone(sincronizar_linea_orden(self.item, self.quote, actor=self.user))
+
+        self.ordenar()
+        segunda = self.item.intento_vigente
+        self.assertNotEqual(segunda, primera)
+        self.assertEqual(sincronizar_linea_orden(self.item, self.quote, actor=self.user), segunda.linea_orden)
+        compra_nueva = self.registrar()
+        self.assertEqual(compra_nueva.intento, segunda)
+        self.assertEqual(compra_nueva.intento.compromiso.monto, Decimal('200'))
+        compra_vieja.refresh_from_db()
+        linea_vieja.refresh_from_db()
+        self.assertEqual(compra_vieja.intento, primera)
+        self.assertEqual(compra_vieja.importe_final, Decimal('200'))
+        self.assertEqual(linea_vieja.intento, primera)
+        self.assertTrue(compra_vieja.avisos.exists())
+        self.assertTrue(compra_nueva.avisos.exists())
+        self.assertEqual(set(compra_vieja.avisos.values_list('compra_id', flat=True)), {compra_vieja.pk})
+        self.assertEqual(set(compra_nueva.avisos.values_list('compra_id', flat=True)), {compra_nueva.pk})
+
+        corregir_compra_realizada(
+            compra_vieja, datos={'importe_final': Decimal('190')}, version=compra_vieja.version,
+            motivo='Corrección histórica', actor=self.user,
+        )
+        primera.compromiso.refresh_from_db()
+        segunda.compromiso.refresh_from_db()
+        self.assertEqual(primera.compromiso.monto, Decimal('190'))
+        self.assertEqual(segunda.compromiso.monto, Decimal('200'))
+
+    def test_cotizacion_nueva_no_reutiliza_compromiso_de_intento_historico(self):
+        self.ordenar()
+        historico = self.item.intento_vigente
+        compromiso_historico = historico.compromiso
+        historico.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
+        historico.save(update_fields=['estado'])
+        compromiso_historico.activo = False
+        compromiso_historico.save(update_fields=['activo'])
+        self.item.estado = ItemCompraDepartamental.ESTADO_POR_COTIZAR
+        self.item.save(update_fields=['estado'])
+        nueva = CotizacionCompraDepartamental.objects.create(
+            item=self.item, proveedor=self.proveedor, cantidad_ofertada=2, costo_unitario=Decimal('90'),
+        )
+
+        seleccionar_cotizacion(nueva, actor=self.user)
+
+        self.item.refresh_from_db()
+        compromiso_historico.refresh_from_db()
+        self.assertEqual(self.item.estado, ItemCompraDepartamental.ESTADO_AUTORIZADO)
+        self.assertFalse(compromiso_historico.activo)
+        self.assertEqual(compromiso_historico.cotizacion, self.quote)
+        self.assertEqual(self.compromiso_actual().cotizacion, nueva)
+        self.assertIsNone(self.compromiso_actual().intento)
+
+    def test_recepcion_historica_bloquea_edicion_aunque_no_haya_intento_vigente(self):
+        self.ordenar()
+        intento = self.item.intento_vigente
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=intento.linea_orden, cantidad_recibida=1, registrado_por=self.user,
+        )
+        intento.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
+        intento.save(update_fields=['estado'])
+        self.assertFalse(tiene_compra_o_recepcion(self.item))
+        self.assertTrue(tiene_recepcion_historica(self.item))
+        with self.assertRaises(ValidationError):
+            validar_edicion(self.item)
+
+    def test_correccion_no_baja_de_reembolso_solicitado(self):
+        compra = self.registrar()
+        intento = compra.intento
+        intento.reembolso_solicitado = Decimal('150')
+        for estado in (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO,
+                       IntentoCompraDepartamental.ESTADO_REEMBOLSADO):
+            with self.subTest(estado=estado):
+                intento.estado = estado
+                intento.save(update_fields=['estado', 'reembolso_solicitado'])
+                with self.assertRaises(ValidationError):
+                    corregir_compra_realizada(
+                        compra, datos={'importe_final': Decimal('140')}, version=compra.version,
+                        motivo='Corrección', actor=self.user,
+                    )
+        compra.refresh_from_db()
+        self.assertEqual(compra.importe_final, Decimal('200'))
+
+    def test_resumen_compromete_solo_el_intento_vigente(self):
+        from compras.resumen_departamentales import construir_resumen_departamental
+
+        historico = IntentoCompraDepartamental.objects.create(
+            item=self.item, cotizacion=self.quote,
+            estado=IntentoCompraDepartamental.ESTADO_REEMBOLSADO,
+        )
+        reserva = CompromisoCompraDepartamental.objects.get(item=self.item)
+        reserva.intento = historico
+        reserva.monto = Decimal('999')
+        reserva.formalizado_en = timezone.now()
+        reserva.save(update_fields=['intento', 'monto', 'formalizado_en'])
+        actual = IntentoCompraDepartamental.objects.create(item=self.item, cotizacion=self.quote)
+        CompromisoCompraDepartamental.objects.create(
+            item=self.item, intento=actual, cotizacion=self.quote, monto=Decimal('200'),
+            formalizado_en=timezone.now(), activo=True,
+        )
+        self.assertEqual(construir_resumen_departamental({})['resumen']['comprometido'], Decimal('200'))

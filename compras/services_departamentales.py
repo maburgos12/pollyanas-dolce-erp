@@ -12,6 +12,7 @@ from .models import (
     CompromisoCompraDepartamental,
     CotizacionCompraDepartamental,
     EventoCompraDepartamental,
+    IntentoCompraDepartamental,
     ItemCompraDepartamental,
     LineaOrdenCompraDepartamental,
     OrdenCompraDepartamental,
@@ -90,12 +91,39 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
     )
 
 
+def reservar_compromiso_del_flujo(item, cotizacion, monto, *, formalizado_en=None):
+    intento = item.intento_vigente
+    defaults = {
+        "item": item, "cotizacion": cotizacion, "monto": monto,
+        "activo": True, "formalizado_en": formalizado_en, "liberado_en": None,
+    }
+    if intento:
+        return CompromisoCompraDepartamental.objects.update_or_create(intento=intento, defaults=defaults)[0]
+    reserva = CompromisoCompraDepartamental.objects.filter(
+        item=item, intento__isnull=True, activo=True
+    ).first()
+    if reserva is None:
+        return CompromisoCompraDepartamental.objects.create(**defaults)
+    for campo, valor in defaults.items():
+        setattr(reserva, campo, valor)
+    reserva.save(update_fields=["cotizacion", "monto", "activo", "formalizado_en", "liberado_en"])
+    return reserva
+
+
+def liberar_compromiso_del_flujo(item, *, monto=None):
+    filtros = Q(item=item, intento__isnull=True) | Q(intento__item=item, intento__estado="VIGENTE")
+    cambios = {"activo": False, "liberado_en": timezone.now()}
+    if monto is not None:
+        cambios["monto"] = monto
+    CompromisoCompraDepartamental.objects.filter(filtros, activo=True).update(**cambios)
+
+
 @transaction.atomic
 def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
     item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud__area").get(pk=cotizacion.item_id)
     cotizacion = CotizacionCompraDepartamental.objects.select_for_update().get(pk=cotizacion.pk)
-    from .services_edicion_compra import tiene_compra_o_recepcion
-    if item.estado in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO') or tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+    from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica
+    if item.estado in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO') or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
         raise ValidationError("Este artículo ya no admite cambiar la cotización seleccionada.")
     revision_pendiente = (item.estado in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO')
         and item.cotizaciones.filter(historial__isnull=False).exists())
@@ -104,20 +132,11 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
     cotizacion.save(update_fields=["seleccionada"])
     resultado = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
     if resultado.requiere_dg or revision_pendiente:
-        CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
+        liberar_compromiso_del_flujo(item)
         item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_DG
     else:
-        CompromisoCompraDepartamental.objects.update_or_create(
-            item=item,
-            defaults={
-                "cotizacion": cotizacion,
-                "monto": cotizacion.total_adquisicion,
-                "activo": True,
-                "formalizado_en": None,
-                "liberado_en": None,
-            },
-        )
+        reservar_compromiso_del_flujo(item, cotizacion, cotizacion.total_adquisicion)
         item.estado = ItemCompraDepartamental.ESTADO_AUTORIZADO
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
     item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
@@ -134,9 +153,9 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
 
 @transaction.atomic
 def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: str, actor, cotizacion_id=None, version=None):
-    from .services_edicion_compra import tiene_compra_o_recepcion, sincronizar_linea_orden
+    from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica, sincronizar_linea_orden
     item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
-    if tiene_compra_o_recepcion(item) or item.estado not in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO'):
+    if tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.estado not in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO'):
         raise ValidationError("El artículo no tiene una decisión de Dirección General pendiente.")
     decisiones = {
         "AUTORIZAR": (ItemCompraDepartamental.ESTADO_AUTORIZADO, ItemCompraDepartamental.RESPONSABLE_COMPRAS),
@@ -163,18 +182,12 @@ def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: 
     item.save(update_fields=["estado", "siguiente_responsable", "comentario_reciente", "actualizado_en"])
     item.solicitud.actualizar_estado_desde_items()
     if decision == "AUTORIZAR":
-        CompromisoCompraDepartamental.objects.update_or_create(
-            item=item,
-            defaults={
-                "cotizacion": cotizacion,
-                "monto": cotizacion.total_adquisicion,
-                "activo": True,
-                "formalizado_en": timezone.now() if linea else None,
-                "liberado_en": None,
-            },
+        reservar_compromiso_del_flujo(
+            item, cotizacion, cotizacion.total_adquisicion,
+            formalizado_en=timezone.now() if linea else None,
         )
     else:
-        CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
+        liberar_compromiso_del_flujo(item)
     EventoCompraDepartamental.objects.create(
         solicitud=item.solicitud, item=item, actor=actor, tipo=f"DG_{decision}", detalle=comentario
     )
@@ -185,8 +198,8 @@ def generar_ordenes_departamentales(items, *, actor):
     grupos = {}
     for original in items:
         item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud").get(pk=original.pk)
-        from .services_edicion_compra import tiene_compra_o_recepcion
-        if tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+        from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica
+        if tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
             raise ValidationError(f"{item.descripcion} ya tiene una orden, compra o entrega registrada.")
         cotizacion = item.cotizaciones.select_related("proveedor").filter(seleccionada=True).first()
         if not cotizacion:
@@ -199,17 +212,19 @@ def generar_ordenes_departamentales(items, *, actor):
     for proveedor_id, lineas in grupos.items():
         orden = OrdenCompraDepartamental.objects.create(proveedor_id=proveedor_id, creado_por=actor)
         for item, cotizacion, original in lineas:
+            intento = IntentoCompraDepartamental.objects.create(item=item, cotizacion=cotizacion)
             LineaOrdenCompraDepartamental.objects.create(
                 orden=orden,
                 item=item,
+                intento=intento,
                 cotizacion=cotizacion,
                 cantidad=item.cantidad,
                 costo_unitario=cotizacion.costo_unitario,
                 total=cotizacion.total_adquisicion,
             )
-            CompromisoCompraDepartamental.objects.filter(item=item, activo=True).update(
-                formalizado_en=timezone.now()
-            )
+            CompromisoCompraDepartamental.objects.filter(
+                item=item, cotizacion=cotizacion, activo=True, intento__isnull=True
+            ).update(intento=intento, formalizado_en=timezone.now())
             item.estado = ItemCompraDepartamental.ESTADO_ORDENADO
             item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
             item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])

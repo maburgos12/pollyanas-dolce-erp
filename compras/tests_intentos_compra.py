@@ -141,6 +141,31 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
                     cantidad=Decimal("2"), costo_unitario=Decimal("100"), total=Decimal("200"),
                 )
 
+    def test_update_fields_generador_persiste_linea_compra_y_compromiso(self):
+        intento = self.crear_intento()
+        orden = OrdenCompraDepartamental.objects.create(proveedor=self.proveedor, creado_por=self.user)
+        linea = LineaOrdenCompraDepartamental.objects.create(
+            orden=orden, intento=intento, item=self.item, cotizacion=self.quote,
+            cantidad=Decimal("2"), costo_unitario=Decimal("100"), total=Decimal("200"),
+        )
+        compromiso = CompromisoCompraDepartamental.objects.get(item=self.item)
+        compromiso.intento = intento
+        compromiso.save(update_fields=["intento"])
+        compra = CompraRealizadaDepartamental.objects.create(
+            intento=intento, item=self.item, cotizacion=self.quote,
+            fecha_compra=timezone.localdate(), importe_final=Decimal("200"),
+            comprobante="compras/prueba.pdf", registrado_por=self.user,
+        )
+        for obj, campo, valor in (
+            (linea, "total", Decimal("190")),
+            (compromiso, "monto", Decimal("190")),
+            (compra, "importe_final", Decimal("190")),
+        ):
+            setattr(obj, campo, valor)
+            obj.save(update_fields=(nombre for nombre in [campo]))
+            obj.refresh_from_db()
+            self.assertEqual(getattr(obj, campo), valor)
+
     def test_reserva_preorden_es_opcional_y_solo_una_activa(self):
         reserva = CompromisoCompraDepartamental.objects.get(item=self.item)
         self.assertIsNone(reserva.intento)

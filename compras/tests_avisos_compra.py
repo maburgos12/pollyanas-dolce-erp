@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from compras.models import (AvisoCompraDepartamental, CompraRealizadaDepartamental,
-                            CotizacionCompraDepartamental, ItemCompraDepartamental,
+                            CotizacionCompraDepartamental, IntentoCompraDepartamental, ItemCompraDepartamental,
                             SolicitudCompraDepartamental)
 from compras.services_avisos_compra import (contexto_mensaje, enviar_aviso, enviar_avisos_pendientes,
                                             programar_avisos, url_solicitud)
@@ -137,6 +137,9 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
             compra = self.registrar_compra()
         despachar.assert_not_called()  # aún no hay commit dentro de TestCase
         avisos = list(compra.avisos.order_by("canal"))
+        self.assertEqual(compra.intento, self.item.intento_vigente)
+        self.assertEqual(compra.cotizacion, compra.intento.cotizacion)
+        self.assertTrue(all(aviso.compra_id == compra.pk for aviso in avisos))
         self.assertEqual([a.canal for a in avisos], ["CORREO", "WHATSAPP"])
         self.assertTrue(all(a.estado == "PENDIENTE" for a in avisos))
         self.assertTrue(all(a.destinatario_id == self.solicitante.pk for a in avisos))
@@ -259,8 +262,9 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
 
     def test_compras_existentes_no_reciben_avisos_retroactivos(self):
         """Una compra creada sin pasar por el servicio no genera cola ni envíos."""
+        intento = IntentoCompraDepartamental.objects.create(item=self.item, cotizacion=self.quote)
         compra = CompraRealizadaDepartamental.objects.create(
-            item=self.item, cotizacion=self.quote, fecha_compra=timezone.localdate(),
+            intento=intento, item=self.item, cotizacion=self.quote, fecha_compra=timezone.localdate(),
             importe_final=Decimal("200.00"),
             comprobante=SimpleUploadedFile("v.pdf", b"%PDF-1.4\n%%EOF"), registrado_por=self.compras_user)
         self.assertEqual(compra.avisos.count(), 0)

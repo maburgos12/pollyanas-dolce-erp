@@ -13,7 +13,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from reportes.models import AreaPresupuesto
-from .models import CotizacionCompraDepartamental, ItemCompraDepartamental, SolicitudCompraDepartamental
+from .models import CotizacionCompraDepartamental, IntentoCompraDepartamental, ItemCompraDepartamental, SolicitudCompraDepartamental
 
 TERMINALES = (
     ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME,
@@ -51,7 +51,7 @@ def construir_resumen_departamental(params):
     filtros = FiltrosResumenDepartamental(params)
     valido = filtros.is_valid()
     items = ItemCompraDepartamental.objects.select_related(
-        'solicitud__area', 'solicitud__solicitante', 'solicitud__comprador_asignado', 'compromiso',
+        'solicitud__area', 'solicitud__solicitante', 'solicitud__comprador_asignado',
     ).exclude(estado__in=TERMINALES).exclude(solicitud__estado__in=[
         SolicitudCompraDepartamental.ESTADO_BORRADOR,
         SolicitudCompraDepartamental.ESTADO_CANCELADA,
@@ -59,6 +59,9 @@ def construir_resumen_departamental(params):
     ]).prefetch_related(Prefetch(
         'cotizaciones', queryset=CotizacionCompraDepartamental.objects.filter(seleccionada=True).order_by('id'),
         to_attr='cotizaciones_seleccionadas',
+    ), Prefetch(
+        'intentos_compra', queryset=IntentoCompraDepartamental.objects.filter(estado='VIGENTE').select_related('compromiso'),
+        to_attr='intentos_vigentes',
     )).order_by('solicitud__area__nombre', 'solicitud_id', 'id')
     query = {}
     if not valido:
@@ -77,7 +80,8 @@ def construir_resumen_departamental(params):
         grupo = departamentos.setdefault(area.pk, {**_totales(), 'nombre': area.nombre, 'id': area.pk})
         estimado = item.subtotal_estimado
         quote = next(iter(item.cotizaciones_seleccionadas), None)
-        compromiso = getattr(item, 'compromiso', None)
+        intento = next(iter(item.intentos_vigentes), None)
+        compromiso = getattr(intento, 'compromiso', None) if intento else None
         item.resumen_estimado = _importe(estimado) if estimado is not None else None
         item.resumen_cotizado = _importe(quote.total_adquisicion) if quote else None
         item.resumen_comprometido = compromiso.monto if compromiso and compromiso.activo and compromiso.formalizado_en else Decimal('0')

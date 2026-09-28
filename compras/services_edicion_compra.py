@@ -11,7 +11,7 @@ from .forms_cotizaciones import CotizacionDepartamentalForm
 from .models import (
     CompraRealizadaDepartamental, CompromisoCompraDepartamental, CotizacionCompraDepartamental,
     EventoCompraDepartamental, HistorialCompraDepartamental, HistorialCotizacionDepartamental,
-    ItemCompraDepartamental, LineaOrdenCompraDepartamental, RecepcionItemDepartamental,
+    IntentoCompraDepartamental, ItemCompraDepartamental, LineaOrdenCompraDepartamental, RecepcionItemDepartamental,
 )
 from .services_avisos_compra import programar_avisos
 
@@ -20,13 +20,19 @@ ESTADOS_CERRADOS = ('COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'R
 
 
 def tiene_compra_o_recepcion(item):
-    return (CompraRealizadaDepartamental.objects.filter(item=item).exists()
-            or RecepcionItemDepartamental.objects.filter(linea_orden__item=item).exists())
+    return (CompraRealizadaDepartamental.objects.filter(intento__item=item, intento__estado="VIGENTE").exists()
+            or RecepcionItemDepartamental.objects.filter(
+                linea_orden__intento__item=item, linea_orden__intento__estado="VIGENTE"
+            ).exists())
+
+
+def tiene_recepcion_historica(item):
+    return RecepcionItemDepartamental.objects.filter(linea_orden__item=item).exists()
 
 
 def validar_edicion(item):
     if (item.estado in ESTADOS_CERRADOS or item.solicitud.estado in ('BORRADOR', 'CANCELADA', 'COMPLETADA')
-            or tiene_compra_o_recepcion(item)):
+            or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item)):
         raise ValidationError('No puedes editar esta cotización: el artículo está cerrado, comprado o tiene entregas registradas.')
 
 
@@ -43,7 +49,9 @@ def snapshot_cotizacion(cotizacion):
 
 
 def sincronizar_linea_orden(item, cotizacion, *, actor):
-    linea = LineaOrdenCompraDepartamental.objects.filter(item=item).first()
+    linea = LineaOrdenCompraDepartamental.objects.filter(
+        intento__item=item, intento__estado=IntentoCompraDepartamental.ESTADO_VIGENTE
+    ).select_related("orden").first()
     if linea:
         if linea.cotizacion_id != cotizacion.pk or linea.orden.proveedor_id != cotizacion.proveedor_id:
             raise ValidationError('La orden está vinculada a otra cotización o proveedor. Revisa la orden antes de continuar.')
@@ -60,7 +68,9 @@ def sincronizar_linea_orden(item, cotizacion, *, actor):
 
 @transaction.atomic
 def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
-    from .services_departamentales import evaluar_presupuesto_item
+    from .services_departamentales import (
+        evaluar_presupuesto_item, liberar_compromiso_del_flujo, reservar_compromiso_del_flujo,
+    )
 
     item = ItemCompraDepartamental.objects.select_for_update().select_related('solicitud__area').get(pk=cotizacion.item_id)
     cotizacion = CotizacionCompraDepartamental.objects.select_for_update().get(pk=cotizacion.pk)
@@ -71,7 +81,9 @@ def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
         raise ValidationError('Escribe el motivo del cambio.')
     antes = snapshot_cotizacion(cotizacion)
     total_anterior = cotizacion.total_adquisicion
-    linea = LineaOrdenCompraDepartamental.objects.filter(item=item).first()
+    linea = LineaOrdenCompraDepartamental.objects.filter(
+        intento__item=item, intento__estado=IntentoCompraDepartamental.ESTADO_VIGENTE
+    ).first()
     if linea and (datos.get('proveedor', cotizacion.proveedor).pk != cotizacion.proveedor_id
                   or datos.get('cantidad_ofertada', cotizacion.cantidad_ofertada) != cotizacion.cantidad_ofertada):
         raise ValidationError('La orden ya existe. Conserva el proveedor y la cantidad ofertada; puedes corregir los importes y observaciones.')
@@ -93,15 +105,14 @@ def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
         if requiere_dg:
             item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG
             item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_DG
-            CompromisoCompraDepartamental.objects.filter(item=item).update(
-                monto=cotizacion.total_adquisicion, activo=False, liberado_en=timezone.now())
+            liberar_compromiso_del_flujo(item, monto=cotizacion.total_adquisicion)
         else:
             item.estado = ItemCompraDepartamental.ESTADO_ORDENADO if linea else ItemCompraDepartamental.ESTADO_AUTORIZADO
             item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
-            CompromisoCompraDepartamental.objects.update_or_create(item=item, defaults={
-                'cotizacion': cotizacion, 'monto': cotizacion.total_adquisicion, 'activo': True,
-                'liberado_en': None, 'formalizado_en': timezone.now() if linea else None,
-            })
+            reservar_compromiso_del_flujo(
+                item, cotizacion, cotizacion.total_adquisicion,
+                formalizado_en=timezone.now() if linea else None,
+            )
             sincronizar_linea_orden(item, cotizacion, actor=actor)
         item.save(update_fields=['estado', 'siguiente_responsable', 'actualizado_en'])
         item.solicitud.actualizar_estado_desde_items()
@@ -131,24 +142,36 @@ def registrar_compra_realizada(item, *, fecha_compra, importe_final, numero_pedi
     importe_autorizado = cotizacion.total_adquisicion.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     if importe_final > importe_autorizado:
         raise ValidationError('El importe final supera la cotización autorizada. Edita la cotización y solicita autorización antes de registrar la compra.')
-    compra = CompraRealizadaDepartamental(
-        item=item, cotizacion=cotizacion, fecha_compra=fecha_compra, importe_final=importe_final,
-        numero_pedido=numero_pedido, comprobante=comprobante, registrado_por=actor,
-    )
-    compra.full_clean()
-    if not LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+    intento = IntentoCompraDepartamental.objects.select_for_update().filter(
+        item=item, estado=IntentoCompraDepartamental.ESTADO_VIGENTE
+    ).first()
+    if intento is None:
         if item.estado != 'AUTORIZADO':
             raise ValidationError('No se encontró la orden de este artículo. Revisa su seguimiento antes de comprar.')
         generar_ordenes_departamentales([item], actor=actor)
-    linea = LineaOrdenCompraDepartamental.objects.get(item=item)
+        intento = IntentoCompraDepartamental.objects.select_for_update().get(
+            item=item, estado=IntentoCompraDepartamental.ESTADO_VIGENTE
+        )
+    if CompraRealizadaDepartamental.objects.filter(intento=intento).exists() or RecepcionItemDepartamental.objects.filter(
+        linea_orden__intento=intento
+    ).exists():
+        raise ValidationError('Este artículo ya tiene una compra o entrega registrada. No se registró otra compra.')
+    linea = LineaOrdenCompraDepartamental.objects.filter(intento=intento).select_related("orden").first()
+    if linea is None:
+        raise ValidationError('No se encontró la orden de este artículo. Revisa su seguimiento antes de comprar.')
     if linea.cotizacion_id != cotizacion.pk or linea.orden.proveedor_id != cotizacion.proveedor_id:
         raise ValidationError('La orden no corresponde a la cotización seleccionada. Revisa la orden antes de comprar.')
+    compra = CompraRealizadaDepartamental(
+        intento=intento, item=item, cotizacion=cotizacion, fecha_compra=fecha_compra,
+        importe_final=importe_final, numero_pedido=numero_pedido, comprobante=comprobante, registrado_por=actor,
+    )
+    compra.full_clean()
     compra.save()
     item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
     item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
     item.save(update_fields=['estado', 'siguiente_responsable', 'actualizado_en'])
-    CompromisoCompraDepartamental.objects.update_or_create(item=item, defaults={
-        'cotizacion': cotizacion, 'monto': importe_final, 'activo': True,
+    CompromisoCompraDepartamental.objects.update_or_create(intento=intento, defaults={
+        'item': item, 'cotizacion': cotizacion, 'monto': importe_final, 'activo': True,
         'formalizado_en': timezone.now(), 'liberado_en': None,
     })
     item.solicitud.actualizar_estado_desde_items()
@@ -183,6 +206,8 @@ def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
     artículo: el dinero ya salió y lo que se arregla es el registro. El
     compromiso sí se realinea porque alimenta el importe comprometido.
     """
+    intento_id = CompraRealizadaDepartamental.objects.values_list('intento_id', flat=True).get(pk=compra.pk)
+    intento = IntentoCompraDepartamental.objects.select_for_update().get(pk=intento_id)
     compra = (CompraRealizadaDepartamental.objects.select_for_update()
               .select_related('item__solicitud').get(pk=compra.pk))
     item = compra.item
@@ -196,6 +221,11 @@ def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
             setattr(compra, name, datos[name])
     if isinstance(datos.get('comprobante'), UploadedFile):
         compra.comprobante = datos['comprobante']
+    if (intento.estado in (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO,
+                           IntentoCompraDepartamental.ESTADO_REEMBOLSADO)
+            and intento.reembolso_solicitado is not None
+            and compra.importe_final < intento.reembolso_solicitado):
+        raise ValidationError('El importe final no puede ser menor que el reembolso solicitado.')
     compra.version += 1
     compra.full_clean()
     compra.save()
@@ -203,7 +233,7 @@ def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
     if antes['importe_final'] != despues['importe_final']:
         # El compromiso refleja lo realmente pagado; la cotización queda intacta
         # como evidencia de lo que se cotizó, aunque se haya cotizado mal.
-        CompromisoCompraDepartamental.objects.filter(item=item).update(monto=compra.importe_final)
+        CompromisoCompraDepartamental.objects.filter(intento=intento).update(monto=compra.importe_final)
     HistorialCompraDepartamental.objects.create(
         compra=compra, antes=antes, despues=despues, motivo=motivo.strip(), actor=actor)
     EventoCompraDepartamental.objects.create(

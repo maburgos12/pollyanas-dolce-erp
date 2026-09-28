@@ -5,7 +5,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -17,14 +17,14 @@ from core.access import ROLE_DG, has_any_role
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto
 
-from .services_edicion_compra import tiene_compra_o_recepcion
+from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica
 
 from .forms_cotizaciones import CotizacionDepartamentalForm, ProveedorCotizacionForm, crear_proveedor_cotizacion
 
 from .models import (
-    CompromisoCompraDepartamental,
     CotizacionCompraDepartamental,
     EventoCompraDepartamental,
+    IntentoCompraDepartamental,
     ItemCompraDepartamental,
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
@@ -293,7 +293,13 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
             "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
-            "items__compra_realizada__avisos", "items__compra_realizada__historial__actor"
+            Prefetch(
+                "items__intentos_compra",
+                queryset=IntentoCompraDepartamental.objects.filter(estado="VIGENTE")
+                .select_related("linea_orden", "compra", "compromiso")
+                .prefetch_related("compra__avisos", "compra__historial__actor"),
+                to_attr="intentos_compra_prefetched",
+            ),
         ),
         pk=pk,
     )
@@ -306,7 +312,10 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     total_comprometido = Decimal("0")
     total_gastado = Decimal("0")
     for item in solicitud.items.all():
-        cerrado_por_evidencia = tiene_compra_o_recepcion(item)
+        intento = item.intento_vigente
+        item.compra_realizada = getattr(intento, "compra", None) if intento else None
+        linea_actual = getattr(intento, "linea_orden", None) if intento else None
+        cerrado_por_evidencia = tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item)
         item.puede_editar_cotizacion = (not cerrado_por_evidencia
             and item.estado not in ('COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
@@ -318,7 +327,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
                 revision.cambios_visibles = _cambios_historial_cotizacion(revision)
                 quote.historial_visible.append(revision)
         item.puede_cotizar = (item.estado not in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
-                             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA') and not cerrado_por_evidencia and not hasattr(item, 'linea_orden'))
+                             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA') and not cerrado_por_evidencia and linea_actual is None)
         item.cotizacion_form = (cotizacion_error[1] if cotizacion_error and cotizacion_error[0] == item.pk
                                 else CotizacionDepartamentalForm(item=item))
         item.proveedor_form = (proveedor_error[1] if proveedor_error and proveedor_error[0] == item.pk
@@ -335,10 +344,8 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         if seleccionada:
             total_cotizado += seleccionada.total_adquisicion
             item.evaluacion_presupuesto = evaluar_presupuesto_item(item, seleccionada.total_adquisicion)
-        compromiso = CompromisoCompraDepartamental.objects.filter(
-            item=item, activo=True, formalizado_en__isnull=False
-        ).first()
-        if compromiso:
+        compromiso = getattr(intento, "compromiso", None) if intento else None
+        if compromiso and compromiso.activo and compromiso.formalizado_en:
             total_comprometido += compromiso.monto
         total_gastado += item.monto_gastado
     return render(
@@ -463,7 +470,7 @@ def departamental_cotizar(request, item_pk):
         return _error_cotizacion(request, item, form)
     with transaction.atomic():
         item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
-        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or hasattr(item, 'linea_orden'):
+        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
             form.add_error(None, 'Este artículo ya no admite nuevas cotizaciones.')
             return _error_cotizacion(request, item, form, status=409)
         cotizacion = form.save(commit=False)
@@ -491,7 +498,7 @@ def departamental_cotizacion_seleccionar(request, quote_pk):
     destino = reverse('compras:departamental_detalle', args=[quote.item.solicitud_id]) + f'#item-{quote.item_id}'
     with transaction.atomic():
         item = ItemCompraDepartamental.objects.select_for_update().get(pk=quote.item_id)
-        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or hasattr(item, 'linea_orden'):
+        if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
             return _respuesta_accion(request, message='Este artículo ya no admite cambiar la cotización seleccionada.', redirect_url=destino, status=409)
         if not quote.proveedor.activo:
             return _respuesta_accion(request, message='El proveedor está inactivo. Revisa su ficha antes de seleccionar.', redirect_url=destino, status=409)
@@ -549,10 +556,12 @@ def departamental_recibir(request, item_pk):
                 raise InvalidOperation
         except InvalidOperation:
             return _respuesta_accion(request, message='La cantidad recibida debe ser mayor que cero.', redirect_url=destino, status=400)
-        if not hasattr(item, 'linea_orden'):
+        intento = item.intento_vigente
+        linea = getattr(intento, 'linea_orden', None) if intento else None
+        if linea is None:
             return _respuesta_accion(request, message='No se encontró la orden del artículo.', redirect_url=destino, status=409)
         RecepcionItemDepartamental.objects.create(
-            linea_orden=item.linea_orden, cantidad_recibida=cantidad,
+            linea_orden=linea, cantidad_recibida=cantidad,
             observaciones=request.POST.get("observaciones", "").strip(), registrado_por=request.user,
         )
     return _respuesta_accion(request, message="Recepción registrada; el pendiente continuará visible hasta confirmación del área.", redirect_url=destino, reload=True)
