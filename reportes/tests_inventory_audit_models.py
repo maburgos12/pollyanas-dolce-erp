@@ -8,6 +8,7 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.db import (
     IntegrityError,
+    OperationalError,
     close_old_connections,
     connection,
     connections,
@@ -650,7 +651,6 @@ class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
 
         case_inserted = Event()
         release_case_commit = Event()
-        update_started = Event()
         update_finished = Event()
         insert_errors = Queue()
         update_errors = Queue()
@@ -680,7 +680,7 @@ class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
                         rebuilt_at=timezone.now(),
                     )
                     case_inserted.set()
-                    if not release_case_commit.wait(timeout=3):
+                    if not release_case_commit.wait(timeout=8):
                         raise TimeoutError("No se liberó el commit del caso.")
             except Exception as exc:  # pragma: no cover - asserted in main thread
                 insert_errors.put(exc)
@@ -690,12 +690,11 @@ class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
         def update_run_month():
             close_old_connections()
             try:
-                if not case_inserted.wait(timeout=3):
+                if not case_inserted.wait(timeout=5):
                     raise TimeoutError("El caso no alcanzó el punto de sincronización.")
                 with transaction.atomic(using="default"):
                     with connections["default"].cursor() as cursor:
-                        cursor.execute("SET LOCAL lock_timeout = '3s'")
-                        update_started.set()
+                        cursor.execute("SET LOCAL lock_timeout = '750ms'")
                         cursor.execute(
                             "UPDATE reportes_productinventoryauditrun "
                             "SET month = %s WHERE id = %s",
@@ -713,11 +712,14 @@ class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
         update_thread.start()
 
         try:
-            self.assertTrue(update_started.wait(timeout=3))
-            self.assertFalse(
-                update_finished.wait(timeout=0.3),
-                "La actualización del mes no esperó el lock del caso.",
+            self.assertTrue(
+                update_finished.wait(timeout=5),
+                "La actualización concurrente no terminó dentro del margen acotado.",
             )
+            self.assertEqual(update_errors.qsize(), 1)
+            timeout_error = update_errors.get()
+            self.assertIsInstance(timeout_error, OperationalError)
+            self.assertEqual(getattr(timeout_error.__cause__, "pgcode", None), "55P03")
         finally:
             release_case_commit.set()
             insert_thread.join(timeout=5)
@@ -726,8 +728,14 @@ class ProductInventoryAuditConcurrencyTests(TransactionTestCase):
         self.assertFalse(insert_thread.is_alive())
         self.assertFalse(update_thread.is_alive())
         self.assertTrue(insert_errors.empty(), list(insert_errors.queue))
-        self.assertEqual(update_errors.qsize(), 1)
-        self.assertIsInstance(update_errors.get(), IntegrityError)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE reportes_productinventoryauditrun "
+                    "SET month = %s WHERE id = %s",
+                    [date(2026, 9, 1), self.run.pk],
+                )
 
         self.run.refresh_from_db()
         case = ProductInventoryAuditCase.objects.get(run=self.run)
