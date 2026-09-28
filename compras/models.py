@@ -540,16 +540,32 @@ class IntentoCompraDepartamental(models.Model):
             raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo del intento."})
 
     def save(self, *args, **kwargs):
+        db = kwargs.get("using") or self._state.db or "default"
         relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion"), args, kwargs)
         _validar_vinculos_compra(
             relaciones["item"], relaciones["cotizacion"],
-            using=kwargs.get("using") or self._state.db or "default",
+            using=db,
         )
         if self._state.adding and not self.numero:
-            with transaction.atomic():
-                ItemCompraDepartamental.objects.select_for_update().get(pk=self.item_id)
-                ultimo = type(self).objects.filter(item_id=self.item_id).aggregate(models.Max("numero"))["numero__max"]
+            with transaction.atomic(using=db):
+                ItemCompraDepartamental.objects.using(db).select_for_update().get(pk=self.item_id)
+                ultimo = type(self).objects.using(db).filter(item_id=self.item_id).aggregate(models.Max("numero"))["numero__max"]
                 self.numero = (ultimo or 0) + 1
+                return super().save(*args, **kwargs)
+        if not self._state.adding:
+            update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+            with transaction.atomic(using=db):
+                guardado = type(self).objects.using(db).select_for_update().get(pk=self.pk)
+                solicitado = (
+                    self.reembolso_solicitado
+                    if update_fields is None or "reembolso_solicitado" in update_fields
+                    else guardado.reembolso_solicitado
+                )
+                if solicitado is not None:
+                    solicitado = self._meta.get_field("reembolso_solicitado").to_python(solicitado)
+                recibido = self.reembolsos.using(db).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+                if recibido and (solicitado is None or solicitado < recibido):
+                    raise ValidationError({"reembolso_solicitado": "La solicitud no puede ser menor que lo reembolsado."})
                 return super().save(*args, **kwargs)
         return super().save(*args, **kwargs)
 
@@ -563,6 +579,12 @@ class IntentoCompraDepartamental(models.Model):
 
 
 class ReembolsoCompraQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        raise ValidationError("Los reembolsos deben registrarse individualmente.")
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+
     def update(self, **kwargs):
         raise ValidationError("Los reembolsos registrados no pueden modificarse.")
 
@@ -591,6 +613,7 @@ class ReembolsoCompraDepartamental(models.Model):
     def save(self, *args, **kwargs):
         if not self._state.adding:
             raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+        self.importe = self._meta.get_field("importe").to_python(self.importe)
         if self.importe is None or self.importe <= 0:
             raise ValidationError({"importe": "El reembolso debe ser mayor que cero."})
         db = kwargs.get("using") or self._state.db or "default"

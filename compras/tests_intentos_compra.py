@@ -206,6 +206,71 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
                 registrado_por=self.user,
             )
 
+    def test_solicitud_no_puede_bajar_de_reembolso_ya_recibido(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        ReembolsoCompraDepartamental.objects.create(
+            intento=intento, importe=Decimal("600"), fecha=timezone.localdate(),
+            registrado_por=self.user,
+        )
+        intento.reembolso_solicitado = Decimal("500")
+        with self.assertRaises(ValidationError):
+            intento.save(update_fields=["reembolso_solicitado"])
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("1000"))
+        intento.reembolso_solicitado = Decimal("600")
+        intento.save(update_fields=["reembolso_solicitado"])
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("600"))
+
+    def test_solicitud_omitida_en_update_fields_usa_valor_persistido(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        ReembolsoCompraDepartamental.objects.create(
+            intento=intento, importe=Decimal("600"), fecha=timezone.localdate(),
+            registrado_por=self.user,
+        )
+        intento.reembolso_solicitado = Decimal("500")
+        intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSADO
+        intento.save(update_fields=["estado"])
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("1000"))
+
+    def test_reembolso_bloquea_escrituras_masivas_incluido_update_conflicts(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        datos = dict(intento=intento, importe=Decimal("100"), fecha=timezone.localdate(), registrado_por=self.user)
+        nuevo = ReembolsoCompraDepartamental(**datos)
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.bulk_create([nuevo])
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.bulk_create(
+                [nuevo], update_conflicts=True, update_fields=["importe"], unique_fields=["id"],
+            )
+        intento.reembolso_solicitado = Decimal("100")
+        intento.save(update_fields=["reembolso_solicitado"])
+        recibido = ReembolsoCompraDepartamental.objects.create(**datos)
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.bulk_create([
+                ReembolsoCompraDepartamental(**{**datos, "importe": Decimal("200")}),
+            ])
+        recibido.importe = Decimal("200")
+        with self.assertRaises(ValidationError):
+            ReembolsoCompraDepartamental.objects.bulk_update([recibido], ["importe"])
+        self.assertEqual(ReembolsoCompraDepartamental.objects.get(pk=recibido.pk).importe, Decimal("100"))
+
+    def test_reembolso_normaliza_importes_de_cadena_y_float(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("1000")
+        intento.save(update_fields=["reembolso_solicitado"])
+        datos = dict(intento=intento, fecha=timezone.localdate(), registrado_por=self.user)
+        primero = ReembolsoCompraDepartamental.objects.create(importe="400.00", **datos)
+        segundo = ReembolsoCompraDepartamental.objects.create(importe=600.0, **datos)
+        self.assertEqual(primero.importe, Decimal("400.00"))
+        self.assertEqual(segundo.importe, Decimal("600.0"))
+        self.assertEqual(intento.total_reembolsado, Decimal("1000"))
+
 
 class MigracionIntentosCompraTests(TransactionTestCase):
     migrate_from = ("compras", "0015_comprarealizadadepartamental_version_and_more")
