@@ -174,6 +174,57 @@ class BranchInventoryTraceabilityService:
                 exception_count=0,
                 source_complete=False,
             )
+        movement_sources = (
+            sales,
+            production,
+            waste,
+            transfer_in,
+            transfer_out,
+            conversion_in,
+            conversion_out,
+        )
+        movement_keys = set().union(*(source.keys() for source in movement_sources))
+        uncovered_movement_issues = []
+        for branch_id, product_id in sorted(movement_keys):
+            missing_manifests = []
+            if (branch_id, product_id) not in opening:
+                missing_manifests.append("apertura")
+            if (branch_id, product_id) not in closing:
+                missing_manifests.append("cierre")
+            if not missing_manifests:
+                continue
+            source_ids = tuple(
+                dict.fromkeys(
+                    source_id
+                    for source in movement_sources
+                    for source_id in source.get(
+                        (branch_id, product_id), (ZERO, ())
+                    )[1]
+                )
+            )
+            uncovered_movement_issues.append(
+                TraceSourceIssue(
+                    code="SOURCE_INCOMPLETE",
+                    message=(
+                        "El movimiento no tiene evidencia de "
+                        f"{' y '.join(missing_manifests)} para la misma "
+                        "ubicación y producto."
+                    ),
+                    branch_id=branch_id,
+                    product_id=product_id,
+                    source_ids=source_ids,
+                )
+            )
+        if uncovered_movement_issues:
+            return BranchInventoryTraceability(
+                month=month_start,
+                lines=(),
+                global_issues=tuple(uncovered_movement_issues)
+                + tuple(movement_issues),
+                company_difference=ZERO,
+                exception_count=0,
+                source_complete=False,
+            )
         keys = sorted(
             opening.keys()
             | closing.keys()
@@ -401,6 +452,7 @@ class BranchInventoryTraceabilityService:
                 "is_received",
                 "is_cancelled",
                 "is_finalized",
+                "is_open",
                 "is_current_snapshot",
             )
             .order_by("id")
@@ -603,6 +655,38 @@ class BranchInventoryTraceabilityService:
             prefix="TRANSFER_SYNC",
         )
         issues = list(exact_job_issues)
+        open_jobs = list(
+            PointSyncJob.objects.filter(
+                job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+                parameters__mode="open_transfers",
+                parameters__fecha=month_end.isoformat(),
+            )
+            .only(
+                "id",
+                "job_type",
+                "status",
+                "started_at",
+                "parameters",
+                "result_summary",
+            )
+            .order_by("-started_at", "-id")
+        )
+        unrestricted_open_jobs = [
+            job
+            for job in open_jobs
+            if not str((job.parameters or {}).get("branch_filter") or "").strip()
+        ]
+        selected_open_job = (
+            unrestricted_open_jobs[0]
+            if unrestricted_open_jobs
+            else (open_jobs[0] if open_jobs else None)
+        )
+        open_job_issues = (
+            ["OPEN_TRANSFER_SYNC_JOB_MISSING"]
+            if selected_open_job is None
+            else cls._open_transfer_job_contract_issues(selected_open_job)
+        )
+        issues.extend(open_job_issues)
         relevant_rows = [
             row
             for row in rows
@@ -617,7 +701,10 @@ class BranchInventoryTraceabilityService:
         provenance_job_ids = {
             row.sync_job_id for row in relevant_rows if row.sync_job_id is not None
         }
-        known_jobs = {job.id: job for job in jobs if job.id in provenance_job_ids}
+        authority_jobs = [*jobs, *open_jobs]
+        known_jobs = {
+            job.id: job for job in authority_jobs if job.id in provenance_job_ids
+        }
         missing_job_ids = provenance_job_ids - known_jobs.keys()
         if missing_job_ids:
             known_jobs.update(
@@ -630,19 +717,30 @@ class BranchInventoryTraceabilityService:
             if row.sync_job_id is None:
                 continue
             provenance_job = known_jobs.get(row.sync_job_id)
-            provenance_issues = (
-                ["TRANSFER_ROW_PROVENANCE_JOB_MISSING"]
-                if provenance_job is None
-                else cls._transfer_job_contract_issues(
+            if provenance_job is None:
+                provenance_issues = ["TRANSFER_ROW_PROVENANCE_JOB_MISSING"]
+            elif (provenance_job.parameters or {}).get("mode") == "open_transfers":
+                provenance_issues = cls._open_transfer_job_contract_issues(
+                    provenance_job
+                )
+            else:
+                provenance_issues = cls._transfer_job_contract_issues(
                     provenance_job,
                     prefix="TRANSFER_ROW_PROVENANCE",
                 )
-            )
             if (
                 provenance_job is not None
                 and provenance_job.job_type != PointSyncJob.JOB_TYPE_TRANSFERS
             ):
                 provenance_issues.append("TRANSFER_ROW_PROVENANCE_JOB_TYPE_INVALID")
+            if provenance_job is not None:
+                provenance_issues.extend(
+                    cls._transfer_row_coverage_issues(
+                        row,
+                        provenance_job,
+                        month_end=month_end,
+                    )
+                )
             if provenance_issues:
                 invalid_provenance_row_ids.append(row.id)
                 issues.extend(provenance_issues)
@@ -650,6 +748,11 @@ class BranchInventoryTraceabilityService:
             dict.fromkeys(
                 (
                     *((selected.id,) if exact_job_issues else ()),
+                    *(
+                        (selected_open_job.id,)
+                        if open_job_issues and selected_open_job
+                        else ()
+                    ),
                     *unbound_row_ids,
                     *invalid_provenance_row_ids,
                 )
@@ -691,6 +794,53 @@ class BranchInventoryTraceabilityService:
         if min(seen, created, updated) < 0 or seen != created + updated:
             issues.append(f"{prefix}_COUNT_MISMATCH")
         return issues
+
+    @classmethod
+    def _open_transfer_job_contract_issues(cls, job):
+        issues = cls._transfer_job_contract_issues(
+            job,
+            prefix="OPEN_TRANSFER_SYNC",
+        )
+        summary = job.result_summary or {}
+        extra_keys = ("lineas_nuevas", "lineas_actualizadas")
+        if any(key not in summary for key in extra_keys):
+            issues.append("OPEN_TRANSFER_SYNC_CONTRACT_INCOMPLETE")
+            return list(dict.fromkeys(issues))
+        try:
+            new_rows, updated_rows = (int(summary[key]) for key in extra_keys)
+            seen = int(summary["transfer_lines_seen"])
+        except (KeyError, TypeError, ValueError):
+            issues.append("OPEN_TRANSFER_SYNC_CONTRACT_INCOMPLETE")
+            return list(dict.fromkeys(issues))
+        if (
+            min(new_rows, updated_rows) < 0
+            or seen != new_rows + updated_rows
+        ):
+            issues.append("OPEN_TRANSFER_SYNC_COUNT_MISMATCH")
+        return list(dict.fromkeys(issues))
+
+    @staticmethod
+    def _transfer_row_coverage_issues(row, job, *, month_end):
+        parameters = job.parameters or {}
+        usable_receipt = row.is_received and row.received_at is not None
+        if usable_receipt:
+            received_date = timezone.localtime(row.received_at).date()
+            try:
+                coverage_start = date.fromisoformat(str(parameters.get("start_date")))
+                coverage_end = date.fromisoformat(str(parameters.get("end_date")))
+            except (TypeError, ValueError):
+                return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
+            if not coverage_start <= received_date <= coverage_end:
+                return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
+            return []
+        if (
+            parameters.get("mode") != "open_transfers"
+            or parameters.get("fecha") != month_end.isoformat()
+        ):
+            return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
+        if not row.is_open:
+            return ["TRANSFER_ROW_PROVENANCE_OPEN_STATUS_MISMATCH"]
+        return []
 
     def _apply_transfers(
         self,
@@ -757,16 +907,6 @@ class BranchInventoryTraceabilityService:
                             "fue enviada pero aún no tiene recepción",
                         )
                     )
-                if issue_code:
-                    issues.append(
-                        TraceSourceIssue(
-                            code=issue_code,
-                            message=f"La transferencia {row.id} se asignó por coincidencia secundaria.",
-                            branch_id=row.origin_branch_id,
-                            product_id=product_id,
-                            source_ids=(row.id,),
-                        )
-                    )
             if destination_in_month:
                 self._add_balance(
                     transfer_in,
@@ -774,6 +914,45 @@ class BranchInventoryTraceabilityService:
                     row.received_quantity,
                     row.id,
                 )
+            affected_branches = []
+            if origin_in_month:
+                affected_branches.append(row.origin_branch_id)
+            if destination_in_month:
+                affected_branches.append(row.destination_branch_id)
+            if issue_code:
+                for affected_branch_id in dict.fromkeys(affected_branches):
+                    issues.append(
+                        TraceSourceIssue(
+                            code=issue_code,
+                            message=(
+                                f"La transferencia {row.id} se asignó por "
+                                "coincidencia secundaria."
+                            ),
+                            branch_id=affected_branch_id,
+                            product_id=product_id,
+                            source_ids=(row.id,),
+                        )
+                    )
+            if (
+                row.is_received
+                and row.received_at is not None
+                and Decimal(row.sent_quantity) != Decimal(row.received_quantity)
+            ):
+                for affected_branch_id in dict.fromkeys(affected_branches):
+                    issues.append(
+                        TraceSourceIssue(
+                            code="TRANSFER_QUANTITY_MISMATCH",
+                            message=(
+                                f"La transferencia {row.transfer_external_id}/"
+                                f"{row.detail_external_id} registra "
+                                f"{row.sent_quantity} enviadas y "
+                                f"{row.received_quantity} recibidas."
+                            ),
+                            branch_id=affected_branch_id,
+                            product_id=product_id,
+                            source_ids=(row.id,),
+                        )
+                    )
 
     @staticmethod
     def _transfer_issue(row, product_id, code, detail):
@@ -813,12 +992,6 @@ class BranchInventoryTraceabilityService:
                     )
                 )
                 continue
-            self._add_balance(
-                conversion_in,
-                (row.branch_id, destination_id),
-                row.quantity,
-                row.id,
-            )
             if destination_issue:
                 issues.append(
                     TraceSourceIssue(
@@ -832,12 +1005,63 @@ class BranchInventoryTraceabilityService:
             destination_recipe_id = self._resolve_recipe_identity(
                 row.item_code, row.item_name, recipe_indexes
             )
-            origin_id, _origin_issue = self._resolve_product_identity(
-                row.source_item_code,
-                row.source_item_name,
+            relation = relations.get(destination_recipe_id)
+            if relation is None:
+                issues.append(
+                    TraceSourceIssue(
+                        code="NON_DERIVED_CONVERSION",
+                        message=(
+                            f"La fila Point {row.id} no tiene una relación derivada "
+                            "activa y no se aplica como conversión."
+                        ),
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            parent_recipe_id, factor = relation
+            if factor <= ZERO:
+                issues.append(
+                    TraceSourceIssue(
+                        code="CONVERSION_EQUIVALENCE_MISMATCH",
+                        message=f"La conversión {row.id} tiene un factor canónico inválido.",
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+
+            supplied_origin = bool(
+                str(row.source_item_code or "").strip()
+                or str(row.source_item_name or "").strip()
+            )
+            if supplied_origin:
+                origin_code = row.source_item_code
+                origin_name = row.source_item_name
+            else:
+                parent_identity = recipe_indexes["by_id"].get(parent_recipe_id)
+                origin_code, origin_name = parent_identity or ("", "")
+            origin_id, origin_issue = self._resolve_product_identity(
+                origin_code,
+                origin_name,
                 product_indexes,
             )
             if origin_id is None:
+                if origin_issue:
+                    issues.append(
+                        TraceSourceIssue(
+                            code=origin_issue,
+                            message=(
+                                f"El origen de la conversión {row.id} no pudo "
+                                "resolverse de forma inequívoca."
+                            ),
+                            branch_id=row.branch_id,
+                            product_id=destination_id,
+                            source_ids=(row.id,),
+                        )
+                    )
                 issues.append(
                     TraceSourceIssue(
                         code="MISSING_CONVERSION_ORIGIN",
@@ -848,16 +1072,16 @@ class BranchInventoryTraceabilityService:
                     )
                 )
                 continue
-            origin_recipe_id = self._resolve_recipe_identity(
-                row.source_item_code, row.source_item_name, recipe_indexes
+            origin_recipe_id = (
+                self._resolve_recipe_identity(
+                    row.source_item_code,
+                    row.source_item_name,
+                    recipe_indexes,
+                )
+                if supplied_origin
+                else parent_recipe_id
             )
-            relation = relations.get(destination_recipe_id)
-            if (
-                relation is None
-                or origin_recipe_id is None
-                or relation[0] != origin_recipe_id
-                or relation[1] <= ZERO
-            ):
+            if origin_recipe_id != parent_recipe_id:
                 issues.append(
                     TraceSourceIssue(
                         code="CONVERSION_EQUIVALENCE_MISMATCH",
@@ -872,11 +1096,30 @@ class BranchInventoryTraceabilityService:
                 )
                 continue
             self._add_balance(
-                conversion_out,
-                (row.branch_id, origin_id),
-                Decimal(row.quantity) / relation[1],
+                conversion_in,
+                (row.branch_id, destination_id),
+                row.quantity,
                 row.id,
             )
+            self._add_balance(
+                conversion_out,
+                (row.branch_id, origin_id),
+                Decimal(row.quantity) / factor,
+                row.id,
+            )
+            if origin_issue:
+                issues.append(
+                    TraceSourceIssue(
+                        code=origin_issue,
+                        message=(
+                            f"El origen de la conversión {row.id} se asignó por "
+                            "coincidencia secundaria."
+                        ),
+                        branch_id=row.branch_id,
+                        product_id=origin_id,
+                        source_ids=(row.id,),
+                    )
+                )
 
     @staticmethod
     def _add_balance(balances, key, quantity, source_id):
@@ -888,16 +1131,24 @@ class BranchInventoryTraceabilityService:
     def _build_recipe_indexes():
         code_candidates = {}
         name_candidates = {}
-        for recipe in Receta.objects.only("id", "codigo_point", "nombre_normalizado"):
+        by_id = {}
+        for recipe in Receta.objects.only(
+            "id",
+            "codigo_point",
+            "nombre",
+            "nombre_normalizado",
+        ):
             code = recipe.codigo_point.strip()
             if code:
                 code_candidates.setdefault(code, []).append(recipe.id)
             name = recipe.nombre_normalizado.strip()
             if name:
                 name_candidates.setdefault(name, []).append(recipe.id)
+            by_id[recipe.id] = (recipe.codigo_point, recipe.nombre)
         return {
             "code": {key: tuple(value) for key, value in code_candidates.items()},
             "name": {key: tuple(value) for key, value in name_candidates.items()},
+            "by_id": by_id,
         }
 
     @staticmethod

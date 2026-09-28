@@ -26,7 +26,7 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
 )
 from pos_bridge.utils.dates import iter_business_dates
-from recetas.models import Receta, RecetaEquivalencia
+from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
 from ventas.services.sales_canonical_source import (
     OFFICIAL_POINT_SOURCE,
     RECENT_POINT_SOURCE,
@@ -53,6 +53,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.production_job = self._movement_job("production")
         self.waste_job = self._movement_job("waste")
         self.transfer_job = self._movement_job("transfers")
+        self.open_transfer_job = self._movement_job("open_transfers")
         self.conversion_job = self._movement_job("conversions")
 
     def _movement_job(
@@ -73,6 +74,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 PointSyncJob.JOB_TYPE_TRANSFERS,
                 "transfer_lines_seen",
             ),
+            "open_transfers": (
+                PointSyncJob.JOB_TYPE_TRANSFERS,
+                "transfer_lines_seen",
+            ),
             "conversions": (
                 PointSyncJob.JOB_TYPE_INVENTORY,
                 "total_rows",
@@ -89,6 +94,20 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 {
                     "transfer_lines_created": rows_seen,
                     "transfer_lines_updated": 0,
+                }
+            )
+        if family == "open_transfers":
+            parameters = {
+                "mode": "open_transfers",
+                "fecha": "2026-08-31",
+                "branch_filter": branch_filter,
+            }
+            result_summary.update(
+                {
+                    "transfer_lines_created": rows_seen,
+                    "transfer_lines_updated": 0,
+                    "lineas_nuevas": rows_seen,
+                    "lineas_actualizadas": 0,
                 }
             )
         if family == "conversions":
@@ -359,8 +378,11 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         is_received=True,
         is_cancelled=False,
         is_finalized=True,
+        is_open=None,
         is_current_snapshot=True,
         is_insumo=False,
+        item_code=None,
+        item_name=None,
         sync_job=...,
         transfer_external_id=None,
     ):
@@ -379,7 +401,13 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 else None
             )
         if sync_job is ...:
-            sync_job = self.transfer_job
+            sync_job = (
+                self.open_transfer_job
+                if received_at is None
+                else self.transfer_job
+            )
+        if is_open is None:
+            is_open = received_at is None
         row = PointTransferLine.objects.create(
             origin_branch=origin or self.centro,
             destination_branch=destination or self.plaza,
@@ -390,19 +418,27 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             registered_at=registered_at,
             sent_at=sent_at,
             received_at=received_at,
-            item_name=self.product.name,
-            item_code=self.product.external_id,
+            item_name=self.product.name if item_name is None else item_name,
+            item_code=self.product.external_id if item_code is None else item_code,
             sent_quantity=Decimal(sent_quantity),
             received_quantity=Decimal(received_quantity),
             is_received=is_received,
             is_cancelled=is_cancelled,
             is_finalized=is_finalized,
+            is_open=is_open,
             is_current_snapshot=is_current_snapshot,
             is_insumo=is_insumo,
         )
         if sync_job == self.transfer_job:
             self._increment_movement_job(self.transfer_job, "transfer_lines_seen")
             self._increment_movement_job(self.transfer_job, "transfer_lines_created")
+        elif sync_job == self.open_transfer_job:
+            for count_key in (
+                "transfer_lines_seen",
+                "transfer_lines_created",
+                "lineas_nuevas",
+            ):
+                self._increment_movement_job(self.open_transfer_job, count_key)
         return row
 
     def _conversion(
@@ -831,7 +867,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.branch_id, self.centro.id)
         self.assertEqual(issue.source_ids, (ambiguous.id,))
 
-    def test_resolution_precedence_and_movement_only_products_expand_key_universe(self):
+    def test_resolution_precedence_does_not_bypass_missing_closing_evidence(self):
         sku_product = PointProduct.objects.create(
             external_id="EXTERNAL-SKU-TARGET",
             sku="ONLY-SKU-MATCH",
@@ -867,37 +903,34 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        by_product = {line.product.id: line for line in result.lines}
-        self.assertEqual(
-            set(by_product), {self.product.id, sku_product.id, name_product.id}
+        self.assertFalse(result.source_complete)
+        self.assertEqual(result.lines, ())
+        missing_product_ids = {
+            issue.product_id
+            for issue in result.global_issues
+            if issue.code == "SOURCE_INCOMPLETE"
+        }
+        self.assertEqual(missing_product_ids, {sku_product.id, name_product.id})
+        sku_issue = next(
+            issue
+            for issue in result.global_issues
+            if issue.code == "PRODUCT_RESOLVED_BY_SKU"
         )
-        self.assertEqual(by_product[self.product.id].production, Decimal("2"))
-        self.assertEqual(
-            by_product[self.product.id].source_trace["production"],
-            (external_match.id,),
-        )
-        self.assertEqual(by_product[sku_product.id].waste, Decimal("3"))
-        self.assertEqual(
-            by_product[sku_product.id].source_trace["waste"], (sku_match.id,)
-        )
-        sku_issue = by_product[sku_product.id].issues[0]
         self.assertEqual(sku_issue.code, "PRODUCT_RESOLVED_BY_SKU")
         self.assertEqual(sku_issue.branch_id, self.centro.id)
         self.assertEqual(sku_issue.product_id, sku_product.id)
         self.assertEqual(sku_issue.source_ids, (sku_match.id,))
-        self.assertEqual(by_product[name_product.id].production, Decimal("4"))
-        self.assertEqual(
-            by_product[name_product.id].source_trace["production"],
-            (name_match.id,),
+        name_issue = next(
+            issue
+            for issue in result.global_issues
+            if issue.code == "PRODUCT_RESOLVED_BY_NAME"
         )
-        name_issue = by_product[name_product.id].issues[0]
         self.assertEqual(name_issue.code, "PRODUCT_RESOLVED_BY_NAME")
         self.assertEqual(name_issue.branch_id, self.centro.id)
         self.assertEqual(name_issue.product_id, name_product.id)
         self.assertEqual(name_issue.source_ids, (name_match.id,))
-        self.assertEqual(by_product[self.product.id].issues, ())
-        self.assertTrue(result.source_complete)
-        self.assertNotIn(misleading_name_product.id, by_product)
+        self.assertNotIn(misleading_name_product.id, missing_product_ids)
+        self.assertEqual(external_match.item_code, self.product.external_id)
 
     def test_noncanonical_sales_row_makes_required_sales_source_incomplete(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
@@ -1167,8 +1200,20 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             external_id="DEVOLUCIONES",
             name="  Devoluciónes  ",
         )
-        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
-        self._closing(date(2026, 8, 31), {self.centro: Decimal("8")})
+        self._closing_lines(
+            date(2026, 7, 31),
+            {
+                (self.centro, self.product): Decimal("10"),
+                (devoluciones, self.product): Decimal("0"),
+            },
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, self.product): Decimal("8"),
+                (devoluciones, self.product): Decimal("2"),
+            },
+        )
         transfer = self._transfer(
             origin=self.centro,
             destination=devoluciones,
@@ -1184,6 +1229,32 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_branch["DEVOLUCIONES"].waste, Decimal("0"))
         self.assertEqual(by_branch["DEVOLUCIONES"].source_trace["transfers"], (transfer.id,))
         self.assertIsNone(by_branch["DEVOLUCIONES"].branch.erp_branch_id)
+
+    def test_movement_location_missing_from_closings_blocks_false_zero_balance(self):
+        devoluciones = PointBranch.objects.create(
+            external_id="DEVOLUCIONES-MISSING",
+            name="Devoluciones",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("8")})
+        transfer = self._transfer(
+            destination=devoluciones,
+            sent_quantity="2",
+            received_quantity="2",
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(result.source_complete)
+        self.assertEqual(result.lines, ())
+        missing = next(
+            issue
+            for issue in result.global_issues
+            if issue.branch_id == devoluciones.id
+        )
+        self.assertEqual(missing.code, "SOURCE_INCOMPLETE")
+        self.assertEqual(missing.product_id, self.product.id)
+        self.assertEqual(missing.source_ids, (transfer.id,))
 
     def test_incomplete_transfer_records_only_origin_and_auditable_issue(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
@@ -1246,6 +1317,20 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
 
     def test_transfer_legs_use_their_own_operational_month(self):
+        september_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+                "branch_filter": "",
+            },
+            result_summary={
+                "transfer_lines_seen": 1,
+                "transfer_lines_created": 0,
+                "transfer_lines_updated": 1,
+            },
+        )
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
         transfer = self._transfer(
@@ -1253,6 +1338,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             received_quantity="4",
             sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=timezone.get_current_timezone()),
             received_at=datetime(2026, 9, 1, 0, 5, tzinfo=timezone.get_current_timezone()),
+            sync_job=september_job,
         )
 
         august = self.service.build(month=date(2026, 8, 1))
@@ -1344,6 +1430,145 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
         self.assertEqual(issue.source_ids, (transfer.id,))
 
+    def test_open_transfer_snapshot_is_required_for_month_close(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        self.open_transfer_job.delete()
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(result.source_complete)
+        self.assertIn(
+            "OPEN_TRANSFER_SYNC_JOB_MISSING",
+            " ".join(issue.message for issue in result.global_issues),
+        )
+
+    def test_open_transfer_snapshot_contract_rejects_failed_restricted_and_mismatched(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        cases = (
+            ("status", PointSyncJob.STATUS_FAILED, "OPEN_TRANSFER_SYNC_JOB_FAILED"),
+            ("branch_filter", "CENTRO", "OPEN_TRANSFER_SYNC_JOB_RESTRICTED"),
+            ("seen", 1, "OPEN_TRANSFER_SYNC_COUNT_MISMATCH"),
+        )
+        for field, value, expected in cases:
+            with self.subTest(expected=expected):
+                original_status = self.open_transfer_job.status
+                original_parameters = dict(self.open_transfer_job.parameters)
+                original_summary = dict(self.open_transfer_job.result_summary)
+                if field == "status":
+                    self.open_transfer_job.status = value
+                elif field == "branch_filter":
+                    self.open_transfer_job.parameters = {
+                        **original_parameters,
+                        "branch_filter": value,
+                    }
+                else:
+                    self.open_transfer_job.result_summary = {
+                        **original_summary,
+                        "transfer_lines_seen": value,
+                    }
+                self.open_transfer_job.save()
+
+                result = self.service.build(month=date(2026, 8, 1))
+
+                self.assertFalse(result.source_complete)
+                self.assertIn(
+                    expected,
+                    " ".join(issue.message for issue in result.global_issues),
+                )
+                self.open_transfer_job.status = original_status
+                self.open_transfer_job.parameters = original_parameters
+                self.open_transfer_job.result_summary = original_summary
+                self.open_transfer_job.save()
+
+    def test_received_transfer_job_must_cover_received_operational_date(self):
+        unrelated_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-31",
+                "branch_filter": "",
+            },
+            result_summary={
+                "transfer_lines_seen": 1,
+                "transfer_lines_created": 0,
+                "transfer_lines_updated": 1,
+            },
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(
+            sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=timezone.get_current_timezone()),
+            received_at=datetime(2026, 9, 1, 0, 5, tzinfo=timezone.get_current_timezone()),
+            sync_job=unrelated_job,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(result.source_complete)
+        issue = next(
+            issue
+            for issue in result.global_issues
+            if "TRANSFER_ROW_PROVENANCE_DATE_MISMATCH" in issue.message
+        )
+        self.assertEqual(issue.source_ids, (transfer.id,))
+
+    def test_arrival_only_secondary_product_resolution_issue_attaches_to_destination(self):
+        self._closing_lines(
+            date(2026, 7, 31),
+            {(self.centro, self.product): Decimal("0"), (self.plaza, self.product): Decimal("0")},
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {(self.centro, self.product): Decimal("0"), (self.plaza, self.product): Decimal("4")},
+        )
+        transfer = self._transfer(
+            sent_at=datetime(2026, 7, 31, 23, 0, tzinfo=timezone.get_current_timezone()),
+            received_at=datetime(2026, 8, 1, 8, 0, tzinfo=timezone.get_current_timezone()),
+            item_code="",
+            item_name=self.product.name,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        destination = next(line for line in result.lines if line.branch == self.plaza)
+        issue = next(
+            issue
+            for issue in destination.issues
+            if issue.code == "PRODUCT_RESOLVED_BY_NAME"
+        )
+        self.assertEqual(issue.source_ids, (transfer.id,))
+
+    def test_completed_transfer_quantity_mismatch_is_explicit_on_both_legs(self):
+        stocks = {
+            (self.centro, self.product): Decimal("10"),
+            (self.plaza, self.product): Decimal("10"),
+        }
+        self._closing_lines(date(2026, 7, 31), stocks)
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, self.product): Decimal("6"),
+                (self.plaza, self.product): Decimal("13"),
+            },
+        )
+        transfer = self._transfer(sent_quantity="4", received_quantity="3")
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        by_branch = {line.branch.external_id: line for line in result.lines}
+        self.assertEqual(by_branch["CENTRO"].transfer_out, Decimal("4"))
+        self.assertEqual(by_branch["PLAZA"].transfer_in, Decimal("3"))
+        for branch_code in ("CENTRO", "PLAZA"):
+            issue = next(
+                issue
+                for issue in by_branch[branch_code].issues
+                if issue.code == "TRANSFER_QUANTITY_MISMATCH"
+            )
+            self.assertEqual(issue.source_ids, (transfer.id,))
+
     def test_conversion_uses_configured_equivalence_for_both_product_legs(self):
         whole = PointProduct.objects.create(
             external_id="WHOLE-001", sku="WHOLE-001", name="Pastel entero"
@@ -1388,7 +1613,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             product=slice_product,
             quantity="12",
             source_item_code="",
-            source_item_name=whole.name,
+            source_item_name="",
         )
 
         result = self.service.build(month=date(2026, 8, 1))
@@ -1400,7 +1625,192 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_product["SLICE-001"].source_trace["conversions"], (conversion.id,))
         self.assertEqual(result.company_difference, Decimal("0"))
 
-    def test_conversion_missing_origin_keeps_destination_leg_and_does_not_invent_exit(self):
+    def test_blank_origin_uses_active_derived_presentation_parent(self):
+        whole = PointProduct.objects.create(
+            external_id="WHOLE-PRESENTATION",
+            sku="WHOLE-PRESENTATION",
+            name="Pastel presentación entero",
+        )
+        slice_product = PointProduct.objects.create(
+            external_id="SLICE-PRESENTATION",
+            sku="SLICE-PRESENTATION",
+            name="Rebanada presentación",
+        )
+        whole_recipe = Receta.objects.create(
+            nombre=whole.name,
+            codigo_point=whole.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-presentation-whole",
+        )
+        slice_recipe = Receta.objects.create(
+            nombre=slice_product.name,
+            codigo_point=slice_product.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-presentation-slice",
+        )
+        RecetaPresentacionDerivada.objects.create(
+            receta_padre=whole_recipe,
+            receta_derivada=slice_recipe,
+            codigo_point_derivado=slice_product.external_id,
+            nombre_derivado=slice_product.name,
+            unidades_por_padre=Decimal("10"),
+            activo=True,
+        )
+        self._closing_lines(
+            date(2026, 7, 31),
+            {
+                (self.centro, whole): Decimal("3"),
+                (self.centro, slice_product): Decimal("0"),
+            },
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, whole): Decimal("2"),
+                (self.centro, slice_product): Decimal("10"),
+            },
+        )
+        conversion = self._conversion(product=slice_product, quantity="10")
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        by_product = {line.product.external_id: line for line in result.lines}
+        self.assertEqual(
+            by_product[whole.external_id].conversion_out,
+            Decimal("1"),
+        )
+        self.assertEqual(
+            by_product[slice_product.external_id].conversion_in,
+            Decimal("10"),
+        )
+        self.assertEqual(
+            by_product[whole.external_id].source_trace["conversions"],
+            (conversion.id,),
+        )
+
+    def test_supplied_origin_name_matches_parent_and_preserves_secondary_resolution(self):
+        whole = PointProduct.objects.create(
+            external_id="WHOLE-NAME",
+            sku="WHOLE-NAME",
+            name="Pastel origen por nombre",
+        )
+        slice_product = PointProduct.objects.create(
+            external_id="SLICE-NAME",
+            sku="SLICE-NAME",
+            name="Rebanada origen por nombre",
+        )
+        whole_recipe = Receta.objects.create(
+            nombre=whole.name,
+            codigo_point=whole.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-name-whole",
+        )
+        slice_recipe = Receta.objects.create(
+            nombre=slice_product.name,
+            codigo_point=slice_product.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-name-slice",
+        )
+        RecetaEquivalencia.objects.create(
+            receta_porcion=slice_recipe,
+            receta_padre=whole_recipe,
+            factor_conversion=Decimal("12"),
+            activo=True,
+        )
+        stocks = {
+            (self.centro, whole): Decimal("5"),
+            (self.centro, slice_product): Decimal("0"),
+        }
+        self._closing_lines(date(2026, 7, 31), stocks)
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, whole): Decimal("4"),
+                (self.centro, slice_product): Decimal("12"),
+            },
+        )
+        conversion = self._conversion(
+            product=slice_product,
+            source_item_code="",
+            source_item_name=whole.name,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        origin = next(line for line in result.lines if line.product == whole)
+        destination = next(
+            line for line in result.lines if line.product == slice_product
+        )
+        self.assertEqual(origin.conversion_out, Decimal("1"))
+        self.assertEqual(destination.conversion_in, Decimal("12"))
+        issue = next(
+            issue
+            for issue in origin.issues
+            if issue.code == "PRODUCT_RESOLVED_BY_NAME"
+        )
+        self.assertEqual(issue.source_ids, (conversion.id,))
+
+    def test_ambiguous_supplied_conversion_origin_is_preserved_without_quantities(self):
+        for suffix in ("A", "B"):
+            PointProduct.objects.create(
+                external_id=f"WHOLE-AMBIGUOUS-{suffix}",
+                sku=f"WHOLE-AMBIGUOUS-{suffix}",
+                name="Pastel origen ambiguo",
+            )
+        slice_product = PointProduct.objects.create(
+            external_id="SLICE-AMBIGUOUS",
+            sku="SLICE-AMBIGUOUS",
+            name="Rebanada origen ambiguo",
+        )
+        parent_recipe = Receta.objects.create(
+            nombre="Pastel origen ambiguo",
+            codigo_point="RECIPE-AMBIGUOUS-PARENT",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-ambiguous-whole",
+        )
+        slice_recipe = Receta.objects.create(
+            nombre=slice_product.name,
+            codigo_point=slice_product.external_id,
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="trace-ambiguous-slice",
+        )
+        RecetaEquivalencia.objects.create(
+            receta_porcion=slice_recipe,
+            receta_padre=parent_recipe,
+            factor_conversion=Decimal("12"),
+            activo=True,
+        )
+        self._closing_lines(
+            date(2026, 7, 31),
+            {
+                (self.centro, self.product): Decimal("0"),
+                (self.centro, slice_product): Decimal("0"),
+            },
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, self.product): Decimal("0"),
+                (self.centro, slice_product): Decimal("0"),
+            },
+        )
+        conversion = self._conversion(
+            product=slice_product,
+            source_item_name=parent_recipe.nombre,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        line = next(line for line in result.lines if line.product == slice_product)
+        self.assertEqual(line.conversion_in, Decimal("0"))
+        self.assertEqual(line.conversion_out, Decimal("0"))
+        self.assertEqual(
+            {issue.code for issue in line.issues},
+            {"AMBIGUOUS_PRODUCT", "MISSING_CONVERSION_ORIGIN"},
+        )
+        self.assertTrue(all(issue.source_ids == (conversion.id,) for issue in line.issues))
+
+    def test_non_derived_conversion_is_auditable_without_affecting_either_leg(self):
         slice_product = PointProduct.objects.create(
             external_id="SLICE-002", sku="SLICE-002", name="Rebanada sin origen"
         )
@@ -1410,35 +1820,29 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             tipo=Receta.TIPO_PRODUCTO_FINAL,
             hash_contenido="trace-slice-no-origin",
         )
-        whole_recipe = Receta.objects.create(
-            nombre="Entero configurado",
-            codigo_point="WHOLE-002",
-            tipo=Receta.TIPO_PRODUCTO_FINAL,
-            hash_contenido="trace-whole-configured",
+        self._closing_lines(
+            date(2026, 7, 31),
+            {(self.centro, self.product): Decimal("0"), (self.centro, slice_product): Decimal("0")},
         )
-        RecetaEquivalencia.objects.create(
-            receta_porcion=slice_recipe,
-            receta_padre=whole_recipe,
-            factor_conversion=Decimal("12"),
-            activo=True,
+        self._closing_lines(
+            date(2026, 8, 31),
+            {(self.centro, self.product): Decimal("0"), (self.centro, slice_product): Decimal("0")},
         )
-        self._closing(date(2026, 7, 31), {self.centro: Decimal("0")})
-        self._closing(date(2026, 8, 31), {self.centro: Decimal("0")})
         conversion = self._conversion(product=slice_product, quantity="12")
 
         result = self.service.build(month=date(2026, 8, 1))
 
         line = next(line for line in result.lines if line.product == slice_product)
-        self.assertEqual(line.conversion_in, Decimal("12"))
+        self.assertEqual(line.conversion_in, Decimal("0"))
         self.assertEqual(line.conversion_out, Decimal("0"))
-        self.assertEqual(line.issues[0].code, "MISSING_CONVERSION_ORIGIN")
+        self.assertEqual(line.issues[0].code, "NON_DERIVED_CONVERSION")
         self.assertEqual(line.issues[0].source_ids, (conversion.id,))
         self.assertEqual(
             sum((item.conversion_out for item in result.lines), Decimal("0")),
             Decimal("0"),
         )
 
-    def test_conversion_equivalence_mismatch_keeps_result_without_inventing_origin_quantity(self):
+    def test_conversion_equivalence_mismatch_does_not_apply_either_leg(self):
         configured_whole = PointProduct.objects.create(
             external_id="WHOLE-CONFIGURED",
             sku="WHOLE-CONFIGURED",
@@ -1478,8 +1882,20 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             factor_conversion=Decimal("12"),
             activo=True,
         )
-        self._closing(date(2026, 7, 31), {self.centro: Decimal("0")})
-        self._closing(date(2026, 8, 31), {self.centro: Decimal("0")})
+        self._closing_lines(
+            date(2026, 7, 31),
+            {
+                (self.centro, self.product): Decimal("0"),
+                (self.centro, slice_product): Decimal("0"),
+            },
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, self.product): Decimal("0"),
+                (self.centro, slice_product): Decimal("0"),
+            },
+        )
         conversion = self._conversion(
             product=slice_product,
             source_item_code=reported_whole.external_id,
@@ -1489,7 +1905,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         line = next(line for line in result.lines if line.product == slice_product)
-        self.assertEqual(line.conversion_in, Decimal("12"))
+        self.assertEqual(line.conversion_in, Decimal("0"))
         self.assertEqual(line.issues[0].code, "CONVERSION_EQUIVALENCE_MISMATCH")
         self.assertEqual(line.issues[0].source_ids, (conversion.id,))
         self.assertEqual(
@@ -1580,4 +1996,4 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(len(baseline.lines), 1)
         self.assertEqual(len(expanded.lines), 14)
         self.assertEqual(len(expanded_queries), len(baseline_queries))
-        self.assertLessEqual(len(expanded_queries), 23)
+        self.assertLessEqual(len(expanded_queries), 24)
