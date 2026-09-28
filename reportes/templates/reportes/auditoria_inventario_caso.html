@@ -33,41 +33,36 @@
     </div>
     <ol class="inventory-audit-balance-list">
       {% for step in balance_steps %}
-      <li class="{% if step.field == 'expected_closing' or step.field == 'difference' %}is-total{% endif %}">
+      <li data-balance-step="{{ step.field }}" class="{% if step.field == 'expected_closing' or step.field == 'difference' %}is-total{% endif %}">
         <span class="inventory-audit-step-number">{{ step.number }}</span>
         <span class="inventory-audit-step-label">{{ step.label }}</span>
         <span class="inventory-audit-step-operator" aria-hidden="true">{{ step.operator }}</span>
         <strong>{{ step.value|floatformat:"-4"|intcomma }}</strong>
-      </li>
-      {% endfor %}
-    </ol>
-  </section>
-
-  <section class="inventory-audit-evidence" aria-labelledby="evidence-title">
-    <div class="inventory-audit-results-heading">
-      <div><h2 id="evidence-title">Evidencia de origen</h2><p>Solo se consulta la evidencia que formó este caso; la lista principal no carga el historial completo.</p></div>
-    </div>
-    {% if source_evidence %}
-    <ul class="inventory-audit-evidence-list">
-      {% for evidence in source_evidence %}
-      <li>
-        {% if evidence.available %}
-        <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
-        <dl>
-          <div><dt>Cantidad</dt><dd>{{ evidence.quantity|floatformat:"-4"|intcomma }}</dd></div>
-          <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
-          <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
-        </dl>
-        {% else %}
-        <div><strong>{{ evidence.source }}</strong><span>{{ evidence.message }}</span></div>
-        <p>Referencia conservada: Point #{{ evidence.source_id }}</p>
+        {% if step.evidence %}
+        <details class="inventory-audit-step-evidence">
+          <summary>Ver evidencia ({{ step.evidence|length }})</summary>
+          <ul>
+            {% for evidence in step.evidence %}
+            <li>
+              {% if evidence.available %}
+              <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
+              <dl>
+                <div><dt>Cantidad</dt><dd>{{ evidence.quantity|floatformat:"-4"|intcomma }}</dd></div>
+                <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
+                <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
+              </dl>
+              {% else %}
+              <div><strong>{{ evidence.source }}</strong><span>{{ evidence.message }}</span></div>
+              <p>Referencia conservada: Point #{{ evidence.source_id }}</p>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
         {% endif %}
       </li>
       {% endfor %}
-    </ul>
-    {% else %}
-    <div class="inventory-audit-empty"><strong>No hay referencias individuales para mostrar.</strong><p>El saldo permanece visible, pero este caso no guardó identificadores de movimientos.</p></div>
-    {% endif %}
+    </ol>
   </section>
 
   {% if can_explain or can_review %}
@@ -99,7 +94,7 @@
     {% endif %}
     {% if can_review %}
     <div class="inventory-audit-review-context">
-      <strong>Explicación recibida: {{ latest_explanation.reason_code }}</strong>
+      <strong>Explicación recibida: {{ latest_explanation.ui_reason_label }}</strong>
       <p>{{ latest_explanation.notes }}</p>
     </div>
     <div class="inventory-audit-review-actions">
@@ -122,10 +117,10 @@
 
   <section class="inventory-audit-history" aria-labelledby="history-title">
     <div class="inventory-audit-results-heading"><div><h2 id="history-title">Historial del caso</h2><p>Las explicaciones y decisiones permanecen como evidencia de auditoría.</p></div></div>
-    {% if case.events.all %}
+    {% if events %}
     <ol>
-      {% for event in case.events.all %}
-      <li><strong>{{ event.get_action_display }}</strong><span>{{ event.created_at|date:"d/m/Y H:i" }} · {{ event.actor.get_full_name|default:event.actor.username|default:"Sistema" }}</span><p>{{ event.notes }}</p>{% if event.evidence %}<a href="{% url 'reportes:inventory_audit_evidence' case.pk event.pk %}">Descargar evidencia</a>{% endif %}</li>
+      {% for event in events %}
+      <li><strong>{{ event.get_action_display }} · {{ event.ui_reason_label }}</strong><span>{{ event.created_at|date:"d/m/Y H:i" }} · {{ event.actor.get_full_name|default:event.actor.username|default:"Sistema" }}</span><p>{{ event.notes }}</p>{% if event.evidence %}<a href="{% url 'reportes:inventory_audit_evidence' case.pk event.pk %}">Descargar evidencia</a>{% endif %}</li>
       {% endfor %}
     </ol>
     {% else %}

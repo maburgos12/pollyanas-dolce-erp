@@ -15,7 +15,13 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Sucursal, UserModuleAccess, UserProfile
-from pos_bridge.models import PointBranch, PointDailySale, PointProduct
+from pos_bridge.models import (
+    PointBranch,
+    PointConversionLine,
+    PointDailySale,
+    PointProduct,
+    PointTransferLine,
+)
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -201,8 +207,13 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "inventory-audit-table-wrap")
         self.assertContains(response, 'class="inventory-audit-table"')
         content = response.content.decode()
-        self.assertLess(content.index(self.product.name), content.index(balanced_product.name))
-        self.assertLess(content.index(pending_product.name), content.index(balanced_product.name))
+        self.assertContains(response, 'aria-current="page">Excepciones')
+        self.assertContains(response, 'tab=balanced')
+        self.assertContains(response, "Excepciones <span>2</span>", html=True)
+        self.assertContains(response, "Conciliados <span>1</span>", html=True)
+        self.assertContains(response, self.product.name)
+        self.assertContains(response, pending_product.name)
+        self.assertNotContains(response, balanced_product.name)
         self.assertEqual(response.context["kpis"]["balanced"], 1)
         self.assertEqual(response.context["kpis"]["pending"], 1)
         self.assertEqual(response.context["kpis"]["pending_approval"], 1)
@@ -231,6 +242,17 @@ class InventoryTraceabilityViewsTests(TestCase):
             queries.captured_queries,
         )
         rebuild.assert_not_called()
+
+        balanced_response = self.client.get(
+            reverse("reportes:inventory_audit"),
+            {"month": "2026-08", "tab": "balanced"},
+            HTTP_ACCEPT="text/html",
+        )
+        self.assertContains(balanced_response, 'aria-current="page">Conciliados')
+        self.assertContains(balanced_response, balanced_product.name)
+        self.assertNotContains(balanced_response, self.product.name)
+        self.assertNotContains(balanced_response, pending_product.name)
+        self.assertEqual(balanced_response.content.decode().count("<table"), 1)
 
     def test_browser_dashboard_filters_materialized_rows_without_loading_other_months(self):
         other_branch = PointBranch.objects.create(
@@ -297,14 +319,21 @@ class InventoryTraceabilityViewsTests(TestCase):
             "Merma",
             "Transferencias enviadas",
             "Conversiones de salida",
-            "Ajuste identificado",
-            "Cierre esperado",
+            "Ajustes identificados",
+            "Inventario esperado",
             "Cierre Point",
             "Diferencia",
         ]
         positions = [balance_content.index(label) for label in labels]
         self.assertEqual(positions, sorted(positions))
-        self.assertContains(response, "15/08/2026")
+        sales_step = content[
+            content.index('data-balance-step="sales"') : content.index(
+                'data-balance-step="waste"'
+            )
+        ]
+        self.assertIn("15/08/2026", sales_step)
+        self.assertIn("Evidencia ya no disponible en la fuente", sales_step)
+        self.assertNotContains(response, "Evidencia de origen")
         self.assertContains(response, self.branch.name)
         self.assertContains(response, "4")
         self.assertContains(response, f"Point #{sale.pk}")
@@ -315,6 +344,126 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "Cierre Point")
         self.assertContains(response, "Movimientos")
         self.assertContains(response, "Conteo físico")
+
+    def test_browser_detail_groups_transfer_and_conversion_evidence_by_balance_direction(self):
+        other_branch = PointBranch.objects.create(
+            external_id="audit-evidence-other-branch",
+            name="CEDIS auditoría",
+        )
+        incoming_transfer = PointTransferLine.objects.create(
+            origin_branch=other_branch,
+            destination_branch=self.branch,
+            transfer_external_id="TR-IN",
+            detail_external_id="TR-IN-1",
+            source_hash="1" * 64,
+            registered_at=timezone.now(),
+            received_at=timezone.now(),
+            item_name=self.product.name,
+            item_code=self.product.sku,
+            received_quantity=Decimal("3"),
+            received_by="Carolina",
+        )
+        outgoing_transfer = PointTransferLine.objects.create(
+            origin_branch=self.branch,
+            destination_branch=other_branch,
+            transfer_external_id="TR-OUT",
+            detail_external_id="TR-OUT-1",
+            source_hash="2" * 64,
+            registered_at=timezone.now(),
+            sent_at=timezone.now(),
+            item_name=self.product.name,
+            item_code=self.product.sku,
+            sent_quantity=Decimal("2"),
+            sent_by="Johana",
+        )
+        conversion_in = PointConversionLine.objects.create(
+            branch=self.branch,
+            movement_external_id="CONV-IN",
+            source_hash="3" * 64,
+            movement_at=timezone.now(),
+            item_name=self.product.name,
+            item_code=self.product.sku,
+            quantity=Decimal("8"),
+            source_item_name="Pastel entero",
+            source_item_code="ENTERO-1",
+            raw_payload={"responsable": "Carolina"},
+        )
+        conversion_out = PointConversionLine.objects.create(
+            branch=self.branch,
+            movement_external_id="CONV-OUT",
+            source_hash="4" * 64,
+            movement_at=timezone.now(),
+            item_name="Rebanada",
+            item_code="REB-1",
+            quantity=Decimal("10"),
+            source_item_name=self.product.name,
+            source_item_code=self.product.sku,
+            raw_payload={"responsable": "Carolina"},
+        )
+        self.case.source_trace = {
+            "transfers": [incoming_transfer.pk, outgoing_transfer.pk],
+            "conversions": [conversion_in.pk, conversion_out.pk],
+        }
+        self.case.save(update_fields=["source_trace"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        content = response.content.decode()
+        transfer_in_step = content[
+            content.index('data-balance-step="transfer_in"') : content.index(
+                'data-balance-step="conversion_in"'
+            )
+        ]
+        transfer_out_step = content[
+            content.index('data-balance-step="transfer_out"') : content.index(
+                'data-balance-step="conversion_out"'
+            )
+        ]
+        conversion_in_step = content[
+            content.index('data-balance-step="conversion_in"') : content.index(
+                'data-balance-step="sales"'
+            )
+        ]
+        conversion_out_step = content[
+            content.index('data-balance-step="conversion_out"') : content.index(
+                'data-balance-step="identified_adjustment"'
+            )
+        ]
+        self.assertIn("TR-IN", transfer_in_step)
+        self.assertNotIn("TR-OUT", transfer_in_step)
+        self.assertIn("TR-OUT", transfer_out_step)
+        self.assertNotIn("TR-IN", transfer_out_step)
+        self.assertIn("CONV-IN", conversion_in_step)
+        self.assertNotIn("CONV-OUT", conversion_in_step)
+        self.assertIn("CONV-OUT", conversion_out_step)
+        self.assertNotIn("CONV-IN", conversion_out_step)
+
+    def test_browser_detail_maps_reason_codes_without_exposing_internal_tokens(self):
+        ProductInventoryAuditEvent.objects.create(
+            case=self.case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="UNKNOWN_INTERNAL_TOKEN",
+            notes="Explicación histórica",
+            actor=self.explainer,
+        )
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertContains(response, "Causa registrada")
+        self.assertNotContains(response, "UNKNOWN_INTERNAL_TOKEN")
+        stylesheet = Path("static/css/styles.css").read_text()
+        self.assertIn(
+            ".inventory-audit-heading h1 {\n  margin: 7px 0 5px;\n  color: var(--vino);\n  font-family: 'Playfair Display', serif;",
+            stylesheet,
+        )
 
     def test_browser_detail_hides_actions_outside_permission_and_custody(self):
         self.client.force_login(self.viewer)
@@ -601,7 +750,8 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(json_response.json()["fields"]["reason_code"], "CAUSA")
         self.assertEqual(json_response.json()["fields"]["notes"], "")
         self.assertIn('name="reason_code"', json_response.json()["html"])
-        self.assertIn('value="CAUSA"', json_response.json()["html"])
+        self.assertNotIn('value="CAUSA"', json_response.json()["html"])
+        self.assertIn("Causa registrada", json_response.json()["html"])
         self.assertIn('name="evidence"', json_response.json()["html"])
         self.assertEqual(self.case.events.count(), 0)
 
@@ -751,7 +901,8 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(payload["toast"]["type"], "success")
         self.assertEqual(payload["target"], f"#inventory-audit-case-{self.case.pk}")
         self.assertIn(f'id="inventory-audit-case-{self.case.pk}"', payload["html"])
-        self.assertIn("PENDING_APPROVAL", payload["html"])
+        self.assertIn("Pendiente de aprobación", payload["html"])
+        self.assertNotIn(">PENDING_APPROVAL<", payload["html"])
         self.assertEqual(
             payload["redirect"],
             f"{reverse('reportes:inventory_audit_case', args=[self.case.pk])}"

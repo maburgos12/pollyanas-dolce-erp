@@ -68,11 +68,35 @@ BALANCE_SEQUENCE = (
     ("waste", "Merma", "−"),
     ("transfer_out", "Transferencias enviadas", "−"),
     ("conversion_out", "Conversiones de salida", "−"),
-    ("identified_adjustment", "Ajuste identificado", "±"),
-    ("expected_closing", "Cierre esperado", "="),
+    ("identified_adjustment", "Ajustes identificados", "±"),
+    ("expected_closing", "Inventario esperado", "="),
     ("point_closing", "Cierre Point", "↔"),
     ("difference", "Diferencia", "="),
 )
+
+EXCEPTION_STATUSES = (
+    ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+    ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+    ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+)
+RECONCILED_STATUSES = (
+    ProductInventoryAuditCase.MovementStatus.BALANCED,
+    ProductInventoryAuditCase.MovementStatus.RESOLVED,
+)
+
+REASON_LABELS = {
+    "TRANSFER_PENDING": "Transferencia pendiente o desfasada",
+    "CONVERSION": "Conversión o producto rebanado",
+    "WASTE": "Merma registrada o pendiente",
+    "PRODUCTION": "Producción por aclarar",
+    "SALE": "Venta por aclarar",
+    "STOCK_ELSEWHERE": "Producto localizado en otra ubicación",
+    "OTHER": "Otra causa comprobable",
+    "PHYSICAL_EVIDENCE": "Evidencia física",
+    "REVIEWED": "Explicación revisada",
+    "INSUFFICIENT": "Evidencia insuficiente",
+    "CUSTODY_REVIEW": "Revisión de custodia",
+}
 
 
 def _require_report_access(request: HttpRequest) -> None:
@@ -191,9 +215,15 @@ def _missing_evidence_row(source: str, source_id: int) -> dict[str, object]:
     }
 
 
-def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]:
+def _reason_label(reason_code: str) -> str:
+    return REASON_LABELS.get(reason_code, "Causa registrada")
+
+
+def _source_evidence_by_step(
+    case: ProductInventoryAuditCase,
+) -> dict[str, list[dict[str, object]]]:
     trace = case.source_trace if isinstance(case.source_trace, dict) else {}
-    evidence: list[dict[str, object]] = []
+    evidence = {field: [] for field, _label, _operator in BALANCE_SEQUENCE}
 
     def ids_for(source):
         values = trace.get(source, [])
@@ -235,12 +265,22 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
             pk__in=ids_for("conversions")
         ).select_related("branch")
     }
+    source_steps = {
+        "opening": "opening_point",
+        "production": "production",
+        "sales": "sales",
+        "waste": "waste",
+        "adjustments": "identified_adjustment",
+        "closing": "point_closing",
+    }
+
     for source in TRACE_SOURCE_LABELS:
         for source_id in ids_for(source):
+            step = source_steps.get(source)
             if source in {"opening", "closing"}:
                 row = closings.get(source_id)
                 if row:
-                    evidence.append(
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -255,7 +295,7 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
             elif source == "sales":
                 row = sales.get(source_id)
                 if row:
-                    evidence.append(
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -270,7 +310,7 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
             elif source == "production":
                 row = production.get(source_id)
                 if row:
-                    evidence.append(
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -285,7 +325,7 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
             elif source == "waste":
                 row = waste.get(source_id)
                 if row:
-                    evidence.append(
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -301,7 +341,8 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
                 row = transfers.get(source_id)
                 if row:
                     incoming = row.destination_branch_id == case.branch_id
-                    evidence.append(
+                    step = "transfer_in" if incoming else "transfer_out"
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -316,7 +357,12 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
             elif source == "conversions":
                 row = conversions.get(source_id)
                 if row:
-                    evidence.append(
+                    step = (
+                        "conversion_out"
+                        if row.source_item_code == case.product.sku
+                        else "conversion_in"
+                    )
+                    evidence[step].append(
                         _evidence_row(
                             source=source,
                             source_id=source_id,
@@ -328,7 +374,13 @@ def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]
                         )
                     )
                     continue
-            evidence.append(_missing_evidence_row(source, source_id))
+            if step is None:
+                if source == "transfers":
+                    step = "transfer_in" if case.transfer_in else "transfer_out"
+                elif source == "conversions":
+                    step = "conversion_in" if case.conversion_in else "conversion_out"
+            if step is not None:
+                evidence[step].append(_missing_evidence_row(source, source_id))
     return evidence
 
 
@@ -361,12 +413,13 @@ def _case_payload(case: ProductInventoryAuditCase) -> dict[str, object]:
 
 def _case_fragment(case: ProductInventoryAuditCase) -> str:
     anchor = f"inventory-audit-case-{case.pk}"
+    status_label = MOVEMENT_STATUS_LABELS.get(case.movement_status, "Por revisar")
     return (
         f'<article id="{anchor}" data-branch-id="{case.branch_id}" '
         f'data-movement-status="{escape(case.movement_status)}">'
         f"<strong>{escape(case.product.name)}</strong> · "
         f"{escape(case.branch.name)} · "
-        f'<span data-audit-status>{escape(case.movement_status)}</span>'
+        f'<span data-audit-status>{escape(status_label)}</span>'
         "</article>"
     )
 
@@ -437,19 +490,49 @@ def _action_form_fragment(
     message: str,
     fields: dict[str, str],
 ) -> str:
-    reason_code = escape(fields.get("reason_code", ""))
+    raw_reason_code = fields.get("reason_code", "")
     notes = escape(fields.get("notes", ""))
     action_url = escape(request.path)
     csrf_token = escape(get_token(request))
     evidence_field = ""
-    if (
+    is_explanation = (
         request.resolver_match
         and request.resolver_match.url_name == "inventory_audit_explain"
-    ):
+    )
+    if is_explanation:
         evidence_field = (
             '<label>Evidencia opcional '
             '<input type="file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.webp">'
             "</label>"
+        )
+        explanation_codes = (
+            "TRANSFER_PENDING",
+            "CONVERSION",
+            "WASTE",
+            "PRODUCTION",
+            "SALE",
+            "STOCK_ELSEWHERE",
+            "OTHER",
+        )
+        if raw_reason_code and raw_reason_code not in explanation_codes:
+            options = '<option value="" selected>Causa registrada</option>'
+        else:
+            options = '<option value="">Selecciona una causa</option>'
+        options += "".join(
+            f'<option value="{code}"'
+            f'{" selected" if raw_reason_code == code else ""}>'
+            f"{escape(REASON_LABELS[code])}</option>"
+            for code in explanation_codes
+        )
+        reason_field = f'<select name="reason_code" required>{options}</select>'
+    else:
+        safe_review_code = (
+            raw_reason_code if raw_reason_code in {"REVIEWED", "INSUFFICIENT"} else ""
+        )
+        reason_field = (
+            '<select name="reason_code" required>'
+            f'<option value="{escape(safe_review_code)}" selected>'
+            f"{escape(_reason_label(safe_review_code))}</option></select>"
         )
     return (
         f'<article id="inventory-audit-case-{case.pk}">'
@@ -459,7 +542,7 @@ def _action_form_fragment(
         'data-async-action>'
         f'<input type="hidden" name="csrfmiddlewaretoken" value="{csrf_token}">'
         '<label>Causa '
-        f'<input name="reason_code" maxlength="80" value="{reason_code}"></label>'
+        f"{reason_field}</label>"
         '<label>Notas '
         f'<textarea name="notes" maxlength="{MAX_NOTES_LENGTH}">{notes}</textarea>'
         "</label>"
@@ -526,6 +609,7 @@ def _store_evidence(event, uploaded, suffix: str) -> dict[str, object]:
 @require_GET
 def dashboard(request: HttpRequest) -> HttpResponse:
     _require_report_access(request)
+    render_html = _wants_html(request)
     raw_month = (request.GET.get("month") or "").strip()
     if raw_month:
         try:
@@ -540,7 +624,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     branches = []
     selected_branch = (request.GET.get("branch") or "").strip()
     selected_status = (request.GET.get("status") or "").strip()
+    selected_tab = (request.GET.get("tab") or "exceptions").strip()
+    if selected_tab not in {"exceptions", "balanced"}:
+        selected_tab = "exceptions"
     kpis = {"balanced": 0, "pending": 0, "pending_approval": 0}
+    tab_counts = {"exceptions": 0, "balanced": 0}
     if run is not None:
         month_cases = ProductInventoryAuditCase.objects.filter(run=run, month=run.month)
         branches = list(
@@ -582,6 +670,23 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             case_queryset = case_queryset.filter(movement_status=selected_status)
         elif selected_status:
             selected_status = ""
+        tab_totals = case_queryset.aggregate(
+            exceptions=models.Count(
+                "id", filter=models.Q(movement_status__in=EXCEPTION_STATUSES)
+            ),
+            balanced=models.Count(
+                "id", filter=models.Q(movement_status__in=RECONCILED_STATUSES)
+            ),
+        )
+        tab_counts = {name: int(value or 0) for name, value in tab_totals.items()}
+        if render_html or "tab" in request.GET:
+            case_queryset = case_queryset.filter(
+                movement_status__in=(
+                    EXCEPTION_STATUSES
+                    if selected_tab == "exceptions"
+                    else RECONCILED_STATUSES
+                )
+            )
         cases = list(
             case_queryset
             .select_related("branch", "product")
@@ -617,7 +722,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 case.movement_status, "Por revisar"
             )
 
-    if _wants_html(request):
+    if render_html:
         return render(
             request,
             "reportes/auditoria_inventario.html",
@@ -628,8 +733,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "selected_month": run.month.strftime("%Y-%m") if run else raw_month,
                 "selected_branch": selected_branch,
                 "selected_status": selected_status,
+                "selected_tab": selected_tab,
                 "status_options": ProductInventoryAuditCase.MovementStatus.choices,
                 "kpis": kpis,
+                "tab_counts": tab_counts,
             },
         )
     return JsonResponse(
@@ -689,6 +796,14 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
         except PermissionDenied:
             has_custody = False
         latest_explanation = _latest_explanation(case)
+        source_evidence = _source_evidence_by_step(case)
+        events = list(case.events.all())
+        for event in events:
+            event.ui_reason_label = _reason_label(event.reason_code)
+        if latest_explanation is not None:
+            latest_explanation.ui_reason_label = _reason_label(
+                latest_explanation.reason_code
+            )
         return render(
             request,
             "reportes/auditoria_inventario_caso.html",
@@ -703,12 +818,13 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
                         "label": label,
                         "operator": operator,
                         "value": getattr(case, field),
+                        "evidence": source_evidence[field],
                     }
                     for index, (field, label, operator) in enumerate(
                         BALANCE_SEQUENCE, start=1
                     )
                 ],
-                "source_evidence": _source_evidence(case),
+                "events": events,
                 "latest_explanation": latest_explanation,
                 "can_explain": (
                     has_custody

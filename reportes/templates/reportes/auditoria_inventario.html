@@ -24,6 +24,7 @@
   </section>
 
   <form class="inventory-audit-filters" method="get" aria-label="Filtros de auditoría">
+    <input name="tab" type="hidden" value="{{ selected_tab }}">
     <label for="inventory-audit-month">Mes
       <input id="inventory-audit-month" name="month" type="month" value="{{ selected_month }}" required>
     </label>
@@ -46,6 +47,11 @@
     <button class="btn btn-primary" type="submit">Aplicar filtros</button>
   </form>
 
+  <nav class="inventory-audit-tabs" aria-label="Conjunto de resultados">
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=exceptions"{% if selected_tab == 'exceptions' %} aria-current="page"{% endif %}>Excepciones <span>{{ tab_counts.exceptions }}</span></a>
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Conciliados <span>{{ tab_counts.balanced }}</span></a>
+  </nav>
+
   {% if run and run.status == 'SOURCE_INCOMPLETE' %}
   <div class="inventory-audit-notice" role="status">
     <strong>El mes todavía no puede conciliarse completo.</strong>
@@ -56,8 +62,8 @@
   <section class="inventory-audit-results" aria-labelledby="inventory-audit-results-title">
     <div class="inventory-audit-results-heading">
       <div>
-        <h2 id="inventory-audit-results-title">Productos por revisar</h2>
-        <p>La diferencia por sí sola no determina merma ni responsabilidad; abre el caso para seguir la evidencia.</p>
+        <h2 id="inventory-audit-results-title">{% if selected_tab == 'balanced' %}Productos conciliados{% else %}Productos por revisar{% endif %}</h2>
+        <p>{% if selected_tab == 'balanced' %}Estos productos cuadran con Point o tienen una explicación aprobada.{% else %}La diferencia por sí sola no determina merma ni responsabilidad; abre el caso para seguir la evidencia.{% endif %}</p>
       </div>
       <span>{{ cases|length }} resultado{{ cases|length|pluralize }}</span>
     </div>
