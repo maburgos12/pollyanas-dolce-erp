@@ -766,7 +766,7 @@ def task_open_transfer_closing_snapshot(
     operational_date = timezone.localdate() - timedelta(days=1)
     user = _resolve_user(triggered_by_id)
     try:
-        with point_account_session_lock(wait=True) as acquired:
+        with point_account_session_lock(wait=False) as acquired:
             if not acquired:
                 raise TimeoutError(
                     "Point está ocupado con otra sincronización de cuenta."

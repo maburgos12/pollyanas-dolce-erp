@@ -35,7 +35,7 @@ class OpenTransferTaskTests(SimpleTestCase):
 
         result = task_open_transfer_closing_snapshot()
 
-        session_lock.assert_called_once_with(wait=True)
+        session_lock.assert_called_once_with(wait=False)
         service_class.return_value.sync_open_transfers.assert_called_once_with(
             fecha=date(2026, 8, 31),
             branch_filter=None,
