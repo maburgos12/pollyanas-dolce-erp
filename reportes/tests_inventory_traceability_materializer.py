@@ -1,0 +1,446 @@
+from __future__ import annotations
+
+from datetime import date
+from decimal import Decimal
+from io import StringIO
+from unittest.mock import patch
+
+from django.core.management import call_command
+from django.core.management.base import CommandError
+from django.test import TestCase
+
+from pos_bridge.models import PointBranch, PointProduct
+from pos_bridge.services.branch_inventory_traceability_service import (
+    BranchInventoryTraceability,
+    BranchProductBalance,
+    TraceSourceIssue,
+)
+from reportes.models import (
+    ProductInventoryAuditCase,
+    ProductInventoryAuditEvent,
+    ProductInventoryAuditRun,
+)
+from reportes.services_inventory_traceability import InventoryAuditMaterializer
+
+
+ZERO = Decimal("0")
+MONTH = date(2026, 8, 1)
+
+
+class MutableTraceabilityService:
+    def __init__(self, result):
+        self.result = result
+        self.months = []
+
+    def build(self, month):
+        self.months.append(month)
+        return self.result
+
+
+class TraceabilityTestFixtures:
+    @classmethod
+    def setUpTestData(cls):
+        cls.branch = PointBranch.objects.create(external_id="CENTRO", name="Centro")
+        cls.product = PointProduct.objects.create(
+            external_id="PASTEL-001",
+            sku="PASTEL-001",
+            name="Pastel de prueba",
+        )
+
+    def _line(
+        self,
+        *,
+        closing=Decimal("11"),
+        issues=(),
+        source_trace=None,
+    ):
+        opening = Decimal("10")
+        production = Decimal("2")
+        sales = Decimal("2")
+        expected = Decimal("10")
+        return BranchProductBalance(
+            branch=self.branch,
+            product=self.product,
+            opening=opening,
+            production=production,
+            sales=sales,
+            waste=ZERO,
+            transfer_in=ZERO,
+            transfer_out=ZERO,
+            conversion_in=ZERO,
+            conversion_out=ZERO,
+            identified_adjustment=ZERO,
+            expected_closing=expected,
+            point_closing=closing,
+            difference=closing - expected,
+            source_trace=source_trace
+            or {
+                "opening": (11,),
+                "closing": (22,),
+                "sales": (33, 34),
+                "production": (44,),
+                "waste": (),
+                "transfers": (),
+                "conversions": (),
+                "adjustments": (),
+            },
+            issues=tuple(issues),
+        )
+
+    def _result(self, *lines, source_complete=True, global_issues=()):
+        return BranchInventoryTraceability(
+            month=MONTH,
+            lines=tuple(lines),
+            global_issues=tuple(global_issues),
+            company_difference=sum((line.difference for line in lines), ZERO),
+            exception_count=sum(line.difference != ZERO for line in lines),
+            source_complete=source_complete,
+        )
+
+    def _materializer(self, result):
+        return InventoryAuditMaterializer(
+            traceability_service=MutableTraceabilityService(result)
+        )
+
+    def _approve_case(self, case):
+        explanation = ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="CONTEO_VALIDADO",
+            notes="Explicación validada.",
+        )
+        ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.APPROVE,
+            reason_code="APROBACION_OPERATIVA",
+            related_event=explanation,
+        )
+        case.movement_status = ProductInventoryAuditCase.MovementStatus.RESOLVED
+        case.save(update_fields=["movement_status", "updated_at"])
+        return case
+
+
+class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_two_identical_rebuilds_are_idempotent(self):
+        materializer = self._materializer(self._result(self._line()))
+
+        first = materializer.rebuild(MONTH)
+        second = materializer.rebuild(date(2026, 8, 19))
+
+        self.assertEqual(
+            first,
+            {
+                "created": 1,
+                "updated": 0,
+                "unchanged": 0,
+                "reopened": 0,
+                "balanced": 0,
+                "exceptions": 1,
+                "source_incomplete": 0,
+            },
+        )
+        self.assertEqual(second["created"], 0)
+        self.assertEqual(second["updated"], 0)
+        self.assertEqual(second["unchanged"], 1)
+        self.assertEqual(second["reopened"], 0)
+        self.assertEqual(ProductInventoryAuditRun.objects.count(), 1)
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertEqual(ProductInventoryAuditEvent.objects.count(), 0)
+
+    def test_identical_fingerprint_preserves_approved_resolution(self):
+        materializer = self._materializer(self._result(self._line()))
+        materializer.rebuild(MONTH)
+        case = self._approve_case(ProductInventoryAuditCase.objects.get())
+        event_count = case.events.count()
+
+        counts = materializer.rebuild(MONTH)
+
+        case.refresh_from_db()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.RESOLVED,
+        )
+        self.assertEqual(counts["unchanged"], 1)
+        self.assertEqual(counts["reopened"], 0)
+        self.assertEqual(case.events.count(), event_count)
+
+    def test_changed_fingerprint_reopens_approved_case_with_system_event(self):
+        service = MutableTraceabilityService(self._result(self._line()))
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        case = self._approve_case(ProductInventoryAuditCase.objects.get())
+        previous_fingerprint = case.calculation_fingerprint
+        service.result = self._result(self._line(closing=Decimal("12")))
+
+        counts = materializer.rebuild(MONTH)
+
+        case.refresh_from_db()
+        event = case.events.filter(
+            action=ProductInventoryAuditEvent.Action.REOPEN
+        ).get()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+        )
+        self.assertEqual(counts["reopened"], 1)
+        self.assertEqual(event.reason_code, "SOURCE_FINGERPRINT_CHANGED")
+        self.assertIsNone(event.actor)
+        self.assertEqual(event.metadata["previous_fingerprint"], previous_fingerprint)
+        self.assertEqual(
+            event.metadata["new_fingerprint"], case.calculation_fingerprint
+        )
+
+    def test_changed_fingerprint_reopens_approved_case_even_if_new_balance_is_zero(self):
+        service = MutableTraceabilityService(self._result(self._line()))
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        self._approve_case(ProductInventoryAuditCase.objects.get())
+        service.result = self._result(self._line(closing=Decimal("10")))
+
+        counts = materializer.rebuild(MONTH)
+
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+        )
+        self.assertEqual(counts["reopened"], 1)
+        self.assertEqual(counts["exceptions"], 1)
+        self.assertEqual(counts["balanced"], 0)
+
+    def test_required_source_failure_updates_only_header_and_preserves_cases(self):
+        service = MutableTraceabilityService(self._result(self._line()))
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        run = ProductInventoryAuditRun.objects.get()
+        successful_at = run.last_successful_rebuild_at
+        case = ProductInventoryAuditCase.objects.get()
+        previous_values = (
+            case.point_closing,
+            case.calculation_fingerprint,
+            case.movement_status,
+        )
+        issue = TraceSourceIssue(
+            code="SOURCE_INCOMPLETE",
+            message="Falta cierre Point verificado para 2026-08-31.",
+        )
+        service.result = self._result(
+            source_complete=False,
+            global_issues=(issue,),
+        )
+
+        counts = materializer.rebuild(MONTH)
+
+        run.refresh_from_db()
+        case.refresh_from_db()
+        self.assertEqual(run.status, ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE)
+        self.assertEqual(run.source_issues[0]["code"], "SOURCE_INCOMPLETE")
+        self.assertEqual(run.last_successful_rebuild_at, successful_at)
+        self.assertEqual(
+            (
+                case.point_closing,
+                case.calculation_fingerprint,
+                case.movement_status,
+            ),
+            previous_values,
+        )
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertEqual(counts["source_incomplete"], 1)
+        self.assertEqual(counts["unchanged"], 1)
+
+    def test_case_missing_from_complete_rebuild_is_retained_as_source_incomplete(self):
+        service = MutableTraceabilityService(self._result(self._line()))
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        service.result = self._result()
+
+        counts = materializer.rebuild(MONTH)
+
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+        )
+        self.assertIn("CASE_MISSING_FROM_REBUILD", case.issue_codes)
+        self.assertEqual(counts["updated"], 1)
+        self.assertEqual(counts["source_incomplete"], 1)
+
+    def test_fingerprint_is_stable_for_reordered_issues_and_source_ids(self):
+        first_issues = (
+            TraceSourceIssue("B", "Segundo", self.branch.id, self.product.id, (8, 7)),
+            TraceSourceIssue("A", "Primero", self.branch.id, self.product.id, (6,)),
+        )
+        first_trace = {
+            "closing": (22,),
+            "opening": (11,),
+            "sales": (34, 33),
+            "production": (44,),
+            "waste": (),
+            "transfers": (),
+            "conversions": (),
+            "adjustments": (),
+        }
+        service = MutableTraceabilityService(
+            self._result(self._line(issues=first_issues, source_trace=first_trace))
+        )
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        fingerprint = ProductInventoryAuditCase.objects.get().calculation_fingerprint
+        service.result = self._result(
+            self._line(
+                issues=tuple(reversed(first_issues)),
+                source_trace={
+                    **first_trace,
+                    "sales": tuple(reversed(first_trace["sales"])),
+                },
+            )
+        )
+
+        counts = materializer.rebuild(MONTH)
+
+        self.assertEqual(counts["unchanged"], 1)
+        self.assertEqual(
+            ProductInventoryAuditCase.objects.get().calculation_fingerprint,
+            fingerprint,
+        )
+
+    def test_line_with_source_issue_is_classified_source_incomplete(self):
+        issue = TraceSourceIssue(
+            code="SOURCE_INCOMPLETE",
+            message="Falta evidencia de transferencia.",
+            branch_id=self.branch.id,
+            product_id=self.product.id,
+            source_ids=(91,),
+        )
+
+        counts = self._materializer(
+            self._result(self._line(closing=Decimal("10"), issues=(issue,)))
+        ).rebuild(MONTH)
+
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+        )
+        self.assertEqual(counts["source_incomplete"], 1)
+        self.assertEqual(counts["balanced"], 0)
+        self.assertEqual(
+            ProductInventoryAuditRun.objects.get().status,
+            ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+        )
+
+    def test_dry_run_returns_counts_without_any_database_write(self):
+        counts = self._materializer(self._result(self._line())).rebuild(
+            MONTH,
+            dry_run=True,
+        )
+
+        self.assertEqual(counts["created"], 1)
+        self.assertEqual(counts["exceptions"], 1)
+        self.assertEqual(
+            set(counts),
+            {
+                "created",
+                "updated",
+                "unchanged",
+                "reopened",
+                "balanced",
+                "exceptions",
+                "source_incomplete",
+            },
+        )
+        self.assertFalse(ProductInventoryAuditRun.objects.exists())
+        self.assertFalse(ProductInventoryAuditCase.objects.exists())
+        self.assertFalse(ProductInventoryAuditEvent.objects.exists())
+
+    def test_incomplete_source_dry_run_does_not_write_header(self):
+        issue = TraceSourceIssue(
+            code="SOURCE_INCOMPLETE",
+            message="Falta cierre Point verificado para 2026-08-31.",
+        )
+
+        counts = self._materializer(
+            self._result(source_complete=False, global_issues=(issue,))
+        ).rebuild(MONTH, dry_run=True)
+
+        self.assertFalse(counts.required_sources_available)
+        self.assertEqual(counts["source_incomplete"], 1)
+        self.assertFalse(ProductInventoryAuditRun.objects.exists())
+        self.assertFalse(ProductInventoryAuditCase.objects.exists())
+
+
+class RebuildProductInventoryAuditCommandTests(TraceabilityTestFixtures, TestCase):
+    def test_command_rejects_non_strict_month_format(self):
+        for invalid in ("2026-8", "2026-08-01", "08-2026", "2026/08"):
+            with self.subTest(invalid=invalid), self.assertRaises(CommandError):
+                call_command("rebuild_product_inventory_audit", month=invalid)
+
+    def test_command_prints_exact_counters_and_dry_run_writes_nothing(self):
+        fake = MutableTraceabilityService(self._result(self._line()))
+        stdout = StringIO()
+
+        with patch(
+            "reportes.services_inventory_traceability.BranchInventoryTraceabilityService",
+            return_value=fake,
+        ):
+            call_command(
+                "rebuild_product_inventory_audit",
+                month="2026-08",
+                dry_run=True,
+                stdout=stdout,
+            )
+
+        output = stdout.getvalue()
+        for key in (
+            "created",
+            "updated",
+            "unchanged",
+            "reopened",
+            "balanced",
+            "exceptions",
+            "source_incomplete",
+        ):
+            self.assertIn(f"{key}=", output)
+        self.assertFalse(ProductInventoryAuditRun.objects.exists())
+
+    def test_command_errors_for_missing_required_closing_after_recording_header(self):
+        issue = TraceSourceIssue(
+            code="SOURCE_INCOMPLETE",
+            message="Falta cierre Point verificado para 2026-08-31.",
+        )
+        fake = MutableTraceabilityService(
+            self._result(source_complete=False, global_issues=(issue,))
+        )
+
+        with patch(
+            "reportes.services_inventory_traceability.BranchInventoryTraceabilityService",
+            return_value=fake,
+        ), self.assertRaisesMessage(CommandError, "fuentes requeridas"):
+            call_command("rebuild_product_inventory_audit", month="2026-08")
+
+        run = ProductInventoryAuditRun.objects.get(month=MONTH)
+        self.assertEqual(run.status, ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE)
+        self.assertFalse(ProductInventoryAuditCase.objects.exists())
+
+    def test_command_does_not_error_when_required_closings_exist_but_case_is_incomplete(self):
+        issue = TraceSourceIssue(
+            code="SOURCE_INCOMPLETE",
+            message="Falta evidencia de un movimiento.",
+            branch_id=self.branch.id,
+            product_id=self.product.id,
+            source_ids=(91,),
+        )
+        fake = MutableTraceabilityService(
+            self._result(self._line(issues=(issue,)), source_complete=True)
+        )
+
+        with patch(
+            "reportes.services_inventory_traceability.BranchInventoryTraceabilityService",
+            return_value=fake,
+        ):
+            call_command("rebuild_product_inventory_audit", month="2026-08")
+
+        self.assertEqual(
+            ProductInventoryAuditRun.objects.get().status,
+            ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+        )

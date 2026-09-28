@@ -1,0 +1,459 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from datetime import date
+from decimal import Decimal
+
+from django.db import transaction
+from django.utils import timezone
+
+from pos_bridge.services.branch_inventory_traceability_service import (
+    BranchInventoryTraceabilityService,
+    TraceSourceIssue,
+)
+from reportes.models import (
+    PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS,
+    ProductInventoryAuditCase,
+    ProductInventoryAuditEvent,
+    ProductInventoryAuditRun,
+)
+
+
+_QUANTITY = Decimal("0.0001")
+_MISSING_CASE_ISSUE = "CASE_MISSING_FROM_REBUILD"
+
+
+class InventoryAuditRebuildCounts(dict):
+    """Seven public counters plus non-serialized source availability."""
+
+    def __init__(self, *, required_sources_available: bool):
+        super().__init__(
+            {key: 0 for key in PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS}
+        )
+        self.required_sources_available = required_sources_available
+
+
+def _empty_counts(*, required_sources_available=True) -> InventoryAuditRebuildCounts:
+    return InventoryAuditRebuildCounts(
+        required_sources_available=required_sources_available
+    )
+
+
+def _decimal_text(value: Decimal) -> str:
+    return format(Decimal(value).quantize(_QUANTITY), "f")
+
+
+def _issue_payload(issue: TraceSourceIssue) -> dict[str, object]:
+    return {
+        "code": issue.code,
+        "message": issue.message,
+        "branch_id": issue.branch_id,
+        "product_id": issue.product_id,
+        "source_ids": sorted({int(source_id) for source_id in issue.source_ids}),
+    }
+
+
+def _sorted_issue_payloads(issues) -> list[dict[str, object]]:
+    payloads = [_issue_payload(issue) for issue in issues]
+    return sorted(
+        payloads,
+        key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
+    )
+
+
+def _source_trace_payload(source_trace) -> dict[str, list[int]]:
+    return {
+        str(source_name): sorted({int(source_id) for source_id in source_ids})
+        for source_name, source_ids in sorted(source_trace.items())
+    }
+
+
+def _sha256(payload: object) -> str:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+class InventoryAuditMaterializer:
+    def __init__(self, *, traceability_service=None):
+        self.traceability_service = (
+            traceability_service or BranchInventoryTraceabilityService()
+        )
+
+    def rebuild(self, month: date, dry_run: bool = False) -> dict[str, int]:
+        month_start = month.replace(day=1)
+        traceability = self.traceability_service.build(month_start)
+        now = timezone.now()
+
+        if not traceability.source_complete:
+            return self._record_incomplete_run(
+                month=month_start,
+                traceability=traceability,
+                now=now,
+                dry_run=dry_run,
+            )
+
+        with transaction.atomic():
+            existing_cases = {
+                (case.branch_id, case.product_id): case
+                for case in ProductInventoryAuditCase.objects.select_for_update().filter(
+                    month=month_start
+                )
+            }
+            prepared_lines = [
+                self._prepare_line(line) for line in traceability.lines
+            ]
+            counts = self._preview_complete_counts(
+                prepared_lines=prepared_lines,
+                existing_cases=existing_cases,
+            )
+            run_fingerprint = self._run_fingerprint(
+                month=month_start,
+                line_fingerprints=[item["fingerprint"] for item in prepared_lines],
+                global_issues=traceability.global_issues,
+            )
+
+            if dry_run:
+                transaction.set_rollback(True)
+                return counts
+
+            run, _ = ProductInventoryAuditRun.objects.update_or_create(
+                month=month_start,
+                defaults={
+                    "status": (
+                        ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE
+                        if counts["source_incomplete"]
+                        else ProductInventoryAuditRun.Status.READY
+                    ),
+                    "source_issues": _sorted_issue_payloads(
+                        traceability.global_issues
+                    ),
+                    "summary": counts,
+                    "calculation_fingerprint": run_fingerprint,
+                    "started_at": now,
+                    "rebuilt_at": now,
+                },
+            )
+            seen_keys = set()
+            for prepared in prepared_lines:
+                key = prepared["key"]
+                seen_keys.add(key)
+                existing = existing_cases.get(key)
+                if (
+                    existing is not None
+                    and existing.calculation_fingerprint == prepared["fingerprint"]
+                ):
+                    continue
+                self._persist_line(
+                    run=run,
+                    month=month_start,
+                    prepared=prepared,
+                    existing=existing,
+                    now=now,
+                )
+
+            for key, existing in existing_cases.items():
+                if key in seen_keys:
+                    continue
+                self._mark_missing_case(run=run, case=existing, now=now)
+
+            run.last_successful_rebuild_at = now
+            run.save(update_fields=["last_successful_rebuild_at", "updated_at"])
+            return counts
+
+    def _record_incomplete_run(
+        self,
+        *,
+        month,
+        traceability,
+        now,
+        dry_run,
+    ) -> dict[str, int]:
+        existing_count = ProductInventoryAuditCase.objects.filter(month=month).count()
+        counts = _empty_counts(required_sources_available=False)
+        counts["unchanged"] = existing_count
+        counts["source_incomplete"] = max(1, len(traceability.global_issues))
+        issues = _sorted_issue_payloads(traceability.global_issues)
+        fingerprint = self._run_fingerprint(
+            month=month,
+            line_fingerprints=(),
+            global_issues=traceability.global_issues,
+        )
+        if dry_run:
+            return counts
+
+        with transaction.atomic():
+            ProductInventoryAuditRun.objects.update_or_create(
+                month=month,
+                defaults={
+                    "status": ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+                    "source_issues": issues,
+                    "summary": counts,
+                    "calculation_fingerprint": fingerprint,
+                    "started_at": now,
+                    "rebuilt_at": now,
+                },
+            )
+        return counts
+
+    def _prepare_line(self, line) -> dict[str, object]:
+        issues = _sorted_issue_payloads(line.issues)
+        source_trace = _source_trace_payload(line.source_trace)
+        quantities = {
+            "opening_point": _decimal_text(line.opening),
+            "production": _decimal_text(line.production),
+            "sales": _decimal_text(line.sales),
+            "waste": _decimal_text(line.waste),
+            "transfer_in": _decimal_text(line.transfer_in),
+            "transfer_out": _decimal_text(line.transfer_out),
+            "conversion_in": _decimal_text(line.conversion_in),
+            "conversion_out": _decimal_text(line.conversion_out),
+            "identified_adjustment": _decimal_text(line.identified_adjustment),
+            "expected_closing": _decimal_text(line.expected_closing),
+            "point_closing": _decimal_text(line.point_closing),
+            "difference": _decimal_text(line.difference),
+        }
+        fingerprint = _sha256(
+            {
+                "branch_id": line.branch.id,
+                "product_id": line.product.id,
+                "quantities": quantities,
+                "issues": issues,
+                "source_trace": source_trace,
+            }
+        )
+        issue_codes = sorted({str(issue["code"]) for issue in issues})
+        if "SOURCE_INCOMPLETE" in issue_codes:
+            movement_status = ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
+        elif Decimal(line.difference) == 0 and not issue_codes:
+            movement_status = ProductInventoryAuditCase.MovementStatus.BALANCED
+        else:
+            movement_status = ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
+        return {
+            "key": (line.branch.id, line.product.id),
+            "line": line,
+            "quantities": quantities,
+            "issues": issues,
+            "issue_codes": issue_codes,
+            "source_trace": source_trace,
+            "fingerprint": fingerprint,
+            "movement_status": movement_status,
+        }
+
+    def _preview_complete_counts(self, *, prepared_lines, existing_cases):
+        counts = _empty_counts()
+        seen_keys = set()
+        for prepared in prepared_lines:
+            key = prepared["key"]
+            seen_keys.add(key)
+            existing = existing_cases.get(key)
+            unchanged = (
+                existing is not None
+                and existing.calculation_fingerprint == prepared["fingerprint"]
+            )
+            if existing is None:
+                counts["created"] += 1
+            elif unchanged:
+                counts["unchanged"] += 1
+            else:
+                counts["updated"] += 1
+                if existing.movement_status in {
+                    ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                    ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+                }:
+                    counts["reopened"] += 1
+            self._increment_classification(
+                counts,
+                self._effective_status(
+                    prepared_status=prepared["movement_status"],
+                    existing=existing,
+                    unchanged=unchanged,
+                ),
+            )
+
+        for key, existing in existing_cases.items():
+            if key in seen_keys:
+                continue
+            missing_fingerprint = self._missing_case_fingerprint(existing)
+            if (
+                existing.movement_status
+                == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
+                and existing.calculation_fingerprint == missing_fingerprint
+                and _MISSING_CASE_ISSUE in existing.issue_codes
+            ):
+                counts["unchanged"] += 1
+            else:
+                counts["updated"] += 1
+                if existing.movement_status in {
+                    ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                    ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+                }:
+                    counts["reopened"] += 1
+            counts["source_incomplete"] += 1
+        return counts
+
+    @staticmethod
+    def _increment_classification(counts, movement_status):
+        if movement_status == ProductInventoryAuditCase.MovementStatus.BALANCED:
+            counts["balanced"] += 1
+        elif movement_status == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE:
+            counts["source_incomplete"] += 1
+        else:
+            counts["exceptions"] += 1
+
+    @staticmethod
+    def _effective_status(*, prepared_status, existing, unchanged):
+        if unchanged:
+            return existing.movement_status
+        if (
+            existing is not None
+            and existing.movement_status
+            in {
+                ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+            }
+            and prepared_status
+            != ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
+        ):
+            return ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
+        return prepared_status
+
+    def _persist_line(self, *, run, month, prepared, existing, now):
+        line = prepared["line"]
+        movement_status = self._effective_status(
+            prepared_status=prepared["movement_status"],
+            existing=existing,
+            unchanged=False,
+        )
+        previous_fingerprint = None
+        should_reopen = False
+        if existing is not None:
+            previous_fingerprint = existing.calculation_fingerprint
+            should_reopen = existing.movement_status in {
+                ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+            }
+
+        defaults = {
+            "run": run,
+            "opening_point": line.opening,
+            "production": line.production,
+            "sales": line.sales,
+            "waste": line.waste,
+            "transfer_in": line.transfer_in,
+            "transfer_out": line.transfer_out,
+            "conversion_in": line.conversion_in,
+            "conversion_out": line.conversion_out,
+            "identified_adjustment": line.identified_adjustment,
+            "expected_closing": line.expected_closing,
+            "point_closing": line.point_closing,
+            "difference": line.difference,
+            "point_closing_status": ProductInventoryAuditCase.PointClosingStatus.PROTECTED,
+            "movement_status": movement_status,
+            "physical_status": ProductInventoryAuditCase.PhysicalStatus.NOT_AVAILABLE,
+            "issue_codes": prepared["issue_codes"],
+            "source_trace": prepared["source_trace"],
+            "calculation_fingerprint": prepared["fingerprint"],
+            "rebuilt_at": now,
+        }
+        case, _ = ProductInventoryAuditCase.objects.update_or_create(
+            month=month,
+            branch=line.branch,
+            product=line.product,
+            defaults=defaults,
+        )
+        if should_reopen:
+            self._create_reopen_event(
+                case=case,
+                previous_fingerprint=previous_fingerprint,
+                new_fingerprint=prepared["fingerprint"],
+            )
+
+    def _mark_missing_case(self, *, run, case, now):
+        new_fingerprint = self._missing_case_fingerprint(case)
+        if (
+            case.movement_status
+            == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
+            and case.calculation_fingerprint == new_fingerprint
+            and _MISSING_CASE_ISSUE in case.issue_codes
+        ):
+            return
+        previous_fingerprint = case.calculation_fingerprint
+        should_reopen = case.movement_status in {
+            ProductInventoryAuditCase.MovementStatus.RESOLVED,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        }
+        issue_codes = sorted({*case.issue_codes, _MISSING_CASE_ISSUE})
+        updated_case, _ = ProductInventoryAuditCase.objects.update_or_create(
+            month=case.month,
+            branch_id=case.branch_id,
+            product_id=case.product_id,
+            defaults={
+                "run": run,
+                "opening_point": case.opening_point,
+                "production": case.production,
+                "sales": case.sales,
+                "waste": case.waste,
+                "transfer_in": case.transfer_in,
+                "transfer_out": case.transfer_out,
+                "conversion_in": case.conversion_in,
+                "conversion_out": case.conversion_out,
+                "identified_adjustment": case.identified_adjustment,
+                "expected_closing": case.expected_closing,
+                "point_closing": case.point_closing,
+                "difference": case.difference,
+                "point_closing_status": case.point_closing_status,
+                "movement_status": ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+                "physical_status": case.physical_status,
+                "issue_codes": issue_codes,
+                "source_trace": case.source_trace,
+                "calculation_fingerprint": new_fingerprint,
+                "rebuilt_at": now,
+            },
+        )
+        if should_reopen:
+            self._create_reopen_event(
+                case=updated_case,
+                previous_fingerprint=previous_fingerprint,
+                new_fingerprint=new_fingerprint,
+            )
+
+    @staticmethod
+    def _missing_case_fingerprint(case):
+        return _sha256(
+            {
+                "month": case.month.isoformat(),
+                "branch_id": case.branch_id,
+                "product_id": case.product_id,
+                "issue": _MISSING_CASE_ISSUE,
+            }
+        )
+
+    @staticmethod
+    def _create_reopen_event(*, case, previous_fingerprint, new_fingerprint):
+        ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.REOPEN,
+            reason_code="SOURCE_FINGERPRINT_CHANGED",
+            notes="Las fuentes cambiaron después de la revisión anterior.",
+            actor=None,
+            metadata={
+                "previous_fingerprint": previous_fingerprint,
+                "new_fingerprint": new_fingerprint,
+            },
+        )
+
+    @staticmethod
+    def _run_fingerprint(*, month, line_fingerprints, global_issues):
+        return _sha256(
+            {
+                "month": month.isoformat(),
+                "line_fingerprints": sorted(line_fingerprints),
+                "global_issues": _sorted_issue_payloads(global_issues),
+            }
+        )
