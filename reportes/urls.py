@@ -2,6 +2,7 @@ from django.urls import path
 
 from . import views
 from . import investment_views
+from . import views_inventory_traceability
 from . import views_mano_obra_area
 from . import views_presupuesto_real
 from . import views_presupuesto_catalogos
@@ -11,6 +12,31 @@ from .views_produccion import ProducidoVsVendidoMermaView
 app_name = "reportes"
 
 urlpatterns = [
+    path(
+        "auditoria-inventario/",
+        views_inventory_traceability.dashboard,
+        name="inventory_audit",
+    ),
+    path(
+        "auditoria-inventario/casos/<int:pk>/",
+        views_inventory_traceability.case_detail,
+        name="inventory_audit_case",
+    ),
+    path(
+        "auditoria-inventario/casos/<int:pk>/explicar/",
+        views_inventory_traceability.explain_case,
+        name="inventory_audit_explain",
+    ),
+    path(
+        "auditoria-inventario/casos/<int:pk>/aprobar/",
+        views_inventory_traceability.approve_case,
+        name="inventory_audit_approve",
+    ),
+    path(
+        "auditoria-inventario/casos/<int:pk>/rechazar/",
+        views_inventory_traceability.reject_case,
+        name="inventory_audit_reject",
+    ),
     path("planeacion-personal/", views_planeacion_personal.planeacion_personal, name="planeacion_personal"),
     path("", views.consumo, name="home"),
     path(
