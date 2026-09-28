@@ -3,7 +3,7 @@ from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from django.db import close_old_connections, transaction
+from django.db import close_old_connections, connection, transaction
 from django.test import SimpleTestCase, TransactionTestCase, override_settings
 
 from pos_bridge.services.product_month_source_mutex import (
@@ -94,6 +94,54 @@ class ProductMonthSourceMutexBoundaryTests(TransactionTestCase):
             with self.assertRaisesRegex(RuntimeError, "stop after mutex"):
                 service.persist_waste_lines(SimpleNamespace(), [item])
         self.assertEqual(acquired_months, [date(2026, 8, 1)])
+
+    def test_transfer_writer_locks_all_operational_months_before_first_write(self):
+        acquired_months = []
+        lock_depths = []
+        service = PointMovementSyncService()
+        item = SimpleNamespace(
+            registered_at=datetime(2026, 8, 15, 12, tzinfo=datetime_timezone.utc),
+            sent_at=datetime(2026, 9, 15, 12, tzinfo=datetime_timezone.utc),
+            received_at=datetime(2026, 10, 15, 12, tzinfo=datetime_timezone.utc),
+            transfer_external_id="T-1",
+            detail_external_id="D-1",
+            origin_branch={},
+        )
+
+        def acquire(values):
+            lock_depths.append(len(connection.atomic_blocks))
+            result = lock_product_month_sources(values)
+            acquired_months.extend(result)
+            return result
+
+        with (
+            patch(
+                "pos_bridge.services.movement_sync_service.lock_product_month_sources",
+                side_effect=acquire,
+            ),
+            patch.object(service, "_upsert_branch", side_effect=RuntimeError("stop after mutex")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stop after mutex"):
+                service.persist_transfer_lines(
+                    SimpleNamespace(
+                        parameters={
+                            "start_date": "2026-07-31",
+                            "end_date": "2026-09-02",
+                        }
+                    ),
+                    [item],
+                )
+
+        self.assertEqual(
+            acquired_months,
+            [
+                date(2026, 7, 1),
+                date(2026, 8, 1),
+                date(2026, 9, 1),
+                date(2026, 10, 1),
+            ],
+        )
+        self.assertEqual(lock_depths, [1])
 
     def test_boundary_capture_blocks_august_but_not_distant_month(self):
         errors = []

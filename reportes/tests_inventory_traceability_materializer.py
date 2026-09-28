@@ -5,11 +5,12 @@ from decimal import Decimal
 from io import StringIO
 from threading import Event, Lock, Thread
 from time import monotonic
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import close_old_connections, connection, transaction
+from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
@@ -19,7 +20,7 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     BranchProductBalance,
     TraceSourceIssue,
 )
-from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -584,7 +585,7 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
         self.assertEqual(run.summary, dict(results["second"]))
         self.assertEqual(run.status, ProductInventoryAuditRun.Status.READY)
 
-    def test_materializer_and_canonical_writer_cannot_cross_source_snapshot(self):
+    def test_materializer_and_transfer_writer_cannot_cross_source_snapshot(self):
         build_entered = Event()
         release_build = Event()
         writer_backend_ready = Event()
@@ -624,11 +625,36 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
                 connection.ensure_connection()
                 writer_backend_pid["pid"] = connection.connection.get_backend_pid()
                 writer_backend_ready.set()
-                with transaction.atomic():
-                    lock_product_month_sources([MONTH])
+
+                def write_after_lock(_branch):
                     writer_entered.set()
                     with source_guard:
                         source["closing"] = Decimal("12")
+                    raise RuntimeError("stop after mutex")
+
+                item = SimpleNamespace(
+                    registered_at=date(2026, 8, 15),
+                    sent_at=None,
+                    received_at=None,
+                    transfer_external_id="T-1",
+                    detail_external_id="D-1",
+                    origin_branch={},
+                )
+                service = PointMovementSyncService()
+                with patch.object(service, "_upsert_branch", side_effect=write_after_lock):
+                    try:
+                        service.persist_transfer_lines(
+                            SimpleNamespace(
+                                parameters={
+                                    "start_date": "2026-08-01",
+                                    "end_date": "2026-08-31",
+                                }
+                            ),
+                            [item],
+                        )
+                    except RuntimeError as exc:
+                        if str(exc) != "stop after mutex":
+                            raise
             except BaseException as exc:  # pragma: no cover - surfaced below
                 errors.append(exc)
             finally:

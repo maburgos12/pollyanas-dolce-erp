@@ -747,6 +747,19 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_transfer_lines(self, sync_job: PointSyncJob, extracted_lines: list, *, apply_inventory: bool = True) -> dict:
+        parameters = getattr(sync_job, "parameters", {}) or {}
+        scope_dates = [
+            date.fromisoformat(str(parameters[key]))
+            for key in ("start_date", "end_date")
+            if parameters.get(key)
+        ]
+        movement_dates = [
+            value
+            for item in extracted_lines
+            for value in (item.registered_at, item.sent_at, item.received_at)
+            if value is not None
+        ]
+        lock_product_month_sources([*scope_dates, *movement_dates])
         staged_created = 0
         staged_updated = 0
         inventory_entries_created = 0
