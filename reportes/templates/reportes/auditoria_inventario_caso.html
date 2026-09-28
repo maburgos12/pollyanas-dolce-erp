@@ -63,6 +63,29 @@
       </li>
       {% endfor %}
     </ol>
+    {% if undirected_evidence %}
+    <section class="inventory-audit-undirected" aria-labelledby="undirected-evidence-title">
+      <h3 id="undirected-evidence-title">Evidencia sin dirección disponible</h3>
+      <p>Este caso fue generado antes de que la fuente conservara si el movimiento era entrada o salida. No se asigna a un paso por suposición.</p>
+      <ul>
+        {% for evidence in undirected_evidence %}
+        <li>
+          {% if evidence.available %}
+          <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
+          <dl>
+            <div><dt>Cantidad</dt><dd>{{ evidence.quantity }}</dd></div>
+            <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
+            <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
+          </dl>
+          {% else %}
+          <div><strong>{{ evidence.source }}</strong><span>{{ evidence.message }}</span></div>
+          <p>Referencia conservada: Point #{{ evidence.source_id }}</p>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
   </section>
 
   {% if can_explain or can_review %}

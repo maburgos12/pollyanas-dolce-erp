@@ -221,9 +221,13 @@ def _reason_label(reason_code: str) -> str:
 
 def _source_evidence_by_step(
     case: ProductInventoryAuditCase,
-) -> dict[str, list[dict[str, object]]]:
+) -> tuple[
+    dict[str, list[dict[str, object]]],
+    list[dict[str, object]],
+]:
     trace = case.source_trace if isinstance(case.source_trace, dict) else {}
     evidence = {field: [] for field, _label, _operator in BALANCE_SEQUENCE}
+    undirected_evidence: list[dict[str, object]] = []
 
     def ids_for(source):
         values = trace.get(source, [])
@@ -253,16 +257,26 @@ def _source_evidence_by_step(
             pk__in=ids_for("waste")
         ).select_related("branch")
     }
+    transfer_ids = set(
+        ids_for("transfers")
+        + ids_for("transfer_in")
+        + ids_for("transfer_out")
+    )
     transfers = {
         row.pk: row
-        for row in PointTransferLine.objects.filter(pk__in=ids_for("transfers")).select_related(
+        for row in PointTransferLine.objects.filter(pk__in=transfer_ids).select_related(
             "origin_branch", "destination_branch"
         )
     }
+    conversion_ids = set(
+        ids_for("conversions")
+        + ids_for("conversion_in")
+        + ids_for("conversion_out")
+    )
     conversions = {
         row.pk: row
         for row in PointConversionLine.objects.filter(
-            pk__in=ids_for("conversions")
+            pk__in=conversion_ids
         ).select_related("branch")
     }
     source_steps = {
@@ -274,7 +288,14 @@ def _source_evidence_by_step(
         "closing": "point_closing",
     }
 
-    for source in TRACE_SOURCE_LABELS:
+    for source in (
+        "opening",
+        "production",
+        "sales",
+        "waste",
+        "adjustments",
+        "closing",
+    ):
         for source_id in ids_for(source):
             step = source_steps.get(source)
             if source in {"opening", "closing"}:
@@ -337,51 +358,102 @@ def _source_evidence_by_step(
                         )
                     )
                     continue
-            elif source == "transfers":
-                row = transfers.get(source_id)
-                if row:
-                    incoming = row.destination_branch_id == case.branch_id
-                    step = "transfer_in" if incoming else "transfer_out"
-                    evidence[step].append(
-                        _evidence_row(
-                            source=source,
-                            source_id=source_id,
-                            date_value=(row.received_at if incoming else row.sent_at) or row.registered_at,
-                            location=f"{row.origin_branch.name} → {row.destination_branch.name}",
-                            quantity=row.received_quantity if incoming else row.sent_quantity,
-                            actor=(row.received_by if incoming else row.sent_by) or row.requested_by,
-                            reference=row.transfer_external_id or f"Point #{source_id}",
-                        )
-                    )
-                    continue
-            elif source == "conversions":
-                row = conversions.get(source_id)
-                if row:
-                    step = (
-                        "conversion_out"
-                        if row.source_item_code == case.product.sku
-                        else "conversion_in"
-                    )
-                    evidence[step].append(
-                        _evidence_row(
-                            source=source,
-                            source_id=source_id,
-                            date_value=row.movement_at,
-                            location=row.branch.name,
-                            quantity=row.quantity,
-                            actor=(row.raw_payload or {}).get("responsable"),
-                            reference=row.movement_external_id or f"Point #{source_id}",
-                        )
-                    )
-                    continue
-            if step is None:
-                if source == "transfers":
-                    step = "transfer_in" if case.transfer_in else "transfer_out"
-                elif source == "conversions":
-                    step = "conversion_in" if case.conversion_in else "conversion_out"
             if step is not None:
                 evidence[step].append(_missing_evidence_row(source, source_id))
-    return evidence
+
+    for trace_bucket, step in (
+        ("transfer_in", "transfer_in"),
+        ("transfer_out", "transfer_out"),
+    ):
+        incoming = step == "transfer_in"
+        for source_id in ids_for(trace_bucket):
+            row = transfers.get(source_id)
+            if row is None:
+                evidence[step].append(_missing_evidence_row("transfers", source_id))
+                continue
+            evidence[step].append(
+                _evidence_row(
+                    source="transfers",
+                    source_id=source_id,
+                    date_value=(row.received_at if incoming else row.sent_at)
+                    or row.registered_at,
+                    location=(
+                        f"{row.origin_branch.name} → {row.destination_branch.name}"
+                    ),
+                    quantity=(
+                        row.received_quantity if incoming else row.sent_quantity
+                    ),
+                    actor=(row.received_by if incoming else row.sent_by)
+                    or row.requested_by,
+                    reference=row.transfer_external_id or f"Point #{source_id}",
+                )
+            )
+
+    for trace_bucket, step in (
+        ("conversion_in", "conversion_in"),
+        ("conversion_out", "conversion_out"),
+    ):
+        for source_id in ids_for(trace_bucket):
+            row = conversions.get(source_id)
+            if row is None:
+                evidence[step].append(_missing_evidence_row("conversions", source_id))
+                continue
+            evidence[step].append(
+                _evidence_row(
+                    source="conversions",
+                    source_id=source_id,
+                    date_value=row.movement_at,
+                    location=row.branch.name,
+                    quantity=row.quantity,
+                    actor=(row.raw_payload or {}).get("responsable"),
+                    reference=row.movement_external_id or f"Point #{source_id}",
+                )
+            )
+
+    if "transfer_in" not in trace and "transfer_out" not in trace:
+        for source_id in ids_for("transfers"):
+            row = transfers.get(source_id)
+            if row is None:
+                undirected_evidence.append(
+                    _missing_evidence_row("transfers", source_id)
+                )
+                continue
+            undirected_evidence.append(
+                _evidence_row(
+                    source="transfers",
+                    source_id=source_id,
+                    date_value=row.received_at or row.sent_at or row.registered_at,
+                    location=f"{row.origin_branch.name} → {row.destination_branch.name}",
+                    quantity=(
+                        f"Enviada {row.sent_quantity} · "
+                        f"recibida {row.received_quantity}"
+                    ),
+                    actor=row.received_by or row.sent_by or row.requested_by,
+                    reference=row.transfer_external_id or f"Point #{source_id}",
+                )
+            )
+
+    if "conversion_in" not in trace and "conversion_out" not in trace:
+        for source_id in ids_for("conversions"):
+            row = conversions.get(source_id)
+            if row is None:
+                undirected_evidence.append(
+                    _missing_evidence_row("conversions", source_id)
+                )
+                continue
+            undirected_evidence.append(
+                _evidence_row(
+                    source="conversions",
+                    source_id=source_id,
+                    date_value=row.movement_at,
+                    location=row.branch.name,
+                    quantity=row.quantity,
+                    actor=(row.raw_payload or {}).get("responsable"),
+                    reference=row.movement_external_id or f"Point #{source_id}",
+                )
+            )
+
+    return evidence, undirected_evidence
 
 
 def _parse_month(raw_month: str) -> date:
@@ -796,7 +868,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
         except PermissionDenied:
             has_custody = False
         latest_explanation = _latest_explanation(case)
-        source_evidence = _source_evidence_by_step(case)
+        source_evidence, undirected_evidence = _source_evidence_by_step(case)
         events = list(case.events.all())
         for event in events:
             event.ui_reason_label = _reason_label(event.reason_code)
@@ -825,6 +897,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
                     )
                 ],
                 "events": events,
+                "undirected_evidence": undirected_evidence,
                 "latest_explanation": latest_explanation,
                 "can_explain": (
                     has_custody

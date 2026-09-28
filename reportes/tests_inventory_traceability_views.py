@@ -346,6 +346,8 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "Conteo físico")
 
     def test_browser_detail_groups_transfer_and_conversion_evidence_by_balance_direction(self):
+        self.product.sku = ""
+        self.product.save(update_fields=["sku"])
         other_branch = PointBranch.objects.create(
             external_id="audit-evidence-other-branch",
             name="CEDIS auditoría",
@@ -401,8 +403,12 @@ class InventoryTraceabilityViewsTests(TestCase):
             raw_payload={"responsable": "Carolina"},
         )
         self.case.source_trace = {
-            "transfers": [incoming_transfer.pk, outgoing_transfer.pk],
-            "conversions": [conversion_in.pk, conversion_out.pk],
+            "transfer_in": [incoming_transfer.pk, 991001],
+            "transfer_out": [outgoing_transfer.pk, 991002],
+            "conversion_in": [conversion_in.pk, 992001],
+            "conversion_out": [conversion_out.pk, 992002],
+            "transfers": [incoming_transfer.pk, outgoing_transfer.pk, 999001],
+            "conversions": [conversion_in.pk, conversion_out.pk, 999002],
         }
         self.case.save(update_fields=["source_trace"])
         self.client.force_login(self.viewer)
@@ -435,12 +441,38 @@ class InventoryTraceabilityViewsTests(TestCase):
         ]
         self.assertIn("TR-IN", transfer_in_step)
         self.assertNotIn("TR-OUT", transfer_in_step)
+        self.assertIn("Point #991001", transfer_in_step)
+        self.assertNotIn("Point #991002", transfer_in_step)
         self.assertIn("TR-OUT", transfer_out_step)
         self.assertNotIn("TR-IN", transfer_out_step)
+        self.assertIn("Point #991002", transfer_out_step)
+        self.assertNotIn("Point #991001", transfer_out_step)
         self.assertIn("CONV-IN", conversion_in_step)
         self.assertNotIn("CONV-OUT", conversion_in_step)
+        self.assertIn("Point #992001", conversion_in_step)
+        self.assertNotIn("Point #992002", conversion_in_step)
         self.assertIn("CONV-OUT", conversion_out_step)
         self.assertNotIn("CONV-IN", conversion_out_step)
+        self.assertIn("Point #992002", conversion_out_step)
+        self.assertNotIn("Point #992001", conversion_out_step)
+        self.assertNotContains(response, "Evidencia sin dirección disponible")
+
+    def test_browser_detail_keeps_legacy_flat_trace_explicitly_undirected(self):
+        self.case.source_trace = {
+            "transfers": [993001],
+            "conversions": [993002],
+        }
+        self.case.save(update_fields=["source_trace"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertContains(response, "Evidencia sin dirección disponible")
+        self.assertContains(response, "Point #993001")
+        self.assertContains(response, "Point #993002")
 
     def test_browser_detail_maps_reason_codes_without_exposing_internal_tokens(self):
         ProductInventoryAuditEvent.objects.create(

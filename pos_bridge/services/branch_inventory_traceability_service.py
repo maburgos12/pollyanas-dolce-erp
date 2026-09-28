@@ -42,6 +42,10 @@ TRACE_SOURCE_NAMES = (
     "waste",
     "transfers",
     "conversions",
+    "transfer_in",
+    "transfer_out",
+    "conversion_in",
+    "conversion_out",
     "adjustments",
 )
 
@@ -302,6 +306,10 @@ class BranchInventoryTraceabilityService:
                 "conversions": tuple(
                     dict.fromkeys((*conversion_in_ids, *conversion_out_ids))
                 ),
+                "transfer_in": transfer_in_ids,
+                "transfer_out": transfer_out_ids,
+                "conversion_in": conversion_in_ids,
+                "conversion_out": conversion_out_ids,
                 "adjustments": (),
             }
             lines.append(

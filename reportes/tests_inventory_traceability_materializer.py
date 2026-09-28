@@ -96,6 +96,10 @@ class TraceabilityTestFixtures:
                 "waste": (),
                 "transfers": (),
                 "conversions": (),
+                "transfer_in": (),
+                "transfer_out": (),
+                "conversion_in": (),
+                "conversion_out": (),
                 "adjustments": (),
             },
             issues=tuple(issues),
@@ -135,6 +139,32 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_directional_source_trace_is_persisted_without_flattening(self):
+        directional_trace = {
+            "opening": (11,),
+            "closing": (22,),
+            "sales": (),
+            "production": (),
+            "waste": (),
+            "transfers": (51, 52),
+            "conversions": (61, 62),
+            "transfer_in": (51,),
+            "transfer_out": (52,),
+            "conversion_in": (61,),
+            "conversion_out": (62,),
+            "adjustments": (),
+        }
+        materializer = self._materializer(
+            self._result(self._line(source_trace=directional_trace))
+        )
+
+        materializer.rebuild(MONTH)
+
+        self.assertEqual(
+            ProductInventoryAuditCase.objects.get().source_trace,
+            {key: list(value) for key, value in directional_trace.items()},
+        )
+
     def test_two_identical_rebuilds_are_idempotent(self):
         materializer = self._materializer(self._result(self._line()))
 

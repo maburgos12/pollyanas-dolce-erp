@@ -626,6 +626,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "waste": (),
                 "transfers": (),
                 "conversions": (),
+                "transfer_in": (),
+                "transfer_out": (),
+                "conversion_in": (),
+                "conversion_out": (),
                 "adjustments": (),
             },
         )
@@ -1172,6 +1176,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "waste",
                 "transfers",
                 "conversions",
+                "transfer_in",
+                "transfer_out",
+                "conversion_in",
+                "conversion_out",
                 "adjustments",
             },
         )
@@ -1209,6 +1217,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_branch["PLAZA"].expected_closing, Decimal("14"))
         self.assertEqual(by_branch["CENTRO"].source_trace["transfers"], (transfer.id,))
         self.assertEqual(by_branch["PLAZA"].source_trace["transfers"], (transfer.id,))
+        self.assertEqual(by_branch["CENTRO"].source_trace["transfer_out"], (transfer.id,))
+        self.assertEqual(by_branch["CENTRO"].source_trace["transfer_in"], ())
+        self.assertEqual(by_branch["PLAZA"].source_trace["transfer_in"], (transfer.id,))
+        self.assertEqual(by_branch["PLAZA"].source_trace["transfer_out"], ())
         self.assertEqual(result.company_difference, Decimal("0"))
 
     def test_devoluciones_remains_auditable_point_location_and_is_not_waste(self):
@@ -1720,6 +1732,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_product["SLICE-001"].conversion_in, Decimal("12"))
         self.assertEqual(by_product["WHOLE-001"].source_trace["conversions"], (conversion.id,))
         self.assertEqual(by_product["SLICE-001"].source_trace["conversions"], (conversion.id,))
+        self.assertEqual(by_product["WHOLE-001"].source_trace["conversion_out"], (conversion.id,))
+        self.assertEqual(by_product["WHOLE-001"].source_trace["conversion_in"], ())
+        self.assertEqual(by_product["SLICE-001"].source_trace["conversion_in"], (conversion.id,))
+        self.assertEqual(by_product["SLICE-001"].source_trace["conversion_out"], ())
         self.assertEqual(result.company_difference, Decimal("0"))
 
     def test_blank_origin_uses_active_derived_presentation_parent(self):
@@ -1788,12 +1804,12 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def test_supplied_origin_name_matches_parent_and_preserves_secondary_resolution(self):
         whole = PointProduct.objects.create(
             external_id="WHOLE-NAME",
-            sku="WHOLE-NAME",
+            sku="",
             name="Pastel origen por nombre",
         )
         slice_product = PointProduct.objects.create(
             external_id="SLICE-NAME",
-            sku="SLICE-NAME",
+            sku="",
             name="Rebanada origen por nombre",
         )
         whole_recipe = Receta.objects.create(
@@ -1846,6 +1862,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             if issue.code == "PRODUCT_RESOLVED_BY_NAME"
         )
         self.assertEqual(issue.source_ids, (conversion.id,))
+        self.assertEqual(origin.source_trace["conversion_out"], (conversion.id,))
+        self.assertEqual(destination.source_trace["conversion_in"], (conversion.id,))
 
     def test_ambiguous_supplied_conversion_origin_is_preserved_without_quantities(self):
         for suffix in ("A", "B"):
