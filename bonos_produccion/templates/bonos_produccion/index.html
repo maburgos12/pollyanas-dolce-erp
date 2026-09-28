@@ -26,8 +26,8 @@ const h=React.createElement;
 const TODAY=new Date();
 const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const AREA_TODAS='TODAS';
-const AREAS=['HORNOS','PRODUCCION','ARMADO','LOGISTICA','CRUCERO'];
-const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Embetunado',ARMADO:'Armado',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
+const AREAS=['HORNOS','PRODUCCION','ARMADO','PREPARACION','CUARTOS_FRIOS','LOGISTICA','CRUCERO'];
+const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Embetunado',ARMADO:'Armado',PREPARACION:'Preparacion',CUARTOS_FRIOS:'Cuartos frios',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
 const FORCE_CAPTURE=new URLSearchParams(window.location.search).get('captura')==='1';
 const OPERADOR_SOLICITUDES={{ operador_solicitudes|yesno:'true,false' }};
 function api(path,opts={}){
@@ -52,6 +52,31 @@ function money(v){return Number(v||0).toLocaleString('es-MX',{style:'currency',c
 function initials(n){return(n||'').split(' ').filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase();}
 function esDom(d,m,a){return new Date(a,m-1,d).getDay()===0;}
 function diasEnMes(m,a){return new Date(a,m,0).getDate();}
+function fechaLocal(valor){
+  if(!valor)return null;
+  const partes=String(valor).slice(0,10).split('-').map(Number);
+  return partes.length===3?new Date(partes[0],partes[1]-1,partes[2],12):null;
+}
+function fechasDelCorte(periodo,bono,mes,anio){
+  const inicio=fechaLocal(periodo?.fecha_inicio||bono?.periodo_fecha_inicio);
+  const fin=fechaLocal(periodo?.fecha_fin||bono?.periodo_fecha_fin);
+  if(!inicio||!fin||fin<inicio){
+    return Array.from({length:diasEnMes(+mes,+anio)},(_,i)=>{
+      const fecha=new Date(+anio,+mes-1,i+1,12);
+      return {dia:i+1,key:`${anio}-${mes}-${i+1}`,mesLabel:'',dom:fecha.getDay()===0};
+    });
+  }
+  const fechas=[];
+  for(let fecha=new Date(inicio);fecha<=fin;fecha.setDate(fecha.getDate()+1)){
+    fechas.push({
+      dia:fecha.getDate(),
+      key:`${fecha.getFullYear()}-${fecha.getMonth()+1}-${fecha.getDate()}`,
+      mesLabel:MESES[fecha.getMonth()+1].slice(0,3),
+      dom:fecha.getDay()===0,
+    });
+  }
+  return fechas;
+}
 const IconFactory=()=>h('svg',{className:'icon-factory-svg',viewBox:'0 0 24 24',fill:'none',stroke:'#fff',strokeWidth:2,strokeLinecap:'round',strokeLinejoin:'round'},h('rect',{x:2,y:7,width:20,height:15,rx:2}),h('polyline',{points:'17 2 12 7 7 2'}));
 const IconCheck=()=>h('span',null,'OK');
 function Badge({ok}){return h('span',{className:`badge ${ok?'ok':'bad'}`},ok?'OK Pasa':'NO No pasa');}
@@ -377,7 +402,7 @@ function App(){
         h('div',{className:'metric-card'},h('div',{className:'lbl'},'Area activa'),h('div',{className:'val val-sm'},AREA_LABELS[area]))
       ),
       tab==='config'&&h(ConfigTab,{bonos,area,setArea}),
-      tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio,operadorSolicitudes:OPERADOR_SOLICITUDES}),
+      tab==='captura'&&h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,periodo,mes,anio,operadorSolicitudes:OPERADOR_SOLICITUDES}),
       tab==='permisos'&&h(PermisosTab,{bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes:OPERADOR_SOLICITUDES}),
       tab==='prestamos'&&OPERADOR_SOLICITUDES&&h(PrestamosTab,{showStatus}),
       tab==='horas_extra'&&h(HorasExtraTab,{area,setArea,mes,anio,showStatus}),
@@ -918,10 +943,10 @@ function HorasExtraTab({area,setArea,mes,anio,showStatus}){
     )
   );
 }
-function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,mes,anio,operadorSolicitudes=false}){
+function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,periodo,mes,anio,operadorSolicitudes=false}){
   const [selDia,setSelDia]=React.useState(null);
   const [savingDia,setSavingDia]=React.useState(null);
-  const total=diasEnMes(+mes,+anio);
+  const diasCorte=fechasDelCorte(periodo,selectedBono,mes,anio);
   const regActivos=registros.filter(r=>r.tiene_asistencia);
   const diaActual=selDia?registros.find(r=>+r.dia===selDia):null;
   const selectedArea=selectedBono?.area||area;
@@ -964,12 +989,14 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
       ),
       h('div',{className:'card-body'},
         h('div',{className:'sec-title'},'Clic en el dia para registrar asistencia'),
-        h('div',{className:'days-grid'},Array.from({length:total},(_,i)=>i+1).map(d=>{
-          const dom=esDom(d,+mes,+anio);
+        h('div',{className:'days-grid'},diasCorte.map(fecha=>{
+          const d=fecha.dia;
+          const dom=fecha.dom;
           const r=registros.find(x=>+x.dia===d);
           const worked=r?.tiene_asistencia;
-          return h('div',{key:d,className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
-            h('span',{className:'dn'},d),h('span',{className:'ds'},worked?'OK':dom?'D':''));
+          const detalle=worked?'OK':dom?`${fecha.mesLabel} · D`:fecha.mesLabel;
+          return h('div',{key:fecha.key,className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
+            h('span',{className:'dn'},d),h('span',{className:'ds'},detalle));
         })),
         regActivos.length>0&&h('div',null,
           h('div',{className:'div'}),

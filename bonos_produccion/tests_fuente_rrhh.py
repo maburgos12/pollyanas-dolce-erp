@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.utils import timezone
@@ -51,7 +53,11 @@ class DashboardFuenteRRHHTests(TestCase):
 
     def test_inicializar_async_devuelve_toast_y_destino_del_mismo_periodo(self):
         hoy = timezone.localdate()
-        ConfigBonoPeriodo.objects.create(mes=hoy.month, anio=hoy.year)
+        periodo = ConfigBonoPeriodo.objects.create(mes=hoy.month, anio=hoy.year)
+        Empleado.objects.create(
+            nombre="Colaboradora lista", departamento=Empleado.DEP_PRODUCCION,
+            puesto_operativo="HORNOS", participa_bonos_produccion=True,
+        )
 
         response = self.client.post(
             "/bonos-produccion/dashboard/",
@@ -60,9 +66,27 @@ class DashboardFuenteRRHHTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["ok"])
-        self.assertEqual(response.json()["toast"]["type"], "success")
-        self.assertIn(f"?mes={hoy.month}&anio={hoy.year}#personal-rrhh", response.json()["redirect"])
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["toast"]["type"], "success")
+        self.assertEqual(
+            payload["toast"]["message"],
+            "Personal listo desde RRHH: 1 colaborador. Nuevos: 1; ya existentes: 0.",
+        )
+        self.assertTrue(payload["reload"])
+        self.assertIn(f"?mes={hoy.month}&anio={hoy.year}#personal-rrhh", payload["redirect"])
+
+        response = self.client.post(
+            "/bonos-produccion/dashboard/",
+            {"action": "inicializar", "mes": hoy.month, "anio": hoy.year},
+            HTTP_ACCEPT="application/json", HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(
+            response.json()["toast"]["message"],
+            "Personal listo desde RRHH: 1 colaborador. Nuevos: 0; ya existentes: 1.",
+        )
+        self.assertEqual(BonoProduccionEmpleado.objects.filter(periodo=periodo).count(), 1)
 
     def test_periodo_historico_no_inicializa_elegibles_actuales(self):
         hoy = timezone.localdate()
@@ -117,3 +141,18 @@ class DashboardFuenteRRHHTests(TestCase):
         sincronizar_bonos_operativos_periodo_actual(empleado)
 
         self.assertTrue(BonoProduccionEmpleado.objects.filter(periodo=periodo, empleado=empleado).exists())
+
+    def test_captura_diaria_pinta_el_rango_real_del_corte(self):
+        template = (
+            Path(__file__).resolve().parent
+            / "templates"
+            / "bonos_produccion"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("function fechasDelCorte", template)
+        self.assertIn("periodo_fecha_inicio", template)
+        self.assertIn("periodo_fecha_fin", template)
+        self.assertIn("h(CapturaTab,{bonosArea,area,setArea,selectedBono,setSelectedBono,registros,guardarDia,periodo,mes,anio", template)
+        self.assertIn("PREPARACION:'Preparacion'", template)
+        self.assertIn("CUARTOS_FRIOS:'Cuartos frios'", template)
