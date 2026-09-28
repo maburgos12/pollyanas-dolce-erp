@@ -3,11 +3,15 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from io import StringIO
+from threading import Event, Lock, Thread
+from time import monotonic
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.db import close_old_connections, connection
+from django.test import TestCase, TransactionTestCase
+from django.utils import timezone
 
 from pos_bridge.models import PointBranch, PointProduct
 from pos_bridge.services.branch_inventory_traceability_service import (
@@ -35,6 +39,14 @@ class MutableTraceabilityService:
     def build(self, month):
         self.months.append(month)
         return self.result
+
+
+class TimestampTraceabilityService(MutableTraceabilityService):
+    def build(self, month):
+        self.build_started_at = timezone.now()
+        result = super().build(month)
+        self.build_finished_at = timezone.now()
+        return result
 
 
 class TraceabilityTestFixtures:
@@ -368,6 +380,39 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
         self.assertFalse(ProductInventoryAuditRun.objects.exists())
         self.assertFalse(ProductInventoryAuditCase.objects.exists())
 
+    def test_quantizes_before_classification_fingerprint_and_persistence(self):
+        service = MutableTraceabilityService(
+            self._result(self._line(closing=Decimal("10.00001")))
+        )
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+
+        first = materializer.rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+        first_fingerprint = case.calculation_fingerprint
+        service.result = self._result(self._line(closing=Decimal("10.00000")))
+        second = materializer.rebuild(MONTH)
+
+        case.refresh_from_db()
+        self.assertEqual(case.point_closing, Decimal("10.0000"))
+        self.assertEqual(case.difference, Decimal("0.0000"))
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.BALANCED,
+        )
+        self.assertEqual(first["balanced"], 1)
+        self.assertEqual(first["exceptions"], 0)
+        self.assertEqual(second["unchanged"], 1)
+        self.assertEqual(case.calculation_fingerprint, first_fingerprint)
+
+    def test_run_timestamps_bracket_source_build(self):
+        service = TimestampTraceabilityService(self._result(self._line()))
+
+        InventoryAuditMaterializer(traceability_service=service).rebuild(MONTH)
+
+        run = ProductInventoryAuditRun.objects.get()
+        self.assertLessEqual(run.started_at, service.build_started_at)
+        self.assertGreaterEqual(run.rebuilt_at, service.build_finished_at)
+
 
 class RebuildProductInventoryAuditCommandTests(TraceabilityTestFixtures, TestCase):
     def test_command_rejects_non_strict_month_format(self):
@@ -444,3 +489,116 @@ class RebuildProductInventoryAuditCommandTests(TraceabilityTestFixtures, TestCas
             ProductInventoryAuditRun.objects.get().status,
             ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
         )
+
+
+class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self.branch = PointBranch.objects.create(external_id="CENTRO", name="Centro")
+        self.product = PointProduct.objects.create(
+            external_id="PASTEL-001",
+            sku="PASTEL-001",
+            name="Pastel de prueba",
+        )
+
+    def test_same_month_rebuilds_serialize_before_building_source_snapshot(self):
+        first_build_entered = Event()
+        release_first_build = Event()
+        second_lock_attempted = Event()
+        build_order_lock = Lock()
+        build_order = []
+        errors = []
+        results = {}
+        second_backend_pid = {}
+
+        first_result = self._result(self._line(closing=Decimal("11")))
+        second_result = self._result(self._line(closing=Decimal("12")))
+
+        class FirstService:
+            def build(inner_self, month):
+                with build_order_lock:
+                    build_order.append("first")
+                first_build_entered.set()
+                if not release_first_build.wait(timeout=10):
+                    raise AssertionError("No se liberó la primera reconstrucción.")
+                return first_result
+
+        class SecondService:
+            def build(inner_self, month):
+                with build_order_lock:
+                    build_order.append("second")
+                return second_result
+
+        class ObservableSecondMaterializer(InventoryAuditMaterializer):
+            def _acquire_month_lock(inner_self, month):
+                connection.ensure_connection()
+                second_backend_pid["pid"] = connection.connection.get_backend_pid()
+                second_lock_attempted.set()
+                return super()._acquire_month_lock(month)
+
+        def run_materializer(name, materializer):
+            close_old_connections()
+            try:
+                results[name] = materializer.rebuild(MONTH)
+            except BaseException as exc:  # pragma: no cover - surfaced below
+                errors.append(exc)
+            finally:
+                close_old_connections()
+
+        first_thread = Thread(
+            target=run_materializer,
+            args=("first", InventoryAuditMaterializer(traceability_service=FirstService())),
+        )
+        second_thread = Thread(
+            target=run_materializer,
+            args=(
+                "second",
+                ObservableSecondMaterializer(traceability_service=SecondService()),
+            ),
+        )
+
+        first_thread.start()
+        self.assertTrue(first_build_entered.wait(timeout=10))
+        second_thread.start()
+        self.assertTrue(second_lock_attempted.wait(timeout=10))
+        self._wait_until_advisory_lock_is_blocked(second_backend_pid["pid"])
+        self.assertEqual(build_order, ["first"])
+
+        release_first_build.set()
+        first_thread.join(timeout=10)
+        second_thread.join(timeout=10)
+
+        self.assertFalse(first_thread.is_alive())
+        self.assertFalse(second_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(build_order, ["first", "second"])
+        self.assertEqual(results["first"]["created"], 1)
+        self.assertEqual(results["second"]["updated"], 1)
+        case = ProductInventoryAuditCase.objects.get()
+        run = ProductInventoryAuditRun.objects.get()
+        self.assertEqual(case.point_closing, Decimal("12.0000"))
+        self.assertEqual(case.run_id, run.id)
+        self.assertEqual(run.summary, dict(results["second"]))
+        self.assertEqual(run.status, ProductInventoryAuditRun.Status.READY)
+
+    def _wait_until_advisory_lock_is_blocked(self, backend_pid):
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_locks
+                        WHERE pid = %s
+                          AND locktype = 'advisory'
+                          AND NOT granted
+                    )
+                    """,
+                    [backend_pid],
+                )
+                if cursor.fetchone()[0]:
+                    return
+            Event().wait(0.01)
+        self.fail("La segunda reconstrucción no esperó el candado mensual.")

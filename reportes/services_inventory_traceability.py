@@ -5,7 +5,7 @@ import json
 from datetime import date
 from decimal import Decimal
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
 from pos_bridge.services.branch_inventory_traceability_service import (
@@ -22,6 +22,7 @@ from reportes.models import (
 
 _QUANTITY = Decimal("0.0001")
 _MISSING_CASE_ISSUE = "CASE_MISSING_FROM_REBUILD"
+_MONTH_LOCK_NAMESPACE = 1_096_107_081  # Stable signed int32: ASCII "AUDI".
 
 
 class InventoryAuditRebuildCounts(dict):
@@ -87,18 +88,25 @@ class InventoryAuditMaterializer:
 
     def rebuild(self, month: date, dry_run: bool = False) -> dict[str, int]:
         month_start = month.replace(day=1)
-        traceability = self.traceability_service.build(month_start)
-        now = timezone.now()
-
-        if not traceability.source_complete:
-            return self._record_incomplete_run(
-                month=month_start,
-                traceability=traceability,
-                now=now,
-                dry_run=dry_run,
-            )
+        started_at = timezone.now()
 
         with transaction.atomic():
+            # The lock intentionally covers the potentially slow source build. Otherwise
+            # two rebuilds can read interleaved snapshots and apply them in reverse order.
+            # Dry runs take the same lock so their preview is comparable; the xact lock
+            # is released automatically and never persists data.
+            self._acquire_month_lock(month_start)
+            traceability = self.traceability_service.build(month_start)
+            source_built_at = timezone.now()
+
+            if not traceability.source_complete:
+                return self._record_incomplete_run(
+                    month=month_start,
+                    traceability=traceability,
+                    started_at=started_at,
+                    dry_run=dry_run,
+                )
+
             existing_cases = {
                 (case.branch_id, case.product_id): case
                 for case in ProductInventoryAuditCase.objects.select_for_update().filter(
@@ -119,7 +127,6 @@ class InventoryAuditMaterializer:
             )
 
             if dry_run:
-                transaction.set_rollback(True)
                 return counts
 
             run, _ = ProductInventoryAuditRun.objects.update_or_create(
@@ -135,8 +142,8 @@ class InventoryAuditMaterializer:
                     ),
                     "summary": counts,
                     "calculation_fingerprint": run_fingerprint,
-                    "started_at": now,
-                    "rebuilt_at": now,
+                    "started_at": started_at,
+                    "rebuilt_at": source_built_at,
                 },
             )
             seen_keys = set()
@@ -154,24 +161,41 @@ class InventoryAuditMaterializer:
                     month=month_start,
                     prepared=prepared,
                     existing=existing,
-                    now=now,
+                    now=source_built_at,
                 )
 
             for key, existing in existing_cases.items():
                 if key in seen_keys:
                     continue
-                self._mark_missing_case(run=run, case=existing, now=now)
+                self._mark_missing_case(run=run, case=existing, now=source_built_at)
 
-            run.last_successful_rebuild_at = now
-            run.save(update_fields=["last_successful_rebuild_at", "updated_at"])
+            rebuilt_at = timezone.now()
+            run.rebuilt_at = rebuilt_at
+            run.last_successful_rebuild_at = rebuilt_at
+            run.save(
+                update_fields=[
+                    "rebuilt_at",
+                    "last_successful_rebuild_at",
+                    "updated_at",
+                ]
+            )
             return counts
+
+    @staticmethod
+    def _acquire_month_lock(month: date) -> None:
+        month_key = (month.year * 12) + month.month
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT pg_advisory_xact_lock(%s, %s)",
+                [_MONTH_LOCK_NAMESPACE, month_key],
+            )
 
     def _record_incomplete_run(
         self,
         *,
         month,
         traceability,
-        now,
+        started_at,
         dry_run,
     ) -> dict[str, int]:
         existing_count = ProductInventoryAuditCase.objects.filter(month=month).count()
@@ -187,36 +211,42 @@ class InventoryAuditMaterializer:
         if dry_run:
             return counts
 
-        with transaction.atomic():
-            ProductInventoryAuditRun.objects.update_or_create(
-                month=month,
-                defaults={
-                    "status": ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
-                    "source_issues": issues,
-                    "summary": counts,
-                    "calculation_fingerprint": fingerprint,
-                    "started_at": now,
-                    "rebuilt_at": now,
-                },
-            )
+        rebuilt_at = timezone.now()
+        ProductInventoryAuditRun.objects.update_or_create(
+            month=month,
+            defaults={
+                "status": ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+                "source_issues": issues,
+                "summary": counts,
+                "calculation_fingerprint": fingerprint,
+                "started_at": started_at,
+                "rebuilt_at": rebuilt_at,
+            },
+        )
         return counts
 
     def _prepare_line(self, line) -> dict[str, object]:
         issues = _sorted_issue_payloads(line.issues)
         source_trace = _source_trace_payload(line.source_trace)
+        normalized_quantities = {
+            "opening_point": Decimal(line.opening).quantize(_QUANTITY),
+            "production": Decimal(line.production).quantize(_QUANTITY),
+            "sales": Decimal(line.sales).quantize(_QUANTITY),
+            "waste": Decimal(line.waste).quantize(_QUANTITY),
+            "transfer_in": Decimal(line.transfer_in).quantize(_QUANTITY),
+            "transfer_out": Decimal(line.transfer_out).quantize(_QUANTITY),
+            "conversion_in": Decimal(line.conversion_in).quantize(_QUANTITY),
+            "conversion_out": Decimal(line.conversion_out).quantize(_QUANTITY),
+            "identified_adjustment": Decimal(line.identified_adjustment).quantize(
+                _QUANTITY
+            ),
+            "expected_closing": Decimal(line.expected_closing).quantize(_QUANTITY),
+            "point_closing": Decimal(line.point_closing).quantize(_QUANTITY),
+            "difference": Decimal(line.difference).quantize(_QUANTITY),
+        }
         quantities = {
-            "opening_point": _decimal_text(line.opening),
-            "production": _decimal_text(line.production),
-            "sales": _decimal_text(line.sales),
-            "waste": _decimal_text(line.waste),
-            "transfer_in": _decimal_text(line.transfer_in),
-            "transfer_out": _decimal_text(line.transfer_out),
-            "conversion_in": _decimal_text(line.conversion_in),
-            "conversion_out": _decimal_text(line.conversion_out),
-            "identified_adjustment": _decimal_text(line.identified_adjustment),
-            "expected_closing": _decimal_text(line.expected_closing),
-            "point_closing": _decimal_text(line.point_closing),
-            "difference": _decimal_text(line.difference),
+            name: _decimal_text(value)
+            for name, value in normalized_quantities.items()
         }
         fingerprint = _sha256(
             {
@@ -230,13 +260,14 @@ class InventoryAuditMaterializer:
         issue_codes = sorted({str(issue["code"]) for issue in issues})
         if "SOURCE_INCOMPLETE" in issue_codes:
             movement_status = ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
-        elif Decimal(line.difference) == 0 and not issue_codes:
+        elif normalized_quantities["difference"] == 0 and not issue_codes:
             movement_status = ProductInventoryAuditCase.MovementStatus.BALANCED
         else:
             movement_status = ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
         return {
             "key": (line.branch.id, line.product.id),
             "line": line,
+            "normalized_quantities": normalized_quantities,
             "quantities": quantities,
             "issues": issues,
             "issue_codes": issue_codes,
@@ -325,6 +356,7 @@ class InventoryAuditMaterializer:
 
     def _persist_line(self, *, run, month, prepared, existing, now):
         line = prepared["line"]
+        normalized = prepared["normalized_quantities"]
         movement_status = self._effective_status(
             prepared_status=prepared["movement_status"],
             existing=existing,
@@ -341,18 +373,18 @@ class InventoryAuditMaterializer:
 
         defaults = {
             "run": run,
-            "opening_point": line.opening,
-            "production": line.production,
-            "sales": line.sales,
-            "waste": line.waste,
-            "transfer_in": line.transfer_in,
-            "transfer_out": line.transfer_out,
-            "conversion_in": line.conversion_in,
-            "conversion_out": line.conversion_out,
-            "identified_adjustment": line.identified_adjustment,
-            "expected_closing": line.expected_closing,
-            "point_closing": line.point_closing,
-            "difference": line.difference,
+            "opening_point": normalized["opening_point"],
+            "production": normalized["production"],
+            "sales": normalized["sales"],
+            "waste": normalized["waste"],
+            "transfer_in": normalized["transfer_in"],
+            "transfer_out": normalized["transfer_out"],
+            "conversion_in": normalized["conversion_in"],
+            "conversion_out": normalized["conversion_out"],
+            "identified_adjustment": normalized["identified_adjustment"],
+            "expected_closing": normalized["expected_closing"],
+            "point_closing": normalized["point_closing"],
+            "difference": normalized["difference"],
             "point_closing_status": ProductInventoryAuditCase.PointClosingStatus.PROTECTED,
             "movement_status": movement_status,
             "physical_status": ProductInventoryAuditCase.PhysicalStatus.NOT_AVAILABLE,
