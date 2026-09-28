@@ -233,6 +233,22 @@ class ProductInventoryAuditModelsTests(TestCase):
                 ["summary"],
             )
 
+    def test_run_rejects_invalid_status_in_orm_and_database(self):
+        with self.assertRaisesMessage(ValidationError, "status"):
+            ProductInventoryAuditRun.objects.create(
+                month=date(2026, 8, 1),
+                status="INVALID",
+                calculation_fingerprint="6" * 64,
+            )
+
+        run = self._run()
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE reportes_productinventoryauditrun SET status = %s WHERE id = %s",
+                    ["INVALID", run.pk],
+                )
+
     def test_case_is_unique_per_month_branch_product_and_keeps_separate_statuses(self):
         run = self._run()
         case = self._case(
@@ -311,6 +327,47 @@ class ProductInventoryAuditModelsTests(TestCase):
                 [case],
                 ["source_trace"],
             )
+
+    def test_case_rejects_invalid_statuses_in_orm_and_database(self):
+        run = self._run()
+        invalid_statuses = (
+            ("point_closing_status", "INVALID"),
+            ("movement_status", "INVALID"),
+            ("physical_status", "INVALID"),
+        )
+        for field, value in invalid_statuses:
+            with self.subTest(layer="orm", field=field):
+                with self.assertRaisesMessage(ValidationError, field):
+                    self._case(run=run, **{field: value})
+
+        case = self._case(run=run)
+        for field, value in invalid_statuses:
+            with self.subTest(layer="database", field=field):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            f"UPDATE reportes_productinventoryauditcase SET {field} = %s WHERE id = %s",
+                            [value, case.pk],
+                        )
+
+    def test_case_rejects_month_different_from_run_in_orm_and_database(self):
+        run = self._run()
+        with self.assertRaisesMessage(ValidationError, "mes de la corrida"):
+            self._case(run=run, month=date(2026, 9, 1))
+
+        case = self._case(run=run)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE reportes_productinventoryauditcase SET month = %s WHERE id = %s",
+                    [date(2026, 9, 1), case.pk],
+                )
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE reportes_productinventoryauditrun SET month = %s WHERE id = %s",
+                    [date(2026, 9, 1), run.pk],
+                )
 
     def test_event_persists_audit_history_and_is_append_only(self):
         case = self._case()
@@ -527,6 +584,32 @@ class ProductInventoryAuditModelsTests(TestCase):
                     [event.pk],
                 )
                 cursor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+
+    def test_event_base_manager_bulk_create_cannot_bypass_database_contract(self):
+        case = self._case()
+        invalid_events = (
+            ProductInventoryAuditEvent(
+                case=case,
+                action="INVALID",
+                reason_code="INVALID_ACTION",
+            ),
+            ProductInventoryAuditEvent(
+                case=case,
+                action=ProductInventoryAuditEvent.Action.EXPLAIN,
+                reason_code="   ",
+            ),
+            ProductInventoryAuditEvent(
+                case=case,
+                action=ProductInventoryAuditEvent.Action.REOPEN,
+                reason_code="SOURCE_CHANGED",
+                metadata=[],
+            ),
+        )
+
+        for event in invalid_events:
+            with self.subTest(action=event.action, reason=event.reason_code):
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    ProductInventoryAuditEvent._base_manager.bulk_create([event])
 
     def test_custom_approval_permission_exists(self):
         permission = Permission.objects.get(

@@ -109,6 +109,11 @@ def _validate_product_inventory_audit_source_trace(source_trace) -> None:
         raise ValidationError({"source_trace": "Debe ser un objeto."})
 
 
+def _validate_inventory_audit_choice(*, field: str, value, allowed_values) -> None:
+    if value not in allowed_values:
+        raise ValidationError({field: "El estado seleccionado no es válido."})
+
+
 class _NoBulkMutationQuerySet(models.QuerySet):
     _BULK_OPERATION_ERROR = (
         "Este registro no admite operaciones masivas; "
@@ -3440,6 +3445,10 @@ class ProductInventoryAuditRun(models.Model):
                 check=models.Q(month__day=1),
                 name="inv_audit_run_month_day_1",
             ),
+            models.CheckConstraint(
+                check=models.Q(status__in=("READY", "SOURCE_INCOMPLETE")),
+                name="inv_audit_run_status_valid",
+            ),
         ]
         verbose_name = "Corrida de auditoría de inventario"
         verbose_name_plural = "Corridas de auditoría de inventario"
@@ -3448,10 +3457,20 @@ class ProductInventoryAuditRun(models.Model):
         super().clean()
         if self.month:
             self.month = self.month.replace(day=1)
+        _validate_inventory_audit_choice(
+            field="status",
+            value=self.status,
+            allowed_values=self.Status.values,
+        )
         _validate_product_inventory_audit_source_issues(self.source_issues)
         _validate_product_inventory_audit_summary(self.summary)
 
     def save(self, *args, **kwargs):
+        _validate_inventory_audit_choice(
+            field="status",
+            value=self.status,
+            allowed_values=self.Status.values,
+        )
         _validate_product_inventory_audit_source_issues(self.source_issues)
         _validate_product_inventory_audit_summary(self.summary)
         return super().save(*args, **kwargs)
@@ -3541,6 +3560,26 @@ class ProductInventoryAuditCase(models.Model):
                 fields=["month", "branch", "product"],
                 name="uniq_inv_audit_month_branch_product",
             ),
+            models.CheckConstraint(
+                check=models.Q(point_closing_status__in=("AVAILABLE", "PROTECTED")),
+                name="inv_audit_point_status_valid",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    movement_status__in=(
+                        "BALANCED",
+                        "NEEDS_EXPLANATION",
+                        "PENDING_APPROVAL",
+                        "RESOLVED",
+                        "SOURCE_INCOMPLETE",
+                    )
+                ),
+                name="inv_audit_move_status_valid",
+            ),
+            models.CheckConstraint(
+                check=models.Q(physical_status="NOT_AVAILABLE"),
+                name="inv_audit_physical_status_valid",
+            ),
         ]
         indexes = [
             models.Index(
@@ -3565,13 +3604,34 @@ class ProductInventoryAuditCase(models.Model):
             self.month = self.month.replace(day=1)
         if self.run_id and self.month and self.run.month != self.month:
             raise ValidationError({"month": "Debe coincidir con el mes de la corrida."})
+        self._validate_statuses()
         _validate_product_inventory_audit_issue_codes(self.issue_codes)
         _validate_product_inventory_audit_source_trace(self.source_trace)
 
     def save(self, *args, **kwargs):
+        if self.run_id and self.month and self.run.month != self.month:
+            raise ValidationError({"month": "Debe coincidir con el mes de la corrida."})
+        self._validate_statuses()
         _validate_product_inventory_audit_issue_codes(self.issue_codes)
         _validate_product_inventory_audit_source_trace(self.source_trace)
         return super().save(*args, **kwargs)
+
+    def _validate_statuses(self) -> None:
+        _validate_inventory_audit_choice(
+            field="point_closing_status",
+            value=self.point_closing_status,
+            allowed_values=self.PointClosingStatus.values,
+        )
+        _validate_inventory_audit_choice(
+            field="movement_status",
+            value=self.movement_status,
+            allowed_values=self.MovementStatus.values,
+        )
+        _validate_inventory_audit_choice(
+            field="physical_status",
+            value=self.physical_status,
+            allowed_values=self.PhysicalStatus.values,
+        )
 
     def __str__(self) -> str:
         return f"{self.month:%Y-%m} · {self.branch} · {self.product}"
@@ -3588,6 +3648,7 @@ class ProductInventoryAuditEventQuerySet(_NoBulkMutationQuerySet):
 
     def delete(self):
         raise ValidationError(self._BULK_OPERATION_ERROR)
+
 
 class ProductInventoryAuditEvent(models.Model):
     class Action(models.TextChoices):
@@ -3641,12 +3702,27 @@ class ProductInventoryAuditEvent(models.Model):
                 ),
                 name="inv_audit_review_has_explain",
             ),
+            models.CheckConstraint(
+                check=models.Q(action__in=("EXPLAIN", "APPROVE", "REJECT", "REOPEN")),
+                name="inv_audit_event_action_valid",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(reason_code__regex=r"^\s*$"),
+                name="inv_audit_event_reason_nonempty",
+            ),
         ]
         verbose_name = "Evento de auditoría de inventario"
         verbose_name_plural = "Eventos de auditoría de inventario"
 
     def clean(self):
         super().clean()
+        _validate_inventory_audit_choice(
+            field="action",
+            value=self.action,
+            allowed_values=self.Action.values,
+        )
+        if not isinstance(self.reason_code, str) or not self.reason_code.strip():
+            raise ValidationError({"reason_code": "Debe indicar una causa."})
         if not isinstance(self.metadata, dict):
             raise ValidationError({"metadata": "Debe ser un objeto."})
         if self.action in {self.Action.APPROVE, self.Action.REJECT}:
