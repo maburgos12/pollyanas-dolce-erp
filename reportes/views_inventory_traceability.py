@@ -9,11 +9,12 @@ from uuid import uuid4
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import models, transaction
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
-from django.shortcuts import redirect
+from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.text import get_valid_filename
 from django.views.decorators.http import require_GET, require_POST
 
@@ -21,6 +22,14 @@ from core.access import ACCESS_MANAGE, can_view_reportes, get_module_access
 from mantenimiento.evidence_validation import (
     EvidenceValidationError,
     validate_evidence_files,
+)
+from pos_bridge.models import (
+    PointConversionLine,
+    PointDailySale,
+    PointHistoricalInventoryClosingLine,
+    PointProductionLine,
+    PointTransferLine,
+    PointWasteLine,
 )
 from reportes.models import (
     ProductInventoryAuditCase,
@@ -30,6 +39,40 @@ from reportes.models import (
 
 MAX_EVIDENCE_SIZE = 10 * 1024 * 1024
 MAX_NOTES_LENGTH = 4000
+
+MOVEMENT_STATUS_LABELS = {
+    ProductInventoryAuditCase.MovementStatus.BALANCED: "Conciliado",
+    ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION: "Requiere explicación",
+    ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL: "Pendiente de aprobación",
+    ProductInventoryAuditCase.MovementStatus.RESOLVED: "Resuelto y aprobado",
+    ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE: "Fuente incompleta",
+}
+
+TRACE_SOURCE_LABELS = {
+    "opening": "Inventario inicial Point",
+    "production": "Producción",
+    "transfers": "Transferencias",
+    "conversions": "Conversiones",
+    "sales": "Ventas",
+    "waste": "Merma",
+    "adjustments": "Ajustes identificados",
+    "closing": "Cierre Point",
+}
+
+BALANCE_SEQUENCE = (
+    ("opening_point", "Inventario inicial Point", "+"),
+    ("production", "Producción", "+"),
+    ("transfer_in", "Transferencias recibidas", "+"),
+    ("conversion_in", "Conversiones de entrada", "+"),
+    ("sales", "Ventas", "−"),
+    ("waste", "Merma", "−"),
+    ("transfer_out", "Transferencias enviadas", "−"),
+    ("conversion_out", "Conversiones de salida", "−"),
+    ("identified_adjustment", "Ajuste identificado", "±"),
+    ("expected_closing", "Cierre esperado", "="),
+    ("point_closing", "Cierre Point", "↔"),
+    ("difference", "Diferencia", "="),
+)
 
 
 def _require_report_access(request: HttpRequest) -> None:
@@ -60,6 +103,233 @@ def _wants_json(request: HttpRequest) -> bool:
         "application/json" in request.headers.get("Accept", "")
         or request.headers.get("X-Requested-With") == "XMLHttpRequest"
     )
+
+
+def _wants_html(request: HttpRequest) -> bool:
+    return "text/html" in request.headers.get("Accept", "")
+
+
+def _possible_cause(case: ProductInventoryAuditCase) -> str:
+    issue_codes = set(case.issue_codes if isinstance(case.issue_codes, list) else [])
+    if "TRANSFER_QUANTITY_MISMATCH" in issue_codes:
+        return "Transferencia con cantidades enviadas y recibidas distintas"
+    if issue_codes.intersection(
+        {
+            "MISSING_CONVERSION_DESTINATION",
+            "MISSING_CONVERSION_ORIGIN",
+        }
+    ):
+        return "Conversión incompleta entre producto entero y presentación"
+    if "CONVERSION_EQUIVALENCE_MISMATCH" in issue_codes:
+        return "La conversión no coincide con la equivalencia aprobada"
+    if "NON_DERIVED_CONVERSION" in issue_codes:
+        return "Conversión sin equivalencia aprobada para este producto"
+    if case.movement_status == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE:
+        return "Falta evidencia de una fuente del mes"
+    if case.movement_status == ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL:
+        return "Hay una explicación esperando revisión"
+    if case.movement_status == ProductInventoryAuditCase.MovementStatus.RESOLVED:
+        return "Diferencia explicada y aprobada"
+    if case.difference and (case.conversion_in or case.conversion_out):
+        return "Conversión o rebanado registrado; revisar la equivalencia"
+    if case.difference and case.waste:
+        return "Merma registrada; revisar fecha, cantidad y ubicación"
+    if case.difference and (case.transfer_in or case.transfer_out):
+        return "Producto transferido; revisar origen y recepción"
+    if case.difference and case.production:
+        return "Producción registrada; revisar fecha y ubicación"
+    if case.difference > 0:
+        return "Point reportó más producto que el saldo esperado"
+    if case.difference < 0:
+        return "Point reportó menos producto que el saldo esperado"
+    return "Sin diferencia"
+
+
+def _case_status_context(case: ProductInventoryAuditCase) -> dict[str, str]:
+    return {
+        "point": (
+            "Cierre protegido"
+            if case.point_closing_status == ProductInventoryAuditCase.PointClosingStatus.PROTECTED
+            else "Cierre disponible"
+        ),
+        "movement": MOVEMENT_STATUS_LABELS.get(case.movement_status, "Por revisar"),
+        "physical": case.get_physical_status_display(),
+    }
+
+
+def _format_evidence_date(value) -> str:
+    if value is None:
+        return "Sin fecha informada"
+    if hasattr(value, "date"):
+        if timezone.is_aware(value):
+            value = timezone.localtime(value)
+        value = value.date()
+    return value.strftime("%d/%m/%Y")
+
+
+def _evidence_row(
+    *, source, source_id, date_value, location, quantity, actor, reference
+) -> dict[str, object]:
+    return {
+        "source": TRACE_SOURCE_LABELS[source],
+        "source_id": source_id,
+        "date": _format_evidence_date(date_value),
+        "location": location,
+        "quantity": quantity,
+        "actor": actor or "No informado por Point",
+        "reference": reference or f"Point #{source_id}",
+        "available": True,
+    }
+
+
+def _missing_evidence_row(source: str, source_id: int) -> dict[str, object]:
+    return {
+        "source": TRACE_SOURCE_LABELS.get(source, "Movimiento"),
+        "source_id": source_id,
+        "available": False,
+        "message": "Evidencia ya no disponible en la fuente",
+    }
+
+
+def _source_evidence(case: ProductInventoryAuditCase) -> list[dict[str, object]]:
+    trace = case.source_trace if isinstance(case.source_trace, dict) else {}
+    evidence: list[dict[str, object]] = []
+
+    def ids_for(source):
+        values = trace.get(source, [])
+        return [value for value in values if type(value) is int and value > 0]
+
+    closing_ids = set(ids_for("opening") + ids_for("closing"))
+    closings = {
+        row.pk: row
+        for row in PointHistoricalInventoryClosingLine.objects.filter(pk__in=closing_ids)
+        .select_related("closing", "branch")
+    }
+    sales = {
+        row.pk: row
+        for row in PointDailySale.objects.filter(
+            pk__in=ids_for("sales")
+        ).select_related("branch")
+    }
+    production = {
+        row.pk: row
+        for row in PointProductionLine.objects.filter(
+            pk__in=ids_for("production")
+        ).select_related("branch")
+    }
+    waste = {
+        row.pk: row
+        for row in PointWasteLine.objects.filter(
+            pk__in=ids_for("waste")
+        ).select_related("branch")
+    }
+    transfers = {
+        row.pk: row
+        for row in PointTransferLine.objects.filter(pk__in=ids_for("transfers")).select_related(
+            "origin_branch", "destination_branch"
+        )
+    }
+    conversions = {
+        row.pk: row
+        for row in PointConversionLine.objects.filter(
+            pk__in=ids_for("conversions")
+        ).select_related("branch")
+    }
+    for source in TRACE_SOURCE_LABELS:
+        for source_id in ids_for(source):
+            if source in {"opening", "closing"}:
+                row = closings.get(source_id)
+                if row:
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=row.closing.operational_date,
+                            location=row.branch.name,
+                            quantity=row.stock,
+                            actor=(row.evidence or {}).get("actor"),
+                            reference=f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            elif source == "sales":
+                row = sales.get(source_id)
+                if row:
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=row.sale_date,
+                            location=row.branch.name,
+                            quantity=row.quantity,
+                            actor=None,
+                            reference=f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            elif source == "production":
+                row = production.get(source_id)
+                if row:
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=row.production_date,
+                            location=row.branch.name,
+                            quantity=row.produced_quantity,
+                            actor=row.responsible,
+                            reference=row.production_external_id or f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            elif source == "waste":
+                row = waste.get(source_id)
+                if row:
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=row.movement_at,
+                            location=row.branch.name,
+                            quantity=row.quantity,
+                            actor=row.responsible,
+                            reference=row.movement_external_id or f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            elif source == "transfers":
+                row = transfers.get(source_id)
+                if row:
+                    incoming = row.destination_branch_id == case.branch_id
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=(row.received_at if incoming else row.sent_at) or row.registered_at,
+                            location=f"{row.origin_branch.name} → {row.destination_branch.name}",
+                            quantity=row.received_quantity if incoming else row.sent_quantity,
+                            actor=(row.received_by if incoming else row.sent_by) or row.requested_by,
+                            reference=row.transfer_external_id or f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            elif source == "conversions":
+                row = conversions.get(source_id)
+                if row:
+                    evidence.append(
+                        _evidence_row(
+                            source=source,
+                            source_id=source_id,
+                            date_value=row.movement_at,
+                            location=row.branch.name,
+                            quantity=row.quantity,
+                            actor=(row.raw_payload or {}).get("responsable"),
+                            reference=row.movement_external_id or f"Point #{source_id}",
+                        )
+                    )
+                    continue
+            evidence.append(_missing_evidence_row(source, source_id))
+    return evidence
 
 
 def _parse_month(raw_month: str) -> date:
@@ -140,6 +410,9 @@ def _action_response(
         }
         if fields is not None:
             payload["fields"] = fields
+        if ok:
+            payload["redirect"] = _case_url(case)
+            payload["reload"] = True
         return JsonResponse(payload, status=status)
 
     if ok:
@@ -264,11 +537,100 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         run = ProductInventoryAuditRun.objects.order_by("-month").first()
 
     cases = []
+    branches = []
+    selected_branch = (request.GET.get("branch") or "").strip()
+    selected_status = (request.GET.get("status") or "").strip()
+    kpis = {"balanced": 0, "pending": 0, "pending_approval": 0}
     if run is not None:
+        month_cases = ProductInventoryAuditCase.objects.filter(run=run, month=run.month)
+        branches = list(
+            month_cases.order_by("branch__name")
+            .values("branch_id", "branch__name")
+            .distinct()
+        )
+        if selected_branch:
+            try:
+                month_cases = month_cases.filter(branch_id=int(selected_branch))
+            except ValueError:
+                selected_branch = ""
+        totals = month_cases.aggregate(
+            balanced=models.Count(
+                "id",
+                filter=models.Q(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.BALANCED
+                ),
+            ),
+            pending=models.Count(
+                "id",
+                filter=models.Q(
+                    movement_status__in=(
+                        ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+                        ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+                    )
+                ),
+            ),
+            pending_approval=models.Count(
+                "id",
+                filter=models.Q(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+                ),
+            ),
+        )
+        kpis = {name: int(value or 0) for name, value in totals.items()}
+        case_queryset = month_cases
+        if selected_status in ProductInventoryAuditCase.MovementStatus.values:
+            case_queryset = case_queryset.filter(movement_status=selected_status)
+        elif selected_status:
+            selected_status = ""
         cases = list(
-            ProductInventoryAuditCase.objects.filter(run=run, month=run.month)
+            case_queryset
             .select_related("branch", "product")
-            .order_by("branch__name", "product__name", "id")
+            .order_by(
+                models.Case(
+                    models.When(
+                        movement_status=ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+                        then=0,
+                    ),
+                    models.When(
+                        movement_status=ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+                        then=1,
+                    ),
+                    models.When(
+                        movement_status=ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+                        then=2,
+                    ),
+                    models.When(
+                        movement_status=ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                        then=3,
+                    ),
+                    default=4,
+                    output_field=models.IntegerField(),
+                ),
+                "branch__name",
+                "product__name",
+                "id",
+            )
+        )
+        for case in cases:
+            case.ui_possible_cause = _possible_cause(case)
+            case.ui_movement_status = MOVEMENT_STATUS_LABELS.get(
+                case.movement_status, "Por revisar"
+            )
+
+    if _wants_html(request):
+        return render(
+            request,
+            "reportes/auditoria_inventario.html",
+            {
+                "run": run,
+                "cases": cases,
+                "branches": branches,
+                "selected_month": run.month.strftime("%Y-%m") if run else raw_month,
+                "selected_branch": selected_branch,
+                "selected_status": selected_status,
+                "status_options": ProductInventoryAuditCase.MovementStatus.choices,
+                "kpis": kpis,
+            },
         )
     return JsonResponse(
         {
@@ -320,6 +682,54 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
         }
         for event in case.events.all()
     ]
+    if _wants_html(request):
+        has_custody = True
+        try:
+            _require_case_custody(request.user, case)
+        except PermissionDenied:
+            has_custody = False
+        latest_explanation = _latest_explanation(case)
+        return render(
+            request,
+            "reportes/auditoria_inventario_caso.html",
+            {
+                "case": case,
+                "status": _case_status_context(case),
+                "possible_cause": _possible_cause(case),
+                "balance_steps": [
+                    {
+                        "number": index,
+                        "field": field,
+                        "label": label,
+                        "operator": operator,
+                        "value": getattr(case, field),
+                    }
+                    for index, (field, label, operator) in enumerate(
+                        BALANCE_SEQUENCE, start=1
+                    )
+                ],
+                "source_evidence": _source_evidence(case),
+                "latest_explanation": latest_explanation,
+                "can_explain": (
+                    has_custody
+                    and request.user.has_perm(
+                        "reportes.change_productinventoryauditcase"
+                    )
+                    and case.movement_status
+                    == ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
+                ),
+                "can_review": (
+                    has_custody
+                    and request.user.has_perm(
+                        "reportes.approve_product_inventory_audit"
+                    )
+                    and case.movement_status
+                    == ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+                    and latest_explanation is not None
+                    and latest_explanation.actor_id != request.user.pk
+                ),
+            },
+        )
     return JsonResponse({"ok": True, "case": payload})
 
 

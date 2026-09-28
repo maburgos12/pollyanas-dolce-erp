@@ -28,6 +28,7 @@
         <p class="executive-section-copy">Comparativo operativo por receta y categoría para {{ selected_period_label }}.</p>
       </div>
       <div class="production-export-actions">
+        <a class="btn btn-primary" href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}">Auditar por sucursal</a>
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=csv">CSV</a>
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=xlsx">Excel XLSX</a>
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=pdf">PDF</a>

@@ -8,12 +8,14 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ImproperlyConfigured, SuspiciousFileOperation
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import Client, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
 from core.models import Sucursal, UserModuleAccess, UserProfile
-from pos_bridge.models import PointBranch, PointProduct
+from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -147,6 +149,185 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertNotIn(other_case.pk, [row["id"] for row in dashboard.json()["cases"]])
         self.assertEqual(detail.json()["case"]["id"], self.case.pk)
         rebuild.assert_not_called()
+
+    def test_browser_dashboard_prioritizes_exceptions_and_exposes_operational_filters(self):
+        self.case.conversion_in = Decimal("8")
+        self.case.save(update_fields=["conversion_in"])
+        balanced_product = PointProduct.objects.create(
+            external_id="audit-view-balanced-product",
+            sku="AUDIT-BALANCED",
+            name="Producto conciliado",
+        )
+        balanced_case = self._case(
+            product=balanced_product,
+            difference=Decimal("0"),
+            movement_status=ProductInventoryAuditCase.MovementStatus.BALANCED,
+            calculation_fingerprint="7" * 64,
+        )
+        pending_product = PointProduct.objects.create(
+            external_id="audit-view-pending-product",
+            sku="AUDIT-PENDING",
+            name="Producto por aprobar",
+        )
+        pending_case = self._case(
+            product=pending_product,
+            movement_status=ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+            calculation_fingerprint="8" * 64,
+        )
+        self.client.force_login(self.viewer)
+
+        with patch(
+            "reportes.services_inventory_traceability.InventoryAuditMaterializer.rebuild"
+        ) as rebuild, CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                reverse("reportes:inventory_audit"),
+                {"month": "2026-08"},
+                HTTP_ACCEPT="text/html",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "reportes/auditoria_inventario.html")
+        self.assertContains(response, "Cuadran con Point")
+        self.assertContains(response, "Pendientes")
+        self.assertContains(response, "Pendientes de aprobación")
+        self.assertContains(
+            response,
+            "Conversión o rebanado registrado; revisar la equivalencia",
+        )
+        self.assertContains(response, 'name="month"')
+        self.assertContains(response, 'name="branch"')
+        self.assertContains(response, 'name="status"')
+        self.assertContains(response, '<colgroup>', html=False)
+        self.assertContains(response, "inventory-audit-table-wrap")
+        self.assertContains(response, 'class="inventory-audit-table"')
+        content = response.content.decode()
+        self.assertLess(content.index(self.product.name), content.index(balanced_product.name))
+        self.assertLess(content.index(pending_product.name), content.index(balanced_product.name))
+        self.assertEqual(response.context["kpis"]["balanced"], 1)
+        self.assertEqual(response.context["kpis"]["pending"], 1)
+        self.assertEqual(response.context["kpis"]["pending_approval"], 1)
+        stylesheet = Path("static/css/styles.css").read_text()
+        self.assertIn(
+            ".inventory-audit-table thead th {\n  position: sticky;",
+            stylesheet,
+        )
+        self.assertIn(
+            ".inventory-audit-table {\n  width: 100%;\n  min-width: 1050px;\n  table-layout: fixed;",
+            stylesheet,
+        )
+        forbidden_live_sources = (
+            "pos_bridge_daily_sales",
+            "pos_bridge_production_lines",
+            "pos_bridge_waste_lines",
+            "pos_bridge_transfer_lines",
+            "pos_bridge_conversion_lines",
+            "pos_bridge_sync_jobs",
+        )
+        self.assertTrue(
+            all(
+                all(source not in query["sql"] for source in forbidden_live_sources)
+                for query in queries.captured_queries
+            ),
+            queries.captured_queries,
+        )
+        rebuild.assert_not_called()
+
+    def test_browser_dashboard_filters_materialized_rows_without_loading_other_months(self):
+        other_branch = PointBranch.objects.create(
+            external_id="audit-view-filter-branch",
+            name="Devoluciones",
+        )
+        other_case = self._case(
+            branch=other_branch,
+            calculation_fingerprint="6" * 64,
+        )
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit"),
+            {
+                "month": "2026-08",
+                "branch": str(other_branch.pk),
+                "status": ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+            },
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Devoluciones")
+        self.assertContains(response, other_case.product.name)
+        self.assertEqual([case.pk for case in response.context["cases"]], [other_case.pk])
+
+    def test_browser_detail_explains_balance_sequence_and_source_evidence(self):
+        sale = PointDailySale.objects.create(
+            branch=self.branch,
+            product=self.product,
+            sale_date=date(2026, 8, 15),
+            quantity=Decimal("4"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+        )
+        self.case.source_trace = {
+            "sales": [sale.pk, 999999],
+            "opening": [],
+            "closing": [],
+            "production": [],
+            "waste": [],
+            "transfers": [],
+            "conversions": [],
+            "adjustments": [],
+        }
+        self.case.save(update_fields=["source_trace"])
+        self.client.force_login(self.explainer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "reportes/auditoria_inventario_caso.html")
+        content = response.content.decode()
+        balance_content = content[content.index('<ol class="inventory-audit-balance-list">'):]
+        labels = [
+            "Inventario inicial Point",
+            "Producción",
+            "Transferencias recibidas",
+            "Conversiones de entrada",
+            "Ventas",
+            "Merma",
+            "Transferencias enviadas",
+            "Conversiones de salida",
+            "Ajuste identificado",
+            "Cierre esperado",
+            "Cierre Point",
+            "Diferencia",
+        ]
+        positions = [balance_content.index(label) for label in labels]
+        self.assertEqual(positions, sorted(positions))
+        self.assertContains(response, "15/08/2026")
+        self.assertContains(response, self.branch.name)
+        self.assertContains(response, "4")
+        self.assertContains(response, f"Point #{sale.pk}")
+        self.assertContains(response, "No informado por Point")
+        self.assertContains(response, "Evidencia ya no disponible en la fuente")
+        self.assertContains(response, 'data-async-action')
+        self.assertContains(response, 'data-pending-label="Procesando…"')
+        self.assertContains(response, "Cierre Point")
+        self.assertContains(response, "Movimientos")
+        self.assertContains(response, "Conteo físico")
+
+    def test_browser_detail_hides_actions_outside_permission_and_custody(self):
+        self.client.force_login(self.viewer)
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'action="%s"' % reverse(
+            "reportes:inventory_audit_explain", args=[self.case.pk]
+        ))
+        self.assertNotContains(response, "Aprobar explicación")
 
     def test_user_without_report_access_cannot_read_dashboard_or_detail(self):
         self.client.force_login(self.outsider)
@@ -571,6 +752,12 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(payload["target"], f"#inventory-audit-case-{self.case.pk}")
         self.assertIn(f'id="inventory-audit-case-{self.case.pk}"', payload["html"])
         self.assertIn("PENDING_APPROVAL", payload["html"])
+        self.assertEqual(
+            payload["redirect"],
+            f"{reverse('reportes:inventory_audit_case', args=[self.case.pk])}"
+            f"#inventory-audit-case-{self.case.pk}",
+        )
+        self.assertTrue(payload["reload"])
 
     def test_invalid_or_duplicate_transitions_return_conflict_without_extra_events(self):
         self.case.movement_status = ProductInventoryAuditCase.MovementStatus.BALANCED
