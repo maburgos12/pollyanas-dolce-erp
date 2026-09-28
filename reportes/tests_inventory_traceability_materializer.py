@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
 from io import StringIO
 from threading import Event, Lock, Thread
@@ -14,7 +14,7 @@ from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
-from pos_bridge.models import PointBranch, PointProduct
+from pos_bridge.models import PointBranch, PointProduct, PointSyncJob, PointTransferLine
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceability,
     BranchProductBalance,
@@ -585,7 +585,7 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
         self.assertEqual(run.summary, dict(results["second"]))
         self.assertEqual(run.status, ProductInventoryAuditRun.Status.READY)
 
-    def test_materializer_and_transfer_writer_cannot_cross_source_snapshot(self):
+    def test_materializer_blocks_transfer_writer_moving_august_row_to_september(self):
         build_entered = Event()
         release_build = Event()
         writer_backend_ready = Event()
@@ -595,6 +595,68 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
         observations = []
         errors = []
         writer_backend_pid = {}
+        destination = PointBranch.objects.create(
+            external_id="DESTINATION",
+            name="Destination",
+        )
+        august_stamp = datetime(2026, 8, 15, 18, tzinfo=datetime_timezone.utc)
+        existing = PointTransferLine.objects.create(
+            origin_branch=self.branch,
+            destination_branch=destination,
+            transfer_external_id="T-1",
+            detail_external_id="D-1",
+            source_hash="TRANSFER-MATERIALIZER-T-1-D-1",
+            registered_at=august_stamp,
+            sent_at=august_stamp,
+            received_at=august_stamp,
+            item_name="Producto de prueba",
+            is_cancelled=True,
+            is_finalized=True,
+        )
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            parameters={
+                "start_date": "2026-09-01",
+                "end_date": "2026-09-30",
+            },
+        )
+        september_stamp = datetime(2026, 9, 15, 18, tzinfo=datetime_timezone.utc)
+        incoming = SimpleNamespace(
+            registered_at=september_stamp,
+            sent_at=september_stamp,
+            received_at=september_stamp,
+            transfer_external_id=existing.transfer_external_id,
+            detail_external_id=existing.detail_external_id,
+            source_hash=existing.source_hash,
+            origin_branch={
+                "external_id": self.branch.external_id,
+                "name": self.branch.name,
+                "status": PointBranch.STATUS_ACTIVE,
+                "metadata": {},
+            },
+            destination_branch={
+                "external_id": destination.external_id,
+                "name": destination.name,
+                "status": PointBranch.STATUS_ACTIVE,
+                "metadata": {},
+            },
+            requested_by="Operación",
+            sent_by="Operación",
+            received_by="Operación",
+            item_name="Producto de prueba",
+            item_code="TEST",
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            requested_quantity=Decimal("1"),
+            sent_quantity=Decimal("1"),
+            received_quantity=Decimal("1"),
+            is_insumo=False,
+            is_received=False,
+            is_cancelled=True,
+            is_finalized=True,
+            is_open=False,
+            raw_payload={},
+        )
 
         class CoordinatedSourceService:
             def build(inner_self, month):
@@ -625,36 +687,10 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
                 connection.ensure_connection()
                 writer_backend_pid["pid"] = connection.connection.get_backend_pid()
                 writer_backend_ready.set()
-
-                def write_after_lock(_branch):
-                    writer_entered.set()
-                    with source_guard:
-                        source["closing"] = Decimal("12")
-                    raise RuntimeError("stop after mutex")
-
-                item = SimpleNamespace(
-                    registered_at=date(2026, 8, 15),
-                    sent_at=None,
-                    received_at=None,
-                    transfer_external_id="T-1",
-                    detail_external_id="D-1",
-                    origin_branch={},
-                )
-                service = PointMovementSyncService()
-                with patch.object(service, "_upsert_branch", side_effect=write_after_lock):
-                    try:
-                        service.persist_transfer_lines(
-                            SimpleNamespace(
-                                parameters={
-                                    "start_date": "2026-08-01",
-                                    "end_date": "2026-08-31",
-                                }
-                            ),
-                            [item],
-                        )
-                    except RuntimeError as exc:
-                        if str(exc) != "stop after mutex":
-                            raise
+                PointMovementSyncService().persist_transfer_lines(sync_job, [incoming])
+                with source_guard:
+                    source["closing"] = Decimal("12")
+                writer_entered.set()
             except BaseException as exc:  # pragma: no cover - surfaced below
                 errors.append(exc)
             finally:
@@ -680,6 +716,8 @@ class MonthlyAuditLockConcurrencyTests(TraceabilityTestFixtures, TransactionTest
         self.assertEqual(observations, [Decimal("11"), Decimal("11")])
         self.assertTrue(writer_entered.is_set())
         self.assertEqual(source["closing"], Decimal("12"))
+        existing.refresh_from_db()
+        self.assertEqual(existing.received_at.month, 9)
         self.assertEqual(
             ProductInventoryAuditCase.objects.get().point_closing,
             Decimal("11.0000"),

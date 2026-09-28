@@ -9,6 +9,7 @@ from django.db import connection
 from django.utils import timezone
 
 PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE = 1_347_901_004
+PRODUCT_TRANSFER_WRITER_LOCK_KEY = 0
 POINT_BUSINESS_TIMEZONE = ZoneInfo("America/Mazatlan")
 
 
@@ -51,6 +52,23 @@ def lock_product_month_sources(months) -> tuple[date, ...]:
                 PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE, value.year * 100 + value.month,
             ])
     return ordered
+
+
+def lock_product_transfer_writer() -> None:
+    """Serialize transfer writers before they discover historical source months.
+
+    Key zero cannot collide with the positive YYYYMM month keys in this namespace.
+    Callers must acquire this lock before any monthly source lock.
+    """
+    if connection.vendor != "postgresql":
+        raise RuntimeError("El mutex de transferencias requiere PostgreSQL.")
+    if not connection.in_atomic_block:
+        raise RuntimeError("El mutex de transferencias requiere transaction.atomic().")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(%s, %s)",
+            [PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE, PRODUCT_TRANSFER_WRITER_LOCK_KEY],
+        )
 
 
 def snapshot_affected_months(captured_at: date | datetime) -> tuple[date, ...]:

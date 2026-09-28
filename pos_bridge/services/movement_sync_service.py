@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from control.models import MermaPOS
@@ -39,7 +40,10 @@ from pos_bridge.services.inventory_baseline import (
 from pos_bridge.services.movement_matching_service import PointMovementMatchingService
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.production_entry_extractor import PointProductionEntryExtractor
-from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.product_month_source_mutex import (
+    lock_product_month_sources,
+    lock_product_transfer_writer,
+)
 from pos_bridge.services.transfer_extractor import PointTransferExtractor
 from pos_bridge.services.waste_extractor import PointWasteExtractor
 from pos_bridge.utils.exceptions import ExtractionError, PersistenceError, PosBridgeError
@@ -747,6 +751,10 @@ class PointMovementSyncService:
 
     @transaction.atomic
     def persist_transfer_lines(self, sync_job: PointSyncJob, extracted_lines: list, *, apply_inventory: bool = True) -> dict:
+        # Every transfer writer takes this stable family lock first. That makes the
+        # following row snapshot authoritative and prevents two writers from
+        # discovering different historical month sets before either one persists.
+        lock_product_transfer_writer()
         parameters = getattr(sync_job, "parameters", {}) or {}
         scope_dates = [
             date.fromisoformat(str(parameters[key]))
@@ -759,7 +767,31 @@ class PointMovementSyncService:
             for value in (item.registered_at, item.sent_at, item.received_at)
             if value is not None
         ]
-        lock_product_month_sources([*scope_dates, *movement_dates])
+        incoming_hashes = {item.source_hash for item in extracted_lines}
+        transfer_ids = {item.transfer_external_id for item in extracted_lines}
+        candidates = Q(source_hash__in=incoming_hashes)
+        if transfer_ids:
+            candidates |= Q(
+                transfer_external_id__in=transfer_ids,
+                is_current_snapshot=True,
+            )
+        # The family lock serializes transfer writers before these row locks.
+        # Materializers only take month locks and plain-read these rows, so this
+        # row-before-month order cannot form a lock cycle with them.
+        existing_rows = []
+        if incoming_hashes or transfer_ids:
+            existing_rows = list(
+                PointTransferLine.objects.select_for_update()
+                .filter(candidates)
+                .only("registered_at", "sent_at", "received_at")
+            )
+        historical_dates = [
+            value
+            for row in existing_rows
+            for value in (row.registered_at, row.sent_at, row.received_at)
+            if value is not None
+        ]
+        lock_product_month_sources([*scope_dates, *movement_dates, *historical_dates])
         staged_created = 0
         staged_updated = 0
         inventory_entries_created = 0
