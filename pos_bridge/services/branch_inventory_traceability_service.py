@@ -18,6 +18,9 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.models.product import _normalize_name
+from pos_bridge.services.monthly_product_balance_service import (
+    MonthlyPointProductBalanceService,
+)
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 
 ZERO = Decimal("0")
@@ -142,11 +145,26 @@ class BranchInventoryTraceabilityService:
 
         products = list(PointProduct.objects.all().order_by("id"))
         product_indexes = self._build_product_indexes(products)
-        sales, production, waste, movement_issues = self._load_direct_movements(
+        (
+            sales,
+            production,
+            waste,
+            movement_issues,
+            authority_issues,
+        ) = self._load_direct_movements(
             month_start=month_start,
             closing_date=closing_date,
             product_indexes=product_indexes,
         )
+        if authority_issues:
+            return BranchInventoryTraceability(
+                month=month_start,
+                lines=(),
+                global_issues=tuple(authority_issues) + tuple(movement_issues),
+                company_difference=ZERO,
+                exception_count=0,
+                source_complete=False,
+            )
         keys = sorted(
             opening.keys()
             | closing.keys()
@@ -268,8 +286,18 @@ class BranchInventoryTraceabilityService:
             official_point_sales_rows_for_range(
                 start_date=month_start, end_date=closing_date
             )
-            .select_related("branch", "product")
-            .only("id", "branch_id", "product_id", "quantity")
+            .select_related("branch", "product", "sync_job")
+            .only(
+                "id",
+                "branch_id",
+                "branch__external_id",
+                "branch__erp_branch_id",
+                "product_id",
+                "receta_id",
+                "sync_job_id",
+                "sale_date",
+                "quantity",
+            )
             .order_by("id")
         )
         production_rows = list(
@@ -277,13 +305,16 @@ class BranchInventoryTraceabilityService:
                 production_date__gte=month_start,
                 production_date__lte=closing_date,
             )
-            .select_related("branch")
+            .select_related("branch", "sync_job")
             .only(
                 "id",
                 "branch_id",
                 "item_code",
                 "item_name",
                 "produced_quantity",
+                "receta_id",
+                "sync_job_id",
+                "is_insumo",
             )
             .order_by("id")
         )
@@ -292,14 +323,68 @@ class BranchInventoryTraceabilityService:
                 movement_at__gte=lower_bound,
                 movement_at__lt=upper_bound,
             )
-            .select_related("branch")
-            .only("id", "branch_id", "item_code", "item_name", "quantity")
+            .select_related("branch", "sync_job")
+            .only(
+                "id",
+                "branch_id",
+                "item_code",
+                "item_name",
+                "quantity",
+                "receta_id",
+                "insumo_id",
+                "sync_job_id",
+            )
             .order_by("id")
         )
 
-        sales: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
-        production: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
-        waste: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
+        authority_service = MonthlyPointProductBalanceService()
+        sales_authoritative, sales_authority, _sales_authority_movements = (
+            authority_service._validate_official_daily_sales_authority(
+                month_start=month_start,
+                month_end=closing_date,
+                official_daily_row_count=len(sales_rows),
+                daily_rows=sales_rows,
+            )
+        )
+        production_authority = authority_service._validate_month_movement_job(
+            family="production",
+            month_start=month_start,
+            month_end=closing_date,
+            row_job_ids=[row.sync_job_id for row in production_rows],
+        )
+        waste_authority = authority_service._validate_month_movement_job(
+            family="waste",
+            month_start=month_start,
+            month_end=closing_date,
+            row_job_ids=[row.sync_job_id for row in waste_rows],
+        )
+        authorities = {
+            "sales": {
+                **sales_authority,
+                "authoritative": sales_authoritative,
+                "selected_sync_job_ids": sales_authority.get(
+                    "selected_row_job_ids", ()
+                ),
+            },
+            "production": production_authority,
+            "waste": waste_authority,
+        }
+        authority_issues = [
+            TraceSourceIssue(
+                code="SOURCE_INCOMPLETE",
+                message=(
+                    f"La fuente requerida {family} no es autoritativa: "
+                    f"{', '.join(authority.get('authority_issues') or ())}."
+                ),
+                source_ids=tuple(authority.get("selected_sync_job_ids") or ()),
+            )
+            for family, authority in authorities.items()
+            if not authority.get("authoritative")
+        ]
+
+        sales: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        production: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        waste: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         issues: list[TraceSourceIssue] = []
 
         for row in sales_rows:
@@ -315,6 +400,8 @@ class BranchInventoryTraceabilityService:
                 quantity=row.quantity,
             )
         for row in production_rows:
+            if row.is_insumo:
+                continue
             product_id, issue_code = self._resolve_product(row, product_indexes)
             self._record_direct_row(
                 balances=production,
@@ -326,7 +413,28 @@ class BranchInventoryTraceabilityService:
                 issue_code=issue_code,
                 quantity=row.produced_quantity,
             )
+        finished_product_recipe_ids = (
+            {row.receta_id for row in sales_rows if row.receta_id is not None}
+            | {
+                row.receta_id
+                for row in production_rows
+                if not row.is_insumo and row.receta_id is not None
+            }
+            | {
+                row.receta_id
+                for row in waste_rows
+                if row.receta_id is not None and row.insumo_id is None
+            }
+        )
         for row in waste_rows:
+            if row.receta_id is None and row.insumo_id is not None:
+                continue
+            if (
+                row.receta_id is not None
+                and row.insumo_id is not None
+                and row.receta_id not in finished_product_recipe_ids
+            ):
+                continue
             product_id, issue_code = self._resolve_product(row, product_indexes)
             self._record_direct_row(
                 balances=waste,
@@ -338,7 +446,7 @@ class BranchInventoryTraceabilityService:
                 issue_code=issue_code,
                 quantity=row.quantity,
             )
-        return sales, production, waste, tuple(issues)
+        return sales, production, waste, tuple(issues), tuple(authority_issues)
 
     @staticmethod
     def _resolve_product(row, indexes) -> tuple[int | None, str | None]:
@@ -391,8 +499,9 @@ class BranchInventoryTraceabilityService:
             )
             return
         key = (branch_id, product_id)
-        current_quantity, source_ids = balances.get(key, (ZERO, ()))
-        balances[key] = (current_quantity + Decimal(quantity), (*source_ids, row.id))
+        current_quantity, source_ids = balances.get(key, (ZERO, []))
+        source_ids.append(row.id)
+        balances[key] = (current_quantity + Decimal(quantity), source_ids)
         if issue_code:
             issues.append(
                 TraceSourceIssue(
@@ -429,7 +538,7 @@ class BranchInventoryTraceabilityService:
     @staticmethod
     def _coverage_complete(
         closing: PointHistoricalInventoryClosing,
-        balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]],
+        balances: dict[tuple[int, int], tuple[Decimal, list[int]]],
     ) -> bool:
         expected_branch_ids = {
             int(value) for value in (closing.expected_branch_ids or [])
@@ -464,13 +573,14 @@ class BranchInventoryTraceabilityService:
     @staticmethod
     def _load_closing(
         closing: PointHistoricalInventoryClosing,
-    ) -> dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]]:
-        balances: dict[tuple[int, int], tuple[Decimal, tuple[int, ...]]] = {}
+    ) -> dict[tuple[int, int], tuple[Decimal, list[int]]]:
+        balances: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         lines = PointHistoricalInventoryClosingLine.objects.filter(
             closing=closing
         ).values_list("id", "branch_id", "product_id", "stock")
         for line_id, branch_id, product_id, line_stock in lines:
             key = (branch_id, product_id)
-            stock, source_ids = balances.get(key, (ZERO, ()))
-            balances[key] = (stock + line_stock, (*source_ids, line_id))
+            stock, source_ids = balances.get(key, (ZERO, []))
+            source_ids.append(line_id)
+            balances[key] = (stock + line_stock, source_ids)
         return balances
