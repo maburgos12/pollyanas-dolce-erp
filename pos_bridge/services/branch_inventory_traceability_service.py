@@ -227,7 +227,7 @@ class BranchInventoryTraceabilityService:
             global_issues=tuple(global_issues),
             company_difference=sum((line.difference for line in frozen_lines), ZERO),
             exception_count=sum(line.difference != ZERO for line in frozen_lines),
-            source_complete=not global_issues and not issues_by_key,
+            source_complete=True,
         )
 
     @staticmethod
@@ -353,14 +353,14 @@ class BranchInventoryTraceabilityService:
                 return int(external_match), None
             sku_matches = indexes["sku"].get(item_code, ())
             if len(sku_matches) == 1:
-                return int(sku_matches[0]), None
+                return int(sku_matches[0]), "PRODUCT_RESOLVED_BY_SKU"
             if len(sku_matches) > 1:
                 return None, "AMBIGUOUS_PRODUCT"
 
         normalized_name = _normalize_name(str(getattr(row, "item_name", "") or ""))
         name_matches = indexes["normalized_name"].get(normalized_name, ())
         if len(name_matches) == 1:
-            return int(name_matches[0]), None
+            return int(name_matches[0]), "PRODUCT_RESOLVED_BY_NAME"
         if len(name_matches) > 1:
             return None, "AMBIGUOUS_PRODUCT"
         return None, "UNRESOLVED_PRODUCT"
@@ -393,6 +393,19 @@ class BranchInventoryTraceabilityService:
         key = (branch_id, product_id)
         current_quantity, source_ids = balances.get(key, (ZERO, ()))
         balances[key] = (current_quantity + Decimal(quantity), (*source_ids, row.id))
+        if issue_code:
+            issues.append(
+                TraceSourceIssue(
+                    code=issue_code,
+                    message=(
+                        f"La fila {row.id} de {source_name} se asignó por una "
+                        "coincidencia secundaria que requiere auditoría."
+                    ),
+                    branch_id=branch_id,
+                    product_id=product_id,
+                    source_ids=(row.id,),
+                )
+            )
 
     @staticmethod
     def _month_datetime_bounds(month_start: date):

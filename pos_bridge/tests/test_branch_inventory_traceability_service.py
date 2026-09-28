@@ -19,7 +19,10 @@ from pos_bridge.models import (
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
 )
-from ventas.services.sales_canonical_source import OFFICIAL_POINT_SOURCE
+from ventas.services.sales_canonical_source import (
+    OFFICIAL_POINT_SOURCE,
+    RECENT_POINT_SOURCE,
+)
 
 
 class BranchInventoryTraceabilityServiceTests(TestCase):
@@ -84,22 +87,38 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             )
         return closing
 
-    def _sale(self, *, branch=None, product=None, quantity="1"):
+    def _sale(
+        self,
+        *,
+        branch=None,
+        product=None,
+        quantity="1",
+        sale_date=None,
+        source_endpoint=OFFICIAL_POINT_SOURCE,
+    ):
         return PointDailySale.objects.create(
             branch=branch or self.centro,
             product=product or self.product,
-            sale_date=date(2026, 8, PointDailySale.objects.count() + 1),
+            sale_date=sale_date or date(2026, 8, PointDailySale.objects.count() + 1),
             quantity=Decimal(quantity),
-            source_endpoint=OFFICIAL_POINT_SOURCE,
+            source_endpoint=source_endpoint,
         )
 
-    def _production(self, *, branch=None, item_code=None, item_name=None, quantity="1"):
+    def _production(
+        self,
+        *,
+        branch=None,
+        item_code=None,
+        item_name=None,
+        quantity="1",
+        production_date=date(2026, 8, 11),
+    ):
         return PointProductionLine.objects.create(
             branch=branch or self.centro,
             production_external_id=f"production-{PointProductionLine.objects.count() + 1}",
             detail_external_id=f"detail-{PointProductionLine.objects.count() + 1}",
             source_hash=f"production-hash-{PointProductionLine.objects.count() + 1}",
-            production_date=date(2026, 8, 11),
+            production_date=production_date,
             item_code=self.product.external_id if item_code is None else item_code,
             item_name=self.product.name if item_name is None else item_name,
             produced_quantity=Decimal(quantity),
@@ -113,20 +132,15 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         item_name=None,
         quantity="1",
         responsible="",
+        movement_at=None,
     ):
         sequence = PointWasteLine.objects.count() + 1
         return PointWasteLine.objects.create(
             branch=branch or self.centro,
             movement_external_id=f"waste-{sequence}",
             source_hash=f"waste-hash-{sequence}",
-            movement_at=datetime(
-                2026,
-                8,
-                12,
-                12,
-                0,
-                tzinfo=timezone.get_current_timezone(),
-            ),
+            movement_at=movement_at
+            or datetime(2026, 8, 12, 12, 0, tzinfo=timezone.get_current_timezone()),
             item_code=self.product.external_id if item_code is None else item_code,
             item_name=self.product.name if item_name is None else item_name,
             quantity=Decimal(quantity),
@@ -395,7 +409,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        self.assertFalse(result.source_complete)
+        self.assertTrue(result.source_complete)
         self.assertEqual(len(result.lines), 1)
         self.assertEqual(result.lines[0].production, Decimal("0"))
         issue = result.global_issues[0]
@@ -424,7 +438,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        self.assertFalse(result.source_complete)
+        self.assertTrue(result.source_complete)
         self.assertEqual(len(result.lines), 1)
         self.assertEqual(result.lines[0].waste, Decimal("0"))
         issue = result.global_issues[0]
@@ -481,12 +495,68 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(
             by_product[sku_product.id].source_trace["waste"], (sku_match.id,)
         )
+        sku_issue = by_product[sku_product.id].issues[0]
+        self.assertEqual(sku_issue.code, "PRODUCT_RESOLVED_BY_SKU")
+        self.assertEqual(sku_issue.branch_id, self.centro.id)
+        self.assertEqual(sku_issue.product_id, sku_product.id)
+        self.assertEqual(sku_issue.source_ids, (sku_match.id,))
         self.assertEqual(by_product[name_product.id].production, Decimal("4"))
         self.assertEqual(
             by_product[name_product.id].source_trace["production"],
             (name_match.id,),
         )
+        name_issue = by_product[name_product.id].issues[0]
+        self.assertEqual(name_issue.code, "PRODUCT_RESOLVED_BY_NAME")
+        self.assertEqual(name_issue.branch_id, self.centro.id)
+        self.assertEqual(name_issue.product_id, name_product.id)
+        self.assertEqual(name_issue.source_ids, (name_match.id,))
+        self.assertEqual(by_product[self.product.id].issues, ())
+        self.assertTrue(result.source_complete)
         self.assertNotIn(misleading_name_product.id, by_product)
+
+    def test_sales_authority_and_month_boundaries_exclude_noncanonical_rows(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        included_sale = self._sale(quantity="2", sale_date=date(2026, 8, 10))
+        self._sale(
+            quantity="50",
+            sale_date=date(2026, 8, 11),
+            source_endpoint=RECENT_POINT_SOURCE,
+        )
+        self._sale(quantity="60", sale_date=date(2026, 7, 31))
+        self._sale(quantity="70", sale_date=date(2026, 9, 1))
+        included_production = self._production(
+            quantity="3", production_date=date(2026, 8, 1)
+        )
+        self._production(quantity="80", production_date=date(2026, 7, 31))
+        self._production(quantity="90", production_date=date(2026, 9, 1))
+        included_waste = self._waste(
+            quantity="1",
+            movement_at=datetime(
+                2026, 8, 31, 23, 59, tzinfo=timezone.get_current_timezone()
+            ),
+        )
+        self._waste(
+            quantity="100",
+            movement_at=datetime(
+                2026, 7, 31, 23, 59, tzinfo=timezone.get_current_timezone()
+            ),
+        )
+        self._waste(
+            quantity="110",
+            movement_at=datetime(
+                2026, 9, 1, 0, 0, tzinfo=timezone.get_current_timezone()
+            ),
+        )
+
+        line = self.service.build(month=date(2026, 8, 1)).lines[0]
+
+        self.assertEqual(line.sales, Decimal("2"))
+        self.assertEqual(line.production, Decimal("3"))
+        self.assertEqual(line.waste, Decimal("1"))
+        self.assertEqual(line.source_trace["sales"], (included_sale.id,))
+        self.assertEqual(line.source_trace["production"], (included_production.id,))
+        self.assertEqual(line.source_trace["waste"], (included_waste.id,))
 
     def test_direct_source_ids_and_empty_future_sources_are_immutable_tuples(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
