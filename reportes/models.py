@@ -9,6 +9,8 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from reportes.storage import inventory_audit_evidence_storage
+
 from bonos_produccion.models import (
     AREA_ARMADO as _BONOS_AREA_ARMADO,
     AREA_EMBETUNADO as _BONOS_AREA_EMBETUNADO,
@@ -3666,7 +3668,8 @@ class ProductInventoryAuditEvent(models.Model):
     reason_code = models.CharField(max_length=80)
     notes = models.TextField(blank=True, default="")
     evidence = models.FileField(
-        upload_to="reportes/inventory-audit/%Y/%m/",
+        storage=inventory_audit_evidence_storage,
+        upload_to="",
         null=True,
         blank=True,
     )

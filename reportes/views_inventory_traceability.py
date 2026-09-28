@@ -6,11 +6,9 @@ from html import escape
 from pathlib import Path
 from uuid import uuid4
 
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.core.files.storage import FileSystemStorage
 from django.db import transaction
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
@@ -32,16 +30,6 @@ from reportes.models import (
 
 MAX_EVIDENCE_SIZE = 10 * 1024 * 1024
 MAX_NOTES_LENGTH = 4000
-
-
-def _evidence_storage() -> FileSystemStorage:
-    return FileSystemStorage(
-        location=getattr(
-            settings,
-            "INVENTORY_AUDIT_PRIVATE_ROOT",
-            Path(settings.BASE_DIR) / "storage" / "inventory_audit_evidence",
-        )
-    )
 
 
 def _require_report_access(request: HttpRequest) -> None:
@@ -246,15 +234,14 @@ def _validate_evidence(uploaded) -> str | None:
     return Path(uploaded.name).suffix.lower()
 
 
-def _store_evidence(uploaded, suffix: str) -> tuple[str, dict[str, object]]:
+def _store_evidence(event, uploaded, suffix: str) -> dict[str, object]:
     digest = hashlib.sha256()
     for chunk in uploaded.chunks():
         digest.update(chunk)
     uploaded.seek(0)
-    storage = _evidence_storage()
-    stored_name = storage.save(f"{uuid4()}{suffix}", uploaded)
+    event.evidence.save(f"{uuid4()}{suffix}", uploaded, save=False)
     original_name = get_valid_filename(Path(uploaded.name).name) or "evidencia"
-    return stored_name, {
+    return {
         "evidence_original_name": original_name,
         "evidence_sha256": digest.hexdigest(),
         "evidence_size": uploaded.size,
@@ -346,7 +333,7 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
     fields = _posted_fields(request)
     reason_code = fields["reason_code"].strip()
     notes = fields["notes"].strip()
-    stored_name = None
+    event = None
     try:
         with transaction.atomic():
             case = _locked_case(pk)
@@ -392,21 +379,17 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
                     status=400,
                     fields=fields,
                 )
-            evidence_metadata: dict[str, object] = {}
-            if uploaded is not None and suffix is not None:
-                stored_name, evidence_metadata = _store_evidence(uploaded, suffix)
-            ProductInventoryAuditEvent.objects.create(
+            event = ProductInventoryAuditEvent(
                 case=case,
                 action=ProductInventoryAuditEvent.Action.EXPLAIN,
                 reason_code=reason_code,
                 notes=notes,
-                evidence=stored_name,
                 actor=request.user,
-                metadata={
-                    "custody_branch_id": case.branch_id,
-                    **evidence_metadata,
-                },
+                metadata={"custody_branch_id": case.branch_id},
             )
+            if uploaded is not None and suffix is not None:
+                event.metadata.update(_store_evidence(event, uploaded, suffix))
+            event.save()
             case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
             case.save(update_fields=["movement_status", "updated_at"])
             return _action_response(
@@ -416,8 +399,8 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
                 message="La explicación quedó pendiente de aprobación.",
             )
     except Exception:
-        if stored_name:
-            _evidence_storage().delete(stored_name)
+        if event is not None and event.evidence:
+            event.evidence.storage.delete(event.evidence.name)
         raise
 
 
@@ -545,13 +528,13 @@ def download_evidence(request: HttpRequest, pk: int, event_id: int) -> HttpRespo
     name = event.evidence.name if event.evidence else ""
     if not name or Path(name).name != name:
         raise Http404("Evidencia no encontrada.")
-    storage = _evidence_storage()
+    storage = event.evidence.storage
     if not storage.exists(name):
         raise Http404("Archivo no disponible.")
     filename = event.metadata.get("evidence_original_name") or "evidencia"
     filename = get_valid_filename(Path(str(filename)).name) or "evidencia"
     response = FileResponse(
-        storage.open(name, "rb"),
+        event.evidence.open("rb"),
         as_attachment=True,
         filename=filename,
     )

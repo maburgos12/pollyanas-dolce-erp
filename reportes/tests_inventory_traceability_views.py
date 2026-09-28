@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ImproperlyConfigured, SuspiciousFileOperation
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
@@ -218,6 +219,33 @@ class InventoryTraceabilityViewsTests(TestCase):
         )
         self.assertEqual(download["X-Content-Type-Options"], "nosniff")
         self.assertEqual(download["Cache-Control"], "private, no-store")
+        self.assertEqual(self.client.get(f"/media/{stored_name}").status_code, 404)
+
+    def test_evidence_filefield_uses_private_storage_without_public_url(self):
+        storage = ProductInventoryAuditEvent._meta.get_field("evidence").storage
+        private_root = Path(self.private_evidence_directory.name).resolve()
+
+        self.assertEqual(Path(storage.path("sample.pdf")).parent, private_root)
+        with self.assertRaises(NotImplementedError):
+            storage.url("sample.pdf")
+        with self.assertRaises(SuspiciousFileOperation):
+            storage.open("../escape.pdf")
+
+    def test_private_storage_rejects_media_root_and_symlink_into_it(self):
+        storage = ProductInventoryAuditEvent._meta.get_field("evidence").storage
+        media_root = Path(self.private_evidence_directory.name, "public-media")
+        media_root.mkdir()
+        linked_private = Path(self.private_evidence_directory.name, "linked-private")
+        linked_private.symlink_to(media_root, target_is_directory=True)
+
+        for invalid_private_root in (media_root / "audit", linked_private):
+            with self.subTest(private_root=invalid_private_root):
+                with override_settings(
+                    MEDIA_ROOT=media_root,
+                    INVENTORY_AUDIT_PRIVATE_ROOT=invalid_private_root,
+                ):
+                    with self.assertRaises(ImproperlyConfigured):
+                        storage.path("sample.pdf")
 
     def test_evidence_rejects_disguised_or_oversized_files_without_writing(self):
         self.client.force_login(self.explainer)
@@ -284,6 +312,40 @@ class InventoryTraceabilityViewsTests(TestCase):
             user=self.viewer, defaults={"sucursal": self.other_erp_branch}
         )
         self.assertEqual(self.client.get(url).status_code, 403)
+
+    def test_private_evidence_download_rejects_case_event_mismatch(self):
+        self.client.force_login(self.explainer)
+        self.client.post(
+            reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
+            {
+                "reason_code": "PHYSICAL_EVIDENCE",
+                "notes": "Evidencia del caso original.",
+                "evidence": SimpleUploadedFile(
+                    "private.pdf",
+                    b"%PDF-1.4\nprivate",
+                    content_type="application/pdf",
+                ),
+            },
+        )
+        event = self.case.events.get()
+        other_product = PointProduct.objects.create(
+            external_id="audit-view-other-product",
+            sku="AUDIT-VIEW-2",
+            name="Otro producto auditoría vistas",
+        )
+        other_case = self._case(
+            product=other_product,
+            calculation_fingerprint="9" * 64,
+        )
+
+        response = self.client.get(
+            reverse(
+                "reportes:inventory_audit_evidence",
+                args=[other_case.pk, event.pk],
+            )
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_failed_transaction_removes_private_evidence(self):
         self.client.force_login(self.explainer)
