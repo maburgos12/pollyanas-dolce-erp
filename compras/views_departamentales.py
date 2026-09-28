@@ -36,6 +36,7 @@ from .services_departamentales import (
     decidir_exceso,
     evaluar_presupuesto_item,
     generar_ordenes_departamentales,
+    intento_operativo_prefetched,
     seleccionar_cotizacion,
 )
 
@@ -295,9 +296,10 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
             Prefetch(
                 "items__intentos_compra",
-                queryset=IntentoCompraDepartamental.objects.filter(estado="VIGENTE")
+                queryset=IntentoCompraDepartamental.objects.order_by("-numero", "-pk")
                 .select_related("linea_orden", "compra", "compromiso")
-                .prefetch_related("compra__avisos", "compra__historial__actor"),
+                .prefetch_related("compra__avisos", "compra__historial__actor",
+                                  Prefetch("linea_orden__recepciones", to_attr="recepciones_prefetched")),
                 to_attr="intentos_compra_prefetched",
             ),
         ),
@@ -312,10 +314,19 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     total_comprometido = Decimal("0")
     total_gastado = Decimal("0")
     for item in solicitud.items.all():
-        intento = item.intento_vigente
+        intento_vigente = item.intento_vigente
+        intento = intento_operativo_prefetched(item)
         item.compra_realizada = getattr(intento, "compra", None) if intento else None
-        linea_actual = getattr(intento, "linea_orden", None) if intento else None
-        cerrado_por_evidencia = tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item)
+        item.linea_orden = getattr(intento, "linea_orden", None) if intento else None
+        linea_actual = getattr(intento_vigente, "linea_orden", None) if intento_vigente else None
+        # Todo el historial ya está precargado: no repetir EXISTS por cada artículo.
+        cerrado_por_evidencia = bool(intento_vigente and (
+            getattr(intento_vigente, "compra", None)
+            or getattr(getattr(intento_vigente, "linea_orden", None), "recepciones_prefetched", ())
+        )) or any(
+            getattr(getattr(historico, "linea_orden", None), "recepciones_prefetched", ())
+            for historico in item.intentos_compra_prefetched
+        )
         item.puede_editar_cotizacion = (not cerrado_por_evidencia
             and item.estado not in ('COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO')
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))

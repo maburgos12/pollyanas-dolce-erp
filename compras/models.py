@@ -803,6 +803,8 @@ class RecepcionItemDepartamental(models.Model):
     recibido_en = models.DateTimeField(default=timezone.now)
 
     def save(self, *args, **kwargs):
+        args, kwargs = _normalizar_update_fields(args, kwargs)
+        update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
         db = kwargs.get("using") or self._state.db or "default"
         with transaction.atomic(using=db):
             linea = LineaOrdenCompraDepartamental.objects.using(db).select_related("intento").get(
@@ -812,20 +814,42 @@ class RecepcionItemDepartamental(models.Model):
             intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.intento_id)
             anterior = None
             if not self._state.adding:
-                anterior = type(self).objects.using(db).get(pk=self.pk)
+                anterior = type(self).objects.using(db).select_for_update().get(pk=self.pk)
                 if anterior.linea_orden_id != linea.pk:
                     raise ValidationError("La recepción no puede cambiar de orden.")
-            cantidad_cambio = anterior is None or anterior.cantidad_recibida != self.cantidad_recibida
+            cantidad_cambio = anterior is None or (
+                (update_fields is None or "cantidad_recibida" in update_fields)
+                and anterior.cantidad_recibida != self.cantidad_recibida
+            )
             if not cantidad_cambio:
                 return super().save(*args, **kwargs)
             if self.cantidad_recibida <= 0:
                 raise ValidationError("La cantidad recibida debe ser mayor que cero.")
-            if (intento.estado != IntentoCompraDepartamental.ESTADO_VIGENTE
-                    or not item.intentos_compra.using(db).filter(pk=intento.pk, estado="VIGENTE").exists()):
+            vigente = intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
+            entregado_pendiente = (
+                anterior is not None
+                and intento.estado == IntentoCompraDepartamental.ESTADO_ENTREGADO
+                and item.estado == ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION
+                and not item.intentos_compra.using(db).filter(estado="VIGENTE").exists()
+                and not item.intentos_compra.using(db).filter(
+                    estado=IntentoCompraDepartamental.ESTADO_ENTREGADO,
+                    numero__gt=intento.numero,
+                ).exists()
+            )
+            if not (vigente or entregado_pendiente):
                 raise ValidationError("La orden no corresponde al intento vigente del artículo.")
+            if vigente and item.estado not in (
+                ItemCompraDepartamental.ESTADO_ORDENADO,
+                ItemCompraDepartamental.ESTADO_COMPRADO,
+                ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL,
+            ):
+                raise ValidationError("El artículo ya no admite modificar la cantidad recibida.")
             result = super().save(*args, **kwargs)
             total = linea.recepciones.using(db).aggregate(models.Sum("cantidad_recibida"))["cantidad_recibida__sum"] or 0
             if total < linea.cantidad:
+                if intento.estado != IntentoCompraDepartamental.ESTADO_VIGENTE:
+                    intento.estado = IntentoCompraDepartamental.ESTADO_VIGENTE
+                    intento.save(update_fields=["estado", "actualizado_en"])
                 item.estado = ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL
                 item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
             else:

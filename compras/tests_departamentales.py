@@ -70,6 +70,20 @@ class ComprasDepartamentalesDomainTests(TestCase):
             motivo="Necesidades del área",
         )
 
+    def recibir_moldes_total(self):
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion="Moldes", cantidad=4, rubro=self.rubro
+        )
+        cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=item, proveedor=self.proveedor_a, cantidad_ofertada=4, costo_unitario=Decimal("200.00")
+        )
+        seleccionar_cotizacion(cotizacion, actor=self.comprador)
+        linea = generar_ordenes_departamentales([item], actor=self.comprador)[0].lineas.get()
+        recepcion = RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=Decimal("4"), registrado_por=self.comprador,
+        )
+        return item, linea.intento, recepcion
+
     def test_solicitud_admite_varios_articulos_independientes_y_costo_estimado_opcional(self):
         solicitud = self.crear_solicitud()
         rack = ItemCompraDepartamental.objects.create(
@@ -312,6 +326,54 @@ class ComprasDepartamentalesDomainTests(TestCase):
                 linea_orden=linea, cantidad_recibida=1, registrado_por=self.comprador
             )
         self.assertFalse(linea.recepciones.exists())
+
+    def test_corregir_recepcion_total_de_cuatro_a_tres_reabre_pendiente_de_compras(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        recepcion.cantidad_recibida = Decimal("3")
+
+        recepcion.save(update_fields=["cantidad_recibida"])
+
+        item.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_VIGENTE)
+        self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_COMPRAS)
+        self.assertEqual(item.solicitud.estado, SolicitudCompraDepartamental.ESTADO_EN_ATENCION)
+
+    def test_corregir_recepcion_tras_confirmacion_final_se_rechaza(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        confirmar_recepcion_departamental(item, conforme=True, actor=self.responsable)
+        recepcion.cantidad_recibida = Decimal("3")
+        with self.assertRaises(ValidationError):
+            recepcion.save(update_fields=["cantidad_recibida"])
+        recepcion.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(recepcion.cantidad_recibida, Decimal("4"))
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+
+    def test_corregir_recepcion_total_sin_perder_cobertura_conserva_confirmacion(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        recepcion.cantidad_recibida = Decimal("5")
+
+        recepcion.save(update_fields=["cantidad_recibida"])
+
+        item.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+        self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_AREA)
+
+    def test_corregir_recepcion_de_intento_cancelado_se_rechaza(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        intento.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
+        intento.save(update_fields=["estado"])
+        recepcion.cantidad_recibida = Decimal("3")
+
+        with self.assertRaises(ValidationError):
+            recepcion.save(update_fields=["cantidad_recibida"])
+
+        recepcion.refresh_from_db()
+        self.assertEqual(recepcion.cantidad_recibida, Decimal("4"))
 
     def test_fallo_al_crear_linea_no_deja_intento_huerfano(self):
         item = ItemCompraDepartamental.objects.create(

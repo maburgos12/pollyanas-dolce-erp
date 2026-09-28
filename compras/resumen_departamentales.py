@@ -14,6 +14,7 @@ from openpyxl.utils import get_column_letter
 
 from reportes.models import AreaPresupuesto
 from .models import CotizacionCompraDepartamental, IntentoCompraDepartamental, ItemCompraDepartamental, SolicitudCompraDepartamental
+from .services_departamentales import intento_operativo_prefetched
 
 TERMINALES = (
     ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME,
@@ -60,8 +61,10 @@ def construir_resumen_departamental(params):
         'cotizaciones', queryset=CotizacionCompraDepartamental.objects.filter(seleccionada=True).order_by('id'),
         to_attr='cotizaciones_seleccionadas',
     ), Prefetch(
-        'intentos_compra', queryset=IntentoCompraDepartamental.objects.filter(estado='VIGENTE').select_related('compromiso'),
-        to_attr='intentos_vigentes',
+        'intentos_compra', queryset=IntentoCompraDepartamental.objects.filter(
+            estado__in=[IntentoCompraDepartamental.ESTADO_VIGENTE, IntentoCompraDepartamental.ESTADO_ENTREGADO],
+        ).select_related('compromiso').order_by('-numero', '-pk'),
+        to_attr='intentos_compra_prefetched',
     )).order_by('solicitud__area__nombre', 'solicitud_id', 'id')
     query = {}
     if not valido:
@@ -80,7 +83,7 @@ def construir_resumen_departamental(params):
         grupo = departamentos.setdefault(area.pk, {**_totales(), 'nombre': area.nombre, 'id': area.pk})
         estimado = item.subtotal_estimado
         quote = next(iter(item.cotizaciones_seleccionadas), None)
-        intento = next(iter(item.intentos_vigentes), None)
+        intento = intento_operativo_prefetched(item)
         compromiso = getattr(intento, 'compromiso', None) if intento else None
         item.resumen_estimado = _importe(estimado) if estimado is not None else None
         item.resumen_cotizado = _importe(quote.total_adquisicion) if quote else None

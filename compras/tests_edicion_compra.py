@@ -12,13 +12,14 @@ from django.utils import timezone
 from compras.models import (CotizacionCompraDepartamental, ItemCompraDepartamental,
                             SolicitudCompraDepartamental, RecepcionItemDepartamental,
                             CompraRealizadaDepartamental, CompromisoCompraDepartamental,
-                            HistorialCotizacionDepartamental, IntentoCompraDepartamental)
+                            HistorialCotizacionDepartamental, IntentoCompraDepartamental,
+                            AvisoCompraDepartamental)
 from compras.services_departamentales import seleccionar_cotizacion, generar_ordenes_departamentales
 from compras.services_edicion_compra import (corregir_compra_realizada, registrar_compra_realizada,
                                              sincronizar_linea_orden, tiene_compra_o_recepcion, validar_edicion,
                                              tiene_recepcion_historica)
 from maestros.models import Proveedor
-from reportes.models import AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
+from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto, LineaPresupuestoMensual
 
 
 class _CompraDepartamentalBase:
@@ -249,6 +250,48 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'PENDIENTE_CONFIRMACION')
         self.assertEqual(CompraRealizadaDepartamental.objects.count(),1)
+
+    def test_compra_y_compromiso_siguen_visibles_tras_entrega_total(self):
+        from compras.resumen_departamentales import construir_resumen_departamental
+
+        self.assertEqual(self.comprar().status_code, 200)
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.assertEqual(compra.avisos.filter(canal=AvisoCompraDepartamental.CANAL_CORREO).update(
+            destino='area@example.com',
+        ), 1)
+        self.assertEqual(self.client.post(
+            reverse('compras:departamental_recibir', args=[self.item.pk]),
+            {'cantidad_recibida': '2'}, **self.headers,
+        ).status_code, 200)
+        compra.intento.refresh_from_db()
+        self.assertEqual(compra.intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+
+        detalle = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(detalle, 'PEDIDO-PRUEBA')
+        self.assertContains(detalle, reverse('compras:departamental_compra_comprobante', args=[compra.pk]))
+        self.assertContains(detalle, 'Aviso al solicitante')
+        self.assertContains(detalle, 'area@example.com')
+        item_visible = next(item for item in detalle.context['solicitud'].items.all() if item.pk == self.item.pk)
+        self.assertEqual(item_visible.compra_realizada, compra)
+        self.assertEqual(item_visible.intentos_compra_prefetched[0], compra.intento)
+        self.assertEqual(len(item_visible.linea_orden.recepciones_prefetched), 1)
+        resumen = construir_resumen_departamental({'estado': 'PENDIENTE_CONFIRMACION'})
+        self.assertEqual(resumen['resumen']['comprometido'], Decimal('200'))
+
+        responsable = get_user_model().objects.create_user('responsable-area')
+        AreaPresupuestoResponsable.objects.create(area=self.area, usuario=responsable, puede_capturar=True)
+        self.client.force_login(responsable)
+        detalle_area = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(detalle_area, 'Confirma lo que recibiste')
+        self.assertContains(detalle_area, 'PEDIDO-PRUEBA')
+        self.assertEqual(self.client.post(
+            reverse('compras:departamental_confirmar', args=[self.item.pk]),
+            {'conforme': '1'}, **self.headers,
+        ).status_code, 200)
+        detalle = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertContains(detalle, 'PEDIDO-PRUEBA')
+        self.assertContains(detalle, reverse('compras:departamental_compra_comprobante', args=[compra.pk]))
+        self.assertContains(detalle, 'area@example.com')
 
     def test_sin_permiso_no_edita_ni_compra(self):
         self.client.force_login(get_user_model().objects.create_user('ajeno'))

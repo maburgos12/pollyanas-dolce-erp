@@ -42,6 +42,24 @@ class EvaluacionPresupuesto:
         return not self.calculable or self.exceso > 0
 
 
+ESTADOS_CON_ENTREGA_OPERATIVA = frozenset({
+    ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION,
+    ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME,
+    ItemCompraDepartamental.ESTADO_ESPERANDO_AREA,
+})
+
+
+def intento_operativo_prefetched(item):
+    """Usa el vigente o la última entrega durante y después del cierre del área."""
+    intentos = item.intentos_compra_prefetched
+    vigente = next((intento for intento in intentos if intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE), None)
+    if vigente is not None:
+        return vigente
+    if item.estado in ESTADOS_CON_ENTREGA_OPERATIVA:
+        return next((intento for intento in intentos if intento.estado == IntentoCompraDepartamental.ESTADO_ENTREGADO), None)
+    return None
+
+
 def _lineas_presupuesto(item):
     if item.rubro_id is None:
         return LineaPresupuestoMensual.objects.none()
