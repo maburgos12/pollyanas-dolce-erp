@@ -16,6 +16,85 @@ from bonos_produccion.models import (
 )
 
 
+PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS = (
+    "created",
+    "updated",
+    "unchanged",
+    "reopened",
+    "balanced",
+    "exceptions",
+    "source_incomplete",
+)
+PRODUCT_INVENTORY_AUDIT_ISSUE_REQUIRED_KEYS = frozenset({"code", "message"})
+PRODUCT_INVENTORY_AUDIT_ISSUE_ALLOWED_KEYS = frozenset(
+    {"code", "message", "branch_id", "product_id", "source_ids"}
+)
+
+
+def default_product_inventory_audit_summary() -> dict[str, int]:
+    return {key: 0 for key in PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS}
+
+
+def _is_non_negative_integer(value) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _is_positive_integer_or_none(value) -> bool:
+    return value is None or (type(value) is int and value > 0)
+
+
+def _validate_product_inventory_audit_summary(summary) -> None:
+    if not isinstance(summary, dict):
+        raise ValidationError({"summary": "Debe ser un objeto."})
+    if set(summary) != set(PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS):
+        raise ValidationError(
+            {"summary": "Debe contener exactamente los contadores conocidos."}
+        )
+    if not all(_is_non_negative_integer(value) for value in summary.values()):
+        raise ValidationError(
+            {"summary": "Cada contador debe ser un entero no negativo."}
+        )
+
+
+def _validate_product_inventory_audit_source_issues(source_issues) -> None:
+    if not isinstance(source_issues, list):
+        raise ValidationError({"source_issues": "Debe ser una lista."})
+    for issue in source_issues:
+        if not isinstance(issue, dict):
+            raise ValidationError(
+                {"source_issues": "Cada incidencia debe ser un objeto."}
+            )
+        keys = set(issue)
+        if not PRODUCT_INVENTORY_AUDIT_ISSUE_REQUIRED_KEYS.issubset(keys):
+            raise ValidationError(
+                {"source_issues": "Cada incidencia requiere code y message."}
+            )
+        if not keys.issubset(PRODUCT_INVENTORY_AUDIT_ISSUE_ALLOWED_KEYS):
+            raise ValidationError(
+                {"source_issues": "La incidencia contiene campos desconocidos."}
+            )
+        if not isinstance(issue["code"], str) or not issue["code"].strip():
+            raise ValidationError(
+                {"source_issues": "code debe ser texto no vacío."}
+            )
+        if not isinstance(issue["message"], str) or not issue["message"].strip():
+            raise ValidationError(
+                {"source_issues": "message debe ser texto no vacío."}
+            )
+        for key in ("branch_id", "product_id"):
+            if key in issue and not _is_positive_integer_or_none(issue[key]):
+                raise ValidationError(
+                    {"source_issues": f"{key} debe ser un entero positivo o null."}
+                )
+        source_ids = issue.get("source_ids", [])
+        if not isinstance(source_ids, list) or not all(
+            type(source_id) is int and source_id > 0 for source_id in source_ids
+        ):
+            raise ValidationError(
+                {"source_issues": "source_ids debe ser una lista de enteros positivos."}
+            )
+
+
 class CentroCosto(models.Model):
     TIPO_PRODUCCION = "PRODUCCION"
     TIPO_SUCURSAL = "SUCURSAL_VENTA"
@@ -3308,7 +3387,10 @@ class ProductInventoryAuditRun(models.Model):
     month = models.DateField(unique=True, db_index=True)
     status = models.CharField(max_length=24, choices=Status.choices, default=Status.READY)
     source_issues = models.JSONField(default=list, blank=True)
-    summary = models.JSONField(default=dict, blank=True)
+    summary = models.JSONField(
+        default=default_product_inventory_audit_summary,
+        blank=True,
+    )
     calculation_fingerprint = models.CharField(max_length=64)
     started_at = models.DateTimeField(null=True, blank=True)
     rebuilt_at = models.DateTimeField(null=True, blank=True)
@@ -3331,10 +3413,8 @@ class ProductInventoryAuditRun(models.Model):
         super().clean()
         if self.month:
             self.month = self.month.replace(day=1)
-        if not isinstance(self.source_issues, list):
-            raise ValidationError({"source_issues": "Debe ser una lista."})
-        if not isinstance(self.summary, dict):
-            raise ValidationError({"summary": "Debe ser un objeto."})
+        _validate_product_inventory_audit_source_issues(self.source_issues)
+        _validate_product_inventory_audit_summary(self.summary)
 
     def __str__(self) -> str:
         return f"Auditoría de inventario {self.month:%Y-%m}"
@@ -3449,6 +3529,27 @@ class ProductInventoryAuditCase(models.Model):
         return f"{self.month:%Y-%m} · {self.branch} · {self.product}"
 
 
+class ProductInventoryAuditEventQuerySet(models.QuerySet):
+    _BULK_OPERATION_ERROR = (
+        "Los eventos de auditoría no admiten operaciones masivas; "
+        "deben registrarse individualmente."
+    )
+
+    def update(self, **kwargs):
+        if set(kwargs) == {"actor"} and kwargs["actor"] is None:
+            return super().update(**kwargs)
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def delete(self):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+
 class ProductInventoryAuditEvent(models.Model):
     class Action(models.TextChoices):
         EXPLAIN = "EXPLAIN", "Explicar"
@@ -3485,11 +3586,23 @@ class ProductInventoryAuditEvent(models.Model):
         related_name="dependent_events",
     )
     metadata = models.JSONField(default=dict, blank=True)
+    objects = ProductInventoryAuditEventQuerySet.as_manager()
 
     class Meta:
         ordering = ["created_at", "id"]
+        base_manager_name = "objects"
+        default_manager_name = "objects"
         indexes = [
             models.Index(fields=["case", "created_at"], name="inv_audit_event_case_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    ~models.Q(action__in=("APPROVE", "REJECT"))
+                    | models.Q(related_event__isnull=False)
+                ),
+                name="inv_audit_review_has_explain",
+            ),
         ]
         verbose_name = "Evento de auditoría de inventario"
         verbose_name_plural = "Eventos de auditoría de inventario"

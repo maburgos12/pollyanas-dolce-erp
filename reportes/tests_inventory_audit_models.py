@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -95,7 +95,15 @@ class ProductInventoryAuditModelsTests(TestCase):
         successful_at = timezone.now()
         run = self._run(
             status=ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
-            source_issues=[{"code": "POINT_CLOSING_MISSING", "branch_id": self.branch.pk}],
+            source_issues=[
+                {
+                    "code": "POINT_CLOSING_MISSING",
+                    "message": "Falta cierre Point verificado.",
+                    "branch_id": self.branch.pk,
+                    "product_id": None,
+                    "source_ids": [17, 18],
+                }
+            ],
             summary={
                 "created": 4,
                 "updated": 3,
@@ -119,6 +127,77 @@ class ProductInventoryAuditModelsTests(TestCase):
         self.assertEqual(run.started_at, started_at)
         self.assertEqual(run.rebuilt_at, rebuilt_at)
         self.assertEqual(run.last_successful_rebuild_at, successful_at)
+
+    def test_run_summary_requires_exact_non_negative_integer_counters(self):
+        valid_summary = {
+            "created": 1,
+            "updated": 2,
+            "unchanged": 3,
+            "reopened": 4,
+            "balanced": 5,
+            "exceptions": 6,
+            "source_incomplete": 7,
+        }
+        valid = ProductInventoryAuditRun(
+            month=date(2026, 8, 1),
+            status=ProductInventoryAuditRun.Status.READY,
+            summary=valid_summary,
+            calculation_fingerprint="e" * 64,
+        )
+        valid.full_clean()
+
+        invalid_summaries = (
+            {key: value for key, value in valid_summary.items() if key != "created"},
+            {**valid_summary, "unknown": 0},
+            {**valid_summary, "created": -1},
+            {**valid_summary, "created": True},
+            {**valid_summary, "created": 1.5},
+        )
+        for summary in invalid_summaries:
+            with self.subTest(summary=summary):
+                invalid = ProductInventoryAuditRun(
+                    month=date(2026, 8, 1),
+                    status=ProductInventoryAuditRun.Status.READY,
+                    summary=summary,
+                    calculation_fingerprint="f" * 64,
+                )
+                with self.assertRaisesMessage(ValidationError, "summary"):
+                    invalid.full_clean()
+
+    def test_run_source_issues_require_known_typed_fields(self):
+        valid_issue = {
+            "code": "SOURCE_INCOMPLETE",
+            "message": "Falta evidencia de cierre.",
+            "branch_id": self.branch.pk,
+            "product_id": self.product.pk,
+            "source_ids": [11, 12],
+        }
+        valid = ProductInventoryAuditRun(
+            month=date(2026, 8, 1),
+            status=ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+            source_issues=[valid_issue],
+            calculation_fingerprint="1" * 64,
+        )
+        valid.full_clean()
+
+        invalid_issues = (
+            [{key: value for key, value in valid_issue.items() if key != "message"}],
+            [{**valid_issue, "unknown": "value"}],
+            [{**valid_issue, "code": ""}],
+            [{**valid_issue, "branch_id": "1"}],
+            [{**valid_issue, "product_id": True}],
+            [{**valid_issue, "source_ids": [11, "12"]}],
+        )
+        for source_issues in invalid_issues:
+            with self.subTest(source_issues=source_issues):
+                invalid = ProductInventoryAuditRun(
+                    month=date(2026, 8, 1),
+                    status=ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+                    source_issues=source_issues,
+                    calculation_fingerprint="2" * 64,
+                )
+                with self.assertRaisesMessage(ValidationError, "source_issues"):
+                    invalid.full_clean()
 
     def test_case_is_unique_per_month_branch_product_and_keeps_separate_statuses(self):
         run = self._run()
@@ -242,6 +321,69 @@ class ProductInventoryAuditModelsTests(TestCase):
                 )
                 with self.assertRaisesMessage(ValidationError, "explicación del mismo caso"):
                     event.full_clean()
+
+    def test_event_queryset_rejects_update_delete_and_bulk_create(self):
+        case = self._case()
+        event = ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="COUNT_TIMING",
+            actor=self.actor,
+        )
+
+        with self.assertRaisesMessage(ValidationError, "operaciones masivas"):
+            ProductInventoryAuditEvent.objects.filter(pk=event.pk).update(
+                notes="Intento masivo"
+            )
+        with self.assertRaisesMessage(ValidationError, "operaciones masivas"):
+            ProductInventoryAuditEvent.objects.filter(pk=event.pk).delete()
+        with self.assertRaisesMessage(ValidationError, "operaciones masivas"):
+            ProductInventoryAuditEvent.objects.bulk_create(
+                [
+                    ProductInventoryAuditEvent(
+                        case=case,
+                        action=ProductInventoryAuditEvent.Action.EXPLAIN,
+                        reason_code="BULK_ATTEMPT",
+                    )
+                ]
+            )
+
+        event.refresh_from_db()
+        self.assertEqual(event.notes, "")
+
+    def test_event_database_rejects_approval_without_related_explanation(self):
+        case = self._case()
+        event = ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="COUNT_TIMING",
+            actor=self.actor,
+        )
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE reportes_productinventoryauditevent
+                    SET action = %s, related_event_id = NULL
+                    WHERE id = %s
+                    """,
+                    [ProductInventoryAuditEvent.Action.APPROVE, event.pk],
+                )
+
+    def test_event_actor_is_set_null_when_user_is_deleted(self):
+        case = self._case()
+        event = ProductInventoryAuditEvent.objects.create(
+            case=case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="COUNT_TIMING",
+            actor=self.actor,
+        )
+
+        self.actor.delete()
+
+        event.refresh_from_db()
+        self.assertIsNone(event.actor_id)
 
     def test_custom_approval_permission_exists(self):
         permission = Permission.objects.get(
