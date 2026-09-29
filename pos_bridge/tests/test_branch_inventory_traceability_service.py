@@ -974,17 +974,21 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        self.assertFalse(result.source_complete)
-        self.assertEqual(result.lines, ())
+        self.assertTrue(result.source_complete)
+        all_issues = [
+            issue
+            for line in result.lines
+            for issue in line.issues
+        ] + list(result.global_issues)
         missing_product_ids = {
             issue.product_id
-            for issue in result.global_issues
+            for issue in all_issues
             if issue.code == "SOURCE_INCOMPLETE"
         }
         self.assertEqual(missing_product_ids, {sku_product.id, name_product.id})
         sku_issue = next(
             issue
-            for issue in result.global_issues
+            for issue in all_issues
             if issue.code == "PRODUCT_RESOLVED_BY_SKU"
         )
         self.assertEqual(sku_issue.code, "PRODUCT_RESOLVED_BY_SKU")
@@ -993,7 +997,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(sku_issue.source_ids, (sku_match.id,))
         name_issue = next(
             issue
-            for issue in result.global_issues
+            for issue in all_issues
             if issue.code == "PRODUCT_RESOLVED_BY_NAME"
         )
         self.assertEqual(name_issue.code, "PRODUCT_RESOLVED_BY_NAME")
@@ -1316,7 +1320,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_branch["DEVOLUCIONES"].source_trace["transfers"], (transfer.id,))
         self.assertIsNone(by_branch["DEVOLUCIONES"].branch.erp_branch_id)
 
-    def test_movement_location_missing_from_closings_blocks_false_zero_balance(self):
+    def test_movement_location_missing_from_closings_becomes_auditable_source_issue(self):
         devoluciones = PointBranch.objects.create(
             external_id="DEVOLUCIONES-MISSING",
             name="Devoluciones",
@@ -1331,12 +1335,14 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        self.assertFalse(result.source_complete)
-        self.assertEqual(result.lines, ())
+        self.assertTrue(result.source_complete)
+        line = next(item for item in result.lines if item.branch == devoluciones)
+        self.assertEqual(line.transfer_in, Decimal("2"))
+        self.assertEqual(line.difference, Decimal("-2"))
         missing = next(
             issue
-            for issue in result.global_issues
-            if issue.branch_id == devoluciones.id
+            for issue in line.issues
+            if issue.code == "SOURCE_INCOMPLETE"
         )
         self.assertEqual(missing.code, "SOURCE_INCOMPLETE")
         self.assertEqual(missing.product_id, self.product.id)

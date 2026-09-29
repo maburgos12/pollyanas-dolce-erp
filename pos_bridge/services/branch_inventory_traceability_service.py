@@ -241,16 +241,7 @@ class BranchInventoryTraceabilityService:
                     source_ids=source_ids,
                 )
             )
-        if uncovered_movement_issues:
-            return BranchInventoryTraceability(
-                month=month_start,
-                lines=(),
-                global_issues=tuple(uncovered_movement_issues)
-                + tuple(movement_issues),
-                company_difference=ZERO,
-                exception_count=0,
-                source_complete=False,
-            )
+        movement_issues = [*movement_issues, *uncovered_movement_issues]
         keys = sorted(
             opening.keys()
             | closing.keys()
