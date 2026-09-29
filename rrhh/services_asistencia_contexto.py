@@ -219,23 +219,6 @@ class ContextoAsistenciaLote:
                 fuente=vacaciones,
             )
 
-        permiso = next(
-            (
-                item for item in self.permisos.get(empleado_id, ())
-                if timezone.localtime(item.fecha_inicio).date() <= fecha
-                and timezone.localtime(item.fecha_fin or item.fecha_inicio).date() >= fecha
-            ),
-            None,
-        )
-        if permiso:
-            return _resultado(
-                CODIGO_PERMISO,
-                exigible=False,
-                falta=False,
-                motivo="Permiso aprobado registrado en Capital Humano.",
-                fuente=permiso,
-            )
-
         asistencia = self.asistencias.get(key)
         incidencias = incidencias_dia
         tipos_pendientes = {
@@ -267,6 +250,23 @@ class ContextoAsistenciaLote:
                 falta=False,
                 motivo="Asistencia registrada en Capital Humano.",
                 fuente=asistencia,
+            )
+
+        permiso = next(
+            (
+                item for item in self.permisos.get(empleado_id, ())
+                if timezone.localtime(item.fecha_inicio).date() <= fecha
+                and timezone.localtime(item.fecha_fin or item.fecha_inicio).date() >= fecha
+            ),
+            None,
+        )
+        if permiso:
+            return _resultado(
+                CODIGO_PERMISO,
+                exigible=False,
+                falta=False,
+                motivo="Permiso aprobado registrado en Capital Humano.",
+                fuente=permiso,
             )
 
         if empleado.exento_checador:

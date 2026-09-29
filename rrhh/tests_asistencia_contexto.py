@@ -192,6 +192,28 @@ class ContextoAsistenciaTests(TestCase):
         self.assertFalse(resultado.falta_penalizable)
         self.assertEqual(resultado.fuente_id, asistencia.id)
 
+    def test_asistencia_real_prevalece_sobre_permiso_parcial(self):
+        PermisoSalida.objects.create(
+            empleado=self.empleado,
+            tipo=PermisoSalida.TIPO_PERMISO_HORA,
+            fecha_inicio=datetime(2026, 9, 8, 8, tzinfo=TZ),
+            fecha_fin=datetime(2026, 9, 8, 9, tzinfo=TZ),
+            motivo="Permiso parcial aprobado",
+            estado=PermisoSalida.ESTADO_APROBADO,
+        )
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 8),
+            entrada=datetime(2026, 9, 8, 9, tzinfo=TZ),
+        )
+
+        resultado = self.clasificar(date(2026, 9, 8))
+
+        self.assertEqual(resultado.codigo, CODIGO_ASISTENCIA)
+        self.assertTrue(resultado.es_exigible)
+        self.assertFalse(resultado.falta_penalizable)
+        self.assertEqual(resultado.fuente_id, asistencia.id)
+
     def test_clasificador_es_solo_lectura_y_consultas_no_crecen_por_empleado_dia(self):
         segundo = Empleado.objects.create(
             codigo="CTX-002",
