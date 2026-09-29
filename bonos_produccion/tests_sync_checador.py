@@ -22,6 +22,7 @@ from .models import (
 )
 from .serializers import BonoProduccionCapturaSerializer, RegistroDiarioCapturaSerializer
 from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
+from .services_preview import generar_preview_contexto_rrhh
 
 
 TZ = ZoneInfo("America/Mazatlan")
@@ -224,6 +225,36 @@ class SyncChecadorProduccionTests(TestCase):
             ),
             dinero_antes,
         )
+
+    def test_preview_contexto_rrhh_no_escribe_y_reporta_hash_manual(self):
+        fecha = date(2026, 9, 1)
+        periodo, empleado, bono = self.crear_bono(
+            fecha,
+            ajuste_positivo=Decimal("50.00"),
+            desc_ajuste_positivo="Captura vigente",
+        )
+        IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=fecha,
+            fecha_fin=fecha,
+            estado=IncapacidadEmpleado.ESTADO_CERRADA,
+        )
+        original = {
+            "total": bono.total_a_pagar,
+            "ajuste": bono.ajuste_positivo,
+            "descripcion": bono.desc_ajuste_positivo,
+            "registros": RegistroDiarioProduccion.objects.count(),
+        }
+
+        preview = generar_preview_contexto_rrhh(periodo)
+        bono.refresh_from_db()
+
+        self.assertEqual(preview["hash_manual_antes"], preview["hash_manual_despues"])
+        self.assertEqual(preview["filas"][0]["faltas_rrhh_propuestas"], 0)
+        self.assertEqual(bono.total_a_pagar, original["total"])
+        self.assertEqual(bono.ajuste_positivo, original["ajuste"])
+        self.assertEqual(bono.desc_ajuste_positivo, original["descripcion"])
+        self.assertEqual(RegistroDiarioProduccion.objects.count(), original["registros"])
 
     def test_checada_normal_sin_incidencias_crea_asistencia_y_puntualidad_true(self):
         fecha = date(2026, 6, 1)
