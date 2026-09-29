@@ -302,6 +302,7 @@ class BonoProduccionEmpleado(models.Model):
     dias_uniforme = models.PositiveSmallIntegerField(default=0)
     dias_puntualidad = models.PositiveSmallIntegerField(default=0)
     dias_asistencia = models.PositiveSmallIntegerField(default=0)
+    faltas_rrhh = models.PositiveSmallIntegerField(null=True, blank=True)
     dias_produccion = models.PositiveSmallIntegerField(default=0)
     total_embetunados = models.PositiveIntegerField(default=0)
     pasa_uniforme = models.BooleanField(default=False)
@@ -416,6 +417,10 @@ class BonoProduccionEmpleado(models.Model):
 class RegistroDiarioProduccion(models.Model):
     bono = models.ForeignKey(BonoProduccionEmpleado, on_delete=models.CASCADE, related_name="registros")
     dia = models.PositiveSmallIntegerField()
+    fecha = models.DateField(null=True, blank=True)
+    estado_rrhh = models.CharField(max_length=32, blank=True, default="")
+    motivo_rrhh = models.CharField(max_length=200, blank=True, default="")
+    falta_penalizable = models.BooleanField(null=True, blank=True)
     tiene_uniforme = models.BooleanField(default=True)
     tiene_puntualidad = models.BooleanField(default=True)
     tiene_asistencia = models.BooleanField(default=True)

@@ -26,7 +26,15 @@ class RegistroDiarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = RegistroDiarioProduccion
         fields = "__all__"
-        read_only_fields = ["capturado_por", "creado_en", "actualizado_en"]
+        read_only_fields = [
+            "fecha",
+            "estado_rrhh",
+            "motivo_rrhh",
+            "falta_penalizable",
+            "capturado_por",
+            "creado_en",
+            "actualizado_en",
+        ]
 
 
 class BonoProduccionSerializer(serializers.ModelSerializer):
@@ -135,6 +143,10 @@ class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
             "id",
             "bono",
             "dia",
+            "fecha",
+            "estado_rrhh",
+            "motivo_rrhh",
+            "falta_penalizable",
             "tiene_uniforme",
             "tiene_puntualidad",
             "tiene_asistencia",
@@ -142,7 +154,13 @@ class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
             "cantidad_embetunados",
             "observacion",
         ]
-        read_only_fields = ["id"]
+        read_only_fields = [
+            "id",
+            "fecha",
+            "estado_rrhh",
+            "motivo_rrhh",
+            "falta_penalizable",
+        ]
 
     def validate_bono(self, bono):
         bonos_permitidos = self.context["bonos_permitidos"]

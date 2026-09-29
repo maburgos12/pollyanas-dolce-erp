@@ -63,6 +63,36 @@ class SyncChecadorProduccionTests(TestCase):
             estado=estado or IncidenciaAsistencia.ESTADO_PENDIENTE,
         )
 
+    def test_registro_admite_contexto_rrhh_y_serializer_lo_expone_solo_lectura(self):
+        fecha = date(2026, 9, 1)
+        _periodo, _empleado, bono = self.crear_bono(fecha)
+        registro = RegistroDiarioProduccion.objects.create(
+            bono=bono,
+            dia=1,
+            fecha=fecha,
+            estado_rrhh="incapacidad",
+            motivo_rrhh="Incapacidad vigente.",
+            falta_penalizable=False,
+        )
+
+        data = RegistroDiarioCapturaSerializer(registro).data
+
+        self.assertEqual(data["fecha"], "2026-09-01")
+        self.assertEqual(data["estado_rrhh"], "incapacidad")
+        self.assertFalse(data["falta_penalizable"])
+        self.assertTrue(RegistroDiarioCapturaSerializer().fields["estado_rrhh"].read_only)
+        self.assertTrue(RegistroDiarioCapturaSerializer().fields["falta_penalizable"].read_only)
+
+    def test_filas_historicas_conservan_contexto_nullable(self):
+        fecha = date(2026, 9, 2)
+        _periodo, _empleado, bono = self.crear_bono(fecha)
+
+        registro = RegistroDiarioProduccion.objects.create(bono=bono, dia=2)
+
+        self.assertIsNone(registro.fecha)
+        self.assertIsNone(registro.falta_penalizable)
+        self.assertIsNone(bono.faltas_rrhh)
+
     def test_checada_normal_sin_incidencias_crea_asistencia_y_puntualidad_true(self):
         fecha = date(2026, 6, 1)
         periodo, empleado, bono = self.crear_bono(fecha)
