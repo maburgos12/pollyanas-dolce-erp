@@ -13,6 +13,7 @@ function element(tag) {
 
 async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true, timeoutMs = 0) {
   const events = [];
+  const assignedUrls = [];
   const region = element("region");
   region.appendChild = function (child) { this.children.push(child); events.push("toast"); };
   const submitter = element("button");
@@ -55,7 +56,7 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
     window: {
       location: {
         href: "https://erp.local/lista/", origin: "https://erp.local", hash: "",
-        assign: () => events.push("navigate"), reload: () => events.push("reload")
+        assign: (url) => { assignedUrls.push(url); events.push("navigate"); }, reload: () => events.push("reload")
       },
       setTimeout(fn, ms) { if (ms === 20000) timeoutCallback = fn; else fn(); return 1; }, clearTimeout() {}, sessionStorage, ERPActionUI: null
     },
@@ -63,7 +64,7 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   };
   vm.runInNewContext(fs.readFileSync("static/js/erp_actions.js", "utf8"), context);
   const event = { currentTarget: form, submitter, preventDefault() {} };
-  return { events, form, submitter, otherButton, field, listener, event, storage, getFetchCount: () => fetchCount, fireTimeout: () => timeoutCallback() };
+  return { events, assignedUrls, form, submitter, otherButton, field, listener, event, storage, getFetchCount: () => fetchCount, fireTimeout: () => timeoutCallback() };
 }
 
 (async () => {
@@ -83,6 +84,25 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   await sameDocument.listener(sameDocument.event);
   assert.deepStrictEqual(sameDocument.events, ["reload"]);
   assert.strictEqual(sameDocument.storage.size, 1);
+
+  const anotherPage = await scenario({
+    ok: true, toast: { message: "actualizado" },
+    redirect: "/compras/departamentales/123/#item-9", reload: true
+  });
+  await anotherPage.listener(anotherPage.event);
+  assert.deepStrictEqual(anotherPage.events, ["navigate"]);
+  assert.deepStrictEqual(anotherPage.assignedUrls, ["https://erp.local/compras/departamentales/123/#item-9"]);
+
+  const anotherQuery = await scenario({
+    ok: true, toast: { message: "actualizado" }, redirect: "/lista/?tab=2#item-9", reload: true
+  });
+  await anotherQuery.listener(anotherQuery.event);
+  assert.deepStrictEqual(anotherQuery.events, ["navigate"]);
+  assert.deepStrictEqual(anotherQuery.assignedUrls, ["https://erp.local/lista/?tab=2#item-9"]);
+
+  const reloadHere = await scenario({ ok: true, toast: { message: "actualizado" }, reload: true });
+  await reloadHere.listener(reloadHere.event);
+  assert.deepStrictEqual(reloadHere.events, ["reload"]);
 
   const external = await scenario({ ok: true, toast: { message: "ok" }, redirect: "https://evil.example/" });
   await external.listener(external.event);

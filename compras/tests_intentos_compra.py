@@ -89,6 +89,24 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertTrue(EventoCompraDepartamental.objects.filter(item=self.item, tipo='INTENTO_CANCELADO').exists())
         self.assertTrue(LineaOrdenCompraDepartamental.objects.filter(intento=intento).exists())
 
+    def test_conflictos_de_version_y_estado_tienen_codigo_estable(self):
+        intento = self._intento()
+        with self.assertRaises(ValidationError) as obsoleto:
+            self._cancelar(intento, version=0)
+        self.assertEqual(obsoleto.exception.error_list[0].code, 'conflict')
+        with self.assertRaises(ValidationError) as vigente:
+            cancelar_articulo_definitivamente(self.item, motivo='Ya no se requiere', actor=self.user)
+        self.assertEqual(vigente.exception.error_list[0].code, 'conflict')
+        self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo__in=['INTENTO_CANCELADO', 'ARTICULO_CANCELADO']).count(), 0)
+
+    def test_reembolso_con_version_obsoleta_tiene_codigo_conflicto(self):
+        intento = self._solicitar_reembolso()
+        with self.assertRaises(ValidationError) as obsoleto:
+            registrar_reembolso_compra(intento, version=1, fecha=timezone.localdate(),
+                                      importe=Decimal('10'), actor=self.user)
+        self.assertEqual(obsoleto.exception.error_list[0].code, 'conflict')
+        self.assertEqual(ReembolsoCompraDepartamental.objects.filter(intento=intento).count(), 0)
+
     def test_cancelar_pagada_conserva_compromiso_y_registra_solicitud(self):
         intento = self._intento(pagado=True)
         compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
@@ -968,7 +986,7 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.item.refresh_from_db()
         casos = [
             (reverse('compras:departamental_intento_cancelar', args=[intento.pk]), 'Se cancelará este intento con el proveedor y se conservará todo su historial. ¿Continuar?', str(intento.version)),
-            (reverse('compras:departamental_reembolso_registrar', args=[intento.pk]), None, str(intento.version)),
+            (reverse('compras:departamental_reembolso_registrar', args=[intento.pk]), 'Se registrará este reembolso recibido y se actualizará el saldo pendiente. ¿Continuar?', str(intento.version)),
             (reverse('compras:departamental_articulo_cancelar', args=[self.item.pk]), 'Este artículo dejará de buscarse y la solicitud puede cerrarse. ¿Continuar?', self.item.actualizado_en.isoformat()),
         ]
         for url, confirmacion, version in casos:
@@ -1008,6 +1026,20 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(self.client.post(url, data, **self.headers).status_code, 409)
         self.assertEqual(ReembolsoCompraDepartamental.objects.filter(intento=intento).count(), 1)
 
+    def test_cancelar_intento_pagado_pide_reembolso_y_conserva_compra(self):
+        intento = self._intento(pagado=True)
+        compra = CompraRealizadaDepartamental.objects.get(intento=intento)
+        url = reverse('compras:departamental_intento_cancelar', args=[intento.pk])
+        get_response = self.client.get(url)
+        self.assertContains(get_response, 'name="reembolso_solicitado_en"')
+        self.assertContains(get_response, 'name="reembolso_solicitado"')
+        response = self.client.post(url, self._cancelar_data(intento), **self.headers)
+        self.assertEqual(response.status_code, 200, response.content)
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        self.assertEqual(CompraRealizadaDepartamental.objects.get(pk=compra.pk).intento_id, intento.pk)
+        self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='REEMBOLSO_SOLICITADO').count(), 1)
+
     def test_cancelar_articulo_async_exige_motivo_y_segundo_post_409(self):
         url = reverse('compras:departamental_articulo_cancelar', args=[self.item.pk])
         self.item.refresh_from_db()
@@ -1039,6 +1071,42 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.assertTrue(response.context['form'].errors['detalle'])
         self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).version, 1)
         self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='INTENTO_CANCELADO').count(), 0)
+
+    def test_post_vacio_de_las_tres_acciones_muestra_errores_sin_mutar(self):
+        intento = self._intento()
+        for url in (
+            reverse('compras:departamental_intento_cancelar', args=[intento.pk]),
+            reverse('compras:departamental_reembolso_registrar', args=[intento.pk]),
+            reverse('compras:departamental_articulo_cancelar', args=[self.item.pk]),
+        ):
+            with self.subTest(url=url):
+                response = self.client.post(url, {})
+                self.assertEqual(response.status_code, 400)
+                self.assertTrue(response.context['form'].is_bound)
+                self.assertTrue(response.context['form'].errors)
+                self.assertContains(response, 'data-async-action', status_code=400)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).version, 1)
+        self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo__in=['INTENTO_CANCELADO', 'REEMBOLSO_RECIBIDO', 'ARTICULO_CANCELADO']).count(), 0)
+
+    def test_cancelar_articulo_con_intento_vigente_es_409_sin_mutar(self):
+        intento = self._intento()
+        self.item.refresh_from_db()
+        response = self.client.post(
+            reverse('compras:departamental_articulo_cancelar', args=[self.item.pk]),
+            {'version': self.item.actualizado_en.isoformat(), 'motivo': 'Ya no se necesita'},
+            **self.headers,
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertFalse(response.json()['ok'])
+        self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='ARTICULO_CANCELADO').count(), 0)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).estado, 'VIGENTE')
+
+    def test_sin_login_redirige_antes_de_ver_datos(self):
+        intento = self._intento()
+        self.client.logout()
+        response = self.client.get(reverse('compras:departamental_intento_cancelar', args=[intento.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/login/', response['Location'])
 
     def test_id_de_intento_y_articulo_no_cruza_solicitudes(self):
         intento = self._intento()

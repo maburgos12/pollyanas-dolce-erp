@@ -73,12 +73,11 @@ def _formulario(request, *, item, form, titulo, explicacion, estado, action, con
 
 def _error_servicio(request, *, error, item, form, titulo, explicacion, estado, action, confirmacion=""):
     mensaje = "; ".join(error.messages)
-    conflicto = "Otra persona actualizó" in mensaje or mensaje in {
-        "Solo se puede cancelar el intento vigente.",
-        "El intento no tiene un reembolso pendiente.",
-        "El artículo ya está cancelado.",
-    }
-    if conflicto and "Otra persona actualizó" not in mensaje:
+    errores = getattr(error, "error_list", None)
+    if errores is None:
+        errores = [detalle for campo in error.error_dict.values() for detalle in campo]
+    conflicto = any(detalle.code == "conflict" for detalle in errores)
+    if conflicto and not mensaje.startswith("Otra persona actualizó"):
         mensaje = f"Otra persona actualizó este registro. Recarga y revisa los cambios. {mensaje}"
     form.add_error(None, mensaje)
     status = 409 if conflicto else 400
@@ -97,7 +96,11 @@ def departamental_intento_cancelar(request, pk):
         IntentoCompraDepartamental.objects.select_related("item__solicitud", "cotizacion__proveedor"), pk=pk,
     )
     item = intento.item
-    form = CancelarIntentoCompraForm(request.POST or None, request.FILES or None, intento=intento)
+    form = CancelarIntentoCompraForm(
+        request.POST if request.method == "POST" else None,
+        request.FILES if request.method == "POST" else None,
+        intento=intento,
+    )
     config = {
         "item": item, "titulo": "Cancelar intento con proveedor",
         "explicacion": "El historial de la compra permanece visible. Si ya se pagó, solicita aquí el reembolso.",
@@ -126,7 +129,9 @@ def departamental_reembolso_registrar(request, pk):
     intento = get_object_or_404(IntentoCompraDepartamental.objects.select_related("item__solicitud"), pk=pk)
     item = intento.item
     form = RegistrarReembolsoCompraForm(
-        request.POST or None, request.FILES or None, intento=intento,
+        request.POST if request.method == "POST" else None,
+        request.FILES if request.method == "POST" else None,
+        intento=intento,
         initial={"fecha": timezone.localdate()},
     )
     config = {
@@ -134,6 +139,7 @@ def departamental_reembolso_registrar(request, pk):
         "explicacion": "Registra únicamente el dinero ya devuelto por el proveedor. El saldo pendiente seguirá visible.",
         "estado": intento.get_estado_display(),
         "action": reverse("compras:departamental_reembolso_registrar", args=[intento.pk]),
+        "confirmacion": "Se registrará este reembolso recibido y se actualizará el saldo pendiente. ¿Continuar?",
     }
     if request.method == "POST":
         try:
@@ -143,7 +149,7 @@ def departamental_reembolso_registrar(request, pk):
         if version_enviada is not None and version_enviada != intento.version:
             return _error_servicio(
                 request,
-                error=ValidationError("Otra persona actualizó este intento. Recarga y revisa el saldo."),
+                error=ValidationError("Otra persona actualizó este intento. Recarga y revisa el saldo.", code="conflict"),
                 form=form, **config,
             )
         if not form.is_valid():
@@ -162,7 +168,7 @@ def departamental_articulo_cancelar(request, item_pk):
     if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
     item = get_object_or_404(ItemCompraDepartamental.objects.select_related("solicitud"), pk=item_pk)
-    form = CancelarArticuloForm(request.POST or None, item=item)
+    form = CancelarArticuloForm(request.POST if request.method == "POST" else None, item=item)
     config = {
         "item": item, "titulo": "Cancelar artículo definitivamente",
         "explicacion": "Se conservarán los intentos anteriores y el motivo de cierre.",
@@ -177,7 +183,7 @@ def departamental_articulo_cancelar(request, item_pk):
             with transaction.atomic():
                 bloqueado = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
                 if form.cleaned_data["version"] != bloqueado.actualizado_en.isoformat():
-                    raise ValidationError("Otra persona actualizó este artículo. Recarga y revisa los cambios.")
+                    raise ValidationError("Otra persona actualizó este artículo. Recarga y revisa los cambios.", code="conflict")
                 cancelar_articulo_definitivamente(bloqueado, motivo=form.cleaned_data["motivo"], actor=request.user)
         except ValidationError as exc:
             return _error_servicio(request, error=exc, form=form, **config)

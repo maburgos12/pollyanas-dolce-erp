@@ -78,7 +78,7 @@ def _bloquear_item_e_intento(intento):
     item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud").get(pk=item_id)
     bloqueado = IntentoCompraDepartamental.objects.select_for_update().get(pk=intento.pk)
     if bloqueado.item_id != item.pk:
-        raise ValidationError("El intento cambió de artículo. Recarga y revisa el historial.")
+        raise ValidationError("El intento cambió de artículo. Recarga y revisa el historial.", code="conflict")
     return item, bloqueado
 
 
@@ -115,9 +115,9 @@ def _cancelar_intento_compra(
 ):
     item, intento = _bloquear_item_e_intento(intento)
     if intento.version != version:
-        raise ValidationError("Otra persona actualizó este intento. Recarga y revisa los cambios.")
+        raise ValidationError("Otra persona actualizó este intento. Recarga y revisa los cambios.", code="conflict")
     if intento.estado != IntentoCompraDepartamental.ESTADO_VIGENTE:
-        raise ValidationError("Solo se puede cancelar el intento vigente.")
+        raise ValidationError("Solo se puede cancelar el intento vigente.", code="conflict")
     if motivo not in dict(IntentoCompraDepartamental.MOTIVO_CHOICES):
         raise ValidationError({"motivo": "Selecciona un motivo de cancelación válido."})
     if not isinstance(detalle, str) or not detalle.strip():
@@ -125,7 +125,7 @@ def _cancelar_intento_compra(
     if RecepcionItemDepartamental.objects.filter(
         linea_orden__intento=intento, cantidad_recibida__gt=0,
     ).exists():
-        raise ValidationError("Este intento tiene una recepción registrada; revisa la entrega antes de cancelarlo.")
+        raise ValidationError("Este intento tiene una recepción registrada; revisa la entrega antes de cancelarlo.", code="conflict")
 
     compra = CompraRealizadaDepartamental.objects.select_for_update().filter(intento=intento).first()
     compromiso = _compromiso(intento)
@@ -135,7 +135,7 @@ def _cancelar_intento_compra(
         if importe > compra.importe_final:
             raise ValidationError({"reembolso_solicitado": "El reembolso no puede superar la compra pagada."})
         if compromiso is None or not compromiso.activo:
-            raise ValidationError("La compra pagada no tiene un compromiso activo. Revisa su registro financiero antes de cancelar.")
+            raise ValidationError("La compra pagada no tiene un compromiso activo. Revisa su registro financiero antes de cancelar.", code="conflict")
         intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
         intento.reembolso_solicitado_en = fecha
         intento.reembolso_solicitado = importe
@@ -200,9 +200,9 @@ def _registrar_reembolso_compra(
 ):
     item, intento = _bloquear_item_e_intento(intento)
     if intento.version != version:
-        raise ValidationError("Otra persona actualizó este intento. Recarga y revisa el saldo.")
+        raise ValidationError("Otra persona actualizó este intento. Recarga y revisa el saldo.", code="conflict")
     if intento.estado != IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO:
-        raise ValidationError("El intento no tiene un reembolso pendiente.")
+        raise ValidationError("El intento no tiene un reembolso pendiente.", code="conflict")
     fecha = _fecha_valida(fecha, nombre="fecha")
     importe = _importe_positivo(importe, nombre="importe")
     recibido = intento.reembolsos.aggregate(total=Sum("importe"))["total"] or Decimal("0")
@@ -211,7 +211,7 @@ def _registrar_reembolso_compra(
         raise ValidationError({"importe": "El reembolso supera el saldo solicitado."})
     compromiso = _compromiso(intento)
     if compromiso is None or not compromiso.activo:
-        raise ValidationError("El intento no tiene un compromiso activo. Revisa su registro financiero.")
+        raise ValidationError("El intento no tiene un compromiso activo. Revisa su registro financiero.", code="conflict")
     comprobante = _guardar_archivo_nuevo(
         ReembolsoCompraDepartamental, "comprobante",
         ReembolsoCompraDepartamental(intento=intento), comprobante, nuevos,
@@ -240,16 +240,16 @@ def cancelar_articulo_definitivamente(item, *, motivo, actor):
     if not isinstance(motivo, str) or not motivo.strip():
         raise ValidationError({"motivo": "Explica por qué ya no se comprará el artículo."})
     if item.estado == ItemCompraDepartamental.ESTADO_CANCELADO:
-        raise ValidationError("El artículo ya está cancelado.")
+        raise ValidationError("El artículo ya está cancelado.", code="conflict")
     intentos = list(IntentoCompraDepartamental.objects.select_for_update().filter(item=item))
     if any(intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE for intento in intentos):
-        raise ValidationError("Cancela primero el intento de compra vigente.")
+        raise ValidationError("Cancela primero el intento de compra vigente.", code="conflict")
     if RecepcionItemDepartamental.objects.filter(
         linea_orden__item=item, cantidad_recibida__gt=0,
     ).exists():
-        raise ValidationError("El artículo tiene una recepción registrada y no puede cancelarse.")
+        raise ValidationError("El artículo tiene una recepción registrada y no puede cancelarse.", code="conflict")
     if any(intento.saldo_reembolso > 0 for intento in intentos):
-        raise ValidationError("Hay un reembolso pendiente; regístralo antes de cancelar el artículo.")
+        raise ValidationError("Hay un reembolso pendiente; regístralo antes de cancelar el artículo.", code="conflict")
     reservas = CompromisoCompraDepartamental.objects.select_for_update().filter(
         item=item, intento__isnull=True, activo=True,
     )

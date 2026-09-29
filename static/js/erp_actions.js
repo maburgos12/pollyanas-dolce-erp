@@ -145,30 +145,31 @@
         target.outerHTML = payload.html;
         bind(document);
       }
-      if (payload.redirect) {
-        var redirectUrl = safeNavigationUrl(payload.redirect);
-        if (!redirectUrl) {
+      if (payload.redirect || payload.reload) {
+        var redirectUrl = payload.redirect ? safeNavigationUrl(payload.redirect) : null;
+        if (payload.redirect && !redirectUrl) {
           throw { toast: { type: "error", message: "La acción terminó, pero se rechazó un destino de navegación inseguro.", persistent: true } };
         }
         navigating = true;
         var redirectToast = normalizedToast(payload.toast, "success");
-        if (storePendingToast(redirectToast)) {
-          if (payload.reload) {
-            window.location.hash = redirectUrl.hash;
-            window.location.reload();
-          } else {
-            window.location.assign(redirectUrl.href);
-          }
-        } else {
-          showToast(redirectToast);
-          window.setTimeout(function () {
-            if (payload.reload) {
+        var navigate = function () {
+          if (redirectUrl) {
+            var currentUrl = new URL(window.location.href);
+            if (payload.reload && redirectUrl.pathname === currentUrl.pathname && redirectUrl.search === currentUrl.search) {
               window.location.hash = redirectUrl.hash;
               window.location.reload();
             } else {
               window.location.assign(redirectUrl.href);
             }
-          }, 900);
+          } else if (payload.reload) {
+            window.location.reload();
+          }
+        };
+        if (storePendingToast(redirectToast)) {
+          navigate();
+        } else {
+          showToast(redirectToast);
+          window.setTimeout(navigate, 900);
         }
         return;
       }
