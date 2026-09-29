@@ -81,11 +81,11 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(empleado_de_usuario(self.user), self.empleado)
 
     def test_portal_muestra_bandeja_operativa_por_tipo(self):
-        response = self.client.get("/seguimiento/")
+        response = self.client.get("/seguimiento/minutas/?estado=activos")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
-        self.assertIn("Mi trabajo activo", content)
+        self.assertIn("Mis acuerdos", content)
         self.assertIn("Vencidos", content)
         self.assertIn("Activos", content)
         self.assertIn("En revisión", content)
@@ -94,7 +94,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIn("Minutas", content)
         self.assertIn("Proyectos", content)
         self.assertIn('data-dashboard-url="/seguimiento/"', content)
-        self.assertIn("Validar inventarios en cuartos fríos", content)
+        self.assertNotIn("Validar inventarios en cuartos fríos", content)
         self.assertNotIn("Alcance", content)
         self.assertNotIn("Control visible y auditable", content)
         self.assertNotIn("Visible:", content)
@@ -158,7 +158,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.check.estatus_origen = "READY"
         self.check.save(update_fields=["origen_step_id", "estatus_origen"])
 
-        response = self.client.get("/seguimiento/")
+        response = self.client.get("/seguimiento/proyectos/")
         content = response.content.decode()
 
         self.assertEqual(response.status_code, 200)
@@ -169,7 +169,7 @@ class SeguimientoColaboradorTests(TestCase):
         otro = get_user_model().objects.create_user(username="usuario.ajeno", password="test12345")
         self.client.force_login(otro)
 
-        response = self.client.get("/seguimiento/")
+        response = self.client.get("/seguimiento/compromisos/")
         self.assertNotContains(response, "Validar inventarios en cuartos fríos")
 
         toggle_response = self.client.post(f"/seguimiento/{self.item.pk}/checklist/{self.check.pk}/")
@@ -328,7 +328,7 @@ class SeguimientoColaboradorTests(TestCase):
 
         groups = build_nav_groups(self.user, "/seguimiento/")
         labels = [item["label"] for group in groups for item in group["items"]]
-        response_mi_trabajo = self.client.get("/seguimiento/")
+        response_mi_trabajo = self.client.get("/seguimiento/minutas/")
         response_panel = self.client.get("/seguimiento/panel/")
         response_revision = self.client.get("/seguimiento/revision/")
         response_detalle_dg = self.client.get(f"/seguimiento/panel/{self.item.pk}/")
@@ -867,7 +867,9 @@ class SeguimientoColaboradorTests(TestCase):
         response = self.client.get("/seguimiento/minutas/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Minutas asignadas")
+        self.assertContains(response, "Mis acuerdos")
+        self.assertContains(response, "Tipo seleccionado")
+        self.assertContains(response, "Minutas activas")
         self.assertContains(response, 'data-work-bucket="vencidos"')
         self.assertContains(response, 'data-work-bucket="activos"')
         self.assertContains(response, 'data-work-bucket="en_revision"')
@@ -1113,7 +1115,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.client.force_login(johana)
 
         with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": ""}):
-            response = self.client.get("/seguimiento/")
+            response = self.client.get("/seguimiento/minutas/")
             post_response = self.client.post(
                 f"/seguimiento/{proyecto.pk}/paso/{paso.pk}/aprobar/",
                 {"accion": "aprobar"},
@@ -1194,9 +1196,9 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertContains(response, "Proyecto producto mes")
         self.assertNotContains(response, "Acuerdo de junta semanal")
         self.assertNotContains(response, "Validar inventarios en cuartos fríos")
-        self.assertIn('href="/seguimiento/minutas/"', content)
-        self.assertIn('href="/seguimiento/proyectos/" class="module-tab active"', content)
-        self.assertIn('href="/seguimiento/compromisos/"', content)
+        self.assertIn('href="/seguimiento/minutas/?estado=activos"', content)
+        self.assertIn('data-work-type="PROYECTO"', content)
+        self.assertIn('href="/seguimiento/compromisos/?estado=activos"', content)
 
     def test_accesos_directos_respetan_bonos_operativos_del_rol(self):
         response_prod = self.client.get("/bp/")
@@ -1262,7 +1264,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertIn(self.user, item.participantes_user.all())
         self.assertIn(self.empleado, item.participantes_empleado.all())
 
-        response = self.client.get("/seguimiento/")
+        response = self.client.get("/seguimiento/proyectos/")
         content = response.content.decode()
         self.assertContains(response, "Producto Mes Junio")
         self.assertIn("Compartido", content)

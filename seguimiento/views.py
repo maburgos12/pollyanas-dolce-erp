@@ -605,6 +605,46 @@ def mi_seguimiento(request, tipo: str | None = None):
     if active_bucket not in items_por_estado:
         active_bucket = "activos"
     visible_items = items_por_estado[active_bucket]
+    list_titles = {
+        SeguimientoItem.TIPO_MINUTA: {
+            "vencidos": "Minutas vencidas que necesitan atención",
+            "activos": "Minutas activas",
+            "en_revision": "Minutas en revisión",
+            "finalizados": "Minutas finalizadas",
+        },
+        SeguimientoItem.TIPO_PROYECTO: {
+            "vencidos": "Proyectos vencidos que necesitan atención",
+            "activos": "Proyectos activos",
+            "en_revision": "Proyectos en revisión",
+            "finalizados": "Proyectos finalizados",
+        },
+        SeguimientoItem.TIPO_COMPROMISO: {
+            "vencidos": "Compromisos vencidos que necesitan atención",
+            "activos": "Compromisos activos",
+            "en_revision": "Compromisos en revisión",
+            "finalizados": "Compromisos finalizados",
+        },
+    }
+    empty_titles = {
+        SeguimientoItem.TIPO_MINUTA: {
+            "vencidos": "No tienes minutas vencidas.",
+            "activos": "No tienes minutas activas.",
+            "en_revision": "No tienes minutas en revisión.",
+            "finalizados": "No tienes minutas finalizadas.",
+        },
+        SeguimientoItem.TIPO_PROYECTO: {
+            "vencidos": "No tienes proyectos vencidos.",
+            "activos": "No tienes proyectos activos.",
+            "en_revision": "No tienes proyectos en revisión.",
+            "finalizados": "No tienes proyectos finalizados.",
+        },
+        SeguimientoItem.TIPO_COMPROMISO: {
+            "vencidos": "No tienes compromisos vencidos.",
+            "activos": "No tienes compromisos activos.",
+            "en_revision": "No tienes compromisos en revisión.",
+            "finalizados": "No tienes compromisos finalizados.",
+        },
+    }
 
     section_config = [
         {
@@ -672,6 +712,8 @@ def mi_seguimiento(request, tipo: str | None = None):
             "active_type_label": active_type["label"],
             "active_type_helper": active_type["helper"],
             "active_type_count": active_type["count"],
+            "active_list_title": list_titles[tipo][active_bucket],
+            "active_empty_title": empty_titles[tipo][active_bucket],
             "modo_detalle": bool(tipo),
             "mis_aprobaciones": mis_aprobaciones,
             "writeback_activo": _writeback_activo(),
