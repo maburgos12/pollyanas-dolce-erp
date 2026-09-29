@@ -171,7 +171,7 @@ class ComprasDepartamentalesDomainTests(TestCase):
         self.assertEqual(resultado.disponible_antes, Decimal("4500.00"))
         self.assertEqual(resultado.exceso, Decimal("500.00"))
 
-    def test_evaluacion_cuenta_vigente_y_reembolso_pendiente_pero_no_entregado_ni_reembolsado(self):
+    def test_evaluacion_cuenta_toda_exposicion_activa_sin_inferir_gasto_real(self):
         solicitud = self.crear_solicitud()
         for estado, monto in (
             (IntentoCompraDepartamental.ESTADO_VIGENTE, '200'),
@@ -195,8 +195,8 @@ class ComprasDepartamentalesDomainTests(TestCase):
             solicitud=solicitud, descripcion='Nuevo equipo', cantidad=1, rubro=self.rubro,
         )
         resultado = evaluar_presupuesto_item(candidato, Decimal('500'))
-        self.assertEqual(resultado.compromisos_previos, Decimal('1200'))
-        self.assertEqual(resultado.disponible_despues, Decimal('5800'))
+        self.assertEqual(resultado.compromisos_previos, Decimal('2400'))
+        self.assertEqual(resultado.disponible_despues, Decimal('4600'))
 
     def test_presupuesto_ausente_no_toma_dinero_del_area_y_requiere_dg(self):
         for caso in ('sin_rubro', 'inactivo', 'otra_area', 'sin_linea'):
