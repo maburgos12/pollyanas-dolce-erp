@@ -58,9 +58,15 @@ POR_FECHA = [
     ("rrhh_vacanterrhh", "sucursal_id", "fecha_solicitada", CORTE_DIARIO),
 ]
 
-# Quedan fuera a propósito, porque no los decide una fecha:
-#   activos_activo — 9 equipos; si se mudaron del local viejo al nuevo lo sabe
-#     operaciones, no la base.
+# Los activos no los decide una fecha sino a dónde se los llevaron, y eso lo
+# confirmó operaciones: el equipo de mostrador se mudó al local nuevo y el de
+# producción Crucero se integró a CEDIS con el resto. El renglón de la
+# desinstalación eléctrica no es un activo, es el registro del desmantelamiento,
+# así que se queda con Crucero.
+ACTIVOS_A_BAMOA = ["ACT-2606-120", "ACT-2606-121", "ACT-2606-124", "ACT-2606-125", "ACT-2608-003"]
+ACTIVOS_A_CEDIS = ["ACT-2606-119", "ACT-2606-122", "ACT-2606-123"]
+
+# Queda fuera a propósito:
 #   ventas_pronosticoguardado_sucursales — tabla puente sin fecha propia.
 # También conviene revisar los patrones fiscales: al pasarlos a Bamoa, un CFDI
 # histórico que diga «Crucero» resolverá a la tienda nueva.
@@ -119,6 +125,7 @@ class Command(BaseCommand):
             total += self._bloque(cur, "POR FECHA", self._sql_fecha(), params)
             total += self._bloque(cur, "POR PERIODO DEL PADRE", self._sql_padre(), params)
             total += self._bloque(cur, "ESTADO ACTUAL DE LA TIENDA", self._sql_estado(), params)
+            total += self._activos(cur, bamoa)
             self.stdout.write("")
             self.stdout.write(f"  renglones movidos a Bamoa: {total:,}")
             if not aplicar:
@@ -163,6 +170,32 @@ class Command(BaseCommand):
                 f"{tabla} ({etiqueta})",
                 f'UPDATE "{tabla}" SET "{col}" = %(destino)s WHERE "{col}" = %(origen)s',
             )
+
+    def _activos(self, cur, bamoa) -> int:
+        """A dónde se llevaron los equipos lo sabe operaciones, no una fecha."""
+        self.stdout.write("")
+        self.stdout.write("ACTIVOS")
+        if "activos_activo" not in connection.introspection.table_names():
+            self.stdout.write("  tabla no presente, se omite")
+            return 0
+        cedis = Sucursal.objects.filter(codigo="CEDIS").first()
+        if cedis is None:
+            raise CommandError("No existe la sucursal CEDIS; no puedo reubicar los activos de producción.")
+        movidos = 0
+        for destino, codigos, etiqueta in (
+            (bamoa, ACTIVOS_A_BAMOA, "mostrador, al local nuevo"),
+            (cedis, ACTIVOS_A_CEDIS, "producción, integrados a CEDIS"),
+        ):
+            cur.execute(
+                'UPDATE "activos_activo" SET "sucursal_id" = %s, "ubicacion" = %s '
+                'WHERE "codigo" = ANY(%s)',
+                [destino.pk, destino.nombre, codigos],
+            )
+            self.stdout.write(f"  {etiqueta:<52} {cur.rowcount:>7,}")
+            movidos += cur.rowcount
+        self.stdout.write("  la desinstalación eléctrica se queda con Crucero")
+        self.stdout.write(f"  {'subtotal':<52} {movidos:>7,}")
+        return movidos
 
     def _bloque(self, cur, titulo, generador, params):
         self.stdout.write("")
