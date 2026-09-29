@@ -159,9 +159,86 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(detail.json()["case"]["id"], self.case.pk)
         rebuild.assert_not_called()
 
+    def test_case_detail_includes_history_from_point_alias_of_same_erp_branch(self):
+        alias = PointBranch.objects.create(
+            external_id="alias-audit-history",
+            name="Alias histórico",
+            erp_branch=self.erp_branch,
+        )
+        alias_case = self._case(
+            branch=alias,
+            calculation_fingerprint="e" * 64,
+        )
+        legacy_event = ProductInventoryAuditEvent.objects.create(
+            case=alias_case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="OTHER",
+            notes="Explicación histórica conservada.",
+            actor=self.explainer,
+        )
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            legacy_event.id,
+            [event["id"] for event in response.json()["case"]["events"]],
+        )
+
+    def test_alias_history_does_not_replace_current_explanation_for_review(self):
+        current_explanation = ProductInventoryAuditEvent.objects.create(
+            case=self.case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="OTHER",
+            notes="Explicación vigente.",
+            actor=self.explainer,
+        )
+        self.case.movement_status = (
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+        )
+        self.case.save(update_fields=["movement_status", "updated_at"])
+        alias = PointBranch.objects.create(
+            external_id="alias-reviewed-history",
+            name="Alias con revisión histórica",
+            erp_branch=self.erp_branch,
+        )
+        alias_case = self._case(
+            branch=alias,
+            calculation_fingerprint="f" * 64,
+        )
+        alias_explanation = ProductInventoryAuditEvent.objects.create(
+            case=alias_case,
+            action=ProductInventoryAuditEvent.Action.EXPLAIN,
+            reason_code="OTHER",
+            notes="Explicación de alias.",
+            actor=self.explainer,
+        )
+        ProductInventoryAuditEvent.objects.create(
+            case=alias_case,
+            action=ProductInventoryAuditEvent.Action.APPROVE,
+            reason_code="REVIEWED",
+            related_event=alias_explanation,
+            actor=self.viewer,
+        )
+        self.client.force_login(self.approver)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["latest_explanation"], current_explanation)
+        self.assertTrue(response.context["can_review"])
+        self.assertContains(response, "Explicación de alias.")
+
     def test_browser_dashboard_prioritizes_exceptions_and_exposes_operational_filters(self):
         self.case.conversion_in = Decimal("8")
-        self.case.save(update_fields=["conversion_in"])
+        self.case.issue_codes = ["CONVERSION_ORIGIN_UNRESOLVED"]
+        self.case.save(update_fields=["conversion_in", "issue_codes"])
         balanced_product = PointProduct.objects.create(
             external_id="audit-view-balanced-product",
             sku="AUDIT-BALANCED",
@@ -201,7 +278,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "Pendientes de aprobación")
         self.assertContains(
             response,
-            "Conversión o rebanado registrado; revisar la equivalencia",
+            "Origen de conversión por identificar",
         )
         self.assertContains(response, 'name="month"')
         self.assertContains(response, 'name="branch"')
@@ -291,6 +368,46 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertNotContains(balanced_response, self.product.name)
         self.assertNotContains(balanced_response, pending_product.name)
         self.assertEqual(balanced_response.content.decode().count("<table"), 1)
+
+    def test_browser_dashboard_names_transfer_mismatch_without_declaring_merma(self):
+        self.case.issue_codes = ["TRANSFER_QUANTITY_MISMATCH"]
+        self.case.transfer_out = Decimal("4")
+        self.case.save(update_fields=["issue_codes", "transfer_out"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit"),
+            {"month": "2026-08"},
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Transferencia por conciliar")
+        self.assertNotContains(response, "Merma registrada o pendiente")
+
+    def test_browser_dashboard_hides_legacy_point_alias_case_for_same_erp_branch(self):
+        self.branch.external_id = "1"
+        self.branch.save(update_fields=["external_id", "updated_at"])
+        alias = PointBranch.objects.create(
+            external_id="Sucursal auditoría vistas",
+            name="Alias nominal que no debe duplicarse",
+            erp_branch=self.erp_branch,
+        )
+        self._case(
+            branch=alias,
+            calculation_fingerprint="9" * 64,
+        )
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit"),
+            {"month": "2026-08"},
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["result_count"], 1)
+        self.assertNotContains(response, "Alias nominal que no debe duplicarse")
 
     def test_browser_dashboard_filters_materialized_rows_without_loading_other_months(self):
         other_branch = PointBranch.objects.create(
