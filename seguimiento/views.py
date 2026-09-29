@@ -445,22 +445,28 @@ def mi_seguimiento(request, tipo: str | None = None):
             panel_url = f"{panel_url}?tab={tipo}"
         return redirect(panel_url)
 
+    if tipo is None:
+        return redirect(f'{reverse("seguimiento:minutas")}?estado=activos')
+
     now = timezone.now()
     empleado = empleado_de_usuario(request.user)
     items = list(_items_del_usuario(request.user))
-    tabs = [
+    type_definitions = [
         {
             "label": "Minutas",
+            "helper": "Acuerdos surgidos de reuniones",
             "url_name": "seguimiento:minutas",
             "tipo": SeguimientoItem.TIPO_MINUTA,
         },
         {
             "label": "Proyectos",
+            "helper": "Iniciativas con pasos y entregables",
             "url_name": "seguimiento:proyectos",
             "tipo": SeguimientoItem.TIPO_PROYECTO,
         },
         {
             "label": "Compromisos",
+            "helper": "Responsabilidades y acuerdos directos",
             "url_name": "seguimiento:compromisos",
             "tipo": SeguimientoItem.TIPO_COMPROMISO,
         },
@@ -542,9 +548,24 @@ def mi_seguimiento(request, tipo: str | None = None):
         ),
     }
 
-    # La bandeja personal separa estados en el servidor. De esta forma el trabajo
-    # terminado no se mezcla ni se descarga como parte de la lista activa.
-    items_del_tipo = [item for item in items if not tipo or item.tipo == tipo]
+    type_counts = {
+        definition["tipo"]: sum(1 for item in items if item.tipo == definition["tipo"])
+        for definition in type_definitions
+    }
+    type_nav = [
+        {
+            **definition,
+            "count": type_counts[definition["tipo"]],
+            "url": f'{reverse(definition["url_name"])}?estado=activos',
+            "is_active": tipo == definition["tipo"],
+        }
+        for definition in type_definitions
+    ]
+    active_type = next(definition for definition in type_nav if definition["is_active"])
+
+    # La bandeja personal separa primero por tipo y después por estado. De esta
+    # forma ningún conteo ni elemento de otro tipo contamina la lista visible.
+    items_del_tipo = [item for item in items if item.tipo == tipo]
     items_por_estado = {
         "vencidos": [
             item
@@ -582,7 +603,7 @@ def mi_seguimiento(request, tipo: str | None = None):
     bucket_counts = {estado: len(bucket_items) for estado, bucket_items in items_por_estado.items()}
     active_bucket = (request.GET.get("estado") or "").strip().lower()
     if active_bucket not in items_por_estado:
-        active_bucket = "vencidos" if bucket_counts["vencidos"] else "activos"
+        active_bucket = "activos"
     visible_items = items_por_estado[active_bucket]
 
     section_config = [
@@ -605,8 +626,7 @@ def mi_seguimiento(request, tipo: str | None = None):
             "tone": "project",
         },
     ]
-    if tipo:
-        section_config = [config for config in section_config if config["tipo"] == tipo]
+    section_config = [config for config in section_config if config["tipo"] == tipo]
     sections = []
     for config in section_config:
         section_items = [item for item in visible_items if item.tipo == config["tipo"]]
@@ -646,8 +666,12 @@ def mi_seguimiento(request, tipo: str | None = None):
             "sections": sections,
             "metrics": metrics,
             "estatus_en_revision": SeguimientoItem.ESTATUS_EN_REVISION,
-            "tabs": tabs,
+            "tabs": type_nav,
+            "type_nav": type_nav,
             "active_tipo": tipo,
+            "active_type_label": active_type["label"],
+            "active_type_helper": active_type["helper"],
+            "active_type_count": active_type["count"],
             "modo_detalle": bool(tipo),
             "mis_aprobaciones": mis_aprobaciones,
             "writeback_activo": _writeback_activo(),
