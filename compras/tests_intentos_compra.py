@@ -1080,6 +1080,16 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(CompraRealizadaDepartamental.objects.get(pk=compra.pk).intento_id, intento.pk)
         self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='REEMBOLSO_SOLICITADO').count(), 1)
 
+    def test_cancelar_intento_pagado_muestra_maximo_reembolsable(self):
+        intento = self._intento(pagado=True)
+
+        response = self.client.get(
+            reverse('compras:departamental_intento_cancelar', args=[intento.pk]),
+        )
+
+        self.assertContains(response, 'max="180.00"')
+        self.assertContains(response, 'Máximo reembolsable: $180.00')
+
     def test_cancelar_articulo_async_exige_motivo_y_segundo_post_409(self):
         url = reverse('compras:departamental_articulo_cancelar', args=[self.item.pk])
         self.item.refresh_from_db()
