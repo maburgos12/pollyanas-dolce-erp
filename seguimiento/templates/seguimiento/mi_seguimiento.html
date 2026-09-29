@@ -7,26 +7,62 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-mi-seguimiento.css?v=20260723-state-inbox-v2">
+<link rel="stylesheet" href="/static/css/template_modules/seguimiento-templates-seguimiento-mi-seguimiento.css?v=20260928-colaboradores-tipos-v1">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell seguimiento-shell" data-active-work-bucket="{{ active_bucket }}">
-  <nav class="module-tabs seguimiento-tabs" aria-label="Mi trabajo">
-    {% for tab in tabs %}
-    <a href="{% url tab.url_name %}" class="module-tab {% if active_tipo == tab.tipo %}active{% endif %}">{{ tab.label }}</a>
-    {% endfor %}
-  </nav>
-
   <header class="seg-work-head">
     <div>
       <span class="seg-work-context">Mi trabajo</span>
-      <h1>{% if active_tipo %}{{ sections.0.title }} asignadas{% else %}Mi trabajo activo{% endif %}</h1>
-      <p>Primero aparece lo que requiere una acción tuya.</p>
+      <h1>Mis acuerdos</h1>
+      <p>Minutas, proyectos y compromisos conservan sus propios estados y cantidades.</p>
     </div>
   </header>
 
-  <nav class="seg-work-buckets" aria-label="Filtrar por estado">
+  <section class="seg-work-type-section" aria-labelledby="seg-work-type-title">
+    <div class="seg-work-section-heading">
+      <h2 id="seg-work-type-title">Tipo de acuerdo</h2>
+      <p>Selecciona una categoría para consultar únicamente sus elementos.</p>
+    </div>
+    <nav class="seg-work-types" aria-label="Tipos de acuerdo">
+      {% for type in type_nav %}
+      <a href="{{ type.url }}"
+         class="seg-work-type-card {% if type.is_active %}is-active{% endif %}"
+         data-work-type="{{ type.tipo }}"
+         {% if type.is_active %}aria-current="page"{% endif %}>
+        <span class="seg-work-type-card-copy">
+          <strong>{{ type.label }}</strong>
+          <span>{{ type.helper }}</span>
+        </span>
+        <span class="seg-work-type-card-total">
+          <strong>{{ type.count }}</strong>
+          <span>Total</span>
+        </span>
+        {% if type.is_active %}<span class="seg-work-type-selected">Seleccionado</span>{% endif %}
+      </a>
+      {% endfor %}
+    </nav>
+  </section>
+
+  <div class="seg-work-selected-summary">
+    <div>
+      <span>Tipo seleccionado</span>
+      <strong>{{ active_type_label }}</strong>
+      <p>Los estados siguientes corresponden exclusivamente a {{ active_type_label|lower }}.</p>
+    </div>
+    <div class="seg-work-selected-total" aria-label="{{ active_type_count }} elementos de {{ active_type_label }}">
+      <strong>{{ active_type_count }}</strong>
+      <span>Total asignado</span>
+    </div>
+  </div>
+
+  <div class="seg-work-section-heading seg-work-state-heading">
+    <h2>Estado de {{ active_type_label }}</h2>
+    <p>Activos es siempre la vista inicial; los vencidos permanecen disponibles por separado.</p>
+  </div>
+
+  <nav class="seg-work-buckets" aria-label="Estados de {{ active_type_label }}">
     <a href="{{ request.path }}?estado=vencidos"
        class="seg-work-bucket {% if active_bucket == 'vencidos' %}is-active{% endif %}"
        data-work-bucket="vencidos"
@@ -57,10 +93,7 @@
     <div class="seg-work-list-head">
       <div>
         <h2 id="seg-work-list-title">
-          {% if active_bucket == "vencidos" %}Vencidos que todavía necesitan atención
-          {% elif active_bucket == "activos" %}Acuerdos activos
-          {% elif active_bucket == "en_revision" %}Acuerdos enviados a revisión
-          {% else %}Acuerdos finalizados{% endif %}
+          {{ active_list_title }}
         </h2>
         <p>
           {% if active_bucket == "vencidos" %}Ordenados para que atiendas primero lo atrasado.
@@ -127,13 +160,8 @@
 
       {% if not visible_total %}
       <div class="seg-work-empty">
-        <strong>
-          {% if active_bucket == "finalizados" %}Todavía no hay acuerdos finalizados.
-          {% elif active_bucket == "en_revision" %}No tienes acuerdos esperando revisión.
-          {% elif active_bucket == "vencidos" %}No tienes acuerdos vencidos.
-          {% else %}No tienes acuerdos activos de este tipo.{% endif %}
-        </strong>
-        <span>Selecciona otro estado para revisar el resto de tu trabajo.</span>
+        <strong>{{ active_empty_title }}</strong>
+        <span>Los demás estados y tipos permanecen disponibles arriba.</span>
       </div>
       {% endif %}
     </div>

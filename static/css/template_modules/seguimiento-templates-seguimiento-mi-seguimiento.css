@@ -2,12 +2,8 @@
   width: min(100%, 1180px);
 }
 
-.seguimiento-tabs {
-  margin-bottom: 0;
-}
-
 .seg-work-head {
-  margin: 24px 0 18px;
+  margin: 24px 0 22px;
 }
 
 .seg-work-context {
@@ -34,6 +30,175 @@
   margin: 8px 0 0;
   color: var(--texto-light);
   font-size: .98rem;
+  text-wrap: pretty;
+}
+
+.seg-work-type-section {
+  margin-bottom: 18px;
+}
+
+.seg-work-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 10px;
+}
+
+.seg-work-section-heading h2 {
+  margin: 0;
+  color: var(--texto);
+  font-size: .96rem;
+  line-height: 1.3;
+}
+
+.seg-work-section-heading p {
+  max-width: 62ch;
+  margin: 0;
+  color: var(--texto-light);
+  font-size: .8rem;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.seg-work-types {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.seg-work-type-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  min-height: 104px;
+  padding: 17px 18px;
+  border: 1px solid color-mix(in srgb, var(--texto-light) 24%, transparent);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .72);
+  color: var(--texto);
+  text-decoration: none;
+  transition: border-color 160ms ease-out, background-color 160ms ease-out, transform 120ms ease-out;
+}
+
+.seg-work-type-card.is-active {
+  border-color: var(--vino);
+  background: color-mix(in srgb, var(--rosa) 42%, white);
+}
+
+.seg-work-type-card-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.seg-work-type-card-copy strong {
+  color: var(--texto);
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.seg-work-type-card.is-active .seg-work-type-card-copy strong {
+  color: var(--vino);
+}
+
+.seg-work-type-card-copy > span {
+  color: var(--texto-light);
+  font-size: .77rem;
+  line-height: 1.35;
+  text-wrap: pretty;
+}
+
+.seg-work-type-card-total {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  min-width: 48px;
+}
+
+.seg-work-type-card-total strong {
+  color: var(--texto);
+  font-size: 1.55rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg-work-type-card-total span {
+  color: var(--texto-light);
+  font-size: .68rem;
+  font-weight: 800;
+}
+
+.seg-work-type-selected {
+  position: absolute;
+  right: 17px;
+  bottom: 9px;
+  color: var(--vino);
+  font-size: .66rem;
+  font-weight: 900;
+}
+
+.seg-work-selected-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 0 20px;
+  padding: 15px 18px;
+  border: 1px solid color-mix(in srgb, var(--vino) 18%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--rosa) 24%, white);
+}
+
+.seg-work-selected-summary > div:first-child {
+  min-width: 0;
+}
+
+.seg-work-selected-summary > div:first-child > span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--vino);
+  font-size: .69rem;
+  font-weight: 900;
+}
+
+.seg-work-selected-summary > div:first-child > strong {
+  color: var(--texto);
+  font-size: 1rem;
+}
+
+.seg-work-selected-summary p {
+  margin: 3px 0 0;
+  color: var(--texto-light);
+  font-size: .8rem;
+  line-height: 1.35;
+}
+
+.seg-work-selected-total {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 2px;
+}
+
+.seg-work-selected-total strong {
+  color: var(--vino);
+  font-size: 1.35rem;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.seg-work-selected-total span {
+  color: var(--texto-light);
+  font-size: .7rem;
+  font-weight: 800;
+}
+
+.seg-work-state-heading {
+  margin-bottom: 10px;
 }
 
 .seg-work-buckets {
@@ -80,12 +245,14 @@
 }
 
 .seg-work-bucket:focus-visible,
+.seg-work-type-card:focus-visible,
 .seg-work-open:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--vino) 32%, transparent);
   outline-offset: 3px;
 }
 
 .seg-work-bucket:active,
+.seg-work-type-card:active,
 .seg-work-open:active {
   transform: scale(.98);
 }
@@ -272,6 +439,11 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .seg-work-type-card:hover {
+    border-color: color-mix(in srgb, var(--vino) 48%, transparent);
+    background: color-mix(in srgb, var(--rosa) 20%, white);
+  }
+
   .seg-work-bucket:hover {
     border-color: color-mix(in srgb, var(--vino) 42%, transparent);
     background: color-mix(in srgb, var(--rosa) 24%, white);
@@ -297,6 +469,28 @@
 @media (max-width: 720px) {
   .seg-work-head h1 {
     font-size: 1.85rem;
+  }
+
+  .seg-work-section-heading {
+    display: grid;
+    gap: 3px;
+  }
+
+  .seg-work-section-heading p {
+    text-align: left;
+  }
+
+  .seg-work-types {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .seg-work-type-card {
+    min-height: 88px;
+  }
+
+  .seg-work-selected-summary {
+    align-items: flex-start;
+    gap: 14px;
   }
 
   .seg-work-buckets {
@@ -329,6 +523,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .seg-work-bucket,
+  .seg-work-type-card,
   .seg-work-open {
     transition: none;
   }
