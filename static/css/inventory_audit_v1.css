@@ -183,6 +183,7 @@
   outline-offset: 3px;
 }
 .inventory-audit-table-wrap {
+  --table-min-width: 1050px;
   max-height: min(68vh, 760px);
   overflow: auto;
   border: 1px solid #d9cbd2;

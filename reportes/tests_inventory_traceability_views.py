@@ -223,6 +223,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertIn(".inventory-audit-table thead th", stylesheet)
         self.assertIn("position: sticky", stylesheet)
         global_stylesheet = Path("static/css/styles.css").read_text()
+        guardrail_stylesheet = Path("static/css/hallmark_guardrails.css").read_text()
 
         def rule_body(css, selector):
             selector_start = css.index(selector)
@@ -239,12 +240,23 @@ class InventoryTraceabilityViewsTests(TestCase):
             stylesheet,
             ".inventory-audit-table-wrap > .inventory-audit-table th,",
         )
+        audit_wrap_rule = rule_body(stylesheet, ".inventory-audit-table-wrap {")
+        guardrail_table_rule = rule_body(
+            guardrail_stylesheet,
+            ".main-content[data-hallmark-scope=\"erp\"] :is(\n"
+            "  .table-responsive > table,",
+        )
         self.assertIn("table-layout: auto", global_table_rule)
         self.assertIn("width: max-content", global_table_rule)
         self.assertGreater((0, 2, 0), (0, 1, 1))
         self.assertIn("table-layout: fixed", audit_table_rule)
         self.assertIn("width: 100%", audit_table_rule)
         self.assertIn("min-width: 1050px", audit_table_rule)
+        self.assertIn("--table-min-width: 1050px", audit_wrap_rule)
+        self.assertIn(
+            "min-width: max(100%, var(--table-min-width, 0px))",
+            guardrail_table_rule,
+        )
         self.assertIn("white-space: normal", audit_cell_rule)
         self.assertIn("overflow-wrap: anywhere", audit_cell_rule)
         forbidden_live_sources = (
