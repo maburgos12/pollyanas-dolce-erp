@@ -28,6 +28,7 @@ const MESES=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto
 const AREA_TODAS='TODAS';
 const AREAS=['HORNOS','PRODUCCION','ARMADO','PREPARACION','CUARTOS_FRIOS','LOGISTICA','CRUCERO'];
 const AREA_LABELS={TODAS:'Todas',HORNOS:'Hornos',EMBETUNADO:'Embetunado',PRODUCCION:'Embetunado',ARMADO:'Armado',PREPARACION:'Preparacion',CUARTOS_FRIOS:'Cuartos frios',LOGISTICA:'Logistica',CRUCERO:'Crucero'};
+const RRHH_LABELS={preingreso:'Antes del ingreso',post_baja:'Baja',festivo:'Festivo',descanso:'Descanso',incapacidad:'Incapacidad',suspension:'Suspension',vacaciones:'Vacaciones',permiso:'Permiso',exento:'Exento',asistencia:'Asistencia',retardo:'Retardo',falta:'Falta'};
 const FORCE_CAPTURE=new URLSearchParams(window.location.search).get('captura')==='1';
 const OPERADOR_SOLICITUDES={{ operador_solicitudes|yesno:'true,false' }};
 function api(path,opts={}){
@@ -306,6 +307,7 @@ function App(){
   const [status,setStatus]=React.useState('');
   const [statusType,setStatusType]=React.useState('ok');
   const [loading,setLoading]=React.useState(false);
+  const [syncing,setSyncing]=React.useState(false);
   React.useEffect(()=>{cargarTodo();},[mes,anio]);
   React.useEffect(()=>{if(selectedBono)cargarRegistros(selectedBono.id);else setRegistros([]);},[selectedBono?.id]);
   function cargarTodo(){
@@ -338,10 +340,12 @@ function App(){
       .then(r=>{showStatus(`${r.creados} empleados inicializados`,'ok');cargarTodo();}).catch(err=>showStatus(err.message,'err'));
   }
   function syncChecador(){
-    if(!periodo)return;
+    if(!periodo||syncing)return;
+    setSyncing(true);
     api(`/api/bonos-produccion/periodos/${periodo.id}/sync-checador/`,{method:'POST',body:'{}'})
       .then(r=>{showStatus(`Checador: ${r.bonos_sincronizados} bonos · ${r.registros_creados} creados · ${r.registros_actualizados} actualizados · ${r.bonos_omitidos} omitidos`,'ok');cargarTodo();})
-      .catch(err=>showStatus(err.message,'err'));
+      .catch(err=>showStatus(err.message,'err'))
+      .finally(()=>setSyncing(false));
   }
   function guardarDia(dia,patch){
     if(!selectedBono)return;
@@ -389,7 +393,7 @@ function App(){
         periodo?h('span',{className:'periodo-id'},`ID ${periodo.id} · ${periodo.dias_laborables} dias lab.`):h('span',{className:'muted-inline'},'Sin periodo para este mes'),
         !periodo&&h('button',{className:'btn btn-wine btn-sm',onClick:crearPeriodo},'Crear periodo'),
         periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:inicializar},'Inicializar empleados'),
-        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador},'Recalcular desde checador')
+        periodo&&h('button',{className:'btn btn-ghost btn-sm',onClick:syncChecador,disabled:syncing},syncing?'Sincronizando asistencia…':'Sincronizar asistencia con RRHH')
       ),
       showOperatorBonusContext&&h('div',{className:'periodo-bar'},
         h('span',{className:'periodo-label'},'Periodo:'),
@@ -994,8 +998,9 @@ function CapturaTab({bonosArea,area,setArea,selectedBono,setSelectedBono,registr
           const dom=fecha.dom;
           const r=registros.find(x=>+x.dia===d);
           const worked=r?.tiene_asistencia;
-          const detalle=worked?'OK':dom?`${fecha.mesLabel} · D`:fecha.mesLabel;
-          return h('div',{key:fecha.key,className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
+          const estadoLabel=r?.estado_rrhh?RRHH_LABELS[r.estado_rrhh]:'';
+          const detalle=worked?'OK':estadoLabel?`${estadoLabel} · RRHH`:dom?`${fecha.mesLabel} · D`:fecha.mesLabel;
+          return h('div',{key:fecha.key,title:r?.motivo_rrhh||'',className:`day-cell ${dom?'dom':''} ${worked?'worked':''} ${savingDia===d?'saving':''}`,onClick:()=>togDia(d)},
             h('span',{className:'dn'},d),h('span',{className:'ds'},detalle));
         })),
         regActivos.length>0&&h('div',null,

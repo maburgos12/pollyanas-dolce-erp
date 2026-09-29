@@ -9,6 +9,11 @@ from django.db.models import Q
 from django.utils import timezone
 
 from rrhh.models import AsistenciaEmpleado, IncidenciaAsistencia
+from rrhh.services_asistencia_contexto import (
+    CODIGO_ASISTENCIA,
+    CODIGO_RETARDO,
+    cargar_contexto_asistencia,
+)
 
 from .models import BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
 from .services_recalculo import recalcular_desde_registros
@@ -116,6 +121,121 @@ def _evaluar_dia(
     return tiene_asistencia, tiene_puntualidad
 
 
+def _fecha_registro_legacy(periodo: ConfigBonoPeriodo, dia: int) -> date | None:
+    coincidencias = [fecha for fecha in _fechas(*_rango_periodo(periodo)) if fecha.day == dia]
+    return coincidencias[0] if len(coincidencias) == 1 else None
+
+
+def _valores_checador(resultado) -> tuple[bool, bool]:
+    tiene_asistencia = resultado.codigo in {CODIGO_ASISTENCIA, CODIGO_RETARDO}
+    tiene_puntualidad = resultado.codigo == CODIGO_ASISTENCIA
+    return tiene_asistencia, tiene_puntualidad
+
+
+def _sincronizar_bonos_fechas(
+    *,
+    periodo: ConfigBonoPeriodo,
+    bonos: list[BonoProduccionEmpleado],
+    fechas: list[date],
+) -> dict:
+    resultado_sync = {
+        "bonos_sincronizados": 0,
+        "bonos_omitidos": 0,
+        "registros_creados": 0,
+        "registros_actualizados": 0,
+        "registros_eliminados": 0,
+    }
+    if not bonos:
+        return resultado_sync
+
+    inicio, fin = _rango_periodo(periodo)
+    contexto = cargar_contexto_asistencia(
+        empleados=[bono.empleado for bono in bonos],
+        fecha_inicio=inicio,
+        fecha_fin=fin,
+    )
+    existentes = list(
+        RegistroDiarioProduccion.objects.filter(bono__in=bonos).select_related("bono__periodo")
+    )
+    por_clave = {}
+    for registro in existentes:
+        fecha_registro = registro.fecha or _fecha_registro_legacy(registro.bono.periodo, registro.dia)
+        if fecha_registro is not None:
+            por_clave[(registro.bono_id, fecha_registro)] = registro
+
+    por_crear = []
+    por_actualizar = []
+    por_eliminar = []
+    campos_contexto = ["fecha", "estado_rrhh", "motivo_rrhh", "falta_penalizable"]
+    campos_automaticos = campos_contexto + ["tiene_asistencia", "tiene_puntualidad"]
+
+    for bono in bonos:
+        for fecha in fechas:
+            registro = por_clave.get((bono.id, fecha))
+            if _debe_eliminar_registro(periodo, bono, fecha):
+                if registro is not None:
+                    por_eliminar.append(registro.pk)
+                continue
+            if not _fecha_sincronizable(periodo, fecha):
+                continue
+
+            dia = contexto.clasificar(bono.empleado, fecha)
+            tiene_asistencia, tiene_puntualidad = _valores_checador(dia)
+            if registro is None:
+                por_crear.append(RegistroDiarioProduccion(
+                    bono=bono,
+                    dia=fecha.day,
+                    fecha=fecha,
+                    estado_rrhh=dia.codigo,
+                    motivo_rrhh=dia.motivo,
+                    falta_penalizable=dia.falta_penalizable,
+                    tiene_asistencia=tiene_asistencia,
+                    tiene_puntualidad=tiene_puntualidad,
+                ))
+                continue
+
+            valores = {
+                "fecha": fecha,
+                "estado_rrhh": dia.codigo,
+                "motivo_rrhh": dia.motivo,
+                "falta_penalizable": dia.falta_penalizable,
+            }
+            campos = campos_contexto
+            if registro.capturado_por_id:
+                valores["falta_penalizable"] = bool(dia.es_exigible and not registro.tiene_asistencia)
+            else:
+                valores.update({
+                    "tiene_asistencia": tiene_asistencia,
+                    "tiene_puntualidad": tiene_puntualidad,
+                })
+                campos = campos_automaticos
+            if any(getattr(registro, campo) != valor for campo, valor in valores.items()):
+                for campo, valor in valores.items():
+                    setattr(registro, campo, valor)
+                registro._sync_campos = campos
+                por_actualizar.append(registro)
+
+    with transaction.atomic():
+        if por_eliminar:
+            RegistroDiarioProduccion.objects.filter(pk__in=por_eliminar).delete()
+        if por_crear:
+            RegistroDiarioProduccion.objects.bulk_create(por_crear)
+        if por_actualizar:
+            # La lista de campos es el superset; los registros manuales conservan
+            # sus booleanos porque nunca se cambian en memoria.
+            RegistroDiarioProduccion.objects.bulk_update(por_actualizar, campos_automaticos)
+        for bono in bonos:
+            recalcular_desde_registros(bono)
+
+    resultado_sync.update({
+        "bonos_sincronizados": len(bonos),
+        "registros_creados": len(por_crear),
+        "registros_actualizados": len(por_actualizar),
+        "registros_eliminados": len(por_eliminar),
+    })
+    return resultado_sync
+
+
 def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
     inicio, fin = _rango_periodo(periodo)
     dias = [fecha for fecha in _fechas(inicio, fin) if _fecha_visible_en_periodo(periodo, fecha)]
@@ -123,55 +243,8 @@ def sincronizar_asistencia_desde_checador(periodo: ConfigBonoPeriodo) -> dict:
         periodo.bonos.select_related("empleado").filter(estatus=BonoProduccionEmpleado.ESTATUS_BORRADOR)
     )
     bonos_omitidos = periodo.bonos.exclude(estatus=BonoProduccionEmpleado.ESTATUS_BORRADOR).count()
-    empleado_ids = [bono.empleado_id for bono in bonos_borrador]
-
-    asistencias = _cargar_asistencias(empleado_ids, inicio, fin) if empleado_ids else set()
-    incidencias = _cargar_incidencias(empleado_ids, inicio, fin) if empleado_ids else {}
-
-    resultado = {
-        "bonos_sincronizados": 0,
-        "bonos_omitidos": bonos_omitidos,
-        "registros_creados": 0,
-        "registros_actualizados": 0,
-        "registros_eliminados": 0,
-    }
-
-    for bono in bonos_borrador:
-        with transaction.atomic():
-            for fecha in dias:
-                if _debe_eliminar_registro(periodo, bono, fecha):
-                    eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
-                    resultado["registros_eliminados"] += eliminados
-                    continue
-                if not _fecha_sincronizable(periodo, fecha):
-                    continue
-                tiene_asistencia, tiene_puntualidad = _evaluar_dia(
-                    bono.empleado_id,
-                    fecha,
-                    asistencias,
-                    incidencias,
-                )
-                registro, created = RegistroDiarioProduccion.objects.get_or_create(
-                    bono=bono,
-                    dia=fecha.day,
-                    defaults={
-                        "tiene_asistencia": tiene_asistencia,
-                        "tiene_puntualidad": tiene_puntualidad,
-                    },
-                )
-                if created:
-                    resultado["registros_creados"] += 1
-                elif (
-                    registro.tiene_asistencia != tiene_asistencia
-                    or registro.tiene_puntualidad != tiene_puntualidad
-                ):
-                    registro.tiene_asistencia = tiene_asistencia
-                    registro.tiene_puntualidad = tiene_puntualidad
-                    registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
-                    resultado["registros_actualizados"] += 1
-            recalcular_desde_registros(bono)
-            resultado["bonos_sincronizados"] += 1
-
+    resultado = _sincronizar_bonos_fechas(periodo=periodo, bonos=bonos_borrador, fechas=dias)
+    resultado["bonos_omitidos"] = bonos_omitidos
     return resultado
 
 
@@ -194,15 +267,6 @@ def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> di
         "registros_eliminados": 0,
     }
 
-    asistencias = _cargar_asistencias([empleado_id], fecha, fecha)
-    incidencias = _cargar_incidencias([empleado_id], fecha, fecha)
-    tiene_asistencia, tiene_puntualidad = _evaluar_dia(
-        empleado_id,
-        fecha,
-        asistencias,
-        incidencias,
-    )
-
     for periodo in _periodos_para_fecha(fecha):
         bono = (
             periodo.bonos.select_related("empleado")
@@ -215,34 +279,8 @@ def sincronizar_empleado_dia_desde_checador(empleado_id: int, fecha: date) -> di
             resultado["bonos_omitidos"] += 1
             continue
 
-        with transaction.atomic():
-            if _debe_eliminar_registro(periodo, bono, fecha):
-                eliminados, _ = RegistroDiarioProduccion.objects.filter(bono=bono, dia=fecha.day).delete()
-                resultado["registros_eliminados"] += eliminados
-                recalcular_desde_registros(bono)
-                resultado["bonos_sincronizados"] += 1
-                continue
-            if not _fecha_sincronizable(periodo, fecha):
-                continue
-            registro, created = RegistroDiarioProduccion.objects.get_or_create(
-                bono=bono,
-                dia=fecha.day,
-                defaults={
-                    "tiene_asistencia": tiene_asistencia,
-                    "tiene_puntualidad": tiene_puntualidad,
-                },
-            )
-            if created:
-                resultado["registros_creados"] += 1
-            elif (
-                registro.tiene_asistencia != tiene_asistencia
-                or registro.tiene_puntualidad != tiene_puntualidad
-            ):
-                registro.tiene_asistencia = tiene_asistencia
-                registro.tiene_puntualidad = tiene_puntualidad
-                registro.save(update_fields=["tiene_asistencia", "tiene_puntualidad"])
-                resultado["registros_actualizados"] += 1
-            recalcular_desde_registros(bono)
-            resultado["bonos_sincronizados"] += 1
+        parcial = _sincronizar_bonos_fechas(periodo=periodo, bonos=[bono], fechas=[fecha])
+        for key in resultado:
+            resultado[key] += parcial[key]
 
     return resultado

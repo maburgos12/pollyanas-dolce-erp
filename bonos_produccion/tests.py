@@ -238,7 +238,12 @@ class BonosProduccionTests(TestCase):
     def test_dashboard_erp_muestra_configuracion_y_app_de_captura(self):
         user = get_user_model().objects.create_superuser(username="admin-bonos", password="x")
         self.client.force_login(user)
-        periodo = ConfigBonoPeriodo.objects.create(mes=5, anio=2026)
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=5,
+            anio=2026,
+            monto_preparacion=Decimal("640.00"),
+            monto_cuartos_frios=Decimal("615.00"),
+        )
         empleado = Empleado.objects.create(
             nombre="Empleado Dashboard",
             area="PRODUCCION",
@@ -255,6 +260,13 @@ class BonosProduccionTests(TestCase):
         self.assertIn("Permisos de equipo", content)
         self.assertIn("/bonos-produccion/app/?captura=1&tab=permisos", content)
         self.assertIn("Monto logística", content)
+        self.assertIn("Monto preparación", content)
+        self.assertIn("Monto cuartos fríos", content)
+        self.assertIn('name="monto_preparacion"', content)
+        self.assertIn('name="monto_cuartos_frios"', content)
+        self.assertIn('value="640.00"', content)
+        self.assertIn('value="615.00"', content)
+        self.assertIn('data-pending-label="Sincronizando asistencia…"', content)
         self.assertIn("Buscar empleado por nombre", content)
         self.assertIn("Usa concepto producción", content)
         self.assertIn("Empleado Dashboard", content)
@@ -291,6 +303,8 @@ class BonosProduccionTests(TestCase):
                 "monto_armado": "875.00",
                 "monto_logistica": "800.00",
                 "monto_crucero": "950.00",
+                "monto_preparacion": "300.00",
+                "monto_cuartos_frios": "325.00",
                 "premio_embetunado": "400.00",
                 "regla_hornos_usa_produccion": "on",
                 "regla_hornos_pct_produccion": "60.00",
@@ -343,6 +357,8 @@ class BonosProduccionTests(TestCase):
         periodo = ConfigBonoPeriodo.objects.get(mes=5, anio=2026)
         self.assertEqual(periodo.dias_laborables, 24)
         self.assertEqual(periodo.monto_logistica, Decimal("800.00"))
+        self.assertEqual(periodo.monto_preparacion, Decimal("300.00"))
+        self.assertEqual(periodo.monto_cuartos_frios, Decimal("325.00"))
         regla_hornos = periodo.reglas_area.get(area=AREA_HORNOS)
         regla_logistica = periodo.reglas_area.get(area=AREA_LOGISTICA)
         self.assertEqual(regla_hornos.pct_produccion, Decimal("60.00"))
@@ -552,7 +568,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v28-corte-real", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v29-contexto-rrhh", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 

@@ -20,7 +20,7 @@
         <a class="bonos-btn primary" href="/bonos-produccion/app/?captura=1">Abrir app de captura</a>
         <a class="bonos-btn" href="/bonos-produccion/app/?captura=1&tab=permisos">Permisos de equipo</a>
         {% if periodo %}
-        <form method="post">
+        <form method="post" data-async-action>
           {% csrf_token %}
           <input type="hidden" name="action" value="recalcular">
           <input type="hidden" name="mes" value="{{ mes }}">
@@ -32,7 +32,7 @@
           <input type="hidden" name="action" value="sync_checador">
           <input type="hidden" name="mes" value="{{ mes }}">
           <input type="hidden" name="anio" value="{{ anio }}">
-          <button class="bonos-btn" type="submit" {% if not can_manage %}disabled{% endif %}>Recalcular desde checador</button>
+          <button class="bonos-btn" type="submit" data-pending-label="Sincronizando asistencia…" {% if not can_manage %}disabled{% endif %}>Sincronizar asistencia con RRHH</button>
         </form>
         {% endif %}
       </div>
@@ -122,6 +122,8 @@
           <div class="bonos-field"><label>Monto hornos</label><input name="monto_hornos" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_hornos }}{% else %}{{ defaults.monto_hornos }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto producción</label><input name="monto_area_produccion" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_area_produccion }}{% else %}{{ defaults.monto_area_produccion }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto armado</label><input name="monto_armado" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_armado }}{% else %}{{ defaults.monto_armado }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto preparación</label><input name="monto_preparacion" type="number" min="0" step="0.01" value="{% if periodo %}{{ periodo.monto_preparacion }}{% else %}{{ defaults.monto_preparacion }}{% endif %}"></div>
+          <div class="bonos-field"><label>Monto cuartos fríos</label><input name="monto_cuartos_frios" type="number" min="0" step="0.01" value="{% if periodo %}{{ periodo.monto_cuartos_frios }}{% else %}{{ defaults.monto_cuartos_frios }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto logística</label><input name="monto_logistica" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_logistica }}{% else %}{{ defaults.monto_logistica }}{% endif %}"></div>
           <div class="bonos-field"><label>Monto crucero</label><input name="monto_crucero" type="number" step="0.01" value="{% if periodo %}{{ periodo.monto_crucero }}{% else %}{{ defaults.monto_crucero }}{% endif %}"></div>
           <div class="bonos-field"><label>Premio embetunado</label><input name="premio_embetunado" type="number" step="0.01" value="{% if periodo %}{{ periodo.premio_embetunado }}{% else %}{{ defaults.premio_embetunado }}{% endif %}"></div>
