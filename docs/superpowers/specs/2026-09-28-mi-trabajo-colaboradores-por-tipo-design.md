@@ -1,7 +1,7 @@
 # Mi trabajo de colaboradores separado por tipo y estado
 
-**Fecha:** 2026-09-28  
-**Estado:** Diseño aprobado por Mauricio  
+**Fecha:** 2026-09-28
+**Estado:** Diseño aprobado por Mauricio
 **Alcance:** Bandeja personal de seguimiento para todos los colaboradores
 
 ## Problema
