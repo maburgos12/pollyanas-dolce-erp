@@ -222,7 +222,31 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "css/inventory_audit_v1.css")
         self.assertIn(".inventory-audit-table thead th", stylesheet)
         self.assertIn("position: sticky", stylesheet)
-        self.assertIn("table-layout: fixed", stylesheet)
+        global_stylesheet = Path("static/css/styles.css").read_text()
+
+        def rule_body(css, selector):
+            selector_start = css.index(selector)
+            block_start = css.index("{", selector_start)
+            block_end = css.index("}", block_start)
+            return css[block_start + 1 : block_end]
+
+        global_table_rule = rule_body(global_stylesheet, ".table-responsive > table,")
+        audit_table_rule = rule_body(
+            stylesheet,
+            ".inventory-audit-table-wrap > .inventory-audit-table",
+        )
+        audit_cell_rule = rule_body(
+            stylesheet,
+            ".inventory-audit-table-wrap > .inventory-audit-table th,",
+        )
+        self.assertIn("table-layout: auto", global_table_rule)
+        self.assertIn("width: max-content", global_table_rule)
+        self.assertGreater((0, 2, 0), (0, 1, 1))
+        self.assertIn("table-layout: fixed", audit_table_rule)
+        self.assertIn("width: 100%", audit_table_rule)
+        self.assertIn("min-width: 1050px", audit_table_rule)
+        self.assertIn("white-space: normal", audit_cell_rule)
+        self.assertIn("overflow-wrap: anywhere", audit_cell_rule)
         forbidden_live_sources = (
             "pos_bridge_daily_sales",
             "pos_bridge_production_lines",

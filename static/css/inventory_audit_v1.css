@@ -189,7 +189,7 @@
   border-radius: 10px;
   background: #fff;
 }
-.inventory-audit-table {
+.inventory-audit-table-wrap > .inventory-audit-table {
   width: 100%;
   min-width: 1050px;
   table-layout: fixed;
@@ -203,13 +203,15 @@
 .inventory-audit-col-cause { width: 25%; }
 .inventory-audit-col-status { width: 17%; }
 .inventory-audit-col-action { width: 12%; }
-.inventory-audit-table th,
-.inventory-audit-table td {
+.inventory-audit-table-wrap > .inventory-audit-table th,
+.inventory-audit-table-wrap > .inventory-audit-table td {
   box-sizing: border-box;
   padding: 12px 14px;
   border-bottom: 1px solid #eee5e9;
   vertical-align: middle;
+  white-space: normal;
   overflow-wrap: anywhere;
+  word-break: normal;
 }
 .inventory-audit-table thead th {
   position: sticky;
