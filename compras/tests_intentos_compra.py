@@ -1,3 +1,4 @@
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -16,8 +17,264 @@ from compras.models import (
     LineaOrdenCompraDepartamental,
     OrdenCompraDepartamental,
     ReembolsoCompraDepartamental,
+    RecepcionItemDepartamental,
+    EventoCompraDepartamental,
+    ItemCompraDepartamental,
 )
 from compras.tests_edicion_compra import _CompraDepartamentalBase
+from compras.services_departamentales import generar_ordenes_departamentales
+from compras.services_intentos_compra import (
+    cancelar_articulo_definitivamente, cancelar_intento_compra, registrar_reembolso_compra,
+)
+from compras.forms_intentos_compra import CancelarIntentoCompraForm, RegistrarReembolsoCompraForm
+
+
+class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
+    def _intento(self, *, pagado=False):
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        intento = self.item.intento_vigente
+        if pagado:
+            CompraRealizadaDepartamental.objects.create(
+                intento=intento, item=self.item, cotizacion=self.quote,
+                fecha_compra=timezone.localdate(), importe_final=Decimal('180'),
+                comprobante='compras/compra.pdf', registrado_por=self.user,
+            )
+            self.item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
+            self.item.save(update_fields=['estado'])
+        return intento
+
+    def _cancelar(self, intento, **kwargs):
+        return cancelar_intento_compra(
+            intento, version=kwargs.pop('version', intento.version),
+            motivo=kwargs.pop('motivo', IntentoCompraDepartamental.MOTIVO_NO_ENTREGO),
+            detalle=kwargs.pop('detalle', 'Proveedor confirmó que no entregará.'),
+            actor=self.user, **kwargs,
+        )
+
+    def _solicitar_reembolso(self):
+        intento = self._intento(pagado=True)
+        self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                       reembolso_solicitado=Decimal('180'))
+        intento.refresh_from_db()
+        return intento
+
+    def test_cancelar_sin_pago_libera_solo_su_compromiso_y_reabre_item(self):
+        intento = self._intento()
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        otro_item = self.solicitud.items.create(descripcion='Otro artículo', cantidad=1)
+        otra_cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=otro_item, proveedor=self.proveedor,
+            cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('50'),
+        )
+        otro_compromiso = CompromisoCompraDepartamental.objects.create(
+            item=otro_item, cotizacion=otra_cotizacion, monto=Decimal('50'), activo=True,
+        )
+        self._cancelar(intento)
+        intento.refresh_from_db(); compromiso.refresh_from_db(); otro_compromiso.refresh_from_db()
+        self.item.refresh_from_db(); self.quote.refresh_from_db(); self.solicitud.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('CANCELADO_SIN_PAGO', 2))
+        self.assertFalse(compromiso.activo)
+        self.assertTrue(otro_compromiso.activo)
+        self.assertIsNotNone(compromiso.liberado_en)
+        self.assertFalse(self.quote.seleccionada)
+        self.assertEqual((self.item.estado, self.item.siguiente_responsable), ('POR_COTIZAR', 'COMPRAS'))
+        self.assertEqual(self.solicitud.estado, 'EN_ATENCION')
+        self.assertTrue(EventoCompraDepartamental.objects.filter(item=self.item, tipo='INTENTO_CANCELADO').exists())
+        self.assertTrue(LineaOrdenCompraDepartamental.objects.filter(intento=intento).exists())
+
+    def test_cancelar_pagada_conserva_compromiso_y_registra_solicitud(self):
+        intento = self._intento(pagado=True)
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                       reembolso_solicitado=Decimal('170'),
+                       evidencia_solicitud_reembolso='compras/solicitud.pdf')
+        intento.refresh_from_db(); compromiso.refresh_from_db(); self.item.refresh_from_db(); self.quote.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('REEMBOLSO_SOLICITADO', 2))
+        self.assertEqual(intento.reembolso_solicitado, Decimal('170'))
+        self.assertEqual(intento.reembolso_solicitado_en, timezone.localdate())
+        self.assertTrue(intento.evidencia_solicitud_reembolso)
+        self.assertTrue(compromiso.activo)
+        self.assertFalse(self.quote.seleccionada)
+        self.assertEqual(self.item.estado, 'POR_COTIZAR')
+
+    def test_cancelacion_rechaza_recepcion_estado_version_y_datos_invalidos_sin_mutar(self):
+        intento = self._intento()
+        linea = LineaOrdenCompraDepartamental.objects.get(intento=intento)
+        for changes in ({'version': 0}, {'motivo': 'INVENTADO'}, {'detalle': '  '},
+                        {'reembolso_solicitado': Decimal('20')}):
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                self._cancelar(intento, **changes)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).version, 1)
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=Decimal('1'), registrado_por=self.user,
+        )
+        with self.assertRaises(ValidationError):
+            self._cancelar(intento)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).estado, 'VIGENTE')
+
+    def test_cancelacion_pagada_rechaza_fechas_e_importes_invalidos(self):
+        intento = self._intento(pagado=True)
+        for changes in ({}, {'reembolso_solicitado_en': timezone.localdate()},
+                        {'reembolso_solicitado': Decimal('10')},
+                        {'reembolso_solicitado_en': timezone.localdate() + timedelta(days=1), 'reembolso_solicitado': Decimal('10')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('0')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('181')}):
+            with self.subTest(changes=changes), self.assertRaises(ValidationError):
+                self._cancelar(intento, **changes)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).estado, 'VIGENTE')
+
+    def test_reembolso_parcial_y_total_solo_liberan_al_completar(self):
+        intento = self._solicitar_reembolso()
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        primero = registrar_reembolso_compra(
+            intento, version=2, fecha=timezone.localdate(), importe=Decimal('80'),
+            referencia='Transferencia 1', actor=self.user,
+        )
+        intento.refresh_from_db(); compromiso.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('REEMBOLSO_SOLICITADO', 3))
+        self.assertTrue(compromiso.activo)
+        self.assertEqual(intento.saldo_reembolso, Decimal('100'))
+        with self.assertRaises(ValidationError):
+            registrar_reembolso_compra(intento, version=2, fecha=timezone.localdate(),
+                                      importe=Decimal('80'), actor=self.user)
+        self.assertEqual(intento.reembolsos.count(), 1)
+        segundo = registrar_reembolso_compra(intento, version=3, fecha=timezone.localdate(),
+                                             importe=Decimal('100'), actor=self.user)
+        intento.refresh_from_db(); compromiso.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('REEMBOLSADO', 4))
+        self.assertFalse(compromiso.activo)
+        self.assertEqual(intento.total_reembolsado, Decimal('180'))
+        self.assertNotEqual(primero.pk, segundo.pk)
+        self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='REEMBOLSO_RECIBIDO').count(), 2)
+
+    def test_reembolso_rechaza_sobrepago_fecha_futura_y_estado(self):
+        intento = self._solicitar_reembolso()
+        for changes in ({'importe': Decimal('181')}, {'importe': Decimal('0')},
+                        {'fecha': timezone.localdate() + timedelta(days=1)}):
+            datos = {'version': 2, 'fecha': timezone.localdate(), 'importe': Decimal('1'), 'actor': self.user, **changes}
+            with self.subTest(datos=datos), self.assertRaises(ValidationError):
+                registrar_reembolso_compra(intento, **datos)
+        self.assertEqual(intento.reembolsos.count(), 0)
+        otro = IntentoCompraDepartamental.objects.get(pk=intento.pk)
+        otro.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSADO
+        otro.save(update_fields=['estado'])
+        with self.assertRaises(ValidationError):
+            registrar_reembolso_compra(intento, version=2, fecha=timezone.localdate(),
+                                      importe=Decimal('1'), actor=self.user)
+
+    def test_cancelar_articulo_definitivo_conserva_historial_y_exige_saldo_cero(self):
+        intento = self._solicitar_reembolso()
+        with self.assertRaises(ValidationError):
+            cancelar_articulo_definitivamente(self.item, motivo='Ya no se necesita', actor=self.user)
+        registrar_reembolso_compra(intento, version=2, fecha=timezone.localdate(),
+                                  importe=Decimal('180'), actor=self.user)
+        cancelar_articulo_definitivamente(self.item, motivo='Ya no se necesita', actor=self.user)
+        self.item.refresh_from_db(); self.solicitud.refresh_from_db()
+        self.assertEqual((self.item.estado, self.item.siguiente_responsable), ('CANCELADO', 'NADIE'))
+        self.assertEqual(self.solicitud.estado, 'COMPLETADA')
+        self.assertTrue(CompraRealizadaDepartamental.objects.filter(intento=intento).exists())
+        self.assertTrue(EventoCompraDepartamental.objects.filter(item=self.item, tipo='ARTICULO_CANCELADO').exists())
+
+    def test_cancelar_articulo_rechaza_motivo_vacio_intento_vigente_y_recepcion(self):
+        intento = self._intento()
+        with self.assertRaises(ValidationError):
+            cancelar_articulo_definitivamente(self.item, motivo=' ', actor=self.user)
+        with self.assertRaises(ValidationError):
+            cancelar_articulo_definitivamente(self.item, motivo='No procede', actor=self.user)
+        linea = LineaOrdenCompraDepartamental.objects.get(intento=intento)
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=Decimal('1'), registrado_por=self.user,
+        )
+        # La recepción histórica bloquea el cierre incluso si el estado del intento
+        # ya fue corregido por una conciliación externa.
+        IntentoCompraDepartamental.objects.filter(pk=intento.pk).update(
+            estado=IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO,
+        )
+        with self.assertRaises(ValidationError):
+            cancelar_articulo_definitivamente(self.item, motivo='No procede', actor=self.user)
+        self.item.refresh_from_db()
+        self.assertNotEqual(self.item.estado, 'CANCELADO')
+
+    def test_cancelacion_sin_pago_tolera_orden_legacy_sin_compromiso(self):
+        intento = self._intento()
+        CompromisoCompraDepartamental.objects.get(intento=intento).delete()
+        self._cancelar(intento)
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, 'CANCELADO_SIN_PAGO')
+
+    def test_cancelacion_pagada_exige_compromiso_financiero(self):
+        intento = self._intento(pagado=True)
+        CompromisoCompraDepartamental.objects.get(intento=intento).delete()
+        with self.assertRaisesMessage(ValidationError, 'compromiso activo'):
+            self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                           reembolso_solicitado=Decimal('180'))
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, 'VIGENTE')
+
+    def test_cancelacion_rechaza_recepcion_total(self):
+        intento = self._intento()
+        linea = LineaOrdenCompraDepartamental.objects.get(intento=intento)
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=linea.cantidad, registrado_por=self.user,
+        )
+        with self.assertRaises(ValidationError):
+            self._cancelar(intento)
+        self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).estado, 'ENTREGADO')
+
+
+class FormulariosIntentoCompraTests(_CompraDepartamentalBase, TestCase):
+    def _intento(self, *, pagado=False):
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        intento = self.item.intento_vigente
+        if pagado:
+            CompraRealizadaDepartamental.objects.create(
+                intento=intento, item=self.item, cotizacion=self.quote,
+                fecha_compra=timezone.localdate(), importe_final=Decimal('180'),
+                comprobante='compras/compra.pdf', registrado_por=self.user,
+            )
+        return intento
+
+    def test_cancelar_form_oculta_reembolso_sin_compra_y_valida_campos(self):
+        intento = self._intento()
+        datos = {'version': '1', 'motivo': 'NO_ENTREGO', 'detalle': 'Proveedor no entregó'}
+        form = CancelarIntentoCompraForm(data=datos, intento=intento)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertNotIn('reembolso_solicitado', form.fields)
+        self.assertFalse(CancelarIntentoCompraForm(data={**datos, 'motivo': 'OTRO', 'detalle': ' '}, intento=intento).is_valid())
+
+    def test_cancelar_form_pagado_exige_solicitud_y_valida_comprobante(self):
+        intento = self._intento(pagado=True)
+        datos = {'version': '1', 'motivo': 'NO_ENTREGO', 'detalle': 'Proveedor no entregó',
+                 'reembolso_solicitado_en': timezone.localdate().isoformat(), 'reembolso_solicitado': '180'}
+        form = CancelarIntentoCompraForm(data=datos, intento=intento)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertIn('reembolso_solicitado', form.fields)
+        for cambios in ({'reembolso_solicitado': '181'},
+                        {'reembolso_solicitado_en': (timezone.localdate() + timedelta(days=1)).isoformat()},
+                        {'reembolso_solicitado': ''}):
+            invalido = CancelarIntentoCompraForm(data={**datos, **cambios}, intento=intento)
+            self.assertFalse(invalido.is_valid())
+            self.assertEqual(invalido.data['detalle'], datos['detalle'])
+        archivo = SimpleUploadedFile('falso.pdf', b'no es PDF')
+        invalido = CancelarIntentoCompraForm(data=datos, files={'evidencia_solicitud_reembolso': archivo}, intento=intento)
+        self.assertFalse(invalido.is_valid())
+        self.assertIn('evidencia_solicitud_reembolso', invalido.errors)
+
+    def test_reembolso_form_exige_saldo_y_valida_archivo_y_fecha(self):
+        intento = self._intento(pagado=True)
+        intento.reembolso_solicitado = Decimal('180')
+        intento.reembolso_solicitado_en = timezone.localdate()
+        intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
+        intento.save(update_fields=['reembolso_solicitado', 'reembolso_solicitado_en', 'estado'])
+        datos = {'version': '1', 'fecha': timezone.localdate().isoformat(), 'importe': '80', 'referencia': 'Banco'}
+        form = RegistrarReembolsoCompraForm(data=datos, intento=intento)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertFalse(RegistrarReembolsoCompraForm(data={**datos, 'importe': '181'}, intento=intento).is_valid())
+        self.assertFalse(RegistrarReembolsoCompraForm(data={**datos, 'fecha': (timezone.localdate() + timedelta(days=1)).isoformat()}, intento=intento).is_valid())
+        invalido = RegistrarReembolsoCompraForm(data=datos, files={'comprobante': SimpleUploadedFile('falso.pdf', b'no es PDF')}, intento=intento)
+        self.assertFalse(invalido.is_valid())
+        self.assertIn('comprobante', invalido.errors)
+        self.assertEqual(invalido.data['referencia'], 'Banco')
 
 
 class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
