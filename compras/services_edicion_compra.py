@@ -242,11 +242,15 @@ def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
             setattr(compra, name, datos[name])
     if isinstance(datos.get('comprobante'), UploadedFile):
         compra.comprobante = datos['comprobante']
+    reembolso_producto = (
+        intento.reembolso_solicitado - intento.reembolso_cargos_adicionales
+        if intento.reembolso_solicitado is not None else None
+    )
     if (intento.estado in (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO,
                            IntentoCompraDepartamental.ESTADO_REEMBOLSADO)
-            and intento.reembolso_solicitado is not None
-            and compra.importe_final < intento.reembolso_solicitado):
-        raise ValidationError('El importe final no puede ser menor que el reembolso solicitado.')
+            and reembolso_producto is not None
+            and compra.importe_final < reembolso_producto):
+        raise ValidationError('El importe final no puede ser menor que la parte del producto solicitada en el reembolso.')
     compra.version += 1
     compra.full_clean()
     compra.save()

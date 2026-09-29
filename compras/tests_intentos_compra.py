@@ -1525,6 +1525,11 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
 
         self.assertNotContains(response, 'max="180.00"')
         self.assertContains(response, 'Producto pagado: $180.00')
+        self.assertContains(response, 'Importe real pagado del producto: $180.00')
+        self.assertContains(
+            response,
+            'El total solicitado puede superar el importe del producto únicamente por cargos adicionales documentados.',
+        )
         self.assertContains(response, 'name="reembolso_cargos_adicionales"')
 
     def test_cancelar_articulo_async_exige_motivo_y_segundo_post_409(self):
@@ -1706,6 +1711,76 @@ class HistorialIntentosDetalleTests(_CompraDepartamentalBase, TestCase):
         self.assertContains(response, 'Cancelar definitivamente el artículo')
         self.assertNotContains(response, 'Registrar reembolso recibido')
 
+    def test_desglose_de_reembolso_permanece_aislado_por_intento(self):
+        primero = self.intento(pagado=True)
+        compra_primera = primero.compra
+        compra_primera.importe_final = Decimal('199.56')
+        compra_primera.save(update_fields=['importe_final'])
+        primero.compromiso.monto = Decimal('199.56')
+        primero.compromiso.save(update_fields=['monto'])
+        evidencia = SimpleUploadedFile(
+            'reembolso.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+        )
+        cancelar_intento_compra(
+            primero, version=primero.version,
+            motivo=IntentoCompraDepartamental.MOTIVO_NO_ENTREGO,
+            detalle='El proveedor no entregará.', actor=self.user,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=Decimal('318.56'),
+            reembolso_cargos_adicionales=Decimal('119.00'),
+            evidencia_solicitud_reembolso=evidencia,
+        )
+
+        segundo_item = self.solicitud.items.create(
+            descripcion='Artículo independiente', cantidad=1, rubro=self.rubro,
+        )
+        segundo_proveedor = Proveedor.objects.create(nombre='Proveedor independiente')
+        segunda_cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=segundo_item, proveedor=segundo_proveedor,
+            cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('119.00'),
+        )
+        seleccionar_cotizacion(segunda_cotizacion, actor=self.user)
+        generar_ordenes_departamentales([segundo_item], actor=self.user)
+        segundo = segundo_item.intento_vigente
+        CompraRealizadaDepartamental.objects.create(
+            intento=segundo, item=segundo_item, cotizacion=segunda_cotizacion,
+            fecha_compra=timezone.localdate(), importe_final=Decimal('119.00'),
+            comprobante='compras/segunda.pdf', registrado_por=self.user,
+        )
+        segundo_item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
+        segundo_item.save(update_fields=['estado'])
+        cancelar_intento_compra(
+            segundo, version=segundo.version,
+            motivo=IntentoCompraDepartamental.MOTIVO_NO_ENTREGO,
+            detalle='El segundo proveedor no entregará.', actor=self.user,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=Decimal('119.00'),
+            reembolso_cargos_adicionales=Decimal('0.00'),
+        )
+        segundo.refresh_from_db()
+        registrar_reembolso_compra(
+            segundo, version=segundo.version, fecha=timezone.localdate(),
+            importe=Decimal('119.00'), referencia='Devolución completa', actor=self.user,
+        )
+
+        response = self.detalle()
+        html = response.content.decode()
+        primer_articulo = html.split(f'id="item-{self.item.pk}"', 1)[1].split('</article>', 1)[0]
+        segundo_articulo = html.split(f'id="item-{segundo_item.pk}"', 1)[1].split('</article>', 1)[0]
+
+        self.assertIn('Reembolso pendiente', primer_articulo)
+        self.assertIn('Total solicitado $318.56', primer_articulo)
+        self.assertIn('Producto $199.56', primer_articulo)
+        self.assertIn('Cargos adicionales $119.00', primer_articulo)
+        self.assertNotIn('Total solicitado $119.00', primer_articulo)
+
+        self.assertIn('Reembolso completado', segundo_articulo)
+        self.assertIn('Total solicitado $119.00', segundo_articulo)
+        self.assertIn('Producto $119.00', segundo_articulo)
+        self.assertNotIn('Cargos adicionales', segundo_articulo)
+        self.assertNotIn('$318.56', segundo_articulo)
+        self.assertNotContains(response, '$437.56')
+
     def test_compra_historica_conserva_correccion_para_compras_en_ambos_estados_reembolso(self):
         intento = self.intento(pagado=True)
         compra = intento.compra
@@ -1781,6 +1856,7 @@ class HistorialIntentosDetalleTests(_CompraDepartamentalBase, TestCase):
                     intento.reembolsos_visibles
                     intento.recepciones_visibles
                     intento.saldo_reembolso_visible
+                    intento.reembolso_producto_visible
 
     def test_get_completo_no_agrega_consultas_por_intento_al_renderizar_historial(self):
         primero = self.intento(pagado=True)

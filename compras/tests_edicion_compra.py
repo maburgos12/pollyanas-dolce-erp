@@ -632,22 +632,81 @@ class FlujoPorIntentoTests(_CompraDepartamentalBase, TestCase):
         with self.assertRaises(ValidationError):
             validar_edicion(self.item)
 
-    def test_correccion_no_baja_de_reembolso_solicitado(self):
+    def test_correccion_respeta_la_parte_del_producto_en_ambos_estados_de_reembolso(self):
         compra = self.registrar()
         intento = compra.intento
-        intento.reembolso_solicitado = Decimal('150')
+        intento.reembolso_solicitado = Decimal('318.56')
+        intento.reembolso_cargos_adicionales = Decimal('119.00')
         for estado in (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO,
                        IntentoCompraDepartamental.ESTADO_REEMBOLSADO):
             with self.subTest(estado=estado):
                 intento.estado = estado
-                intento.save(update_fields=['estado', 'reembolso_solicitado'])
-                with self.assertRaises(ValidationError):
+                intento.save(update_fields=[
+                    'estado', 'reembolso_solicitado', 'reembolso_cargos_adicionales',
+                ])
+                compra.refresh_from_db()
+                corregida = corregir_compra_realizada(
+                    compra, datos={'importe_final': Decimal('199.56')}, version=compra.version,
+                    motivo='Importe exacto del producto', actor=self.user,
+                )
+                self.assertEqual(corregida.importe_final, Decimal('199.56'))
+                version_antes = corregida.version
+                historial_antes = corregida.historial.count()
+                compromiso_antes = corregida.intento.compromiso.monto
+                with self.assertRaisesMessage(ValidationError, 'parte del producto'):
                     corregir_compra_realizada(
-                        compra, datos={'importe_final': Decimal('140')}, version=compra.version,
-                        motivo='Corrección', actor=self.user,
+                        corregida, datos={'importe_final': Decimal('199.55')},
+                        version=version_antes, motivo='Importe inferior', actor=self.user,
                     )
         compra.refresh_from_db()
-        self.assertEqual(compra.importe_final, Decimal('200'))
+        self.assertEqual(compra.importe_final, Decimal('199.56'))
+        self.assertEqual(compra.version, version_antes)
+        self.assertEqual(compra.historial.count(), historial_antes)
+        intento.compromiso.refresh_from_db()
+        self.assertEqual(intento.compromiso.monto, compromiso_antes)
+
+    def test_correccion_sin_cambio_de_importe_funciona_con_cargos(self):
+        compra = self.registrar()
+        intento = compra.intento
+        compra.importe_final = Decimal('199.56')
+        compra.save(update_fields=['importe_final'])
+        intento.reembolso_solicitado = Decimal('318.56')
+        intento.reembolso_cargos_adicionales = Decimal('119.00')
+        intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
+        intento.save(update_fields=[
+            'estado', 'reembolso_solicitado', 'reembolso_cargos_adicionales',
+        ])
+
+        corregida = corregir_compra_realizada(
+            compra, datos={'numero_pedido': 'REFERENCIA-CORREGIDA'}, version=compra.version,
+            motivo='Corregir referencia', actor=self.user,
+        )
+
+        self.assertEqual(corregida.importe_final, Decimal('199.56'))
+        self.assertEqual(corregida.numero_pedido, 'REFERENCIA-CORREGIDA')
+
+    def test_correccion_sin_cargos_conserva_el_limite_anterior(self):
+        compra = self.registrar()
+        intento = compra.intento
+        intento.reembolso_solicitado = Decimal('150.00')
+        intento.reembolso_cargos_adicionales = Decimal('0.00')
+        intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
+        intento.save(update_fields=[
+            'estado', 'reembolso_solicitado', 'reembolso_cargos_adicionales',
+        ])
+
+        corregida = corregir_compra_realizada(
+            compra, datos={'importe_final': Decimal('150.00')}, version=compra.version,
+            motivo='Importe exacto solicitado', actor=self.user,
+        )
+        with self.assertRaisesMessage(ValidationError, 'parte del producto'):
+            corregir_compra_realizada(
+                corregida, datos={'importe_final': Decimal('149.99')}, version=corregida.version,
+                motivo='Importe inferior', actor=self.user,
+            )
+
+        compra.refresh_from_db()
+        self.assertEqual(compra.importe_final, Decimal('150.00'))
 
     def test_resumen_compromete_solo_el_intento_vigente(self):
         from compras.resumen_departamentales import construir_resumen_departamental

@@ -12,6 +12,12 @@
     <p>{{ item.solicitud.folio }} · {{ item.solicitud.area.nombre }}</p>
     <p>Estado actual: {{ estado }}</p>
     <p>{{ explicacion }}</p>
+    {% if form.compra %}
+    <div class="cd-comment" role="note">
+      <strong>Importe real pagado del producto: ${{ form.compra.importe_final|floatformat:2 }}</strong>
+      El total solicitado puede superar el importe del producto únicamente por cargos adicionales documentados.
+    </div>
+    {% endif %}
   </header>
   <form method="post" action="{{ action }}" enctype="multipart/form-data" data-async-action{% if confirmacion %} data-confirm-message="{{ confirmacion }}"{% endif %} class="cd-edit-form">
     {% csrf_token %}
