@@ -93,7 +93,7 @@ class PointHttpSessionServiceTests(SimpleTestCase):
         )
 
     @patch("pos_bridge.services.point_http_session_service.requests.Session")
-    def test_create_falls_back_to_first_account_for_all_branches(self, session_cls):
+    def test_create_without_branch_selects_a_complete_workspace(self, session_cls):
         session = Mock()
         session_cls.return_value = session
         session.get.side_effect = [
@@ -126,13 +126,17 @@ class PointHttpSessionServiceTests(SimpleTestCase):
         ]
 
         service = PointHttpSessionService(self._settings())
-        service.create()
+        result = service.create()
 
         self.assertGreaterEqual(session.get.call_count, 5)
         self.assertEqual(session.get.call_args_list[0].args[0], "https://app.pointmeup.com/")
         self.assertEqual(session.post.call_args_list[0].kwargs["data"]["timeZone"], "0")
         self.assertEqual(session.post.call_args_list[2].kwargs["data"], {"accId": "acc-1"})
-        self.assertEqual(session.post.call_args_list[3].kwargs["data"], {"acid": "acc-1"})
+        self.assertEqual(
+            session.post.call_args_list[3].kwargs["data"],
+            {"acid": "acc-1", "sucid": "1", "sucname": "Matriz"},
+        )
+        self.assertEqual(result.workspace_name, "Matriz")
 
     def test_resolve_account_strict_rejects_branch_without_workspace(self):
         service = PointHttpSessionService(self._settings())

@@ -511,9 +511,9 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
     if user and user.is_authenticated:
         try:
-            from core.models import Notificacion
+            from core.notificaciones_bandeja import contar_grupos_pendientes
 
-            notificaciones_pendientes = Notificacion.objects.filter(usuario=user, leida=False).count()
+            notificaciones_pendientes = contar_grupos_pendientes(user)
         except Exception:
             notificaciones_pendientes = 0
         match_len = len("/notificaciones/") if current_path.startswith("/notificaciones/") else 0

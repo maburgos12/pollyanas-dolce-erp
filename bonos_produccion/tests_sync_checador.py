@@ -14,6 +14,7 @@ from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
 from rrhh.services_bonos_checador import programar_sincronizacion_bonos_desde_checador
 
 from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
+from .serializers import BonoProduccionCapturaSerializer, RegistroDiarioCapturaSerializer
 from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
 
 
@@ -336,3 +337,124 @@ class SyncChecadorProduccionTests(TestCase):
 
         self.assertEqual(resultado["bonos_sincronizados"], 0)
         self.assertFalse(RegistroDiarioProduccion.objects.filter(bono=bono, dia=15).exists())
+
+    def test_sync_incluye_dias_del_corte_que_caen_en_el_mes_anterior(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=9,
+            anio=2026,
+            dias_laborables=5,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 2),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado corte cruzado",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+        )
+        for fecha in (
+            date(2026, 8, 28),
+            date(2026, 8, 29),
+            date(2026, 8, 31),
+            date(2026, 9, 1),
+            date(2026, 9, 2),
+        ):
+            self.crear_asistencia(empleado, fecha)
+
+        sincronizar_asistencia_desde_checador(periodo)
+
+        bono.refresh_from_db()
+        self.assertEqual(bono.dias_trabajados, 5)
+        self.assertFalse(bono.cancela_bono)
+        self.assertEqual(
+            list(bono.registros.values_list("dia", flat=True).order_by("dia")),
+            [1, 2, 28, 29, 30, 31],
+        )
+
+    def test_sync_dia_encuentra_periodo_cuyo_corte_inicia_en_mes_anterior(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=9,
+            anio=2026,
+            dias_laborables=23,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 26),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado puente corte",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+        )
+        fecha = date(2026, 8, 28)
+        self.crear_asistencia(empleado, fecha)
+
+        resultado = sincronizar_empleado_dia_desde_checador(empleado.id, fecha)
+
+        self.assertEqual(resultado["bonos_sincronizados"], 1)
+        self.assertTrue(
+            RegistroDiarioProduccion.objects.get(bono=bono, dia=28).tiene_asistencia
+        )
+
+    def test_sync_corte_cruzado_no_crea_faltas_para_fechas_futuras(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=9,
+            anio=2026,
+            dias_laborables=23,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 26),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado corte en curso",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+        )
+
+        with patch("bonos_produccion.services_checador.timezone.localdate", return_value=date(2026, 8, 29)):
+            sincronizar_asistencia_desde_checador(periodo)
+
+        self.assertEqual(
+            list(bono.registros.values_list("dia", flat=True).order_by("dia")),
+            [28, 29],
+        )
+
+    def test_captura_expone_rango_y_acepta_dia_del_mes_anterior(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=9,
+            anio=2026,
+            dias_laborables=23,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 26),
+        )
+        empleado = Empleado.objects.create(
+            nombre="Empleado captura corte",
+            area="HORNOS",
+            fecha_ingreso=date(2026, 1, 1),
+        )
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+        )
+
+        payload = BonoProduccionCapturaSerializer(bono).data
+        self.assertEqual(payload["periodo_fecha_inicio"], "2026-08-28")
+        self.assertEqual(payload["periodo_fecha_fin"], "2026-09-26")
+
+        serializer = RegistroDiarioCapturaSerializer(
+            data={"bono": bono.id, "dia": 31},
+            context={"bonos_permitidos": BonoProduccionEmpleado.objects.filter(pk=bono.pk)},
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)

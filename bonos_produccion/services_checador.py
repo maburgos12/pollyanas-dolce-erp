@@ -35,13 +35,14 @@ def _fechas(inicio: date, fin: date) -> list[date]:
 
 
 def _fecha_visible_en_periodo(periodo: ConfigBonoPeriodo, fecha: date) -> bool:
-    return fecha.month == periodo.mes and fecha.year == periodo.anio
+    inicio, fin = _rango_periodo(periodo)
+    return inicio <= fecha <= fin
 
 
 def _periodo_en_curso(periodo: ConfigBonoPeriodo) -> bool:
     hoy = timezone.localdate()
     inicio, fin = _rango_periodo(periodo)
-    return inicio <= hoy <= fin and periodo.mes == hoy.month and periodo.anio == hoy.year
+    return inicio <= hoy <= fin
 
 
 def _fecha_futura_en_periodo_en_curso(periodo: ConfigBonoPeriodo, fecha: date) -> bool:
@@ -180,7 +181,7 @@ def _periodos_para_fecha(fecha: date):
             (Q(fecha_inicio__isnull=True) | Q(fecha_fin__isnull=True))
             & Q(mes=fecha.month, anio=fecha.year)
         )
-        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha, mes=fecha.month, anio=fecha.year)
+        | Q(fecha_inicio__lte=fecha, fecha_fin__gte=fecha)
     )
 
 

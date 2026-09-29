@@ -294,7 +294,7 @@ class OperacionAppTests(TestCase):
         self.assertContains(response, "logistica/pwa/pollyanas-logo-header.png")
         self.assertContains(response, "App Operativa")
         self.assertNotContains(response, "App<br>Operativa")
-        self.assertContains(response, "20260911-pasaporte-qr-v2")
+        self.assertContains(response, "20260927-higiene-continuidad-v1")
         self.assertContains(response, 'class="pull-refresh"')
         self.assertContains(response, 'document.addEventListener("touchstart"')
         self.assertContains(response, 'document.addEventListener("touchcancel"')
@@ -317,7 +317,7 @@ class OperacionAppTests(TestCase):
         self.assertNotContains(response, 'viewBox="0 0 512 512"')
         self.assertContains(
             response,
-            'navigator.serviceWorker.register("/app/sw.js?v=20260911-pasaporte-qr-v2"',
+            'navigator.serviceWorker.register("/app/sw.js?v=20260927-higiene-continuidad-v1"',
         )
         self.assertContains(response, 'updateViaCache: "none"')
         self.assertContains(response, 'href="/logout/"')
@@ -335,6 +335,25 @@ class OperacionAppTests(TestCase):
         self.assertIn("/static/operacion/app-icon-192.png", manifest)
         self.assertIn("/static/operacion/app-icon-512.png", manifest)
         self.assertTrue((root / "static/operacion/apple-touch-icon.png").exists())
+
+    def test_all_app_service_worker_registrations_use_hygiene_continuity_version(self):
+        root = Path(__file__).resolve().parents[1]
+        expected_registration = (
+            'navigator.serviceWorker.register('
+            '"/app/sw.js?v=20260927-higiene-continuidad-v1"'
+        )
+        legacy_registration = "/app/sw.js?v=20260911-pasaporte-qr-v2"
+
+        for relative_path in (
+            "templates/operacion/app_home.html",
+            "templates/operacion/activo_pasaporte.html",
+            "templates/operacion/activo_escanear.html",
+            "templates/operacion/sucursal_tools.html",
+        ):
+            with self.subTest(template=relative_path):
+                source = (root / relative_path).read_text(encoding="utf-8")
+                self.assertIn(expected_registration, source)
+                self.assertNotIn(legacy_registration, source)
 
     def test_module_manifests_install_app_operativa_home(self):
         root = Path(__file__).resolve().parents[1]
@@ -360,7 +379,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v45-conteos-captura-compacta", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v46-higiene-falla-continuidad", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3190,7 +3209,7 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v45-conteos-captura-compacta", sw_content)
+        self.assertIn("v46-higiene-falla-continuidad", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/conteos/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)

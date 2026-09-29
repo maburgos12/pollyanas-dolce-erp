@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#8b2252">
   <title>Higiene y limpieza · Pollyana's Dolce</title>
-  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260730-higiene-icons-v3">
+  <link rel="stylesheet" href="{% static 'operacion/higiene.css' %}?v=20260926-higiene-continuidad-v1">
 </head>
 <body class="higiene-body">
   {% include "operacion/_higiene_icons.html" %}
@@ -87,6 +87,7 @@
           <form
             data-async-action
             data-higiene-form
+            data-failure-matches-url="{% url 'operacion:higiene_fallas_coincidentes' %}"
             action="{% url 'operacion:higiene_guardar' %}"
             method="post"
             enctype="multipart/form-data"
@@ -240,6 +241,39 @@
                               </select>
                             </label>
                             <p class="integration-note">La foto y descripción se enviarán una sola vez al módulo de Fallas.</p>
+                            <section class="failure-match" data-failure-match aria-live="polite" hidden>
+                              <div class="failure-match-heading">
+                                <strong>Consulta de continuidad</strong>
+                                <span data-match-state>Completa la clasificación para buscar coincidencias.</span>
+                                <button type="button" data-match-retry hidden>Reintentar búsqueda</button>
+                              </div>
+                              <div class="failure-match-results" data-match-results hidden>
+                                <fieldset class="failure-report-options" data-match-reports>
+                                  <legend>Fallas activas relacionadas</legend>
+                                  <div class="failure-report-list" data-match-report-list></div>
+                                </fieldset>
+                                <fieldset class="failure-decision">
+                                  <legend>¿Qué ocurre hoy?</legend>
+                                  <label>
+                                    <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="MISMA">
+                                    <span><b>Sigue siendo la misma</b><small>Confirmar el seguimiento del reporte elegido.</small></span>
+                                  </label>
+                                  <label>
+                                    <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="CAMBIO">
+                                    <span><b>Empeoró o cambió</b><small>Actualizar el reporte con evidencia nueva.</small></span>
+                                  </label>
+                                  <label>
+                                    <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="DISTINTA">
+                                    <span><b>Es otro problema</b><small>Abrir una falla nueva.</small></span>
+                                  </label>
+                                  <label>
+                                    <input type="radio" data-failure-decision name="failure_decision_{{ tipo }}_{{ punto.key }}" value="CORRECCION_PENDIENTE">
+                                    <span><b>Ya quedó corregido; solicitar validación</b><small>Pedir a Mantenimiento que confirme el cierre.</small></span>
+                                  </label>
+                                </fieldset>
+                                <p class="failure-evidence-note">“Sigue siendo la misma” no necesita foto nueva. Cambio, problema distinto y corrección sí requieren evidencia.</p>
+                              </div>
+                            </section>
                           </div>
                         </div>
                       {% endif %}
@@ -304,6 +338,6 @@
     </section>
   </main>
   <div class="higiene-toast" role="status" aria-live="polite" hidden></div>
-  <script src="{% static 'operacion/higiene.js' %}?v=20260730-higiene-visual-v2"></script>
+  <script src="{% static 'operacion/higiene.js' %}?v=20260926-higiene-continuidad-v1"></script>
 </body>
 </html>

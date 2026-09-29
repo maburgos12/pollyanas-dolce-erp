@@ -1,11 +1,17 @@
 from django.urls import path
 
 from . import views
+from .views_consolidacion_higiene import consolidacion_higiene
 
 app_name = "mantenimiento"
 
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
+    path(
+        "consolidacion-higiene/",
+        consolidacion_higiene,
+        name="consolidacion-higiene",
+    ),
     path("app/", views.pwa_mantenimiento, name="app"),
     path("sw.js", views.pwa_sw, name="pwa-sw"),
     path("nueva-falla/", views.crear_falla, name="crear-falla"),

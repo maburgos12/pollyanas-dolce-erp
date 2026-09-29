@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -33,6 +34,7 @@ from mantenimiento.services_access import (
     authorized_unit_services,
     can_access_mantenimiento,
 )
+from mantenimiento.services_history import continuidad_por_principal
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -328,6 +330,9 @@ def _branch_falla_item(reporte):
         "semaforo": _semaforo(dias),
         "asignado": bool(getattr(reporte, "asignado_a_id", None)),
         "duplicados_total": getattr(reporte, "duplicados_total", 0),
+        "constataciones_total": getattr(reporte, "constataciones_total", 0),
+        "primera_constatacion": getattr(reporte, "primera_constatacion", None),
+        "ultima_constatacion": getattr(reporte, "ultima_constatacion", None),
     }
 
 
@@ -396,35 +401,61 @@ def _logistica_item(reporte):
     }
 
 
-def _unified_items(origen=""):
+def _branch_fallas(queryset, *, user, limit=80):
+    queryset = (
+        queryset.filter(duplicado_de__isnull=True)
+        .annotate(
+            duplicados_total=Count(
+                "duplicados",
+                filter=Q(
+                    duplicados__pk__in=authorized_fallas(user).values("pk")
+                ),
+            )
+        )
+        .select_related("sucursal", "categoria", "activo_relacionado", "reportado_por")
+        .prefetch_related(
+            Prefetch(
+                "bitacora",
+                queryset=BitacoraFalla.objects.select_related("usuario").order_by("-timestamp"),
+                to_attr="bitacora_reciente",
+            )
+        )
+        .order_by("-fecha_reporte")
+    )
+    if limit is not None:
+        queryset = queryset[:limit]
+    fallas = list(queryset)
+    continuidad = continuidad_por_principal(
+        [falla.pk for falla in fallas], user=user
+    )
+    for falla in fallas:
+        falla.bitacora_total = len(getattr(falla, "bitacora_reciente", []))
+        metrics = continuidad.get(falla.pk, {})
+        falla.constataciones_total = metrics.get("constataciones_total", 0)
+        falla.primera_constatacion = metrics.get("primera_constatacion")
+        falla.ultima_constatacion = metrics.get("ultima_constatacion")
+    return fallas
+
+
+def _unified_items(origen, user):
     items = []
     if origen in ("", "sucursales"):
-        fallas = (
-            ReporteFalla.objects.filter(estatus__in=_branch_statuses())
-            .filter(duplicado_de__isnull=True)
-            .annotate(duplicados_total=Count("duplicados"))
-            .select_related("sucursal", "categoria", "activo_relacionado", "reportado_por")
-            .prefetch_related(
-                Prefetch(
-                    "bitacora",
-                    queryset=BitacoraFalla.objects.select_related("usuario").order_by("-timestamp"),
-                    to_attr="bitacora_reciente",
-                )
-            )
-            .order_by("-fecha_reporte")[:80]
+        fallas_queryset = authorized_fallas(user)
+        fallas = _branch_fallas(
+            fallas_queryset.filter(estatus__in=_branch_statuses()), user=user
         )
-        for falla in fallas:
-            falla.bitacora_total = len(getattr(falla, "bitacora_reciente", []))
+        orders_queryset = authorized_orders(user)
         ordenes = (
-            OrdenMantenimiento.objects.filter(estatus__in=_order_open_statuses())
+            orders_queryset.filter(estatus__in=_order_open_statuses())
             .select_related("activo_ref", "activo_ref__sucursal", "creado_por", "proveedor_servicio")
             .order_by("-creado_en")[:80]
         )
         items.extend(_branch_falla_item(row) for row in fallas)
         items.extend(_branch_order_item(row) for row in ordenes)
     if origen in ("", "logistica"):
+        reportes_queryset = authorized_unit_reports(user)
         reportes = (
-            ReporteUnidad.objects.filter(estatus__in=_unit_open_statuses())
+            reportes_queryset.filter(estatus__in=_unit_open_statuses())
             .filter(duplicado_de__isnull=True)
             .annotate(
                 duplicados_total=Count("duplicados", distinct=True),
@@ -437,8 +468,8 @@ def _unified_items(origen=""):
     return sorted(items, key=lambda item: item["fecha"], reverse=True)
 
 
-def _unified_counts():
-    items = _unified_items("")
+def _unified_counts(user):
+    items = _unified_items("", user)
     return {
         "sucursales": sum(1 for item in items if item["origen"] == "sucursales"),
         "logistica": sum(1 for item in items if item["origen"] == "logistica"),
@@ -912,11 +943,11 @@ def bandeja(request):
     origen = (request.query_params.get("origen") or "").strip().lower()
     if origen not in {"", "sucursales", "logistica"}:
         return Response({"error": "Origen no válido."}, status=400)
-    items = _unified_items(origen)
+    items = _unified_items(origen, request.user)
     return Response(
         {
             "origen": origen or "todos",
-            "counts": _unified_counts(),
+            "counts": _unified_counts(request.user),
             "items": items,
         }
     )
@@ -1043,7 +1074,7 @@ def _resolver_cancelacion_obj(solicitud, user, accion, notas=""):
 @permission_classes([EsMantenimiento])
 def resumen_movil(request):
     today = timezone.localdate()
-    items = _unified_items("")
+    items = _unified_items("", request.user)
     summary = _dashboard_summary(items)
     planes = []
     for plan in (
@@ -1842,7 +1873,22 @@ def dashboard(request):
     origen = (request.GET.get("origen") or "").strip().lower()
     if origen not in {"", "sucursales", "logistica"}:
         return redirect("mantenimiento:dashboard")
-    items = _unified_items(origen)
+    items = _unified_items(origen, request.user)
+    requested_open = (request.GET.get("open") or "").strip()
+    open_item_uid = requested_open if any(item["uid"] == requested_open for item in items) else ""
+    display_items = list(items)
+    if not open_item_uid:
+        requested_match = re.fullmatch(r"falla:([1-9][0-9]*)", requested_open)
+        if requested_match:
+            requested = _branch_fallas(
+                authorized_fallas(request.user).filter(pk=int(requested_match.group(1))),
+                user=request.user,
+                limit=1,
+            )
+            if requested:
+                requested_item = _branch_falla_item(requested[0])
+                display_items.append(requested_item)
+                open_item_uid = requested_item["uid"]
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     puede_crear_proveedor = _can_write_mantenimiento(request.user)
     proveedores_todos = list(ProveedorServicio.objects.order_by("nombre"))
@@ -1899,7 +1945,8 @@ def dashboard(request):
         "mantenimiento/dashboard.html",
         {
             "items": items,
-            "kanban_columns": _kanban_columns(items),
+            "open_item_uid": open_item_uid,
+            "kanban_columns": _kanban_columns(display_items),
             "summary": _dashboard_summary(items),
             "provider_options": provider_options,
             "puede_crear_proveedor": puede_crear_proveedor,
@@ -1911,7 +1958,7 @@ def dashboard(request):
             "sucursales_list": sucursales_list,
             "categorias_list": categorias_list,
             "origen": origen or "todos",
-            "counts": _unified_counts(),
+            "counts": _unified_counts(request.user),
             "estatus_fallas": ReporteFalla.ESTATUS,
             "estatus_unidad": ReporteUnidad.ESTATUS_CHOICES,
             "estatus_orden": OrdenMantenimiento.ESTATUS_CHOICES,

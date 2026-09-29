@@ -115,7 +115,7 @@
         <input class="mant-input" id="mantBoardSearch" type="search" placeholder="Filtrar por sucursal, unidad, activo o descripción...">
         <span class="mant-board-help">El filtro no duplica reportes; solo reduce las tarjetas visibles.</span>
       </div>
-      <div class="mant-board">
+      <div class="mant-board" data-open-uid="{{ open_item_uid }}">
         {% for column in kanban_columns %}
           <article class="mant-col">
             <div class="mant-col-head">
@@ -130,6 +130,11 @@
                     <span class="mant-badge">{{ item.prioridad }}</span>
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
                     {% if item.duplicados_total %}<span class="mant-badge is-warning" title="Otros reportes del mismo problema, ligados a este">Reportado {{ item.duplicados_total|add:1 }} veces</span>{% endif %}
+                    {% if item.constataciones_total %}
+                      <span class="mant-badge is-warning">
+                        {{ item.constataciones_total }} revisiones · última {{ item.ultima_constatacion|date:"d/m/Y" }}
+                      </span>
+                    {% endif %}
                     {% if item.reafirmaciones_total %}<span class="mant-badge is-warning" title="El repartidor volvió a verlo en la inspección diaria">Insistido {{ item.reafirmaciones_total }}×</span>{% endif %}
                     <span class="mant-semaforo {{ item.semaforo }}">{{ item.dias_abierto }}d</span>
                   </div>
@@ -160,6 +165,7 @@
                   {% endif %}
                   <div class="mant-ticket-actions">
                     <button class="btn btn-secondary btn-sm" type="button" data-open-follow
+                      data-maintenance-uid="{{ item.uid }}"
                       data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
                       data-type="{{ item.tipo }}" data-status="{{ item.estatus }}"
                       data-provider="{{ item.proveedor|default:'' }}"
@@ -1047,6 +1053,7 @@ function requireElements(scope, elementMap) {
   const assetCreate = document.getElementById("mantDrawerAssetCreate");
   const assetCreateInputs = assetCreate ? assetCreate.querySelectorAll("input, select") : [];
   const boardSearch = document.getElementById("mantBoardSearch");
+  let drawerTrigger = null;
 
   function filterBoard() {
     const query = (boardSearch.value || "").trim().toLowerCase();
@@ -1083,6 +1090,7 @@ function requireElements(scope, elementMap) {
   }
 
   function openDrawer(button) {
+    drawerTrigger = button;
     const template = document.getElementById(`mant-status-${button.dataset.type}`);
     const hasLinkedAsset = Boolean(button.dataset.assetId);
     const hideAssets = button.dataset.type === "unidad";
@@ -1149,6 +1157,17 @@ function requireElements(scope, elementMap) {
     drawer.classList.add("is-open");
   }
 
+  function closeDrawer() {
+    if (!drawer.classList.contains("is-open")) return;
+    drawer.classList.remove("is-open");
+    const fallback = document.querySelector('[data-tab="tab-seguimiento"]');
+    const returnTarget = drawerTrigger?.isConnected && !drawerTrigger.closest(".is-hidden")
+      ? drawerTrigger
+      : fallback;
+    drawerTrigger = null;
+    returnTarget?.focus({preventScroll: true});
+  }
+
   if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
   document.addEventListener("click", (event) => {
@@ -1156,15 +1175,28 @@ function requireElements(scope, elementMap) {
     if (!button) return;
     openDrawer(button);
   });
+
+  const board = document.querySelector(".mant-board");
+  const openUid = board?.dataset.openUid || "";
+  const target = Array.from(
+    document.querySelectorAll("[data-open-follow][data-maintenance-uid]")
+  ).find((button) => button.dataset.maintenanceUid === openUid);
+  if (target) {
+    const seguimientoTab = document.querySelector('[data-tab="tab-seguimiento"]');
+    seguimientoTab?.click();
+    target.scrollIntoView({block: "center"});
+    openDrawer(target);
+    drawer.querySelector("[data-close-drawer]")?.focus({preventScroll: true});
+  }
   document.querySelectorAll("[data-close-drawer]").forEach((button) => {
-    button.addEventListener("click", () => drawer.classList.remove("is-open"));
+    button.addEventListener("click", closeDrawer);
   });
   drawer.addEventListener("click", (event) => {
-    if (event.target === drawer) drawer.classList.remove("is-open");
+    if (event.target === drawer) closeDrawer();
   });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-	      drawer.classList.remove("is-open");
+	      closeDrawer();
 	      document.getElementById("modalNuevaFalla").classList.remove("is-open");
 	      document.getElementById("modalOrdenServicio").classList.remove("is-open");
 	      document.getElementById("mantCancelarModal").classList.remove("is-open");

@@ -120,14 +120,12 @@ class PointHttpSessionService:
         branch_display_name: str | None,
         current_account_id: str | None,
         strict_branch: bool = False,
-    ) -> tuple[str, str | None]:
+    ) -> tuple[str, str | None, str | None]:
         if not accounts:
             raise AuthenticationError("Point no devolvió cuentas accesibles para el usuario configurado.")
 
         branch_token = str(branch_external_id or "").strip().lower()
         branch_name_token = normalize_text(branch_display_name or "")
-        matched_workspace_name: str | None = None
-
         for account in accounts:
             try:
                 workspaces = json.loads(account.get("JSON_WORKSPACES") or "[]")
@@ -138,30 +136,55 @@ class PointHttpSessionService:
                 workspace_name = str(workspace.get("wsName") or workspace.get("wsAvName") or "").strip()
                 workspace_name_token = normalize_text(workspace_name)
                 if branch_token and workspace_branch_id == branch_token:
-                    return account["ACC_ID"], workspace_name or None
+                    return account["ACC_ID"], str(workspace.get("id_suc") or "").strip() or None, workspace_name or None
                 if (
                     (not strict_branch or not branch_token)
                     and branch_name_token
                     and workspace_name_token
                     and branch_name_token == workspace_name_token
                 ):
-                    return account["ACC_ID"], workspace_name or None
+                    return account["ACC_ID"], str(workspace.get("id_suc") or "").strip() or None, workspace_name or None
 
         if strict_branch and (branch_token or branch_name_token):
             raise ConfigurationError(
                 "La sucursal solicitada no corresponde a ningún workspace de Point.",
             )
 
+        selected_account = None
         if current_account_id:
-            for account in accounts:
-                if str(account.get("ACC_ID") or "").strip() == str(current_account_id).strip():
-                    return str(account["ACC_ID"]).strip(), matched_workspace_name
+            selected_account = next(
+                (
+                    account
+                    for account in accounts
+                    if str(account.get("ACC_ID") or "").strip() == str(current_account_id).strip()
+                ),
+                None,
+            )
+        if selected_account is None:
+            selected_account = next(
+                (
+                    account
+                    for account in accounts
+                    if str(account.get("ACC_ID") or "").strip() == self.DEFAULT_ACCOUNT_ID
+                ),
+                accounts[0],
+            )
 
-        for account in accounts:
-            if str(account.get("ACC_ID") or "").strip() == self.DEFAULT_ACCOUNT_ID:
-                return str(account["ACC_ID"]).strip(), matched_workspace_name
-
-        return str(accounts[0]["ACC_ID"]).strip(), matched_workspace_name
+        try:
+            selected_workspaces = json.loads(selected_account.get("JSON_WORKSPACES") or "[]")
+        except json.JSONDecodeError:
+            selected_workspaces = []
+        selected_workspace = next(
+            (workspace for workspace in selected_workspaces if workspace.get("id_suc")),
+            None,
+        )
+        if selected_workspace is None:
+            raise AuthenticationError("Point no devolvió un workspace válido para la cuenta seleccionada.")
+        return (
+            str(selected_account["ACC_ID"]).strip(),
+            str(selected_workspace.get("id_suc") or "").strip() or None,
+            str(selected_workspace.get("wsName") or selected_workspace.get("wsAvName") or "").strip() or None,
+        )
 
     def _select_account(
         self,
@@ -217,7 +240,7 @@ class PointHttpSessionService:
             self._sign_in(session)
             accounts = self._get_workspaces(session)
             current_account_id = self._current_account_id(session)
-            account_id, resolved_name = self._resolve_account(
+            account_id, resolved_branch_id, resolved_name = self._resolve_account(
                 accounts=accounts,
                 branch_external_id=branch_external_id,
                 branch_display_name=branch_display_name,
@@ -227,7 +250,7 @@ class PointHttpSessionService:
             self._select_account(
                 session=session,
                 account_id=account_id,
-                branch_external_id=branch_external_id,
+                branch_external_id=branch_external_id or resolved_branch_id,
                 branch_display_name=branch_display_name or resolved_name,
             )
         except Exception:

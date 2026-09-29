@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, time, timedelta
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from decimal import Decimal
 import hashlib
 import json
@@ -38,6 +38,22 @@ class ConfiguracionJornadasError(ValueError):
     """El plan no puede aplicarse sin revisar el conflicto y generar nueva huella."""
 
 
+@dataclass(frozen=True)
+class ConfiguracionJornadasSpec:
+    """Parámetros cerrados para una carga de jornadas auditable."""
+
+    inicio: date
+    fin: date
+    motivo: str
+    lock_key: int
+    manifiesto: tuple
+    turnos: tuple
+    perfiles: dict
+    modelo_auditoria: str
+    reutilizar_turnos_compatibles: bool = True
+    crear_extras_faltantes: bool = True
+
+
 INICIO = date(2026, 9, 1)
 FIN = date(2026, 12, 31)
 MOTIVO = "Carga administrativa 2026 aprobada; vigencia septiembre a diciembre"
@@ -61,6 +77,16 @@ PERFILES = {
     "Johana 2026": ("Administrativa 2026 09:00-17:30",) * 5
     + ("Administrativa 2026 08:00-13:30", None),
 }
+SPEC_ADMINISTRATIVAS = ConfiguracionJornadasSpec(
+    inicio=INICIO,
+    fin=FIN,
+    motivo=MOTIVO,
+    lock_key=LOCK_KEY,
+    manifiesto=MANIFIESTO,
+    turnos=TURNOS,
+    perfiles=PERFILES,
+    modelo_auditoria="rrhh.JornadasAdministrativas2026",
+)
 TIPOS_EXTRA = (
     IncidenciaAsistencia.TIPO_HORA_EXTRA_NO_CALCULABLE,
     IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE,
@@ -84,14 +110,15 @@ def _turno_compatible(turno, entrada, salida):
     )
 
 
-def _jornada_compatible(jornada, dias):
-    if not jornada.activo or jornada.vigencia_desde != INICIO or jornada.vigencia_hasta != FIN:
+def _jornada_compatible(jornada, dias, spec):
+    if (not jornada.activo or jornada.vigencia_desde != spec.inicio
+            or jornada.vigencia_hasta != spec.fin):
         return False
     if len(dias) != 7 or {dia.dia_semana for dia in dias} != set(range(7)):
         return False
-    requisitos = {nombre: (entrada, salida) for nombre, entrada, salida in TURNOS}
+    requisitos = {nombre: (entrada, salida) for nombre, entrada, salida in spec.turnos}
     for dia in dias:
-        esperado = PERFILES[jornada.nombre][dia.dia_semana]
+        esperado = spec.perfiles[jornada.nombre][dia.dia_semana]
         if esperado is None:
             if dia.turno_id is not None:
                 return False
@@ -153,9 +180,9 @@ def _hora_extra_snapshot(extra):
     }
 
 
-def _plan(hoy: date, *, bloquear=False):
-    limite = min(hoy, FIN)
-    ids = [pk for pk, _, _ in MANIFIESTO]
+def _plan(hoy: date, *, bloquear=False, spec=SPEC_ADMINISTRATIVAS):
+    limite = min(hoy, spec.fin)
+    ids = [pk for pk, _, _ in spec.manifiesto]
     def filas(qs):
         if bloquear:
             qs = qs.select_for_update(of=("self",))
@@ -163,39 +190,40 @@ def _plan(hoy: date, *, bloquear=False):
 
     personas_db = {e.pk: e for e in filas(Empleado.objects.filter(pk__in=ids))}
     turnos_db = filas(Turno.objects.filter(
-        Q(nombre__in=[t[0] for t in TURNOS])
-        | Q(hora_entrada__in=[t[1] for t in TURNOS], hora_salida__in=[t[2] for t in TURNOS])
+        Q(nombre__in=[t[0] for t in spec.turnos])
+        | Q(hora_entrada__in=[t[1] for t in spec.turnos],
+            hora_salida__in=[t[2] for t in spec.turnos])
     ))
-    jornadas_db = filas(JornadaSemanal.objects.filter(nombre__in=PERFILES))
+    jornadas_db = filas(JornadaSemanal.objects.filter(nombre__in=spec.perfiles))
     dias_db = filas(JornadaSemanalDia.objects.filter(jornada_id__in=[j.pk for j in jornadas_db]))
     if bloquear:
         filas(Turno.objects.filter(pk__in=[d.turno_id for d in dias_db if d.turno_id]))
     asignaciones_db = filas(AsignacionJornadaEmpleado.objects.filter(
-        empleado_id__in=ids, fecha_inicio__lte=FIN,
-    ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=INICIO)))
+        empleado_id__in=ids, fecha_inicio__lte=spec.fin,
+    ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=spec.inicio)))
     legacy_db = filas(AsignacionTurnoEmpleado.objects.filter(
-        empleado_id__in=ids, fecha_inicio__lte=FIN,
-    ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=INICIO)))
+        empleado_id__in=ids, fecha_inicio__lte=spec.fin,
+    ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=spec.inicio)))
     asistencias_db = filas(AsistenciaEmpleado.objects.filter(
-        empleado_id__in=ids, fecha__range=(INICIO, limite),
-    )) if limite >= INICIO else []
+        empleado_id__in=ids, fecha__range=(spec.inicio, limite),
+    )) if limite >= spec.inicio else []
     incidencias_db = filas(IncidenciaAsistencia.objects.filter(
-        empleado_id__in=ids, fecha__range=(INICIO, limite), tipo__in=TIPOS_EXTRA,
-    )) if limite >= INICIO else []
+        empleado_id__in=ids, fecha__range=(spec.inicio, limite), tipo__in=TIPOS_EXTRA,
+    )) if limite >= spec.inicio else []
     extras_db = filas(HoraExtra.objects.filter(
-        empleado_id__in=ids, fecha__range=(INICIO, limite),
-    )) if limite >= INICIO else []
+        empleado_id__in=ids, fecha__range=(spec.inicio, limite),
+    )) if limite >= spec.inicio else []
     cancelaciones_auditadas = set(AuditLog.objects.filter(
         action="UPDATE", model="rrhh.HoraExtra",
         object_id__in=[str(he.pk) for he in extras_db if he.estado == HoraExtra.ESTADO_CANCELADO],
-        payload__motivo=MOTIVO,
+        payload__motivo=spec.motivo,
         payload__antes__estado=HoraExtra.ESTADO_PENDIENTE,
         payload__despues__estado=HoraExtra.ESTADO_CANCELADO,
     ).values_list("object_id", flat=True))
 
     conflictos = []
     personas = []
-    for pk, esperado, perfil in MANIFIESTO:
+    for pk, esperado, perfil in spec.manifiesto:
         empleado = personas_db.get(pk)
         observado = normalizar_nombre(empleado.nombre).upper() if empleado else None
         if not empleado or observado != normalizar_nombre(esperado).upper() or not empleado.activo:
@@ -204,8 +232,8 @@ def _plan(hoy: date, *, bloquear=False):
                                "activo": empleado.activo if empleado else None})
         personas.append({"id": pk, "esperado": esperado, "observado": observado,
                          "activo": empleado.activo if empleado else None,
-                         "perfil": perfil, "fecha_inicio": INICIO.isoformat(),
-                         "fecha_fin": FIN.isoformat(),
+                         "perfil": perfil, "fecha_inicio": spec.inicio.isoformat(),
+                         "fecha_fin": spec.fin.isoformat(),
                          "asistencias": sum(a.empleado_id == pk for a in asistencias_db),
                          "asignaciones_existentes": sum(a.empleado_id == pk for a in asignaciones_db),
                          "extras_automaticas_pendientes": sum(
@@ -215,7 +243,7 @@ def _plan(hoy: date, *, bloquear=False):
 
     turnos = []
     turnos_obj = {}
-    for nombre, entrada, salida in TURNOS:
+    for nombre, entrada, salida in spec.turnos:
         por_nombre = [t for t in turnos_db if t.nombre == nombre]
         if len(por_nombre) > 1 or (por_nombre and not _turno_compatible(por_nombre[0], entrada, salida)):
             conflictos.append({"tipo": "turno_incompatible", "nombre": nombre,
@@ -223,7 +251,8 @@ def _plan(hoy: date, *, bloquear=False):
             elegido = None
             estado = "conflicto"
         else:
-            exactos = [t for t in turnos_db if _turno_compatible(t, entrada, salida)]
+            exactos = ([t for t in turnos_db if _turno_compatible(t, entrada, salida)]
+                       if spec.reutilizar_turnos_compatibles else [])
             elegido = por_nombre[0] if por_nombre else min(exactos, key=lambda t: t.pk, default=None)
             estado = "reutilizar" if elegido else "crear"
         turnos_obj[nombre] = elegido or Turno(
@@ -237,11 +266,11 @@ def _plan(hoy: date, *, bloquear=False):
 
     jornadas = []
     jornadas_obj = {}
-    for nombre in sorted(PERFILES):
+    for nombre in sorted(spec.perfiles):
         existentes = [j for j in jornadas_db if j.nombre == nombre]
         existente = existentes[0] if len(existentes) == 1 else None
         dias = [d for d in dias_db if existente and d.jornada_id == existente.pk]
-        if existentes and (not existente or not _jornada_compatible(existente, dias)):
+        if existentes and (not existente or not _jornada_compatible(existente, dias, spec)):
             conflictos.append({"tipo": "jornada_incompatible", "nombre": nombre,
                                "ids": [j.pk for j in existentes]})
             accion = "conflicto"
@@ -249,30 +278,30 @@ def _plan(hoy: date, *, bloquear=False):
             accion = "reutilizar" if existente else "crear"
         jornadas_obj[nombre] = existente
         jornadas.append({"nombre": nombre, "id": existente.pk if existente else None,
-                         "fecha_inicio": INICIO.isoformat(), "fecha_fin": FIN.isoformat(),
-                         "dias": list(PERFILES[nombre]), "horas_semanales": 48,
+                         "fecha_inicio": spec.inicio.isoformat(), "fecha_fin": spec.fin.isoformat(),
+                         "dias": list(spec.perfiles[nombre]), "horas_semanales": 48,
                          "accion": accion})
 
     asignaciones = []
-    for pk, _, perfil in MANIFIESTO:
+    for pk, _, perfil in spec.manifiesto:
         coincidencias = [a for a in asignaciones_db if a.empleado_id == pk]
-        exacta = next((a for a in coincidencias if a.fecha_inicio == INICIO
-                       and a.fecha_fin == FIN and a.jornada.nombre == perfil), None)
+        exacta = next((a for a in coincidencias if a.fecha_inicio == spec.inicio
+                       and a.fecha_fin == spec.fin and a.jornada.nombre == perfil), None)
         otras = [a for a in coincidencias if a != exacta]
         legacy = [a.pk for a in legacy_db if a.empleado_id == pk]
         if otras or legacy:
             conflictos.append({"tipo": "asignacion_traslapada", "empleado_id": pk,
                                "ids": [a.pk for a in otras], "legacy_ids": legacy})
         asignaciones.append({"empleado_id": pk, "perfil": perfil,
-                             "fecha_inicio": INICIO.isoformat(), "fecha_fin": FIN.isoformat(),
+                             "fecha_inicio": spec.inicio.isoformat(), "fecha_fin": spec.fin.isoformat(),
                              "id": exacta.pk if exacta else None,
                              "accion": "existente" if exacta else "crear",
                              "traslapes": [a.pk for a in otras], "traslapes_legacy": legacy})
 
-    perfil_por_id = {pk: perfil for pk, _, perfil in MANIFIESTO}
+    perfil_por_id = {pk: perfil for pk, _, perfil in spec.manifiesto}
     asistencias_a_actualizar = []
     for a in asistencias_db:
-        nombre_turno = PERFILES[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
+        nombre_turno = spec.perfiles[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
         turno = turnos_obj[nombre_turno] if nombre_turno else None
         if a.turno_id != (turno.pk if turno else None) or (turno and not turno.pk):
             asistencias_a_actualizar.append({
@@ -300,7 +329,7 @@ def _plan(hoy: date, *, bloquear=False):
         key = (a.empleado_id, a.fecha)
         if key not in fechas_examinar:
             continue
-        nombre_turno = PERFILES[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
+        nombre_turno = spec.perfiles[perfil_por_id[a.empleado_id]][a.fecha.weekday()]
         turno = turnos_obj[nombre_turno] if nombre_turno else None
         diagnostico = diagnosticar_horas_extra(_asistencia_proyectada(a, turno))
         jefe_nuevo = usuario_jefe_directo_de_empleado(a.empleado)
@@ -342,7 +371,7 @@ def _plan(hoy: date, *, bloquear=False):
                                    "jefe_anterior_id": vinculado.jefe_directo_id,
                                    "jefe_nuevo_id": jefe_nuevo_id,
                                    "accion": accion})
-        elif not vinculado:
+        elif not vinculado and spec.crear_extras_faltantes:
             saldo = saldo_automatico_esperado(diagnostico, registros)
             if saldo and saldo > 0:
                 pendientes.append({"id": None, "asistencia_id": a.pk,
@@ -358,7 +387,8 @@ def _plan(hoy: date, *, bloquear=False):
                                and saldo_crudo >= UMBRAL_SOLICITUD_EXTRA_MINUTOS)
         extra_conciliada = (diagnostico.minutos is not None and diagnostico.minutos > 0
                             and saldo_autorizado >= diagnostico.minutos)
-        if reevaluar and (saldo_supera_umbral or extra_conciliada):
+        if (reevaluar and (saldo_supera_umbral or extra_conciliada)
+                and (spec.crear_extras_faltantes or vinculado)):
             tipo = IncidenciaAsistencia.TIPO_HORA_EXTRA_PENDIENTE
             existente = incidencias_por_fecha.get((a.empleado_id, a.fecha, tipo))
             if existente is None or (
@@ -409,7 +439,7 @@ def _plan(hoy: date, *, bloquear=False):
                                         "antes": _incidencia_snapshot(incidencia)})
 
     plan = {
-        "modo": "preview", "personas_objetivo": 6, "personas": personas,
+        "modo": "preview", "personas_objetivo": len(spec.manifiesto), "personas": personas,
         "turnos": turnos, "jornadas": jornadas, "asignaciones": asignaciones,
         "asistencias_evaluadas": asistencias_evaluadas,
         "extras_evaluadas": [_hora_extra_snapshot(he) for he in extras_db],
@@ -423,14 +453,15 @@ def _plan(hoy: date, *, bloquear=False):
     return plan
 
 
-def _auditar(actor, action, model, object_id, antes, despues, *, fecha=None):
+def _auditar(actor, action, model, object_id, antes, despues, *, fecha=None,
+             spec=SPEC_ADMINISTRATIVAS):
     log_event(actor, action, model, str(object_id), {
-        "motivo": MOTIVO, "fecha": fecha.isoformat() if fecha else None,
+        "motivo": spec.motivo, "fecha": fecha.isoformat() if fecha else None,
         "antes": antes, "despues": despues,
     })
 
 
-def _aplicar_plan(plan, actor):
+def _aplicar_plan(plan, actor, spec=SPEC_ADMINISTRATIVAS):
     aplicadas = []
     turnos = {}
     for fila in plan["turnos"]:
@@ -441,7 +472,7 @@ def _aplicar_plan(plan, actor):
                           tolerancia_minutos=10, activo=True, deteccion_por_checada=False)
             turno.full_clean()
             turno.save()
-            _auditar(actor, "CREATE", "rrhh.Turno", turno.pk, None, fila)
+            _auditar(actor, "CREATE", "rrhh.Turno", turno.pk, None, fila, spec=spec)
             aplicadas.append({"modelo": "Turno", "id": turno.pk, "accion": "crear"})
         else:
             turno = Turno.objects.get(pk=fila["id"])
@@ -451,19 +482,20 @@ def _aplicar_plan(plan, actor):
     for fila in plan["jornadas"]:
         if fila["accion"] == "crear":
             jornada = JornadaSemanal(nombre=fila["nombre"], activo=True,
-                                      vigencia_desde=INICIO, vigencia_hasta=FIN,
+                                      vigencia_desde=spec.inicio, vigencia_hasta=spec.fin,
                                       descripcion="48 horas semanales; domingo descanso")
             jornada.full_clean()
             jornada.save()
-            for indice, nombre_turno in enumerate(PERFILES[fila["nombre"]]):
+            for indice, nombre_turno in enumerate(spec.perfiles[fila["nombre"]]):
                 dia = JornadaSemanalDia(jornada=jornada, dia_semana=indice,
                                         turno=turnos[nombre_turno] if nombre_turno else None)
                 dia.full_clean()
                 dia.save()
                 _auditar(actor, "CREATE", "rrhh.JornadaSemanalDia", dia.pk, None,
                          {"jornada": jornada.nombre, "dia_semana": indice,
-                          "turno": nombre_turno})
-            _auditar(actor, "CREATE", "rrhh.JornadaSemanal", jornada.pk, None, fila)
+                          "turno": nombre_turno}, spec=spec)
+            _auditar(actor, "CREATE", "rrhh.JornadaSemanal", jornada.pk, None, fila,
+                     spec=spec)
             aplicadas.append({"modelo": "JornadaSemanal", "id": jornada.pk, "accion": "crear"})
         else:
             jornada = JornadaSemanal.objects.get(pk=fila["id"])
@@ -474,11 +506,11 @@ def _aplicar_plan(plan, actor):
             continue
         asignacion = asignar_jornada_empleado(
             empleado=Empleado.objects.get(pk=fila["empleado_id"]),
-            jornada=jornadas[fila["perfil"]], fecha_inicio=INICIO, fecha_fin=FIN,
-            motivo=MOTIVO, actor=actor,
+            jornada=jornadas[fila["perfil"]], fecha_inicio=spec.inicio, fecha_fin=spec.fin,
+            motivo=spec.motivo, actor=actor,
         )
         _auditar(actor, "CREATE", "rrhh.AsignacionJornadaEmpleado", asignacion.pk,
-                 None, fila, fecha=INICIO)
+                 None, fila, fecha=spec.inicio, spec=spec)
         aplicadas.append({"modelo": "AsignacionJornadaEmpleado", "id": asignacion.pk,
                            "accion": "crear"})
 
@@ -488,7 +520,7 @@ def _aplicar_plan(plan, actor):
         asistencia.save(update_fields=["turno"])
         _auditar(actor, "UPDATE", "rrhh.AsistenciaEmpleado", asistencia.pk,
                  {"turno_id": fila["turno_anterior_id"]},
-                 {"turno_id": asistencia.turno_id}, fecha=asistencia.fecha)
+                 {"turno_id": asistencia.turno_id}, fecha=asistencia.fecha, spec=spec)
         aplicadas.append({"modelo": "AsistenciaEmpleado", "id": asistencia.pk,
                            "accion": "actualizar_turno"})
 
@@ -533,7 +565,7 @@ def _aplicar_plan(plan, actor):
         _auditar(actor, accion, "rrhh.HoraExtra", he.pk, antes,
                  {"horas": str(he.horas), "estado": he.estado, "notas": he.notas,
                   "jefe_directo_id": he.jefe_directo_id},
-                 fecha=he.fecha)
+                 fecha=he.fecha, spec=spec)
         aplicadas.append({"modelo": "HoraExtra", "id": he.pk, "accion": fila["accion"]})
 
     for fila in plan["incidencias_a_reconciliar"]:
@@ -557,7 +589,7 @@ def _aplicar_plan(plan, actor):
             if anterior != despues:
                 _auditar(actor, "CREATE" if anterior is None else "UPDATE",
                          "rrhh.IncidenciaAsistencia", incidencia.pk,
-                         anterior, despues, fecha=incidencia.fecha)
+                         anterior, despues, fecha=incidencia.fecha, spec=spec)
                 aplicadas.append({"modelo": "IncidenciaAsistencia", "id": incidencia.pk,
                                    "accion": fila["accion"]})
             continue
@@ -568,33 +600,34 @@ def _aplicar_plan(plan, actor):
         incidencia.estado = IncidenciaAsistencia.ESTADO_RESUELTO
         incidencia.save(update_fields=["estado", "actualizado_en"])
         _auditar(actor, "UPDATE", "rrhh.IncidenciaAsistencia", incidencia.pk,
-                 {"estado": anterior}, {"estado": incidencia.estado}, fecha=incidencia.fecha)
+                 {"estado": anterior}, {"estado": incidencia.estado},
+                 fecha=incidencia.fecha, spec=spec)
         aplicadas.append({"modelo": "IncidenciaAsistencia", "id": incidencia.pk,
                            "accion": "resolver"})
 
     for fila in plan["extras_resueltas_con_diferencia"]:
         clave = hashlib.sha256(_canonical(fila).encode()).hexdigest()
         if not AuditLog.objects.filter(
-            action="REVIEW", model="rrhh.JornadasAdministrativas2026",
+            action="REVIEW", model=spec.modelo_auditoria,
             payload__revision_clave=clave,
         ).exists():
-            log_event(actor, "REVIEW", "rrhh.JornadasAdministrativas2026", str(fila["id"]), {
-                "motivo": MOTIVO, "fecha": fila["fecha"], "revision_clave": clave,
+            log_event(actor, "REVIEW", spec.modelo_auditoria, str(fila["id"]), {
+                "motivo": spec.motivo, "fecha": fila["fecha"], "revision_clave": clave,
                 "extra_resuelta_sin_modificar": fila,
             })
             aplicadas.append({"modelo": "HoraExtra", "id": fila["id"], "accion": "revision"})
     return aplicadas
 
 
-def configurar_jornadas_administrativas_2026(
-    *, aplicar=False, hoy=None, actor=None, expected_fingerprint=None,
+def configurar_jornadas_2026(
+    *, spec, aplicar=False, hoy=None, actor=None, expected_fingerprint=None,
 ) -> dict:
     """Previsualiza sin escribir; aplica solo con actor y huella de un plan fresco."""
     hoy = hoy or timezone.localdate()
     if type(hoy) is not date:
         raise ConfiguracionJornadasError("hoy debe ser una fecha válida.")
     if not aplicar:
-        return _plan(hoy)
+        return _plan(hoy, spec=spec)
     if not actor or not getattr(actor, "is_authenticated", False) or not actor.is_active or not can_manage_rrhh(actor):
         raise ConfiguracionJornadasError("Se requiere un actor activo con permiso para gestionar RRHH.")
     if not expected_fingerprint:
@@ -603,25 +636,37 @@ def configurar_jornadas_administrativas_2026(
         if connection.vendor != "postgresql":
             raise ConfiguracionJornadasError("La aplicación requiere PostgreSQL.")
         with connection.cursor() as cursor:
-            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [LOCK_KEY])
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [spec.lock_key])
         # El guardado ordinario de extra toma advisory diario ANTES de filas.
         # Cubrir todo el manifiesto y rango evita phantoms de asistencia/extra
         # y mantiene ese mismo orden antes de cualquier select_for_update.
-        limite = min(hoy, FIN)
-        if limite >= INICIO:
+        limite = min(hoy, spec.fin)
+        if limite >= spec.inicio:
             jornadas = [
-                (empleado_id, INICIO + timedelta(days=offset))
-                for empleado_id, _, _ in MANIFIESTO
-                for offset in range((limite - INICIO).days + 1)
+                (empleado_id, spec.inicio + timedelta(days=offset))
+                for empleado_id, _, _ in spec.manifiesto
+                for offset in range((limite - spec.inicio).days + 1)
             ]
             bloquear_jornadas_extra(jornadas)
-        plan = _plan(hoy, bloquear=True)
+        plan = _plan(hoy, bloquear=True, spec=spec)
         if plan["conflictos"]:
             raise ConfiguracionJornadasError(f"La carga tiene conflictos: {_canonical(plan['conflictos'])}")
         if plan["fingerprint"] != expected_fingerprint:
             raise ConfiguracionJornadasError("La huella del plan cambió; genere una previsualización nueva.")
-        aplicadas = _aplicar_plan(plan, actor)
-        resultado = _plan(hoy, bloquear=True)
+        aplicadas = _aplicar_plan(plan, actor, spec=spec)
+        resultado = _plan(hoy, bloquear=True, spec=spec)
         resultado["modo"] = "apply"
         resultado["aplicadas"] = aplicadas
         return resultado
+
+
+def configurar_jornadas_administrativas_2026(
+    *, aplicar=False, hoy=None, actor=None, expected_fingerprint=None,
+) -> dict:
+    return configurar_jornadas_2026(
+        spec=SPEC_ADMINISTRATIVAS,
+        aplicar=aplicar,
+        hoy=hoy,
+        actor=actor,
+        expected_fingerprint=expected_fingerprint,
+    )

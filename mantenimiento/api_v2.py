@@ -5,6 +5,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.response import Response
 
 from fallas.models import EvidenciaSeguimientoFalla
+from operacion.models import RespuestaHigiene
 from mantenimiento.services_access import (
     authorized_fallas, authorized_orders, authorized_repairs, authorized_unit_reports,
     authorized_unit_services, can_view_costs,
@@ -159,6 +160,12 @@ def _authorized_file(user, kind, pk):
             pk=pk, bitacora__reporte_id__in=authorized_fallas(user).values("pk")
         ).first()
         return (evidence.archivo, evidence.nombre) if evidence else (None, "")
+    if kind == "higiene_constatacion":
+        evidencia = RespuestaHigiene.objects.filter(
+            pk=pk,
+            reporte_falla_id__in=authorized_fallas(user).values("pk"),
+        ).only("evidencia").first()
+        return (evidencia.evidencia, "") if evidencia else (None, "")
     definitions = {
         "reporte_unidad": (authorized_unit_reports, "foto"),
         "orden_factura": (authorized_orders, "factura_archivo"),

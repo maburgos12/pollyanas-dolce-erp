@@ -1,6 +1,5 @@
-import calendar
+from datetime import timedelta
 
-from django.utils import timezone
 from rest_framework import serializers
 
 from rrhh.models import Empleado
@@ -96,6 +95,10 @@ class BonoProduccionCapturaSerializer(serializers.ModelSerializer):
     empleado_codigo = serializers.CharField(source="empleado.codigo", read_only=True)
     puesto = serializers.CharField(source="empleado.puesto", read_only=True)
     sucursal_nombre = serializers.CharField(source="empleado.sucursal_display", read_only=True)
+    periodo_mes = serializers.IntegerField(source="periodo.mes", read_only=True)
+    periodo_anio = serializers.IntegerField(source="periodo.anio", read_only=True)
+    periodo_fecha_inicio = serializers.DateField(source="periodo.fecha_inicio", read_only=True)
+    periodo_fecha_fin = serializers.DateField(source="periodo.fecha_fin", read_only=True)
 
     class Meta:
         model = BonoProduccionEmpleado
@@ -106,6 +109,10 @@ class BonoProduccionCapturaSerializer(serializers.ModelSerializer):
             "empleado_codigo",
             "puesto",
             "sucursal_nombre",
+            "periodo_mes",
+            "periodo_anio",
+            "periodo_fecha_inicio",
+            "periodo_fecha_fin",
             "area",
             "dias_trabajados",
             "dias_uniforme",
@@ -143,17 +150,21 @@ class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Bono fuera del periodo o alcance de Produccion.")
         return bono
 
-    def validate_dia(self, dia):
-        today = timezone.localdate()
-        ultimo_dia = calendar.monthrange(today.year, today.month)[1]
-        if dia < 1 or dia > ultimo_dia:
-            raise serializers.ValidationError("Dia fuera del mes actual.")
-        return dia
-
     def validate(self, attrs):
         unexpected = set(self.initial_data) - set(self.fields)
         if unexpected:
             raise serializers.ValidationError(
                 {key: "Campo no permitido para captura operativa." for key in unexpected}
             )
+        bono = attrs.get("bono") or getattr(self.instance, "bono", None)
+        dia = attrs.get("dia", getattr(self.instance, "dia", None))
+        if bono is not None and dia is not None:
+            inicio, fin = bono.periodo.rango_fechas()
+            fecha = inicio
+            dias_validos = set()
+            while fecha <= fin:
+                dias_validos.add(fecha.day)
+                fecha += timedelta(days=1)
+            if dia not in dias_validos:
+                raise serializers.ValidationError({"dia": "Día fuera del rango del corte."})
         return attrs

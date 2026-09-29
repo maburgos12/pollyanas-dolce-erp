@@ -68,6 +68,19 @@ class Command(BaseCommand):
             help="Sobrescribe una proporcion exenta; puede repetirse.",
         )
         parser.add_argument("--apply", action="store_true")
+        parser.add_argument(
+            "--aceptar-diferencia-isn",
+            action="store_true",
+            help=(
+                "Aplica un CFDI pagado aunque el calculo reconstruido difiera; "
+                "requiere --motivo-diferencia-isn."
+            ),
+        )
+        parser.add_argument(
+            "--motivo-diferencia-isn",
+            default="",
+            help="Justificacion auditable para aceptar la diferencia historica.",
+        )
 
     def handle(self, *args, **options):
         try:
@@ -84,6 +97,8 @@ class Command(BaseCommand):
             try:
                 expediente = aplicar_expediente_isn(
                     preview,
+                    aceptar_diferencia_isn=options["aceptar_diferencia_isn"],
+                    motivo_diferencia_isn=options["motivo_diferencia_isn"],
                 )
             except ValueError as exc:
                 raise CommandError(str(exc)) from exc

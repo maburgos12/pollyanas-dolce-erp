@@ -2328,10 +2328,20 @@
         }
         const initial = data.reporte_inicial || data.detalle || {};
         const timeline = data.seguimiento || [];
+        const hygieneTimeline = data.constataciones_higiene || [];
+        const hygieneSection = hygieneTimeline.length
+          ? `<h2>Revisiones diarias</h2><ol class="timeline">${hygieneTimeline.map(row => `
+              <li>
+                <strong>${esc(row.tipo_etiqueta || "Revisión diaria")}</strong>
+                <p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.persona?.nombre || "Sistema")}</p>
+                <p>${esc(row.punto || "Punto sin nombre")}: ${esc(row.observacion || "Sin observación")}</p>
+                ${evidenceGallery(row.evidencia ? [row.evidencia] : [])}
+              </li>`).join("")}</ol>`
+          : `<div class="empty">Sin revisiones diarias relacionadas.</div>`;
         const initialEvidences = [initial.foto, initial.factura].filter(Boolean);
         render(shell(`<button class="secondary-btn" onclick="returnFromDetail()">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
           <section class="card report-card"><div class="detail-list">${detailRows(initial)}${detailRows(data.fechas,"fecha ")}${detailRows(data.responsables,"responsable ")}</div><p>${esc(initial.descripcion || "Sin descripción registrada.")}</p></section>
-          <h2>Evidencias iniciales</h2>${evidenceGallery(initialEvidences)}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
+          <h2>Evidencias iniciales</h2>${evidenceGallery(initialEvidences)}${hygieneSection}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
       }
 
       async function returnFromDetail() {
@@ -2383,7 +2393,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260911-proveedor-sin-contacto-v4", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260927-higiene-consolidacion-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

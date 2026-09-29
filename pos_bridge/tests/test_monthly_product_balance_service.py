@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from control.models import MermaMensualSucursal
 from core.models import Sucursal
+from maestros.models import Insumo
 from pos_bridge.models import (
     PointBranch,
     PointConversionLine,
@@ -28,6 +29,7 @@ from pos_bridge.services.monthly_product_balance_service import MonthlyPointProd
 from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada, VentaHistorica
 from reportes.models import FactProduccionDiaria
+from ventas.models import VentaAutoritativaPoint
 
 
 class MonthlyProductBalanceConversionTests(TestCase):
@@ -590,11 +592,12 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             sync_job=sync_job,
         )
 
-    def _waste(self, recipe, quantity, when, suffix, *, sync_job=None):
+    def _waste(self, recipe, quantity, when, suffix, *, sync_job=None, insumo=None):
         return PointWasteLine.objects.create(
             branch=self.branch,
             erp_branch=self.sucursal,
             receta=recipe,
+            insumo=insumo,
             movement_external_id=f"waste-{suffix}",
             source_hash=f"waste-hash-{suffix}",
             movement_at=timezone.make_aware(when, timezone.get_current_timezone()),
@@ -603,6 +606,44 @@ class MonthlyProductBalanceLedgerTests(TestCase):
             quantity=Decimal(quantity),
             sync_job=sync_job,
         )
+
+    def test_dual_mapped_internal_waste_does_not_enter_finished_product_balance(self):
+        internal_recipe = self._recipe("Pan interno CEDIS", "PAN-INTERNO")
+        internal_input = Insumo.objects.create(
+            nombre=internal_recipe.nombre,
+            nombre_point=internal_recipe.nombre,
+            codigo_point=internal_recipe.codigo_point,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        final_input = Insumo.objects.create(
+            nombre=self.parent.nombre,
+            nombre_point=self.parent.nombre,
+            codigo_point=self.parent.codigo_point,
+            tipo_item=Insumo.TIPO_INTERNO,
+        )
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "9", datetime(2026, 7, 31, 8))
+        self._waste(
+            internal_recipe,
+            "2",
+            datetime(2026, 7, 10, 12),
+            "internal-input",
+            insumo=internal_input,
+        )
+        self._waste(
+            self.parent,
+            "1",
+            datetime(2026, 7, 10, 13),
+            "finished-product",
+            insumo=final_input,
+        )
+        service, _official = self._service()
+
+        balance = service.build("2026-07")
+
+        self.assertNotIn(internal_recipe.id, balance.rows)
+        self.assertEqual(balance.rows[self.parent.id].waste, Decimal("1"))
+        self.assertEqual(balance.sources["waste"]["internal_input_rows_excluded"], 1)
 
     def _movement_job(
         self,
@@ -1732,6 +1773,44 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
         self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+
+    def test_authoritative_product_overlay_is_a_valid_materialization_and_sales_source(self):
+        self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
+        self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "official", sync_job=job)
+        VentaAutoritativaPoint.objects.create(
+            branch=self.sucursal,
+            product=self.slice,
+            sale_date=date(2026, 7, 3),
+            product_code=self.slice.codigo_point,
+            point_name=self.slice.nombre,
+            quantity=Decimal("4"),
+        )
+        VentaHistorica.objects.bulk_create([
+            VentaHistorica(
+                receta=self.parent,
+                sucursal=self.sucursal,
+                fecha=date(2026, 7, 3),
+                cantidad=Decimal("3"),
+                fuente="POINT_BRIDGE_SALES",
+            ),
+            VentaHistorica(
+                receta=self.slice,
+                sucursal=self.sucursal,
+                fecha=date(2026, 7, 3),
+                cantidad=Decimal("4"),
+                fuente="POINT_BRIDGE_SALES",
+            ),
+        ])
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
+        self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
+        self.assertEqual(balance.rows[self.slice.id].sales, Decimal("4"))
+        self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
 
     def test_divergent_or_unmatched_bridge_rows_block_daily_sales_authority(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
