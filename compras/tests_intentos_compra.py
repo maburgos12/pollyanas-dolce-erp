@@ -74,13 +74,13 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(con_orden.compromisos_previos, Decimal('1000'))
         self.assertEqual(con_orden.disponible_despues, Decimal('8500'))
 
-    def _intento(self, *, pagado=False):
+    def _intento(self, *, pagado=False, importe=Decimal('180')):
         generar_ordenes_departamentales([self.item], actor=self.user)
         intento = self.item.intento_vigente
         if pagado:
             CompraRealizadaDepartamental.objects.create(
                 intento=intento, item=self.item, cotizacion=self.quote,
-                fecha_compra=timezone.localdate(), importe_final=Decimal('180'),
+                fecha_compra=timezone.localdate(), importe_final=importe,
                 comprobante='compras/compra.pdf', registrado_por=self.user,
             )
             self.item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
@@ -164,6 +164,89 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertIn(timezone.localdate().isoformat(), solicitud_evento.detalle)
         self.assertIn('170', solicitud_evento.detalle)
 
+    def test_cancelacion_pagada_admite_cargos_documentados_y_desglosa_evento(self):
+        intento = self._intento(pagado=True, importe=Decimal('199.56'))
+        evidencia = SimpleUploadedFile(
+            'reembolso.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+        )
+        self._cancelar(
+            intento,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=Decimal('318.56'),
+            reembolso_cargos_adicionales=Decimal('119.00'),
+            evidencia_solicitud_reembolso=evidencia,
+        )
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal('318.56'))
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal('119.00'))
+        evento = EventoCompraDepartamental.objects.get(
+            item=self.item, tipo='REEMBOLSO_SOLICITADO',
+        )
+        self.assertIn('producto $199.56', evento.detalle)
+        self.assertIn('cargos adicionales documentados $119.00', evento.detalle)
+        self.assertIn('total $318.56', evento.detalle)
+
+    def test_cancelacion_pagada_sin_cargos_conserva_flujo_simple(self):
+        intento = self._intento(pagado=True, importe=Decimal('119.00'))
+        self._cancelar(
+            intento,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=Decimal('119.00'),
+            reembolso_cargos_adicionales=Decimal('0.00'),
+        )
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal('0.00'))
+        evento = EventoCompraDepartamental.objects.get(
+            item=self.item, tipo='REEMBOLSO_SOLICITADO',
+        )
+        self.assertIn('por $119.00', evento.detalle)
+        self.assertNotIn('cargos adicionales', evento.detalle)
+
+    def test_cargos_adicionales_invalidos_no_mutan_estado_ni_dejan_archivos(self):
+        intento = self._intento(pagado=True, importe=Decimal('199.56'))
+        casos = (
+            (Decimal('119.00'), Decimal('119.00'), None, 'evidencia_solicitud_reembolso'),
+            (Decimal('100.00'), Decimal('100.01'), 'compras/evidencia.pdf', 'reembolso_cargos_adicionales'),
+            (
+                Decimal('318.57'), Decimal('119.00'),
+                SimpleUploadedFile(
+                    'invalido.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+                ),
+                'reembolso_solicitado',
+            ),
+            (Decimal('100.00'), Decimal('-0.01'), 'compras/evidencia.pdf', 'reembolso_cargos_adicionales'),
+            (Decimal('100.00'), Decimal('NaN'), 'compras/evidencia.pdf', 'reembolso_cargos_adicionales'),
+            (Decimal('100.00'), Decimal('Infinity'), 'compras/evidencia.pdf', 'reembolso_cargos_adicionales'),
+            (Decimal('100.00'), Decimal('0.001'), 'compras/evidencia.pdf', 'reembolso_cargos_adicionales'),
+        )
+        for total, cargos, evidencia, campo_error in casos:
+            with self.subTest(total=total, cargos=cargos):
+                with self.assertRaises(ValidationError) as error:
+                    self._cancelar(
+                        intento,
+                        reembolso_solicitado_en=timezone.localdate(),
+                        reembolso_solicitado=total,
+                        reembolso_cargos_adicionales=cargos,
+                        evidencia_solicitud_reembolso=evidencia,
+                    )
+                self.assertIn(campo_error, error.exception.message_dict)
+        intento.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertIsNone(intento.reembolso_solicitado)
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal('0.00'))
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertFalse(any(path.is_file() for path in Path(self.media.name).rglob('*')))
+
+    def test_cancelacion_sin_pago_rechaza_cargos_explicitos(self):
+        intento = self._intento()
+        with self.assertRaisesMessage(ValidationError, 'no requiere solicitud de reembolso'):
+            self._cancelar(intento, reembolso_cargos_adicionales=Decimal('0.00'))
+        intento.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertEqual(self.item.estado, ItemCompraDepartamental.ESTADO_ORDENADO)
+
     def test_cancelacion_actualiza_comentario_reciente_normalizado(self):
         intento = self._intento()
         self._cancelar(intento, detalle='  Proveedor no entregará.  ')
@@ -237,7 +320,9 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         intento = self._intento()
         linea = LineaOrdenCompraDepartamental.objects.get(intento=intento)
         for changes in ({'version': 0}, {'motivo': 'INVENTADO'}, {'detalle': '  '},
-                        {'reembolso_solicitado': Decimal('20')}):
+                        {'reembolso_solicitado': Decimal('20')},
+                        {'reembolso_solicitado_en': timezone.localdate()},
+                        {'evidencia_solicitud_reembolso': 'compras/evidencia.pdf'}):
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
                 self._cancelar(intento, **changes)
         self.assertEqual(IntentoCompraDepartamental.objects.get(pk=intento.pk).version, 1)
@@ -253,6 +338,12 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         for changes in ({}, {'reembolso_solicitado_en': timezone.localdate()},
                         {'reembolso_solicitado': Decimal('10')},
                         {'reembolso_solicitado_en': timezone.localdate() + timedelta(days=1), 'reembolso_solicitado': Decimal('10')},
+                        {'reembolso_solicitado_en': '2026-09-29', 'reembolso_solicitado': Decimal('10')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': 'importe inválido'},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('NaN')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('Infinity')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('-1')},
+                        {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('10.001')},
                         {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('0')},
                         {'reembolso_solicitado_en': timezone.localdate(), 'reembolso_solicitado': Decimal('181')}):
             with self.subTest(changes=changes), self.assertRaises(ValidationError):
@@ -385,13 +476,13 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
 
 
 class FormulariosIntentoCompraTests(_CompraDepartamentalBase, TestCase):
-    def _intento(self, *, pagado=False):
+    def _intento(self, *, pagado=False, importe=Decimal('180')):
         generar_ordenes_departamentales([self.item], actor=self.user)
         intento = self.item.intento_vigente
         if pagado:
             CompraRealizadaDepartamental.objects.create(
                 intento=intento, item=self.item, cotizacion=self.quote,
-                fecha_compra=timezone.localdate(), importe_final=Decimal('180'),
+                fecha_compra=timezone.localdate(), importe_final=importe,
                 comprobante='compras/compra.pdf', registrado_por=self.user,
             )
         return intento
@@ -422,6 +513,57 @@ class FormulariosIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         invalido = CancelarIntentoCompraForm(data=datos, files={'evidencia_solicitud_reembolso': archivo}, intento=intento)
         self.assertFalse(invalido.is_valid())
         self.assertIn('evidencia_solicitud_reembolso', invalido.errors)
+
+    def test_cancelar_form_expone_desglose_sin_maximo_antiguo_y_default_cero(self):
+        intento = self._intento(pagado=True, importe=Decimal('199.56'))
+        form = CancelarIntentoCompraForm(intento=intento)
+        campo_total = form.fields['reembolso_solicitado']
+        campo_cargos = form.fields['reembolso_cargos_adicionales']
+        self.assertIsNone(campo_total.max_value)
+        self.assertIn('$199.56', campo_total.help_text)
+        self.assertIn('exceso', campo_total.help_text.lower())
+        self.assertEqual(campo_cargos.label, 'Cargos adicionales documentados')
+        self.assertEqual(campo_cargos.initial, Decimal('0.00'))
+        datos = {
+            'version': '1', 'motivo': 'NO_ENTREGO', 'detalle': 'Proveedor no entregó',
+            'reembolso_solicitado_en': timezone.localdate().isoformat(),
+            'reembolso_solicitado': '199.56',
+        }
+        ligado = CancelarIntentoCompraForm(data=datos, intento=intento)
+        self.assertTrue(ligado.is_valid(), ligado.errors)
+        self.assertEqual(ligado.cleaned_data['reembolso_cargos_adicionales'], Decimal('0.00'))
+
+    def test_cancelar_form_valida_relacion_y_evidencia_de_cargos(self):
+        intento = self._intento(pagado=True, importe=Decimal('199.56'))
+        base = {
+            'version': '1', 'motivo': 'NO_ENTREGO', 'detalle': 'Proveedor no entregó',
+            'reembolso_solicitado_en': timezone.localdate().isoformat(),
+            'reembolso_solicitado': '318.56',
+            'reembolso_cargos_adicionales': '119.00',
+        }
+        casos = (
+            ({}, 'evidencia_solicitud_reembolso'),
+            ({'reembolso_solicitado': '100.00', 'reembolso_cargos_adicionales': '100.01'}, 'reembolso_cargos_adicionales'),
+            ({'reembolso_solicitado': '318.57'}, 'reembolso_solicitado'),
+            ({'reembolso_cargos_adicionales': '-0.01'}, 'reembolso_cargos_adicionales'),
+            ({'reembolso_cargos_adicionales': 'NaN'}, 'reembolso_cargos_adicionales'),
+            ({'reembolso_cargos_adicionales': 'Infinity'}, 'reembolso_cargos_adicionales'),
+            ({'reembolso_cargos_adicionales': '0.001'}, 'reembolso_cargos_adicionales'),
+            ({'reembolso_solicitado': ''}, 'reembolso_solicitado'),
+            ({'reembolso_solicitado_en': ''}, 'reembolso_solicitado_en'),
+        )
+        for cambios, campo_error in casos:
+            with self.subTest(cambios=cambios):
+                form = CancelarIntentoCompraForm(data={**base, **cambios}, intento=intento)
+                self.assertFalse(form.is_valid())
+                self.assertIn(campo_error, form.errors)
+        evidencia = SimpleUploadedFile(
+            'reembolso.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+        )
+        valido = CancelarIntentoCompraForm(
+            data=base, files={'evidencia_solicitud_reembolso': evidencia}, intento=intento,
+        )
+        self.assertTrue(valido.is_valid(), valido.errors)
 
     def test_reembolso_form_exige_saldo_y_valida_archivo_y_fecha(self):
         intento = self._intento(pagado=True)
@@ -1252,15 +1394,16 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(CompraRealizadaDepartamental.objects.get(pk=compra.pk).intento_id, intento.pk)
         self.assertEqual(EventoCompraDepartamental.objects.filter(item=self.item, tipo='REEMBOLSO_SOLICITADO').count(), 1)
 
-    def test_cancelar_intento_pagado_muestra_maximo_reembolsable(self):
+    def test_cancelar_intento_pagado_muestra_producto_y_cargos_documentados(self):
         intento = self._intento(pagado=True)
 
         response = self.client.get(
             reverse('compras:departamental_intento_cancelar', args=[intento.pk]),
         )
 
-        self.assertContains(response, 'max="180.00"')
-        self.assertContains(response, 'Máximo reembolsable: $180.00')
+        self.assertNotContains(response, 'max="180.00"')
+        self.assertContains(response, 'Producto pagado: $180.00')
+        self.assertContains(response, 'name="reembolso_cargos_adicionales"')
 
     def test_cancelar_articulo_async_exige_motivo_y_segundo_post_409(self):
         url = reverse('compras:departamental_articulo_cancelar', args=[self.item.pk])
