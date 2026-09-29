@@ -141,6 +141,23 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    @patch("reportes.services_inventory_traceability.transaction.on_commit")
+    def test_complete_rebuild_schedules_agent_after_commit(self, on_commit):
+        self._materializer(self._result(self._line())).rebuild(MONTH)
+
+        on_commit.assert_called_once()
+        self.assertTrue(callable(on_commit.call_args.args[0]))
+
+    @patch("reportes.services_inventory_traceability.transaction.on_commit")
+    def test_incomplete_rebuild_does_not_schedule_agent(self, on_commit):
+        issue = TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta cierre")
+
+        self._materializer(
+            self._result(source_complete=False, global_issues=(issue,))
+        ).rebuild(MONTH)
+
+        on_commit.assert_not_called()
+
     def test_rebuild_moves_resolved_alias_case_to_canonical_branch_with_history(self):
         erp_branch = Sucursal.objects.create(codigo="AUD-MAT", nombre="Centro")
         self.branch.external_id = "1"

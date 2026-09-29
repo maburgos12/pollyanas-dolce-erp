@@ -575,6 +575,10 @@ def _case_payload(case: ProductInventoryAuditCase) -> dict[str, object]:
         "movement_status": case.movement_status,
         "point_closing_status": case.point_closing_status,
         "physical_status": case.physical_status,
+        "attention_level": case.attention_level,
+        "responsible_area": case.responsible_area,
+        "assigned_to_id": case.assigned_to_id,
+        "investigation_summary": case.investigation_summary,
         "difference": str(case.difference),
     }
 
@@ -793,6 +797,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     branches = []
     selected_branch = (request.GET.get("branch") or "").strip()
     selected_status = (request.GET.get("status") or "").strip()
+    selected_attention = (request.GET.get("attention") or "").strip()
     selected_tab = (request.GET.get("tab") or "exceptions").strip()
     if selected_tab not in {"exceptions", "balanced"}:
         selected_tab = "exceptions"
@@ -847,6 +852,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             case_queryset = case_queryset.filter(movement_status=selected_status)
         elif selected_status:
             selected_status = ""
+        if selected_attention in ProductInventoryAuditCase.AttentionLevel.values:
+            case_queryset = case_queryset.filter(attention_level=selected_attention)
+        elif selected_attention:
+            selected_attention = ""
         tab_totals = case_queryset.aggregate(
             exceptions=models.Count(
                 "id", filter=models.Q(movement_status__in=EXCEPTION_STATUSES)
@@ -864,7 +873,21 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     else RECONCILED_STATUSES
                 )
             )
-        ordered_cases = case_queryset.select_related("branch", "product").order_by(
+        ordered_cases = case_queryset.select_related(
+            "branch", "product", "assigned_to"
+        ).order_by(
+            models.Case(
+                models.When(
+                    attention_level=ProductInventoryAuditCase.AttentionLevel.HIGH,
+                    then=0,
+                ),
+                models.When(
+                    attention_level=ProductInventoryAuditCase.AttentionLevel.NORMAL,
+                    then=1,
+                ),
+                default=2,
+                output_field=models.IntegerField(),
+            ),
             models.Case(
                 models.When(
                     movement_status=ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
@@ -912,8 +935,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "selected_month": run.month.strftime("%Y-%m") if run else raw_month,
                 "selected_branch": selected_branch,
                 "selected_status": selected_status,
+                "selected_attention": selected_attention,
                 "selected_tab": selected_tab,
                 "status_options": ProductInventoryAuditCase.MovementStatus.choices,
+                "attention_options": ProductInventoryAuditCase.AttentionLevel.choices,
                 "kpis": kpis,
                 "tab_counts": tab_counts,
                 "page_obj": page_obj,
@@ -954,7 +979,9 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "actor", "related_event", "related_event__actor"
         ).order_by("created_at", "id")
         case = (
-            ProductInventoryAuditCase.objects.select_related("branch", "product", "run")
+            ProductInventoryAuditCase.objects.select_related(
+                "branch", "product", "run", "assigned_to"
+            )
             .get(pk=pk)
         )
     except ProductInventoryAuditCase.DoesNotExist:
