@@ -1652,7 +1652,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "fecha": "2026-07-31",
             }
         )
-        PointSyncJob.objects.create(
+        legacy_open_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
             status=PointSyncJob.STATUS_SUCCESS,
             parameters={
@@ -1675,7 +1675,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             received_at=datetime(
                 2026, 9, 1, 8, 0, tzinfo=timezone.get_current_timezone()
             ),
-            sync_job=self.transfer_job,
+            sync_job=legacy_open_job,
         )
 
         result = self.service.build(month=date(2026, 8, 1))

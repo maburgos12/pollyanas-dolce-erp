@@ -865,10 +865,15 @@ class BranchInventoryTraceabilityService:
             if provenance_job is None:
                 provenance_issues = ["TRANSFER_ROW_PROVENANCE_JOB_MISSING"]
             elif (provenance_job.parameters or {}).get("mode") == "open_transfers":
-                provenance_issues = cls._open_transfer_job_contract_issues(
-                    provenance_job,
-                    operational_date=month_end,
-                )
+                if cls._uses_legacy_open_transfer_contract(provenance_job):
+                    provenance_issues = cls._legacy_open_transfer_job_contract_issues(
+                        provenance_job
+                    )
+                else:
+                    provenance_issues = cls._open_transfer_job_contract_issues(
+                        provenance_job,
+                        operational_date=month_end,
+                    )
             else:
                 provenance_issues = cls._transfer_job_contract_issues(
                     provenance_job,
