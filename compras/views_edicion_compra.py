@@ -49,7 +49,7 @@ def departamental_cotizacion_editar(request, quote_pk):
     form = EditarCotizacionDepartamentalForm(request.POST or None, request.FILES or None, item=quote.item, instance=quote)
     config = {'titulo': 'Editar cotización', 'explicacion': 'Cada cambio conserva su versión anterior, autor y motivo. Si aumenta el importe de la cotización seleccionada, Dirección General debe volver a autorizarla.'}
     try:
-        validar_edicion(quote.item)
+        validar_edicion(quote.item, quote)
     except ValidationError as exc:
         return _respuesta_accion(request, message='; '.join(exc.messages), redirect_url=_destino(quote.item), status=409)
     if request.method == 'POST':

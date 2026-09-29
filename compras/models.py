@@ -812,6 +812,7 @@ class RecepcionItemDepartamental(models.Model):
             )
             item = ItemCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.item_id)
             intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.intento_id)
+            linea = LineaOrdenCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.pk)
             anterior = None
             if not self._state.adding:
                 anterior = type(self).objects.using(db).select_for_update().get(pk=self.pk)
@@ -847,16 +848,17 @@ class RecepcionItemDepartamental(models.Model):
             result = super().save(*args, **kwargs)
             total = linea.recepciones.using(db).aggregate(models.Sum("cantidad_recibida"))["cantidad_recibida__sum"] or 0
             if total < linea.cantidad:
-                if intento.estado != IntentoCompraDepartamental.ESTADO_VIGENTE:
-                    intento.estado = IntentoCompraDepartamental.ESTADO_VIGENTE
-                    intento.save(update_fields=["estado", "actualizado_en"])
+                intento.estado = IntentoCompraDepartamental.ESTADO_VIGENTE
                 item.estado = ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL
                 item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
             else:
                 intento.estado = IntentoCompraDepartamental.ESTADO_ENTREGADO
-                intento.save(update_fields=["estado", "actualizado_en"])
                 item.estado = ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION
                 item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_AREA
+            # Toda variación de cantidad invalida formularios abiertos; editar
+            # observaciones conserva la versión y no vuelve a procesar la entrega.
+            intento.version += 1
+            intento.save(update_fields=["estado", "version", "actualizado_en"])
             item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
             item.solicitud.actualizar_estado_desde_items()
             return result

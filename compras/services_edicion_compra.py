@@ -30,7 +30,12 @@ def tiene_recepcion_historica(item):
     return RecepcionItemDepartamental.objects.filter(linea_orden__item=item).exists()
 
 
-def validar_edicion(item):
+def validar_edicion(item, cotizacion=None):
+    if cotizacion is not None and (
+        IntentoCompraDepartamental.objects.filter(cotizacion=cotizacion).exists()
+        or LineaOrdenCompraDepartamental.objects.filter(cotizacion=cotizacion).exists()
+    ):
+        raise ValidationError('Esta cotización pertenece al historial de una orden y no puede editarse. Crea una nueva cotización para reemplazarla.')
     if (item.estado in ESTADOS_CERRADOS or item.solicitud.estado in ('BORRADOR', 'CANCELADA', 'COMPLETADA')
             or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item)):
         raise ValidationError('No puedes editar esta cotización: el artículo está cerrado, comprado o tiene entregas registradas.')
@@ -75,7 +80,7 @@ def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
 
     item = ItemCompraDepartamental.objects.select_for_update().select_related('solicitud__area').get(pk=cotizacion.item_id)
     cotizacion = CotizacionCompraDepartamental.objects.select_for_update().get(pk=cotizacion.pk)
-    validar_edicion(item)
+    validar_edicion(item, cotizacion)
     if cotizacion.version != version:
         raise ValidationError('Otra persona actualizó esta cotización. Recarga la página y revisa los cambios antes de guardar.')
     if not motivo.strip():

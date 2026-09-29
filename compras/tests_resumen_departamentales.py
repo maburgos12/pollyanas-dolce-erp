@@ -188,6 +188,24 @@ class ResumenDepartamentalTests(TestCase):
         self.assertEqual((total['comprometido'], total['reembolso_pendiente'], total['reembolsado']),
                          (Decimal('500'), Decimal('0'), Decimal('1000')))
 
+    def test_saldos_terminales_no_duplican_filas_ni_agregan_consultas(self):
+        from .resumen_departamentales import construir_resumen_departamental
+        for _ in range(5):
+            item = self.item(self.solicitud(estado=Solicitud.ESTADO_COMPLETADA),
+                             estado=Item.ESTADO_RECIBIDO_CONFORME)
+            for _ in range(2):
+                quote = self.cotizacion(item, seleccionada=False)
+                intento = Intento.objects.create(item=item, cotizacion=quote,
+                    estado=Intento.ESTADO_REEMBOLSO_SOLICITADO, reembolso_solicitado=Decimal('100'))
+                Reembolso.objects.create(intento=intento, importe=Decimal('10'),
+                    fecha=timezone.localdate(), registrado_por=self.user)
+        with self.assertNumQueries(4):
+            contexto = construir_resumen_departamental({'estado': Item.ESTADO_POR_COTIZAR})
+        self.assertEqual(len(contexto['items']), 5)
+        self.assertEqual(contexto['resumen']['articulos'], 0)
+        self.assertEqual(contexto['resumen']['reembolso_pendiente'], Decimal('900'))
+        self.assertEqual(contexto['resumen']['reembolsado'], Decimal('100'))
+
     def test_comprometido_excluye_intentos_cancelados_y_entregados(self):
         for estado in (Intento.ESTADO_CANCELADO_SIN_PAGO, Intento.ESTADO_ENTREGADO):
             item = self.item()

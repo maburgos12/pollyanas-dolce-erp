@@ -26,6 +26,7 @@ from .models import (
     EventoCompraDepartamental,
     IntentoCompraDepartamental,
     ItemCompraDepartamental,
+    LineaOrdenCompraDepartamental,
     ReembolsoCompraDepartamental,
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
@@ -296,6 +297,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     solicitud = get_object_or_404(
         SolicitudCompraDepartamental.objects.select_related("area", "solicitante", "comprador_asignado").prefetch_related(
             "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
+            "items__lineas_orden",
             Prefetch(
                 "items__intentos_compra",
                 queryset=IntentoCompraDepartamental.objects.order_by("creado_en", "pk")
@@ -347,6 +349,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
                 and historico.saldo_reembolso_visible > 0
             )
         intento_vigente = item.intento_vigente
+        item.intento_para_entrega = intento_vigente
         item.puede_cancelar_definitivamente = (
             es_compras and intento_vigente is None and not hay_recepcion and not hay_saldo_reembolso
             and item.estado not in ("CANCELADO", "RECHAZADO", "PENDIENTE_CONFIRMACION", "RECIBIDO_CONFORME")
@@ -373,7 +376,10 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
         item.puede_registrar_compra = (not cerrado_por_evidencia and item.estado in ('AUTORIZADO','ORDENADO')
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
+        cotizaciones_historicas = {historico.cotizacion_id for historico in item.intentos_compra_prefetched}
+        cotizaciones_historicas.update(linea.cotizacion_id for linea in item.lineas_orden.all())
         for quote in item.cotizaciones.all():
+            quote.puede_editar = item.puede_editar_cotizacion and quote.pk not in cotizaciones_historicas
             quote.historial_visible = []
             for revision in quote.historial.all():
                 revision.cambios_visibles = _cambios_historial_cotizacion(revision)
@@ -393,13 +399,18 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             total_solicitado += item.subtotal_estimado
         seleccionada = next((quote for quote in item.cotizaciones.all() if quote.seleccionada), None)
         item.cotizacion_seleccionada = seleccionada
+        compromiso = getattr(intento, "compromiso", None) if intento else None
         if seleccionada:
             total_cotizado += seleccionada.total_adquisicion
+            # La selección que se muestra ya forma parte de la exposición activa,
+            # incluso después de entregar. Se descuenta una sola vez en la evaluación.
+            candidato = compromiso if intento else compromiso_actual_para_evaluar(item)
+            compromiso_propio = (candidato if candidato and candidato.activo
+                                 and candidato.cotizacion_id == seleccionada.pk else None)
             item.evaluacion_presupuesto = evaluar_presupuesto_item(
                 item, seleccionada.total_adquisicion,
-                compromiso_excluido=compromiso_actual_para_evaluar(item),
+                compromiso_excluido=compromiso_propio,
             )
-        compromiso = getattr(intento, "compromiso", None) if intento else None
         if (intento and intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
                 and compromiso and compromiso.activo and compromiso.formalizado_en):
             total_comprometido += compromiso.monto
@@ -608,6 +619,16 @@ def departamental_recibir(request, item_pk):
     with transaction.atomic():
         item = get_object_or_404(ItemCompraDepartamental.objects.select_for_update(), pk=item_pk)
         destino = reverse("compras:departamental_detalle", args=[item.solicitud_id]) + f'#item-{item.pk}'
+        try:
+            intento_id = int(request.POST.get('intento_id', ''))
+            intento_version = int(request.POST.get('intento_version', ''))
+        except (ValueError, TypeError):
+            return _respuesta_accion(request, message='Recarga el artículo para revisar la orden antes de registrar la entrega.', redirect_url=destino, status=409)
+        intento = IntentoCompraDepartamental.objects.select_for_update().filter(
+            pk=intento_id, item=item, estado=IntentoCompraDepartamental.ESTADO_VIGENTE,
+        ).first()
+        if intento is None or intento.version != intento_version:
+            return _respuesta_accion(request, message='La orden o sus entregas cambiaron. Recarga el artículo antes de registrar la recepción.', redirect_url=destino, status=409)
         if item.estado not in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL'):
             return _respuesta_accion(request, message='Este artículo no está pendiente de entrega.', redirect_url=destino, status=409)
         try:
@@ -616,8 +637,7 @@ def departamental_recibir(request, item_pk):
                 raise InvalidOperation
         except InvalidOperation:
             return _respuesta_accion(request, message='La cantidad recibida debe ser mayor que cero.', redirect_url=destino, status=400)
-        intento = item.intento_vigente
-        linea = getattr(intento, 'linea_orden', None) if intento else None
+        linea = LineaOrdenCompraDepartamental.objects.select_for_update().filter(intento=intento, item=item).first()
         if linea is None:
             return _respuesta_accion(request, message='No se encontró la orden del artículo.', redirect_url=destino, status=409)
         RecepcionItemDepartamental.objects.create(

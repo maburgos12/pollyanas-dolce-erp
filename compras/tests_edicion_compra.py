@@ -90,6 +90,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
     def test_autorizacion_existente_sin_rubro_se_conserva_al_consultar_y_reducir(self):
         self.item.rubro = None
         self.item.save(update_fields=['rubro'])
+        self.assertEqual(self.editar(costo_unitario='90').status_code, 200)
         for estado in ('AUTORIZADO', 'ORDENADO'):
             with self.subTest(estado=estado):
                 if estado == 'ORDENADO':
@@ -101,7 +102,7 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
                 self.item.refresh_from_db()
                 self.assertEqual(self.item.estado, estado)
                 self.assertTrue(self.compromiso_actual().activo)
-        self.assertEqual(self.editar(costo_unitario='90').status_code, 200)
+        self.assertEqual(self.editar(costo_unitario='80', version='2').status_code, 409)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado, 'ORDENADO')
         self.assertEqual(self.linea_actual().total, Decimal('180'))
@@ -172,29 +173,25 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
                 self.assertGreaterEqual(self.editar(**data).status_code,400)
         self.assertFalse(HistorialCotizacionDepartamental.objects.exists())
 
-    def test_orden_existente_se_corrige_sin_duplicar(self):
+    def test_orden_existente_conserva_cotizacion_y_permite_compra_menor(self):
         self.ordenar()
         line_pk=self.linea_actual().pk
-        self.assertEqual(self.editar(costo_unitario='90').status_code,200)
+        self.assertEqual(self.editar(costo_unitario='90').status_code,409)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ORDENADO')
         self.assertEqual(self.linea_actual().pk,line_pk)
-        self.assertEqual(self.linea_actual().total,Decimal('180'))
+        self.assertEqual(self.linea_actual().total,Decimal('200'))
         self.assertEqual(self.comprar(importe_final='180').status_code,200)
 
-    def test_reautorizacion_actualiza_orden_existente(self):
+    def test_aumento_no_modifica_cotizacion_de_orden_existente(self):
         self.ordenar()
         line_pk=self.linea_actual().pk
-        self.assertEqual(self.editar(costo_unitario='150').status_code,200)
-        response=self.client.post(reverse('compras:departamental_decidir',args=[self.item.pk]),
-                                  {'decision':'AUTORIZAR','cotizacion_id':self.quote.pk,
-                                   'version':CotizacionCompraDepartamental.objects.get(pk=self.quote.pk).version},**self.headers)
-        self.assertEqual(response.status_code,200,response.content)
+        self.assertEqual(self.editar(costo_unitario='150').status_code,409)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'ORDENADO')
         self.assertEqual(self.linea_actual().pk,line_pk)
-        self.assertEqual(self.linea_actual().total,Decimal('300'))
-        self.assertEqual(self.comprar(importe_final='300').status_code,200)
+        self.assertEqual(self.linea_actual().total,Decimal('200'))
+        self.assertEqual(self.comprar(importe_final='300').status_code,409)
 
     def test_orden_no_permite_cambiar_proveedor_o_cantidad(self):
         self.ordenar()
@@ -202,13 +199,14 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertGreaterEqual(self.editar(proveedor=otro.pk).status_code,400)
         self.assertGreaterEqual(self.editar(cantidad_ofertada='3').status_code,400)
 
-    def test_formulario_advierte_restricciones_de_orden_vigente(self):
+    def test_formulario_rechaza_editar_cotizacion_de_orden_vigente(self):
         url = reverse('compras:departamental_cotizacion_editar', args=[self.quote.pk])
         self.assertNotContains(self.client.get(url), 'La orden ya existe: este dato debe conservarse.')
         self.ordenar()
-        response = self.client.get(url)
+        response = self.client.get(url, follow=True)
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'La orden ya existe: este dato debe conservarse.', count=2)
+        self.assertContains(response, 'Crea una nueva cotización para reemplazarla.')
+        self.assertNotContains(response, 'Editar cotización')
 
     def test_compra_crea_orden_sin_entrega_ni_gasto_contable(self):
         response=self.comprar()
@@ -253,8 +251,10 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
 
     def test_entrega_posterior_a_compra_se_registra_por_separado(self):
         self.comprar()
+        intento = self.item.intento_vigente
         response=self.client.post(reverse('compras:departamental_recibir',args=[self.item.pk]),
-                                  {'cantidad_recibida':'2'},**self.headers)
+                                  {'cantidad_recibida':'2', 'intento_id': intento.pk,
+                                   'intento_version': intento.version},**self.headers)
         self.assertEqual(response.status_code,200,response.content)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estado,'PENDIENTE_CONFIRMACION')
@@ -270,7 +270,8 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         ), 1)
         self.assertEqual(self.client.post(
             reverse('compras:departamental_recibir', args=[self.item.pk]),
-            {'cantidad_recibida': '2'}, **self.headers,
+            {'cantidad_recibida': '2', 'intento_id': compra.intento_id,
+             'intento_version': compra.intento.version}, **self.headers,
         ).status_code, 200)
         compra.intento.refresh_from_db()
         self.assertEqual(compra.intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)

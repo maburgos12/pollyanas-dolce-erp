@@ -9,7 +9,7 @@ from django.utils import timezone
 from django.db.models import Q
 
 from .forms_cotizaciones import CotizacionDepartamentalForm
-from .models import CompraRealizadaDepartamental, IntentoCompraDepartamental, LineaOrdenCompraDepartamental
+from .models import CompraRealizadaDepartamental
 
 
 class EditarCotizacionDepartamentalForm(CotizacionDepartamentalForm):
@@ -24,11 +24,6 @@ class EditarCotizacionDepartamentalForm(CotizacionDepartamentalForm):
         self.fields['proveedor'].queryset = self.fields['proveedor'].queryset.model.objects.filter(
             Q(activo=True) | Q(pk=self.instance.proveedor_id)
         ).order_by('nombre')
-        if LineaOrdenCompraDepartamental.objects.filter(
-            intento__item=self.item, intento__estado=IntentoCompraDepartamental.ESTADO_VIGENTE,
-        ).exists():
-            for name in ('proveedor', 'cantidad_ofertada'):
-                self.fields[name].help_text = 'La orden ya existe: este dato debe conservarse.'
 
 
 class RegistrarCompraDepartamentalForm(forms.ModelForm):
