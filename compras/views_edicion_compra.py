@@ -49,7 +49,7 @@ def departamental_cotizacion_editar(request, quote_pk):
     form = EditarCotizacionDepartamentalForm(request.POST or None, request.FILES or None, item=quote.item, instance=quote)
     config = {'titulo': 'Editar cotización', 'explicacion': 'Cada cambio conserva su versión anterior, autor y motivo. Si aumenta el importe de la cotización seleccionada, Dirección General debe volver a autorizarla.'}
     try:
-        validar_edicion(quote.item)
+        validar_edicion(quote.item, quote)
     except ValidationError as exc:
         return _respuesta_accion(request, message='; '.join(exc.messages), redirect_url=_destino(quote.item), status=409)
     if request.method == 'POST':
@@ -138,7 +138,7 @@ def departamental_aviso_reintentar(request, pk):
     )
     if not (puede_gestionar_compras_departamentales(request.user) or _es_direccion(request.user)):
         raise PermissionDenied
-    destino = _destino(aviso.compra.item) + '-avisos'
+    destino = reverse('compras:departamental_detalle', args=[aviso.compra.item.solicitud_id]) + f'#intento-{aviso.compra.intento_id}-avisos'
     if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
         return _respuesta_accion(request, message=f'El aviso por {aviso.get_canal_display().lower()} ya se había enviado. No se reenvió.',
                                  redirect_url=destino, reload=True)

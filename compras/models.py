@@ -376,6 +376,15 @@ class ItemCompraDepartamental(models.Model):
             return None
         return self.cantidad * self.costo_unitario_estimado
 
+    @property
+    def intento_vigente(self):
+        intentos = getattr(self, "intentos_compra_prefetched", None)
+        if intentos is not None:
+            return next((intento for intento in intentos if intento.estado == "VIGENTE"), None)
+        return self.intentos_compra.filter(estado="VIGENTE").select_related(
+            "cotizacion__proveedor", "linea_orden", "compra"
+        ).first()
+
     def clean(self):
         super().clean()
         if self.rubro_id and self.solicitud_id and self.rubro.area_id != self.solicitud.area_id:
@@ -431,9 +440,240 @@ class HistorialCotizacionDepartamental(models.Model):
         ordering = ["-creado_en", "-pk"]
 
 
+def _normalizar_update_fields(args, kwargs):
+    """Conserva un generador de campos para validar y luego guardar la misma edición."""
+    if kwargs.get("update_fields") is not None:
+        kwargs["update_fields"] = tuple(kwargs["update_fields"])
+    elif len(args) > 3 and args[3] is not None:
+        args = (*args[:3], tuple(args[3]), *args[4:])
+    return args, kwargs
+
+
+def _ids_relacion_efectivos(instancia, campos, args, kwargs):
+    """Usar valores persistidos para relaciones omitidas de update_fields."""
+    update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+    valores = {campo: getattr(instancia, f"{campo}_id") for campo in campos}
+    if not instancia._state.adding and update_fields is not None:
+        incluidos = set(update_fields)
+        omitidos = [
+            campo for campo in campos
+            if campo not in incluidos and f"{campo}_id" not in incluidos
+        ]
+        if omitidos:
+            db = kwargs.get("using") or instancia._state.db or "default"
+            guardados = type(instancia)._base_manager.using(db).values(
+                *(f"{campo}_id" for campo in omitidos)
+            ).get(pk=instancia.pk)
+            valores.update({campo: guardados[f"{campo}_id"] for campo in omitidos})
+    return valores
+
+
+def _validar_vinculos_compra(item_id, cotizacion_id, intento_id=None, *, using="default"):
+    if not item_id or not cotizacion_id:
+        return
+    item_cotizado = CotizacionCompraDepartamental.objects.using(using).filter(
+        pk=cotizacion_id
+    ).values_list("item_id", flat=True).first()
+    if item_cotizado is not None and item_cotizado != item_id:
+        raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo."})
+    if intento_id is not None:
+        intento = IntentoCompraDepartamental.objects.using(using).filter(
+            pk=intento_id
+        ).values("item_id", "cotizacion_id").first()
+        if intento is not None and (intento["item_id"] != item_id or intento["cotizacion_id"] != cotizacion_id):
+            raise ValidationError("El artículo y la cotización deben corresponder al intento de compra.")
+
+
+class IntentoCompraQuerySet(models.QuerySet):
+    CAMPOS_REEMBOLSO = frozenset({
+        "reembolso_solicitado", "reembolso_solicitado_en", "evidencia_solicitud_reembolso",
+    })
+
+    def update(self, **kwargs):
+        if self.CAMPOS_REEMBOLSO.intersection(kwargs):
+            raise ValidationError("Use save() o el servicio para modificar la solicitud de reembolso.")
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        fields = tuple(fields)
+        if self.CAMPOS_REEMBOLSO.intersection(fields):
+            raise ValidationError("Use save() o el servicio para modificar la solicitud de reembolso.")
+        return super().bulk_update(objs, fields, *args, **kwargs)
+
+
+class IntentoCompraDepartamental(models.Model):
+    ESTADO_VIGENTE = "VIGENTE"
+    ESTADO_CANCELADO_SIN_PAGO = "CANCELADO_SIN_PAGO"
+    ESTADO_REEMBOLSO_SOLICITADO = "REEMBOLSO_SOLICITADO"
+    ESTADO_REEMBOLSADO = "REEMBOLSADO"
+    ESTADO_ENTREGADO = "ENTREGADO"
+    ESTADO_CHOICES = [
+        (ESTADO_VIGENTE, "Vigente"),
+        (ESTADO_CANCELADO_SIN_PAGO, "Cancelado sin pago"),
+        (ESTADO_REEMBOLSO_SOLICITADO, "Reembolso solicitado"),
+        (ESTADO_REEMBOLSADO, "Reembolsado"),
+        (ESTADO_ENTREGADO, "Entregado"),
+    ]
+    MOTIVO_PROVEEDOR_CANCELO = "PROVEEDOR_CANCELO"
+    MOTIVO_NO_ENTREGO = "NO_ENTREGO"
+    MOTIVO_OTRO = "OTRO"
+    MOTIVO_CHOICES = [
+        (MOTIVO_PROVEEDOR_CANCELO, "Proveedor canceló"),
+        (MOTIVO_NO_ENTREGO, "Proveedor no entregó"),
+        (MOTIVO_OTRO, "Otro"),
+    ]
+
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="intentos_compra")
+    cotizacion = models.ForeignKey(
+        CotizacionCompraDepartamental, on_delete=models.PROTECT, related_name="intentos_compra"
+    )
+    numero = models.PositiveIntegerField(editable=False)
+    version = models.PositiveIntegerField(default=1)
+    estado = models.CharField(max_length=30, choices=ESTADO_CHOICES, default=ESTADO_VIGENTE, db_index=True)
+    motivo_cancelacion = models.CharField(max_length=30, choices=MOTIVO_CHOICES, blank=True, default="")
+    detalle_cancelacion = models.TextField(blank=True, default="")
+    cancelado_en = models.DateTimeField(null=True, blank=True)
+    cancelado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT,
+        related_name="intentos_compra_cancelados",
+    )
+    reembolso_solicitado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    reembolso_solicitado_en = models.DateField(null=True, blank=True)
+    evidencia_solicitud_reembolso = models.FileField(
+        upload_to="compras/departamentales/reembolsos/solicitudes/%Y/%m/", null=True, blank=True
+    )
+    creado_en = models.DateTimeField(default=timezone.now)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    objects = IntentoCompraQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["numero", "pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item"], condition=models.Q(estado="VIGENTE"),
+                name="comp_dept_un_intento_vigente",
+            ),
+            models.UniqueConstraint(fields=["item", "numero"], name="comp_dept_intento_numero_unico"),
+            models.CheckConstraint(check=models.Q(numero__gt=0), name="comp_dept_intento_numero_positivo"),
+            models.CheckConstraint(
+                check=models.Q(reembolso_solicitado__isnull=True) | models.Q(reembolso_solicitado__gt=0),
+                name="comp_dept_solicitud_reembolso_positiva",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.item_id and self.cotizacion_id and self.cotizacion.item_id != self.item_id:
+            raise ValidationError({"cotizacion": "La cotización debe corresponder al artículo del intento."})
+
+    def save(self, *args, **kwargs):
+        if kwargs.get("update_fields") is not None:
+            kwargs["update_fields"] = tuple(kwargs["update_fields"])
+        elif len(args) > 3 and args[3] is not None:
+            args = (*args[:3], tuple(args[3]), *args[4:])
+        db = kwargs.get("using") or self._state.db or "default"
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"],
+            using=db,
+        )
+        if self._state.adding and not self.numero:
+            with transaction.atomic(using=db):
+                ItemCompraDepartamental.objects.using(db).select_for_update().get(pk=self.item_id)
+                ultimo = type(self).objects.using(db).filter(item_id=self.item_id).aggregate(models.Max("numero"))["numero__max"]
+                self.numero = (ultimo or 0) + 1
+                return super().save(*args, **kwargs)
+        if not self._state.adding:
+            update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+            with transaction.atomic(using=db):
+                guardado = type(self).objects.using(db).select_for_update().get(pk=self.pk)
+                solicitado = (
+                    self.reembolso_solicitado
+                    if update_fields is None or "reembolso_solicitado" in update_fields
+                    else guardado.reembolso_solicitado
+                )
+                if solicitado is not None:
+                    solicitado = self._meta.get_field("reembolso_solicitado").to_python(solicitado)
+                recibido = self.reembolsos.using(db).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+                if recibido and (solicitado is None or solicitado < recibido):
+                    raise ValidationError({"reembolso_solicitado": "La solicitud no puede ser menor que lo reembolsado."})
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
+
+    @property
+    def total_reembolsado(self):
+        return self.reembolsos.aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+
+    @property
+    def saldo_reembolso(self):
+        return max((self.reembolso_solicitado or Decimal("0")) - self.total_reembolsado, Decimal("0"))
+
+
+class ReembolsoCompraQuerySet(models.QuerySet):
+    def bulk_create(self, objs, *args, **kwargs):
+        raise ValidationError("Los reembolsos deben registrarse individualmente.")
+
+    def bulk_update(self, objs, fields, *args, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+
+    def update(self, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+
+    def delete(self):
+        raise ValidationError("Los reembolsos registrados no pueden eliminarse.")
+
+
+class ReembolsoCompraDepartamental(models.Model):
+    intento = models.ForeignKey(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="reembolsos")
+    importe = models.DecimalField(max_digits=14, decimal_places=2)
+    fecha = models.DateField()
+    referencia = models.CharField(max_length=160, blank=True, default="")
+    comprobante = models.FileField(
+        upload_to="compras/departamentales/reembolsos/recibidos/%Y/%m/", null=True, blank=True
+    )
+    registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creado_en = models.DateTimeField(default=timezone.now)
+    objects = ReembolsoCompraQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["creado_en", "pk"]
+        constraints = [
+            models.CheckConstraint(check=models.Q(importe__gt=0), name="comp_dept_reembolso_positivo"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Los reembolsos registrados no pueden modificarse.")
+        self.importe = self._meta.get_field("importe").to_python(self.importe)
+        if self.importe is None or self.importe <= 0:
+            raise ValidationError({"importe": "El reembolso debe ser mayor que cero."})
+        db = kwargs.get("using") or self._state.db or "default"
+        with transaction.atomic(using=db):
+            intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=self.intento_id)
+            if self.pk is not None and type(self).objects.using(db).filter(pk=self.pk).exists():
+                raise ValidationError("Un reembolso registrado no puede reemplazarse.")
+            solicitado = intento.reembolso_solicitado
+            if solicitado is None:
+                raise ValidationError("El intento no tiene un reembolso solicitado.")
+            recibido = type(self).objects.using(db).filter(intento_id=self.intento_id).exclude(
+                pk=self.pk
+            ).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
+            if recibido + self.importe > solicitado:
+                raise ValidationError({"importe": "El reembolso supera el saldo solicitado."})
+            if args:
+                args = (True, *args[1:])
+            else:
+                kwargs["force_insert"] = True
+            return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Los reembolsos registrados no pueden eliminarse.")
+
+
 class CompraRealizadaDepartamental(models.Model):
     version = models.PositiveIntegerField(default=1)
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compra_realizada")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="compras_realizadas")
+    intento = models.OneToOneField(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="compra")
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     fecha_compra = models.DateField()
     importe_final = models.DecimalField(max_digits=14, decimal_places=2)
@@ -450,6 +690,15 @@ class CompraRealizadaDepartamental(models.Model):
             raise ValidationError({"importe_final": "El importe final debe ser mayor que cero."})
         if self.cotizacion_id and self.item_id and self.cotizacion.item_id != self.item_id:
             raise ValidationError("La cotización debe corresponder al artículo comprado.")
+
+    def save(self, *args, **kwargs):
+        args, kwargs = _normalizar_update_fields(args, kwargs)
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
 
 
 class HistorialCompraDepartamental(models.Model):
@@ -474,7 +723,10 @@ class HistorialCompraDepartamental(models.Model):
 
 
 class CompromisoCompraDepartamental(models.Model):
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.CASCADE, related_name="compromiso")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.CASCADE, related_name="compromisos")
+    intento = models.OneToOneField(
+        IntentoCompraDepartamental, null=True, blank=True, on_delete=models.PROTECT, related_name="compromiso"
+    )
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     monto = models.DecimalField(max_digits=14, decimal_places=2)
     activo = models.BooleanField(default=True, db_index=True)
@@ -485,6 +737,23 @@ class CompromisoCompraDepartamental(models.Model):
         help_text="Se llena al generar la orden; antes de eso el monto es una reserva presupuestal.",
     )
     liberado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item"], condition=models.Q(activo=True, intento__isnull=True),
+                name="comp_dept_una_reserva_preorden_activa",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        args, kwargs = _normalizar_update_fields(args, kwargs)
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
 
 
 class OrdenCompraDepartamental(models.Model):
@@ -509,11 +778,21 @@ class OrdenCompraDepartamental(models.Model):
 
 class LineaOrdenCompraDepartamental(models.Model):
     orden = models.ForeignKey(OrdenCompraDepartamental, on_delete=models.CASCADE, related_name="lineas")
-    item = models.OneToOneField(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="linea_orden")
+    item = models.ForeignKey(ItemCompraDepartamental, on_delete=models.PROTECT, related_name="lineas_orden")
+    intento = models.OneToOneField(IntentoCompraDepartamental, on_delete=models.PROTECT, related_name="linea_orden")
     cotizacion = models.ForeignKey(CotizacionCompraDepartamental, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=12, decimal_places=3)
     costo_unitario = models.DecimalField(max_digits=14, decimal_places=2)
     total = models.DecimalField(max_digits=14, decimal_places=2)
+
+    def save(self, *args, **kwargs):
+        args, kwargs = _normalizar_update_fields(args, kwargs)
+        relaciones = _ids_relacion_efectivos(self, ("item", "cotizacion", "intento"), args, kwargs)
+        _validar_vinculos_compra(
+            relaciones["item"], relaciones["cotizacion"], relaciones["intento"],
+            using=kwargs.get("using") or self._state.db or "default",
+        )
+        return super().save(*args, **kwargs)
 
 
 class RecepcionItemDepartamental(models.Model):
@@ -524,18 +803,65 @@ class RecepcionItemDepartamental(models.Model):
     recibido_en = models.DateTimeField(default=timezone.now)
 
     def save(self, *args, **kwargs):
-        result = super().save(*args, **kwargs)
-        total = self.linea_orden.recepciones.aggregate(models.Sum("cantidad_recibida"))["cantidad_recibida__sum"] or 0
-        item = self.linea_orden.item
-        if total < self.linea_orden.cantidad:
-            item.estado = ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL
-            item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
-        else:
-            item.estado = ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION
-            item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_AREA
-        item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
-        item.solicitud.actualizar_estado_desde_items()
-        return result
+        args, kwargs = _normalizar_update_fields(args, kwargs)
+        update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+        db = kwargs.get("using") or self._state.db or "default"
+        with transaction.atomic(using=db):
+            linea = LineaOrdenCompraDepartamental.objects.using(db).select_related("intento").get(
+                pk=self.linea_orden_id
+            )
+            item = ItemCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.item_id)
+            intento = IntentoCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.intento_id)
+            linea = LineaOrdenCompraDepartamental.objects.using(db).select_for_update().get(pk=linea.pk)
+            anterior = None
+            if not self._state.adding:
+                anterior = type(self).objects.using(db).select_for_update().get(pk=self.pk)
+                if anterior.linea_orden_id != linea.pk:
+                    raise ValidationError("La recepción no puede cambiar de orden.")
+            cantidad_cambio = anterior is None or (
+                (update_fields is None or "cantidad_recibida" in update_fields)
+                and anterior.cantidad_recibida != self.cantidad_recibida
+            )
+            if not cantidad_cambio:
+                return super().save(*args, **kwargs)
+            if self.cantidad_recibida <= 0:
+                raise ValidationError("La cantidad recibida debe ser mayor que cero.")
+            vigente = intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
+            entregado_pendiente = (
+                anterior is not None
+                and intento.estado == IntentoCompraDepartamental.ESTADO_ENTREGADO
+                and item.estado == ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION
+                and not item.intentos_compra.using(db).filter(estado="VIGENTE").exists()
+                and not item.intentos_compra.using(db).filter(
+                    estado=IntentoCompraDepartamental.ESTADO_ENTREGADO,
+                    numero__gt=intento.numero,
+                ).exists()
+            )
+            if not (vigente or entregado_pendiente):
+                raise ValidationError("La orden no corresponde al intento vigente del artículo.")
+            if vigente and item.estado not in (
+                ItemCompraDepartamental.ESTADO_ORDENADO,
+                ItemCompraDepartamental.ESTADO_COMPRADO,
+                ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL,
+            ):
+                raise ValidationError("El artículo ya no admite modificar la cantidad recibida.")
+            result = super().save(*args, **kwargs)
+            total = linea.recepciones.using(db).aggregate(models.Sum("cantidad_recibida"))["cantidad_recibida__sum"] or 0
+            if total < linea.cantidad:
+                intento.estado = IntentoCompraDepartamental.ESTADO_VIGENTE
+                item.estado = ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL
+                item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
+            else:
+                intento.estado = IntentoCompraDepartamental.ESTADO_ENTREGADO
+                item.estado = ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION
+                item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_AREA
+            # Toda variación de cantidad invalida formularios abiertos; editar
+            # observaciones conserva la versión y no vuelve a procesar la entrega.
+            intento.version += 1
+            intento.save(update_fields=["estado", "version", "actualizado_en"])
+            item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
+            item.solicitud.actualizar_estado_desde_items()
+            return result
 
 
 class EventoCompraDepartamental(models.Model):

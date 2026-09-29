@@ -2,7 +2,7 @@
 {% load static humanize %}
 {% block title %}Bandeja de Compras{% endblock %}
 {% block page_title %}Bandeja de Compras departamentales{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260908-resumen-1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260928-reembolsos-1">{% endblock %}
 {% block content %}
 <main class="cd-shell cd-bandeja">
   {% include "compras/departamentales/_tabs.html" %}
@@ -18,7 +18,9 @@
   <section class="cd-kpis cd-money-kpis" aria-label="Resumen monetario">
     <article><span>Solicitado estimado</span><strong>${{ resumen.solicitado|floatformat:2|intcomma }}</strong><small>{{ resumen.solicitudes }} solicitud{{ resumen.solicitudes|pluralize:"es" }} · {{ resumen.articulos }} artículo{{ resumen.articulos|pluralize }}</small></article>
     <article><span>Cotizado</span><strong>${{ resumen.cotizado|floatformat:2|intcomma }}</strong><small>Cotizaciones seleccionadas, incluidos cargos</small></article>
-    <article><span>Comprometido</span><strong>${{ resumen.comprometido|floatformat:2|intcomma }}</strong><small>Órdenes formalizadas con compromiso activo</small></article>
+    <article><span>Comprometido vigente</span><strong>${{ resumen.comprometido|floatformat:2|intcomma }}</strong><small>Órdenes activas aún vigentes</small></article>
+    <article><span>Reembolso pendiente</span><strong>${{ resumen.reembolso_pendiente|floatformat:2|intcomma }}</strong><small>Saldo solicitado por recuperar</small></article>
+    <article><span>Reembolsado</span><strong>${{ resumen.reembolsado|floatformat:2|intcomma }}</strong><small>Importe recibido, incluso parcial</small></article>
     <article><span>Sin precio</span><strong>{{ resumen.sin_precio }}</strong><small>Sin estimado ni cotización seleccionada</small></article>
   </section>
   {% if resumen.sin_estimacion %}<p class="cd-notice"><strong>Total estimado parcial:</strong> {{ resumen.sin_estimacion }} artículo{{ resumen.sin_estimacion|pluralize }} sin estimación del área. No están incluidos en Solicitado estimado.</p>{% endif %}
@@ -26,22 +28,22 @@
   <p class="cd-scope">{{ etapas_resumen }}</p>
   <section class="cd-card" aria-labelledby="departamentos-titulo">
     <div class="cd-card-head"><div><h2 id="departamentos-titulo">Por departamento</h2><p>Selecciona un departamento para ver sus artículos con los mismos filtros.</p></div></div>
-    <div class="cd-table-wrap" tabindex="0" role="region" aria-label="Resumen por departamento"><table class="cd-table cd-departamentos"><thead><tr><th scope="col">Departamento</th><th scope="col">Solicitudes</th><th scope="col">Artículos</th><th scope="col">Sin precio</th><th scope="col">Solicitado estimado</th><th scope="col">Cotizado</th><th scope="col">Comprometido</th></tr></thead><tbody>
-      {% for departamento in departamentos %}<tr><th scope="row"><a class="cd-link" href="{{ departamento.url }}">{{ departamento.nombre }}</a></th><td>{{ departamento.solicitudes }}</td><td>{{ departamento.articulos }}</td><td>{{ departamento.sin_precio }}</td><td>${{ departamento.solicitado|floatformat:2|intcomma }}{% if departamento.sin_estimacion %}<small>Parcial · {{ departamento.sin_estimacion }} sin estimación</small>{% endif %}</td><td>${{ departamento.cotizado|floatformat:2|intcomma }}{% if departamento.sin_cotizacion %}<small>{{ departamento.sin_cotizacion }} sin cotización</small>{% endif %}</td><td>${{ departamento.comprometido|floatformat:2|intcomma }}</td></tr>
-      {% empty %}<tr><td colspan="7">No hay compras pendientes con estos filtros.</td></tr>{% endfor %}
-    </tbody><tfoot><tr><th scope="row">Total</th><td>{{ resumen.solicitudes }}</td><td>{{ resumen.articulos }}</td><td>{{ resumen.sin_precio }}</td><td>${{ resumen.solicitado|floatformat:2|intcomma }}</td><td>${{ resumen.cotizado|floatformat:2|intcomma }}</td><td>${{ resumen.comprometido|floatformat:2|intcomma }}</td></tr></tfoot></table></div>
+    <div class="cd-table-wrap" tabindex="0" role="region" aria-label="Resumen por departamento"><table class="cd-table cd-departamentos"><thead><tr><th scope="col">Departamento</th><th scope="col">Solicitudes</th><th scope="col">Artículos</th><th scope="col">Sin precio</th><th scope="col">Solicitado estimado</th><th scope="col">Cotizado</th><th scope="col">Comprometido vigente</th><th scope="col">Reembolso pendiente</th><th scope="col">Reembolsado</th></tr></thead><tbody>
+      {% for departamento in departamentos %}<tr><th scope="row"><a class="cd-link" href="{{ departamento.url }}">{{ departamento.nombre }}</a></th><td>{{ departamento.solicitudes }}</td><td>{{ departamento.articulos }}</td><td>{{ departamento.sin_precio }}</td><td>${{ departamento.solicitado|floatformat:2|intcomma }}{% if departamento.sin_estimacion %}<small>Parcial · {{ departamento.sin_estimacion }} sin estimación</small>{% endif %}</td><td>${{ departamento.cotizado|floatformat:2|intcomma }}{% if departamento.sin_cotizacion %}<small>{{ departamento.sin_cotizacion }} sin cotización</small>{% endif %}</td><td>${{ departamento.comprometido|floatformat:2|intcomma }}</td><td>${{ departamento.reembolso_pendiente|floatformat:2|intcomma }}</td><td>${{ departamento.reembolsado|floatformat:2|intcomma }}</td></tr>
+      {% empty %}<tr><td colspan="9">No hay compras pendientes con estos filtros.</td></tr>{% endfor %}
+    </tbody><tfoot><tr><th scope="row">Total</th><td>{{ resumen.solicitudes }}</td><td>{{ resumen.articulos }}</td><td>{{ resumen.sin_precio }}</td><td>${{ resumen.solicitado|floatformat:2|intcomma }}</td><td>${{ resumen.cotizado|floatformat:2|intcomma }}</td><td>${{ resumen.comprometido|floatformat:2|intcomma }}</td><td>${{ resumen.reembolso_pendiente|floatformat:2|intcomma }}</td><td>${{ resumen.reembolsado|floatformat:2|intcomma }}</td></tr></tfoot></table></div>
   </section>
   {% endif %}
   <section class="cd-card" id="articulos">
     <div class="cd-card-head"><div><h2>Artículos que requieren atención</h2></div></div>
-    <div class="cd-table-wrap table-responsive"><table class="cd-table"><thead><tr><th>Artículo</th><th>Solicitud</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Solicitado estimado</th><th>Cotizado</th><th>Comprometido</th><th>Siguiente acción</th><th>Detalle</th></tr></thead><tbody>
+    <div class="cd-table-wrap table-responsive"><table class="cd-table"><thead><tr><th>Artículo</th><th>Solicitud</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Solicitado estimado</th><th>Cotizado</th><th>Comprometido vigente</th><th>Reembolso pendiente</th><th>Reembolsado</th><th>Siguiente acción</th><th>Detalle</th></tr></thead><tbody>
       {% for item in items %}<tr>
         <td><div class="cd-product">{% if item.imagen %}<img src="{{ item.imagen.url }}" alt="Referencia de {{ item.descripcion }}">{% else %}<span class="cd-thumb">{{ item.descripcion|slice:":1" }}</span>{% endif %}<div><strong>{{ item.descripcion }}</strong><small>{{ item.cantidad|floatformat:-3 }} {{ item.unidad }}</small></div></div></td>
         <td>{{ item.solicitud.folio }}<small>{{ item.solicitud.get_tipo_display }}</small></td><td>{{ item.solicitud.area.nombre }}</td>
         <td><span class="cd-priority {{ item.prioridad|lower }}">{{ item.get_prioridad_display }}</span></td>
-        <td><span class="cd-status">{{ item.get_estado_display }}</span></td><td>{% if item.resumen_estimado is not None %}${{ item.resumen_estimado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin estimación</span>{% endif %}</td><td>{% if item.resumen_cotizado is not None %}${{ item.resumen_cotizado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin cotización</span>{% endif %}</td><td>${{ item.resumen_comprometido|floatformat:2|intcomma }}</td><td>{{ item.get_siguiente_responsable_display }}</td>
+        <td><span class="cd-status">{{ item.get_estado_display }}</span>{% if not item.resumen_en_alcance_operativo %}<small>Solo seguimiento de reembolso</small>{% endif %}</td><td>{% if not item.resumen_en_alcance_operativo %}—{% elif item.resumen_estimado is not None %}${{ item.resumen_estimado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin estimación</span>{% endif %}</td><td>{% if not item.resumen_en_alcance_operativo %}—{% elif item.resumen_cotizado is not None %}${{ item.resumen_cotizado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin cotización</span>{% endif %}</td><td>${{ item.resumen_comprometido|floatformat:2|intcomma }}</td><td>${{ item.resumen_reembolso_pendiente|floatformat:2|intcomma }}</td><td>${{ item.resumen_reembolsado|floatformat:2|intcomma }}</td><td>{% if not item.resumen_en_alcance_operativo %}Compras · recuperar reembolso{% else %}{{ item.get_siguiente_responsable_display }}{% endif %}</td>
         <td><a class="cd-link" href="{% url 'compras:departamental_detalle' item.solicitud_id %}">Atender →</a></td>
-      </tr>{% empty %}<tr><td colspan="10"><div class="cd-empty"><strong>No hay artículos con estos filtros.</strong><span>Puedes limpiar los filtros para revisar todos los pendientes.</span></div></td></tr>{% endfor %}
+      </tr>{% empty %}<tr><td colspan="12"><div class="cd-empty"><strong>No hay artículos con estos filtros.</strong><span>Puedes limpiar los filtros para revisar todos los pendientes.</span></div></td></tr>{% endfor %}
     </tbody></table></div>
   </section>
 </main>

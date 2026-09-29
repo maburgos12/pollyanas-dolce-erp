@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -7,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.access import can_manage_compras
 from core.navigation import build_nav_groups
@@ -24,6 +26,8 @@ from reportes.models import (
 from .models import (
     CompromisoCompraDepartamental,
     CotizacionCompraDepartamental,
+    IntentoCompraDepartamental,
+    OrdenCompraDepartamental,
     ItemCompraDepartamental,
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
@@ -66,6 +70,20 @@ class ComprasDepartamentalesDomainTests(TestCase):
             periodo=date(2026, 9, 1),
             motivo="Necesidades del área",
         )
+
+    def recibir_moldes_total(self):
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion="Moldes", cantidad=4, rubro=self.rubro
+        )
+        cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=item, proveedor=self.proveedor_a, cantidad_ofertada=4, costo_unitario=Decimal("200.00")
+        )
+        seleccionar_cotizacion(cotizacion, actor=self.comprador)
+        linea = generar_ordenes_departamentales([item], actor=self.comprador)[0].lineas.get()
+        recepcion = RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=Decimal("4"), registrado_por=self.comprador,
+        )
+        return item, linea.intento, recepcion
 
     def test_solicitud_admite_varios_articulos_independientes_y_costo_estimado_opcional(self):
         solicitud = self.crear_solicitud()
@@ -152,6 +170,33 @@ class ComprasDepartamentalesDomainTests(TestCase):
         self.assertEqual(resultado.compromisos_previos, Decimal("3000.00"))
         self.assertEqual(resultado.disponible_antes, Decimal("4500.00"))
         self.assertEqual(resultado.exceso, Decimal("500.00"))
+
+    def test_evaluacion_cuenta_toda_exposicion_activa_sin_inferir_gasto_real(self):
+        solicitud = self.crear_solicitud()
+        for estado, monto in (
+            (IntentoCompraDepartamental.ESTADO_VIGENTE, '200'),
+            (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO, '1000'),
+            (IntentoCompraDepartamental.ESTADO_ENTREGADO, '300'),
+            (IntentoCompraDepartamental.ESTADO_REEMBOLSADO, '400'),
+            (IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO, '500'),
+        ):
+            item = ItemCompraDepartamental.objects.create(
+                solicitud=solicitud, descripcion=estado, cantidad=1, rubro=self.rubro,
+            )
+            quote = CotizacionCompraDepartamental.objects.create(
+                item=item, proveedor=self.proveedor_a, cantidad_ofertada=1, costo_unitario=Decimal(monto),
+            )
+            intento = IntentoCompraDepartamental.objects.create(item=item, cotizacion=quote, estado=estado)
+            CompromisoCompraDepartamental.objects.create(
+                item=item, intento=intento, cotizacion=quote, monto=Decimal(monto),
+                activo=True, formalizado_en=timezone.now(),
+            )
+        candidato = ItemCompraDepartamental.objects.create(
+            solicitud=solicitud, descripcion='Nuevo equipo', cantidad=1, rubro=self.rubro,
+        )
+        resultado = evaluar_presupuesto_item(candidato, Decimal('500'))
+        self.assertEqual(resultado.compromisos_previos, Decimal('2400'))
+        self.assertEqual(resultado.disponible_despues, Decimal('4600'))
 
     def test_presupuesto_ausente_no_toma_dinero_del_area_y_requiere_dg(self):
         for caso in ('sin_rubro', 'inactivo', 'otra_area', 'sin_linea'):
@@ -242,6 +287,13 @@ class ComprasDepartamentalesDomainTests(TestCase):
         self.assertEqual(len(ordenes), 2)
         self.assertEqual(sorted(orden.lineas.count() for orden in ordenes), [1, 2])
         self.assertTrue(all(item.estado == ItemCompraDepartamental.ESTADO_ORDENADO for item in items))
+        self.assertEqual(IntentoCompraDepartamental.objects.filter(item__in=items, estado="VIGENTE").count(), 3)
+        for linea in (linea for orden in ordenes for linea in orden.lineas.all()):
+            intento = linea.item.intento_vigente
+            self.assertEqual(linea.intento, intento)
+            self.assertEqual(linea.cotizacion, intento.cotizacion)
+            self.assertEqual(intento.compromiso.item, linea.item)
+            self.assertEqual(intento.compromiso.cotizacion, linea.cotizacion)
         self.assertEqual(
             CompromisoCompraDepartamental.objects.filter(
                 item__in=items, formalizado_en__isnull=False, activo=True
@@ -263,13 +315,108 @@ class ComprasDepartamentalesDomainTests(TestCase):
 
         item.refresh_from_db()
         self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_COMPRAS)
+        self.assertEqual(linea.intento.estado, IntentoCompraDepartamental.ESTADO_VIGENTE)
 
-        RecepcionItemDepartamental.objects.create(linea_orden=linea, cantidad_recibida=2, registrado_por=self.comprador)
+        recepcion_final = RecepcionItemDepartamental.objects.create(
+            linea_orden=linea, cantidad_recibida=2, registrado_por=self.comprador
+        )
+        item.refresh_from_db()
+        linea.intento.refresh_from_db()
+        self.assertEqual(linea.intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+        self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_AREA)
+        recepcion_final.observaciones = "Entrega revisada"
+        recepcion_final.save(update_fields=["observaciones"])
+        recepcion_final.refresh_from_db()
+        self.assertEqual(recepcion_final.observaciones, "Entrega revisada")
         confirmar_recepcion_departamental(item, conforme=True, actor=self.responsable)
         item.refresh_from_db()
         item.solicitud.refresh_from_db()
         self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME)
         self.assertEqual(item.solicitud.estado, SolicitudCompraDepartamental.ESTADO_COMPLETADA)
+
+    def test_recepcion_rechaza_linea_de_intento_cancelado(self):
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion="Moldes", cantidad=4, rubro=self.rubro
+        )
+        cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=item, proveedor=self.proveedor_a, cantidad_ofertada=4, costo_unitario=Decimal("200.00")
+        )
+        seleccionar_cotizacion(cotizacion, actor=self.comprador)
+        linea = generar_ordenes_departamentales([item], actor=self.comprador)[0].lineas.get()
+        intento = linea.intento
+        intento.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
+        intento.save(update_fields=["estado"])
+
+        with self.assertRaises(ValidationError):
+            RecepcionItemDepartamental.objects.create(
+                linea_orden=linea, cantidad_recibida=1, registrado_por=self.comprador
+            )
+        self.assertFalse(linea.recepciones.exists())
+
+    def test_corregir_recepcion_total_de_cuatro_a_tres_reabre_pendiente_de_compras(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        recepcion.cantidad_recibida = Decimal("3")
+
+        recepcion.save(update_fields=["cantidad_recibida"])
+
+        item.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_VIGENTE)
+        self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_COMPRAS)
+        self.assertEqual(item.solicitud.estado, SolicitudCompraDepartamental.ESTADO_EN_ATENCION)
+
+    def test_corregir_recepcion_tras_confirmacion_final_se_rechaza(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        confirmar_recepcion_departamental(item, conforme=True, actor=self.responsable)
+        recepcion.cantidad_recibida = Decimal("3")
+        with self.assertRaises(ValidationError):
+            recepcion.save(update_fields=["cantidad_recibida"])
+        recepcion.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(recepcion.cantidad_recibida, Decimal("4"))
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+
+    def test_corregir_recepcion_total_sin_perder_cobertura_conserva_confirmacion(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        recepcion.cantidad_recibida = Decimal("5")
+
+        recepcion.save(update_fields=["cantidad_recibida"])
+
+        item.refresh_from_db()
+        intento.refresh_from_db()
+        self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_ENTREGADO)
+        self.assertEqual(item.estado, ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION)
+        self.assertEqual(item.siguiente_responsable, ItemCompraDepartamental.RESPONSABLE_AREA)
+
+    def test_corregir_recepcion_de_intento_cancelado_se_rechaza(self):
+        item, intento, recepcion = self.recibir_moldes_total()
+        intento.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
+        intento.save(update_fields=["estado"])
+        recepcion.cantidad_recibida = Decimal("3")
+
+        with self.assertRaises(ValidationError):
+            recepcion.save(update_fields=["cantidad_recibida"])
+
+        recepcion.refresh_from_db()
+        self.assertEqual(recepcion.cantidad_recibida, Decimal("4"))
+
+    def test_fallo_al_crear_linea_no_deja_intento_huerfano(self):
+        item = ItemCompraDepartamental.objects.create(
+            solicitud=self.crear_solicitud(), descripcion="Moldes", cantidad=4, rubro=self.rubro
+        )
+        cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=item, proveedor=self.proveedor_a, cantidad_ofertada=4, costo_unitario=Decimal("200.00")
+        )
+        seleccionar_cotizacion(cotizacion, actor=self.comprador)
+        with patch("compras.services_departamentales.LineaOrdenCompraDepartamental.objects.create", side_effect=RuntimeError):
+            with self.assertRaises(RuntimeError):
+                generar_ordenes_departamentales([item], actor=self.comprador)
+        self.assertFalse(item.intentos_compra.exists())
+        self.assertFalse(OrdenCompraDepartamental.objects.exists())
+        self.assertTrue(CompromisoCompraDepartamental.objects.get(item=item).activo)
 
 
 class ComprasDepartamentalesViewTests(TestCase):

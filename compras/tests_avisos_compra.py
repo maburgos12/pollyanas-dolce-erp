@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from compras.models import (AvisoCompraDepartamental, CompraRealizadaDepartamental,
-                            CotizacionCompraDepartamental, ItemCompraDepartamental,
+                            CotizacionCompraDepartamental, IntentoCompraDepartamental, ItemCompraDepartamental,
                             SolicitudCompraDepartamental)
 from compras.services_avisos_compra import (contexto_mensaje, enviar_aviso, enviar_avisos_pendientes,
                                             programar_avisos, url_solicitud)
@@ -137,6 +137,9 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
             compra = self.registrar_compra()
         despachar.assert_not_called()  # aún no hay commit dentro de TestCase
         avisos = list(compra.avisos.order_by("canal"))
+        self.assertEqual(compra.intento, self.item.intento_vigente)
+        self.assertEqual(compra.cotizacion, compra.intento.cotizacion)
+        self.assertTrue(all(aviso.compra_id == compra.pk for aviso in avisos))
         self.assertEqual([a.canal for a in avisos], ["CORREO", "WHATSAPP"])
         self.assertTrue(all(a.estado == "PENDIENTE" for a in avisos))
         self.assertTrue(all(a.destinatario_id == self.solicitante.pk for a in avisos))
@@ -259,8 +262,9 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
 
     def test_compras_existentes_no_reciben_avisos_retroactivos(self):
         """Una compra creada sin pasar por el servicio no genera cola ni envíos."""
+        intento = IntentoCompraDepartamental.objects.create(item=self.item, cotizacion=self.quote)
         compra = CompraRealizadaDepartamental.objects.create(
-            item=self.item, cotizacion=self.quote, fecha_compra=timezone.localdate(),
+            intento=intento, item=self.item, cotizacion=self.quote, fecha_compra=timezone.localdate(),
             importe_final=Decimal("200.00"),
             comprobante=SimpleUploadedFile("v.pdf", b"%PDF-1.4\n%%EOF"), registrado_por=self.compras_user)
         self.assertEqual(compra.avisos.count(), 0)
@@ -368,6 +372,10 @@ class ReintentoAvisoTests(BaseAvisosMixin, TestCase):
         self.url = reverse("compras:departamental_aviso_reintentar", args=[self.aviso.pk])
         self.headers = {"HTTP_ACCEPT": "application/json"}
 
+    @property
+    def destino_avisos(self):
+        return reverse("compras:departamental_detalle", args=[self.solicitud.pk]) + f"#intento-{self.compra.intento_id}-avisos"
+
     def test_solicitante_sin_permisos_no_puede_reintentar(self):
         self.client.force_login(self.solicitante)
         respuesta = self.client.post(self.url, **self.headers)
@@ -379,6 +387,7 @@ class ReintentoAvisoTests(BaseAvisosMixin, TestCase):
         respuesta = self.client.post(self.url, **self.headers)
         self.assertEqual(respuesta.status_code, 200)
         self.assertTrue(respuesta.json()["ok"])
+        self.assertEqual(respuesta.json()["redirect"], self.destino_avisos)
         self.aviso.refresh_from_db()
         self.assertEqual(self.aviso.estado, "ENVIADO")
         self.assertEqual(self.aviso.intentos, 1)
@@ -413,11 +422,31 @@ class ReintentoAvisoTests(BaseAvisosMixin, TestCase):
             respuesta = self.client.post(self.url, **self.headers)
         self.assertEqual(respuesta.status_code, 409)
         self.assertIn("403", respuesta.json()["toast"]["message"])
+        self.assertEqual(respuesta.json()["redirect"], self.destino_avisos)
+
+    def test_reintento_tradicional_exitoso_vuelve_al_aviso_del_intento(self):
+        self.client.force_login(self.compras_user)
+        respuesta = self.client.post(self.url)
+        self.assertRedirects(respuesta, self.destino_avisos)
+        self.aviso.refresh_from_db()
+        self.assertEqual(self.aviso.estado, AvisoCompraDepartamental.ESTADO_ENVIADO)
+
+    def test_reintento_tradicional_fallido_vuelve_al_aviso_del_intento(self):
+        self.client.force_login(self.compras_user)
+        with patch("django.core.mail.EmailMultiAlternatives.send",
+                   side_effect=RuntimeError("Resend API error (403): dominio no verificado")):
+            respuesta = self.client.post(self.url)
+        self.assertRedirects(respuesta, self.destino_avisos)
+        self.aviso.refresh_from_db()
+        self.assertEqual(self.aviso.estado, AvisoCompraDepartamental.ESTADO_FALLIDO)
 
     def test_pantalla_muestra_estado_de_cada_canal(self):
         self.client.force_login(self.compras_user)
-        html = self.client.get(
-            reverse("compras:departamental_detalle", args=[self.solicitud.pk])).content.decode()
+        respuesta = self.client.get(reverse("compras:departamental_detalle", args=[self.solicitud.pk]))
+        self.assertEqual(respuesta.status_code, 200)
+        html = respuesta.content.decode()
+        self.assertEqual(html.count(f'id="intento-{self.compra.intento_id}-avisos"'), 1)
+        self.assertIn(f'action="{self.url}"', html)
         self.assertIn("Aviso al solicitante", html)
         self.assertIn("Reintentar aviso", html)
         self.assertIn("data-async-action", html)

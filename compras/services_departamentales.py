@@ -12,6 +12,7 @@ from .models import (
     CompromisoCompraDepartamental,
     CotizacionCompraDepartamental,
     EventoCompraDepartamental,
+    IntentoCompraDepartamental,
     ItemCompraDepartamental,
     LineaOrdenCompraDepartamental,
     OrdenCompraDepartamental,
@@ -41,6 +42,24 @@ class EvaluacionPresupuesto:
         return not self.calculable or self.exceso > 0
 
 
+ESTADOS_CON_ENTREGA_OPERATIVA = frozenset({
+    ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION,
+    ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME,
+    ItemCompraDepartamental.ESTADO_ESPERANDO_AREA,
+})
+
+
+def intento_operativo_prefetched(item):
+    """Usa el vigente o la última entrega durante y después del cierre del área."""
+    intentos = item.intentos_compra_prefetched
+    vigente = next((intento for intento in intentos if intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE), None)
+    if vigente is not None:
+        return vigente
+    if item.estado in ESTADOS_CON_ENTREGA_OPERATIVA:
+        return next((intento for intento in intentos if intento.estado == IntentoCompraDepartamental.ESTADO_ENTREGADO), None)
+    return None
+
+
 def _lineas_presupuesto(item):
     if item.rubro_id is None:
         return LineaPresupuestoMensual.objects.none()
@@ -57,7 +76,16 @@ def _lineas_presupuesto(item):
     )
 
 
-def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> EvaluacionPresupuesto:
+def compromiso_actual_para_evaluar(item):
+    """Solo el compromiso que se reemplazará al reevaluar esta selección."""
+    return CompromisoCompraDepartamental.objects.filter(item=item, activo=True).filter(
+        Q(intento__isnull=True) | Q(intento__estado=IntentoCompraDepartamental.ESTADO_VIGENTE)
+    ).order_by('-pk').first()
+
+
+def evaluar_presupuesto_item(
+    item: ItemCompraDepartamental, costo: Decimal, compromiso_excluido=None,
+) -> EvaluacionPresupuesto:
     lineas = _lineas_presupuesto(item)
     totales = lineas.aggregate(presupuesto=Sum("monto_presupuesto"), real=Sum("monto_real"))
     # Ausencia de partida y gasto real desconocido no equivalen a cero.
@@ -65,17 +93,15 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
     gasto_real = totales["real"]
     compromisos = None
     if presupuesto is not None:
-        compromisos = (
-            CompromisoCompraDepartamental.objects.filter(
+        compromisos_qs = CompromisoCompraDepartamental.objects.filter(
                 activo=True,
                 item__rubro_id=item.rubro_id,
                 item__solicitud__area=item.solicitud.area,
                 item__solicitud__periodo=item.solicitud.periodo,
             )
-            .exclude(item=item)
-            .aggregate(total=Sum("monto"))["total"]
-            or Decimal("0")
-        )
+        if compromiso_excluido is not None:
+            compromisos_qs = compromisos_qs.exclude(pk=compromiso_excluido.pk)
+        compromisos = compromisos_qs.aggregate(total=Sum("monto"))["total"] or Decimal("0")
     calculable = presupuesto is not None and gasto_real is not None
     disponible_antes = presupuesto - gasto_real - compromisos if calculable else None
     disponible_despues = disponible_antes - costo if calculable else None
@@ -90,34 +116,55 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
     )
 
 
+def reservar_compromiso_del_flujo(item, cotizacion, monto, *, formalizado_en=None):
+    intento = item.intento_vigente
+    defaults = {
+        "item": item, "cotizacion": cotizacion, "monto": monto,
+        "activo": True, "formalizado_en": formalizado_en, "liberado_en": None,
+    }
+    if intento:
+        return CompromisoCompraDepartamental.objects.update_or_create(intento=intento, defaults=defaults)[0]
+    reserva = CompromisoCompraDepartamental.objects.filter(
+        item=item, intento__isnull=True, activo=True
+    ).first()
+    if reserva is None:
+        return CompromisoCompraDepartamental.objects.create(**defaults)
+    for campo, valor in defaults.items():
+        setattr(reserva, campo, valor)
+    reserva.save(update_fields=["cotizacion", "monto", "activo", "formalizado_en", "liberado_en"])
+    return reserva
+
+
+def liberar_compromiso_del_flujo(item, *, monto=None):
+    filtros = Q(item=item, intento__isnull=True) | Q(intento__item=item, intento__estado="VIGENTE")
+    cambios = {"activo": False, "liberado_en": timezone.now()}
+    if monto is not None:
+        cambios["monto"] = monto
+    CompromisoCompraDepartamental.objects.filter(filtros, activo=True).update(**cambios)
+
+
 @transaction.atomic
 def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
     item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud__area").get(pk=cotizacion.item_id)
     cotizacion = CotizacionCompraDepartamental.objects.select_for_update().get(pk=cotizacion.pk)
-    from .services_edicion_compra import tiene_compra_o_recepcion
-    if item.estado in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO') or tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+    from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica
+    if item.estado in ('ORDENADO', 'COMPRADO', 'RECIBIDO_PARCIAL', 'PENDIENTE_CONFIRMACION', 'RECIBIDO_CONFORME', 'RECHAZADO', 'CANCELADO') or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
         raise ValidationError("Este artículo ya no admite cambiar la cotización seleccionada.")
     revision_pendiente = (item.estado in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO')
         and item.cotizaciones.filter(historial__isnull=False).exists())
     CotizacionCompraDepartamental.objects.filter(item=item).update(seleccionada=False)
     cotizacion.seleccionada = True
     cotizacion.save(update_fields=["seleccionada"])
-    resultado = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
+    resultado = evaluar_presupuesto_item(
+        item, cotizacion.total_adquisicion,
+        compromiso_excluido=compromiso_actual_para_evaluar(item),
+    )
     if resultado.requiere_dg or revision_pendiente:
-        CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
+        liberar_compromiso_del_flujo(item)
         item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_DG
     else:
-        CompromisoCompraDepartamental.objects.update_or_create(
-            item=item,
-            defaults={
-                "cotizacion": cotizacion,
-                "monto": cotizacion.total_adquisicion,
-                "activo": True,
-                "formalizado_en": None,
-                "liberado_en": None,
-            },
-        )
+        reservar_compromiso_del_flujo(item, cotizacion, cotizacion.total_adquisicion)
         item.estado = ItemCompraDepartamental.ESTADO_AUTORIZADO
         item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
     item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
@@ -134,9 +181,9 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
 
 @transaction.atomic
 def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: str, actor, cotizacion_id=None, version=None):
-    from .services_edicion_compra import tiene_compra_o_recepcion, sincronizar_linea_orden
+    from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica, sincronizar_linea_orden
     item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
-    if tiene_compra_o_recepcion(item) or item.estado not in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO'):
+    if tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.estado not in ('ESPERANDO_DG', 'POSPUESTO', 'FINANCIAMIENTO'):
         raise ValidationError("El artículo no tiene una decisión de Dirección General pendiente.")
     decisiones = {
         "AUTORIZAR": (ItemCompraDepartamental.ESTADO_AUTORIZADO, ItemCompraDepartamental.RESPONSABLE_COMPRAS),
@@ -163,18 +210,12 @@ def decidir_exceso(item: ItemCompraDepartamental, *, decision: str, comentario: 
     item.save(update_fields=["estado", "siguiente_responsable", "comentario_reciente", "actualizado_en"])
     item.solicitud.actualizar_estado_desde_items()
     if decision == "AUTORIZAR":
-        CompromisoCompraDepartamental.objects.update_or_create(
-            item=item,
-            defaults={
-                "cotizacion": cotizacion,
-                "monto": cotizacion.total_adquisicion,
-                "activo": True,
-                "formalizado_en": timezone.now() if linea else None,
-                "liberado_en": None,
-            },
+        reservar_compromiso_del_flujo(
+            item, cotizacion, cotizacion.total_adquisicion,
+            formalizado_en=timezone.now() if linea else None,
         )
     else:
-        CompromisoCompraDepartamental.objects.filter(item=item).update(activo=False, liberado_en=timezone.now())
+        liberar_compromiso_del_flujo(item)
     EventoCompraDepartamental.objects.create(
         solicitud=item.solicitud, item=item, actor=actor, tipo=f"DG_{decision}", detalle=comentario
     )
@@ -185,8 +226,8 @@ def generar_ordenes_departamentales(items, *, actor):
     grupos = {}
     for original in items:
         item = ItemCompraDepartamental.objects.select_for_update().select_related("solicitud").get(pk=original.pk)
-        from .services_edicion_compra import tiene_compra_o_recepcion
-        if tiene_compra_o_recepcion(item) or LineaOrdenCompraDepartamental.objects.filter(item=item).exists():
+        from .services_edicion_compra import tiene_compra_o_recepcion, tiene_recepcion_historica
+        if tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
             raise ValidationError(f"{item.descripcion} ya tiene una orden, compra o entrega registrada.")
         cotizacion = item.cotizaciones.select_related("proveedor").filter(seleccionada=True).first()
         if not cotizacion:
@@ -199,17 +240,19 @@ def generar_ordenes_departamentales(items, *, actor):
     for proveedor_id, lineas in grupos.items():
         orden = OrdenCompraDepartamental.objects.create(proveedor_id=proveedor_id, creado_por=actor)
         for item, cotizacion, original in lineas:
+            intento = IntentoCompraDepartamental.objects.create(item=item, cotizacion=cotizacion)
             LineaOrdenCompraDepartamental.objects.create(
                 orden=orden,
                 item=item,
+                intento=intento,
                 cotizacion=cotizacion,
                 cantidad=item.cantidad,
                 costo_unitario=cotizacion.costo_unitario,
                 total=cotizacion.total_adquisicion,
             )
-            CompromisoCompraDepartamental.objects.filter(item=item, activo=True).update(
-                formalizado_en=timezone.now()
-            )
+            CompromisoCompraDepartamental.objects.filter(
+                item=item, cotizacion=cotizacion, activo=True, intento__isnull=True
+            ).update(intento=intento, formalizado_en=timezone.now())
             item.estado = ItemCompraDepartamental.ESTADO_ORDENADO
             item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
             item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
