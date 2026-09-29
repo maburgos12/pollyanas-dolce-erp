@@ -11,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.urls import reverse
 
@@ -24,6 +25,8 @@ from compras.models import (
     ReembolsoCompraDepartamental,
     RecepcionItemDepartamental,
     EventoCompraDepartamental,
+    HistorialCompraDepartamental,
+    AvisoCompraDepartamental,
     ItemCompraDepartamental,
     SolicitudCompraDepartamental,
 )
@@ -1220,6 +1223,33 @@ class HistorialIntentosDetalleTests(_CompraDepartamentalBase, TestCase):
         self.assertContains(response, 'Cancelar definitivamente el artículo')
         self.assertNotContains(response, 'Registrar reembolso recibido')
 
+    def test_compra_historica_conserva_correccion_para_compras_en_ambos_estados_reembolso(self):
+        intento = self.intento(pagado=True)
+        compra = intento.compra
+        url = reverse('compras:departamental_compra_corregir', args=[compra.pk])
+        self.cancelar(intento, pagado=True)
+        response = self.detalle()
+        self.assertContains(response, 'Reembolso solicitado')
+        self.assertContains(response, url)
+        self.assertIn(url, response.content.decode().split(f'id="intento-{intento.pk}"', 1)[1].split('</ol>', 1)[0])
+
+        area_user = get_user_model().objects.create_user('area-correccion-historica', password='test')
+        AreaPresupuestoResponsable.objects.create(area=self.area, usuario=area_user, puede_capturar=True)
+        self.client.force_login(area_user)
+        self.assertNotContains(self.detalle(), url)
+        self.client.force_login(self.user)
+
+        registrar_reembolso_compra(
+            intento, version=intento.version, fecha=timezone.localdate(), importe=Decimal('180'),
+            referencia='Devolución completa', actor=self.user,
+        )
+        response = self.detalle()
+        self.assertContains(response, 'Reembolsado')
+        self.assertContains(response, url)
+
+        self.client.force_login(area_user)
+        self.assertNotContains(self.detalle(), url)
+
     def test_sin_compra_vigente_ni_entrega_permita_cancelacion_definitiva_solo_a_compras(self):
         intento = self.intento()
         self.cancelar(intento)
@@ -1268,3 +1298,76 @@ class HistorialIntentosDetalleTests(_CompraDepartamentalBase, TestCase):
                     intento.reembolsos_visibles
                     intento.recepciones_visibles
                     intento.saldo_reembolso_visible
+
+    def test_get_completo_no_agrega_consultas_por_intento_al_renderizar_historial(self):
+        primero = self.intento(pagado=True)
+        compra = primero.compra
+        AvisoCompraDepartamental.objects.create(
+            compra=compra, canal='CORREO', destinatario=self.user,
+            destino='pruebas@example.com', estado='ENVIADO',
+        )
+        HistorialCompraDepartamental.objects.create(
+            compra=compra, antes={'importe_final': '200'}, despues={'importe_final': '180'},
+            motivo='Importe corregido', actor=self.user,
+        )
+        self.cancelar(primero, pagado=True)
+        registrar_reembolso_compra(
+            primero, version=primero.version, fecha=timezone.localdate(), importe=Decimal('80'),
+            referencia='Parcial', actor=self.user,
+        )
+        with CaptureQueriesContext(connection) as inicial:
+            self.assertEqual(self.detalle().status_code, 200)
+
+        reemplazo = CotizacionCompraDepartamental.objects.create(
+            item=self.item, proveedor=Proveedor.objects.create(nombre='Proveedor B'),
+            cantidad_ofertada=2, costo_unitario=90,
+        )
+        seleccionar_cotizacion(reemplazo, actor=self.user)
+        self.item.refresh_from_db()
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        for numero in range(2):
+            item = self.solicitud.items.create(
+                descripcion=f'Artículo de rendimiento {numero}', cantidad=1, rubro=self.rubro,
+            )
+            quote = CotizacionCompraDepartamental.objects.create(
+                item=item, proveedor=Proveedor.objects.create(nombre=f'Proveedor C{numero}'),
+                cantidad_ofertada=1, costo_unitario=50,
+            )
+            seleccionar_cotizacion(quote, actor=self.user)
+            generar_ordenes_departamentales([item], actor=self.user)
+            intento = item.intento_vigente
+            compra = CompraRealizadaDepartamental.objects.create(
+                intento=intento, item=item, cotizacion=quote,
+                fecha_compra=timezone.localdate(), importe_final=Decimal('50'),
+                comprobante=f'compras/compra-{numero}.pdf', registrado_por=self.user,
+            )
+            AvisoCompraDepartamental.objects.create(
+                compra=compra, canal='CORREO', destinatario=self.user,
+                destino='pruebas@example.com', estado='ENVIADO',
+            )
+            HistorialCompraDepartamental.objects.create(
+                compra=compra, antes={'importe_final': '55'}, despues={'importe_final': '50'},
+                motivo='Importe corregido', actor=self.user,
+            )
+            item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
+            item.save(update_fields=['estado'])
+        with CaptureQueriesContext(connection) as ampliado:
+            response = self.detalle()
+            self.assertEqual(response.status_code, 200)
+            self.assertContains(response, 'Proveedor C1')
+
+        tablas_historial = (
+            'maestros_proveedor',
+            'compras_intentocompradepartamental', 'compras_reembolsocompradepartamental',
+            'compras_avisocompradepartamental', 'compras_historialcompradepartamental',
+        )
+        def consultas_historial(queries):
+            return {tabla: sum(f'FROM "{tabla}"' in q['sql'] for q in queries) for tabla in tablas_historial}
+
+        iniciales = consultas_historial(inicial)
+        ampliadas = consultas_historial(ampliado)
+        for tabla in tablas_historial:
+            self.assertGreater(iniciales[tabla], 0, tabla)
+            self.assertGreater(ampliadas[tabla], 0, tabla)
+            self.assertLessEqual(ampliadas[tabla], iniciales[tabla], tabla)
+        self.assertLessEqual(len(ampliado) - len(inicial), 12)
