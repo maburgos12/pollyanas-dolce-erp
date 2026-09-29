@@ -45,12 +45,20 @@
         {% endfor %}
       </select>
     </label>
+    <label for="inventory-audit-attention">Atención
+      <select id="inventory-audit-attention" name="attention">
+        <option value="">Todas</option>
+        {% for value, label in attention_options %}
+        <option value="{{ value }}"{% if selected_attention == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <button class="btn btn-primary" type="submit">Aplicar filtros</button>
   </form>
 
   <nav class="inventory-audit-tabs" aria-label="Conjunto de resultados">
-    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=exceptions"{% if selected_tab == 'exceptions' %} aria-current="page"{% endif %}>Excepciones <span>{{ tab_counts.exceptions }}</span></a>
-    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Conciliados <span>{{ tab_counts.balanced }}</span></a>
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}{% if selected_attention %}&amp;attention={{ selected_attention }}{% endif %}&amp;tab=exceptions"{% if selected_tab == 'exceptions' %} aria-current="page"{% endif %}>Excepciones <span>{{ tab_counts.exceptions }}</span></a>
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}{% if selected_attention %}&amp;attention={{ selected_attention }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Conciliados <span>{{ tab_counts.balanced }}</span></a>
   </nav>
 
   {% if run and run.status == 'SOURCE_INCOMPLETE' %}
@@ -103,7 +111,11 @@
             <td>{{ case.branch.name }}</td>
             <td class="text-end"><span class="inventory-audit-difference is-{{ case.movement_status|lower }}">{{ case.difference|floatformat:"-4"|intcomma }}</span></td>
             <td>{{ case.ui_possible_cause }}</td>
-            <td><span class="inventory-audit-status is-{{ case.movement_status|lower }}">{{ case.ui_movement_status }}</span></td>
+            <td>
+              <span class="inventory-audit-attention is-{{ case.attention_level|lower }}">{{ case.get_attention_level_display }}</span>
+              <span class="inventory-audit-status is-{{ case.movement_status|lower }}">{{ case.ui_movement_status }}</span>
+              <small class="inventory-audit-owner">{{ case.get_responsible_area_display }}{% if case.assigned_to %} · {{ case.assigned_to.get_full_name|default:case.assigned_to.username }}{% endif %}</small>
+            </td>
             <td><a class="inventory-audit-review-link" href="{% url 'reportes:inventory_audit_case' case.pk %}">Ver trazabilidad<span aria-hidden="true"> →</span></a></td>
           </tr>
           {% endfor %}

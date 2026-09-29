@@ -3500,6 +3500,17 @@ class ProductInventoryAuditCase(models.Model):
     class PhysicalStatus(models.TextChoices):
         NOT_AVAILABLE = "NOT_AVAILABLE", "Sin conteo manual"
 
+    class AttentionLevel(models.TextChoices):
+        GROUPED = "GROUPED", "Agrupado para revisión"
+        NORMAL = "NORMAL", "Revisión normal"
+        HIGH = "HIGH", "Atención inmediata"
+
+    class ResponsibleArea(models.TextChoices):
+        LOGISTICS = "LOGISTICS", "Logística"
+        SALES = "SALES", "Ventas"
+        PRODUCTION = "PRODUCTION", "Producción / CEDIS"
+        ADMINISTRATION = "ADMINISTRATION", "Administración"
+
     run = models.ForeignKey(
         ProductInventoryAuditRun,
         on_delete=models.PROTECT,
@@ -3543,6 +3554,39 @@ class ProductInventoryAuditCase(models.Model):
         choices=PhysicalStatus.choices,
         default=PhysicalStatus.NOT_AVAILABLE,
     )
+    attention_level = models.CharField(
+        max_length=12,
+        choices=AttentionLevel.choices,
+        default=AttentionLevel.GROUPED,
+        db_index=True,
+    )
+    responsible_area = models.CharField(
+        max_length=20,
+        choices=ResponsibleArea.choices,
+        default=ResponsibleArea.ADMINISTRATION,
+        db_index=True,
+    )
+    assigned_to = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="inventory_audit_cases_assigned",
+    )
+    assignment_reason = models.CharField(max_length=240, blank=True, default="")
+    investigation_summary = models.JSONField(default=dict, blank=True)
+    investigation_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+    )
+    last_notified_fingerprint = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+    )
+    investigated_at = models.DateTimeField(null=True, blank=True)
     issue_codes = models.JSONField(default=list, blank=True)
     source_trace = models.JSONField(default=dict, blank=True)
     calculation_fingerprint = models.CharField(max_length=64, db_index=True)
@@ -3633,6 +3677,16 @@ class ProductInventoryAuditCase(models.Model):
             field="physical_status",
             value=self.physical_status,
             allowed_values=self.PhysicalStatus.values,
+        )
+        _validate_inventory_audit_choice(
+            field="attention_level",
+            value=self.attention_level,
+            allowed_values=self.AttentionLevel.values,
+        )
+        _validate_inventory_audit_choice(
+            field="responsible_area",
+            value=self.responsible_area,
+            allowed_values=self.ResponsibleArea.values,
         )
 
     def __str__(self) -> str:

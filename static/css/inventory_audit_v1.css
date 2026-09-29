@@ -248,6 +248,22 @@
   font-size: .75rem;
   font-weight: 900;
 }
+.inventory-audit-attention {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin: 0 5px 5px 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #eee7ea;
+  color: #583b49;
+  font-size: .7rem;
+  font-weight: 900;
+}
+.inventory-audit-attention.is-high { background: #8b2252; color: #fff; }
+.inventory-audit-attention.is-normal { background: #fff1ce; color: #76500b; }
+.inventory-audit-attention.is-grouped { background: #ece8ea; color: #64545c; }
+.inventory-audit-owner { display: block; margin-top: 5px; color: #67565f; line-height: 1.35; }
 .inventory-audit-status.is-balanced,
 .inventory-audit-status.is-resolved { background: #e2f1e7; color: #275e3d; }
 .inventory-audit-status.is-needs_explanation,
@@ -260,6 +276,23 @@
 .inventory-audit-detail { max-width: 1180px; }
 .inventory-audit-explanation { padding-bottom: 18px; border-bottom: 1px solid #e4d8de; }
 .inventory-audit-explanation p + p { margin-top: 8px; }
+.inventory-audit-investigation {
+  margin-top: 24px;
+  padding: 18px;
+  border: 1px solid #d9cbd2;
+  border-radius: 10px;
+  background: #fff;
+}
+.inventory-audit-investigation-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.inventory-audit-investigation-heading h2 { margin: 3px 0 0; color: #49303d; font: 700 1.16rem/1.3 'Playfair Display', serif; }
+.inventory-audit-investigation-heading > p { display: grid; gap: 2px; margin: 0; text-align: right; }
+.inventory-audit-investigation-heading > p span { color: #67565f; font-size: .8rem; }
+.inventory-audit-investigation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; margin-top: 16px; }
+.inventory-audit-investigation-grid > div { padding-top: 11px; border-top: 2px solid #e5d9df; }
+.inventory-audit-investigation-grid h3 { margin: 0; color: #49303d; font-size: .82rem; }
+.inventory-audit-investigation-grid ul { margin: 8px 0 0; padding-left: 18px; color: #67565f; font-size: .84rem; }
+.inventory-audit-investigation-grid li + li { margin-top: 5px; }
+.inventory-audit-assignment-reason { margin: 14px 0 0; padding-top: 12px; border-top: 1px solid #eee5e9; color: #67565f; font-size: .8rem; }
 .inventory-audit-balance-list,
 .inventory-audit-history ol { margin: 0; padding: 0; list-style: none; }
 .inventory-audit-balance-list { border-block: 1px solid #ded1d7; }
@@ -329,6 +362,9 @@
   .inventory-audit-filters label { flex-basis: auto; }
   .inventory-audit-filters .btn { width: 100%; }
   .inventory-audit-results-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .inventory-audit-investigation-heading { align-items: flex-start; flex-direction: column; }
+  .inventory-audit-investigation-heading > p { text-align: left; }
+  .inventory-audit-investigation-grid { grid-template-columns: 1fr; }
   .inventory-audit-table-wrap { max-height: 64vh; }
   .inventory-audit-balance-list > li { grid-template-columns: 28px minmax(0, 1fr) 24px minmax(80px, auto); padding-inline: 6px; }
   .inventory-audit-step-evidence { grid-column: 1 / -1; }

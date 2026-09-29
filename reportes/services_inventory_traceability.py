@@ -227,7 +227,18 @@ class InventoryAuditMaterializer:
                     "updated_at",
                 ]
             )
+            transaction.on_commit(
+                lambda audit_month=month_start: self._investigate_committed_month(
+                    audit_month
+                )
+            )
             return counts
+
+    @staticmethod
+    def _investigate_committed_month(month: date) -> None:
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+
+        InventoryAuditAgent().run_month(month)
 
     @staticmethod
     def _case_matches_prepared(case, prepared) -> bool:

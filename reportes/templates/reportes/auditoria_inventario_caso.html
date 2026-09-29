@@ -28,6 +28,24 @@
     <p><strong>Lectura actual:</strong> {{ possible_cause }}.</p>
   </section>
 
+  {% if case.investigation_summary %}
+  <section class="inventory-audit-investigation" aria-labelledby="investigation-title">
+    <div class="inventory-audit-investigation-heading">
+      <div>
+        <span class="inventory-audit-attention is-{{ case.attention_level|lower }}">{{ case.get_attention_level_display }}</span>
+        <h2 id="investigation-title">Investigación del agente auditor</h2>
+      </div>
+      <p><strong>{{ case.get_responsible_area_display }}</strong>{% if case.assigned_to %}<span>{{ case.assigned_to.get_full_name|default:case.assigned_to.username }}</span>{% else %}<span>Sin persona asignada</span>{% endif %}</p>
+    </div>
+    <div class="inventory-audit-investigation-grid">
+      <div><h3>Comprobado</h3><ul>{% for item in case.investigation_summary.facts %}<li>{{ item }}</li>{% empty %}<li>Sin hechos adicionales.</li>{% endfor %}</ul></div>
+      <div><h3>Por confirmar</h3><ul>{% for item in case.investigation_summary.hypotheses %}<li>{{ item }}</li>{% empty %}<li>No hay hipótesis pendientes.</li>{% endfor %}</ul></div>
+      <div><h3>Qué falta</h3><ul>{% for item in case.investigation_summary.missing %}<li>{{ item }}</li>{% empty %}<li>No falta evidencia identificada.</li>{% endfor %}</ul></div>
+    </div>
+    {% if case.assignment_reason %}<p class="inventory-audit-assignment-reason">{{ case.assignment_reason }}</p>{% endif %}
+  </section>
+  {% endif %}
+
   <section class="inventory-audit-balance" aria-labelledby="balance-title">
     <div class="inventory-audit-results-heading">
       <div><h2 id="balance-title">Secuencia del saldo</h2><p>Los pasos se presentan en el mismo orden del cálculo mensual.</p></div>

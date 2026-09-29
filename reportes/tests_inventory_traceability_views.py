@@ -385,6 +385,58 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "Transferencia por conciliar")
         self.assertNotContains(response, "Merma registrada o pendiente")
 
+    def test_browser_dashboard_filters_attention_and_shows_compact_owner(self):
+        self.case.attention_level = ProductInventoryAuditCase.AttentionLevel.HIGH
+        self.case.responsible_area = ProductInventoryAuditCase.ResponsibleArea.LOGISTICS
+        self.case.assigned_to = self.viewer
+        self.case.investigation_summary = {
+            "facts": ["Transferencia ligada a ruta RUT-202608-0029."],
+            "hypotheses": [],
+            "missing": ["Confirmar recepción."],
+        }
+        self.case.save(
+            update_fields=[
+                "attention_level",
+                "responsible_area",
+                "assigned_to",
+                "investigation_summary",
+                "updated_at",
+            ]
+        )
+        other_product = PointProduct.objects.create(
+            external_id="audit-normal-product",
+            sku="AUDIT-NORMAL",
+            name="Producto de atención normal",
+        )
+        self._case(
+            product=other_product,
+            attention_level=ProductInventoryAuditCase.AttentionLevel.NORMAL,
+            calculation_fingerprint="1" * 64,
+        )
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit"),
+            {"month": "2026-08", "attention": "HIGH"},
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="attention"')
+        self.assertContains(response, "Atención inmediata")
+        self.assertContains(response, "Logística · audit.viewer")
+        self.assertContains(response, self.product.name)
+        self.assertNotContains(response, other_product.name)
+
+        detail = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+        self.assertContains(detail, "Investigación del agente auditor")
+        self.assertContains(detail, "Comprobado")
+        self.assertContains(detail, "Transferencia ligada a ruta RUT-202608-0029.")
+        self.assertContains(detail, "Confirmar recepción.")
+
     def test_browser_dashboard_hides_legacy_point_alias_case_for_same_erp_branch(self):
         self.branch.external_id = "1"
         self.branch.save(update_fields=["external_id", "updated_at"])
