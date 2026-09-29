@@ -88,6 +88,21 @@ class SyncChecadorProduccionTests(TestCase):
         self.assertFalse(data["falta_penalizable"])
         self.assertTrue(RegistroDiarioCapturaSerializer().fields["estado_rrhh"].read_only)
         self.assertTrue(RegistroDiarioCapturaSerializer().fields["falta_penalizable"].read_only)
+        self.assertIn("faltas_rrhh", BonoProduccionCapturaSerializer(bono).data)
+
+    def test_pwa_explica_estados_rrhh_y_bloquea_doble_sincronizacion(self):
+        user = User.objects.create_superuser(username="admin-contexto-pwa", password="x")
+        self.client.force_login(user)
+
+        response = self.client.get("/bonos-produccion/app/?captura=1")
+        content = response.content.decode()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Incapacidad", content)
+        self.assertIn("Festivo", content)
+        self.assertIn("Descanso", content)
+        self.assertIn("syncing", content)
+        self.assertIn("Sincronizando asistencia", content)
 
     def test_filas_historicas_conservan_contexto_nullable(self):
         fecha = date(2026, 9, 2)

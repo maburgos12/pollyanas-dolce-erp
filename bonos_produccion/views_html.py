@@ -170,14 +170,23 @@ def bonos_produccion_dashboard(request):
 
         if action == "sync_checador":
             resultado = sincronizar_asistencia_desde_checador(periodo)
-            messages.success(
-                request,
-                "Checador sincronizado: "
+            mensaje = (
+                "Asistencia sincronizada con RRHH: "
                 f"{resultado['bonos_sincronizados']} bonos, "
                 f"{resultado['registros_creados']} registros creados, "
                 f"{resultado['registros_actualizados']} actualizados, "
-                f"{resultado['bonos_omitidos']} omitidos.",
+                f"{resultado['bonos_omitidos']} omitidos."
             )
+            destino = f"{reverse('bonos_produccion:bonos-produccion-dashboard')}?mes={mes}&anio={anio}"
+            if request.headers.get("Accept", "").startswith("application/json"):
+                return JsonResponse({
+                    "ok": True,
+                    "toast": {"type": "success", "message": mensaje},
+                    "redirect": destino,
+                    "reload": True,
+                    "resultado": resultado,
+                })
+            messages.success(request, mensaje)
             return _dashboard_redirect(mes, anio)
 
         if action == "ajuste_bono":
@@ -287,6 +296,8 @@ def bonos_produccion_dashboard(request):
                 "monto_hornos": Decimal("1000.00"),
                 "monto_area_produccion": Decimal("850.00"),
                 "monto_armado": Decimal("850.00"),
+                "monto_preparacion": Decimal("850.00"),
+                "monto_cuartos_frios": Decimal("850.00"),
                 "monto_logistica": Decimal("850.00"),
                 "monto_crucero": Decimal("950.00"),
                 "premio_embetunado": Decimal("400.00"),
