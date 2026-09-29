@@ -206,11 +206,14 @@ def corregir_compra_realizada(compra, *, datos, version, motivo, actor):
     artículo: el dinero ya salió y lo que se arregla es el registro. El
     compromiso sí se realinea porque alimenta el importe comprometido.
     """
-    intento_id = CompraRealizadaDepartamental.objects.values_list('intento_id', flat=True).get(pk=compra.pk)
+    item_id, intento_id = CompraRealizadaDepartamental.objects.values_list(
+        'item_id', 'intento_id'
+    ).get(pk=compra.pk)
+    item = ItemCompraDepartamental.objects.select_for_update().get(pk=item_id)
     intento = IntentoCompraDepartamental.objects.select_for_update().get(pk=intento_id)
-    compra = (CompraRealizadaDepartamental.objects.select_for_update()
-              .select_related('item__solicitud').get(pk=compra.pk))
-    item = compra.item
+    compra = CompraRealizadaDepartamental.objects.select_for_update().get(pk=compra.pk)
+    if compra.item_id != item.pk or compra.intento_id != intento.pk:
+        raise ValidationError('La compra cambió de artículo o intento. Recarga y revisa su historial.')
     if not motivo.strip():
         raise ValidationError('Escribe el motivo de la corrección.')
     if compra.version != version:

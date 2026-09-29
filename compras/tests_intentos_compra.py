@@ -252,6 +252,32 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertTrue(CompraRealizadaDepartamental.objects.filter(intento=intento).exists())
         self.assertTrue(EventoCompraDepartamental.objects.filter(item=self.item, tipo='ARTICULO_CANCELADO').exists())
 
+    def test_cancelar_articulo_autorizado_libera_reserva_preorden(self):
+        reserva = CompromisoCompraDepartamental.objects.get(
+            item=self.item, intento__isnull=True, activo=True,
+        )
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'AUTORIZADO')
+        cancelar_articulo_definitivamente(self.item, motivo='  Ya no se requiere  ', actor=self.user)
+        reserva.refresh_from_db(); self.item.refresh_from_db()
+        self.assertEqual(self.item.estado, 'CANCELADO')
+        self.assertFalse(reserva.activo)
+        self.assertIsNotNone(reserva.liberado_en)
+        self.assertEqual(self.item.comentario_reciente, 'Ya no se requiere')
+
+    def test_cancelar_articulo_revierte_reserva_si_falla_evento(self):
+        reserva = CompromisoCompraDepartamental.objects.get(
+            item=self.item, intento__isnull=True, activo=True,
+        )
+        with patch('compras.services_intentos_compra.EventoCompraDepartamental.objects.create',
+                   side_effect=RuntimeError('evento falló')):
+            with self.assertRaisesMessage(RuntimeError, 'evento falló'):
+                cancelar_articulo_definitivamente(self.item, motivo='Ya no se requiere', actor=self.user)
+        reserva.refresh_from_db(); self.item.refresh_from_db()
+        self.assertTrue(reserva.activo)
+        self.assertIsNone(reserva.liberado_en)
+        self.assertEqual(self.item.estado, 'AUTORIZADO')
+
     def test_cancelar_articulo_rechaza_motivo_vacio_intento_vigente_y_recepcion(self):
         intento = self._intento()
         with self.assertRaises(ValidationError):

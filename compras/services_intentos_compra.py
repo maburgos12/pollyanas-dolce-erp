@@ -250,6 +250,11 @@ def cancelar_articulo_definitivamente(item, *, motivo, actor):
         raise ValidationError("El artículo tiene una recepción registrada y no puede cancelarse.")
     if any(intento.saldo_reembolso > 0 for intento in intentos):
         raise ValidationError("Hay un reembolso pendiente; regístralo antes de cancelar el artículo.")
+    reservas = CompromisoCompraDepartamental.objects.select_for_update().filter(
+        item=item, intento__isnull=True, activo=True,
+    )
+    for reserva in reservas:
+        _liberar_compromiso(reserva)
     item.estado = ItemCompraDepartamental.ESTADO_CANCELADO
     item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_NADIE
     item.comentario_reciente = motivo.strip()

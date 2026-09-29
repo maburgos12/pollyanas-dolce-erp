@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -412,6 +413,32 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
 
 class CorreccionCompraRegistradaTests(_CompraDepartamentalBase, TestCase):
     """La compra ya pagada se corrige con motivo y sin reabrir la autorización."""
+
+    def test_correccion_bloquea_item_intento_compra_en_ese_orden_sin_joins(self):
+        self.assertEqual(self.comprar().status_code, 200)
+        compra = CompraRealizadaDepartamental.objects.get(item=self.item)
+        bloqueos = []
+
+        def registrar_bloqueo(execute, sql, params, many, context):
+            if 'FOR UPDATE' in sql.upper():
+                for modelo in ('itemcompradepartamental', 'intentocompradepartamental',
+                               'comprarealizadadepartamental'):
+                    if f'FROM "compras_{modelo}"' in sql:
+                        bloqueos.append((modelo, sql))
+                        break
+            return execute(sql, params, many, context)
+
+        with connection.execute_wrapper(registrar_bloqueo):
+            corregida = corregir_compra_realizada(
+                compra, datos={'importe_final': Decimal('190')},
+                version=compra.version, motivo='Importe comprobado', actor=self.user,
+            )
+        self.assertEqual(corregida.importe_final, Decimal('190'))
+        self.assertEqual([modelo for modelo, _ in bloqueos[:3]], [
+            'itemcompradepartamental', 'intentocompradepartamental',
+            'comprarealizadadepartamental',
+        ])
+        self.assertNotIn(' JOIN ', bloqueos[2][1].upper())
 
     def corregir(self, **changes):
         compra = CompraRealizadaDepartamental.objects.get(item=self.item)
