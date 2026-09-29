@@ -645,6 +645,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         with self.assertRaises(TypeError):
             line.source_trace["opening"] = ()
+        with self.assertRaises(TypeError):
+            line.source_trace["conversion_in_impacts"][999] = Decimal("1")
 
     def test_key_universe_keeps_opening_only_and_closing_only_products(self):
         closing_only_product = PointProduct.objects.create(

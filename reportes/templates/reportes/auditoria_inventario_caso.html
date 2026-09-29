@@ -49,7 +49,7 @@
               <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
               <dl>
                 <div><dt>{% if evidence.source_quantity is not None %}Impacto aplicado{% else %}Cantidad{% endif %}</dt><dd>{% if evidence.quantity_is_text %}{{ evidence.quantity }}{% else %}{{ evidence.quantity|floatformat:"-4"|intcomma }}{% endif %}</dd></div>
-                {% if evidence.source_quantity is not None %}<div><dt>Cantidad origen Point</dt><dd>{{ evidence.source_quantity|floatformat:"-4"|intcomma }}</dd></div>{% endif %}
+                {% if evidence.source_quantity is not None %}<div><dt>{{ evidence.source_quantity_label }}</dt><dd>{{ evidence.source_quantity|floatformat:"-4"|intcomma }}</dd></div>{% endif %}
                 <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
                 <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
               </dl>

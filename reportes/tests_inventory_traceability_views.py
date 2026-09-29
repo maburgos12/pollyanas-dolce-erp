@@ -525,9 +525,13 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertNotIn("CONV-IN", conversion_out_step)
         self.assertIn("Point #992002", conversion_out_step)
         self.assertNotIn("Point #992001", conversion_out_step)
-        self.assertIn("Impacto aplicado", conversion_in_step)
+        self.assertIn("Cantidad", conversion_in_step)
         self.assertIn("8", conversion_in_step)
-        self.assertIn("Cantidad origen Point", conversion_out_step)
+        self.assertNotIn("Cantidad registrada en Point", conversion_in_step)
+        self.assertIn(
+            "Cantidad registrada en Point (producto destino)",
+            conversion_out_step,
+        )
         self.assertIn("0.8333", conversion_out_step)
         self.assertIn("10", conversion_out_step)
         self.assertNotContains(response, "Evidencia sin dirección disponible")
@@ -977,6 +981,36 @@ class InventoryTraceabilityViewsTests(TestCase):
         rejection = self.case.events.get(action=ProductInventoryAuditEvent.Action.REJECT)
         self.assertEqual(rejection.related_event, explanation)
         self.assertEqual(rejection.reason_code, "INSUFFICIENT")
+
+    def test_reject_requires_nonblank_notes_for_html_and_async_requests(self):
+        self._explain()
+        self.client.force_login(self.approver)
+        url = reverse("reportes:inventory_audit_reject", args=[self.case.pk])
+
+        html_response = self.client.post(
+            url,
+            {"reason_code": "MANIPULATED", "notes": "   "},
+        )
+        json_response = self.client.post(
+            url,
+            {"reason_code": "MANIPULATED", "notes": "   "},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(html_response.status_code, 400)
+        self.assertContains(html_response, f'action="{url}"', status_code=400)
+        self.assertContains(html_response, 'value="INSUFFICIENT"', status_code=400)
+        self.assertEqual(json_response.status_code, 400)
+        self.assertEqual(json_response.json()["fields"]["reason_code"], "INSUFFICIENT")
+        self.assertEqual(json_response.json()["fields"]["notes"], "   ")
+        self.assertIn('value="INSUFFICIENT"', json_response.json()["html"])
+        self.case.refresh_from_db()
+        self.assertEqual(
+            self.case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        )
+        self.assertEqual(self.case.events.count(), 1)
 
     def test_review_fails_closed_when_current_explanation_has_no_actor(self):
         self.case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL

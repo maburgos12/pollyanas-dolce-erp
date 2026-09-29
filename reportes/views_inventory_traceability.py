@@ -217,6 +217,7 @@ def _evidence_row(
     actor,
     reference,
     source_quantity=None,
+    source_quantity_label=None,
 ) -> dict[str, object]:
     return {
         "source": TRACE_SOURCE_LABELS[source],
@@ -227,6 +228,7 @@ def _evidence_row(
         "actor": actor or "No informado por Point",
         "reference": reference or f"Point #{source_id}",
         "source_quantity": source_quantity,
+        "source_quantity_label": source_quantity_label,
         "quantity_is_text": isinstance(quantity, str),
         "available": True,
     }
@@ -450,7 +452,14 @@ def _source_evidence_by_step(
                     ),
                     actor=(row.raw_payload or {}).get("responsable"),
                     reference=row.movement_external_id or f"Point #{source_id}",
-                    source_quantity=row.quantity,
+                    source_quantity=(
+                        row.quantity if trace_bucket == "conversion_out" else None
+                    ),
+                    source_quantity_label=(
+                        "Cantidad registrada en Point (producto destino)"
+                        if trace_bucket == "conversion_out"
+                        else None
+                    ),
                 )
             )
 
@@ -1088,12 +1097,18 @@ def _review_case(
     with transaction.atomic():
         case = _locked_case(pk)
         _require_case_custody(request.user, case)
-        if len(notes) > MAX_NOTES_LENGTH:
+        if len(notes) > MAX_NOTES_LENGTH or (
+            action == ProductInventoryAuditEvent.Action.REJECT and not notes
+        ):
             return _action_response(
                 request,
                 case=case,
                 ok=False,
-                message="Indica una causa para registrar la revisión.",
+                message=(
+                    "Indica el motivo del rechazo antes de continuar."
+                    if action == ProductInventoryAuditEvent.Action.REJECT and not notes
+                    else "El comentario no puede exceder el límite permitido."
+                ),
                 status=400,
                 fields=fields,
             )
