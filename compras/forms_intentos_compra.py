@@ -27,7 +27,12 @@ class CancelarIntentoCompraForm(forms.Form):
             )
             self.fields["reembolso_solicitado"] = forms.DecimalField(
                 label="Importe solicitado", min_value=Decimal("0.01"),
+                max_value=self.compra.importe_final,
                 max_digits=14, decimal_places=2,
+                help_text=f"Máximo reembolsable: ${self.compra.importe_final:.2f}",
+                error_messages={
+                    "max_value": "El reembolso no puede superar la compra pagada.",
+                },
             )
             self.fields["evidencia_solicitud_reembolso"] = forms.FileField(
                 label="Evidencia de solicitud", required=False,
