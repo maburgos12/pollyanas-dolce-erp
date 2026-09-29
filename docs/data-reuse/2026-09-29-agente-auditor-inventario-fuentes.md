@@ -46,4 +46,3 @@ python3 manage.py shell -c '<consultas ORM de conteo por mes y estado>'
 Las consultas de producción fueron agregadas, acotadas a agosto de 2026 y no extrajeron archivos, contraseñas ni contenidos personales.
 
 Riesgos y pendientes: no existe aún un responsable explícito por sucursal para esta auditoría; por eso la primera etapa usa jefaturas canónicas por área y deja sin persona cualquier empate. El valor monetario histórico queda fuera hasta identificar una fuente temporal confiable.
-

@@ -306,4 +306,3 @@ Abrir agosto en producción, revisar consola y Network, filtro de atención, fil
 - [ ] **Step 8: Cerrar worktree**
 
 Ejecutar auditoría, cierre oficial `task_workspace_close.sh --state merged` y limpieza de rama remota según el protocolo.
-

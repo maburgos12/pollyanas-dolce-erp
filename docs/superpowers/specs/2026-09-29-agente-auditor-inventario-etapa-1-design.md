@@ -110,4 +110,3 @@ La implementación añade un comando idempotente con `--dry-run` y `--month`. En
 - Los casos menores siguen visibles y agrupables, pero no interrumpen al responsable.
 - La pantalla mantiene columnas alineadas, encabezado fijo y términos operativos.
 - Ninguna acción del agente cambia movimientos, cierres o cantidades de Point.
-
