@@ -6,10 +6,17 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
+from django.db import transaction
 from django.utils import timezone
 
 from core.models import sucursales_operativas
-from pos_bridge.models import PointExtractionLog, PointSyncJob, PointTransferLine
+from pos_bridge.models import (
+    PointExtractionLog,
+    PointOpenTransferSnapshot,
+    PointOpenTransferSnapshotMember,
+    PointSyncJob,
+    PointTransferLine,
+)
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text
@@ -46,6 +53,52 @@ def _canonical_datetime(value) -> str:
     return value.astimezone(OPEN_TRANSFER_TIME_ZONE).isoformat()
 
 
+def _branch_value(line, side: str, field: str):
+    frozen_value = getattr(line, f"{side}_branch_{field}", None)
+    if frozen_value is not None:
+        return str(frozen_value or "")
+    branch = getattr(line, f"{side}_branch", None)
+    if isinstance(branch, dict):
+        return str(branch.get(field) or "")
+    return str(getattr(branch, field, "") or "")
+
+
+def canonical_open_transfer_payload(line) -> dict:
+    return {
+        "source_hash": str(line.source_hash or ""),
+        "transfer_external_id": str(line.transfer_external_id or ""),
+        "detail_external_id": str(line.detail_external_id or ""),
+        "origin_branch_external_id": _branch_value(line, "origin", "external_id"),
+        "origin_branch_name": _branch_value(line, "origin", "name"),
+        "destination_branch_external_id": _branch_value(
+            line, "destination", "external_id"
+        ),
+        "destination_branch_name": _branch_value(line, "destination", "name"),
+        "registered_at": _canonical_datetime(line.registered_at),
+        "sent_at": _canonical_datetime(line.sent_at),
+        "received_at": _canonical_datetime(line.received_at),
+        "requested_by": str(getattr(line, "requested_by", "") or ""),
+        "sent_by": str(getattr(line, "sent_by", "") or ""),
+        "received_by": str(getattr(line, "received_by", "") or ""),
+        "item_name": str(line.item_name or ""),
+        "item_code": str(line.item_code or ""),
+        "unit": str(getattr(line, "unit", "") or ""),
+        "requested_quantity": _canonical_decimal(line.requested_quantity),
+        "sent_quantity": _canonical_decimal(line.sent_quantity),
+        "received_quantity": _canonical_decimal(line.received_quantity),
+        "is_insumo": bool(line.is_insumo),
+        "is_received": bool(line.is_received),
+        "is_cancelled": bool(line.is_cancelled),
+        "is_finalized": bool(line.is_finalized),
+        "is_open": bool(line.is_open),
+    }
+
+
+def _payload_sha256(payload: dict) -> str:
+    serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def build_open_transfer_manifest(
     lines,
     *,
@@ -54,24 +107,7 @@ def build_open_transfer_manifest(
 ) -> dict:
     stable_rows = []
     for line in lines:
-        stable_rows.append(
-            {
-                "source_hash": str(line.source_hash or ""),
-                "transfer_external_id": str(line.transfer_external_id or ""),
-                "detail_external_id": str(line.detail_external_id or ""),
-                "registered_at": _canonical_datetime(line.registered_at),
-                "sent_at": _canonical_datetime(line.sent_at),
-                "received_at": _canonical_datetime(line.received_at),
-                "requested_quantity": _canonical_decimal(line.requested_quantity),
-                "sent_quantity": _canonical_decimal(line.sent_quantity),
-                "received_quantity": _canonical_decimal(line.received_quantity),
-                "is_insumo": bool(line.is_insumo),
-                "is_received": bool(line.is_received),
-                "is_cancelled": bool(line.is_cancelled),
-                "is_finalized": bool(line.is_finalized),
-                "is_open": bool(line.is_open),
-            }
-        )
+        stable_rows.append(canonical_open_transfer_payload(line))
     stable_rows.sort(
         key=lambda row: (
             row["source_hash"],
@@ -87,6 +123,76 @@ def build_open_transfer_manifest(
         "operational_date": operational_date.isoformat(),
         "captured_at": captured_at.isoformat(),
     }
+
+
+@transaction.atomic
+def persist_open_transfer_snapshot(
+    *,
+    sync_job: PointSyncJob,
+    lines,
+    operational_date: date,
+    captured_at: datetime,
+) -> tuple[PointOpenTransferSnapshot, dict]:
+    rows = list(lines)
+    source_hashes = [str(row.source_hash or "") for row in rows]
+    if any(not value for value in source_hashes) or len(source_hashes) != len(
+        set(source_hashes)
+    ):
+        raise PersistenceError(
+            "El snapshot de transferencias abiertas contiene identificadores "
+            "duplicados o vacíos."
+        )
+    manifest = build_open_transfer_manifest(
+        rows,
+        operational_date=operational_date,
+        captured_at=captured_at,
+    )
+    snapshot = PointOpenTransferSnapshot.objects.create(
+        sync_job=sync_job,
+        operational_date=operational_date,
+        captured_at=captured_at,
+        row_count=manifest["row_count"],
+        sha256=manifest["sha256"],
+    )
+    members = []
+    for row in rows:
+        payload = canonical_open_transfer_payload(row)
+        members.append(
+            PointOpenTransferSnapshotMember(
+                snapshot=snapshot,
+                source_line_id=getattr(row, "id", None),
+                source_hash=payload["source_hash"],
+                payload_sha256=_payload_sha256(payload),
+                transfer_external_id=payload["transfer_external_id"],
+                detail_external_id=payload["detail_external_id"],
+                origin_branch_id=row.origin_branch_id,
+                destination_branch_id=row.destination_branch_id,
+                origin_branch_external_id=payload["origin_branch_external_id"],
+                origin_branch_name=payload["origin_branch_name"],
+                destination_branch_external_id=payload["destination_branch_external_id"],
+                destination_branch_name=payload["destination_branch_name"],
+                registered_at=row.registered_at,
+                sent_at=row.sent_at,
+                received_at=row.received_at,
+                requested_by=payload["requested_by"],
+                sent_by=payload["sent_by"],
+                received_by=payload["received_by"],
+                item_name=payload["item_name"],
+                item_code=payload["item_code"],
+                unit=payload["unit"],
+                requested_quantity=row.requested_quantity,
+                sent_quantity=row.sent_quantity,
+                received_quantity=row.received_quantity,
+                is_insumo=row.is_insumo,
+                is_received=row.is_received,
+                is_cancelled=row.is_cancelled,
+                is_finalized=row.is_finalized,
+                is_open=row.is_open,
+            )
+        )
+    PointOpenTransferSnapshotMember.objects.bulk_create(members)
+    manifest["snapshot_id"] = snapshot.id
+    return snapshot, manifest
 
 
 def is_cedis_like_name(value: str) -> bool:
@@ -163,11 +269,23 @@ class OpenTransferSyncService:
                 }
             )
             if not str(branch_filter or "").strip():
-                summary[OPEN_TRANSFER_MANIFEST_KEY] = build_open_transfer_manifest(
-                    lines,
+                persisted_lines = list(
+                    PointTransferLine.objects.filter(
+                        source_hash__in=[line.source_hash for line in lines],
+                        sync_job=sync_job,
+                    ).select_related("origin_branch", "destination_branch")
+                )
+                if len(persisted_lines) != len(lines):
+                    raise PersistenceError(
+                        "No fue posible materializar todas las líneas del snapshot de cierre."
+                    )
+                _snapshot, manifest = persist_open_transfer_snapshot(
+                    sync_job=sync_job,
+                    lines=persisted_lines,
                     operational_date=fecha,
                     captured_at=timezone.now(),
                 )
+                summary[OPEN_TRANSFER_MANIFEST_KEY] = manifest
             return self.movement_service._mark_success(sync_job, summary)
         except PosBridgeError as exc:
             return self.movement_service._mark_failure(sync_job, exc)

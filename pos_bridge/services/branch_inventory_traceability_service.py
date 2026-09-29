@@ -16,6 +16,7 @@ from pos_bridge.models import (
     PointConversionLine,
     PointHistoricalInventoryClosing,
     PointHistoricalInventoryClosingLine,
+    PointOpenTransferSnapshot,
     PointProduct,
     PointProductionLine,
     PointSyncJob,
@@ -28,6 +29,9 @@ from pos_bridge.services.monthly_product_balance_service import (
 )
 from pos_bridge.services.open_transfer_sync_service import (
     OPEN_TRANSFER_MANIFEST_KEY,
+    _payload_sha256,
+    build_open_transfer_manifest,
+    canonical_open_transfer_payload,
     open_transfer_close_window,
 )
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
@@ -44,6 +48,8 @@ TRACE_SOURCE_NAMES = (
     "conversions",
     "transfer_in",
     "transfer_out",
+    "open_transfer_snapshot_in",
+    "open_transfer_snapshot_out",
     "conversion_in",
     "conversion_out",
     "adjustments",
@@ -169,6 +175,8 @@ class BranchInventoryTraceabilityService:
             waste,
             transfer_in,
             transfer_out,
+            open_transfer_snapshot_in,
+            open_transfer_snapshot_out,
             conversion_in,
             conversion_out,
             conversion_in_impacts,
@@ -195,6 +203,8 @@ class BranchInventoryTraceabilityService:
             waste,
             transfer_in,
             transfer_out,
+            open_transfer_snapshot_in,
+            open_transfer_snapshot_out,
             conversion_in,
             conversion_out,
         )
@@ -248,6 +258,8 @@ class BranchInventoryTraceabilityService:
             | waste.keys()
             | transfer_in.keys()
             | transfer_out.keys()
+            | open_transfer_snapshot_in.keys()
+            | open_transfer_snapshot_out.keys()
             | conversion_in.keys()
             | conversion_out.keys()
         )
@@ -283,6 +295,12 @@ class BranchInventoryTraceabilityService:
             transfer_out_quantity, transfer_out_ids = transfer_out.get(
                 (branch_id, product_id), (ZERO, ())
             )
+            _snapshot_in_quantity, snapshot_in_ids = open_transfer_snapshot_in.get(
+                (branch_id, product_id), (ZERO, ())
+            )
+            _snapshot_out_quantity, snapshot_out_ids = open_transfer_snapshot_out.get(
+                (branch_id, product_id), (ZERO, ())
+            )
             conversion_in_quantity, conversion_in_ids = conversion_in.get(
                 (branch_id, product_id), (ZERO, ())
             )
@@ -314,6 +332,8 @@ class BranchInventoryTraceabilityService:
                 ),
                 "transfer_in": transfer_in_ids,
                 "transfer_out": transfer_out_ids,
+                "open_transfer_snapshot_in": snapshot_in_ids,
+                "open_transfer_snapshot_out": snapshot_out_ids,
                 "conversion_in": conversion_in_ids,
                 "conversion_out": conversion_out_ids,
                 "adjustments": (),
@@ -574,6 +594,8 @@ class BranchInventoryTraceabilityService:
         waste: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         transfer_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         transfer_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        open_transfer_snapshot_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        open_transfer_snapshot_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         conversion_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         conversion_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         conversion_in_impacts: dict[tuple[int, int], dict[int, Decimal]] = {}
@@ -627,7 +649,7 @@ class BranchInventoryTraceabilityService:
                 quantity=row.quantity,
             )
         self._apply_transfers(
-            rows=transfer_rows,
+            rows=transfer_authority.get("mutable_rows", transfer_rows),
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             product_indexes=product_indexes,
@@ -635,6 +657,21 @@ class BranchInventoryTraceabilityService:
             transfer_out=transfer_out,
             issues=issues,
         )
+        snapshot_transfer_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        snapshot_transfer_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        self._apply_transfers(
+            rows=transfer_authority.get("snapshot_members", ()),
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            product_indexes=product_indexes,
+            transfer_in=snapshot_transfer_in,
+            transfer_out=snapshot_transfer_out,
+            issues=issues,
+        )
+        self._merge_balance_maps(transfer_in, snapshot_transfer_in)
+        self._merge_balance_maps(transfer_out, snapshot_transfer_out)
+        open_transfer_snapshot_in.update(snapshot_transfer_in)
+        open_transfer_snapshot_out.update(snapshot_transfer_out)
         self._apply_conversions(
             rows=conversion_rows,
             product_indexes=product_indexes,
@@ -650,6 +687,8 @@ class BranchInventoryTraceabilityService:
             waste,
             transfer_in,
             transfer_out,
+            open_transfer_snapshot_in,
+            open_transfer_snapshot_out,
             conversion_in,
             conversion_out,
             conversion_in_impacts,
@@ -700,6 +739,8 @@ class BranchInventoryTraceabilityService:
                 parameters__mode="open_transfers",
                 parameters__fecha=month_end.isoformat(),
             )
+            .select_related("open_transfer_snapshot")
+            .prefetch_related("open_transfer_snapshot__members")
             .only(
                 "id",
                 "job_type",
@@ -745,9 +786,24 @@ class BranchInventoryTraceabilityService:
             selected_open_job = None
             open_job_issues = ["OPEN_TRANSFER_SYNC_JOB_MISSING"]
         issues.extend(open_job_issues)
-        relevant_rows = [
+        snapshot_members = (
+            list(selected_open_job.open_transfer_snapshot.members.all())
+            if selected_open_job is not None and not open_job_issues
+            else []
+        )
+        frozen_references = {
+            (row.transfer_external_id, row.detail_external_id)
+            for row in snapshot_members
+        }
+        mutable_rows = [
             row
             for row in rows
+            if (row.transfer_external_id, row.detail_external_id)
+            not in frozen_references
+        ]
+        relevant_rows = [
+            row
+            for row in mutable_rows
             if not row.is_cancelled
             and row.is_current_snapshot
             and not row.is_insumo
@@ -830,6 +886,8 @@ class BranchInventoryTraceabilityService:
             "selected_sync_job_ids": (selected.id,),
             "authority_issues": tuple(dict.fromkeys(issues)),
             "source_ids": source_ids,
+            "mutable_rows": tuple(mutable_rows),
+            "snapshot_members": tuple(snapshot_members),
         }
 
     @staticmethod
@@ -892,6 +950,7 @@ class BranchInventoryTraceabilityService:
         try:
             manifest_count = int(manifest["row_count"])
             manifest_hash = str(manifest["sha256"])
+            manifest_snapshot_id = int(manifest["snapshot_id"])
             manifest_date = date.fromisoformat(str(manifest["operational_date"]))
             captured_at = parse_datetime(str(manifest["captured_at"]))
         except (KeyError, TypeError, ValueError):
@@ -907,6 +966,40 @@ class BranchInventoryTraceabilityService:
             or timezone.is_naive(captured_at)
         ):
             issues.append("OPEN_TRANSFER_SYNC_MANIFEST_INVALID")
+
+        try:
+            snapshot = job.open_transfer_snapshot
+        except PointOpenTransferSnapshot.DoesNotExist:
+            snapshot = None
+        if snapshot is None:
+            issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_MISSING")
+        else:
+            members = list(snapshot.members.all())
+            if (
+                snapshot.operational_date != operational_date
+                or snapshot.captured_at != captured_at
+                or snapshot.row_count != manifest_count
+                or snapshot.sha256 != manifest_hash
+                or snapshot.id != manifest_snapshot_id
+            ):
+                issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_MANIFEST_MISMATCH")
+            if len(members) != snapshot.row_count:
+                issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_COUNT_MISMATCH")
+            if any(
+                member.payload_sha256
+                != _payload_sha256(canonical_open_transfer_payload(member))
+                for member in members
+            ):
+                issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_MEMBER_HASH_MISMATCH")
+            if any(not member.is_open or member.is_cancelled for member in members):
+                issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_STATUS_INVALID")
+            rebuilt_manifest = build_open_transfer_manifest(
+                members,
+                operational_date=snapshot.operational_date,
+                captured_at=snapshot.captured_at,
+            )
+            if rebuilt_manifest["sha256"] != snapshot.sha256:
+                issues.append("OPEN_TRANSFER_SYNC_SNAPSHOT_HASH_MISMATCH")
 
         cutoff, window_end = open_transfer_close_window(operational_date)
         started_at = job.started_at
@@ -959,7 +1052,11 @@ class BranchInventoryTraceabilityService:
         issues,
     ):
         for row in rows:
-            if row.is_cancelled or not row.is_current_snapshot or row.is_insumo:
+            if (
+                row.is_cancelled
+                or not getattr(row, "is_current_snapshot", True)
+                or row.is_insumo
+            ):
                 continue
             product_id, issue_code = self._resolve_product(row, product_indexes)
             origin_at = row.sent_at
@@ -1241,6 +1338,15 @@ class BranchInventoryTraceabilityService:
         current, source_ids = balances.get(key, (ZERO, []))
         source_ids.append(source_id)
         balances[key] = (current + Decimal(quantity), source_ids)
+
+    @staticmethod
+    def _merge_balance_maps(target, addition):
+        for key, (quantity, _source_ids) in addition.items():
+            current, current_source_ids = target.get(key, (ZERO, []))
+            target[key] = (
+                current + Decimal(quantity),
+                list(current_source_ids),
+            )
 
     @staticmethod
     def _build_recipe_indexes():

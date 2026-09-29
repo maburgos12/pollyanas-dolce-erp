@@ -30,6 +30,7 @@ from pos_bridge.models import (
     PointConversionLine,
     PointDailySale,
     PointHistoricalInventoryClosingLine,
+    PointOpenTransferSnapshotMember,
     PointProductionLine,
     PointTransferLine,
     PointWasteLine,
@@ -308,6 +309,16 @@ def _source_evidence_by_step(
             "origin_branch", "destination_branch"
         )
     }
+    snapshot_transfer_ids = set(
+        ids_for("open_transfer_snapshot_in")
+        + ids_for("open_transfer_snapshot_out")
+    )
+    snapshot_transfers = {
+        row.pk: row
+        for row in PointOpenTransferSnapshotMember.objects.filter(
+            pk__in=snapshot_transfer_ids
+        ).select_related("snapshot")
+    }
     conversion_ids = set(
         ids_for("conversions")
         + ids_for("conversion_in")
@@ -426,6 +437,37 @@ def _source_evidence_by_step(
                     actor=(row.received_by if incoming else row.sent_by)
                     or row.requested_by,
                     reference=row.transfer_external_id or f"Point #{source_id}",
+                )
+            )
+
+    for trace_bucket, step in (
+        ("open_transfer_snapshot_in", "transfer_in"),
+        ("open_transfer_snapshot_out", "transfer_out"),
+    ):
+        incoming = step == "transfer_in"
+        for source_id in ids_for(trace_bucket):
+            row = snapshot_transfers.get(source_id)
+            if row is None:
+                evidence[step].append(_missing_evidence_row("transfers", source_id))
+                continue
+            evidence[step].append(
+                _evidence_row(
+                    source="transfers",
+                    source_id=source_id,
+                    date_value=(row.received_at if incoming else row.sent_at)
+                    or row.registered_at,
+                    location=(
+                        f"{row.origin_branch_name} → {row.destination_branch_name}"
+                    ),
+                    quantity=(
+                        row.received_quantity if incoming else row.sent_quantity
+                    ),
+                    actor=(row.received_by if incoming else row.sent_by)
+                    or row.requested_by,
+                    reference=(
+                        f"{row.transfer_external_id} · "
+                        f"cierre inmutable #{row.snapshot_id}"
+                    ),
                 )
             )
 

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,9 +19,12 @@ from pos_bridge.models import (
     PointBranch,
     PointConversionLine,
     PointDailySale,
+    PointOpenTransferSnapshotMember,
     PointProduct,
+    PointSyncJob,
     PointTransferLine,
 )
+from pos_bridge.services.open_transfer_sync_service import persist_open_transfer_snapshot
 from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
@@ -590,6 +593,67 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "Evidencia sin dirección disponible")
         self.assertContains(response, "Point #993001")
         self.assertContains(response, "Point #993002")
+
+    def test_browser_detail_resolves_immutable_open_transfer_snapshot_evidence(self):
+        other_branch = PointBranch.objects.create(
+            external_id="audit-snapshot-other-branch",
+            name="CEDIS histórico",
+        )
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+        )
+        transfer = PointTransferLine.objects.create(
+            origin_branch=self.branch,
+            destination_branch=other_branch,
+            sync_job=job,
+            transfer_external_id="TR-SNAPSHOT",
+            detail_external_id="TR-SNAPSHOT-1",
+            source_hash="9" * 64,
+            registered_at=datetime(
+                2026, 8, 31, 20, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            sent_at=datetime(
+                2026, 8, 31, 21, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            item_name=self.product.name,
+            item_code=self.product.external_id,
+            sent_quantity=Decimal("2"),
+            sent_by="Johana",
+            is_open=True,
+            is_finalized=True,
+        )
+        snapshot, _manifest = persist_open_transfer_snapshot(
+            sync_job=job,
+            lines=[transfer],
+            operational_date=date(2026, 8, 31),
+            captured_at=datetime(
+                2026, 9, 1, 2, 4, tzinfo=timezone.get_current_timezone()
+            ),
+        )
+        member = PointOpenTransferSnapshotMember.objects.get(snapshot=snapshot)
+        transfer.delete()
+        self.case.source_trace = {
+            "open_transfer_snapshot_out": [member.pk],
+        }
+        self.case.save(update_fields=["source_trace"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        content = response.content.decode()
+        transfer_out_step = content[
+            content.index('data-balance-step="transfer_out"') : content.index(
+                'data-balance-step="conversion_out"'
+            )
+        ]
+        self.assertIn("TR-SNAPSHOT", transfer_out_step)
+        self.assertIn("Sucursal auditoría vistas → CEDIS histórico", transfer_out_step)
+        self.assertIn("2", transfer_out_step)
+        self.assertNotIn("Evidencia ya no disponible", transfer_out_step)
 
     def test_browser_detail_maps_reason_codes_without_exposing_internal_tokens(self):
         ProductInventoryAuditEvent.objects.create(

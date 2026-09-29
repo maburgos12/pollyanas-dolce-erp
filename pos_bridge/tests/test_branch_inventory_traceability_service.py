@@ -17,6 +17,8 @@ from pos_bridge.models import (
     PointExtractionLog,
     PointHistoricalInventoryClosing,
     PointHistoricalInventoryClosingLine,
+    PointOpenTransferSnapshot,
+    PointOpenTransferSnapshotMember,
     PointProduct,
     PointProductionLine,
     PointSyncJob,
@@ -25,6 +27,9 @@ from pos_bridge.models import (
 )
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
+)
+from pos_bridge.services.open_transfer_sync_service import (
+    persist_open_transfer_snapshot,
 )
 from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
@@ -145,6 +150,17 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             job.started_at = datetime(2026, 9, 1, 2, 0, tzinfo=local_tz)
             job.finished_at = datetime(2026, 9, 1, 2, 5, tzinfo=local_tz)
             job.save(update_fields=["started_at", "finished_at"])
+            _snapshot, manifest = persist_open_transfer_snapshot(
+                sync_job=job,
+                lines=[],
+                operational_date=date(2026, 8, 31),
+                captured_at=datetime(2026, 9, 1, 2, 4, tzinfo=local_tz),
+            )
+            job.result_summary = {
+                **job.result_summary,
+                "open_transfer_manifest": manifest,
+            }
+            job.save(update_fields=["result_summary", "updated_at"])
         return job
 
     def _sales_job(self, *, status=PointSyncJob.STATUS_SUCCESS, branch_filter=""):
@@ -220,12 +236,32 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def _increment_movement_job(job, count_key):
         summary = dict(job.result_summary or {})
         summary[count_key] = int(summary.get(count_key) or 0) + 1
-        if count_key == "transfer_lines_seen" and "open_transfer_manifest" in summary:
-            manifest = dict(summary["open_transfer_manifest"])
-            manifest["row_count"] = summary[count_key]
-            summary["open_transfer_manifest"] = manifest
         job.result_summary = summary
         job.save(update_fields=["result_summary", "updated_at"])
+
+    def _refresh_open_transfer_snapshot(self):
+        PointOpenTransferSnapshotMember.objects.filter(
+            snapshot__sync_job=self.open_transfer_job
+        ).delete()
+        PointOpenTransferSnapshot.objects.filter(
+            sync_job=self.open_transfer_job
+        ).delete()
+        snapshot, manifest = persist_open_transfer_snapshot(
+            sync_job=self.open_transfer_job,
+            lines=PointTransferLine.objects.filter(sync_job=self.open_transfer_job)
+            .select_related("origin_branch", "destination_branch")
+            .order_by("id"),
+            operational_date=date(2026, 8, 31),
+            captured_at=datetime(
+                2026, 9, 1, 2, 4, tzinfo=timezone.get_current_timezone()
+            ),
+        )
+        self.open_transfer_job.result_summary = {
+            **self.open_transfer_job.result_summary,
+            "open_transfer_manifest": manifest,
+        }
+        self.open_transfer_job.save(update_fields=["result_summary", "updated_at"])
+        return snapshot
 
     def _closing(
         self,
@@ -456,6 +492,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "lineas_nuevas",
             ):
                 self._increment_movement_job(self.open_transfer_job, count_key)
+            self._refresh_open_transfer_snapshot()
         return row
 
     def _conversion(
@@ -629,6 +666,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "conversions": (),
                 "transfer_in": (),
                 "transfer_out": (),
+                "open_transfer_snapshot_in": (),
+                "open_transfer_snapshot_out": (),
                 "conversion_in": (),
                 "conversion_out": (),
                 "adjustments": (),
@@ -1015,6 +1054,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def test_missing_required_movement_authority_stops_calculation(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        PointOpenTransferSnapshotMember.objects.all().delete()
+        PointOpenTransferSnapshot.objects.all().delete()
         PointSyncJob.objects.all().delete()
 
         result = self.service.build(month=date(2026, 8, 1))
@@ -1183,6 +1224,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "conversions",
                 "transfer_in",
                 "transfer_out",
+                "open_transfer_snapshot_in",
+                "open_transfer_snapshot_out",
                 "conversion_in",
                 "conversion_out",
                 "adjustments",
@@ -1310,8 +1353,11 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_branch["CENTRO"].transfer_out, Decimal("4"))
         self.assertNotIn("PLAZA", by_branch)
         issue = by_branch["CENTRO"].issues[0]
+        member = self.open_transfer_job.open_transfer_snapshot.members.get(
+            source_line_id=transfer.id
+        )
         self.assertEqual(issue.code, "INCOMPLETE_TRANSFER")
-        self.assertEqual(issue.source_ids, (transfer.id,))
+        self.assertEqual(issue.source_ids, (member.id,))
         self.assertIn(transfer.transfer_external_id, issue.message)
         self.assertIn(transfer.detail_external_id, issue.message)
 
@@ -1334,7 +1380,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             {issue.code for issue in line.issues},
             {"INCOMPLETE_TRANSFER", "TRANSFER_DATE_FALLBACK"},
         )
-        self.assertTrue(all(issue.source_ids == (transfer.id,) for issue in line.issues))
+        member = self.open_transfer_job.open_transfer_snapshot.members.get(
+            source_line_id=transfer.id
+        )
+        self.assertTrue(all(issue.source_ids == (member.id,) for issue in line.issues))
 
     def test_cancelled_stale_and_ingredient_transfer_rows_only_count_for_authority(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
@@ -1466,11 +1515,17 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             for issue in by_branch["CENTRO"].issues
             if issue.code == "INCOMPLETE_TRANSFER"
         )
-        self.assertEqual(issue.source_ids, (transfer.id,))
+        member = self.open_transfer_job.open_transfer_snapshot.members.get(
+            source_line_id=transfer.id
+        )
+        self.assertEqual(issue.source_ids, (member.id,))
 
     def test_open_transfer_snapshot_is_required_for_month_close(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        PointOpenTransferSnapshot.objects.filter(
+            sync_job=self.open_transfer_job
+        ).delete()
         self.open_transfer_job.delete()
 
         result = self.service.build(month=date(2026, 8, 1))
@@ -1580,6 +1635,55 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         self.assertTrue(result.source_complete)
+
+    def test_historical_open_transfer_uses_immutable_snapshot_after_live_row_changes(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(is_received=False, received_at=None)
+        snapshot = self.open_transfer_job.open_transfer_snapshot
+        member = snapshot.members.get()
+
+        PointTransferLine.objects.filter(pk=transfer.pk).update(
+            sent_quantity=Decimal("99"),
+            is_cancelled=True,
+            is_open=False,
+            is_current_snapshot=False,
+            item_code="OTRO",
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
+        line = next(item for item in result.lines if item.branch.id == self.centro.id)
+        self.assertEqual(line.transfer_out, Decimal("4"))
+        self.assertEqual(line.source_trace["transfer_out"], ())
+        self.assertEqual(
+            line.source_trace["open_transfer_snapshot_out"], (member.id,)
+        )
+
+    def test_tampered_or_missing_snapshot_member_fails_closed(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(is_received=False, received_at=None)
+        snapshot = self.open_transfer_job.open_transfer_snapshot
+
+        PointOpenTransferSnapshotMember.objects.filter(snapshot=snapshot).update(
+            sent_quantity=Decimal("99")
+        )
+        tampered = self.service.build(month=date(2026, 8, 1))
+        self.assertFalse(tampered.source_complete)
+        self.assertIn(
+            "OPEN_TRANSFER_SYNC_SNAPSHOT_HASH_MISMATCH",
+            " ".join(issue.message for issue in tampered.global_issues),
+        )
+
+        PointOpenTransferSnapshotMember.objects.filter(snapshot=snapshot).delete()
+        missing = self.service.build(month=date(2026, 8, 1))
+        self.assertFalse(missing.source_complete)
+        self.assertIn(
+            "OPEN_TRANSFER_SYNC_SNAPSHOT_COUNT_MISMATCH",
+            " ".join(issue.message for issue in missing.global_issues),
+        )
 
     def test_late_rerun_does_not_hide_qualifying_close_snapshot(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
@@ -2129,4 +2233,32 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(len(baseline.lines), 1)
         self.assertEqual(len(expanded.lines), 14)
         self.assertEqual(len(expanded_queries), len(baseline_queries))
-        self.assertLessEqual(len(expanded_queries), 24)
+        self.assertLessEqual(len(expanded_queries), 25)
+
+    def test_query_count_does_not_grow_with_open_snapshot_members(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("20")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("19")})
+        self._transfer(
+            sent_quantity="1",
+            received_quantity="0",
+            is_received=False,
+            received_at=None,
+        )
+        with CaptureQueriesContext(connection) as baseline_queries:
+            baseline = self.service.build(month=date(2026, 8, 1))
+
+        for sequence in range(2, 12):
+            self._transfer(
+                sent_quantity="1",
+                received_quantity="0",
+                is_received=False,
+                received_at=None,
+                transfer_external_id=f"open-query-{sequence}",
+            )
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(baseline.source_complete)
+        self.assertTrue(expanded.source_complete)
+        self.assertEqual(len(expanded_queries), len(baseline_queries))
+        self.assertLessEqual(len(expanded_queries), 25)

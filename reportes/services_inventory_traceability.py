@@ -33,6 +33,8 @@ _LEGACY_FINGERPRINT_TRACE_KEYS = (
     "production",
     "waste",
     "transfers",
+    "open_transfer_snapshot_in",
+    "open_transfer_snapshot_out",
     "conversions",
     "adjustments",
 )

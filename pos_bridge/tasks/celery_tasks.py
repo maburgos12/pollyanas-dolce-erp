@@ -782,16 +782,16 @@ def task_open_transfer_closing_snapshot(
         raise
 
     if job.status != PointSyncJob.STATUS_SUCCESS:
-        if self.request.retries < self.max_retries:
-            raise self.retry(
-                exc=RuntimeError(
-                    job.error_message
-                    or (
-                        "La captura de transferencias abiertas no terminó "
-                        f"correctamente: {job.status}."
-                    )
-                )
+        error = RuntimeError(
+            job.error_message
+            or (
+                "La captura de transferencias abiertas no terminó "
+                f"correctamente: {job.status}."
             )
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=error)
+        raise error
     return _serialize_job(job)
 
 

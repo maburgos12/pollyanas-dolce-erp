@@ -3,15 +3,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from celery.exceptions import Retry
-from django.test import SimpleTestCase
+from django.test import TestCase
 
+from pos_bridge.models import PointSyncJob
 from pos_bridge.tasks.celery_tasks import (
     task_open_transfer_closing_snapshot,
     task_open_transfer_sync,
 )
 
 
-class OpenTransferTaskTests(SimpleTestCase):
+class OpenTransferTaskTests(TestCase):
     @staticmethod
     def _job(*, status="SUCCESS", error_message=""):
         return SimpleNamespace(
@@ -95,24 +96,27 @@ class OpenTransferTaskTests(SimpleTestCase):
     @patch("pos_bridge.tasks.celery_tasks.point_account_session_lock")
     def test_exhausted_retries_preserve_final_failed_job(self, session_lock, service_class):
         session_lock.return_value.__enter__.return_value = True
-        service_class.return_value.sync_open_transfers.return_value = self._job(
-            status="FAILED",
+        failed_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_FAILED,
             error_message="Point siguió sin responder",
         )
+        service_class.return_value.sync_open_transfers.return_value = failed_job
 
         task_open_transfer_closing_snapshot.push_request(
             retries=task_open_transfer_closing_snapshot.max_retries
         )
         try:
             with patch.object(task_open_transfer_closing_snapshot, "retry") as retry:
-                result = task_open_transfer_closing_snapshot.run()
+                with self.assertRaisesRegex(RuntimeError, "Point siguió sin responder"):
+                    task_open_transfer_closing_snapshot.run()
         finally:
             task_open_transfer_closing_snapshot.pop_request()
 
         retry.assert_not_called()
-        self.assertEqual(result["job_id"], 321)
-        self.assertEqual(result["status"], "FAILED")
-        self.assertEqual(result["error_message"], "Point siguió sin responder")
+        failed_job.refresh_from_db()
+        self.assertEqual(failed_job.status, PointSyncJob.STATUS_FAILED)
+        self.assertEqual(failed_job.error_message, "Point siguió sin responder")
 
     def test_closing_snapshot_preserves_open_sync_retry_contract(self):
         self.assertEqual(
