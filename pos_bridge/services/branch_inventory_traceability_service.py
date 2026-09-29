@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import copy
 from calendar import monthrange
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -771,9 +772,23 @@ class BranchInventoryTraceabilityService:
             (job for job, job_issues in evaluated_open_jobs if not job_issues),
             None,
         )
+        legacy_open_job = next(
+            (
+                job
+                for job in unrestricted_open_jobs
+                if cls._uses_legacy_open_transfer_contract(job)
+                and not cls._legacy_open_transfer_job_contract_issues(job)
+            ),
+            None,
+        )
+        legacy_open_reconstruction = False
         if valid_open_job is not None:
             selected_open_job = valid_open_job
             open_job_issues = []
+        elif legacy_open_job is not None:
+            selected_open_job = legacy_open_job
+            open_job_issues = []
+            legacy_open_reconstruction = True
         elif evaluated_open_jobs:
             selected_open_job, open_job_issues = evaluated_open_jobs[0]
         elif open_jobs:
@@ -788,7 +803,9 @@ class BranchInventoryTraceabilityService:
         issues.extend(open_job_issues)
         snapshot_members = (
             list(selected_open_job.open_transfer_snapshot.members.all())
-            if selected_open_job is not None and not open_job_issues
+            if selected_open_job is not None
+            and not open_job_issues
+            and not legacy_open_reconstruction
             else []
         )
         frozen_references = {
@@ -801,6 +818,12 @@ class BranchInventoryTraceabilityService:
             if (row.transfer_external_id, row.detail_external_id)
             not in frozen_references
         ]
+        if legacy_open_reconstruction:
+            mutable_rows, legacy_issues = cls._reconstruct_legacy_open_rows(
+                mutable_rows,
+                operational_date=month_end,
+            )
+            issues.extend(legacy_issues)
         relevant_rows = [
             row
             for row in mutable_rows
@@ -857,13 +880,7 @@ class BranchInventoryTraceabilityService:
             ):
                 provenance_issues.append("TRANSFER_ROW_PROVENANCE_JOB_TYPE_INVALID")
             if provenance_job is not None:
-                provenance_issues.extend(
-                    cls._transfer_row_coverage_issues(
-                        row,
-                        provenance_job,
-                        month_end=month_end,
-                    )
-                )
+                provenance_issues.extend(cls._transfer_row_event_issues(row))
             if provenance_issues:
                 invalid_provenance_row_ids.append(row.id)
                 issues.extend(provenance_issues)
@@ -919,6 +936,59 @@ class BranchInventoryTraceabilityService:
         if min(seen, created, updated) < 0 or seen != created + updated:
             issues.append(f"{prefix}_COUNT_MISMATCH")
         return issues
+
+    @classmethod
+    def _legacy_open_transfer_job_contract_issues(cls, job):
+        issues = cls._transfer_job_contract_issues(
+            job,
+            prefix="OPEN_TRANSFER_SYNC",
+        )
+        summary = job.result_summary or {}
+        try:
+            seen = int(summary["transfer_lines_seen"])
+            new_rows = int(summary["lineas_nuevas"])
+            updated_rows = int(summary["lineas_actualizadas"])
+        except (KeyError, TypeError, ValueError):
+            issues.append("OPEN_TRANSFER_SYNC_CONTRACT_INCOMPLETE")
+            return list(dict.fromkeys(issues))
+        if min(seen, new_rows, updated_rows) < 0 or seen != new_rows + updated_rows:
+            issues.append("OPEN_TRANSFER_SYNC_COUNT_MISMATCH")
+        return list(dict.fromkeys(issues))
+
+    @staticmethod
+    def _uses_legacy_open_transfer_contract(job):
+        if OPEN_TRANSFER_MANIFEST_KEY in (job.result_summary or {}):
+            return False
+        try:
+            job.open_transfer_snapshot
+        except PointOpenTransferSnapshot.DoesNotExist:
+            return True
+        return False
+
+    @staticmethod
+    def _reconstruct_legacy_open_rows(rows, *, operational_date):
+        cutoff, _window_end = open_transfer_close_window(operational_date)
+        reconstructed = []
+        issues = []
+        for row in rows:
+            was_open_at_close = (
+                row.sent_at is not None
+                and row.sent_at < cutoff
+                and (row.received_at is None or row.received_at > cutoff)
+            )
+            if not was_open_at_close:
+                reconstructed.append(row)
+                continue
+            if row.is_cancelled:
+                issues.append("LEGACY_OPEN_TRANSFER_STATUS_AMBIGUOUS")
+                continue
+            historical_row = copy(row)
+            historical_row.is_received = False
+            historical_row.received_at = None
+            historical_row.received_quantity = ZERO
+            historical_row.is_open = True
+            reconstructed.append(historical_row)
+        return reconstructed, issues
 
     @classmethod
     def _open_transfer_job_contract_issues(cls, job, *, operational_date):
@@ -1018,26 +1088,10 @@ class BranchInventoryTraceabilityService:
         return list(dict.fromkeys(issues))
 
     @staticmethod
-    def _transfer_row_coverage_issues(row, job, *, month_end):
-        parameters = job.parameters or {}
-        usable_receipt = row.is_received and row.received_at is not None
-        if usable_receipt:
-            received_date = timezone.localtime(row.received_at).date()
-            try:
-                coverage_start = date.fromisoformat(str(parameters.get("start_date")))
-                coverage_end = date.fromisoformat(str(parameters.get("end_date")))
-            except (TypeError, ValueError):
-                return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
-            if not coverage_start <= received_date <= coverage_end:
-                return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
-            return []
-        if (
-            parameters.get("mode") != "open_transfers"
-            or parameters.get("fecha") != month_end.isoformat()
-        ):
-            return ["TRANSFER_ROW_PROVENANCE_DATE_MISMATCH"]
-        if not row.is_open:
-            return ["TRANSFER_ROW_PROVENANCE_OPEN_STATUS_MISMATCH"]
+    def _transfer_row_event_issues(row):
+        if row.received_at is not None and row.sent_at is not None:
+            if row.received_at < row.sent_at:
+                return ["TRANSFER_ROW_EVENT_SEQUENCE_INVALID"]
         return []
 
     def _apply_transfers(
