@@ -3,6 +3,7 @@ from decimal import Decimal
 from collections.abc import Mapping
 from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.db import connection, models
 from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
@@ -240,12 +241,18 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         job.save(update_fields=["result_summary", "updated_at"])
 
     def _refresh_open_transfer_snapshot(self):
-        PointOpenTransferSnapshotMember.objects.filter(
-            snapshot__sync_job=self.open_transfer_job
-        ).delete()
-        PointOpenTransferSnapshot.objects.filter(
+        previous_job = self.open_transfer_job
+        self.open_transfer_job = PointSyncJob.objects.create(
+            job_type=previous_job.job_type,
+            status=previous_job.status,
+            started_at=previous_job.started_at,
+            finished_at=previous_job.finished_at,
+            parameters=dict(previous_job.parameters),
+            result_summary=dict(previous_job.result_summary),
+        )
+        PointTransferLine.objects.filter(sync_job=previous_job).update(
             sync_job=self.open_transfer_job
-        ).delete()
+        )
         snapshot, manifest = persist_open_transfer_snapshot(
             sync_job=self.open_transfer_job,
             lines=PointTransferLine.objects.filter(sync_job=self.open_transfer_job)
@@ -1054,9 +1061,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def test_missing_required_movement_authority_stops_calculation(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
-        PointOpenTransferSnapshotMember.objects.all().delete()
-        PointOpenTransferSnapshot.objects.all().delete()
-        PointSyncJob.objects.all().delete()
+        PointSyncJob.objects.all().update(parameters={})
 
         result = self.service.build(month=date(2026, 8, 1))
 
@@ -1523,10 +1528,12 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
     def test_open_transfer_snapshot_is_required_for_month_close(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
-        PointOpenTransferSnapshot.objects.filter(
-            sync_job=self.open_transfer_job
-        ).delete()
-        self.open_transfer_job.delete()
+        PointSyncJob.objects.filter(pk=self.open_transfer_job.pk).update(
+            parameters={
+                **self.open_transfer_job.parameters,
+                "fecha": "2026-07-31",
+            }
+        )
 
         result = self.service.build(month=date(2026, 8, 1))
 
@@ -1661,28 +1668,37 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             line.source_trace["open_transfer_snapshot_out"], (member.id,)
         )
 
-    def test_tampered_or_missing_snapshot_member_fails_closed(self):
+    def test_branch_tampering_is_blocked_and_hash_mismatch_fails_closed(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
-        transfer = self._transfer(is_received=False, received_at=None)
+        self._transfer(is_received=False, received_at=None)
         snapshot = self.open_transfer_job.open_transfer_snapshot
+        member = snapshot.members.get()
 
-        PointOpenTransferSnapshotMember.objects.filter(snapshot=snapshot).update(
-            sent_quantity=Decimal("99")
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshotMember.objects.filter(pk=member.pk).update(
+                origin_branch=self.plaza
+            )
+
+        from pos_bridge.services.open_transfer_sync_service import (
+            canonical_open_transfer_payload,
         )
-        tampered = self.service.build(month=date(2026, 8, 1))
+
+        def branch_tampered_payload(row):
+            payload = canonical_open_transfer_payload(row)
+            payload["origin_branch_id"] = self.plaza.id
+            return payload
+
+        with patch(
+            "pos_bridge.services.branch_inventory_traceability_service."
+            "canonical_open_transfer_payload",
+            side_effect=branch_tampered_payload,
+        ):
+            tampered = self.service.build(month=date(2026, 8, 1))
         self.assertFalse(tampered.source_complete)
         self.assertIn(
-            "OPEN_TRANSFER_SYNC_SNAPSHOT_HASH_MISMATCH",
+            "OPEN_TRANSFER_SYNC_SNAPSHOT_MEMBER_HASH_MISMATCH",
             " ".join(issue.message for issue in tampered.global_issues),
-        )
-
-        PointOpenTransferSnapshotMember.objects.filter(snapshot=snapshot).delete()
-        missing = self.service.build(month=date(2026, 8, 1))
-        self.assertFalse(missing.source_complete)
-        self.assertIn(
-            "OPEN_TRANSFER_SYNC_SNAPSHOT_COUNT_MISMATCH",
-            " ".join(issue.message for issue in missing.global_issues),
         )
 
     def test_late_rerun_does_not_hide_qualifying_close_snapshot(self):

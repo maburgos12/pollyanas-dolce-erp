@@ -65,9 +65,16 @@ def _branch_value(line, side: str, field: str):
 
 def canonical_open_transfer_payload(line) -> dict:
     return {
+        "source_line_id": int(
+            getattr(line, "source_line_id", None) or getattr(line, "id", 0) or 0
+        ),
         "source_hash": str(line.source_hash or ""),
         "transfer_external_id": str(line.transfer_external_id or ""),
         "detail_external_id": str(line.detail_external_id or ""),
+        "origin_branch_id": int(getattr(line, "origin_branch_id", 0) or 0),
+        "destination_branch_id": int(
+            getattr(line, "destination_branch_id", 0) or 0
+        ),
         "origin_branch_external_id": _branch_value(line, "origin", "external_id"),
         "origin_branch_name": _branch_value(line, "origin", "name"),
         "destination_branch_external_id": _branch_value(

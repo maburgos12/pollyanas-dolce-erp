@@ -4,7 +4,24 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 
+class _ImmutableSnapshotQuerySet(models.QuerySet):
+    @staticmethod
+    def _reject_mutation():
+        raise ValidationError("La evidencia histórica de cierre es inmutable.")
+
+    def update(self, **kwargs):
+        self._reject_mutation()
+
+    def delete(self):
+        self._reject_mutation()
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        self._reject_mutation()
+
+
 class _ImmutableSnapshotModel(models.Model):
+    objects = _ImmutableSnapshotQuerySet.as_manager()
+
     class Meta:
         abstract = True
 

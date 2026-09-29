@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.core.exceptions import ValidationError
+from django.db import DatabaseError, connection, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -17,7 +18,9 @@ from pos_bridge.models import (
 from pos_bridge.services.open_transfer_sync_service import (
     OPEN_TRANSFER_MANIFEST_KEY,
     OpenTransferSyncService,
+    _payload_sha256,
     build_open_transfer_manifest,
+    canonical_open_transfer_payload,
     persist_open_transfer_snapshot,
 )
 from pos_bridge.services.branch_inventory_traceability_service import (
@@ -27,6 +30,46 @@ from pos_bridge.services.transfer_extractor import ExtractedTransferLine
 
 
 class OpenTransferSyncServiceTests(TestCase):
+    def _persisted_snapshot(self):
+        origin = PointBranch.objects.create(external_id="CEDIS", name="CEDIS")
+        destination = PointBranch.objects.create(external_id="PLAZA", name="Plaza")
+        job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_RUNNING,
+        )
+        line = PointTransferLine.objects.create(
+            origin_branch=origin,
+            destination_branch=destination,
+            sync_job=job,
+            transfer_external_id="T-1",
+            detail_external_id="D-1",
+            source_hash="hash-T-1-D-1",
+            registered_at=datetime(
+                2026, 8, 31, 20, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            sent_at=datetime(
+                2026, 8, 31, 21, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            item_name="Pastel",
+            item_code="PASTEL-001",
+            requested_by="solicita",
+            sent_by="envia",
+            requested_quantity=Decimal("4"),
+            sent_quantity=Decimal("4"),
+            is_finalized=True,
+            is_open=True,
+        )
+        captured_at = datetime(
+            2026, 9, 1, 2, 4, tzinfo=timezone.get_current_timezone()
+        )
+        snapshot, manifest = persist_open_transfer_snapshot(
+            sync_job=job,
+            lines=[line],
+            operational_date=date(2026, 8, 31),
+            captured_at=captured_at,
+        )
+        return origin, destination, snapshot, manifest
+
     def _line(self, *, transfer_id, detail_id, quantity):
         local_tz = timezone.get_current_timezone()
         return ExtractedTransferLine(
@@ -167,44 +210,7 @@ class OpenTransferSyncServiceTests(TestCase):
         self.assertNotIn(OPEN_TRANSFER_MANIFEST_KEY, result.result_summary)
 
     def test_persisted_snapshot_membership_is_complete_and_immutable(self):
-        origin = PointBranch.objects.create(external_id="CEDIS", name="CEDIS")
-        destination = PointBranch.objects.create(external_id="PLAZA", name="Plaza")
-        job = PointSyncJob.objects.create(
-            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
-            status=PointSyncJob.STATUS_RUNNING,
-        )
-        line = PointTransferLine.objects.create(
-            origin_branch=origin,
-            destination_branch=destination,
-            sync_job=job,
-            transfer_external_id="T-1",
-            detail_external_id="D-1",
-            source_hash="hash-T-1-D-1",
-            registered_at=datetime(
-                2026, 8, 31, 20, 0, tzinfo=timezone.get_current_timezone()
-            ),
-            sent_at=datetime(
-                2026, 8, 31, 21, 0, tzinfo=timezone.get_current_timezone()
-            ),
-            item_name="Pastel",
-            item_code="PASTEL-001",
-            requested_by="solicita",
-            sent_by="envia",
-            requested_quantity=Decimal("4"),
-            sent_quantity=Decimal("4"),
-            is_finalized=True,
-            is_open=True,
-        )
-        captured_at = datetime(
-            2026, 9, 1, 2, 4, tzinfo=timezone.get_current_timezone()
-        )
-
-        snapshot, manifest = persist_open_transfer_snapshot(
-            sync_job=job,
-            lines=[line],
-            operational_date=date(2026, 8, 31),
-            captured_at=captured_at,
-        )
+        origin, destination, snapshot, manifest = self._persisted_snapshot()
 
         self.assertEqual(snapshot.row_count, 1)
         self.assertEqual(manifest["sha256"], snapshot.sha256)
@@ -215,6 +221,93 @@ class OpenTransferSyncServiceTests(TestCase):
         member.sent_quantity = Decimal("99")
         with self.assertRaises(ValidationError):
             member.save()
+
+    def test_branch_membership_is_covered_by_member_hash(self):
+        origin, destination, snapshot, _manifest = self._persisted_snapshot()
+        member = snapshot.members.get()
+        payload = canonical_open_transfer_payload(member)
+
+        self.assertEqual(payload["source_line_id"], member.source_line_id)
+        self.assertEqual(payload["origin_branch_id"], origin.id)
+        self.assertEqual(payload["destination_branch_id"], destination.id)
+        self.assertEqual(member.payload_sha256, _payload_sha256(payload))
+        original_manifest = build_open_transfer_manifest(
+            [member],
+            operational_date=snapshot.operational_date,
+            captured_at=snapshot.captured_at,
+        )
+
+        payload["origin_branch_id"] = destination.id
+        payload["destination_branch_id"] = origin.id
+        self.assertNotEqual(member.payload_sha256, _payload_sha256(payload))
+        member.origin_branch_id = destination.id
+        member.destination_branch_id = origin.id
+        tampered_manifest = build_open_transfer_manifest(
+            [member],
+            operational_date=snapshot.operational_date,
+            captured_at=snapshot.captured_at,
+        )
+        self.assertNotEqual(original_manifest["sha256"], tampered_manifest["sha256"])
+
+    def test_snapshot_models_reject_queryset_mutations(self):
+        _origin, _destination, snapshot, _manifest = self._persisted_snapshot()
+        member = snapshot.members.get()
+
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshot.objects.filter(pk=snapshot.pk).update(row_count=9)
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshot.objects.filter(pk=snapshot.pk).delete()
+        snapshot.row_count = 9
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshot.objects.bulk_update([snapshot], ["row_count"])
+
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshotMember.objects.filter(pk=member.pk).update(
+                origin_branch_id=member.destination_branch_id
+            )
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshotMember.objects.filter(pk=member.pk).delete()
+        member.sent_quantity = Decimal("99")
+        with self.assertRaises(ValidationError):
+            PointOpenTransferSnapshotMember.objects.bulk_update(
+                [member], ["sent_quantity"]
+            )
+
+    def test_postgresql_rejects_raw_snapshot_update_and_delete(self):
+        _origin, _destination, snapshot, _manifest = self._persisted_snapshot()
+        member = snapshot.members.get()
+        operations = (
+            (
+                "UPDATE pos_bridge_open_transfer_snapshots SET row_count = 9 WHERE id = %s",
+                snapshot.pk,
+            ),
+            (
+                "DELETE FROM pos_bridge_open_transfer_snapshots WHERE id = %s",
+                snapshot.pk,
+            ),
+            (
+                "UPDATE pos_bridge_open_transfer_snapshot_members "
+                "SET origin_branch_id = destination_branch_id WHERE id = %s",
+                member.pk,
+            ),
+            (
+                "DELETE FROM pos_bridge_open_transfer_snapshot_members WHERE id = %s",
+                member.pk,
+            ),
+        )
+
+        for sql, pk in operations:
+            with self.subTest(sql=sql):
+                with self.assertRaises(DatabaseError), transaction.atomic():
+                    with connection.cursor() as cursor:
+                        cursor.execute(sql, [pk])
+
+        self.assertTrue(
+            PointOpenTransferSnapshot.objects.filter(pk=snapshot.pk).exists()
+        )
+        self.assertTrue(
+            PointOpenTransferSnapshotMember.objects.filter(pk=member.pk).exists()
+        )
 
     def test_legacy_manifest_without_persisted_snapshot_is_not_reused(self):
         local_tz = timezone.get_current_timezone()
