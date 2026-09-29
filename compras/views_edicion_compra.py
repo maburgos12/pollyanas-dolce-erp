@@ -138,7 +138,7 @@ def departamental_aviso_reintentar(request, pk):
     )
     if not (puede_gestionar_compras_departamentales(request.user) or _es_direccion(request.user)):
         raise PermissionDenied
-    destino = _destino(aviso.compra.item) + '-avisos'
+    destino = reverse('compras:departamental_detalle', args=[aviso.compra.item.solicitud_id]) + f'#intento-{aviso.compra.intento_id}-avisos'
     if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
         return _respuesta_accion(request, message=f'El aviso por {aviso.get_canal_display().lower()} ya se había enviado. No se reenvió.',
                                  redirect_url=destino, reload=True)
