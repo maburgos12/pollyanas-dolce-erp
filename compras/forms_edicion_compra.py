@@ -1,15 +1,14 @@
 """Formularios de corrección y evidencia de compra departamental."""
-from pathlib import Path
 from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
-from django.core.files.uploadedfile import UploadedFile
 from django.utils import timezone
 from django.db.models import Q
 
 from .forms_cotizaciones import CotizacionDepartamentalForm
 from .models import CompraRealizadaDepartamental, IntentoCompraDepartamental, LineaOrdenCompraDepartamental
+from .validaciones_archivos import validar_comprobante
 
 
 class EditarCotizacionDepartamentalForm(CotizacionDepartamentalForm):
@@ -58,22 +57,6 @@ class RegistrarCompraDepartamentalForm(forms.ModelForm):
 
     def clean_comprobante(self):
         return validar_comprobante(self.cleaned_data['comprobante'])
-
-
-def validar_comprobante(value):
-    # Un FieldFile sin reemplazo ya se validó al subirse; solo se revisa lo nuevo.
-    if isinstance(value, UploadedFile):
-        if value.size > 10 * 1024 * 1024:
-            raise ValidationError('El comprobante no puede superar 10 MB.')
-        suffix = Path(value.name).suffix.lower()
-        header = value.read(16)
-        value.seek(0)
-        signatures = {'.pdf': header.startswith(b'%PDF-'), '.jpg': header.startswith(b'\xff\xd8\xff'),
-                      '.jpeg': header.startswith(b'\xff\xd8\xff'), '.png': header.startswith(b'\x89PNG\r\n\x1a\n'),
-                      '.webp': header.startswith(b'RIFF') and header[8:12] == b'WEBP'}
-        if not signatures.get(suffix, False):
-            raise ValidationError('Adjunta un comprobante PDF, JPG, PNG o WebP válido.')
-    return value
 
 
 class CorregirCompraDepartamentalForm(forms.ModelForm):

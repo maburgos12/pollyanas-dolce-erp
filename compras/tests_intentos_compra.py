@@ -34,6 +34,7 @@ from compras.models import (
 from compras.tests_edicion_compra import _CompraDepartamentalBase
 from compras.services_departamentales import evaluar_presupuesto_item, generar_ordenes_departamentales, seleccionar_cotizacion
 from compras.services_intentos_compra import (
+    _importe_no_negativo, _importe_positivo,
     cancelar_articulo_definitivamente, cancelar_intento_compra, registrar_reembolso_compra,
 )
 from compras.forms_intentos_compra import CancelarIntentoCompraForm, RegistrarReembolsoCompraForm
@@ -147,9 +148,12 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
     def test_cancelar_pagada_conserva_compromiso_y_registra_solicitud(self):
         intento = self._intento(pagado=True)
         compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        evidencia = SimpleUploadedFile(
+            'solicitud.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+        )
         self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
                        reembolso_solicitado=Decimal('170'),
-                       evidencia_solicitud_reembolso='compras/solicitud.pdf')
+                       evidencia_solicitud_reembolso=evidencia)
         intento.refresh_from_db(); compromiso.refresh_from_db(); self.item.refresh_from_db(); self.quote.refresh_from_db()
         self.assertEqual((intento.estado, intento.version), ('REEMBOLSO_SOLICITADO', 2))
         self.assertEqual(intento.reembolso_solicitado, Decimal('170'))
@@ -235,6 +239,124 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
         self.assertIsNone(intento.reembolso_solicitado)
         self.assertEqual(intento.reembolso_cargos_adicionales, Decimal('0.00'))
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertFalse(any(path.is_file() for path in Path(self.media.name).rglob('*')))
+
+    def _assert_servicio_rechaza_evidencia(self, evidencia, *, cargos=Decimal('0.00')):
+        intento = self._intento(pagado=True, importe=Decimal('199.56'))
+        with self.assertRaises(ValidationError) as error:
+            self._cancelar(
+                intento,
+                reembolso_solicitado_en=timezone.localdate(),
+                reembolso_solicitado=Decimal('199.56') + cargos,
+                reembolso_cargos_adicionales=cargos,
+                evidencia_solicitud_reembolso=evidencia,
+            )
+        self.assertIn('evidencia_solicitud_reembolso', error.exception.message_dict)
+        intento.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertIsNone(intento.reembolso_solicitado)
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertFalse(any(path.is_file() for path in Path(self.media.name).rglob('*')))
+
+    def test_servicio_rechaza_ruta_como_evidencia_nueva_con_cargos(self):
+        self._assert_servicio_rechaza_evidencia(
+            'compras/evidencia.pdf', cargos=Decimal('119.00'),
+        )
+
+    def test_servicio_rechaza_objeto_como_evidencia_sin_cargos(self):
+        self._assert_servicio_rechaza_evidencia(object())
+
+    def test_servicio_rechaza_extension_invalida_de_evidencia(self):
+        self._assert_servicio_rechaza_evidencia(
+            SimpleUploadedFile('evidencia.txt', b'%PDF-1.4\n%%EOF'),
+        )
+
+    def test_servicio_rechaza_firma_invalida_de_evidencia(self):
+        self._assert_servicio_rechaza_evidencia(
+            SimpleUploadedFile('evidencia.pdf', b'no es pdf'),
+        )
+
+    def test_servicio_rechaza_evidencia_mayor_a_diez_mb(self):
+        self._assert_servicio_rechaza_evidencia(
+            SimpleUploadedFile(
+                'evidencia.pdf', b'%PDF-' + b'x' * (10 * 1024 * 1024),
+            ),
+        )
+
+    def test_helpers_de_importe_aceptan_limite_de_catorce_digitos(self):
+        limite = Decimal('999999999999.99')
+        self.assertEqual(_importe_positivo(limite, nombre='total'), limite)
+        self.assertEqual(_importe_no_negativo(limite, nombre='cargos'), limite)
+
+    def test_helpers_de_importe_rechazan_primer_valor_sobredimensionado(self):
+        sobredimensionado = Decimal('1000000000000.00')
+        for helper, nombre in ((_importe_positivo, 'total'), (_importe_no_negativo, 'cargos')):
+            with self.subTest(nombre=nombre):
+                with self.assertRaises(ValidationError) as error:
+                    helper(sobredimensionado, nombre=nombre)
+                self.assertIn(nombre, error.exception.message_dict)
+                self.assertIn('14', str(error.exception))
+
+    def test_servicio_acepta_limite_de_catorce_digitos_en_total(self):
+        limite = Decimal('999999999999.99')
+        intento = self._intento(pagado=True, importe=limite)
+        self._cancelar(
+            intento,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=limite,
+            reembolso_cargos_adicionales=Decimal('0.00'),
+        )
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, limite)
+
+    def test_servicio_acepta_limite_de_catorce_digitos_en_cargos(self):
+        limite = Decimal('999999999999.99')
+        intento = self._intento(pagado=True, importe=Decimal('1.00'))
+        evidencia = SimpleUploadedFile(
+            'evidencia.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+        )
+        self._cancelar(
+            intento,
+            reembolso_solicitado_en=timezone.localdate(),
+            reembolso_solicitado=limite,
+            reembolso_cargos_adicionales=limite,
+            evidencia_solicitud_reembolso=evidencia,
+        )
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_cargos_adicionales, limite)
+
+    def test_servicio_rechaza_primer_total_y_cargos_sobredimensionados_sin_mutar(self):
+        limite = Decimal('999999999999.99')
+        sobredimensionado = Decimal('1000000000000.00')
+        intento = self._intento(pagado=True, importe=limite)
+        casos = (
+            (sobredimensionado, sobredimensionado, None, 'reembolso_solicitado'),
+            (
+                limite, sobredimensionado,
+                SimpleUploadedFile(
+                    'evidencia.pdf', b'%PDF-1.4\n%%EOF', content_type='application/pdf',
+                ),
+                'reembolso_cargos_adicionales',
+            ),
+        )
+        for total, cargos, evidencia, campo_error in casos:
+            with self.subTest(campo=campo_error):
+                with self.assertRaises(ValidationError) as error:
+                    self._cancelar(
+                        intento,
+                        reembolso_solicitado_en=timezone.localdate(),
+                        reembolso_solicitado=total,
+                        reembolso_cargos_adicionales=cargos,
+                        evidencia_solicitud_reembolso=evidencia,
+                    )
+                self.assertIn(campo_error, error.exception.message_dict)
+                self.assertIn('14', str(error.exception))
+        intento.refresh_from_db()
+        self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertIsNone(intento.reembolso_solicitado)
         self.assertEqual(self.item.estado, 'COMPRADO')
         self.assertFalse(any(path.is_file() for path in Path(self.media.name).rglob('*')))
 

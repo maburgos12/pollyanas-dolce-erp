@@ -7,6 +7,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
+from django.core.validators import DecimalValidator
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -21,8 +22,17 @@ from .models import (
     RecepcionItemDepartamental,
     ReembolsoCompraDepartamental,
 )
+from .validaciones_archivos import validar_comprobante
 
 logger = logging.getLogger(__name__)
+_VALIDAR_IMPORTE = DecimalValidator(max_digits=14, decimal_places=2)
+
+
+def _validar_digitos_importe(importe, *, nombre):
+    try:
+        _VALIDAR_IMPORTE(importe)
+    except ValidationError as exc:
+        raise ValidationError({nombre: exc.messages}) from None
 
 
 def _importe_positivo(value, *, nombre):
@@ -34,6 +44,7 @@ def _importe_positivo(value, *, nombre):
         raise ValidationError({nombre: "El importe debe ser mayor que cero."})
     if importe.as_tuple().exponent < -2:
         raise ValidationError({nombre: "El importe debe tener como máximo dos decimales."})
+    _validar_digitos_importe(importe, nombre=nombre)
     return importe
 
 
@@ -46,6 +57,7 @@ def _importe_no_negativo(value, *, nombre):
         raise ValidationError({nombre: "El importe debe ser mayor o igual que cero."})
     if importe.as_tuple().exponent < -2:
         raise ValidationError({nombre: "El importe debe tener como máximo dos decimales."})
+    _validar_digitos_importe(importe, nombre=nombre)
     return importe
 
 
@@ -163,6 +175,15 @@ def _cancelar_intento_compra(
                 "evidencia_solicitud_reembolso":
                     "Adjunta evidencia cuando el reembolso incluya cargos adicionales."
             })
+        if evidencia_solicitud_reembolso is not None:
+            try:
+                evidencia_solicitud_reembolso = validar_comprobante(
+                    evidencia_solicitud_reembolso, exigir_archivo_nuevo=True,
+                )
+            except ValidationError as exc:
+                raise ValidationError({
+                    "evidencia_solicitud_reembolso": exc.messages,
+                }) from None
         if compromiso is None or not compromiso.activo:
             raise ValidationError("La compra pagada no tiene un compromiso activo. Revisa su registro financiero antes de cancelar.", code="conflict")
         intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO

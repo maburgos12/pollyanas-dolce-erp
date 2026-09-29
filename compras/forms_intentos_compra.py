@@ -6,8 +6,8 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from .forms_edicion_compra import validar_comprobante
 from .models import CompraRealizadaDepartamental, IntentoCompraDepartamental
+from .validaciones_archivos import validar_comprobante
 
 
 class CancelarIntentoCompraForm(forms.Form):
