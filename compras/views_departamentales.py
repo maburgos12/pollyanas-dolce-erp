@@ -26,6 +26,7 @@ from .models import (
     EventoCompraDepartamental,
     IntentoCompraDepartamental,
     ItemCompraDepartamental,
+    ReembolsoCompraDepartamental,
     RecepcionItemDepartamental,
     SolicitudCompraDepartamental,
 )
@@ -296,10 +297,13 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "items__cotizaciones__proveedor", "items__cotizaciones__historial__actor", "items__eventos",
             Prefetch(
                 "items__intentos_compra",
-                queryset=IntentoCompraDepartamental.objects.order_by("-numero", "-pk")
-                .select_related("linea_orden", "compra", "compromiso")
-                .prefetch_related("compra__avisos", "compra__historial__actor",
-                                  Prefetch("linea_orden__recepciones", to_attr="recepciones_prefetched")),
+                queryset=IntentoCompraDepartamental.objects.order_by("creado_en", "pk")
+                .select_related("cotizacion__proveedor", "linea_orden__orden", "compra", "compromiso", "cancelado_por")
+                .prefetch_related(
+                    Prefetch("reembolsos", queryset=ReembolsoCompraDepartamental.objects.select_related("registrado_por").order_by("fecha", "pk"), to_attr="reembolsos_prefetched"),
+                    "compra__avisos", "compra__historial__actor",
+                    Prefetch("linea_orden__recepciones", queryset=RecepcionItemDepartamental.objects.select_related("registrado_por").order_by("recibido_en", "pk"), to_attr="recepciones_prefetched"),
+                ),
                 to_attr="intentos_compra_prefetched",
             ),
         ),
@@ -313,9 +317,45 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     total_cotizado = Decimal("0")
     total_comprometido = Decimal("0")
     total_gastado = Decimal("0")
+    es_compras = puede_gestionar_compras_departamentales(request.user)
+    es_area_responsable = AreaPresupuestoResponsable.objects.filter(
+        area=solicitud.area, usuario=request.user, puede_capturar=True,
+    ).exists()
     for item in solicitud.items.all():
+        hay_recepcion = False
+        hay_saldo_reembolso = False
+        for historico in item.intentos_compra_prefetched:
+            historico.compra_visible = getattr(historico, "compra", None)
+            historico.reembolsos_visibles = historico.reembolsos_prefetched
+            historico.total_reembolsado_visible = sum((r.importe for r in historico.reembolsos_visibles), Decimal("0"))
+            historico.saldo_reembolso_visible = max(
+                (historico.reembolso_solicitado or Decimal("0")) - historico.total_reembolsado_visible,
+                Decimal("0"),
+            )
+            historico.recepciones_visibles = getattr(getattr(historico, "linea_orden", None), "recepciones_prefetched", ())
+            historico.cantidad_recibida_visible = sum((r.cantidad_recibida for r in historico.recepciones_visibles), Decimal("0"))
+            hay_recepcion = hay_recepcion or historico.cantidad_recibida_visible > 0
+            hay_saldo_reembolso = hay_saldo_reembolso or historico.saldo_reembolso_visible > 0
+            historico.puede_cancelar_desde_detalle = (
+                es_compras and historico.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
+                and historico.cantidad_recibida_visible == 0
+                and item.estado in ("ORDENADO", "COMPRADO", "RECIBIDO_PARCIAL")
+            )
+            historico.puede_registrar_reembolso_desde_detalle = (
+                es_compras and historico.estado == IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
+                and historico.saldo_reembolso_visible > 0
+            )
         intento_vigente = item.intento_vigente
+        item.puede_cancelar_definitivamente = (
+            es_compras and intento_vigente is None and not hay_recepcion and not hay_saldo_reembolso
+            and item.estado not in ("CANCELADO", "RECHAZADO", "PENDIENTE_CONFIRMACION", "RECIBIDO_CONFORME")
+        )
+        item.puede_registrar_entrega = (
+            es_compras and intento_vigente is not None
+            and item.estado in ("ORDENADO", "COMPRADO", "RECIBIDO_PARCIAL")
+        )
         intento = intento_operativo_prefetched(item)
+        # Compatibilidad del contexto para consumidores de la compra operativa.
         item.compra_realizada = getattr(intento, "compra", None) if intento else None
         item.linea_orden = getattr(intento, "linea_orden", None) if intento else None
         linea_actual = getattr(intento_vigente, "linea_orden", None) if intento_vigente else None
@@ -367,7 +407,8 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "puede_enviar": solicitud.estado == SolicitudCompraDepartamental.ESTADO_BORRADOR and _puede_enviar_solicitud(request.user, solicitud),
             "rubros": rubros,
             "proveedores": proveedores,
-            "es_compras": puede_gestionar_compras_departamentales(request.user),
+            "es_compras": es_compras,
+            "es_area_responsable": es_area_responsable,
             "es_direccion": _es_direccion(request.user),
             "puede_reintentar_avisos": puede_gestionar_compras_departamentales(request.user) or _es_direccion(request.user),
             "total_solicitado": total_solicitado,

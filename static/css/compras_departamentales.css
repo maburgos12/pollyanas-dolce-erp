@@ -90,3 +90,43 @@
 /* Total en vivo de la cotización: hace visible el importe que se está capturando. */
 .cd-quote-total { margin: 12px 0; padding: 10px 14px; border-radius: 10px; background: var(--rosa,#f8e8ee); color: var(--texto,#3d2b2b); font-weight: 700; }
 .cd-quote-total strong { color: var(--vino,#8b2252); }
+
+/* Cada intento conserva su orden, pago, incidencias y saldo en el mismo contexto. */
+.cd-attempt-timeline{margin:22px 0 16px;padding-top:18px;border-top:1px solid #d9cbc6}
+.cd-attempt-timeline>h3{margin:0 0 14px;font:700 20px/1.25 "Playfair Display",serif;color:#3d2b2b}
+.cd-attempt-timeline>ol{list-style:none;margin:0;padding:0}
+.cd-attempt-card{padding:17px 0;border-bottom:1px solid #e4d9d5;min-width:0}
+.cd-attempt-card:last-child{border-bottom:0}
+.cd-attempt-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.cd-attempt-head h4{margin:0;font:800 16px/1.4 Nunito,sans-serif;color:#3d2b2b;overflow-wrap:anywhere}
+.cd-attempt-status{display:inline-flex;padding:4px 9px;border-radius:999px;background:#f4ecef;color:#742044;font-size:12px;font-weight:800}
+.cd-attempt-card--reembolso_solicitado .cd-attempt-status{background:#fff3d6;color:#715312}
+.cd-attempt-card--reembolsado .cd-attempt-status,.cd-attempt-card--entregado .cd-attempt-status{background:#e7f3e9;color:#285f39}
+.cd-attempt-date{margin:4px 0 10px;color:#675252;font-size:13px}
+.cd-attempt-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:0}
+.cd-attempt-facts>div{min-width:0}
+.cd-attempt-facts dt{color:#675252;font-size:12px;font-weight:800}
+.cd-attempt-facts dd{margin:2px 0 0;font-size:14px;font-weight:700;overflow-wrap:anywhere}
+.cd-attempt-note{margin:13px 0 0;max-width:72ch;line-height:1.5;overflow-wrap:anywhere}
+.cd-refund-state{display:flex;flex-wrap:wrap;align-items:baseline;gap:5px 16px;margin:15px 0 0;padding:12px 14px;border-radius:12px;background:#fff4dc;color:#513e24;font-size:13px}
+.cd-refund-state--complete{background:#e9f5ed;color:#285f39}
+.cd-refund-state>strong{flex-basis:100%;font-size:14px}
+.cd-refund-state>a.cd-button{margin-top:7px}
+.cd-refund-entries{flex-basis:100%;margin:4px 0;padding-left:19px}
+.cd-refund-entries li{margin:3px 0}
+.cd-attempt-links{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:13px;font-weight:800;font-size:13px}
+.cd-attempt-card a:not(.cd-button){color:#742044;text-decoration:underline;text-underline-offset:2px}
+.cd-attempt-card .cd-quote-history{margin:12px 0}
+.cd-attempt-card .cd-notice-list{border-top:1px solid #e4d9d5}
+.cd-attempt-card .cd-notice-list h5{margin:0 0 4px;font-size:14px}
+.cd-attempt-card .cd-notice{border-left-width:1px;border-radius:8px;margin:0}
+.cd-attempt-actions{display:flex;align-items:center;gap:10px 16px;flex-wrap:wrap;margin-top:14px}
+.cd-attempt-actions p{margin:0;max-width:50ch;color:#675252;font-size:13px}
+.cd-delivery-state{margin:18px 0;padding:15px 17px;border:1px solid #d7c5aa;border-radius:12px;background:#fff7e9;color:#513e24}
+.cd-delivery-state--complete{border-color:#b5d5bd;background:#edf6ef;color:#285f39}
+.cd-delivery-state strong{display:block;font-size:15px}
+.cd-delivery-state p{margin:4px 0 0;line-height:1.45}
+.cd-final-cancel{margin:18px 0;padding:16px 0;border-top:1px solid #e4d9d5;color:#3d2b2b}
+.cd-final-cancel strong{display:block}
+.cd-final-cancel p{margin:4px 0 11px;max-width:65ch;color:#675252}
+@media(max-width:620px){.cd-attempt-facts{grid-template-columns:1fr}.cd-attempt-head{display:block}.cd-attempt-status{margin-top:6px}.cd-attempt-actions .cd-button,.cd-final-cancel .cd-button{width:100%}.cd-refund-state{display:block}.cd-refund-state>span{display:block;margin-top:5px}}

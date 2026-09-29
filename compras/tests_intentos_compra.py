@@ -28,12 +28,13 @@ from compras.models import (
     SolicitudCompraDepartamental,
 )
 from compras.tests_edicion_compra import _CompraDepartamentalBase
-from compras.services_departamentales import generar_ordenes_departamentales
+from compras.services_departamentales import generar_ordenes_departamentales, seleccionar_cotizacion
 from compras.services_intentos_compra import (
     cancelar_articulo_definitivamente, cancelar_intento_compra, registrar_reembolso_compra,
 )
 from compras.forms_intentos_compra import CancelarIntentoCompraForm, RegistrarReembolsoCompraForm
 from reportes.models import AreaPresupuestoResponsable
+from maestros.models import Proveedor
 
 
 class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
@@ -1121,3 +1122,149 @@ class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(self.client.get(reverse('compras:departamental_intento_cancelar', args=[999999])).status_code, 404)
         self.assertEqual(self.client.get(reverse('compras:departamental_articulo_cancelar', args=[999999])).status_code, 404)
         self.assertEqual(self.client.get(reverse('compras:departamental_reembolso_registrar', args=[999999])).status_code, 404)
+
+
+class HistorialIntentosDetalleTests(_CompraDepartamentalBase, TestCase):
+    def detalle(self):
+        return self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+
+    def intento(self, *, pagado=False):
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        intento = self.item.intento_vigente
+        if pagado:
+            CompraRealizadaDepartamental.objects.create(
+                intento=intento, item=self.item, cotizacion=self.quote,
+                fecha_compra=timezone.localdate(), importe_final=Decimal('180'),
+                comprobante='compras/compra.pdf', registrado_por=self.user,
+            )
+            self.item.estado = ItemCompraDepartamental.ESTADO_COMPRADO
+            self.item.save(update_fields=['estado'])
+        return intento
+
+    def cancelar(self, intento, *, pagado=False):
+        kwargs = {}
+        if pagado:
+            kwargs = {'reembolso_solicitado_en': timezone.localdate(),
+                      'reembolso_solicitado': Decimal('180')}
+        cancelar_intento_compra(
+            intento, version=intento.version, motivo=IntentoCompraDepartamental.MOTIVO_NO_ENTREGO,
+            detalle='El proveedor no entregará.', actor=self.user, **kwargs,
+        )
+        intento.refresh_from_db()
+
+    def test_intento_vigente_sin_recepcion_ofrece_cancelacion_y_entrega_positiva(self):
+        intento = self.intento()
+        response = self.detalle()
+        self.assertContains(response, 'Proveedor canceló / no entregó')
+        self.assertContains(response, reverse('compras:departamental_intento_cancelar', args=[intento.pk]))
+        self.assertContains(response, 'min="0.001"')
+        self.assertNotContains(response, 'min="0"')
+        area_user = get_user_model().objects.create_user('area-intento', password='test')
+        AreaPresupuestoResponsable.objects.create(area=self.area, usuario=area_user, puede_capturar=True)
+        self.client.force_login(area_user)
+        self.assertNotContains(self.detalle(), reverse('compras:departamental_intento_cancelar', args=[intento.pk]))
+
+    def test_entrega_total_identifica_a_compras_y_al_area_sin_ofrecer_otra_entrega(self):
+        intento = self.intento()
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=intento.linea_orden, cantidad_recibida=Decimal('2'), registrado_por=self.user,
+        )
+        response = self.detalle()
+        self.assertContains(response, 'Entregado por Compras')
+        self.assertContains(response, f'Pendiente de confirmación del área {self.area.nombre}.')
+        self.assertNotContains(response, '<summary>Registrar entrega</summary>')
+        self.assertNotContains(response, 'Proveedor canceló / no entregó')
+        area_user = get_user_model().objects.create_user('area-detalle', password='test')
+        AreaPresupuestoResponsable.objects.create(area=self.area, usuario=area_user, puede_capturar=True)
+        self.client.force_login(area_user)
+        self.assertContains(self.detalle(), 'Confirma lo que recibiste')
+
+    def test_historial_con_reembolso_parcial_y_reemplazo_conserva_ambos_proveedores(self):
+        primero = self.intento(pagado=True)
+        self.cancelar(primero, pagado=True)
+        registrar_reembolso_compra(
+            primero, version=primero.version, fecha=timezone.localdate(), importe=Decimal('80'),
+            referencia='Devolución parcial', actor=self.user,
+        )
+        segundo_proveedor = Proveedor.objects.create(nombre='Proveedor reemplazo')
+        segunda_cotizacion = CotizacionCompraDepartamental.objects.create(
+            item=self.item, proveedor=segundo_proveedor,
+            cantidad_ofertada=Decimal('2'), costo_unitario=Decimal('90'),
+        )
+        seleccionar_cotizacion(segunda_cotizacion, actor=self.user)
+        self.item.refresh_from_db()
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        response = self.detalle()
+        html = response.content.decode()
+        self.assertLess(html.index('Intento 1'), html.index('Intento 2'))
+        self.assertContains(response, 'Proveedor reemplazo')
+        self.assertContains(response, 'Reembolso solicitado')
+        self.assertContains(response, 'Recibido $80.00')
+        self.assertContains(response, 'Saldo pendiente $100.00')
+        self.assertContains(response, 'Registrar reembolso recibido')
+        self.assertContains(response, reverse('compras:departamental_reembolso_registrar', args=[primero.pk]))
+
+    def test_reembolso_total_muestra_saldo_cero_y_permite_cancelar_articulo(self):
+        intento = self.intento(pagado=True)
+        self.cancelar(intento, pagado=True)
+        response = self.detalle()
+        self.assertContains(response, 'Saldo pendiente $180.00')
+        self.assertNotContains(response, 'Cancelar definitivamente el artículo')
+        registrar_reembolso_compra(
+            intento, version=intento.version, fecha=timezone.localdate(), importe=Decimal('180'),
+            referencia='Devolución completa', actor=self.user,
+        )
+        response = self.detalle()
+        self.assertContains(response, 'Reembolso completado')
+        self.assertContains(response, 'Saldo pendiente $0.00')
+        self.assertContains(response, 'Cancelar definitivamente el artículo')
+        self.assertNotContains(response, 'Registrar reembolso recibido')
+
+    def test_sin_compra_vigente_ni_entrega_permita_cancelacion_definitiva_solo_a_compras(self):
+        intento = self.intento()
+        self.cancelar(intento)
+        url = reverse('compras:departamental_articulo_cancelar', args=[self.item.pk])
+        response = self.detalle()
+        self.assertContains(response, url)
+        self.assertContains(response, 'Cancelar definitivamente el artículo')
+        area_user = get_user_model().objects.create_user('area-historial', password='test')
+        AreaPresupuestoResponsable.objects.create(area=self.area, usuario=area_user, puede_capturar=True)
+        self.client.force_login(area_user)
+        response = self.detalle()
+        self.assertNotContains(response, url)
+        self.assertNotContains(response, 'Proveedor canceló / no entregó')
+
+    def test_confirmacion_final_indica_completado(self):
+        intento = self.intento()
+        RecepcionItemDepartamental.objects.create(
+            linea_orden=intento.linea_orden, cantidad_recibida=Decimal('2'), registrado_por=self.user,
+        )
+        self.item.refresh_from_db()
+        from compras.services_departamentales import confirmar_recepcion_departamental
+        confirmar_recepcion_departamental(self.item, conforme=True, actor=self.user)
+        response = self.detalle()
+        self.assertContains(response, 'Entrega completada y confirmada')
+        self.assertNotContains(response, 'Pendiente de confirmación del área')
+
+    def test_varios_intentos_quedan_precargados_sin_consultas_al_recorrerlos(self):
+        for numero in range(3):
+            item = self.item if numero == 0 else self.solicitud.items.create(
+                descripcion=f'Artículo {numero}', cantidad=1, rubro=self.rubro,
+            )
+            if numero:
+                proveedor = Proveedor.objects.create(nombre=f'Proveedor {numero}')
+                quote = CotizacionCompraDepartamental.objects.create(
+                    item=item, proveedor=proveedor, cantidad_ofertada=1, costo_unitario=50,
+                )
+                seleccionar_cotizacion(quote, actor=self.user)
+            generar_ordenes_departamentales([item], actor=self.user)
+        response = self.detalle()
+        self.assertEqual(response.status_code, 200)
+        with self.assertNumQueries(0):
+            for item in response.context['solicitud'].items.all():
+                for intento in item.intentos_compra_prefetched:
+                    intento.cotizacion.proveedor.nombre
+                    intento.linea_orden.orden.folio
+                    intento.reembolsos_visibles
+                    intento.recepciones_visibles
+                    intento.saldo_reembolso_visible
