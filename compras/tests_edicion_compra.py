@@ -202,6 +202,14 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertGreaterEqual(self.editar(proveedor=otro.pk).status_code,400)
         self.assertGreaterEqual(self.editar(cantidad_ofertada='3').status_code,400)
 
+    def test_formulario_advierte_restricciones_de_orden_vigente(self):
+        url = reverse('compras:departamental_cotizacion_editar', args=[self.quote.pk])
+        self.assertNotContains(self.client.get(url), 'La orden ya existe: este dato debe conservarse.')
+        self.ordenar()
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'La orden ya existe: este dato debe conservarse.', count=2)
+
     def test_compra_crea_orden_sin_entrega_ni_gasto_contable(self):
         response=self.comprar()
         self.assertEqual(response.status_code,200,response.content)
