@@ -175,6 +175,23 @@ class ContextoAsistenciaTests(TestCase):
         self.assertTrue(falta.es_exigible)
         self.assertTrue(falta.falta_penalizable)
 
+    def test_asistencia_real_prevalece_sobre_exencion_de_checador(self):
+        self.empleado.exento_checador = True
+        self.empleado.exento_checador_motivo = "Exención histórica durante incapacidad"
+        self.empleado.save(update_fields=["exento_checador", "exento_checador_motivo"])
+        asistencia = AsistenciaEmpleado.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 7),
+            entrada=datetime(2026, 9, 7, 8, tzinfo=TZ),
+        )
+
+        resultado = self.clasificar(date(2026, 9, 7))
+
+        self.assertEqual(resultado.codigo, CODIGO_ASISTENCIA)
+        self.assertTrue(resultado.es_exigible)
+        self.assertFalse(resultado.falta_penalizable)
+        self.assertEqual(resultado.fuente_id, asistencia.id)
+
     def test_clasificador_es_solo_lectura_y_consultas_no_crecen_por_empleado_dia(self):
         segundo = Empleado.objects.create(
             codigo="CTX-002",

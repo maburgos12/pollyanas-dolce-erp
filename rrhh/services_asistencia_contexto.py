@@ -236,14 +236,6 @@ class ContextoAsistenciaLote:
                 fuente=permiso,
             )
 
-        if empleado.exento_checador:
-            return _resultado(
-                CODIGO_EXENTO,
-                exigible=False,
-                falta=False,
-                motivo=empleado.exento_checador_motivo or "Colaborador exento de checador.",
-            )
-
         asistencia = self.asistencias.get(key)
         incidencias = incidencias_dia
         tipos_pendientes = {
@@ -275,6 +267,14 @@ class ContextoAsistenciaLote:
                 falta=False,
                 motivo="Asistencia registrada en Capital Humano.",
                 fuente=asistencia,
+            )
+
+        if empleado.exento_checador:
+            return _resultado(
+                CODIGO_EXENTO,
+                exigible=False,
+                falta=False,
+                motivo=empleado.exento_checador_motivo or "Colaborador exento de checador.",
             )
 
         return _resultado(
