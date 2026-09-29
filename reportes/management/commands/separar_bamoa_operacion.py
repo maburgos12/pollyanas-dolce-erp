@@ -59,12 +59,28 @@ POR_FECHA = [
 ]
 
 # Los activos no los decide una fecha sino a dónde se los llevaron, y eso lo
-# confirmó operaciones: el equipo de mostrador se mudó al local nuevo y el de
-# producción Crucero se integró a CEDIS con el resto. El renglón de la
-# desinstalación eléctrica no es un activo, es el registro del desmantelamiento,
-# así que se queda con Crucero.
-ACTIVOS_A_BAMOA = ["ACT-2606-120", "ACT-2606-121", "ACT-2606-124", "ACT-2606-125", "ACT-2608-003"]
-ACTIVOS_A_CEDIS = ["ACT-2606-119", "ACT-2606-122", "ACT-2606-123"]
+# confirmó operaciones: los ocho equipos son del área de venta —lo que se
+# necesita para vender— y se mudaron completos al local nuevo. El renglón de la
+# desinstalación eléctrica no se mueve porque no es un activo: es el gasto de
+# desmantelar el local viejo, y ese gasto fue de Crucero.
+MEDIDOR_BAMOA = "543220903285"  # No. de servicio CFE de Estación Bamoa
+
+# Bamoa no tenía patrones de texto; sin ellos un CFDI que la nombre no resuelve.
+PATRONES_BAMOA = [
+    ("SUC BAMOA", 10, "Factura global Bamoa"),
+    ("BAMOA", 30, "Referencia Bamoa"),
+]
+
+ACTIVOS_A_BAMOA = [
+    "ACT-2606-119",  # mesa refrigerada
+    "ACT-2606-120",  # aire acondicionado
+    "ACT-2606-121",  # vitrina
+    "ACT-2606-122",  # refrigerador
+    "ACT-2606-123",  # báscula
+    "ACT-2606-124",  # computadora
+    "ACT-2606-125",  # impresora de punto de venta
+    "ACT-2608-003",  # instalaciones generales
+]
 
 # Queda fuera a propósito:
 #   ventas_pronosticoguardado_sucursales — tabla puente sin fecha propia.
@@ -98,7 +114,6 @@ ESTADO_ACTUAL = [
     ("rrhh_empleado", "sucursal_ref_id", "empleados asignados"),
     ("core_userprofile", "sucursal_id", "perfiles de usuario"),
     ("logistica_puntologistico", "sucursal_id", "punto logístico"),
-    ("conciliacion_sucursalidentificadorfiscal", "sucursal_id", "patrones fiscales"),
 ]
 
 
@@ -126,6 +141,7 @@ class Command(BaseCommand):
             total += self._bloque(cur, "POR PERIODO DEL PADRE", self._sql_padre(), params)
             total += self._bloque(cur, "ESTADO ACTUAL DE LA TIENDA", self._sql_estado(), params)
             total += self._activos(cur, bamoa)
+            self._fiscal(cur, bamoa)
             self.stdout.write("")
             self.stdout.write(f"  renglones movidos a Bamoa: {total:,}")
             if not aplicar:
@@ -171,6 +187,34 @@ class Command(BaseCommand):
                 f'UPDATE "{tabla}" SET "{col}" = %(destino)s WHERE "{col}" = %(origen)s',
             )
 
+    def _fiscal(self, cur, bamoa) -> None:
+        """Sólo el medidor de Bamoa es suyo; «CRUCERO» seguiría nombrando al local viejo."""
+        self.stdout.write("")
+        self.stdout.write("PATRONES FISCALES")
+        if "conciliacion_sucursalidentificadorfiscal" not in connection.introspection.table_names():
+            self.stdout.write("  tabla no presente, se omite")
+            return 0
+        cur.execute(
+            'UPDATE "conciliacion_sucursalidentificadorfiscal" SET "sucursal_id" = %s '
+            'WHERE "patron" = %s',
+            [bamoa.pk, MEDIDOR_BAMOA],
+        )
+        self.stdout.write(f"  medidor CFE de Estación Bamoa → Bamoa{'':<18} {cur.rowcount:>7,}")
+        self.stdout.write("  «CRUCERO», «SUC CRUCERO» y el medidor de Niños Héroes se quedan")
+
+        # Sin patrones de texto propios, un CFDI que diga «Bamoa» no resuelve a
+        # ninguna sucursal. Se siguen las prioridades del resto del catálogo.
+        creados = 0
+        for patron, prioridad, descripcion in PATRONES_BAMOA:
+            cur.execute(
+                'INSERT INTO "conciliacion_sucursalidentificadorfiscal" '
+                '("patron","tipo","descripcion","prioridad","activo","sucursal_id","creado_en","actualizado_en") '
+                "VALUES (%s,'texto',%s,%s,true,%s,NOW(),NOW()) ON CONFLICT DO NOTHING",
+                [patron, descripcion, prioridad, bamoa.pk],
+            )
+            creados += cur.rowcount
+        self.stdout.write(f"  patrones de texto propios de Bamoa dados de alta{'':<3} {creados:>7,}")
+
     def _activos(self, cur, bamoa) -> int:
         """A dónde se llevaron los equipos lo sabe operaciones, no una fecha."""
         self.stdout.write("")
@@ -178,23 +222,14 @@ class Command(BaseCommand):
         if "activos_activo" not in connection.introspection.table_names():
             self.stdout.write("  tabla no presente, se omite")
             return 0
-        cedis = Sucursal.objects.filter(codigo="CEDIS").first()
-        if cedis is None:
-            raise CommandError("No existe la sucursal CEDIS; no puedo reubicar los activos de producción.")
-        movidos = 0
-        for destino, codigos, etiqueta in (
-            (bamoa, ACTIVOS_A_BAMOA, "mostrador, al local nuevo"),
-            (cedis, ACTIVOS_A_CEDIS, "producción, integrados a CEDIS"),
-        ):
-            cur.execute(
-                'UPDATE "activos_activo" SET "sucursal_id" = %s, "ubicacion" = %s '
-                'WHERE "codigo" = ANY(%s)',
-                [destino.pk, destino.nombre, codigos],
-            )
-            self.stdout.write(f"  {etiqueta:<52} {cur.rowcount:>7,}")
-            movidos += cur.rowcount
-        self.stdout.write("  la desinstalación eléctrica se queda con Crucero")
-        self.stdout.write(f"  {'subtotal':<52} {movidos:>7,}")
+        cur.execute(
+            'UPDATE "activos_activo" SET "sucursal_id" = %s, "ubicacion" = %s '
+            'WHERE "codigo" = ANY(%s)',
+            [bamoa.pk, bamoa.nombre, ACTIVOS_A_BAMOA],
+        )
+        movidos = cur.rowcount
+        self.stdout.write(f"  {'equipo de venta, al local nuevo':<52} {movidos:>7,}")
+        self.stdout.write("  la desinstalación eléctrica se queda: es un gasto de Crucero")
         return movidos
 
     def _bloque(self, cur, titulo, generador, params):
