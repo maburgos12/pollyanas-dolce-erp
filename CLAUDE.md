@@ -34,6 +34,24 @@ Sistema de uso interno para el equipo operativo.
   resolverse localmente, indicando el comando fallido y la variable o servicio
   faltante; no intentar SQLite.
 
+## Revisión de fuentes antes de diseñar módulos
+
+Antes de crear o ampliar un módulo que capture, importe o calcule datos compartidos,
+usar la habilidad `.agents/skills/erp-data-reuse/SKILL.md`. Entregar una ficha de
+fuentes con `docs/data-reuse/ficha-fuentes-template.md`, documentando las
+fuentes existentes con concepto, unidad de análisis, modelos y tablas candidatos,
+identificadores, alias, fuente que crea y actualiza, consumidores, evidencia de
+registros y decisión de reutilizar, extender o crear. Ejecutar
+`python3 manage.py inventario_fuentes_datos --term <concepto>` con sinónimos
+relevantes y PostgreSQL configurado, y verificar los registros candidatos mediante
+consultas acotadas de solo lectura cuando el dominio lo requiera. El comando
+produce candidatos léxicos; no prueba identidad semántica. Una equivalencia nueva
+entre registros o fuentes debe presentarse para revisión antes de aplicarse.
+No crear una segunda captura o tabla maestra sin documentar por qué la fuente
+existente no cubre la necesidad.
+
+---
+
 ## Otros sistemas en el mismo servidor
 | Sistema | Directorio | Puerto | Dominio |
 |---------|-----------|--------|---------|
