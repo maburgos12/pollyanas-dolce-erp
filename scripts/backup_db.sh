@@ -10,7 +10,11 @@ DB_NAME="${DB_NAME:-pastelerias_erp}"
 DB_USER="${DB_USER:-postgres}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONTEOS_EVIDENCE_DIR="${CONTEOS_EVIDENCE_DIR:-$SCRIPT_DIR/../storage/conteos_evidencias}"
-INVENTORY_AUDIT_EVIDENCE_DIR="${INVENTORY_AUDIT_EVIDENCE_DIR:-$SCRIPT_DIR/../storage/inventory_audit_evidence}"
+if [[ -n "${INVENTORY_AUDIT_EVIDENCE_DIR:-}" ]]; then
+    echo "INVENTORY_AUDIT_EVIDENCE_DIR ya no es válida; use INVENTORY_AUDIT_PRIVATE_ROOT en Django y respaldo" >&2
+    exit 1
+fi
+INVENTORY_AUDIT_PRIVATE_ROOT="${INVENTORY_AUDIT_PRIVATE_ROOT:-$SCRIPT_DIR/../storage/inventory_audit_evidence}"
 KEEP_LAST="${BACKUP_KEEP_LAST:-7}"
 BACKUP_EXPORT_DIR="${BACKUP_EXPORT_DIR:-}"
 BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
@@ -95,12 +99,12 @@ else
     log "ERROR: la fuente de evidencias no es un directorio"
     exit 1
 fi
-if [ -d "$INVENTORY_AUDIT_EVIDENCE_DIR" ]; then
-    if ! tar -czf "$STAGING/$PREFIX.inventory-audit.tar.gz" -C "$INVENTORY_AUDIT_EVIDENCE_DIR" .; then
+if [ -d "$INVENTORY_AUDIT_PRIVATE_ROOT" ]; then
+    if ! tar -czf "$STAGING/$PREFIX.inventory-audit.tar.gz" -C "$INVENTORY_AUDIT_PRIVATE_ROOT" .; then
         log "ERROR: falló el respaldo de evidencias de auditoría de inventario"
         exit 1
     fi
-elif [ ! -e "$INVENTORY_AUDIT_EVIDENCE_DIR" ]; then
+elif [ ! -e "$INVENTORY_AUDIT_PRIVATE_ROOT" ]; then
     if ! tar -czf "$STAGING/$PREFIX.inventory-audit.tar.gz" -T /dev/null; then
         log "ERROR: falló el respaldo vacío de evidencias de auditoría de inventario"
         exit 1

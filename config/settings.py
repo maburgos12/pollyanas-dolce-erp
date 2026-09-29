@@ -264,6 +264,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
 MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(BASE_DIR, "storage", "media"))
+INVENTORY_AUDIT_PRIVATE_ROOT = os.getenv(
+    "INVENTORY_AUDIT_PRIVATE_ROOT",
+    os.path.join(BASE_DIR, "storage", "inventory_audit_evidence"),
+)
 if "test" in sys.argv:
     # Evita dependencia de manifest/collectstatic en la suite de tests.
     STATICFILES_STORAGE = "django.contrib.staticfiles.storage.StaticFilesStorage"

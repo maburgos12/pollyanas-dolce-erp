@@ -25,7 +25,7 @@ class BackupTests(unittest.TestCase):
         (self.backups / '.backup.flock').touch()
         self.evidence = self.root / 'storage' / 'conteos_evidencias'
         self.evidence.mkdir(parents=True)
-        self.audit_evidence = self.root / 'storage' / 'inventory_audit_evidence'
+        self.audit_evidence = self.root / 'private' / 'inventory_audit_evidence'
         self.audit_evidence.mkdir(parents=True)
         self.log = self.root / 'backup.log'
         self.bin = self.root / 'bin'
@@ -38,7 +38,7 @@ class BackupTests(unittest.TestCase):
         self.env = {**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
                     'BACKUP_DIR': str(self.backups), 'LOG_FILE': str(self.log),
                     'CONTEOS_EVIDENCE_DIR': str(self.evidence), 'CONTAINER': 'isolated-test-db'}
-        self.env['INVENTORY_AUDIT_EVIDENCE_DIR'] = str(self.audit_evidence)
+        self.env['INVENTORY_AUDIT_PRIVATE_ROOT'] = str(self.audit_evidence)
         self.stub('docker', 'printf "CREATE TABLE evidence (id int);\\n"\nexit "${FAIL_DUMP:-0}"\n')
         self.stub('tar', 'if [ "${FAIL_TAR:-0}" = 1 ]; then exit 19; fi\nexec ' + shutil.which('tar') + ' "$@"\n')
         self.stub('date', 'if [ "$1" = "+%Y%m%d_%H%M%S" ]; then echo ' + STAMP + '; else exec ' + shutil.which('date') + ' "$@"; fi\n')
@@ -88,6 +88,14 @@ class BackupTests(unittest.TestCase):
             proof = next(m for m in archive.getmembers() if Path(m.name).name == 'audit-proof.pdf')
             self.assertEqual(archive.extractfile(proof).read(), b'%PDF-1.4 audit evidence')
         self.assertFalse(any('partial' in p.name for p in self.backups.iterdir()))
+
+    def test_legacy_inventory_audit_path_variable_fails_loudly(self):
+        result = self.run_backup(
+            INVENTORY_AUDIT_EVIDENCE_DIR=str(self.audit_evidence),
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("INVENTORY_AUDIT_PRIVATE_ROOT", result.stderr)
 
     def test_failure_of_dump_does_not_publish_or_rotate(self):
         original = self.seed()
