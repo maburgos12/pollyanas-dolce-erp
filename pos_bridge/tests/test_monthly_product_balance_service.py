@@ -75,7 +75,7 @@ class MonthlyProductBalanceConversionTests(TestCase):
         values.update(overrides)
         return PointConversionLine.objects.create(**values)
 
-    def test_configured_equivalence_projects_real_point_conversion(self):
+    def test_blank_point_origin_keeps_destination_without_inferring_parent(self):
         RecetaEquivalencia.objects.create(
             receta_porcion=self.slice,
             receta_padre=self.parent,
@@ -92,27 +92,60 @@ class MonthlyProductBalanceConversionTests(TestCase):
         self.assertEqual(balance.month_start, date(2026, 8, 1))
         self.assertEqual(balance.month_end, date(2026, 8, 31))
         slice_row = balance.rows[self.slice.id]
-        parent_row = balance.rows[self.parent.id]
         self.assertEqual(slice_row.conversion_in, Decimal("16"))
-        self.assertEqual(parent_row.conversion_out, Decimal("2"))
-        self.assertEqual(slice_row.conversion_origin, "EQUIVALENCIA_CONFIGURADA")
+        self.assertNotIn(self.parent.id, balance.rows)
+        self.assertEqual(slice_row.conversion_origin, "UNRESOLVED")
+        self.assertIn("CONVERSION_ORIGIN_UNRESOLVED", slice_row.issues)
         self.assertEqual(slice_row.source_counts["conversion_in_rows"], 2)
         self.assertEqual(slice_row.source_counts["conversion_out_rows"], 0)
         self.assertEqual(balance.source_counts["conversion_rows_read"], 2)
         self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 2)
+        self.assertEqual(
+            len(
+                [
+                    item
+                    for item in balance.unresolved_movements
+                    if item.source == "conversion_source"
+                    and item.issue == "CONVERSION_ORIGIN_UNRESOLVED"
+                ]
+            ),
+            2,
+        )
 
-    def test_grouped_point_row_without_erp_conversion_relation_is_not_counted_as_conversion(self):
+    def test_grouped_point_row_without_relation_keeps_confirmed_destination(self):
         self._conversion(quantity="1", when=datetime(2026, 8, 15, 12, 0))
 
         balance = self._service().build("2026-08")
 
-        self.assertNotIn(self.slice.id, balance.rows)
+        self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("1"))
+        self.assertIn(
+            "CONVERSION_ORIGIN_UNRESOLVED", balance.rows[self.slice.id].issues
+        )
         self.assertEqual(balance.source_counts["conversion_rows_read"], 1)
-        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 0)
-        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
-        self.assertFalse(any(item.source == "conversion_source" for item in balance.unresolved_movements))
+        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 1)
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 0)
+        self.assertTrue(any(item.source == "conversion_source" for item in balance.unresolved_movements))
 
-    def test_derived_slice_rule_projects_grouped_point_conversion(self):
+    def test_august_414_slices_never_infer_41_4_whole_cakes(self):
+        RecetaEquivalencia.objects.create(
+            receta_porcion=self.slice,
+            receta_padre=self.parent,
+            factor_conversion=Decimal("10"),
+            tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
+            activo=True,
+        )
+        self._conversion(quantity="414", when=datetime(2026, 8, 31, 23, 0))
+
+        balance = self._service().build("2026-08")
+
+        self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("414"))
+        self.assertNotIn(self.parent.id, balance.rows)
+        self.assertEqual(
+            sum((row.conversion_out for row in balance.rows.values()), Decimal("0")),
+            Decimal("0"),
+        )
+
+    def test_derived_slice_rule_does_not_replace_missing_point_origin(self):
         RecetaPresentacionDerivada.objects.create(
             receta_derivada=self.slice,
             receta_padre=self.parent,
@@ -126,8 +159,12 @@ class MonthlyProductBalanceConversionTests(TestCase):
         balance = self._service().build("2026-08")
 
         self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("10"))
-        self.assertEqual(balance.rows[self.parent.id].conversion_out, Decimal("1"))
-        self.assertEqual(balance.rows[self.slice.id].conversion_origin, "EQUIVALENCIA_CONFIGURADA")
+        self.assertNotIn(self.parent.id, balance.rows)
+        self.assertEqual(balance.rows[self.slice.id].conversion_origin, "UNRESOLVED")
+        self.assertIn(
+            "CONVERSION_ORIGIN_UNRESOLVED",
+            balance.rows[self.slice.id].issues,
+        )
 
     def test_mixed_conversion_origins_preserve_exact_observed_collection(self):
         RecetaEquivalencia.objects.create(
@@ -150,21 +187,24 @@ class MonthlyProductBalanceConversionTests(TestCase):
         self.assertEqual(balance.rows[self.slice.id].conversion_origin, "MIXED")
         self.assertEqual(
             balance.rows[self.slice.id].conversion_origins,
-            ("EQUIVALENCIA_CONFIGURADA", "POINT"),
+            ("POINT", "UNRESOLVED"),
         )
         self.assertEqual(
             balance.rows[self.parent.id].conversion_origins,
-            ("EQUIVALENCIA_CONFIGURADA", "POINT"),
+            ("POINT",),
         )
 
-    def test_unconfigured_grouped_conversion_is_ignored_without_affecting_inventory(self):
+    def test_unconfigured_grouped_conversion_keeps_destination_without_origin(self):
         self._conversion(quantity="8", when=datetime(2026, 8, 10, 12, 0))
 
         balance = self._service().build("2026-08")
 
-        self.assertNotIn(self.slice.id, balance.rows)
-        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
-        self.assertNotIn("CONVERSION_ORIGIN_UNRESOLVED", balance.issues)
+        self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("8"))
+        self.assertEqual(balance.rows[self.slice.id].conversion_out, Decimal("0"))
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 0)
+        self.assertIn(
+            "CONVERSION_ORIGIN_UNRESOLVED", balance.rows[self.slice.id].issues
+        )
 
     def test_sales_without_point_conversion_do_not_create_conversion_movements(self):
         product = PointProduct.objects.create(
@@ -203,14 +243,20 @@ class MonthlyProductBalanceConversionTests(TestCase):
         with self.assertRaises(TypeError):
             balance.rows[self.slice.id] = None
 
-    def test_unresolved_origin_does_not_create_false_destination_entry(self):
-        self._conversion(quantity="16", when=datetime(2026, 8, 15, 12, 0))
+    def test_explicit_origin_without_relation_keeps_destination_without_origin_exit(self):
+        self._conversion(
+            quantity="16",
+            when=datetime(2026, 8, 15, 12, 0),
+            source_item_code=self.parent.codigo_point,
+            source_item_name=self.parent.nombre,
+        )
 
         balance = self._service().build("2026-08")
 
-        self.assertNotIn(self.slice.id, balance.rows)
-        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 0)
-        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 1)
+        self.assertEqual(balance.rows[self.slice.id].conversion_in, Decimal("16"))
+        self.assertIn("CONVERSION_FACTOR_MISSING", balance.rows[self.slice.id].issues)
+        self.assertEqual(balance.source_counts["conversion_destination_rows_applied"], 1)
+        self.assertEqual(balance.source_counts["conversion_rows_ignored_non_derived"], 0)
         self.assertEqual(sum(row.conversion_out for row in balance.rows.values()), Decimal("0"))
 
     def test_explicit_point_source_uses_factor_only_for_same_configured_parent(self):
@@ -346,7 +392,12 @@ class MonthlyProductBalanceConversionTests(TestCase):
             tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
             activo=True,
         )
-        self._conversion(quantity="16", when=datetime(2026, 8, 15, 12, 0))
+        self._conversion(
+            quantity="16",
+            when=datetime(2026, 8, 15, 12, 0),
+            source_item_code=self.parent.codigo_point,
+            source_item_name=self.parent.nombre,
+        )
 
         balance = self._service().build("2026-08")
 
@@ -361,8 +412,18 @@ class MonthlyProductBalanceConversionTests(TestCase):
             tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION,
             activo=True,
         )
-        self._conversion(quantity="-16", when=datetime(2026, 8, 15, 12, 0))
-        self._conversion(quantity="0", when=datetime(2026, 8, 16, 12, 0))
+        self._conversion(
+            quantity="-16",
+            when=datetime(2026, 8, 15, 12, 0),
+            source_item_code=self.parent.codigo_point,
+            source_item_name=self.parent.nombre,
+        )
+        self._conversion(
+            quantity="0",
+            when=datetime(2026, 8, 16, 12, 0),
+            source_item_code=self.parent.codigo_point,
+            source_item_name=self.parent.nombre,
+        )
 
         balance = self._service().build("2026-08")
 

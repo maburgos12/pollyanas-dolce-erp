@@ -12,7 +12,6 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db import models, transaction
-from django.db.models import Prefetch
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
@@ -34,6 +33,9 @@ from pos_bridge.models import (
     PointProductionLine,
     PointTransferLine,
     PointWasteLine,
+)
+from pos_bridge.services.branch_inventory_traceability_service import (
+    canonical_point_branch_identity,
 )
 from reportes.models import (
     ProductInventoryAuditCase,
@@ -153,14 +155,13 @@ def _wants_html(request: HttpRequest) -> bool:
 def _possible_cause(case: ProductInventoryAuditCase) -> str:
     issue_codes = set(case.issue_codes if isinstance(case.issue_codes, list) else [])
     if "TRANSFER_QUANTITY_MISMATCH" in issue_codes:
-        return "Transferencia con cantidades enviadas y recibidas distintas"
+        return "Transferencia por conciliar"
     if issue_codes.intersection(
-        {
-            "MISSING_CONVERSION_DESTINATION",
-            "MISSING_CONVERSION_ORIGIN",
-        }
+        {"MISSING_CONVERSION_ORIGIN", "CONVERSION_ORIGIN_UNRESOLVED"}
     ):
-        return "Conversión incompleta entre producto entero y presentación"
+        return "Origen de conversión por identificar"
+    if "MISSING_CONVERSION_DESTINATION" in issue_codes:
+        return "Destino de conversión por identificar"
     if "CONVERSION_EQUIVALENCE_MISMATCH" in issue_codes:
         return "La conversión no coincide con la equivalencia aprobada"
     if "NON_DERIVED_CONVERSION" in issue_codes:
@@ -172,11 +173,11 @@ def _possible_cause(case: ProductInventoryAuditCase) -> str:
     if case.movement_status == ProductInventoryAuditCase.MovementStatus.RESOLVED:
         return "Diferencia explicada y aprobada"
     if case.difference and (case.conversion_in or case.conversion_out):
-        return "Conversión o rebanado registrado; revisar la equivalencia"
+        return "Conversión registrada; revisar trazabilidad"
     if case.difference and case.waste:
         return "Merma registrada; revisar fecha, cantidad y ubicación"
     if case.difference and (case.transfer_in or case.transfer_out):
-        return "Producto transferido; revisar origen y recepción"
+        return "Transferencia por conciliar"
     if case.difference and case.production:
         return "Producción registrada; revisar fecha y ubicación"
     if case.difference > 0:
@@ -801,7 +802,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     result_count = 0
     page_size = 100 if request.GET.get("page_size") == "100" else 50
     if run is not None:
-        month_cases = ProductInventoryAuditCase.objects.filter(run=run, month=run.month)
+        branch_aliases, _branch_objects = canonical_point_branch_identity()
+        month_cases = ProductInventoryAuditCase.objects.filter(
+            run=run,
+            month=run.month,
+            branch_id__in=set(branch_aliases.values()),
+        )
         branches = list(
             month_cases.order_by("branch__name")
             .values("branch_id", "branch__name")
@@ -949,17 +955,27 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
         ).order_by("created_at", "id")
         case = (
             ProductInventoryAuditCase.objects.select_related("branch", "product", "run")
-            .prefetch_related(
-                Prefetch(
-                    "events",
-                    queryset=event_queryset,
-                    to_attr="prefetched_events",
-                )
-            )
             .get(pk=pk)
         )
     except ProductInventoryAuditCase.DoesNotExist:
         raise Http404("Caso de auditoría no encontrado.") from None
+    related_branch_ids = [case.branch_id]
+    if case.branch.erp_branch_id is not None:
+        related_branch_ids = list(
+            case.branch.__class__.objects.filter(
+                erp_branch_id=case.branch.erp_branch_id
+            ).values_list("id", flat=True)
+        )
+    related_events = list(
+        event_queryset.filter(
+            case__month=case.month,
+            case__product_id=case.product_id,
+            case__branch_id__in=related_branch_ids,
+        )
+    )
+    case.prefetched_events = [
+        event for event in related_events if event.case_id == case.id
+    ]
     payload = _case_payload(case)
     payload["events"] = [
         {
@@ -973,13 +989,13 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "evidence_download_url": (
                 reverse(
                     "reportes:inventory_audit_evidence",
-                    args=[case.pk, event.pk],
+                    args=[event.case_id, event.pk],
                 )
                 if event.evidence
                 else None
             ),
         }
-        for event in case.prefetched_events
+        for event in related_events
     ]
     if _wants_html(request):
         has_custody = True
@@ -989,7 +1005,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             has_custody = False
         latest_explanation = _latest_explanation(case)
         source_evidence, undirected_evidence = _source_evidence_by_step(case)
-        events = case.prefetched_events
+        events = related_events
         for event in events:
             event.ui_reason_label = _reason_label(event.reason_code)
         if latest_explanation is not None:

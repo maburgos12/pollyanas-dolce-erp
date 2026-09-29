@@ -31,6 +31,17 @@ class PointBranchIndicatorPayload:
     raw_payload: dict
 
 
+def point_branch_canonical_sort_key(branch: PointBranch):
+    external = (branch.external_id or "").strip()
+    return (
+        external.isdigit(),
+        branch.status == PointBranch.STATUS_ACTIVE,
+        branch.last_seen_at or datetime.min.replace(tzinfo=dt_timezone.utc),
+        branch.updated_at or datetime.min.replace(tzinfo=dt_timezone.utc),
+        branch.id,
+    )
+
+
 class PointSalesBranchIndicatorService:
     INDICATORS_PATH = "/Ventas/get_Ventas_ByDay"
 
@@ -57,19 +68,9 @@ class PointSalesBranchIndicatorService:
         for branch in queryset:
             grouped.setdefault(branch.erp_branch_id, []).append(branch)
 
-        def _sort_key(branch: PointBranch):
-            external = (branch.external_id or "").strip()
-            return (
-                external.isdigit(),
-                branch.status == PointBranch.STATUS_ACTIVE,
-                branch.last_seen_at or datetime.min.replace(tzinfo=dt_timezone.utc),
-                branch.updated_at or datetime.min.replace(tzinfo=dt_timezone.utc),
-                branch.id,
-            )
-
         selected: list[PointBranch] = []
         for branches in grouped.values():
-            selected.append(max(branches, key=_sort_key))
+            selected.append(max(branches, key=point_branch_canonical_sort_key))
         selected.sort(key=lambda branch: ((branch.erp_branch.codigo or ""), branch.name, branch.id))
         return selected
 

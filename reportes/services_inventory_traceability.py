@@ -7,11 +7,13 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import transaction
+from django.db.models import Count
 from django.utils import timezone
 
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceabilityService,
     TraceSourceIssue,
+    canonical_point_branch_identity,
 )
 from pos_bridge.services.product_month_source_mutex import (
     lock_product_month_sources,
@@ -146,15 +148,16 @@ class InventoryAuditMaterializer:
                     dry_run=dry_run,
                 )
 
-            existing_cases = {
-                (case.branch_id, case.product_id): case
-                for case in ProductInventoryAuditCase.objects.select_for_update().filter(
-                    month=month_start
-                )
-            }
             prepared_lines = [
                 self._prepare_line(line) for line in traceability.lines
             ]
+            branch_aliases, _branch_objects = canonical_point_branch_identity()
+            existing_cases = self._canonical_existing_cases(
+                month=month_start,
+                branch_aliases=branch_aliases,
+                prepared_lines=prepared_lines,
+                dry_run=dry_run,
+            )
             counts = self._preview_complete_counts(
                 prepared_lines=prepared_lines,
                 existing_cases=existing_cases,
@@ -225,6 +228,85 @@ class InventoryAuditMaterializer:
                 ]
             )
             return counts
+
+    @staticmethod
+    def _case_matches_prepared(case, prepared) -> bool:
+        normalized = prepared["normalized_quantities"]
+        return (
+            all(
+                Decimal(getattr(case, field)).quantize(_QUANTITY) == value
+                for field, value in normalized.items()
+            )
+            and sorted(case.issue_codes) == prepared["issue_codes"]
+            and case.source_trace == prepared["source_trace"]
+        )
+
+    def _canonical_existing_cases(
+        self, *, month, branch_aliases, prepared_lines, dry_run
+    ):
+        prepared_by_key = {prepared["key"]: prepared for prepared in prepared_lines}
+        event_counts = dict(
+            ProductInventoryAuditEvent.objects.filter(case__month=month)
+            .values("case_id")
+            .annotate(total=Count("id"))
+            .values_list("case_id", "total")
+        )
+        cases = list(
+            ProductInventoryAuditCase.objects.select_for_update().filter(
+                month=month
+            )
+        )
+        for case in cases:
+            case.audit_event_count = event_counts.get(case.id, 0)
+        grouped = {}
+        for case in cases:
+            key = (
+                branch_aliases.get(case.branch_id, case.branch_id),
+                case.product_id,
+            )
+            grouped.setdefault(key, []).append(case)
+
+        selected = {}
+        status_priority = {
+            ProductInventoryAuditCase.MovementStatus.RESOLVED: 3,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL: 2,
+            ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION: 1,
+        }
+        for key, candidates in grouped.items():
+            canonical_branch_id, _product_id = key
+            canonical = next(
+                (
+                    case
+                    for case in candidates
+                    if case.branch_id == canonical_branch_id
+                ),
+                None,
+            )
+            survivor = canonical or max(
+                candidates,
+                key=lambda case: (
+                    case.audit_event_count,
+                    status_priority.get(case.movement_status, 0),
+                    case.updated_at,
+                    case.id,
+                ),
+            )
+            prepared = prepared_by_key.get(key)
+            if (
+                not dry_run
+                and canonical is None
+                and survivor.branch_id != canonical_branch_id
+            ):
+                update_fields = ["branch", "updated_at"]
+                survivor.branch_id = canonical_branch_id
+                if prepared is not None and self._case_matches_prepared(
+                    survivor, prepared
+                ):
+                    survivor.calculation_fingerprint = prepared["fingerprint"]
+                    update_fields.append("calculation_fingerprint")
+                survivor.save(update_fields=update_fields)
+            selected[key] = survivor
+        return selected
 
     @staticmethod
     def _lock_source_months(month: date) -> tuple[date, ...]:
@@ -437,12 +519,18 @@ class InventoryAuditMaterializer:
             "calculation_fingerprint": prepared["fingerprint"],
             "rebuilt_at": now,
         }
-        case, _ = ProductInventoryAuditCase.objects.update_or_create(
-            month=month,
-            branch=line.branch,
-            product=line.product,
-            defaults=defaults,
-        )
+        if existing is None:
+            case = ProductInventoryAuditCase.objects.create(
+                month=month,
+                branch=line.branch,
+                product=line.product,
+                **defaults,
+            )
+        else:
+            case = existing
+            for field, value in defaults.items():
+                setattr(case, field, value)
+            case.save(update_fields=[*defaults, "updated_at"])
         if should_reopen:
             self._create_reopen_event(
                 case=case,

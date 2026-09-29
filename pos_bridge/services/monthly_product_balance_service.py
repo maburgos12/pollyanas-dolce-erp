@@ -2399,10 +2399,6 @@ class MonthlyPointProductBalanceService:
                 equivalence,
                 self._build_conversion_cache,
             )
-            if equivalence is None and origin == ORIGIN_UNRESOLVED:
-                source_counts["conversion_rows_ignored_non_derived"] += 1
-                continue
-
             source_counts["conversion_destination_rows_applied"] += 1
             destination = result.setdefault(conversion.receta_id, _MutableBalanceRow())
             destination.add("conversion_in", quantity, count_name="conversion_in_rows")
@@ -2458,11 +2454,6 @@ class MonthlyPointProductBalanceService:
                 return point_source.id, None, ORIGIN_POINT, ISSUE_FACTOR_INVALID
             return point_source.id, factor, ORIGIN_POINT, ""
 
-        if equivalence is not None:
-            factor = Decimal(equivalence.factor_conversion)
-            if factor <= ZERO:
-                return equivalence.receta_padre_id, None, ORIGIN_CONFIGURED_EQUIVALENCE, ISSUE_FACTOR_INVALID
-            return equivalence.receta_padre_id, factor, ORIGIN_CONFIGURED_EQUIVALENCE, ""
         return None, None, ORIGIN_UNRESOLVED, ISSUE_CONVERSION_ORIGIN_UNRESOLVED
 
     def _match_recipe(self, *, code: str, name: str) -> Receta | None:

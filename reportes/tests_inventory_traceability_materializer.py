@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
 from io import StringIO
@@ -14,6 +15,7 @@ from django.db import close_old_connections, connection
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
+from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointProduct, PointSyncJob, PointTransferLine
 from pos_bridge.services.branch_inventory_traceability_service import (
     BranchInventoryTraceability,
@@ -139,6 +141,43 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_rebuild_moves_resolved_alias_case_to_canonical_branch_with_history(self):
+        erp_branch = Sucursal.objects.create(codigo="AUD-MAT", nombre="Centro")
+        self.branch.external_id = "1"
+        self.branch.erp_branch = erp_branch
+        self.branch.save(
+            update_fields=["external_id", "erp_branch", "updated_at"]
+        )
+        alias = PointBranch.objects.create(
+            external_id="Centro",
+            name="Centro alias",
+            erp_branch=erp_branch,
+        )
+        legacy_line = replace(self._line(), branch=alias)
+        self._materializer(self._result(legacy_line)).rebuild(MONTH)
+        legacy_case = ProductInventoryAuditCase.objects.get(branch=alias)
+        self._approve_case(legacy_case)
+        original_case_id = legacy_case.id
+        original_event_ids = list(legacy_case.events.values_list("id", flat=True))
+
+        counts = self._materializer(self._result(self._line())).rebuild(MONTH)
+
+        legacy_case.refresh_from_db()
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertEqual(legacy_case.id, original_case_id)
+        self.assertEqual(legacy_case.branch, self.branch)
+        self.assertEqual(
+            list(legacy_case.events.values_list("id", flat=True)), original_event_ids
+        )
+        self.assertEqual(
+            legacy_case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.RESOLVED,
+        )
+        self.assertEqual(counts["created"], 0)
+        self.assertEqual(counts["unchanged"], 1)
+        self.assertEqual(counts["reopened"], 0)
+        self.assertEqual(counts["source_incomplete"], 0)
+
     def test_directional_source_trace_is_persisted_without_flattening(self):
         directional_trace = {
             "opening": (11,),

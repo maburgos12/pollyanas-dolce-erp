@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import copy
 from calendar import monthrange
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import MappingProxyType
@@ -34,6 +34,9 @@ from pos_bridge.services.open_transfer_sync_service import (
     build_open_transfer_manifest,
     canonical_open_transfer_payload,
     open_transfer_close_window,
+)
+from pos_bridge.services.sales_branch_indicator_service import (
+    point_branch_canonical_sort_key,
 )
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
@@ -98,6 +101,25 @@ class BranchInventoryTraceability:
     company_difference: Decimal
     exception_count: int
     source_complete: bool
+
+
+def canonical_point_branch_identity() -> tuple[
+    dict[int, int], dict[int, PointBranch]
+]:
+    """Map Point aliases to one branch per linked ERP branch."""
+    grouped: dict[int, list[PointBranch]] = {}
+    branches = list(PointBranch.objects.all().order_by("id"))
+    aliases = {branch.id: branch.id for branch in branches}
+    branch_objects = {branch.id: branch for branch in branches}
+    for branch in branches:
+        if branch.erp_branch_id is not None:
+            grouped.setdefault(branch.erp_branch_id, []).append(branch)
+    for linked_branches in grouped.values():
+        canonical = max(linked_branches, key=point_branch_canonical_sort_key)
+        aliases.update(
+            {branch.id: canonical.id for branch in linked_branches}
+        )
+    return aliases, branch_objects
 
 
 class BranchInventoryTraceabilityService:
@@ -198,6 +220,41 @@ class BranchInventoryTraceabilityService:
                 exception_count=0,
                 source_complete=False,
             )
+        branch_id_aliases, branch_objects = self.canonical_branch_identity()
+        opening = self._canonicalize_balance_map(opening, branch_id_aliases)
+        closing = self._canonicalize_balance_map(closing, branch_id_aliases)
+        sales = self._canonicalize_balance_map(sales, branch_id_aliases)
+        production = self._canonicalize_balance_map(production, branch_id_aliases)
+        waste = self._canonicalize_balance_map(waste, branch_id_aliases)
+        transfer_in = self._canonicalize_balance_map(transfer_in, branch_id_aliases)
+        transfer_out = self._canonicalize_balance_map(transfer_out, branch_id_aliases)
+        open_transfer_snapshot_in = self._canonicalize_balance_map(
+            open_transfer_snapshot_in, branch_id_aliases
+        )
+        open_transfer_snapshot_out = self._canonicalize_balance_map(
+            open_transfer_snapshot_out, branch_id_aliases
+        )
+        conversion_in = self._canonicalize_balance_map(
+            conversion_in, branch_id_aliases
+        )
+        conversion_out = self._canonicalize_balance_map(
+            conversion_out, branch_id_aliases
+        )
+        conversion_in_impacts = self._canonicalize_impact_map(
+            conversion_in_impacts, branch_id_aliases
+        )
+        conversion_out_impacts = self._canonicalize_impact_map(
+            conversion_out_impacts, branch_id_aliases
+        )
+        movement_issues = tuple(
+            replace(
+                issue,
+                branch_id=branch_id_aliases.get(issue.branch_id, issue.branch_id),
+            )
+            if issue.branch_id is not None
+            else issue
+            for issue in movement_issues
+        )
         movement_sources = (
             sales,
             production,
@@ -255,7 +312,10 @@ class BranchInventoryTraceabilityService:
             | conversion_in.keys()
             | conversion_out.keys()
         )
-        branches = PointBranch.objects.in_bulk({branch_id for branch_id, _ in keys})
+        branches = {
+            branch_id: branch_objects[branch_id]
+            for branch_id, _product_id in keys
+        }
         products_by_id = {product.id: product for product in products}
 
         global_issues = []
@@ -1256,6 +1316,16 @@ class BranchInventoryTraceabilityService:
                         source_ids=(row.id,),
                     )
                 )
+            destination_impact = Decimal(row.quantity)
+            self._add_balance(
+                conversion_in,
+                (row.branch_id, destination_id),
+                destination_impact,
+                row.id,
+            )
+            conversion_in_impacts.setdefault(
+                (row.branch_id, destination_id), {}
+            )[row.id] = destination_impact
             destination_recipe_id = self._resolve_recipe_identity(
                 row.item_code, row.item_name, recipe_indexes
             )
@@ -1266,7 +1336,7 @@ class BranchInventoryTraceabilityService:
                         code="NON_DERIVED_CONVERSION",
                         message=(
                             f"La fila Point {row.id} no tiene una relación derivada "
-                            "activa y no se aplica como conversión."
+                            "activa; se conserva el destino sin asignar origen."
                         ),
                         branch_id=row.branch_id,
                         product_id=destination_id,
@@ -1291,12 +1361,22 @@ class BranchInventoryTraceabilityService:
                 str(row.source_item_code or "").strip()
                 or str(row.source_item_name or "").strip()
             )
-            if supplied_origin:
-                origin_code = row.source_item_code
-                origin_name = row.source_item_name
-            else:
-                parent_identity = recipe_indexes["by_id"].get(parent_recipe_id)
-                origin_code, origin_name = parent_identity or ("", "")
+            if not supplied_origin:
+                issues.append(
+                    TraceSourceIssue(
+                        code="MISSING_CONVERSION_ORIGIN",
+                        message=(
+                            f"La conversión {row.id} confirma el producto destino, "
+                            "pero Point no informó el producto origen."
+                        ),
+                        branch_id=row.branch_id,
+                        product_id=destination_id,
+                        source_ids=(row.id,),
+                    )
+                )
+                continue
+            origin_code = row.source_item_code
+            origin_name = row.source_item_name
             origin_id, origin_issue = self._resolve_product_identity(
                 origin_code,
                 origin_name,
@@ -1349,17 +1429,7 @@ class BranchInventoryTraceabilityService:
                     )
                 )
                 continue
-            destination_impact = Decimal(row.quantity)
             origin_impact = destination_impact / factor
-            self._add_balance(
-                conversion_in,
-                (row.branch_id, destination_id),
-                destination_impact,
-                row.id,
-            )
-            conversion_in_impacts.setdefault(
-                (row.branch_id, destination_id), {}
-            )[row.id] = destination_impact
             self._add_balance(
                 conversion_out,
                 (row.branch_id, origin_id),
@@ -1382,6 +1452,30 @@ class BranchInventoryTraceabilityService:
                         source_ids=(row.id,),
                     )
                 )
+
+    @staticmethod
+    def canonical_branch_identity() -> tuple[dict[int, int], dict[int, PointBranch]]:
+        return canonical_point_branch_identity()
+
+    @staticmethod
+    def _canonicalize_balance_map(balances, branch_id_aliases):
+        canonical = {}
+        for (branch_id, product_id), (quantity, source_ids) in balances.items():
+            key = (branch_id_aliases.get(branch_id, branch_id), product_id)
+            current_quantity, current_ids = canonical.get(key, (ZERO, []))
+            canonical[key] = (
+                current_quantity + Decimal(quantity),
+                list(dict.fromkeys((*current_ids, *source_ids))),
+            )
+        return canonical
+
+    @staticmethod
+    def _canonicalize_impact_map(impacts, branch_id_aliases):
+        canonical = {}
+        for (branch_id, product_id), source_impacts in impacts.items():
+            key = (branch_id_aliases.get(branch_id, branch_id), product_id)
+            canonical.setdefault(key, {}).update(source_impacts)
+        return canonical
 
     @staticmethod
     def _add_balance(balances, key, quantity, source_id):

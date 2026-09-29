@@ -613,6 +613,56 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(result.company_difference, Decimal("0"))
         self.assertEqual(result.exception_count, 2)
 
+    def test_point_aliases_for_same_erp_branch_are_reconciled_as_one_location(self):
+        centro_alias = self.centro
+        centro_canonical = PointBranch.objects.create(
+            external_id="1",
+            name="Centro",
+            erp_branch=self.centro_erp,
+        )
+        self.centro = centro_canonical
+        self._refresh_sales_evidence(self.sales_job)
+        self._closing(date(2026, 7, 31), {centro_canonical: Decimal("10")})
+        self._closing(date(2026, 8, 31), {centro_canonical: Decimal("12")})
+        production = self._production(branch=centro_alias, quantity="2")
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        product_lines = [line for line in result.lines if line.product == self.product]
+        self.assertEqual(len(product_lines), 1)
+        line = product_lines[0]
+        self.assertEqual(line.branch, centro_canonical)
+        self.assertEqual(line.opening, Decimal("10"))
+        self.assertEqual(line.production, Decimal("2"))
+        self.assertEqual(line.point_closing, Decimal("12"))
+        self.assertEqual(line.difference, Decimal("0"))
+        self.assertEqual(line.source_trace["production"], (production.id,))
+        self.assertNotIn("SOURCE_INCOMPLETE", {issue.code for issue in line.issues})
+
+    def test_canonical_branch_matches_shared_point_recency_selection(self):
+        older = self.centro
+        older.external_id = "1"
+        older.last_seen_at = timezone.now() - timedelta(days=1)
+        older.save(update_fields=["external_id", "last_seen_at", "updated_at"])
+        recent = PointBranch.objects.create(
+            external_id="01",
+            name="Centro vigente",
+            erp_branch=self.centro_erp,
+            last_seen_at=timezone.now(),
+        )
+        self.centro = recent
+        self._refresh_sales_evidence(self.sales_job)
+        self._closing(date(2026, 7, 31), {recent: Decimal("10")})
+        self._closing(date(2026, 8, 31), {recent: Decimal("12")})
+        self._production(branch=older, quantity="2")
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        product_lines = [line for line in result.lines if line.product == self.product]
+        self.assertEqual(len(product_lines), 1)
+        self.assertEqual(product_lines[0].branch, recent)
+        self.assertEqual(product_lines[0].difference, Decimal("0"))
+
     def test_build_normalizes_month_to_first_day(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("3")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("3")})
@@ -1857,7 +1907,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             )
             self.assertEqual(issue.source_ids, (transfer.id,))
 
-    def test_conversion_uses_configured_equivalence_for_both_product_legs(self):
+    def test_blank_conversion_origin_keeps_destination_without_parent_outflow(self):
         whole = PointProduct.objects.create(
             external_id="WHOLE-001", sku="WHOLE-001", name="Pastel entero"
         )
@@ -1907,17 +1957,21 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         by_product = {line.product.external_id: line for line in result.lines}
-        self.assertEqual(by_product["WHOLE-001"].conversion_out, Decimal("1"))
+        self.assertEqual(by_product["WHOLE-001"].conversion_out, Decimal("0"))
         self.assertEqual(by_product["SLICE-001"].conversion_in, Decimal("12"))
-        self.assertEqual(by_product["WHOLE-001"].source_trace["conversions"], (conversion.id,))
+        self.assertEqual(by_product["WHOLE-001"].source_trace["conversions"], ())
         self.assertEqual(by_product["SLICE-001"].source_trace["conversions"], (conversion.id,))
-        self.assertEqual(by_product["WHOLE-001"].source_trace["conversion_out"], (conversion.id,))
+        self.assertEqual(by_product["WHOLE-001"].source_trace["conversion_out"], ())
         self.assertEqual(by_product["WHOLE-001"].source_trace["conversion_in"], ())
         self.assertEqual(by_product["SLICE-001"].source_trace["conversion_in"], (conversion.id,))
         self.assertEqual(by_product["SLICE-001"].source_trace["conversion_out"], ())
-        self.assertEqual(result.company_difference, Decimal("0"))
+        self.assertIn(
+            "MISSING_CONVERSION_ORIGIN",
+            {issue.code for issue in by_product["SLICE-001"].issues},
+        )
+        self.assertEqual(result.company_difference, Decimal("-1"))
 
-    def test_blank_origin_uses_active_derived_presentation_parent(self):
+    def test_blank_origin_does_not_use_active_derived_presentation_parent(self):
         whole = PointProduct.objects.create(
             external_id="WHOLE-PRESENTATION",
             sku="WHOLE-PRESENTATION",
@@ -1969,7 +2023,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         by_product = {line.product.external_id: line for line in result.lines}
         self.assertEqual(
             by_product[whole.external_id].conversion_out,
-            Decimal("1"),
+            Decimal("0"),
         )
         self.assertEqual(
             by_product[slice_product.external_id].conversion_in,
@@ -1977,7 +2031,15 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
         self.assertEqual(
             by_product[whole.external_id].source_trace["conversions"],
+            (),
+        )
+        self.assertEqual(
+            by_product[slice_product.external_id].source_trace["conversion_in"],
             (conversion.id,),
+        )
+        self.assertIn(
+            "MISSING_CONVERSION_ORIGIN",
+            {issue.code for issue in by_product[slice_product.external_id].issues},
         )
 
     def test_supplied_origin_name_matches_parent_and_preserves_secondary_resolution(self):
@@ -2104,7 +2166,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         line = next(line for line in result.lines if line.product == slice_product)
-        self.assertEqual(line.conversion_in, Decimal("0"))
+        self.assertEqual(line.conversion_in, Decimal("12"))
         self.assertEqual(line.conversion_out, Decimal("0"))
         self.assertEqual(
             {issue.code for issue in line.issues},
@@ -2112,7 +2174,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
         self.assertTrue(all(issue.source_ids == (conversion.id,) for issue in line.issues))
 
-    def test_non_derived_conversion_is_auditable_without_affecting_either_leg(self):
+    def test_non_derived_conversion_keeps_destination_without_origin_leg(self):
         slice_product = PointProduct.objects.create(
             external_id="SLICE-002", sku="SLICE-002", name="Rebanada sin origen"
         )
@@ -2135,7 +2197,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         line = next(line for line in result.lines if line.product == slice_product)
-        self.assertEqual(line.conversion_in, Decimal("0"))
+        self.assertEqual(line.conversion_in, Decimal("12"))
         self.assertEqual(line.conversion_out, Decimal("0"))
         self.assertEqual(line.issues[0].code, "NON_DERIVED_CONVERSION")
         self.assertEqual(line.issues[0].source_ids, (conversion.id,))
@@ -2144,7 +2206,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             Decimal("0"),
         )
 
-    def test_conversion_equivalence_mismatch_does_not_apply_either_leg(self):
+    def test_conversion_equivalence_mismatch_keeps_destination_without_origin_leg(self):
         configured_whole = PointProduct.objects.create(
             external_id="WHOLE-CONFIGURED",
             sku="WHOLE-CONFIGURED",
@@ -2207,7 +2269,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         result = self.service.build(month=date(2026, 8, 1))
 
         line = next(line for line in result.lines if line.product == slice_product)
-        self.assertEqual(line.conversion_in, Decimal("0"))
+        self.assertEqual(line.conversion_in, Decimal("12"))
         self.assertEqual(line.issues[0].code, "CONVERSION_EQUIVALENCE_MISMATCH")
         self.assertEqual(line.issues[0].source_ids, (conversion.id,))
         self.assertEqual(
