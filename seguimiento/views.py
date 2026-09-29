@@ -446,7 +446,7 @@ def mi_seguimiento(request, tipo: str | None = None):
         return redirect(panel_url)
 
     if tipo is None:
-        return redirect(f'{reverse("seguimiento:minutas")}?estado=activos')
+        tipo = SeguimientoItem.TIPO_MINUTA
 
     now = timezone.now()
     empleado = empleado_de_usuario(request.user)

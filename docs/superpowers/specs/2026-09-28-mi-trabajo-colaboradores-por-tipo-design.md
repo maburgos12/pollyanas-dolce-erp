@@ -36,8 +36,8 @@ persona elija otro estado o tipo; nunca saltará silenciosamente a `Vencidos`.
 
 ### Entrada
 
-- Para un colaborador, `/seguimiento/` tendrá una única salida canónica hacia la
-  vista de minutas activas.
+- Para un colaborador, `/seguimiento/` renderizará directamente la vista de
+  minutas activas, conservando la compatibilidad con la vista previa de DG.
 - Los accesos de navegación existentes a Minutas, Proyectos y Compromisos se
   conservarán.
 - Dirección General conservará su redirección al panel de equipo; esta tarea no

@@ -52,10 +52,11 @@
 
 - [ ] **Step 1: Add a test for the canonical collaborator entry**
 
-  Create a non-DG user, request `/seguimiento/`, and assert a redirect to:
+  Create a non-DG user, request `/seguimiento/`, and assert a successful response
+  whose active type and state are:
 
   ```text
-  /seguimiento/minutas/?estado=activos
+  MINUTA + activos
   ```
 
   Keep the existing DG redirect assertion unchanged.
@@ -102,12 +103,12 @@
 - Modify: `seguimiento/views.py`
 - Test: `seguimiento/tests.py`
 
-- [ ] **Step 1: Redirect the generic collaborator route**
+- [ ] **Step 1: Resolve the generic collaborator route to Minutas**
 
-  Preserve the existing DG redirect first. For collaborators, when `tipo is None`, return:
+  Preserve the existing DG redirect first. For collaborators, when `tipo is None`, assign:
 
   ```python
-  return redirect(f'{reverse("seguimiento:minutas")}?estado=activos')
+  tipo = SeguimientoItem.TIPO_MINUTA
   ```
 
 - [ ] **Step 2: Define the three type navigation records**

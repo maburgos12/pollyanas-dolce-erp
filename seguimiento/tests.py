@@ -830,14 +830,13 @@ class SeguimientoColaboradorTests(TestCase):
 
         self.assertRedirects(response, "/seguimiento/panel/", fetch_redirect_response=False)
 
-    def test_colaborador_que_abre_mi_trabajo_es_enviado_a_minutas_activas(self):
+    def test_colaborador_que_abre_mi_trabajo_ve_minutas_activas(self):
         response = self.client.get("/seguimiento/")
 
-        self.assertRedirects(
-            response,
-            "/seguimiento/minutas/?estado=activos",
-            fetch_redirect_response=False,
-        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["active_tipo"], SeguimientoItem.TIPO_MINUTA)
+        self.assertEqual(response.context["active_bucket"], "activos")
+        self.assertContains(response, 'data-work-type="MINUTA"')
 
     def test_dg_que_abre_minutas_personales_es_enviado_al_panel_filtrado(self):
         dg_group, _ = Group.objects.get_or_create(name=ROLE_DG)
