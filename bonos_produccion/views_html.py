@@ -146,10 +146,21 @@ def bonos_produccion_dashboard(request):
                 messages.error(request, mensaje)
                 return _dashboard_redirect(mes, anio)
             resultado = inicializar_bonos_desde_rrhh(periodo)
-            mensaje = f"Personal sincronizado desde RRHH: {resultado['creados']} bonos creados."
+            total = resultado["total"]
+            existentes = total - resultado["creados"]
+            etiqueta_colaborador = "colaborador" if total == 1 else "colaboradores"
+            mensaje = (
+                f"Personal listo desde RRHH: {total} {etiqueta_colaborador}. "
+                f"Nuevos: {resultado['creados']}; ya existentes: {existentes}."
+            )
             destino = f"{reverse('bonos_produccion:bonos-produccion-dashboard')}?mes={mes}&anio={anio}#personal-rrhh"
             if request.headers.get("Accept", "").startswith("application/json"):
-                return JsonResponse({"ok": True, "toast": {"type": "success", "message": mensaje}, "redirect": destino})
+                return JsonResponse({
+                    "ok": True,
+                    "toast": {"type": "success", "message": mensaje},
+                    "redirect": destino,
+                    "reload": True,
+                })
             messages.success(request, mensaje)
             return redirect(destino)
         if action == "recalcular":
