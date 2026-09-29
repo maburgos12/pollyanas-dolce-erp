@@ -1643,6 +1643,52 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         self.assertTrue(result.source_complete)
 
+    def test_legacy_month_close_reuses_persisted_transfer_dates_without_new_manifest(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        PointSyncJob.objects.filter(pk=self.open_transfer_job.pk).update(
+            parameters={
+                **self.open_transfer_job.parameters,
+                "fecha": "2026-07-31",
+            }
+        )
+        PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            parameters={
+                "mode": "open_transfers",
+                "fecha": "2026-08-31",
+                "branch_filter": "",
+            },
+            result_summary={
+                "transfer_lines_seen": 1,
+                "transfer_lines_created": 0,
+                "transfer_lines_updated": 1,
+                "lineas_nuevas": 0,
+                "lineas_actualizadas": 1,
+            },
+        )
+        transfer = self._transfer(
+            sent_at=datetime(
+                2026, 8, 31, 23, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            received_at=datetime(
+                2026, 9, 1, 8, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            sync_job=self.transfer_job,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(result.source_complete)
+        line = next(item for item in result.lines if item.branch == self.centro)
+        self.assertEqual(line.transfer_out, Decimal("4"))
+        self.assertEqual(line.transfer_in, Decimal("0"))
+        self.assertIn(transfer.id, line.source_trace["transfer_out"])
+        self.assertTrue(
+            any(issue.code == "INCOMPLETE_TRANSFER" for issue in line.issues)
+        )
+
     def test_historical_open_transfer_uses_immutable_snapshot_after_live_row_changes(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
@@ -1721,7 +1767,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         self.assertTrue(result.source_complete)
 
-    def test_received_transfer_job_must_cover_received_operational_date(self):
+    def test_last_sync_date_does_not_replace_transfer_operational_dates(self):
         unrelated_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
             status=PointSyncJob.STATUS_SUCCESS,
@@ -1746,13 +1792,10 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         result = self.service.build(month=date(2026, 8, 1))
 
-        self.assertFalse(result.source_complete)
-        issue = next(
-            issue
-            for issue in result.global_issues
-            if "TRANSFER_ROW_PROVENANCE_DATE_MISMATCH" in issue.message
-        )
-        self.assertEqual(issue.source_ids, (transfer.id,))
+        self.assertTrue(result.source_complete)
+        origin = next(line for line in result.lines if line.branch == self.centro)
+        self.assertEqual(origin.transfer_out, Decimal("4"))
+        self.assertIn(transfer.id, origin.source_trace["transfer_out"])
 
     def test_arrival_only_secondary_product_resolution_issue_attaches_to_destination(self):
         self._closing_lines(
