@@ -61,13 +61,38 @@ if (( worktree_presente )); then
 else
   head="$(git -C "$repo" rev-parse "$branch")"
 fi
+squash_equivalent=""
+find_same_tree_on_main() {
+  local target_tree candidate candidate_tree
+  git -C "$repo" merge-base --is-ancestor "$base" origin/main || return 1
+  target_tree="$(git -C "$repo" rev-parse "$1^{tree}")"
+  while IFS= read -r candidate; do
+    candidate_tree="$(git -C "$repo" rev-parse "$candidate^{tree}")"
+    if [[ "$candidate_tree" == "$target_tree" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done < <(git -C "$repo" rev-list --first-parent origin/main "^$base")
+  return 1
+}
 if [[ "$state" == "merged" ]]; then
-  git -C "$repo" merge-base --is-ancestor "$head" origin/main \
-    || die "HEAD contiene commits ausentes de origin/main"
+  if ! git -C "$repo" merge-base --is-ancestor "$head" origin/main; then
+    squash_equivalent="$(find_same_tree_on_main "$head")" \
+      || die "HEAD contiene commits ausentes de origin/main y no hay árbol equivalente"
+  fi
   if git -C "$repo" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
     git -C "$repo" fetch origin "$branch:refs/remotes/origin/$branch" --quiet
-    git -C "$repo" merge-base --is-ancestor "refs/remotes/origin/$branch" origin/main \
-      || die "la rama remota contiene commits ausentes de origin/main"
+    if ! git -C "$repo" merge-base --is-ancestor "refs/remotes/origin/$branch" origin/main; then
+      [[ -n "$squash_equivalent" \
+        && "$(git -C "$repo" rev-parse "refs/remotes/origin/$branch")" == "$head" ]] \
+        || die "la rama remota contiene commits ausentes de origin/main"
+    fi
+  fi
+  if [[ -n "$squash_equivalent" ]]; then
+    recovery="$registry/recovery/${task}-$(date -u +%Y%m%dT%H%M%SZ).bundle"
+    git -C "$repo" bundle create "$recovery" "$branch" >/dev/null
+    git -C "$repo" bundle verify "$recovery" >/dev/null 2>&1 \
+      || die "no se pudo verificar el respaldo de la rama squash"
   fi
 else
   recovery="$registry/recovery/${task}-$(date -u +%Y%m%dT%H%M%SZ).bundle"
@@ -77,12 +102,20 @@ fi
 if (( worktree_presente )); then
   git -C "$repo" worktree remove "$worktree"
 fi
-# La rama local se borra ANTES que la remota. `git branch -d` valida contra el
-# upstream, y `push --delete` también borra refs/remotes/origin/<rama>: si la
-# remota se va primero, `-d` se queda sin referencia, cae en el HEAD del checkout
-# base —que suele estar atrasado respecto a origin/main— y falla con "not fully
-# merged", dejando la tarea a medio cerrar. La corroboración real ya ocurrió
-# arriba contra origin/main.
+if [[ -n "$squash_equivalent" ]]; then
+  # El respaldo ya conserva el SHA original. Borrar primero la rama remota hace
+  # reintentable un cierre interrumpido antes de realinear la rama local.
+  if git -C "$repo" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    git -C "$repo" push --force-with-lease="refs/heads/$branch:$head" \
+      origin --delete "$branch" >/dev/null
+  fi
+  git -C "$repo" branch -f "$branch" "$squash_equivalent" >/dev/null
+fi
+# En un merge directo, la rama local se borra ANTES que la remota. `git branch -d`
+# valida contra el upstream: borrarlo primero puede hacer que un checkout base
+# atrasado provoque "not fully merged". En squash, la rama ya se realineó al
+# commit equivalente de main y se respaldó; por eso se pudo borrar la remota
+# antes sin perder la posibilidad de reintentar.
 if [[ "$state" == "discarded" ]]; then
   git -C "$repo" branch -D "$branch" >/dev/null
 else
