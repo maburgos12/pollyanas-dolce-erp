@@ -611,7 +611,7 @@ class IntentoCompraDepartamental(models.Model):
             )
             solicitado = self._meta.get_field("reembolso_solicitado").to_python(solicitado)
             cargos = self._meta.get_field("reembolso_cargos_adicionales").to_python(cargos)
-            if cargos < 0:
+            if cargos is None or cargos < 0:
                 raise ValidationError({
                     "reembolso_cargos_adicionales": "Los cargos adicionales no pueden ser negativos."
                 })

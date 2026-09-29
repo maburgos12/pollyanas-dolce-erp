@@ -780,6 +780,14 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         self.assertIsNone(intento.reembolso_solicitado)
         self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
 
+    def test_cargos_adicionales_none_se_rechaza_con_error_de_dominio(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("100.00")
+        intento.reembolso_cargos_adicionales = None
+
+        with self.assertRaisesMessage(ValidationError, "no pueden ser negativos"):
+            intento.save(update_fields=["reembolso_solicitado", "reembolso_cargos_adicionales"])
+
     def test_cargos_adicionales_no_admiten_update_ni_bulk_update(self):
         intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
         with self.assertRaises(ValidationError):
@@ -795,6 +803,31 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
 
         intento.refresh_from_db()
         self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
+
+    def test_restricciones_bd_rechazan_cargos_inconsistentes_sin_romper_conexion(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("100.00")
+        intento.save(update_fields=["reembolso_solicitado"])
+        tabla = connection.ops.quote_name(IntentoCompraDepartamental._meta.db_table)
+        casos = (
+            (Decimal("100.00"), Decimal("-0.01")),
+            (None, Decimal("1.00")),
+            (Decimal("100.00"), Decimal("100.01")),
+        )
+
+        for total, cargos in casos:
+            with self.subTest(total=total, cargos=cargos), self.assertRaises(IntegrityError):
+                with transaction.atomic():
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            f"UPDATE {tabla} "
+                            "SET reembolso_solicitado = %s, reembolso_cargos_adicionales = %s "
+                            "WHERE id = %s",
+                            [total, cargos, intento.pk],
+                        )
+            intento.refresh_from_db()
+            self.assertEqual(intento.reembolso_solicitado, Decimal("100.00"))
+            self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
 
     def test_update_fields_generador_valida_valores_efectivos_de_total_y_cargos(self):
         intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
@@ -837,6 +870,56 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         intento.save(update_fields=(campo for campo in ("reembolso_solicitado",)))
         intento.refresh_from_db()
         self.assertEqual(intento.reembolso_solicitado, Decimal("700"))
+
+
+class MigracionCargosReembolsoTests(TransactionTestCase):
+    migrate_from = ("compras", "0016_intentos_compra_reembolsos")
+    migrate_to = ("compras", "0017_intento_reembolso_cargos_adicionales")
+
+    def setUp(self):
+        super().setUp()
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_from])
+        self.apps_0016 = self.executor.loader.project_state([self.migrate_from]).apps
+
+    def tearDown(self):
+        MigrationExecutor(connection).migrate([self.migrate_to])
+        super().tearDown()
+
+    def test_migracion_asigna_cero_a_intento_historico(self):
+        Usuario = self.apps_0016.get_model(*settings.AUTH_USER_MODEL.split("."))
+        Area = self.apps_0016.get_model("reportes", "AreaPresupuesto")
+        Proveedor = self.apps_0016.get_model("maestros", "Proveedor")
+        Solicitud = self.apps_0016.get_model("compras", "SolicitudCompraDepartamental")
+        Item = self.apps_0016.get_model("compras", "ItemCompraDepartamental")
+        Cotizacion = self.apps_0016.get_model("compras", "CotizacionCompraDepartamental")
+        Intento = self.apps_0016.get_model("compras", "IntentoCompraDepartamental")
+        user = Usuario.objects.create(username="migracion-cargos-reembolso")
+        area = Area.objects.create(nombre="Migración cargos", codigo="MIG_CARGOS")
+        proveedor = Proveedor.objects.create(nombre="Proveedor histórico cargos")
+        solicitud = Solicitud.objects.create(
+            folio="SCD-MIG-CARGOS", area=area, solicitante=user,
+            periodo=timezone.localdate().replace(day=1),
+        )
+        item = Item.objects.create(solicitud=solicitud, descripcion="Artículo histórico")
+        cotizacion = Cotizacion.objects.create(
+            item=item, proveedor=proveedor, cantidad_ofertada=Decimal("1"),
+            costo_unitario=Decimal("100.00"),
+        )
+        intento = Intento.objects.create(
+            item=item, cotizacion=cotizacion, numero=1,
+            reembolso_solicitado=Decimal("100.00"),
+        )
+
+        self.executor = MigrationExecutor(connection)
+        self.executor.migrate([self.migrate_to])
+        apps_0017 = self.executor.loader.project_state([self.migrate_to]).apps
+        IntentoMigrado = apps_0017.get_model("compras", "IntentoCompraDepartamental")
+
+        self.assertEqual(
+            IntentoMigrado.objects.get(pk=intento.pk).reembolso_cargos_adicionales,
+            Decimal("0.00"),
+        )
 
 
 class MigracionIntentosCompraTests(TransactionTestCase):
