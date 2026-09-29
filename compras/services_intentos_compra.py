@@ -1,9 +1,12 @@
 """Transiciones auditables de cancelación y reembolso de intentos de compra."""
 
+from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+import logging
 
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -19,6 +22,8 @@ from .models import (
     ReembolsoCompraDepartamental,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _importe_positivo(value, *, nombre):
     try:
@@ -27,7 +32,36 @@ def _importe_positivo(value, *, nombre):
         raise ValidationError({nombre: "Captura un importe válido."}) from None
     if not importe.is_finite() or importe <= 0:
         raise ValidationError({nombre: "El importe debe ser mayor que cero."})
+    if importe.as_tuple().exponent < -2:
+        raise ValidationError({nombre: "El importe debe tener como máximo dos decimales."})
     return importe
+
+
+@contextmanager
+def _transaccion_con_archivos():
+    """Revierte archivos nuevos si la operación o el commit de BD fallan."""
+    nuevos = []
+    try:
+        with transaction.atomic():
+            yield nuevos
+    except Exception:
+        for storage, nombre in reversed(nuevos):
+            try:
+                storage.delete(nombre)
+            except Exception:
+                logger.exception("No se pudo limpiar el archivo de compra %s", nombre)
+        raise
+
+
+def _guardar_archivo_nuevo(modelo, campo_nombre, instancia, valor, nuevos):
+    """El nombre devuelto por storage.save identifica solo el archivo creado aquí."""
+    if not isinstance(valor, UploadedFile):
+        return valor
+    campo = modelo._meta.get_field(campo_nombre)
+    candidato = campo.generate_filename(instancia, valor.name)
+    nombre = campo.storage.save(candidato, valor, max_length=campo.max_length)
+    nuevos.append((campo.storage, nombre))
+    return nombre
 
 
 def _fecha_valida(value, *, nombre):
@@ -59,11 +93,25 @@ def _liberar_compromiso(compromiso):
         compromiso.save(update_fields=["activo", "liberado_en"])
 
 
-@transaction.atomic
 def cancelar_intento_compra(
     intento, *, version, motivo, detalle, actor,
     reembolso_solicitado_en=None, reembolso_solicitado=None,
     evidencia_solicitud_reembolso=None,
+):
+    with _transaccion_con_archivos() as nuevos:
+        return _cancelar_intento_compra(
+            intento, version=version, motivo=motivo, detalle=detalle, actor=actor,
+            reembolso_solicitado_en=reembolso_solicitado_en,
+            reembolso_solicitado=reembolso_solicitado,
+            evidencia_solicitud_reembolso=evidencia_solicitud_reembolso,
+            nuevos=nuevos,
+        )
+
+
+def _cancelar_intento_compra(
+    intento, *, version, motivo, detalle, actor,
+    reembolso_solicitado_en, reembolso_solicitado,
+    evidencia_solicitud_reembolso, nuevos,
 ):
     item, intento = _bloquear_item_e_intento(intento)
     if intento.version != version:
@@ -91,7 +139,10 @@ def cancelar_intento_compra(
         intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
         intento.reembolso_solicitado_en = fecha
         intento.reembolso_solicitado = importe
-        intento.evidencia_solicitud_reembolso = evidencia_solicitud_reembolso
+        intento.evidencia_solicitud_reembolso = _guardar_archivo_nuevo(
+            IntentoCompraDepartamental, "evidencia_solicitud_reembolso",
+            intento, evidencia_solicitud_reembolso, nuevos,
+        )
         campos = ["reembolso_solicitado_en", "reembolso_solicitado", "evidencia_solicitud_reembolso"]
     else:
         if any(value is not None for value in (
@@ -114,19 +165,38 @@ def cancelar_intento_compra(
     CotizacionCompraDepartamental.objects.filter(pk=intento.cotizacion_id).update(seleccionada=False)
     item.estado = ItemCompraDepartamental.ESTADO_POR_COTIZAR
     item.siguiente_responsable = ItemCompraDepartamental.RESPONSABLE_COMPRAS
-    item.save(update_fields=["estado", "siguiente_responsable", "actualizado_en"])
+    item.comentario_reciente = (
+        f"{intento.get_motivo_cancelacion_display()}: {intento.detalle_cancelacion}"
+    )
+    item.save(update_fields=["estado", "siguiente_responsable", "comentario_reciente", "actualizado_en"])
     item.solicitud.actualizar_estado_desde_items()
     EventoCompraDepartamental.objects.create(
         solicitud=item.solicitud, item=item, actor=actor, tipo="INTENTO_CANCELADO",
         detalle=(f"Intento #{intento.numero}: {intento.get_motivo_cancelacion_display()}. "
                  f"{intento.detalle_cancelacion} Estado: {intento.get_estado_display()}."),
     )
+    if compra:
+        EventoCompraDepartamental.objects.create(
+            solicitud=item.solicitud, item=item, actor=actor, tipo="REEMBOLSO_SOLICITADO",
+            detalle=(f"Intento #{intento.numero}: solicitud del "
+                     f"{intento.reembolso_solicitado_en:%Y-%m-%d} por "
+                     f"${intento.reembolso_solicitado:.2f}."),
+        )
     return intento
 
 
-@transaction.atomic
 def registrar_reembolso_compra(
     intento, *, version, fecha, importe, actor, referencia="", comprobante=None,
+):
+    with _transaccion_con_archivos() as nuevos:
+        return _registrar_reembolso_compra(
+            intento, version=version, fecha=fecha, importe=importe, actor=actor,
+            referencia=referencia, comprobante=comprobante, nuevos=nuevos,
+        )
+
+
+def _registrar_reembolso_compra(
+    intento, *, version, fecha, importe, actor, referencia, comprobante, nuevos,
 ):
     item, intento = _bloquear_item_e_intento(intento)
     if intento.version != version:
@@ -142,6 +212,10 @@ def registrar_reembolso_compra(
     compromiso = _compromiso(intento)
     if compromiso is None or not compromiso.activo:
         raise ValidationError("El intento no tiene un compromiso activo. Revisa su registro financiero.")
+    comprobante = _guardar_archivo_nuevo(
+        ReembolsoCompraDepartamental, "comprobante",
+        ReembolsoCompraDepartamental(intento=intento), comprobante, nuevos,
+    )
     reembolso = ReembolsoCompraDepartamental.objects.create(
         intento=intento, fecha=fecha, importe=importe,
         referencia=(referencia or "").strip(), comprobante=comprobante, registrado_por=actor,

@@ -1,7 +1,10 @@
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
@@ -96,6 +99,80 @@ class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertTrue(compromiso.activo)
         self.assertFalse(self.quote.seleccionada)
         self.assertEqual(self.item.estado, 'POR_COTIZAR')
+        eventos = list(EventoCompraDepartamental.objects.filter(item=self.item).order_by('-pk')[:2])
+        self.assertEqual({evento.tipo for evento in eventos}, {'INTENTO_CANCELADO', 'REEMBOLSO_SOLICITADO'})
+        solicitud_evento = next(evento for evento in eventos if evento.tipo == 'REEMBOLSO_SOLICITADO')
+        self.assertIn(timezone.localdate().isoformat(), solicitud_evento.detalle)
+        self.assertIn('170', solicitud_evento.detalle)
+
+    def test_cancelacion_actualiza_comentario_reciente_normalizado(self):
+        intento = self._intento()
+        self._cancelar(intento, detalle='  Proveedor no entregará.  ')
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.comentario_reciente, 'Proveedor no entregó: Proveedor no entregará.')
+
+    def test_solicitud_reembolso_rechaza_mas_de_dos_decimales_sin_mutar(self):
+        intento = self._intento(pagado=True)
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        with self.assertRaises(ValidationError):
+            self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                           reembolso_solicitado=Decimal('100.005'))
+        intento.refresh_from_db(); compromiso.refresh_from_db(); self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertIsNone(intento.reembolso_solicitado)
+        self.assertTrue(compromiso.activo)
+        self.assertEqual(self.item.estado, 'COMPRADO')
+
+    def test_reembolso_rechaza_fraccion_de_centavo_sin_mutar(self):
+        intento = self._intento(pagado=True)
+        self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                       reembolso_solicitado=Decimal('100.00'))
+        intento.refresh_from_db()
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        with self.assertRaises(ValidationError):
+            registrar_reembolso_compra(intento, version=2, fecha=timezone.localdate(),
+                                      importe=Decimal('99.995'), actor=self.user)
+        intento.refresh_from_db(); compromiso.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('REEMBOLSO_SOLICITADO', 2))
+        self.assertEqual(intento.reembolsos.count(), 0)
+        self.assertTrue(compromiso.activo)
+
+    def test_rollback_cancelacion_borra_solo_evidencia_nueva(self):
+        intento = self._intento(pagado=True)
+        campo = IntentoCompraDepartamental._meta.get_field('evidencia_solicitud_reembolso')
+        compartido = campo.storage.save(
+            campo.generate_filename(intento, 'solicitud.pdf'), ContentFile(b'archivo previo'),
+        )
+        evidencia = SimpleUploadedFile('solicitud.pdf', b'%PDF-1.4\n%%EOF')
+        with patch('compras.services_intentos_compra.EventoCompraDepartamental.objects.create',
+                   side_effect=RuntimeError('evento falló')):
+            with self.assertRaisesMessage(RuntimeError, 'evento falló'):
+                self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                               reembolso_solicitado=Decimal('100'),
+                               evidencia_solicitud_reembolso=evidencia)
+        intento.refresh_from_db(); self.item.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('VIGENTE', 1))
+        self.assertEqual(self.item.estado, 'COMPRADO')
+        self.assertEqual(
+            {str(path.relative_to(self.media.name)) for path in Path(self.media.name).rglob('*') if path.is_file()},
+            {compartido},
+        )
+
+    def test_rollback_reembolso_borra_solo_comprobante_nuevo(self):
+        intento = self._solicitar_reembolso()
+        compromiso = CompromisoCompraDepartamental.objects.get(intento=intento)
+        comprobante = SimpleUploadedFile('devolucion.pdf', b'%PDF-1.4\n%%EOF')
+        with patch('compras.services_intentos_compra.EventoCompraDepartamental.objects.create',
+                   side_effect=RuntimeError('evento falló')):
+            with self.assertRaisesMessage(RuntimeError, 'evento falló'):
+                registrar_reembolso_compra(intento, version=2, fecha=timezone.localdate(),
+                                          importe=Decimal('180'), comprobante=comprobante,
+                                          actor=self.user)
+        intento.refresh_from_db(); compromiso.refresh_from_db()
+        self.assertEqual((intento.estado, intento.version), ('REEMBOLSO_SOLICITADO', 2))
+        self.assertEqual(intento.reembolsos.count(), 0)
+        self.assertTrue(compromiso.activo)
+        self.assertFalse(any(path.is_file() for path in Path(self.media.name).rglob('*')))
 
     def test_cancelacion_rechaza_recepcion_estado_version_y_datos_invalidos_sin_mutar(self):
         intento = self._intento()
@@ -250,6 +327,7 @@ class FormulariosIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertIn('reembolso_solicitado', form.fields)
         for cambios in ({'reembolso_solicitado': '181'},
+                        {'reembolso_solicitado': '100.005'},
                         {'reembolso_solicitado_en': (timezone.localdate() + timedelta(days=1)).isoformat()},
                         {'reembolso_solicitado': ''}):
             invalido = CancelarIntentoCompraForm(data={**datos, **cambios}, intento=intento)
@@ -270,6 +348,7 @@ class FormulariosIntentoCompraTests(_CompraDepartamentalBase, TestCase):
         form = RegistrarReembolsoCompraForm(data=datos, intento=intento)
         self.assertTrue(form.is_valid(), form.errors)
         self.assertFalse(RegistrarReembolsoCompraForm(data={**datos, 'importe': '181'}, intento=intento).is_valid())
+        self.assertFalse(RegistrarReembolsoCompraForm(data={**datos, 'importe': '99.995'}, intento=intento).is_valid())
         self.assertFalse(RegistrarReembolsoCompraForm(data={**datos, 'fecha': (timezone.localdate() + timedelta(days=1)).isoformat()}, intento=intento).is_valid())
         invalido = RegistrarReembolsoCompraForm(data=datos, files={'comprobante': SimpleUploadedFile('falso.pdf', b'no es PDF')}, intento=intento)
         self.assertFalse(invalido.is_valid())
