@@ -10,6 +10,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
+from django.db.migrations.recorder import MigrationRecorder
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
@@ -863,11 +864,13 @@ class MigracionIntentosCompraTests(TransactionTestCase):
         MigrationExecutor(connection).migrate([self.migrate_to])
         self.assertEqual(Intento.objects.count(), 2)
 
-    def test_backfill_rechaza_compra_sin_linea_antes_de_crear_intentos(self):
+    def test_backfill_rechaza_datos_no_asociables_sin_perder_atomicidad(self):
         user, proveedor, solicitud = self._datos_base()
         Item = self.apps_0015.get_model("compras", "ItemCompraDepartamental")
         Cotizacion = self.apps_0015.get_model("compras", "CotizacionCompraDepartamental")
         Compra = self.apps_0015.get_model("compras", "CompraRealizadaDepartamental")
+        Compromiso = self.apps_0015.get_model("compras", "CompromisoCompraDepartamental")
+
         item = Item.objects.create(solicitud=solicitud, descripcion="Sin orden")
         cotizacion = Cotizacion.objects.create(
             item=item, proveedor=proveedor, cantidad_ofertada=1, costo_unitario=Decimal("100"),
@@ -876,18 +879,18 @@ class MigracionIntentosCompraTests(TransactionTestCase):
             item=item, cotizacion=cotizacion, fecha_compra=timezone.localdate(),
             importe_final=Decimal("100"), comprobante="compras/historico.pdf", registrado_por=user,
         )
-        with self.assertRaisesMessage(RuntimeError, f"compra departamental {compra.pk}"):
-            MigrationExecutor(connection).migrate([self.migrate_to])
-        compra.delete()
+        with self.subTest(caso="compra sin línea"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, f"compra departamental {compra.pk}"):
+                    MigrationExecutor(connection).migrate([self.migrate_to])
+                self.assertNotIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                compra.delete()
 
-    def test_backfill_rechaza_compra_con_otra_cotizacion_del_mismo_item(self):
-        user, proveedor, solicitud = self._datos_base()
         item, _, _, _ = self._crear_linea(
             solicitud=solicitud, proveedor=proveedor, user=user,
             estado="COMPRADO", folio="OCD-MIG-6",
         )
-        Cotizacion = self.apps_0015.get_model("compras", "CotizacionCompraDepartamental")
-        Compra = self.apps_0015.get_model("compras", "CompraRealizadaDepartamental")
         alternativa = Cotizacion.objects.create(
             item=item, proveedor=proveedor, cantidad_ofertada=2, costo_unitario=Decimal("90"),
         )
@@ -895,31 +898,43 @@ class MigracionIntentosCompraTests(TransactionTestCase):
             item=item, cotizacion=alternativa, fecha_compra=timezone.localdate(),
             importe_final=Decimal("180"), comprobante="compras/historico.pdf", registrado_por=user,
         )
-        with self.assertRaisesMessage(RuntimeError, f"compra {compra.pk}"):
-            MigrationExecutor(connection).migrate([self.migrate_to])
-        compra.delete()
+        with self.subTest(caso="compra con otra cotización"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, f"compra {compra.pk}"):
+                    MigrationExecutor(connection).migrate([self.migrate_to])
+                self.assertNotIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                compra.delete()
 
-    def test_backfill_rechaza_compromiso_con_otra_cotizacion_del_mismo_item(self):
-        user, proveedor, solicitud = self._datos_base()
         item, cotizacion, _, compromiso = self._crear_linea(
             solicitud=solicitud, proveedor=proveedor, user=user,
             estado="ORDENADO", folio="OCD-MIG-7",
         )
-        Cotizacion = self.apps_0015.get_model("compras", "CotizacionCompraDepartamental")
-        Compromiso = self.apps_0015.get_model("compras", "CompromisoCompraDepartamental")
         alternativa = Cotizacion.objects.create(
             item=item, proveedor=proveedor, cantidad_ofertada=2, costo_unitario=Decimal("90"),
         )
         Compromiso.objects.filter(pk=compromiso.pk).update(cotizacion_id=alternativa.pk)
-        with self.assertRaisesMessage(RuntimeError, f"compromiso {compromiso.pk}"):
-            MigrationExecutor(connection).migrate([self.migrate_to])
-        Compromiso.objects.filter(pk=compromiso.pk).update(cotizacion_id=cotizacion.pk)
+        with self.subTest(caso="compromiso con otra cotización"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, f"compromiso {compromiso.pk}"):
+                    MigrationExecutor(connection).migrate([self.migrate_to])
+                self.assertNotIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                Compromiso.objects.filter(pk=compromiso.pk).update(cotizacion_id=cotizacion.pk)
 
-    def test_reversa_rechaza_reembolso_nuevo_que_0015_no_puede_conservar(self):
+    def test_reversa_rechaza_datos_no_reconstruibles_sin_perder_atomicidad(self):
         user, proveedor, solicitud = self._datos_base()
-        item, _, _, _ = self._crear_linea(
+        item_reembolso, _, _, _ = self._crear_linea(
             solicitud=solicitud, proveedor=proveedor, user=user,
             estado="ORDENADO", folio="OCD-MIG-3",
+        )
+        item_estado, _, _, _ = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="COMPRADO", folio="OCD-MIG-4",
+        )
+        item_numero, _, _, _ = self._crear_linea(
+            solicitud=solicitud, proveedor=proveedor, user=user,
+            estado="COMPRADO", folio="OCD-MIG-5",
         )
         executor = MigrationExecutor(connection)
         executor.migrate([self.migrate_to])
@@ -927,42 +942,34 @@ class MigracionIntentosCompraTests(TransactionTestCase):
         Intento = apps.get_model("compras", "IntentoCompraDepartamental")
         Reembolso = apps.get_model("compras", "ReembolsoCompraDepartamental")
         reembolso = Reembolso.objects.create(
-            intento=Intento.objects.get(item_id=item.pk), importe=Decimal("10"),
+            intento=Intento.objects.get(item_id=item_reembolso.pk), importe=Decimal("10"),
             fecha=timezone.localdate(), registrado_por_id=user.pk,
         )
-        with self.assertRaisesMessage(RuntimeError, "reembolsos"):
-            MigrationExecutor(connection).migrate([self.migrate_from])
-        Reembolso.objects.filter(pk=reembolso.pk).delete()
+        with self.subTest(caso="reembolso nuevo"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, "reembolsos"):
+                    MigrationExecutor(connection).migrate([self.migrate_from])
+                self.assertIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                Reembolso.objects.filter(pk=reembolso.pk).delete()
 
-    def test_reversa_rechaza_estado_entregado_que_item_no_reconstruye(self):
-        user, proveedor, solicitud = self._datos_base()
-        item, _, _, _ = self._crear_linea(
-            solicitud=solicitud, proveedor=proveedor, user=user,
-            estado="COMPRADO", folio="OCD-MIG-4",
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        Intento = executor.loader.project_state([self.migrate_to]).apps.get_model(
-            "compras", "IntentoCompraDepartamental"
-        )
-        Intento.objects.filter(item_id=item.pk).update(estado="ENTREGADO")
-        with self.assertRaisesMessage(RuntimeError, "estado"):
-            MigrationExecutor(connection).migrate([self.migrate_from])
+        Intento.objects.filter(item_id=item_estado.pk).update(estado="ENTREGADO")
+        with self.subTest(caso="estado no reconstruible"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, "estado"):
+                    MigrationExecutor(connection).migrate([self.migrate_from])
+                self.assertIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                Intento.objects.filter(item_id=item_estado.pk).update(estado="VIGENTE")
 
-    def test_reversa_rechaza_numero_que_backfill_no_reconstruye(self):
-        user, proveedor, solicitud = self._datos_base()
-        item, _, _, _ = self._crear_linea(
-            solicitud=solicitud, proveedor=proveedor, user=user,
-            estado="COMPRADO", folio="OCD-MIG-5",
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate([self.migrate_to])
-        Intento = executor.loader.project_state([self.migrate_to]).apps.get_model(
-            "compras", "IntentoCompraDepartamental"
-        )
-        Intento.objects.filter(item_id=item.pk).update(numero=2)
-        with self.assertRaisesMessage(RuntimeError, "número"):
-            MigrationExecutor(connection).migrate([self.migrate_from])
+        Intento.objects.filter(item_id=item_numero.pk).update(numero=2)
+        with self.subTest(caso="número no reconstruible"):
+            try:
+                with self.assertRaisesMessage(RuntimeError, "número"):
+                    MigrationExecutor(connection).migrate([self.migrate_from])
+                self.assertIn(self.migrate_to, MigrationRecorder(connection).applied_migrations())
+            finally:
+                Intento.objects.filter(item_id=item_numero.pk).update(numero=1)
 
 
 class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):
