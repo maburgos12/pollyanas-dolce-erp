@@ -193,6 +193,7 @@
 .inventory-audit-table-wrap > .inventory-audit-table {
   width: 100%;
   min-width: 1050px;
+  overflow: visible !important;
   table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;

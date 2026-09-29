@@ -248,10 +248,12 @@ class InventoryTraceabilityViewsTests(TestCase):
         )
         self.assertIn("table-layout: auto", global_table_rule)
         self.assertIn("width: max-content", global_table_rule)
+        self.assertIn("overflow: hidden", global_table_rule)
         self.assertGreater((0, 2, 0), (0, 1, 1))
         self.assertIn("table-layout: fixed", audit_table_rule)
         self.assertIn("width: 100%", audit_table_rule)
         self.assertIn("min-width: 1050px", audit_table_rule)
+        self.assertIn("overflow: visible !important", audit_table_rule)
         self.assertIn("--table-min-width: 1050px", audit_wrap_rule)
         self.assertIn(
             "min-width: max(100%, var(--table-min-width, 0px))",
