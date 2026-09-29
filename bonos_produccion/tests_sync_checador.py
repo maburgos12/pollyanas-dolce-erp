@@ -10,10 +10,16 @@ from django.test import TestCase
 from django.urls import reverse
 
 from core.access import ROLE_BONOS_PRODUCCION_CAPTURA
-from rrhh.models import AsistenciaEmpleado, Empleado, IncidenciaAsistencia
+from rrhh.models import AsistenciaEmpleado, Empleado, IncapacidadEmpleado, IncidenciaAsistencia
 from rrhh.services_bonos_checador import programar_sincronizacion_bonos_desde_checador
 
-from .models import AREA_HORNOS, BonoProduccionEmpleado, ConfigBonoPeriodo, RegistroDiarioProduccion
+from .models import (
+    AREA_HORNOS,
+    BonoProduccionEmpleado,
+    ConfigBonoArea,
+    ConfigBonoPeriodo,
+    RegistroDiarioProduccion,
+)
 from .serializers import BonoProduccionCapturaSerializer, RegistroDiarioCapturaSerializer
 from .services_checador import sincronizar_asistencia_desde_checador, sincronizar_empleado_dia_desde_checador
 
@@ -92,6 +98,117 @@ class SyncChecadorProduccionTests(TestCase):
         self.assertIsNone(registro.fecha)
         self.assertIsNone(registro.falta_penalizable)
         self.assertIsNone(bono.faltas_rrhh)
+
+    def test_argelia_incapacidad_y_festivo_no_se_convierten_en_faltas(self):
+        periodo = ConfigBonoPeriodo.objects.create(
+            mes=9,
+            anio=2026,
+            dias_laborables=23,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 26),
+        )
+        empleado = Empleado.objects.create(
+            codigo="ARGELIA-CTX",
+            nombre="Melendrez Verdugo Argelia",
+            area="HORNOS",
+            fecha_ingreso=date(2007, 7, 30),
+        )
+        bono = BonoProduccionEmpleado.objects.create(
+            periodo=periodo,
+            empleado=empleado,
+            area=AREA_HORNOS,
+        )
+        ConfigBonoArea.objects.create(
+            periodo=periodo,
+            area=AREA_HORNOS,
+            cancela_por_asistencia=True,
+            limite_asistencia_cancelacion=1,
+        )
+        IncapacidadEmpleado.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 8, 28),
+            fecha_fin=date(2026, 9, 1),
+            estado=IncapacidadEmpleado.ESTADO_CERRADA,
+        )
+        fecha = date(2026, 9, 2)
+        while fecha <= date(2026, 9, 26):
+            if fecha.weekday() != 6 and fecha != date(2026, 9, 16):
+                self.crear_asistencia(empleado, fecha)
+            fecha = date.fromordinal(fecha.toordinal() + 1)
+
+        sincronizar_asistencia_desde_checador(periodo)
+        bono.refresh_from_db()
+
+        self.assertEqual(bono.dias_asistencia, 21)
+        self.assertEqual(bono.faltas_rrhh, 0)
+        self.assertFalse(bono.cancela_bono)
+        incapacidad = RegistroDiarioProduccion.objects.get(bono=bono, fecha=date(2026, 9, 1))
+        festivo = RegistroDiarioProduccion.objects.get(bono=bono, fecha=date(2026, 9, 16))
+        self.assertEqual(incapacidad.estado_rrhh, "incapacidad")
+        self.assertFalse(incapacidad.falta_penalizable)
+        self.assertEqual(festivo.estado_rrhh, "festivo")
+        self.assertFalse(festivo.falta_penalizable)
+
+    def test_sync_preserva_captura_manual_dinero_y_es_idempotente(self):
+        fecha = date(2026, 9, 7)
+        periodo, empleado, bono = self.crear_bono(
+            fecha,
+            ajuste_positivo=Decimal("125.00"),
+            ajuste_negativo=Decimal("25.00"),
+            bono_extra=Decimal("75.00"),
+            desc_ajuste_positivo="Captura Carolina",
+            desc_ajuste_negativo="Ajuste revisado",
+            desc_bono_extra="Extra autorizado",
+        )
+        capturista = User.objects.create_user(username="carolina.contexto", password="x")
+        self.crear_asistencia(empleado, fecha)
+        RegistroDiarioProduccion.objects.create(
+            bono=bono,
+            dia=fecha.day,
+            tiene_asistencia=False,
+            tiene_puntualidad=False,
+            tiene_uniforme=False,
+            tiene_produccion=False,
+            cantidad_embetunados=4,
+            observacion="Corrección manual",
+            capturado_por=capturista,
+        )
+        dinero_antes = (
+            bono.ajuste_positivo,
+            bono.ajuste_negativo,
+            bono.bono_extra,
+            bono.desc_ajuste_positivo,
+            bono.desc_ajuste_negativo,
+            bono.desc_bono_extra,
+        )
+
+        primera = sincronizar_asistencia_desde_checador(periodo)
+        registro = RegistroDiarioProduccion.objects.get(bono=bono)
+        segunda = sincronizar_asistencia_desde_checador(periodo)
+        bono.refresh_from_db()
+        registro.refresh_from_db()
+
+        self.assertEqual(primera["registros_actualizados"], 1)
+        self.assertEqual(segunda["registros_creados"], 0)
+        self.assertEqual(segunda["registros_actualizados"], 0)
+        self.assertFalse(registro.tiene_asistencia)
+        self.assertFalse(registro.tiene_puntualidad)
+        self.assertFalse(registro.tiene_uniforme)
+        self.assertFalse(registro.tiene_produccion)
+        self.assertEqual(registro.cantidad_embetunados, 4)
+        self.assertEqual(registro.observacion, "Corrección manual")
+        self.assertTrue(registro.falta_penalizable)
+        self.assertEqual(
+            (
+                bono.ajuste_positivo,
+                bono.ajuste_negativo,
+                bono.bono_extra,
+                bono.desc_ajuste_positivo,
+                bono.desc_ajuste_negativo,
+                bono.desc_bono_extra,
+            ),
+            dinero_antes,
+        )
 
     def test_checada_normal_sin_incidencias_crea_asistencia_y_puntualidad_true(self):
         fecha = date(2026, 6, 1)

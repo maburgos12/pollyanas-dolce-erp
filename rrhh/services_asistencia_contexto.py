@@ -190,6 +190,25 @@ class ContextoAsistenciaLote:
                 fuente=suspension,
             )
 
+        key = (empleado_id, fecha)
+        incidencias_dia = self.incidencias.get(key, ())
+        suspension_conciliada = next(
+            (
+                incidencia for incidencia in incidencias_dia
+                if incidencia.tipo == IncidenciaAsistencia.TIPO_SUSPENSION
+                and incidencia.estado == IncidenciaAsistencia.ESTADO_CONCILIADO
+            ),
+            None,
+        )
+        if suspension_conciliada:
+            return _resultado(
+                CODIGO_SUSPENSION,
+                exigible=False,
+                falta=False,
+                motivo="Suspensión conciliada en Capital Humano.",
+                fuente=suspension_conciliada,
+            )
+
         vacaciones = self._primero_vigente(self.vacaciones.get(empleado_id, ()), fecha)
         if vacaciones:
             return _resultado(
@@ -225,9 +244,8 @@ class ContextoAsistenciaLote:
                 motivo=empleado.exento_checador_motivo or "Colaborador exento de checador.",
             )
 
-        key = (empleado_id, fecha)
         asistencia = self.asistencias.get(key)
-        incidencias = self.incidencias.get(key, ())
+        incidencias = incidencias_dia
         tipos_pendientes = {
             incidencia.tipo
             for incidencia in incidencias

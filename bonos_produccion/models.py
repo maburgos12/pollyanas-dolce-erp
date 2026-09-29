@@ -355,13 +355,17 @@ class BonoProduccionEmpleado(models.Model):
         dias_exigibles = cfg.dias_laborables_exigibles(total=total_laborables)
 
         self.pasa_uniforme = (dias_base - int(self.dias_uniforme or 0)) <= regla.limite_uniforme
-        self.pasa_asistencia = (dias_exigibles - int(self.dias_asistencia or 0)) <= regla.limite_asistencia
+        faltas = (
+            int(self.faltas_rrhh)
+            if self.faltas_rrhh is not None
+            else max(dias_exigibles - int(self.dias_asistencia or 0), 0)
+        )
+        self.pasa_asistencia = faltas <= regla.limite_asistencia
         self.pasa_puntualidad = (dias_base - int(self.dias_puntualidad or 0)) <= regla.limite_puntualidad
         self.pasa_produccion = True
         if regla.usa_produccion:
             self.pasa_produccion = (dias_base - int(self.dias_produccion or 0)) <= regla.limite_produccion
 
-        faltas = max(dias_exigibles - int(self.dias_asistencia or 0), 0)
         retardos = max(dias_base - int(self.dias_puntualidad or 0), 0)
         faltas_por_retardos = (retardos // LLEGADAS_TARDE_POR_RETARDO) // RETARDOS_POR_FALTA
         faltas_totales = faltas + faltas_por_retardos
