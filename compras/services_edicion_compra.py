@@ -5,6 +5,7 @@ from pathlib import Path
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from .forms_cotizaciones import CotizacionDepartamentalForm
@@ -32,10 +33,18 @@ def tiene_recepcion_historica(item):
 
 def validar_edicion(item, cotizacion=None):
     if cotizacion is not None and (
-        IntentoCompraDepartamental.objects.filter(cotizacion=cotizacion).exists()
-        or LineaOrdenCompraDepartamental.objects.filter(cotizacion=cotizacion).exists()
+        IntentoCompraDepartamental.objects.filter(cotizacion=cotizacion).exclude(
+            estado=IntentoCompraDepartamental.ESTADO_VIGENTE,
+        ).exists()
+        or LineaOrdenCompraDepartamental.objects.filter(cotizacion=cotizacion).filter(
+            Q(intento_id__isnull=True) | ~Q(intento_id__in=IntentoCompraDepartamental.objects.filter(
+                estado=IntentoCompraDepartamental.ESTADO_VIGENTE,
+            ).values('pk')),
+        ).exists()
     ):
         raise ValidationError('Esta cotización pertenece al historial de una orden y no puede editarse. Crea una nueva cotización para reemplazarla.')
+    # Una orden vigente impaga conserva su edición controlada. Si comparte
+    # cotización con cualquier intento histórico, la guarda anterior prevalece.
     if (item.estado in ESTADOS_CERRADOS or item.solicitud.estado in ('BORRADOR', 'CANCELADA', 'COMPLETADA')
             or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item)):
         raise ValidationError('No puedes editar esta cotización: el artículo está cerrado, comprado o tiene entregas registradas.')

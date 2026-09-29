@@ -376,8 +376,14 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
         item.puede_registrar_compra = (not cerrado_por_evidencia and item.estado in ('AUTORIZADO','ORDENADO')
             and solicitud.estado not in ('BORRADOR','CANCELADA','COMPLETADA'))
-        cotizaciones_historicas = {historico.cotizacion_id for historico in item.intentos_compra_prefetched}
-        cotizaciones_historicas.update(linea.cotizacion_id for linea in item.lineas_orden.all())
+        cotizaciones_historicas = {
+            historico.cotizacion_id for historico in item.intentos_compra_prefetched
+            if historico.estado != IntentoCompraDepartamental.ESTADO_VIGENTE
+        }
+        cotizaciones_historicas.update(
+            linea.cotizacion_id for linea in item.lineas_orden.all()
+            if intento_vigente is None or linea.intento_id != intento_vigente.pk
+        )
         for quote in item.cotizaciones.all():
             quote.puede_editar = item.puede_editar_cotizacion and quote.pk not in cotizaciones_historicas
             quote.historial_visible = []

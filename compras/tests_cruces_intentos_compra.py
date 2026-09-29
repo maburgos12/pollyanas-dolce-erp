@@ -61,6 +61,18 @@ class CrucesIntentosCompraTests(_CompraDepartamentalBase, TestCase):
         self.verificar_cotizacion_historica(intento)
         self.assertNotEqual(self.reemplazar().cotizacion_id, self.quote.pk)
 
+    def test_cotizacion_compartida_por_historico_y_vigente_sigue_inmutable(self):
+        self.ordenar()
+        anterior = self.item.intento_vigente
+        self.cancelar(anterior)
+        seleccionar_cotizacion(self.quote, actor=self.user)
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        vigente = self.item.intento_vigente
+        self.assertNotEqual(vigente.pk, anterior.pk)
+        self.assertEqual(vigente.cotizacion_id, anterior.cotizacion_id)
+        self.verificar_cotizacion_historica(anterior)
+        self.assertEqual(vigente.linea_orden.total, Decimal('200'))
+
     def verificar_cotizacion_historica(self, intento):
         self.quote.refresh_from_db()
         antes = (self.quote.proveedor_id, self.quote.cantidad_ofertada, self.quote.costo_unitario,
