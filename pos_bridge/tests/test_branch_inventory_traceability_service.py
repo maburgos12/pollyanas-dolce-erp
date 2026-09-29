@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from collections.abc import Mapping
 from unittest.mock import patch
 
 from django.db import connection, models
@@ -631,6 +632,8 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "conversion_in": (),
                 "conversion_out": (),
                 "adjustments": (),
+                "conversion_in_impacts": {},
+                "conversion_out_impacts": {},
             },
         )
 
@@ -1181,9 +1184,14 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 "conversion_in",
                 "conversion_out",
                 "adjustments",
+                "conversion_in_impacts",
+                "conversion_out_impacts",
             },
         )
-        for source_ids in line.source_trace.values():
+        for source_name, source_ids in line.source_trace.items():
+            if source_name.endswith("_impacts"):
+                self.assertIsInstance(source_ids, Mapping)
+                continue
             self.assertIsInstance(source_ids, tuple)
 
     def test_complete_transfer_moves_stock_between_point_locations_without_company_change(self):
@@ -1864,6 +1872,14 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.source_ids, (conversion.id,))
         self.assertEqual(origin.source_trace["conversion_out"], (conversion.id,))
         self.assertEqual(destination.source_trace["conversion_in"], (conversion.id,))
+        self.assertEqual(
+            origin.source_trace["conversion_out_impacts"],
+            {conversion.id: Decimal("1")},
+        )
+        self.assertEqual(
+            destination.source_trace["conversion_in_impacts"],
+            {conversion.id: Decimal("12")},
+        )
 
     def test_ambiguous_supplied_conversion_origin_is_preserved_without_quantities(self):
         for suffix in ("A", "B"):

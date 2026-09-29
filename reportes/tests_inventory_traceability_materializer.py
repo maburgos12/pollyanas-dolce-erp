@@ -208,6 +208,99 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
         self.assertEqual(counts["reopened"], 0)
         self.assertEqual(case.events.count(), event_count)
 
+    def test_directional_projection_upgrade_preserves_approved_resolution(self):
+        legacy_trace = {
+            "opening": (11,),
+            "closing": (22,),
+            "sales": (33, 34),
+            "production": (44,),
+            "waste": (),
+            "transfers": (51,),
+            "conversions": (61,),
+            "adjustments": (),
+        }
+        service = MutableTraceabilityService(
+            self._result(self._line(source_trace=legacy_trace))
+        )
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        case = self._approve_case(ProductInventoryAuditCase.objects.get())
+        fingerprint = case.calculation_fingerprint
+        event_count = case.events.count()
+        service.result = self._result(
+            self._line(
+                source_trace={
+                    **legacy_trace,
+                    "transfer_in": (51,),
+                    "transfer_out": (),
+                    "conversion_in": (61,),
+                    "conversion_out": (),
+                    "conversion_in_impacts": {61: Decimal("12")},
+                    "conversion_out_impacts": {},
+                }
+            )
+        )
+
+        counts = materializer.rebuild(MONTH)
+
+        case.refresh_from_db()
+        self.assertEqual(case.calculation_fingerprint, fingerprint)
+        self.assertEqual(case.movement_status, ProductInventoryAuditCase.MovementStatus.RESOLVED)
+        self.assertEqual(case.events.count(), event_count)
+        self.assertEqual(counts["unchanged"], 1)
+        self.assertEqual(counts["reopened"], 0)
+        self.assertEqual(case.source_trace["conversion_in_impacts"], {"61": "12.0000"})
+
+    def test_directional_projection_upgrade_preserves_pending_approval(self):
+        legacy_trace = {
+            "opening": (11,),
+            "closing": (22,),
+            "sales": (33, 34),
+            "production": (44,),
+            "waste": (),
+            "transfers": (),
+            "conversions": (61,),
+            "adjustments": (),
+        }
+        service = MutableTraceabilityService(
+            self._result(self._line(source_trace=legacy_trace))
+        )
+        materializer = InventoryAuditMaterializer(traceability_service=service)
+        materializer.rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+        case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
+        case.save(update_fields=["movement_status", "updated_at"])
+        fingerprint = case.calculation_fingerprint
+        service.result = self._result(
+            self._line(
+                source_trace={
+                    **legacy_trace,
+                    "transfer_in": (),
+                    "transfer_out": (),
+                    "conversion_in": (),
+                    "conversion_out": (61,),
+                    "conversion_in_impacts": {},
+                    "conversion_out_impacts": {61: Decimal("1")},
+                }
+            )
+        )
+
+        counts = materializer.rebuild(MONTH)
+
+        case.refresh_from_db()
+        self.assertEqual(case.calculation_fingerprint, fingerprint)
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        )
+        self.assertEqual(counts["unchanged"], 1)
+        self.assertEqual(counts["reopened"], 0)
+        self.assertFalse(
+            case.events.filter(
+                action=ProductInventoryAuditEvent.Action.REOPEN
+            ).exists()
+        )
+
     def test_changed_fingerprint_reopens_approved_case_with_system_event(self):
         service = MutableTraceabilityService(self._result(self._line()))
         materializer = InventoryAuditMaterializer(traceability_service=service)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -25,6 +26,20 @@ from reportes.models import (
 
 _QUANTITY = Decimal("0.0001")
 _MISSING_CASE_ISSUE = "CASE_MISSING_FROM_REBUILD"
+_LEGACY_FINGERPRINT_TRACE_KEYS = (
+    "opening",
+    "closing",
+    "sales",
+    "production",
+    "waste",
+    "transfers",
+    "conversions",
+    "adjustments",
+)
+_TRACE_IMPACT_KEYS = (
+    "conversion_in_impacts",
+    "conversion_out_impacts",
+)
 
 
 class InventoryAuditRebuildCounts(dict):
@@ -65,10 +80,30 @@ def _sorted_issue_payloads(issues) -> list[dict[str, object]]:
     )
 
 
-def _source_trace_payload(source_trace) -> dict[str, list[int]]:
+def _source_trace_payload(source_trace) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for source_name, source_value in sorted(source_trace.items()):
+        name = str(source_name)
+        if name in _TRACE_IMPACT_KEYS:
+            if not isinstance(source_value, Mapping):
+                payload[name] = {}
+                continue
+            payload[name] = {
+                str(int(source_id)): _decimal_text(Decimal(quantity))
+                for source_id, quantity in sorted(
+                    source_value.items(), key=lambda item: int(item[0])
+                )
+            }
+            continue
+        payload[name] = sorted({int(source_id) for source_id in source_value})
+    return payload
+
+
+def _fingerprint_source_trace(source_trace: dict[str, object]) -> dict[str, list[int]]:
+    """Keep the deployed fingerprint contract independent of UI projections."""
     return {
-        str(source_name): sorted({int(source_id) for source_id in source_ids})
-        for source_name, source_ids in sorted(source_trace.items())
+        source_name: list(source_trace.get(source_name, []))
+        for source_name in _LEGACY_FINGERPRINT_TRACE_KEYS
     }
 
 
@@ -157,6 +192,12 @@ class InventoryAuditMaterializer:
                     existing is not None
                     and existing.calculation_fingerprint == prepared["fingerprint"]
                 ):
+                    if existing.source_trace != prepared["source_trace"]:
+                        existing.source_trace = prepared["source_trace"]
+                        existing.rebuilt_at = source_built_at
+                        existing.save(
+                            update_fields=["source_trace", "rebuilt_at", "updated_at"]
+                        )
                     continue
                 self._persist_line(
                     run=run,
@@ -255,7 +296,7 @@ class InventoryAuditMaterializer:
                 "product_id": line.product.id,
                 "quantities": quantities,
                 "issues": issues,
-                "source_trace": source_trace,
+                "source_trace": _fingerprint_source_trace(source_trace),
             }
         )
         issue_codes = sorted({str(issue["code"]) for issue in issues})

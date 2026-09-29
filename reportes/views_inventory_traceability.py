@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import date
+from decimal import Decimal
 from html import escape
 from pathlib import Path
 from uuid import uuid4
@@ -9,7 +10,9 @@ from uuid import uuid4
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.core.paginator import Paginator
 from django.db import models, transaction
+from django.db.models import Prefetch
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
@@ -96,6 +99,19 @@ REASON_LABELS = {
     "REVIEWED": "Explicación revisada",
     "INSUFFICIENT": "Evidencia insuficiente",
     "CUSTODY_REVIEW": "Revisión de custodia",
+}
+EXPLANATION_REASON_CODES = (
+    "TRANSFER_PENDING",
+    "CONVERSION",
+    "WASTE",
+    "PRODUCTION",
+    "SALE",
+    "STOCK_ELSEWHERE",
+    "OTHER",
+)
+REVIEW_REASON_CODES = {
+    ProductInventoryAuditEvent.Action.APPROVE: "REVIEWED",
+    ProductInventoryAuditEvent.Action.REJECT: "INSUFFICIENT",
 }
 
 
@@ -192,7 +208,15 @@ def _format_evidence_date(value) -> str:
 
 
 def _evidence_row(
-    *, source, source_id, date_value, location, quantity, actor, reference
+    *,
+    source,
+    source_id,
+    date_value,
+    location,
+    quantity,
+    actor,
+    reference,
+    source_quantity=None,
 ) -> dict[str, object]:
     return {
         "source": TRACE_SOURCE_LABELS[source],
@@ -202,6 +226,8 @@ def _evidence_row(
         "quantity": quantity,
         "actor": actor or "No informado por Point",
         "reference": reference or f"Point #{source_id}",
+        "source_quantity": source_quantity,
+        "quantity_is_text": isinstance(quantity, str),
         "available": True,
     }
 
@@ -232,6 +258,18 @@ def _source_evidence_by_step(
     def ids_for(source):
         values = trace.get(source, [])
         return [value for value in values if type(value) is int and value > 0]
+
+    def impact_for(source, source_id):
+        impacts = trace.get(f"{source}_impacts", {})
+        if not isinstance(impacts, dict):
+            return None
+        raw_value = impacts.get(str(source_id), impacts.get(source_id))
+        if raw_value is None:
+            return None
+        try:
+            return Decimal(str(raw_value))
+        except (ArithmeticError, ValueError):
+            return None
 
     closing_ids = set(ids_for("opening") + ids_for("closing"))
     closings = {
@@ -398,15 +436,21 @@ def _source_evidence_by_step(
             if row is None:
                 evidence[step].append(_missing_evidence_row("conversions", source_id))
                 continue
+            applied_impact = impact_for(trace_bucket, source_id)
             evidence[step].append(
                 _evidence_row(
                     source="conversions",
                     source_id=source_id,
                     date_value=row.movement_at,
                     location=row.branch.name,
-                    quantity=row.quantity,
+                    quantity=(
+                        applied_impact
+                        if applied_impact is not None
+                        else "Impacto no conservado"
+                    ),
                     actor=(row.raw_payload or {}).get("responsable"),
                     reference=row.movement_external_id or f"Point #{source_id}",
+                    source_quantity=row.quantity,
                 )
             )
 
@@ -577,16 +621,7 @@ def _action_form_fragment(
             '<input type="file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.webp">'
             "</label>"
         )
-        explanation_codes = (
-            "TRANSFER_PENDING",
-            "CONVERSION",
-            "WASTE",
-            "PRODUCTION",
-            "SALE",
-            "STOCK_ELSEWHERE",
-            "OTHER",
-        )
-        if raw_reason_code and raw_reason_code not in explanation_codes:
+        if raw_reason_code and raw_reason_code not in EXPLANATION_REASON_CODES:
             options = '<option value="" selected>Causa registrada</option>'
         else:
             options = '<option value="">Selecciona una causa</option>'
@@ -594,7 +629,7 @@ def _action_form_fragment(
             f'<option value="{code}"'
             f'{" selected" if raw_reason_code == code else ""}>'
             f"{escape(REASON_LABELS[code])}</option>"
-            for code in explanation_codes
+            for code in EXPLANATION_REASON_CODES
         )
         reason_field = f'<select name="reason_code" required>{options}</select>'
     else:
@@ -638,7 +673,10 @@ def _locked_case(pk: int) -> ProductInventoryAuditCase:
 def _latest_explanation(
     case: ProductInventoryAuditCase,
 ) -> ProductInventoryAuditEvent | None:
-    latest = case.events.order_by("-created_at", "-id").first()
+    prefetched = getattr(case, "prefetched_events", None)
+    latest = prefetched[-1] if prefetched else None
+    if prefetched is None:
+        latest = case.events.order_by("-created_at", "-id").first()
     if latest is None or latest.action != ProductInventoryAuditEvent.Action.EXPLAIN:
         return None
     return latest
@@ -687,6 +725,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         try:
             selected_month = _parse_month(raw_month)
         except ValueError as exc:
+            if render_html:
+                return HttpResponse(
+                    "<h1>Mes no válido</h1>"
+                    f"<p>{escape(str(exc))}</p>",
+                    status=400,
+                    content_type="text/html; charset=utf-8",
+                )
             return JsonResponse({"ok": False, "error": str(exc)}, status=400)
         run = ProductInventoryAuditRun.objects.filter(month=selected_month).first()
     else:
@@ -701,6 +746,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         selected_tab = "exceptions"
     kpis = {"balanced": 0, "pending": 0, "pending_approval": 0}
     tab_counts = {"exceptions": 0, "balanced": 0}
+    page_obj = None
+    result_count = 0
+    page_size = 100 if request.GET.get("page_size") == "100" else 50
     if run is not None:
         month_cases = ProductInventoryAuditCase.objects.filter(run=run, month=run.month)
         branches = list(
@@ -759,35 +807,35 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     else RECONCILED_STATUSES
                 )
             )
-        cases = list(
-            case_queryset
-            .select_related("branch", "product")
-            .order_by(
-                models.Case(
-                    models.When(
-                        movement_status=ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
-                        then=0,
-                    ),
-                    models.When(
-                        movement_status=ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
-                        then=1,
-                    ),
-                    models.When(
-                        movement_status=ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
-                        then=2,
-                    ),
-                    models.When(
-                        movement_status=ProductInventoryAuditCase.MovementStatus.RESOLVED,
-                        then=3,
-                    ),
-                    default=4,
-                    output_field=models.IntegerField(),
+        ordered_cases = case_queryset.select_related("branch", "product").order_by(
+            models.Case(
+                models.When(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
+                    then=0,
                 ),
-                "branch__name",
-                "product__name",
-                "id",
-            )
+                models.When(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+                    then=1,
+                ),
+                models.When(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+                    then=2,
+                ),
+                models.When(
+                    movement_status=ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                    then=3,
+                ),
+                default=4,
+                output_field=models.IntegerField(),
+            ),
+            "branch__name",
+            "product__name",
+            "id",
         )
+        paginator = Paginator(ordered_cases, page_size)
+        page_obj = paginator.get_page(request.GET.get("page"))
+        result_count = paginator.count
+        cases = list(page_obj.object_list)
         for case in cases:
             case.ui_possible_cause = _possible_cause(case)
             case.ui_movement_status = MOVEMENT_STATUS_LABELS.get(
@@ -795,6 +843,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             )
 
     if render_html:
+        pagination_params = request.GET.copy()
+        pagination_params.pop("page", None)
         return render(
             request,
             "reportes/auditoria_inventario.html",
@@ -809,6 +859,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "status_options": ProductInventoryAuditCase.MovementStatus.choices,
                 "kpis": kpis,
                 "tab_counts": tab_counts,
+                "page_obj": page_obj,
+                "page_size": page_size,
+                "result_count": result_count,
+                "pagination_query": pagination_params.urlencode(),
             },
         )
     return JsonResponse(
@@ -824,6 +878,12 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 else None
             ),
             "cases": [_case_payload(case) for case in cases],
+            "pagination": {
+                "page": page_obj.number if page_obj else 1,
+                "pages": page_obj.paginator.num_pages if page_obj else 0,
+                "total": result_count,
+                "page_size": page_size,
+            },
         }
     )
 
@@ -833,9 +893,18 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
     _require_report_access(request)
     try:
+        event_queryset = ProductInventoryAuditEvent.objects.select_related(
+            "actor", "related_event", "related_event__actor"
+        ).order_by("created_at", "id")
         case = (
             ProductInventoryAuditCase.objects.select_related("branch", "product", "run")
-            .prefetch_related("events")
+            .prefetch_related(
+                Prefetch(
+                    "events",
+                    queryset=event_queryset,
+                    to_attr="prefetched_events",
+                )
+            )
             .get(pk=pk)
         )
     except ProductInventoryAuditCase.DoesNotExist:
@@ -859,7 +928,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 else None
             ),
         }
-        for event in case.events.all()
+        for event in case.prefetched_events
     ]
     if _wants_html(request):
         has_custody = True
@@ -869,7 +938,7 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             has_custody = False
         latest_explanation = _latest_explanation(case)
         source_evidence, undirected_evidence = _source_evidence_by_step(case)
-        events = list(case.events.all())
+        events = case.prefetched_events
         for event in events:
             event.ui_reason_label = _reason_label(event.reason_code)
         if latest_explanation is not None:
@@ -938,9 +1007,8 @@ def explain_case(request: HttpRequest, pk: int) -> HttpResponse:
             case = _locked_case(pk)
             _require_case_custody(request.user, case)
             if (
-                not reason_code
+                reason_code not in EXPLANATION_REASON_CODES
                 or not notes
-                or len(reason_code) > 80
                 or len(notes) > MAX_NOTES_LENGTH
             ):
                 return _action_response(
@@ -1014,16 +1082,13 @@ def _review_case(
         raise PermissionDenied("No tienes permisos para revisar este caso.")
 
     fields = _posted_fields(request)
-    reason_code = fields["reason_code"].strip()
+    reason_code = REVIEW_REASON_CODES[action]
+    fields["reason_code"] = reason_code
     notes = fields["notes"].strip()
     with transaction.atomic():
         case = _locked_case(pk)
         _require_case_custody(request.user, case)
-        if (
-            not reason_code
-            or len(reason_code) > 80
-            or len(notes) > MAX_NOTES_LENGTH
-        ):
+        if len(notes) > MAX_NOTES_LENGTH:
             return _action_response(
                 request,
                 case=case,

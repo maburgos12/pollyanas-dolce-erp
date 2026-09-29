@@ -48,6 +48,10 @@ TRACE_SOURCE_NAMES = (
     "conversion_out",
     "adjustments",
 )
+TRACE_VIEW_METADATA_NAMES = (
+    "conversion_in_impacts",
+    "conversion_out_impacts",
+)
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,7 @@ class BranchProductBalance:
     expected_closing: Decimal
     point_closing: Decimal
     difference: Decimal
-    source_trace: Mapping[str, tuple[int, ...]]
+    source_trace: Mapping[str, object]
     issues: tuple[TraceSourceIssue, ...]
 
 
@@ -167,6 +171,8 @@ class BranchInventoryTraceabilityService:
             transfer_out,
             conversion_in,
             conversion_out,
+            conversion_in_impacts,
+            conversion_out_impacts,
             movement_issues,
             authority_issues,
         ) = self._load_direct_movements(
@@ -311,6 +317,12 @@ class BranchInventoryTraceabilityService:
                 "conversion_in": conversion_in_ids,
                 "conversion_out": conversion_out_ids,
                 "adjustments": (),
+                "conversion_in_impacts": conversion_in_impacts.get(
+                    (branch_id, product_id), {}
+                ),
+                "conversion_out_impacts": conversion_out_impacts.get(
+                    (branch_id, product_id), {}
+                ),
             }
             lines.append(
                 BranchProductBalance(
@@ -330,8 +342,15 @@ class BranchInventoryTraceabilityService:
                     difference=difference,
                     source_trace=MappingProxyType(
                         {
-                            source_name: tuple(trace_values[source_name])
-                            for source_name in TRACE_SOURCE_NAMES
+                            source_name: (
+                                MappingProxyType(dict(trace_values[source_name]))
+                                if source_name in TRACE_VIEW_METADATA_NAMES
+                                else tuple(trace_values[source_name])
+                            )
+                            for source_name in (
+                                *TRACE_SOURCE_NAMES,
+                                *TRACE_VIEW_METADATA_NAMES,
+                            )
                         }
                     ),
                     issues=tuple(issues_by_key.get((branch_id, product_id), ())),
@@ -557,6 +576,8 @@ class BranchInventoryTraceabilityService:
         transfer_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         conversion_in: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
         conversion_out: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
+        conversion_in_impacts: dict[tuple[int, int], dict[int, Decimal]] = {}
+        conversion_out_impacts: dict[tuple[int, int], dict[int, Decimal]] = {}
         issues: list[TraceSourceIssue] = []
 
         for row in sales_rows:
@@ -619,6 +640,8 @@ class BranchInventoryTraceabilityService:
             product_indexes=product_indexes,
             conversion_in=conversion_in,
             conversion_out=conversion_out,
+            conversion_in_impacts=conversion_in_impacts,
+            conversion_out_impacts=conversion_out_impacts,
             issues=issues,
         )
         return (
@@ -629,6 +652,8 @@ class BranchInventoryTraceabilityService:
             transfer_out,
             conversion_in,
             conversion_out,
+            conversion_in_impacts,
+            conversion_out_impacts,
             tuple(issues),
             tuple(authority_issues),
         )
@@ -1054,6 +1079,8 @@ class BranchInventoryTraceabilityService:
         product_indexes,
         conversion_in,
         conversion_out,
+        conversion_in_impacts,
+        conversion_out_impacts,
         issues,
     ):
         recipe_indexes = self._build_recipe_indexes()
@@ -1175,18 +1202,26 @@ class BranchInventoryTraceabilityService:
                     )
                 )
                 continue
+            destination_impact = Decimal(row.quantity)
+            origin_impact = destination_impact / factor
             self._add_balance(
                 conversion_in,
                 (row.branch_id, destination_id),
-                row.quantity,
+                destination_impact,
                 row.id,
             )
+            conversion_in_impacts.setdefault(
+                (row.branch_id, destination_id), {}
+            )[row.id] = destination_impact
             self._add_balance(
                 conversion_out,
                 (row.branch_id, origin_id),
-                Decimal(row.quantity) / factor,
+                origin_impact,
                 row.id,
             )
+            conversion_out_impacts.setdefault(
+                (row.branch_id, origin_id), {}
+            )[row.id] = origin_impact
             if origin_issue:
                 issues.append(
                     TraceSourceIssue(

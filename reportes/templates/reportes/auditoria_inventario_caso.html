@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize static %}
 
 {% block title %}Trazabilidad de {{ case.product.name }} - ERP{% endblock %}
 {% block body_class %}page-inventory-audit{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/inventory_audit_v1.css' %}">{% endblock %}
 
 {% block content %}
-<main class="container inventory-audit-shell inventory-audit-detail" id="inventory-audit-case-{{ case.pk }}">
+<div class="container inventory-audit-shell inventory-audit-detail" id="inventory-audit-case-{{ case.pk }}">
   <header class="inventory-audit-heading">
     <div>
       <a class="inventory-audit-back" href="{% url 'reportes:inventory_audit' %}?month={{ case.month|date:'Y-m' }}">← Auditoría del mes</a>
@@ -47,7 +48,8 @@
               {% if evidence.available %}
               <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
               <dl>
-                <div><dt>Cantidad</dt><dd>{{ evidence.quantity|floatformat:"-4"|intcomma }}</dd></div>
+                <div><dt>{% if evidence.source_quantity is not None %}Impacto aplicado{% else %}Cantidad{% endif %}</dt><dd>{% if evidence.quantity_is_text %}{{ evidence.quantity }}{% else %}{{ evidence.quantity|floatformat:"-4"|intcomma }}{% endif %}</dd></div>
+                {% if evidence.source_quantity is not None %}<div><dt>Cantidad origen Point</dt><dd>{{ evidence.source_quantity|floatformat:"-4"|intcomma }}</dd></div>{% endif %}
                 <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
                 <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
               </dl>
@@ -150,5 +152,5 @@
     <p class="inventory-audit-muted">Todavía no hay explicaciones ni decisiones registradas.</p>
     {% endif %}
   </section>
-</main>
+</div>
 {% endblock %}

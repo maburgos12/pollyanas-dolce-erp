@@ -207,6 +207,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, "inventory-audit-table-wrap")
         self.assertContains(response, 'class="inventory-audit-table"')
         content = response.content.decode()
+        self.assertEqual(content.count("<main"), 1)
         self.assertContains(response, 'aria-current="page">Excepciones')
         self.assertContains(response, 'tab=balanced')
         self.assertContains(response, "Excepciones <span>2</span>", html=True)
@@ -217,15 +218,11 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(response.context["kpis"]["balanced"], 1)
         self.assertEqual(response.context["kpis"]["pending"], 1)
         self.assertEqual(response.context["kpis"]["pending_approval"], 1)
-        stylesheet = Path("static/css/styles.css").read_text()
-        self.assertIn(
-            ".inventory-audit-table thead th {\n  position: sticky;",
-            stylesheet,
-        )
-        self.assertIn(
-            ".inventory-audit-table {\n  width: 100%;\n  min-width: 1050px;\n  table-layout: fixed;",
-            stylesheet,
-        )
+        stylesheet = Path("static/css/inventory_audit_v1.css").read_text()
+        self.assertContains(response, "css/inventory_audit_v1.css")
+        self.assertIn(".inventory-audit-table thead th", stylesheet)
+        self.assertIn("position: sticky", stylesheet)
+        self.assertIn("table-layout: fixed", stylesheet)
         forbidden_live_sources = (
             "pos_bridge_daily_sales",
             "pos_bridge_production_lines",
@@ -280,6 +277,76 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, other_case.product.name)
         self.assertEqual([case.pk for case in response.context["cases"]], [other_case.pk])
 
+    def test_browser_dashboard_paginates_rows_and_preserves_filters(self):
+        products = PointProduct.objects.bulk_create(
+            [
+                PointProduct(
+                    external_id=f"audit-page-{index}",
+                    sku=f"PAGE-{index:03d}",
+                    name=f"Producto paginado {index:03d}",
+                )
+                for index in range(60)
+            ]
+        )
+        for index, product in enumerate(products, start=1):
+            self._case(
+                product=product,
+                difference=Decimal("-1"),
+                calculation_fingerprint=f"{index:064x}",
+            )
+        self.client.force_login(self.viewer)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                reverse("reportes:inventory_audit"),
+                {
+                    "month": "2026-08",
+                    "branch": str(self.branch.pk),
+                    "status": ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
+                    "tab": "exceptions",
+                    "page": "2",
+                },
+                HTTP_ACCEPT="text/html",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["result_count"], 61)
+        self.assertEqual(len(response.context["cases"]), 11)
+        self.assertContains(response, "Página 2 de 2")
+        self.assertContains(response, "month=2026-08")
+        self.assertContains(response, f"branch={self.branch.pk}")
+        self.assertContains(response, "status=NEEDS_EXPLANATION")
+        self.assertEqual(response.content.decode().count("<table"), 1)
+        audit_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if "reportes_productinventoryaudit" in query["sql"]
+        ]
+        self.assertLessEqual(len(audit_queries), 7)
+        self.assertLessEqual(len(queries), 35)
+
+    def test_invalid_month_uses_html_error_for_navigation_and_json_for_async(self):
+        self.client.force_login(self.viewer)
+        url = reverse("reportes:inventory_audit")
+
+        html_response = self.client.get(
+            url,
+            {"month": "2026-13"},
+            HTTP_ACCEPT="text/html",
+        )
+        json_response = self.client.get(
+            url,
+            {"month": "2026-13"},
+            HTTP_ACCEPT="application/json",
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(html_response.status_code, 400)
+        self.assertTrue(html_response["Content-Type"].startswith("text/html"))
+        self.assertContains(html_response, "Mes no válido", status_code=400)
+        self.assertEqual(json_response.status_code, 400)
+        self.assertEqual(json_response.json()["ok"], False)
+
     def test_browser_detail_explains_balance_sequence_and_source_evidence(self):
         sale = PointDailySale.objects.create(
             branch=self.branch,
@@ -309,6 +376,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "reportes/auditoria_inventario_caso.html")
         content = response.content.decode()
+        self.assertEqual(content.count("<main"), 1)
         balance_content = content[content.index('<ol class="inventory-audit-balance-list">'):]
         labels = [
             "Inventario inicial Point",
@@ -409,6 +477,8 @@ class InventoryTraceabilityViewsTests(TestCase):
             "conversion_out": [conversion_out.pk, 992002],
             "transfers": [incoming_transfer.pk, outgoing_transfer.pk, 999001],
             "conversions": [conversion_in.pk, conversion_out.pk, 999002],
+            "conversion_in_impacts": {str(conversion_in.pk): "8.0000"},
+            "conversion_out_impacts": {str(conversion_out.pk): "0.8333"},
         }
         self.case.save(update_fields=["source_trace"])
         self.client.force_login(self.viewer)
@@ -455,6 +525,11 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertNotIn("CONV-IN", conversion_out_step)
         self.assertIn("Point #992002", conversion_out_step)
         self.assertNotIn("Point #992001", conversion_out_step)
+        self.assertIn("Impacto aplicado", conversion_in_step)
+        self.assertIn("8", conversion_in_step)
+        self.assertIn("Cantidad origen Point", conversion_out_step)
+        self.assertIn("0.8333", conversion_out_step)
+        self.assertIn("10", conversion_out_step)
         self.assertNotContains(response, "Evidencia sin dirección disponible")
 
     def test_browser_detail_keeps_legacy_flat_trace_explicitly_undirected(self):
@@ -491,11 +566,37 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         self.assertContains(response, "Causa registrada")
         self.assertNotContains(response, "UNKNOWN_INTERNAL_TOKEN")
-        stylesheet = Path("static/css/styles.css").read_text()
-        self.assertIn(
-            ".inventory-audit-heading h1 {\n  margin: 7px 0 5px;\n  color: var(--vino);\n  font-family: 'Playfair Display', serif;",
-            stylesheet,
-        )
+        stylesheet = Path("static/css/inventory_audit_v1.css").read_text()
+        self.assertIn(".inventory-audit-heading h1", stylesheet)
+        self.assertIn("font-family: 'Playfair Display', serif", stylesheet)
+
+    def test_browser_detail_prefetches_event_actors_without_query_per_event(self):
+        for index in range(8):
+            ProductInventoryAuditEvent.objects.create(
+                case=self.case,
+                action=ProductInventoryAuditEvent.Action.EXPLAIN,
+                reason_code="OTHER",
+                notes=f"Evidencia {index}",
+                actor=self.explainer,
+            )
+        self.client.force_login(self.viewer)
+
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get(
+                reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+                HTTP_ACCEPT="text/html",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.explainer.username, count=8)
+        event_queries = [
+            query["sql"]
+            for query in queries.captured_queries
+            if "reportes_productinventoryauditevent" in query["sql"]
+        ]
+        self.assertEqual(len(event_queries), 1)
+        self.assertIn("JOIN", event_queries[0])
+        self.assertLessEqual(len(queries), 30)
 
     def test_browser_detail_hides_actions_outside_permission_and_custody(self):
         self.client.force_login(self.viewer)
@@ -547,7 +648,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         response = self.client.post(
             reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
             {
-                "reason_code": "PHYSICAL_EVIDENCE",
+                "reason_code": "OTHER",
                 "notes": "Se adjunta evidencia de custodia.",
                 "evidence": SimpleUploadedFile(
                     "evidencia.pdf",
@@ -616,7 +717,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         disguised = self.client.post(
             url,
             {
-                "reason_code": "PHYSICAL_EVIDENCE",
+                "reason_code": "OTHER",
                 "notes": "Archivo con extensión falsa.",
                 "evidence": SimpleUploadedFile(
                     "evidencia.png",
@@ -628,7 +729,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         oversized = self.client.post(
             url,
             {
-                "reason_code": "PHYSICAL_EVIDENCE",
+                "reason_code": "OTHER",
                 "notes": "Archivo demasiado grande.",
                 "evidence": SimpleUploadedFile(
                     "evidencia.pdf",
@@ -650,7 +751,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.client.post(
             reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
             {
-                "reason_code": "PHYSICAL_EVIDENCE",
+                "reason_code": "OTHER",
                 "notes": "Evidencia privada.",
                 "evidence": SimpleUploadedFile(
                     "private.pdf",
@@ -680,7 +781,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.client.post(
             reverse("reportes:inventory_audit_explain", args=[self.case.pk]),
             {
-                "reason_code": "PHYSICAL_EVIDENCE",
+                "reason_code": "OTHER",
                 "notes": "Evidencia del caso original.",
                 "evidence": SimpleUploadedFile(
                     "private.pdf",
@@ -728,7 +829,7 @@ class InventoryTraceabilityViewsTests(TestCase):
                         "reportes:inventory_audit_explain", args=[self.case.pk]
                     ),
                     {
-                        "reason_code": "PHYSICAL_EVIDENCE",
+                        "reason_code": "OTHER",
                         "notes": "Debe revertir archivo y base.",
                         "evidence": uploaded,
                     },
@@ -787,6 +888,15 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertIn('name="evidence"', json_response.json()["html"])
         self.assertEqual(self.case.events.count(), 0)
 
+    def test_explanation_rejects_reason_code_outside_operational_allowlist(self):
+        response = self._explain(
+            reason_code="INTERNAL_ADMIN_OVERRIDE",
+            notes="Intento manipulado.",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(self.case.events.exists())
+
     def test_notes_length_is_bounded_for_explanations_and_reviews(self):
         long_notes = "x" * 4001
         explanation = self._explain(notes=long_notes)
@@ -833,7 +943,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         response = self.client.post(
             reverse("reportes:inventory_audit_approve", args=[self.case.pk]),
-            {"reason_code": "REVIEWED", "notes": "Cadena comprobada"},
+            {"reason_code": "MANIPULATED", "notes": "Cadena comprobada"},
         )
 
         self.assertEqual(response.status_code, 302)
@@ -845,6 +955,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         approval = self.case.events.get(action=ProductInventoryAuditEvent.Action.APPROVE)
         self.assertEqual(approval.related_event, explanation)
         self.assertEqual(approval.actor, self.approver)
+        self.assertEqual(approval.reason_code, "REVIEWED")
 
     def test_reject_adds_history_and_returns_case_to_needs_explanation(self):
         self._explain()
@@ -853,7 +964,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         response = self.client.post(
             reverse("reportes:inventory_audit_reject", args=[self.case.pk]),
-            {"reason_code": "INSUFFICIENT", "notes": "Falta la contraparte"},
+            {"reason_code": "MANIPULATED", "notes": "Falta la contraparte"},
         )
 
         self.assertEqual(response.status_code, 302)
@@ -865,6 +976,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertEqual(self.case.events.count(), 2)
         rejection = self.case.events.get(action=ProductInventoryAuditEvent.Action.REJECT)
         self.assertEqual(rejection.related_event, explanation)
+        self.assertEqual(rejection.reason_code, "INSUFFICIENT")
 
     def test_review_fails_closed_when_current_explanation_has_no_actor(self):
         self.case.movement_status = ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL
@@ -1029,7 +1141,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
                 response = self.client.post(
                     reverse("reportes:inventory_audit_explain", args=[case.pk]),
-                    {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión"},
+                    {"reason_code": "OTHER", "notes": "Revisión"},
                 )
 
                 self.assertEqual(response.status_code, 403)
@@ -1057,7 +1169,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         response = self.client.post(
             reverse("reportes:inventory_audit_explain", args=[case.pk]),
-            {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión global"},
+            {"reason_code": "OTHER", "notes": "Revisión global"},
         )
 
         self.assertEqual(response.status_code, 302)
@@ -1091,7 +1203,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         response = self.client.post(
             reverse("reportes:inventory_audit_explain", args=[case.pk]),
-            {"reason_code": "CUSTODY_REVIEW", "notes": "Fuera de alcance"},
+            {"reason_code": "OTHER", "notes": "Fuera de alcance"},
         )
 
         self.assertEqual(response.status_code, 403)
@@ -1115,7 +1227,7 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         response = self.client.post(
             reverse("reportes:inventory_audit_explain", args=[case.pk]),
-            {"reason_code": "CUSTODY_REVIEW", "notes": "Revisión DG"},
+            {"reason_code": "OTHER", "notes": "Revisión DG"},
         )
 
         self.assertEqual(response.status_code, 302)

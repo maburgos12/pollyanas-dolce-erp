@@ -1,11 +1,12 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize static %}
 
 {% block title %}Auditoría de inventario - ERP{% endblock %}
 {% block body_class %}page-inventory-audit{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/inventory_audit_v1.css' %}">{% endblock %}
 
 {% block content %}
-<main class="container inventory-audit-shell">
+<div class="container inventory-audit-shell">
   <header class="inventory-audit-heading">
     <div>
       <a class="inventory-audit-back" href="{% url 'reportes:producido_vs_vendido' %}{% if selected_month %}?periodo={{ selected_month }}{% endif %}">← Producido vs Vendido</a>
@@ -65,8 +66,15 @@
         <h2 id="inventory-audit-results-title">{% if selected_tab == 'balanced' %}Productos conciliados{% else %}Productos por revisar{% endif %}</h2>
         <p>{% if selected_tab == 'balanced' %}Estos productos cuadran con Point o tienen una explicación aprobada.{% else %}La diferencia por sí sola no determina merma ni responsabilidad; abre el caso para seguir la evidencia.{% endif %}</p>
       </div>
-      <span>{{ cases|length }} resultado{{ cases|length|pluralize }}</span>
+      <span>{{ result_count }} resultado{{ result_count|pluralize }}</span>
     </div>
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <nav class="inventory-audit-pagination" aria-label="Páginas de resultados">
+      {% if page_obj.has_previous %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">← Anterior</a>{% endif %}
+      <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente →</a>{% endif %}
+    </nav>
+    {% endif %}
     {% if cases %}
     <div class="table-responsive inventory-audit-table-wrap" tabindex="0" aria-label="Resultados de auditoría; desplázate para ver todas las columnas">
       <table class="inventory-audit-table">
@@ -109,5 +117,5 @@
     </div>
     {% endif %}
   </section>
-</main>
+</div>
 {% endblock %}
