@@ -330,11 +330,46 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(case.last_notified_fingerprint, case.investigation_fingerprint)
         self.assertEqual(
             Notificacion.objects.filter(
-                objeto_tipo="reportes.ProductInventoryAuditCase",
-                objeto_id=str(case.id),
+                objeto_tipo="reportes.ProductInventoryAuditCaseGroup",
             ).count(),
             1,
         )
+
+    def test_multiple_high_cases_for_same_owner_create_one_grouped_notification(self):
+        production_owner = self._head(
+            username="jefatura.produccion.resumen",
+            department=Empleado.DEP_PRODUCCION,
+        )
+        second_product = PointProduct.objects.create(
+            external_id="AUDITOR-AGENT-PRODUCT-2",
+            sku="AGENT-002",
+            name="Segundo producto agente auditor",
+        )
+        first = self.make_case(
+            issue_codes=["MISSING_CONVERSION_ORIGIN"],
+            conversion_in=Decimal("12"),
+        )
+        second = self.make_case(
+            product=second_product,
+            issue_codes=["MISSING_CONVERSION_ORIGIN"],
+            conversion_in=Decimal("8"),
+            calculation_fingerprint="f" * 64,
+        )
+
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+
+        result = InventoryAuditAgent().run_month(self.month)
+
+        first.refresh_from_db()
+        second.refresh_from_db()
+        notification = Notificacion.objects.get(
+            objeto_tipo="reportes.ProductInventoryAuditCaseGroup"
+        )
+        self.assertEqual(result["notifications"], 1)
+        self.assertEqual(notification.usuario_id, production_owner.id)
+        self.assertIn("2 diferencias", notification.mensaje)
+        self.assertEqual(first.last_notified_fingerprint, first.investigation_fingerprint)
+        self.assertEqual(second.last_notified_fingerprint, second.investigation_fingerprint)
 
     def test_dry_run_writes_nothing(self):
         case = self.make_case(

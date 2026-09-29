@@ -60,8 +60,10 @@ class InventoryAuditAgent:
             "assigned": 0,
             "unassigned": 0,
             "updated": 0,
+            "notification_groups": 0,
             "notifications": 0,
         }
+        notification_groups: dict[tuple[int, str], list[tuple[int, str]]] = {}
         month_rows = list(
             ProductInventoryAuditCase.objects.filter(month=month)
             .order_by("id")
@@ -88,6 +90,10 @@ class InventoryAuditAgent:
                         and case.last_notified_fingerprint != result.fingerprint
                     )
                     if dry_run:
+                        if should_notify:
+                            notification_groups.setdefault(
+                                (result.assigned_to_id, result.responsible_area), []
+                            ).append((case.id, result.fingerprint))
                         continue
 
                     if changed:
@@ -113,30 +119,71 @@ class InventoryAuditAgent:
                         counters["updated"] += 1
 
                     if should_notify:
-                        notification = crear_notificacion(
-                            usuario=case.assigned_to,
-                            titulo="Inventario: diferencia de atención inmediata",
-                            mensaje=(
-                                f"{case.branch.name} · {case.product.name} · "
-                                f"diferencia {case.difference}. Revisa la trazabilidad disponible."
-                            ),
-                            url=reverse("reportes:inventory_audit_case", args=[case.id]),
-                            tipo=Notificacion.TIPO_SISTEMA,
-                            prioridad=Notificacion.PRIORIDAD_ALTA,
-                            objeto_tipo="reportes.ProductInventoryAuditCase",
-                            objeto_id=case.id,
-                        )
-                        if notification is not None:
-                            case.last_notified_fingerprint = result.fingerprint
-                            case.save(
-                                update_fields=["last_notified_fingerprint", "updated_at"]
-                            )
-                            counters["notifications"] += 1
+                        notification_groups.setdefault(
+                            (result.assigned_to_id, result.responsible_area), []
+                        ).append((case.id, result.fingerprint))
+            counters["notification_groups"] = len(notification_groups)
+            if not dry_run:
+                counters["notifications"] = self._notify_groups(
+                    month, notification_groups
+                )
         finally:
             self._discrepancy_cache = None
             self._head_cache = {}
             self._recurrence_cache = None
         return counters
+
+    @staticmethod
+    def _notify_groups(month, notification_groups) -> int:
+        created = 0
+        area_labels = dict(ProductInventoryAuditCase.ResponsibleArea.choices)
+        for (assigned_to_id, area), expected_cases in sorted(
+            notification_groups.items()
+        ):
+            expected_by_id = dict(expected_cases)
+            with transaction.atomic():
+                cases = list(
+                    ProductInventoryAuditCase.objects.select_for_update()
+                    .filter(id__in=expected_by_id)
+                    .order_by("id")
+                )
+                pending = [
+                    case
+                    for case in cases
+                    if case.attention_level
+                    == ProductInventoryAuditCase.AttentionLevel.HIGH
+                    and case.assigned_to_id == assigned_to_id
+                    and case.investigation_fingerprint == expected_by_id[case.id]
+                    and case.last_notified_fingerprint
+                    != case.investigation_fingerprint
+                ]
+                if not pending:
+                    continue
+                notification = crear_notificacion(
+                    usuario=pending[0].assigned_to,
+                    titulo=f"Inventario: {len(pending)} diferencias requieren atención",
+                    mensaje=(
+                        f"{len(pending)} diferencias de atención inmediata en "
+                        f"{area_labels[area]}. El agente auditor las concentró para revisión."
+                    ),
+                    url=(
+                        f"{reverse('reportes:inventory_audit')}?month={month:%Y-%m}"
+                        f"&attention={ProductInventoryAuditCase.AttentionLevel.HIGH}"
+                    ),
+                    tipo=Notificacion.TIPO_SISTEMA,
+                    prioridad=Notificacion.PRIORIDAD_ALTA,
+                    objeto_tipo="reportes.ProductInventoryAuditCaseGroup",
+                    objeto_id=f"{month:%Y-%m}:{area}:{assigned_to_id}",
+                )
+                if notification is None:
+                    continue
+                for case in pending:
+                    case.last_notified_fingerprint = case.investigation_fingerprint
+                    case.save(
+                        update_fields=["last_notified_fingerprint", "updated_at"]
+                    )
+                created += 1
+        return created
 
     def _prepare_month_context(self, month, month_rows):
         transfer_ids = {
