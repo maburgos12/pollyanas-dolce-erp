@@ -479,6 +479,70 @@ test_close_with_stale_base_checkout() {
   cleanup_repo
 }
 
+test_close_after_squash_merge() {
+  setup_repo
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task squash --branch codex/squash --owner test --scope scripts >/dev/null
+  echo delivered >"$TEST_TMP/worktrees/squash/feature.txt"
+  git -C "$TEST_TMP/worktrees/squash" add feature.txt
+  git -C "$TEST_TMP/worktrees/squash" commit -m feature >/dev/null
+  git -C "$TEST_TMP/worktrees/squash" push -u origin codex/squash >/dev/null
+
+  git clone "$TEST_TMP/origin.git" "$TEST_TMP/publisher" >/dev/null 2>&1
+  git -C "$TEST_TMP/publisher" config user.name Publisher
+  git -C "$TEST_TMP/publisher" config user.email publisher@example.com
+  echo delivered >"$TEST_TMP/publisher/feature.txt"
+  git -C "$TEST_TMP/publisher" add feature.txt
+  git -C "$TEST_TMP/publisher" commit -m 'squash feature' >/dev/null
+  echo later >"$TEST_TMP/publisher/later.txt"
+  git -C "$TEST_TMP/publisher" add later.txt
+  git -C "$TEST_TMP/publisher" commit -m 'later unrelated change' >/dev/null
+  git -C "$TEST_TMP/publisher" push origin main >/dev/null
+
+  assert_success "close accepts exact squash content in main" \
+    "$CLOSE" --repo "$TEST_TMP/repo" --task squash --state merged
+  [[ -f "$TEST_TMP/repo/.git/task-workspaces/closed/squash.json" ]] \
+    && pass "squash close archives registry" || fail "squash close archives registry"
+  [[ ! -d "$TEST_TMP/worktrees/squash" ]] \
+    && pass "squash close removes worktree" || fail "squash close removes worktree"
+  recovery_count="$(find "$TEST_TMP/repo/.git/task-workspaces/recovery" \
+    -type f -name 'squash-*.bundle' | wc -l | tr -d ' ')"
+  [[ "$recovery_count" == "1" ]] \
+    && pass "squash close preserves a recovery bundle" \
+    || fail "squash close preserves a recovery bundle"
+  if git -C "$TEST_TMP/repo" ls-remote --exit-code --heads origin codex/squash >/dev/null 2>&1; then
+    fail "squash close removes remote branch"
+  else
+    pass "squash close removes remote branch"
+  fi
+  cleanup_repo
+}
+
+test_close_rejects_nonidentical_squash() {
+  setup_repo
+  "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
+    --task different --branch codex/different --owner test --scope scripts >/dev/null
+  echo delivered >"$TEST_TMP/worktrees/different/feature.txt"
+  git -C "$TEST_TMP/worktrees/different" add feature.txt
+  git -C "$TEST_TMP/worktrees/different" commit -m feature >/dev/null
+  git -C "$TEST_TMP/worktrees/different" push -u origin codex/different >/dev/null
+
+  git clone "$TEST_TMP/origin.git" "$TEST_TMP/publisher" >/dev/null 2>&1
+  git -C "$TEST_TMP/publisher" config user.name Publisher
+  git -C "$TEST_TMP/publisher" config user.email publisher@example.com
+  echo altered >"$TEST_TMP/publisher/feature.txt"
+  git -C "$TEST_TMP/publisher" add feature.txt
+  git -C "$TEST_TMP/publisher" commit -m 'different feature' >/dev/null
+  git -C "$TEST_TMP/publisher" push origin main >/dev/null
+
+  assert_failure "close rejects a nonidentical squash" \
+    "$CLOSE" --repo "$TEST_TMP/repo" --task different --state merged
+  [[ -d "$TEST_TMP/worktrees/different" ]] \
+    && pass "rejected squash preserves worktree" \
+    || fail "rejected squash preserves worktree"
+  cleanup_repo
+}
+
 test_close_resumes_after_missing_worktree() {
   setup_repo
   "$START" --repo "$TEST_TMP/repo" --root "$TEST_TMP/worktrees" \
@@ -518,6 +582,8 @@ test_audit_uses_root_and_disables_optional_locks
 test_adopt_legacy_worktree
 test_safe_close
 test_close_with_stale_base_checkout
+test_close_after_squash_merge
+test_close_rejects_nonidentical_squash
 test_close_resumes_after_missing_worktree
 
 echo "RESULT: passed=$passed failed=$failed"
