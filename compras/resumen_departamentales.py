@@ -13,8 +13,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from reportes.models import AreaPresupuesto
-from .models import CotizacionCompraDepartamental, IntentoCompraDepartamental, ItemCompraDepartamental, SolicitudCompraDepartamental
-from .services_departamentales import intento_operativo_prefetched
+from .models import (CotizacionCompraDepartamental, IntentoCompraDepartamental,
+                     ItemCompraDepartamental, ReembolsoCompraDepartamental,
+                     SolicitudCompraDepartamental)
 
 TERMINALES = (
     ItemCompraDepartamental.ESTADO_RECIBIDO_CONFORME,
@@ -22,8 +23,13 @@ TERMINALES = (
     ItemCompraDepartamental.ESTADO_CANCELADO,
 )
 ESTADOS = [(value, label) for value, label in ItemCompraDepartamental.ESTADO_CHOICES if value not in TERMINALES]
-ALCANCE = 'Solo artículos pendientes de solicitudes enviadas. Excluye borradores, canceladas, completadas, rechazados y recibidos conforme.'
-ETAPAS = 'Importes en MXN. Solicitado, cotizado y comprometido son etapas distintas: no se suman entre sí.'
+ALCANCE = ('Solo artículos pendientes de solicitudes enviadas. Excluye borradores, canceladas, '
+           'completadas, rechazados y recibidos conforme. Los reembolsos incluyen intentos '
+           'anteriores de estos artículos pendientes.')
+ETAPAS = ('Importes en MXN. Solicitado y cotizado son etapas de precio; Comprometido vigente '
+          'son órdenes activas. Reembolso pendiente es saldo por recuperar y Reembolsado es '
+          'histórico recibido, incluso parcial. Son naturalezas separadas: no se suman entre sí '
+          'ni se descuentan de lo comprado o gastado.')
 
 
 class FiltrosResumenDepartamental(forms.Form):
@@ -45,7 +51,8 @@ def _importe(value):
 
 def _totales():
     return dict(solicitudes=set(), articulos=0, solicitado=Decimal('0'), cotizado=Decimal('0'),
-                comprometido=Decimal('0'), sin_estimacion=0, sin_cotizacion=0, sin_precio=0)
+                comprometido=Decimal('0'), reembolso_pendiente=Decimal('0'),
+                reembolsado=Decimal('0'), sin_estimacion=0, sin_cotizacion=0, sin_precio=0)
 
 
 def construir_resumen_departamental(params):
@@ -61,9 +68,12 @@ def construir_resumen_departamental(params):
         'cotizaciones', queryset=CotizacionCompraDepartamental.objects.filter(seleccionada=True).order_by('id'),
         to_attr='cotizaciones_seleccionadas',
     ), Prefetch(
-        'intentos_compra', queryset=IntentoCompraDepartamental.objects.filter(
-            estado__in=[IntentoCompraDepartamental.ESTADO_VIGENTE, IntentoCompraDepartamental.ESTADO_ENTREGADO],
-        ).select_related('compromiso').order_by('-numero', '-pk'),
+        'intentos_compra', queryset=IntentoCompraDepartamental.objects.select_related(
+            'compromiso',
+        ).prefetch_related(Prefetch(
+            'reembolsos', queryset=ReembolsoCompraDepartamental.objects.only('intento_id', 'importe'),
+            to_attr='reembolsos_resumen',
+        )).order_by('-numero', '-pk'),
         to_attr='intentos_compra_prefetched',
     )).order_by('solicitud__area__nombre', 'solicitud_id', 'id')
     query = {}
@@ -83,11 +93,22 @@ def construir_resumen_departamental(params):
         grupo = departamentos.setdefault(area.pk, {**_totales(), 'nombre': area.nombre, 'id': area.pk})
         estimado = item.subtotal_estimado
         quote = next(iter(item.cotizaciones_seleccionadas), None)
-        intento = intento_operativo_prefetched(item)
-        compromiso = getattr(intento, 'compromiso', None) if intento else None
+        item.resumen_comprometido = Decimal('0')
+        item.resumen_reembolso_pendiente = Decimal('0')
+        item.resumen_reembolsado = Decimal('0')
+        for intento in item.intentos_compra_prefetched:
+            recibido = sum((reembolso.importe for reembolso in intento.reembolsos_resumen), Decimal('0'))
+            item.resumen_reembolsado += recibido
+            if intento.estado == IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO:
+                item.resumen_reembolso_pendiente += max(
+                    (intento.reembolso_solicitado or Decimal('0')) - recibido, Decimal('0'),
+                )
+            if intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE:
+                compromiso = getattr(intento, 'compromiso', None)
+                if compromiso and compromiso.activo and compromiso.formalizado_en:
+                    item.resumen_comprometido += compromiso.monto
         item.resumen_estimado = _importe(estimado) if estimado is not None else None
         item.resumen_cotizado = _importe(quote.total_adquisicion) if quote else None
-        item.resumen_comprometido = compromiso.monto if compromiso and compromiso.activo and compromiso.formalizado_en else Decimal('0')
         item.resumen_sin_precio = estimado is None and quote is None
         for destino in (total, grupo):
             destino['solicitudes'].add(item.solicitud_id)
@@ -95,6 +116,8 @@ def construir_resumen_departamental(params):
             destino['solicitado'] += item.resumen_estimado or Decimal('0')
             destino['cotizado'] += item.resumen_cotizado or Decimal('0')
             destino['comprometido'] += item.resumen_comprometido
+            destino['reembolso_pendiente'] += item.resumen_reembolso_pendiente
+            destino['reembolsado'] += item.resumen_reembolsado
             destino['sin_estimacion'] += estimado is None
             destino['sin_cotizacion'] += quote is None
             destino['sin_precio'] += item.resumen_sin_precio
@@ -128,18 +151,23 @@ def exportar_resumen_departamental(contexto):
                      f'Generado: {fecha}', cobertura):
             ws.append([text])
         ws.append([])
-    resumen_headers = ['Departamento', 'Solicitudes', 'Artículos', 'Sin precio', 'Solicitado estimado', 'Cotizado', 'Comprometido', 'Sin estimación', 'Sin cotización']
+    resumen_headers = ['Departamento', 'Solicitudes', 'Artículos', 'Sin precio', 'Solicitado estimado',
+                       'Cotizado', 'Comprometido vigente', 'Reembolso pendiente', 'Reembolsado',
+                       'Sin estimación', 'Sin cotización']
     wb.active.append(resumen_headers)
     for grupo in [*contexto['departamentos'], {'nombre': 'Total', **total}]:
         wb.active.append([grupo['nombre'], *[grupo[key] for key in (
-            'solicitudes', 'articulos', 'sin_precio', 'solicitado', 'cotizado', 'comprometido', 'sin_estimacion', 'sin_cotizacion',
+            'solicitudes', 'articulos', 'sin_precio', 'solicitado', 'cotizado', 'comprometido',
+            'reembolso_pendiente', 'reembolsado', 'sin_estimacion', 'sin_cotizacion',
         )]])
     detalle.append(['Solicitud', 'Departamento', 'Mes planeado', 'Artículo', 'Cantidad', 'Unidad',
-                    'Estado', 'Costo unitario estimado', 'Solicitado estimado', 'Cotizado', 'Comprometido', 'Sin precio'])
+                    'Estado', 'Costo unitario estimado', 'Solicitado estimado', 'Cotizado',
+                    'Comprometido vigente', 'Reembolso pendiente', 'Reembolsado', 'Sin precio'])
     for item in contexto['items']:
         detalle.append([item.solicitud.folio, item.solicitud.area.nombre, item.solicitud.periodo.strftime('%Y-%m'),
                         item.descripcion, item.cantidad, item.unidad, item.get_estado_display(), item.costo_unitario_estimado,
                         item.resumen_estimado, item.resumen_cotizado, item.resumen_comprometido,
+                        item.resumen_reembolso_pendiente, item.resumen_reembolsado,
                         'Sí' if item.resumen_sin_precio else 'No'])
     for ws in wb:
         ws.freeze_panes = 'B9'
@@ -153,7 +181,7 @@ def exportar_resumen_departamental(contexto):
                     cell.font = Font(color='FFFFFF', bold=True)
                 if cell.row >= 8:
                     cell.alignment = Alignment(vertical='top', wrap_text=True)
-                money_cols = (5, 6, 7) if ws.title == 'Resumen' else (8, 9, 10, 11)
+                money_cols = (5, 6, 7, 8, 9) if ws.title == 'Resumen' else (8, 9, 10, 11, 12, 13)
                 if cell.row > 8 and cell.column in money_cols:
                     cell.number_format = '"$"#,##0.00'
         for col in range(1, ws.max_column + 1):

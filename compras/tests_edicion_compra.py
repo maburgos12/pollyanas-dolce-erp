@@ -277,7 +277,8 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(item_visible.intentos_compra_prefetched[0], compra.intento)
         self.assertEqual(len(item_visible.linea_orden.recepciones_prefetched), 1)
         resumen = construir_resumen_departamental({'estado': 'PENDIENTE_CONFIRMACION'})
-        self.assertEqual(resumen['resumen']['comprometido'], Decimal('200'))
+        # ENTREGADO conserva la compra histórica, pero ya no es Comprometido vigente.
+        self.assertEqual(resumen['resumen']['comprometido'], Decimal('0'))
 
         responsable = get_user_model().objects.create_user('responsable-area')
         AreaPresupuestoResponsable.objects.create(area=self.area, usuario=responsable, puede_capturar=True)

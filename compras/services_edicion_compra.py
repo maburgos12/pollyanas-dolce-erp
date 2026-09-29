@@ -69,7 +69,8 @@ def sincronizar_linea_orden(item, cotizacion, *, actor):
 @transaction.atomic
 def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
     from .services_departamentales import (
-        evaluar_presupuesto_item, liberar_compromiso_del_flujo, reservar_compromiso_del_flujo,
+        compromiso_actual_para_evaluar, evaluar_presupuesto_item,
+        liberar_compromiso_del_flujo, reservar_compromiso_del_flujo,
     )
 
     item = ItemCompraDepartamental.objects.select_for_update().select_related('solicitud__area').get(pk=cotizacion.item_id)
@@ -96,7 +97,10 @@ def editar_cotizacion(cotizacion, *, datos, version, motivo, actor):
     despues = snapshot_cotizacion(cotizacion)
     monetario = any(antes[name] != despues[name] for name in CAMPOS_MONETARIOS)
     if cotizacion.seleccionada and monetario:
-        evaluacion = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
+        evaluacion = evaluar_presupuesto_item(
+            item, cotizacion.total_adquisicion,
+            compromiso_excluido=compromiso_actual_para_evaluar(item),
+        )
         # Una reducción conserva la autorización existente cuando el presupuesto
         # no es calculable; un incremento siempre exige una nueva decisión.
         exceso_conocido = evaluacion.calculable and evaluacion.exceso > 0

@@ -33,6 +33,7 @@ from .models import (
 from .resumen_departamentales import construir_resumen_departamental, exportar_resumen_departamental
 from .access_departamentales import puede_gestionar_compras_departamentales
 from .services_departamentales import (
+    compromiso_actual_para_evaluar,
     confirmar_recepcion_departamental,
     decidir_exceso,
     evaluar_presupuesto_item,
@@ -394,7 +395,10 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         item.cotizacion_seleccionada = seleccionada
         if seleccionada:
             total_cotizado += seleccionada.total_adquisicion
-            item.evaluacion_presupuesto = evaluar_presupuesto_item(item, seleccionada.total_adquisicion)
+            item.evaluacion_presupuesto = evaluar_presupuesto_item(
+                item, seleccionada.total_adquisicion,
+                compromiso_excluido=compromiso_actual_para_evaluar(item),
+            )
         compromiso = getattr(intento, "compromiso", None) if intento else None
         if compromiso and compromiso.activo and compromiso.formalizado_en:
             total_comprometido += compromiso.monto
@@ -448,7 +452,10 @@ def departamental_direccion(request):
     for item in items:
         seleccionada = next((quote for quote in item.cotizaciones.all() if quote.seleccionada), None)
         if seleccionada:
-            item.evaluacion_presupuesto = evaluar_presupuesto_item(item, seleccionada.total_adquisicion)
+            item.evaluacion_presupuesto = evaluar_presupuesto_item(
+                item, seleccionada.total_adquisicion,
+                compromiso_excluido=compromiso_actual_para_evaluar(item),
+            )
     return render(
         request,
         "compras/departamentales/direccion.html",

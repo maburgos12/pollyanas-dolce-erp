@@ -16,6 +16,8 @@ from .models import (
     ItemCompraDepartamental as Item,
     CotizacionCompraDepartamental as Cotizacion,
     CompromisoCompraDepartamental as Compromiso,
+    IntentoCompraDepartamental as Intento,
+    ReembolsoCompraDepartamental as Reembolso,
 )
 
 
@@ -65,7 +67,8 @@ class ResumenDepartamentalTests(TestCase):
         item = self.item(solicitud)
         quote = self.cotizacion(item)
         self.cotizacion(item, seleccionada=False, costo_unitario=999)
-        Compromiso.objects.create(item=item, cotizacion=quote, monto=Decimal('270.20'), formalizado_en=timezone.now())
+        intento = Intento.objects.create(item=item, cotizacion=quote)
+        Compromiso.objects.create(item=item, intento=intento, cotizacion=quote, monto=Decimal('270.20'), formalizado_en=timezone.now())
         sin_estimacion = self.item(solicitud, costo_unitario_estimado=None)
         quote2 = self.cotizacion(sin_estimacion)
         Compromiso.objects.create(item=sin_estimacion, cotizacion=quote2, monto=999)  # reserva, no orden
@@ -137,10 +140,92 @@ class ResumenDepartamentalTests(TestCase):
     def test_consulta_no_crece_por_articulo(self):
         from .resumen_departamentales import construir_resumen_departamental
         for _ in range(5):
-            self.cotizacion(self.item())
-        with self.assertNumQueries(2):
+            item = self.item()
+            quote = self.cotizacion(item)
+            intento = Intento.objects.create(item=item, cotizacion=quote,
+                                            estado=Intento.ESTADO_REEMBOLSO_SOLICITADO,
+                                            reembolso_solicitado=Decimal('100'))
+            for _ in range(2):
+                Reembolso.objects.create(intento=intento, importe=Decimal('10'),
+                                        fecha=timezone.localdate(), registrado_por=self.user)
+        with self.assertNumQueries(4):
             contexto = construir_resumen_departamental({})
         self.assertEqual(contexto['resumen']['articulos'], 5)
+        self.assertEqual(contexto['resumen']['reembolso_pendiente'], Decimal('400'))
+        self.assertEqual(contexto['resumen']['reembolsado'], Decimal('100'))
+
+    def test_reembolso_parcial_total_y_reemplazo_son_importes_separados(self):
+        item = self.item()
+        anterior = self.cotizacion(item, seleccionada=False, cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('1000'))
+        intento_anterior = Intento.objects.create(
+            item=item, cotizacion=anterior, estado=Intento.ESTADO_REEMBOLSO_SOLICITADO,
+            reembolso_solicitado=Decimal('1000'),
+        )
+        Compromiso.objects.create(item=item, intento=intento_anterior, cotizacion=anterior,
+                                 monto=Decimal('1000'), formalizado_en=timezone.now())
+        Reembolso.objects.create(intento=intento_anterior, importe=Decimal('250'),
+                                fecha=timezone.localdate(), registrado_por=self.user)
+        nueva = self.cotizacion(item, cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('500'))
+        vigente = Intento.objects.create(item=item, cotizacion=nueva)
+        Compromiso.objects.create(item=item, intento=vigente, cotizacion=nueva,
+                                 monto=Decimal('500'), formalizado_en=timezone.now())
+
+        response = self.client.get(self.url)
+        total = response.context['resumen']
+        self.assertEqual((total['comprometido'], total['reembolso_pendiente'], total['reembolsado']),
+                         (Decimal('500'), Decimal('750'), Decimal('250')))
+        self.assertContains(response, 'Comprometido vigente')
+        self.assertContains(response, 'Reembolso pendiente')
+        self.assertContains(response, 'Reembolsado')
+        self.assertEqual(response.context['items'][0].resumen_reembolso_pendiente, Decimal('750'))
+        self.assertEqual(response.context['departamentos'][0]['reembolsado'], Decimal('250'))
+
+        Reembolso.objects.create(intento=intento_anterior, importe=Decimal('750'),
+                                fecha=timezone.localdate(), registrado_por=self.user)
+        intento_anterior.estado = Intento.ESTADO_REEMBOLSADO
+        intento_anterior.save(update_fields=['estado'])
+        total = self.client.get(self.url).context['resumen']
+        self.assertEqual((total['comprometido'], total['reembolso_pendiente'], total['reembolsado']),
+                         (Decimal('500'), Decimal('0'), Decimal('1000')))
+
+    def test_comprometido_excluye_intentos_cancelados_y_entregados(self):
+        for estado in (Intento.ESTADO_CANCELADO_SIN_PAGO, Intento.ESTADO_ENTREGADO):
+            item = self.item()
+            quote = self.cotizacion(item)
+            intento = Intento.objects.create(item=item, cotizacion=quote, estado=estado)
+            Compromiso.objects.create(item=item, intento=intento, cotizacion=quote,
+                                     monto=Decimal('300'), formalizado_en=timezone.now())
+        total = self.client.get(self.url).context['resumen']
+        self.assertEqual(total['comprometido'], Decimal('0'))
+
+    def test_excel_conserva_estructura_y_tres_importes_numericos_sin_formulas(self):
+        item = self.item()
+        quote = self.cotizacion(item, seleccionada=False)
+        intento = Intento.objects.create(item=item, cotizacion=quote,
+                                        estado=Intento.ESTADO_REEMBOLSO_SOLICITADO,
+                                        reembolso_solicitado=Decimal('1000'))
+        Reembolso.objects.create(intento=intento, importe=Decimal('250'),
+                                fecha=timezone.localdate(), registrado_por=self.user)
+        nueva = self.cotizacion(item, cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('500'))
+        vigente = Intento.objects.create(item=item, cotizacion=nueva)
+        Compromiso.objects.create(item=item, intento=vigente, cotizacion=nueva,
+                                 monto=Decimal('500'), formalizado_en=timezone.now())
+        response = self.client.get(self.url, {'exportar': 'xlsx'})
+        wb = load_workbook(BytesIO(response.content), data_only=False)
+        self.assertEqual(wb.sheetnames, ['Resumen', 'Artículos'])
+        for ws in wb:
+            headers = [cell.value for cell in ws[8]]
+            for title, expected in [('Comprometido vigente', 500), ('Reembolso pendiente', 750), ('Reembolsado', 250)]:
+                col = headers.index(title) + 1
+                self.assertEqual(ws.cell(9, col).value, expected)
+                self.assertEqual(ws.cell(9, col).data_type, 'n')
+                self.assertEqual(ws.cell(9, col).number_format, '"$"#,##0.00')
+                if ws.title == 'Resumen':
+                    self.assertEqual(ws.cell(10, col).value, expected)
+            self.assertEqual(ws.freeze_panes, 'B9')
+            self.assertTrue(ws.auto_filter.ref.startswith('A8:'))
+            self.assertEqual(ws.print_title_rows, '$8:$8')
+            self.assertFalse(any(cell.data_type == 'f' for row in ws for cell in row))
 
     def test_vacio_es_cero_sin_advertencia_de_datos_faltantes(self):
         response = self.client.get(self.url)

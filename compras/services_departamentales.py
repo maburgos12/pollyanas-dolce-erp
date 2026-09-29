@@ -76,7 +76,16 @@ def _lineas_presupuesto(item):
     )
 
 
-def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> EvaluacionPresupuesto:
+def compromiso_actual_para_evaluar(item):
+    """Solo el compromiso que se reemplazará al reevaluar esta selección."""
+    return CompromisoCompraDepartamental.objects.filter(item=item, activo=True).filter(
+        Q(intento__isnull=True) | Q(intento__estado=IntentoCompraDepartamental.ESTADO_VIGENTE)
+    ).order_by('-pk').first()
+
+
+def evaluar_presupuesto_item(
+    item: ItemCompraDepartamental, costo: Decimal, compromiso_excluido=None,
+) -> EvaluacionPresupuesto:
     lineas = _lineas_presupuesto(item)
     totales = lineas.aggregate(presupuesto=Sum("monto_presupuesto"), real=Sum("monto_real"))
     # Ausencia de partida y gasto real desconocido no equivalen a cero.
@@ -84,17 +93,15 @@ def evaluar_presupuesto_item(item: ItemCompraDepartamental, costo: Decimal) -> E
     gasto_real = totales["real"]
     compromisos = None
     if presupuesto is not None:
-        compromisos = (
-            CompromisoCompraDepartamental.objects.filter(
+        compromisos_qs = CompromisoCompraDepartamental.objects.filter(
                 activo=True,
                 item__rubro_id=item.rubro_id,
                 item__solicitud__area=item.solicitud.area,
                 item__solicitud__periodo=item.solicitud.periodo,
             )
-            .exclude(item=item)
-            .aggregate(total=Sum("monto"))["total"]
-            or Decimal("0")
-        )
+        if compromiso_excluido is not None:
+            compromisos_qs = compromisos_qs.exclude(pk=compromiso_excluido.pk)
+        compromisos = compromisos_qs.aggregate(total=Sum("monto"))["total"] or Decimal("0")
     calculable = presupuesto is not None and gasto_real is not None
     disponible_antes = presupuesto - gasto_real - compromisos if calculable else None
     disponible_despues = disponible_antes - costo if calculable else None
@@ -148,7 +155,10 @@ def seleccionar_cotizacion(cotizacion: CotizacionCompraDepartamental, *, actor):
     CotizacionCompraDepartamental.objects.filter(item=item).update(seleccionada=False)
     cotizacion.seleccionada = True
     cotizacion.save(update_fields=["seleccionada"])
-    resultado = evaluar_presupuesto_item(item, cotizacion.total_adquisicion)
+    resultado = evaluar_presupuesto_item(
+        item, cotizacion.total_adquisicion,
+        compromiso_excluido=compromiso_actual_para_evaluar(item),
+    )
     if resultado.requiere_dg or revision_pendiente:
         liberar_compromiso_del_flujo(item)
         item.estado = ItemCompraDepartamental.ESTADO_ESPERANDO_DG

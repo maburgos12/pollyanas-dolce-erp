@@ -31,7 +31,7 @@ from compras.models import (
     SolicitudCompraDepartamental,
 )
 from compras.tests_edicion_compra import _CompraDepartamentalBase
-from compras.services_departamentales import generar_ordenes_departamentales, seleccionar_cotizacion
+from compras.services_departamentales import evaluar_presupuesto_item, generar_ordenes_departamentales, seleccionar_cotizacion
 from compras.services_intentos_compra import (
     cancelar_articulo_definitivamente, cancelar_intento_compra, registrar_reembolso_compra,
 )
@@ -41,6 +41,35 @@ from maestros.models import Proveedor
 
 
 class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
+    def test_reemplazo_conserva_exposicion_pendiente_sin_duplicar_su_reserva(self):
+        intento = self._intento(pagado=True)
+        compra = intento.compra
+        compra.importe_final = Decimal('1000')
+        compra.save(update_fields=['importe_final'])
+        compromiso = intento.compromiso
+        compromiso.monto = Decimal('1000')
+        compromiso.save(update_fields=['monto'])
+        self._cancelar(intento, reembolso_solicitado_en=timezone.localdate(),
+                       reembolso_solicitado=Decimal('1000'))
+        reemplazo = CotizacionCompraDepartamental.objects.create(
+            item=self.item, proveedor=self.proveedor,
+            cantidad_ofertada=Decimal('1'), costo_unitario=Decimal('500'),
+        )
+        resultado = seleccionar_cotizacion(reemplazo, actor=self.user)
+        self.assertEqual(resultado.compromisos_previos, Decimal('1000'))
+        self.assertEqual(resultado.disponible_despues, Decimal('8500'))
+        reserva = CompromisoCompraDepartamental.objects.get(item=self.item, intento__isnull=True, activo=True)
+        reevaluacion = evaluar_presupuesto_item(self.item, Decimal('500'), compromiso_excluido=reserva)
+        self.assertEqual(reevaluacion.compromisos_previos, Decimal('1000'))
+        self.assertEqual(reevaluacion.disponible_despues, Decimal('8500'))
+        generar_ordenes_departamentales([self.item], actor=self.user)
+        reemplazo_vigente = self.item.intento_vigente
+        con_orden = evaluar_presupuesto_item(
+            self.item, Decimal('500'), compromiso_excluido=reemplazo_vigente.compromiso,
+        )
+        self.assertEqual(con_orden.compromisos_previos, Decimal('1000'))
+        self.assertEqual(con_orden.disponible_despues, Decimal('8500'))
+
     def _intento(self, *, pagado=False):
         generar_ordenes_departamentales([self.item], actor=self.user)
         intento = self.item.intento_vigente
