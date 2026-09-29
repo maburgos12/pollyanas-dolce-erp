@@ -751,6 +751,80 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
         intento.refresh_from_db()
         self.assertEqual(intento.estado, IntentoCompraDepartamental.ESTADO_REEMBOLSADO)
 
+    def test_cargos_adicionales_tienen_cero_predeterminado_y_admiten_total_documentado(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
+
+        intento.reembolso_solicitado = Decimal("318.56")
+        intento.reembolso_cargos_adicionales = Decimal("119.00")
+        intento.save(update_fields=["reembolso_solicitado", "reembolso_cargos_adicionales"])
+
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("318.56"))
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("119.00"))
+
+    def test_cargos_adicionales_rechazan_negativos_sin_total_y_mayores_al_total(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        for total, cargos, mensaje in (
+            (None, Decimal("-0.01"), "no pueden ser negativos"),
+            (None, Decimal("1.00"), "requieren una solicitud de reembolso"),
+            (Decimal("318.56"), Decimal("318.57"), "no pueden superar el total"),
+        ):
+            with self.subTest(total=total, cargos=cargos):
+                intento.reembolso_solicitado = total
+                intento.reembolso_cargos_adicionales = cargos
+                with self.assertRaisesMessage(ValidationError, mensaje):
+                    intento.save(update_fields=["reembolso_solicitado", "reembolso_cargos_adicionales"])
+
+        intento.refresh_from_db()
+        self.assertIsNone(intento.reembolso_solicitado)
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
+
+    def test_cargos_adicionales_no_admiten_update_ni_bulk_update(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        with self.assertRaises(ValidationError):
+            IntentoCompraDepartamental.objects.filter(pk=intento.pk).update(
+                reembolso_cargos_adicionales=Decimal("1.00"),
+            )
+
+        intento.reembolso_cargos_adicionales = Decimal("1.00")
+        with self.assertRaises(ValidationError):
+            IntentoCompraDepartamental.objects.bulk_update(
+                [intento], ["reembolso_cargos_adicionales"],
+            )
+
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("0.00"))
+
+    def test_update_fields_generador_valida_valores_efectivos_de_total_y_cargos(self):
+        intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
+        intento.reembolso_solicitado = Decimal("318.56")
+        intento.reembolso_cargos_adicionales = Decimal("119.00")
+        intento.save(update_fields=(campo for campo in (
+            "reembolso_solicitado", "reembolso_cargos_adicionales",
+        )))
+
+        intento.reembolso_solicitado = Decimal("100.00")
+        with self.assertRaisesMessage(ValidationError, "no pueden superar el total"):
+            intento.save(update_fields=(campo for campo in ("reembolso_solicitado",)))
+
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("318.56"))
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("119.00"))
+
+        ReembolsoCompraDepartamental.objects.create(
+            intento=intento, importe=Decimal("200.00"), fecha=timezone.localdate(),
+            registrado_por=self.user,
+        )
+        intento.reembolso_cargos_adicionales = Decimal("100.00")
+        intento.reembolso_solicitado = Decimal("199.00")
+        with self.assertRaisesMessage(ValidationError, "no puede ser menor que lo reembolsado"):
+            intento.save(update_fields=(campo for campo in ("reembolso_solicitado",)))
+
+        intento.refresh_from_db()
+        self.assertEqual(intento.reembolso_solicitado, Decimal("318.56"))
+        self.assertEqual(intento.reembolso_cargos_adicionales, Decimal("119.00"))
+
     def test_update_fields_generador_persiste_solicitud_validada(self):
         intento = self.crear_intento(IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO)
         intento.reembolso_solicitado = Decimal("1000")
