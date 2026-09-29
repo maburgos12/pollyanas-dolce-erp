@@ -98,6 +98,11 @@ def evaluar_presupuesto_item(
                 item__rubro_id=item.rubro_id,
                 item__solicitud__area=item.solicitud.area,
                 item__solicitud__periodo=item.solicitud.periodo,
+            ).filter(
+                Q(intento__isnull=True) | Q(intento__estado__in=[
+                    IntentoCompraDepartamental.ESTADO_VIGENTE,
+                    IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO,
+                ])
             )
         if compromiso_excluido is not None:
             compromisos_qs = compromisos_qs.exclude(pk=compromiso_excluido.pk)

@@ -20,7 +20,7 @@
   <section class="cd-kpis cd-financial-kpis">
     <article><span>Solicitado</span><strong>${{ total_solicitado|floatformat:2|intcomma }}</strong><small>Estimación opcional del área</small></article>
     <article><span>Cotizado</span><strong>${{ total_cotizado|floatformat:2|intcomma }}</strong><small>Propuestas definitivas seleccionadas</small></article>
-    <article><span>Comprometido</span><strong>${{ total_comprometido|floatformat:2|intcomma }}</strong><small>Separado del gasto real para no duplicar</small></article>
+    <article><span>Comprometido vigente</span><strong>${{ total_comprometido|floatformat:2|intcomma }}</strong><small>Órdenes activas aún vigentes</small></article>
     <article><span>Gastado</span><strong>${{ total_gastado|floatformat:2|intcomma }}</strong><small>Solo cuando lo reconoce la fuente financiera</small></article>
   </section>
   {% if es_compras and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
@@ -100,7 +100,7 @@
           <div class="cd-budget-grid">
             <div><span>Presupuesto</span><strong>{% if evaluacion.presupuesto_asignado %}${{ evaluacion.presupuesto|floatformat:2|intcomma }}{% else %}Sin presupuesto asignado{% endif %}</strong></div>
             <div><span>Gasto real acumulado</span><strong>{% if evaluacion.gasto_real is not None %}− ${{ evaluacion.gasto_real|floatformat:2|intcomma }}{% else %}No disponible{% endif %}</strong></div>
-            <div><span>Otros compromisos de la partida</span><strong>{% if evaluacion.presupuesto_asignado %}− ${{ evaluacion.compromisos_previos|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
+            <div><span>Compromisos y reembolsos pendientes de la partida</span><strong>{% if evaluacion.presupuesto_asignado %}− ${{ evaluacion.compromisos_previos|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
             <div><span>Disponible antes</span><strong>{% if evaluacion.calculable %}${{ evaluacion.disponible_antes|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>
             <div><span>Compra seleccionada</span><strong>− ${{ evaluacion.costo_seleccionado|floatformat:2|intcomma }}</strong></div>
             <div class="projected"><span>Disponible proyectado</span><strong>{% if evaluacion.calculable %}${{ evaluacion.disponible_despues|floatformat:2|intcomma }}{% else %}No calculable{% endif %}</strong></div>

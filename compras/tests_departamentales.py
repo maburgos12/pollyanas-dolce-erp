@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from core.access import can_manage_compras
 from core.navigation import build_nav_groups
@@ -169,6 +170,33 @@ class ComprasDepartamentalesDomainTests(TestCase):
         self.assertEqual(resultado.compromisos_previos, Decimal("3000.00"))
         self.assertEqual(resultado.disponible_antes, Decimal("4500.00"))
         self.assertEqual(resultado.exceso, Decimal("500.00"))
+
+    def test_evaluacion_cuenta_vigente_y_reembolso_pendiente_pero_no_entregado_ni_reembolsado(self):
+        solicitud = self.crear_solicitud()
+        for estado, monto in (
+            (IntentoCompraDepartamental.ESTADO_VIGENTE, '200'),
+            (IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO, '1000'),
+            (IntentoCompraDepartamental.ESTADO_ENTREGADO, '300'),
+            (IntentoCompraDepartamental.ESTADO_REEMBOLSADO, '400'),
+            (IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO, '500'),
+        ):
+            item = ItemCompraDepartamental.objects.create(
+                solicitud=solicitud, descripcion=estado, cantidad=1, rubro=self.rubro,
+            )
+            quote = CotizacionCompraDepartamental.objects.create(
+                item=item, proveedor=self.proveedor_a, cantidad_ofertada=1, costo_unitario=Decimal(monto),
+            )
+            intento = IntentoCompraDepartamental.objects.create(item=item, cotizacion=quote, estado=estado)
+            CompromisoCompraDepartamental.objects.create(
+                item=item, intento=intento, cotizacion=quote, monto=Decimal(monto),
+                activo=True, formalizado_en=timezone.now(),
+            )
+        candidato = ItemCompraDepartamental.objects.create(
+            solicitud=solicitud, descripcion='Nuevo equipo', cantidad=1, rubro=self.rubro,
+        )
+        resultado = evaluar_presupuesto_item(candidato, Decimal('500'))
+        self.assertEqual(resultado.compromisos_previos, Decimal('1200'))
+        self.assertEqual(resultado.disponible_despues, Decimal('5800'))
 
     def test_presupuesto_ausente_no_toma_dinero_del_area_y_requiere_dg(self):
         for caso in ('sin_rubro', 'inactivo', 'otra_area', 'sin_linea'):

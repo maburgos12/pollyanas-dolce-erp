@@ -15,7 +15,7 @@ from compras.models import (CotizacionCompraDepartamental, ItemCompraDepartament
                             CompraRealizadaDepartamental, CompromisoCompraDepartamental,
                             HistorialCotizacionDepartamental, IntentoCompraDepartamental,
                             AvisoCompraDepartamental)
-from compras.services_departamentales import seleccionar_cotizacion, generar_ordenes_departamentales
+from compras.services_departamentales import evaluar_presupuesto_item, seleccionar_cotizacion, generar_ordenes_departamentales
 from compras.services_edicion_compra import (corregir_compra_realizada, registrar_compra_realizada,
                                              sincronizar_linea_orden, tiene_compra_o_recepcion, validar_edicion,
                                              tiene_recepcion_historica)
@@ -276,9 +276,16 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertEqual(item_visible.compra_realizada, compra)
         self.assertEqual(item_visible.intentos_compra_prefetched[0], compra.intento)
         self.assertEqual(len(item_visible.linea_orden.recepciones_prefetched), 1)
+        self.assertEqual(detalle.context['total_comprometido'], Decimal('0'))
+        self.assertContains(detalle, 'Comprometido vigente')
+        self.assertContains(detalle, 'Compromisos y reembolsos pendientes de la partida')
         resumen = construir_resumen_departamental({'estado': 'PENDIENTE_CONFIRMACION'})
         # ENTREGADO conserva la compra histórica, pero ya no es Comprometido vigente.
         self.assertEqual(resumen['resumen']['comprometido'], Decimal('0'))
+        nuevo = self.solicitud.items.create(descripcion='Reemplazo posterior', cantidad=1, rubro=self.rubro)
+        evaluacion = evaluar_presupuesto_item(nuevo, Decimal('100'))
+        self.assertEqual(evaluacion.compromisos_previos, Decimal('0'))
+        self.assertEqual(evaluacion.disponible_despues, Decimal('9900'))
 
         responsable = get_user_model().objects.create_user('responsable-area')
         AreaPresupuestoResponsable.objects.create(area=self.area, usuario=responsable, puede_capturar=True)

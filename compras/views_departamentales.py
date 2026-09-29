@@ -400,7 +400,8 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
                 compromiso_excluido=compromiso_actual_para_evaluar(item),
             )
         compromiso = getattr(intento, "compromiso", None) if intento else None
-        if compromiso and compromiso.activo and compromiso.formalizado_en:
+        if (intento and intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
+                and compromiso and compromiso.activo and compromiso.formalizado_en):
             total_comprometido += compromiso.monto
         total_gastado += item.monto_gastado
     return render(
