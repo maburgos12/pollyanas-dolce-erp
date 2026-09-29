@@ -5,6 +5,10 @@ from pos_bridge.models.historical_inventory import (
     PointHistoricalInventoryClosingLine,
 )
 from pos_bridge.models.movements import PointConversionLine, PointProductionLine, PointTransferLine, PointWasteLine
+from pos_bridge.models.open_transfer_snapshot import (
+    PointOpenTransferSnapshot,
+    PointOpenTransferSnapshotMember,
+)
 from pos_bridge.models.product import PointProduct, PointProductCategory
 from pos_bridge.models.product_history import (
     PointProductCostReconciliation,
@@ -57,6 +61,8 @@ __all__ = [
     "PointConversionLine",
     "PointProductionLine",
     "PointTransferLine",
+    "PointOpenTransferSnapshot",
+    "PointOpenTransferSnapshotMember",
     "PointSyncJob",
     "PointExtractionLog",
 ]

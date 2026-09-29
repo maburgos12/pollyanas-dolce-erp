@@ -352,6 +352,10 @@ class ProducidoVsVendidoCanonicalBalanceTests(TestCase):
         self.assertIn('Periodo mostrado: Agosto 2026', rendered)
         self.assertIn('requestSubmit()', rendered)
         self.assertIn('styles.css?v=20260926-production-table-v3', rendered)
+        self.assertIn(
+            'href="/reportes/auditoria-inventario/?month=2026-08">Auditar por sucursal</a>',
+            rendered,
+        )
 
     def test_partial_point_data_is_summarized_without_exposing_technical_wall(self):
         sources = canonical_balance().sources

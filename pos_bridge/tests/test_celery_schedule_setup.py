@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+from datetime import date, datetime, time, timedelta
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings
+
+from pos_bridge.services.open_transfer_sync_service import open_transfer_close_window
 
 
 @override_settings(TIME_ZONE="America/Mazatlan")
@@ -128,6 +131,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: produccion diario",
                 "pos_bridge: transferencias diario",
                 "pos_bridge: transferencias abiertas diario",
+                "pos_bridge: evidencia cierre transferencias abiertas diario",
                 "pos_bridge: inventario realtime",
                 "pos_bridge: recetas semanal",
                 "pos_bridge: retry jobs fallidos",
@@ -157,7 +161,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 42)
+        self.assertEqual(PeriodicTask.objects.count(), 43)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -199,6 +203,34 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(inventory_close.crontab.hour, "23")
         self.assertEqual(inventory_close.crontab.minute, "0")
         self.assertEqual(inventory_close.kwargs, '{"capture_costs": false}')
+        open_logistics = PeriodicTask.objects.get(
+            name="pos_bridge: transferencias abiertas diario"
+        )
+        self.assertEqual(open_logistics.task, "pos_bridge.open_transfer_sync")
+        self.assertEqual(open_logistics.crontab.hour, "22")
+        self.assertEqual(open_logistics.crontab.minute, "5")
+        open_close = PeriodicTask.objects.get(
+            name="pos_bridge: evidencia cierre transferencias abiertas diario"
+        )
+        self.assertEqual(
+            open_close.task,
+            "pos_bridge.open_transfer_closing_snapshot",
+        )
+        self.assertEqual(open_close.crontab.hour, "1")
+        self.assertEqual(open_close.crontab.minute, "10")
+        self.assertEqual(str(open_close.crontab.timezone), "America/Mazatlan")
+        operational_date = date(2026, 8, 31)
+        cutoff, window_end = open_transfer_close_window(operational_date)
+        scheduled_at = datetime.combine(
+            operational_date + timedelta(days=1),
+            time(
+                int(open_close.crontab.hour),
+                int(open_close.crontab.minute),
+            ),
+            tzinfo=cutoff.tzinfo,
+        )
+        self.assertLessEqual(cutoff, scheduled_at)
+        self.assertLessEqual(scheduled_at, window_end)
         close_email = PeriodicTask.objects.get(name="recetas: inventario final cierre email")
         self.assertEqual(close_email.task, "recetas.inventario_final_cierre_email")
         self.assertEqual(close_email.crontab.hour, "1")
@@ -259,6 +291,37 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(auto_close.crontab.day_of_month, "5")
         self.assertEqual(auto_close.crontab.hour, "6")
         self.assertEqual(auto_close.crontab.minute, "0")
+
+    def test_closing_open_transfer_schedule_updates_without_duplicates(self):
+        from django_celery_beat.models import CrontabSchedule, PeriodicTask
+
+        call_command("setup_celery_schedules")
+        task = PeriodicTask.objects.get(
+            name="pos_bridge: evidencia cierre transferencias abiertas diario"
+        )
+        wrong_cron = CrontabSchedule.objects.create(
+            minute="45",
+            hour="9",
+            day_of_week="*",
+            day_of_month="*",
+            month_of_year="*",
+            timezone="America/Mazatlan",
+        )
+        task.crontab = wrong_cron
+        task.save(update_fields=["crontab"])
+
+        call_command("setup_celery_schedules")
+        call_command("setup_celery_schedules")
+
+        self.assertEqual(
+            PeriodicTask.objects.filter(
+                name="pos_bridge: evidencia cierre transferencias abiertas diario"
+            ).count(),
+            1,
+        )
+        task.refresh_from_db()
+        self.assertEqual(task.crontab.hour, "1")
+        self.assertEqual(task.crontab.minute, "10")
 
     def test_respects_orchestration_schedule_overrides(self):
         from django_celery_beat.models import PeriodicTask

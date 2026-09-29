@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
+from django.db import connection
 from django.test import SimpleTestCase, TestCase
 
 from core.models import Sucursal
@@ -20,6 +22,7 @@ from pos_bridge.services.historical_inventory_capture import (
     HistoricalPointInventoryClosingCapture,
     resolve_stock_at_close,
 )
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from recetas.models import Receta
 
 
@@ -134,6 +137,59 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(first.closing.pk, second.closing.pk)
         self.assertEqual(PointHistoricalInventoryClosing.objects.count(), 1)
         self.assertEqual(client.login_calls, 2)
+
+    def test_capture_locks_operational_month_inside_persistence_transaction(self):
+        client = _FakePointClient(
+            history_by_key={
+                ("1", "857"): [
+                    {
+                        "Fecha": "2026-07-31T22:00:00",
+                        "FK_Movimiento": 123,
+                        "Movimiento": "VENTA",
+                        "Existencia_anterior": 4,
+                        "Existencia_nueva": 3,
+                        "Cancelado": False,
+                    }
+                ]
+            },
+            current_by_product={"857": [{"PK_Sucursal": 1, "Cantidad": 2}]},
+        )
+        baseline_depth = len(connection.atomic_blocks)
+        acquired_months = []
+        lock_depths = []
+        persistence_saw_lock = []
+        real_get_or_create = PointHistoricalInventoryClosing.objects.get_or_create
+
+        def acquire(values):
+            lock_depths.append(len(connection.atomic_blocks))
+            result = lock_product_month_sources(values)
+            acquired_months.extend(result)
+            return result
+
+        def get_or_create_after_lock(*args, **kwargs):
+            persistence_saw_lock.append(bool(acquired_months))
+            return real_get_or_create(*args, **kwargs)
+
+        with (
+            patch(
+                "pos_bridge.services.historical_inventory_capture.lock_product_month_sources",
+                side_effect=acquire,
+            ),
+            patch.object(
+                PointHistoricalInventoryClosing.objects,
+                "get_or_create",
+                side_effect=get_or_create_after_lock,
+            ),
+        ):
+            HistoricalPointInventoryClosingCapture(client=client).capture(
+                operational_date=date(2026, 7, 31),
+                branches=[self.branch],
+                products=[self.product],
+            )
+
+        self.assertEqual(acquired_months, [date(2026, 7, 1)])
+        self.assertEqual(lock_depths, [baseline_depth + 1])
+        self.assertEqual(persistence_saw_lock, [True])
 
     def test_unresolved_manifest_is_saved_as_draft_not_verified(self):
         client = _FakePointClient(

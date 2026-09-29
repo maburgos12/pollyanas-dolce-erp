@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% load humanize static %}
+
+{% block title %}Auditoría de inventario - ERP{% endblock %}
+{% block body_class %}page-inventory-audit{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/inventory_audit_v1.css' %}">{% endblock %}
+
+{% block content %}
+<div class="container inventory-audit-shell">
+  <header class="inventory-audit-heading">
+    <div>
+      <a class="inventory-audit-back" href="{% url 'reportes:producido_vs_vendido' %}{% if selected_month %}?periodo={{ selected_month }}{% endif %}">← Producido vs Vendido</a>
+      <h1>Auditoría de inventario por sucursal</h1>
+      <p>Compara lo que debió quedar con el cierre de Point y concentra primero lo que necesita revisión.</p>
+    </div>
+    {% if run %}
+    <p class="inventory-audit-period"><strong>{{ run.month|date:"F Y"|capfirst }}</strong><span>{% if run.status == 'READY' %}Fuentes completas{% else %}Hay fuentes por completar{% endif %}</span></p>
+    {% endif %}
+  </header>
+
+  <section class="inventory-audit-kpis" aria-label="Resumen del mes">
+    <div><span>Cuadran con Point</span><strong>{{ kpis.balanced|intcomma }}</strong></div>
+    <div><span>Pendientes</span><strong>{{ kpis.pending|intcomma }}</strong></div>
+    <div><span>Pendientes de aprobación</span><strong>{{ kpis.pending_approval|intcomma }}</strong></div>
+  </section>
+
+  <form class="inventory-audit-filters" method="get" aria-label="Filtros de auditoría">
+    <input name="tab" type="hidden" value="{{ selected_tab }}">
+    <label for="inventory-audit-month">Mes
+      <input id="inventory-audit-month" name="month" type="month" value="{{ selected_month }}" required>
+    </label>
+    <label for="inventory-audit-branch">Ubicación
+      <select id="inventory-audit-branch" name="branch">
+        <option value="">Todas</option>
+        {% for branch in branches %}
+        <option value="{{ branch.branch_id }}"{% if selected_branch == branch.branch_id|stringformat:"s" %} selected{% endif %}>{{ branch.branch__name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label for="inventory-audit-status">Estado
+      <select id="inventory-audit-status" name="status">
+        <option value="">Todos</option>
+        {% for value, label in status_options %}
+        <option value="{{ value }}"{% if selected_status == value %} selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button class="btn btn-primary" type="submit">Aplicar filtros</button>
+  </form>
+
+  <nav class="inventory-audit-tabs" aria-label="Conjunto de resultados">
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=exceptions"{% if selected_tab == 'exceptions' %} aria-current="page"{% endif %}>Excepciones <span>{{ tab_counts.exceptions }}</span></a>
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Conciliados <span>{{ tab_counts.balanced }}</span></a>
+  </nav>
+
+  {% if run and run.status == 'SOURCE_INCOMPLETE' %}
+  <div class="inventory-audit-notice" role="status">
+    <strong>El mes todavía no puede conciliarse completo.</strong>
+    <span>Se conserva la última revisión disponible y no se muestran ceros como si fueran datos confirmados.</span>
+  </div>
+  {% endif %}
+
+  <section class="inventory-audit-results" aria-labelledby="inventory-audit-results-title">
+    <div class="inventory-audit-results-heading">
+      <div>
+        <h2 id="inventory-audit-results-title">{% if selected_tab == 'balanced' %}Productos conciliados{% else %}Productos por revisar{% endif %}</h2>
+        <p>{% if selected_tab == 'balanced' %}Estos productos cuadran con Point o tienen una explicación aprobada.{% else %}La diferencia por sí sola no determina merma ni responsabilidad; abre el caso para seguir la evidencia.{% endif %}</p>
+      </div>
+      <span>{{ result_count }} resultado{{ result_count|pluralize }}</span>
+    </div>
+    {% if page_obj and page_obj.paginator.num_pages > 1 %}
+    <nav class="inventory-audit-pagination" aria-label="Páginas de resultados">
+      {% if page_obj.has_previous %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.previous_page_number }}">← Anterior</a>{% endif %}
+      <span>Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span>
+      {% if page_obj.has_next %}<a href="?{% if pagination_query %}{{ pagination_query }}&amp;{% endif %}page={{ page_obj.next_page_number }}">Siguiente →</a>{% endif %}
+    </nav>
+    {% endif %}
+    {% if cases %}
+    <div class="table-responsive inventory-audit-table-wrap" tabindex="0" aria-label="Resultados de auditoría; desplázate para ver todas las columnas">
+      <table class="inventory-audit-table">
+        <colgroup>
+          <col class="inventory-audit-col-product">
+          <col class="inventory-audit-col-location">
+          <col class="inventory-audit-col-difference">
+          <col class="inventory-audit-col-cause">
+          <col class="inventory-audit-col-status">
+          <col class="inventory-audit-col-action">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">Producto</th>
+            <th scope="col">Ubicación</th>
+            <th class="text-end" scope="col">Diferencia</th>
+            <th scope="col">Posible causa</th>
+            <th scope="col">Estado</th>
+            <th scope="col">Revisar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for case in cases %}
+          <tr class="{% if case.movement_status == 'BALANCED' or case.movement_status == 'RESOLVED' %}is-secondary{% else %}is-exception{% endif %}">
+            <td><strong>{{ case.product.name }}</strong>{% if case.product.sku %}<small>{{ case.product.sku }}</small>{% endif %}</td>
+            <td>{{ case.branch.name }}</td>
+            <td class="text-end"><span class="inventory-audit-difference is-{{ case.movement_status|lower }}">{{ case.difference|floatformat:"-4"|intcomma }}</span></td>
+            <td>{{ case.ui_possible_cause }}</td>
+            <td><span class="inventory-audit-status is-{{ case.movement_status|lower }}">{{ case.ui_movement_status }}</span></td>
+            <td><a class="inventory-audit-review-link" href="{% url 'reportes:inventory_audit_case' case.pk %}">Ver trazabilidad<span aria-hidden="true"> →</span></a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="inventory-audit-empty">
+      <strong>No hay productos para estos filtros.</strong>
+      <p>Cambia la ubicación o el estado. Si el mes aún no tiene corrida, primero debe completarse la conciliación mensual.</p>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

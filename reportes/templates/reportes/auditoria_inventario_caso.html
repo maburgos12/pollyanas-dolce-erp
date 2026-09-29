@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% load humanize static %}
+
+{% block title %}Trazabilidad de {{ case.product.name }} - ERP{% endblock %}
+{% block body_class %}page-inventory-audit{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/inventory_audit_v1.css' %}">{% endblock %}
+
+{% block content %}
+<div class="container inventory-audit-shell inventory-audit-detail" id="inventory-audit-case-{{ case.pk }}">
+  <header class="inventory-audit-heading">
+    <div>
+      <a class="inventory-audit-back" href="{% url 'reportes:inventory_audit' %}?month={{ case.month|date:'Y-m' }}">← Auditoría del mes</a>
+      <h1>{{ case.product.name }}</h1>
+      <p>{{ case.branch.name }} · {{ case.month|date:"F Y"|capfirst }}{% if case.product.sku %} · {{ case.product.sku }}{% endif %}</p>
+    </div>
+    <p class="inventory-audit-difference-summary"><span>Diferencia</span><strong>{{ case.difference|floatformat:"-4"|intcomma }}</strong></p>
+  </header>
+
+  <section class="inventory-audit-state-strip" aria-label="Estado del caso">
+    <div><span>Cierre Point</span><strong>{{ status.point }}</strong></div>
+    <div><span>Movimientos</span><strong>{{ status.movement }}</strong></div>
+    <div><span>Conteo físico</span><strong>{{ status.physical }}</strong></div>
+  </section>
+
+  <section class="inventory-audit-explanation">
+    <h2>Qué se está conciliando</h2>
+    <p>Partimos del inventario con el que inició el mes, sumamos entradas, restamos salidas y comparamos el resultado esperado con el cierre de Point.</p>
+    <p><strong>Lectura actual:</strong> {{ possible_cause }}.</p>
+  </section>
+
+  <section class="inventory-audit-balance" aria-labelledby="balance-title">
+    <div class="inventory-audit-results-heading">
+      <div><h2 id="balance-title">Secuencia del saldo</h2><p>Los pasos se presentan en el mismo orden del cálculo mensual.</p></div>
+    </div>
+    <ol class="inventory-audit-balance-list">
+      {% for step in balance_steps %}
+      <li data-balance-step="{{ step.field }}" class="{% if step.field == 'expected_closing' or step.field == 'difference' %}is-total{% endif %}">
+        <span class="inventory-audit-step-number">{{ step.number }}</span>
+        <span class="inventory-audit-step-label">{{ step.label }}</span>
+        <span class="inventory-audit-step-operator" aria-hidden="true">{{ step.operator }}</span>
+        <strong>{{ step.value|floatformat:"-4"|intcomma }}</strong>
+        {% if step.evidence %}
+        <details class="inventory-audit-step-evidence">
+          <summary>Ver evidencia ({{ step.evidence|length }})</summary>
+          <ul>
+            {% for evidence in step.evidence %}
+            <li>
+              {% if evidence.available %}
+              <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
+              <dl>
+                <div><dt>{% if evidence.source_quantity is not None %}Impacto aplicado{% else %}Cantidad{% endif %}</dt><dd>{% if evidence.quantity_is_text %}{{ evidence.quantity }}{% else %}{{ evidence.quantity|floatformat:"-4"|intcomma }}{% endif %}</dd></div>
+                {% if evidence.source_quantity is not None %}<div><dt>{{ evidence.source_quantity_label }}</dt><dd>{{ evidence.source_quantity|floatformat:"-4"|intcomma }}</dd></div>{% endif %}
+                <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
+                <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
+              </dl>
+              {% else %}
+              <div><strong>{{ evidence.source }}</strong><span>{{ evidence.message }}</span></div>
+              <p>Referencia conservada: Point #{{ evidence.source_id }}</p>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% if undirected_evidence %}
+    <section class="inventory-audit-undirected" aria-labelledby="undirected-evidence-title">
+      <h3 id="undirected-evidence-title">Evidencia sin dirección disponible</h3>
+      <p>Este caso fue generado antes de que la fuente conservara si el movimiento era entrada o salida. No se asigna a un paso por suposición.</p>
+      <ul>
+        {% for evidence in undirected_evidence %}
+        <li>
+          {% if evidence.available %}
+          <div><strong>{{ evidence.source }}</strong><span>{{ evidence.date }} · {{ evidence.location }}</span></div>
+          <dl>
+            <div><dt>Cantidad</dt><dd>{{ evidence.quantity }}</dd></div>
+            <div><dt>Responsable</dt><dd>{{ evidence.actor }}</dd></div>
+            <div><dt>Referencia Point</dt><dd>{{ evidence.reference }}</dd></div>
+          </dl>
+          {% else %}
+          <div><strong>{{ evidence.source }}</strong><span>{{ evidence.message }}</span></div>
+          <p>Referencia conservada: Point #{{ evidence.source_id }}</p>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  </section>
+
+  {% if can_explain or can_review %}
+  <section class="inventory-audit-actions" aria-labelledby="actions-title">
+    <div class="inventory-audit-results-heading"><div><h2 id="actions-title">Resolver el caso</h2><p>La explicación queda en historial y debe revisarla una persona distinta.</p></div></div>
+    {% if can_explain %}
+    <form method="post" action="{% url 'reportes:inventory_audit_explain' case.pk %}" enctype="multipart/form-data" data-async-action>
+      {% csrf_token %}
+      <label>Causa identificada
+        <select name="reason_code" required>
+          <option value="">Selecciona una causa</option>
+          <option value="TRANSFER_PENDING">Transferencia pendiente o desfasada</option>
+          <option value="CONVERSION">Conversión o producto rebanado</option>
+          <option value="WASTE">Merma registrada o pendiente</option>
+          <option value="PRODUCTION">Producción por aclarar</option>
+          <option value="SALE">Venta por aclarar</option>
+          <option value="STOCK_ELSEWHERE">Producto localizado en otra ubicación</option>
+          <option value="OTHER">Otra causa comprobable</option>
+        </select>
+      </label>
+      <label>Explicación
+        <textarea name="notes" maxlength="4000" rows="4" required placeholder="Indica qué ocurrió, cuándo y qué evidencia lo demuestra."></textarea>
+      </label>
+      <label>Evidencia opcional
+        <input type="file" name="evidence" accept=".pdf,.jpg,.jpeg,.png,.webp">
+      </label>
+      <button class="btn btn-primary" type="submit" data-pending-label="Procesando…">Enviar a aprobación</button>
+    </form>
+    {% endif %}
+    {% if can_review %}
+    <div class="inventory-audit-review-context">
+      <strong>Explicación recibida: {{ latest_explanation.ui_reason_label }}</strong>
+      <p>{{ latest_explanation.notes }}</p>
+    </div>
+    <div class="inventory-audit-review-actions">
+      <form method="post" action="{% url 'reportes:inventory_audit_approve' case.pk %}" data-async-action>
+        {% csrf_token %}
+        <input type="hidden" name="reason_code" value="REVIEWED">
+        <label>Comentario de aprobación<textarea name="notes" maxlength="4000" rows="3" placeholder="Qué evidencia confirma la explicación."></textarea></label>
+        <button class="btn btn-primary" type="submit" data-pending-label="Procesando…">Aprobar explicación</button>
+      </form>
+      <form method="post" action="{% url 'reportes:inventory_audit_reject' case.pk %}" data-async-action>
+        {% csrf_token %}
+        <input type="hidden" name="reason_code" value="INSUFFICIENT">
+        <label>Motivo del rechazo<textarea name="notes" maxlength="4000" rows="3" required placeholder="Indica qué evidencia o relación falta."></textarea></label>
+        <button class="btn btn-secondary" type="submit" data-pending-label="Procesando…">Solicitar corrección</button>
+      </form>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="inventory-audit-history" aria-labelledby="history-title">
+    <div class="inventory-audit-results-heading"><div><h2 id="history-title">Historial del caso</h2><p>Las explicaciones y decisiones permanecen como evidencia de auditoría.</p></div></div>
+    {% if events %}
+    <ol>
+      {% for event in events %}
+      <li><strong>{{ event.get_action_display }} · {{ event.ui_reason_label }}</strong><span>{{ event.created_at|date:"d/m/Y H:i" }} · {{ event.actor.get_full_name|default:event.actor.username|default:"Sistema" }}</span><p>{{ event.notes }}</p>{% if event.evidence %}<a href="{% url 'reportes:inventory_audit_evidence' case.pk event.pk %}">Descargar evidencia</a>{% endif %}</li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="inventory-audit-muted">Todavía no hay explicaciones ni decisiones registradas.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

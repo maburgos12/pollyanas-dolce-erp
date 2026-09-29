@@ -9,11 +9,127 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 
+from reportes.storage import inventory_audit_evidence_storage
+
 from bonos_produccion.models import (
     AREA_ARMADO as _BONOS_AREA_ARMADO,
     AREA_EMBETUNADO as _BONOS_AREA_EMBETUNADO,
     AREA_HORNOS as _BONOS_AREA_HORNOS,
 )
+
+
+PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS = (
+    "created",
+    "updated",
+    "unchanged",
+    "reopened",
+    "balanced",
+    "exceptions",
+    "source_incomplete",
+)
+PRODUCT_INVENTORY_AUDIT_ISSUE_REQUIRED_KEYS = frozenset({"code", "message"})
+PRODUCT_INVENTORY_AUDIT_ISSUE_ALLOWED_KEYS = frozenset(
+    {"code", "message", "branch_id", "product_id", "source_ids"}
+)
+
+
+def default_product_inventory_audit_summary() -> dict[str, int]:
+    return {key: 0 for key in PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS}
+
+
+def _is_non_negative_integer(value) -> bool:
+    return type(value) is int and value >= 0
+
+
+def _is_positive_integer_or_none(value) -> bool:
+    return value is None or (type(value) is int and value > 0)
+
+
+def _validate_product_inventory_audit_summary(summary) -> None:
+    if not isinstance(summary, dict):
+        raise ValidationError({"summary": "Debe ser un objeto."})
+    if set(summary) != set(PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS):
+        raise ValidationError(
+            {"summary": "Debe contener exactamente los contadores conocidos."}
+        )
+    if not all(_is_non_negative_integer(value) for value in summary.values()):
+        raise ValidationError(
+            {"summary": "Cada contador debe ser un entero no negativo."}
+        )
+
+
+def _validate_product_inventory_audit_source_issues(source_issues) -> None:
+    if not isinstance(source_issues, list):
+        raise ValidationError({"source_issues": "Debe ser una lista."})
+    for issue in source_issues:
+        if not isinstance(issue, dict):
+            raise ValidationError(
+                {"source_issues": "Cada incidencia debe ser un objeto."}
+            )
+        keys = set(issue)
+        if not PRODUCT_INVENTORY_AUDIT_ISSUE_REQUIRED_KEYS.issubset(keys):
+            raise ValidationError(
+                {"source_issues": "Cada incidencia requiere code y message."}
+            )
+        if not keys.issubset(PRODUCT_INVENTORY_AUDIT_ISSUE_ALLOWED_KEYS):
+            raise ValidationError(
+                {"source_issues": "La incidencia contiene campos desconocidos."}
+            )
+        if not isinstance(issue["code"], str) or not issue["code"].strip():
+            raise ValidationError(
+                {"source_issues": "code debe ser texto no vacío."}
+            )
+        if not isinstance(issue["message"], str) or not issue["message"].strip():
+            raise ValidationError(
+                {"source_issues": "message debe ser texto no vacío."}
+            )
+        for key in ("branch_id", "product_id"):
+            if key in issue and not _is_positive_integer_or_none(issue[key]):
+                raise ValidationError(
+                    {"source_issues": f"{key} debe ser un entero positivo o null."}
+                )
+        source_ids = issue.get("source_ids", [])
+        if not isinstance(source_ids, list) or not all(
+            type(source_id) is int and source_id > 0 for source_id in source_ids
+        ):
+            raise ValidationError(
+                {"source_issues": "source_ids debe ser una lista de enteros positivos."}
+            )
+
+
+def _validate_product_inventory_audit_issue_codes(issue_codes) -> None:
+    if not isinstance(issue_codes, list) or not all(
+        isinstance(code, str) and code.strip() for code in issue_codes
+    ):
+        raise ValidationError(
+            {"issue_codes": "Debe ser una lista de códigos de texto no vacíos."}
+        )
+
+
+def _validate_product_inventory_audit_source_trace(source_trace) -> None:
+    if not isinstance(source_trace, dict):
+        raise ValidationError({"source_trace": "Debe ser un objeto."})
+
+
+def _validate_inventory_audit_choice(*, field: str, value, allowed_values) -> None:
+    if value not in allowed_values:
+        raise ValidationError({field: "El estado seleccionado no es válido."})
+
+
+class _NoBulkMutationQuerySet(models.QuerySet):
+    _BULK_OPERATION_ERROR = (
+        "Este registro no admite operaciones masivas; "
+        "debe guardarse individualmente con validación."
+    )
+
+    def update(self, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_create(self, objs, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
 
 
 class CentroCosto(models.Model):
@@ -3298,3 +3414,339 @@ class DistribucionISNEmpleado(models.Model):
                 name="uniq_isn_expediente_empleado",
             )
         ]
+
+
+class ProductInventoryAuditRunQuerySet(_NoBulkMutationQuerySet):
+    pass
+
+
+class ProductInventoryAuditRun(models.Model):
+    class Status(models.TextChoices):
+        READY = "READY", "Lista"
+        SOURCE_INCOMPLETE = "SOURCE_INCOMPLETE", "Fuente incompleta"
+
+    month = models.DateField(unique=True, db_index=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.READY)
+    source_issues = models.JSONField(default=list, blank=True)
+    summary = models.JSONField(
+        default=default_product_inventory_audit_summary,
+        blank=True,
+    )
+    calculation_fingerprint = models.CharField(max_length=64)
+    started_at = models.DateTimeField(null=True, blank=True)
+    rebuilt_at = models.DateTimeField(null=True, blank=True)
+    last_successful_rebuild_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    objects = ProductInventoryAuditRunQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-month", "-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(month__day=1),
+                name="inv_audit_run_month_day_1",
+            ),
+            models.CheckConstraint(
+                check=models.Q(status__in=("READY", "SOURCE_INCOMPLETE")),
+                name="inv_audit_run_status_valid",
+            ),
+        ]
+        verbose_name = "Corrida de auditoría de inventario"
+        verbose_name_plural = "Corridas de auditoría de inventario"
+
+    def clean(self):
+        super().clean()
+        if self.month:
+            self.month = self.month.replace(day=1)
+        _validate_inventory_audit_choice(
+            field="status",
+            value=self.status,
+            allowed_values=self.Status.values,
+        )
+        _validate_product_inventory_audit_source_issues(self.source_issues)
+        _validate_product_inventory_audit_summary(self.summary)
+
+    def save(self, *args, **kwargs):
+        _validate_inventory_audit_choice(
+            field="status",
+            value=self.status,
+            allowed_values=self.Status.values,
+        )
+        _validate_product_inventory_audit_source_issues(self.source_issues)
+        _validate_product_inventory_audit_summary(self.summary)
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"Auditoría de inventario {self.month:%Y-%m}"
+
+
+class ProductInventoryAuditCaseQuerySet(_NoBulkMutationQuerySet):
+    pass
+
+
+class ProductInventoryAuditCase(models.Model):
+    class PointClosingStatus(models.TextChoices):
+        AVAILABLE = "AVAILABLE", "Disponible"
+        PROTECTED = "PROTECTED", "Protegido"
+
+    class MovementStatus(models.TextChoices):
+        BALANCED = "BALANCED", "Conciliado"
+        NEEDS_EXPLANATION = "NEEDS_EXPLANATION", "Pendiente de explicación"
+        PENDING_APPROVAL = "PENDING_APPROVAL", "Explicación pendiente de aprobación"
+        RESOLVED = "RESOLVED", "Resuelto y aprobado"
+        SOURCE_INCOMPLETE = "SOURCE_INCOMPLETE", "Fuente incompleta"
+
+    class PhysicalStatus(models.TextChoices):
+        NOT_AVAILABLE = "NOT_AVAILABLE", "Sin conteo manual"
+
+    run = models.ForeignKey(
+        ProductInventoryAuditRun,
+        on_delete=models.PROTECT,
+        related_name="cases",
+    )
+    month = models.DateField(db_index=True)
+    branch = models.ForeignKey(
+        "pos_bridge.PointBranch",
+        on_delete=models.PROTECT,
+        related_name="inventory_audit_cases",
+    )
+    product = models.ForeignKey(
+        "pos_bridge.PointProduct",
+        on_delete=models.PROTECT,
+        related_name="inventory_audit_cases",
+    )
+    opening_point = models.DecimalField(max_digits=18, decimal_places=4)
+    production = models.DecimalField(max_digits=18, decimal_places=4)
+    sales = models.DecimalField(max_digits=18, decimal_places=4)
+    waste = models.DecimalField(max_digits=18, decimal_places=4)
+    transfer_in = models.DecimalField(max_digits=18, decimal_places=4)
+    transfer_out = models.DecimalField(max_digits=18, decimal_places=4)
+    conversion_in = models.DecimalField(max_digits=18, decimal_places=4)
+    conversion_out = models.DecimalField(max_digits=18, decimal_places=4)
+    identified_adjustment = models.DecimalField(max_digits=18, decimal_places=4)
+    expected_closing = models.DecimalField(max_digits=18, decimal_places=4)
+    point_closing = models.DecimalField(max_digits=18, decimal_places=4)
+    difference = models.DecimalField(max_digits=18, decimal_places=4)
+    point_closing_status = models.CharField(
+        max_length=16,
+        choices=PointClosingStatus.choices,
+        default=PointClosingStatus.AVAILABLE,
+    )
+    movement_status = models.CharField(
+        max_length=24,
+        choices=MovementStatus.choices,
+        default=MovementStatus.NEEDS_EXPLANATION,
+    )
+    physical_status = models.CharField(
+        max_length=20,
+        choices=PhysicalStatus.choices,
+        default=PhysicalStatus.NOT_AVAILABLE,
+    )
+    issue_codes = models.JSONField(default=list, blank=True)
+    source_trace = models.JSONField(default=dict, blank=True)
+    calculation_fingerprint = models.CharField(max_length=64, db_index=True)
+    rebuilt_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    objects = ProductInventoryAuditCaseQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["month", "branch_id", "product_id"]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(month__day=1),
+                name="inv_audit_case_month_day_1",
+            ),
+            models.UniqueConstraint(
+                fields=["month", "branch", "product"],
+                name="uniq_inv_audit_month_branch_product",
+            ),
+            models.CheckConstraint(
+                check=models.Q(point_closing_status__in=("AVAILABLE", "PROTECTED")),
+                name="inv_audit_point_status_valid",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    movement_status__in=(
+                        "BALANCED",
+                        "NEEDS_EXPLANATION",
+                        "PENDING_APPROVAL",
+                        "RESOLVED",
+                        "SOURCE_INCOMPLETE",
+                    )
+                ),
+                name="inv_audit_move_status_valid",
+            ),
+            models.CheckConstraint(
+                check=models.Q(physical_status="NOT_AVAILABLE"),
+                name="inv_audit_physical_status_valid",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["month", "movement_status"],
+                name="inv_audit_month_move_idx",
+            ),
+            models.Index(fields=["month", "branch"], name="inv_audit_month_branch_idx"),
+            models.Index(
+                fields=["month", "point_closing_status"],
+                name="inv_audit_month_point_idx",
+            ),
+        ]
+        permissions = [
+            ("approve_product_inventory_audit", "Puede aprobar auditorías de inventario"),
+        ]
+        verbose_name = "Caso de auditoría de inventario"
+        verbose_name_plural = "Casos de auditoría de inventario"
+
+    def clean(self):
+        super().clean()
+        if self.month:
+            self.month = self.month.replace(day=1)
+        if self.run_id and self.month and self.run.month != self.month:
+            raise ValidationError({"month": "Debe coincidir con el mes de la corrida."})
+        self._validate_statuses()
+        _validate_product_inventory_audit_issue_codes(self.issue_codes)
+        _validate_product_inventory_audit_source_trace(self.source_trace)
+
+    def save(self, *args, **kwargs):
+        if self.run_id and self.month and self.run.month != self.month:
+            raise ValidationError({"month": "Debe coincidir con el mes de la corrida."})
+        self._validate_statuses()
+        _validate_product_inventory_audit_issue_codes(self.issue_codes)
+        _validate_product_inventory_audit_source_trace(self.source_trace)
+        return super().save(*args, **kwargs)
+
+    def _validate_statuses(self) -> None:
+        _validate_inventory_audit_choice(
+            field="point_closing_status",
+            value=self.point_closing_status,
+            allowed_values=self.PointClosingStatus.values,
+        )
+        _validate_inventory_audit_choice(
+            field="movement_status",
+            value=self.movement_status,
+            allowed_values=self.MovementStatus.values,
+        )
+        _validate_inventory_audit_choice(
+            field="physical_status",
+            value=self.physical_status,
+            allowed_values=self.PhysicalStatus.values,
+        )
+
+    def __str__(self) -> str:
+        return f"{self.month:%Y-%m} · {self.branch} · {self.product}"
+
+
+class ProductInventoryAuditEventQuerySet(_NoBulkMutationQuerySet):
+    _BULK_OPERATION_ERROR = (
+        "Los eventos de auditoría no admiten operaciones masivas; "
+        "deben registrarse individualmente."
+    )
+
+    def update(self, **kwargs):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+    def delete(self):
+        raise ValidationError(self._BULK_OPERATION_ERROR)
+
+
+class ProductInventoryAuditEvent(models.Model):
+    class Action(models.TextChoices):
+        EXPLAIN = "EXPLAIN", "Explicar"
+        APPROVE = "APPROVE", "Aprobar"
+        REJECT = "REJECT", "Rechazar"
+        REOPEN = "REOPEN", "Reabrir"
+
+    case = models.ForeignKey(
+        ProductInventoryAuditCase,
+        on_delete=models.PROTECT,
+        related_name="events",
+    )
+    action = models.CharField(max_length=12, choices=Action.choices)
+    reason_code = models.CharField(max_length=80)
+    notes = models.TextField(blank=True, default="")
+    evidence = models.FileField(
+        storage=inventory_audit_evidence_storage,
+        upload_to="",
+        null=True,
+        blank=True,
+    )
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="product_inventory_audit_events",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    related_event = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="dependent_events",
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+    objects = ProductInventoryAuditEventQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        default_manager_name = "objects"
+        indexes = [
+            models.Index(fields=["case", "created_at"], name="inv_audit_event_case_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    ~models.Q(action__in=("APPROVE", "REJECT"))
+                    | models.Q(related_event__isnull=False)
+                ),
+                name="inv_audit_review_has_explain",
+            ),
+            models.CheckConstraint(
+                check=models.Q(action__in=("EXPLAIN", "APPROVE", "REJECT", "REOPEN")),
+                name="inv_audit_event_action_valid",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(reason_code__regex=r"^\s*$"),
+                name="inv_audit_event_reason_nonempty",
+            ),
+        ]
+        verbose_name = "Evento de auditoría de inventario"
+        verbose_name_plural = "Eventos de auditoría de inventario"
+
+    def clean(self):
+        super().clean()
+        _validate_inventory_audit_choice(
+            field="action",
+            value=self.action,
+            allowed_values=self.Action.values,
+        )
+        if not isinstance(self.reason_code, str) or not self.reason_code.strip():
+            raise ValidationError({"reason_code": "Debe indicar una causa."})
+        if not isinstance(self.metadata, dict):
+            raise ValidationError({"metadata": "Debe ser un objeto."})
+        if self.action in {self.Action.APPROVE, self.Action.REJECT}:
+            related = self.related_event
+            if (
+                related is None
+                or related.action != self.Action.EXPLAIN
+                or related.case_id != self.case_id
+            ):
+                raise ValidationError(
+                    {"related_event": "Debe apuntar a una explicación del mismo caso."}
+                )
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("Los eventos de auditoría son inmutables.")
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Los eventos de auditoría no pueden eliminarse.")
+
+    def __str__(self) -> str:
+        return f"{self.case_id} · {self.action} · {self.created_at}"

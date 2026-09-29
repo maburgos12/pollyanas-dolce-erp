@@ -751,6 +751,51 @@ def task_open_transfer_sync(
 
 
 @shared_task(
+    name="pos_bridge.open_transfer_closing_snapshot",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+    acks_late=True,
+    time_limit=1800,
+)
+def task_open_transfer_closing_snapshot(
+    self,
+    *,
+    triggered_by_id: int | None = None,
+):
+    operational_date = timezone.localdate() - timedelta(days=1)
+    user = _resolve_user(triggered_by_id)
+    try:
+        with point_account_session_lock(wait=False) as acquired:
+            if not acquired:
+                raise TimeoutError(
+                    "Point está ocupado con otra sincronización de cuenta."
+                )
+            job = OpenTransferSyncService().sync_open_transfers(
+                fecha=operational_date,
+                branch_filter=None,
+                triggered_by=user,
+            )
+    except Exception as exc:
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        raise
+
+    if job.status != PointSyncJob.STATUS_SUCCESS:
+        error = RuntimeError(
+            job.error_message
+            or (
+                "La captura de transferencias abiertas no terminó "
+                f"correctamente: {job.status}."
+            )
+        )
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=error)
+        raise error
+    return _serialize_job(job)
+
+
+@shared_task(
     name="reportes.analytics_refresh_cycle",
     bind=True,
     max_retries=1,

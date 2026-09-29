@@ -16,6 +16,7 @@ from pos_bridge.models import (
     PointHistoricalInventoryClosingLine,
     PointProduct,
 )
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 
 
 HISTORY_LIMIT = 500
@@ -240,6 +241,7 @@ class HistoricalPointInventoryClosingCapture:
         }
 
         with transaction.atomic():
+            lock_product_month_sources([operational_date])
             closing, created = PointHistoricalInventoryClosing.objects.get_or_create(
                 operational_date=operational_date,
                 source_fingerprint=fingerprint,
