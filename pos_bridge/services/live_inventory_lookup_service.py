@@ -239,29 +239,35 @@ class PointLiveInventoryLookupService:
         sucursal: Sucursal,
         point_branch: PointBranch | None,
     ) -> dict[str, Any]:
-        target_ids = {str(point_branch.external_id).strip()} if point_branch and point_branch.external_id else set()
+        target_id = str(point_branch.external_id or "").strip() if point_branch else ""
+        id_matches = [
+            row for row in stock_rows
+            if target_id and str(_first_present(row, ("PK_Sucursal", "pk_sucursal", "SucursalID", "id_sucursal")) or "").strip() == target_id
+        ]
+        if len(id_matches) == 1:
+            return id_matches[0]
+        if id_matches or target_id.isdigit():
+            raise PointLiveInventoryLookupError("Point no devolvió una existencia única para el identificador de sucursal solicitado.")
+
+        names = (point_branch.name,) if point_branch else (sucursal.codigo, sucursal.nombre)
         target_names = {
             normalize_text(value)
-            for value in (
-                getattr(point_branch, "name", "") if point_branch else "",
-                sucursal.codigo,
-                sucursal.nombre,
-            )
+            for value in names
             if value
         }
-        for row in stock_rows:
-            row_id = str(_first_present(row, ("PK_Sucursal", "pk_sucursal", "SucursalID", "id_sucursal")) or "").strip()
-            if row_id and row_id in target_ids:
-                return row
-            row_name = normalize_text(str(_first_present(row, ("Sucursal", "sucursal", "NombreSucursal", "name")) or ""))
-            if row_name and row_name in target_names:
-                return row
-        raise PointLiveInventoryLookupError("Point no devolvió existencia para la sucursal solicitada.")
+        target_names.discard("")
+        name_matches = [
+            row for row in stock_rows
+            if normalize_text(str(_first_present(row, ("Sucursal", "sucursal", "NombreSucursal", "name")) or "")) in target_names
+        ]
+        if len(name_matches) == 1:
+            return name_matches[0]
+        raise PointLiveInventoryLookupError("Point no devolvió una existencia única para la sucursal solicitada.")
 
     def _cache_key(self, *, codes: list[str], sucursal: Sucursal, point_branch: PointBranch | None) -> str:
         code_key = ",".join(normalizar_codigo_point(code) for code in codes)
         branch_key = str(point_branch.external_id if point_branch else sucursal.codigo).strip().lower()
-        return f"pos_bridge:pickup_live_point:v2:{code_key}:{branch_key}"
+        return f"pos_bridge:pickup_live_point:v3:{code_key}:{branch_key}"
 
     def _result_to_cache(self, result: PointLiveInventoryResult) -> dict[str, Any]:
         return {

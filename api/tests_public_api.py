@@ -512,22 +512,28 @@ class PublicApiTests(APITestCase):
         PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0,
     )
     def test_pickup_availability_prefers_live_point_stock(self):
+        self.sucursal.codigo = "CRUCERO"
+        self.sucursal.nombre = "Sucursal Bamoa"
+        self.sucursal.save(update_fields=["codigo", "nombre"])
+        self.point_branch.external_id = "Bamoa"
+        self.point_branch.name = "Bamoa"
+        self.point_branch.save(update_fields=["external_id", "name"])
         PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=5), stock=Decimal("0"))
         live_result = PointLiveInventoryResult(
-            product_code="01PSV",
-            product_name="Pastel Selva Negra",
-            point_product_id="1001",
-            point_branch_id="1",
-            point_branch_name="Matriz",
+            product_code="POINT-SOURCE-CODE",
+            product_name="Point source product",
+            point_product_id="101",
+            point_branch_id="2",
+            point_branch_name="Bamoa",
             stock_qty=Decimal("7"),
             captured_at=timezone.now(),
-            raw_payload={"Cantidad": 7, "Sucursal": "Matriz"},
+            raw_payload={"Cantidad": 7, "Sucursal": "Bamoa"},
         )
 
         with patch("pos_bridge.services.live_inventory_lookup_service.PointLiveInventoryLookupService.get_stock", return_value=live_result):
             response = self.client.get(
                 reverse("api_public_pickup_availability"),
-                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                {"product_code": "01PSV", "branch_code": "Bamoa", "quantity": "1"},
                 **self._auth_headers(),
             )
 
@@ -535,6 +541,13 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["status"], "AVAILABLE")
         self.assertEqual(response.data["source"], "ERP_POS_BRIDGE_LIVE_POINT")
         self.assertEqual(response.data["available_to_promise"], "6")
+        self.assertEqual(response.data["branch_code"], "CRUCERO")
+        self.assertIn("point_branch_id", response.data)
+        self.assertEqual(response.data["point_branch_id"], "2")
+        self.assertEqual(response.data["point_branch_name"], "Bamoa")
+        self.assertEqual(response.data["point_product_id"], "101")
+        self.assertEqual(response.data["point_product_code"], "POINT-SOURCE-CODE")
+        self.assertEqual(response.data["point_product_name"], "Point source product")
 
     @override_settings(
         SECURE_SSL_REDIRECT=False,
@@ -561,6 +574,9 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["status"], "UNKNOWN")
         self.assertEqual(response.data["source"], "ERP_POS_BRIDGE")
         self.assertEqual(response.data["available_to_promise"], "4.000")
+        for field in ("point_product_id", "point_product_code", "point_product_name", "point_branch_id", "point_branch_name"):
+            self.assertIn(field, response.data)
+            self.assertIsNone(response.data[field])
 
     @override_settings(
         PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,

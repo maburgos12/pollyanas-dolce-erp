@@ -19,7 +19,7 @@ from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente, PickupReservation, SeguimientoPedido
 from crm.services.sucursal_resolution import SucursalResolutionError, resolve_sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
-from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryLookupService
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryLookupService, PointLiveInventoryResult
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -53,6 +53,7 @@ class PickupAvailability:
     status: str
     stock_source: str = "ERP_POS_BRIDGE"
     stock_captured_at: datetime | None = None
+    live_result: PointLiveInventoryResult | None = None
 
     @property
     def available(self) -> bool:
@@ -65,6 +66,11 @@ class PickupAvailability:
             "product_name": self.receta.nombre,
             "branch_code": self.sucursal.codigo,
             "branch_name": self.sucursal.nombre,
+            "point_product_id": self.live_result.point_product_id if self.live_result else None,
+            "point_product_code": self.live_result.product_code if self.live_result else None,
+            "point_product_name": self.live_result.product_name if self.live_result else None,
+            "point_branch_id": self.live_result.point_branch_id if self.live_result else None,
+            "point_branch_name": self.live_result.point_branch_name if self.live_result else None,
             "available": self.available,
             "stock_qty": str(self.snapshot_stock_qty),
             "reserved_qty": str(self.reserved_qty),
@@ -370,6 +376,7 @@ class PickupAvailabilityService:
             status=status,
             stock_source=stock_source,
             stock_captured_at=stock_captured_at,
+            live_result=live_result,
         )
 
     @transaction.atomic

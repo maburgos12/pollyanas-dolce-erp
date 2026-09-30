@@ -151,7 +151,63 @@ class PointLiveInventoryLookupServiceTests(TestCase):
             point_branch=self.point_branch,
         )
 
-        self.assertIn("pickup_live_point:v2:", key)
+        self.assertIn("pickup_live_point:v3:", key)
+
+    def test_exact_point_id_wins_over_earlier_historical_erp_name(self):
+        self.client.get_stock_products.return_value = [
+            {"PK": 101, "Codigo": "PASTEL-1", "Nombre": "Pastel", "isInsumo": False}
+        ]
+        self.client.get_product_stock.return_value = [
+            {"PK_Sucursal": 10, "Sucursal": "Crucero", "Cantidad": 0},
+            {"PK_Sucursal": 2, "Sucursal": "Bamoa", "Cantidad": 3},
+        ]
+        result = self._service().get_stock(
+            product_codes=["PASTEL-1"], sucursal=self.sucursal, point_branch=self.point_branch,
+        )
+        self.assertEqual((result.point_branch_id, result.point_branch_name, result.stock_qty),
+                         ("2", "Bamoa", Decimal("3")))
+
+    def test_ambiguous_or_missing_point_identity_fails_closed(self):
+        for rows in (
+            [{"PK_Sucursal": 2, "Sucursal": "Bamoa"}, {"PK_Sucursal": 2, "Sucursal": "Bamoa"}],
+            [{"PK_Sucursal": 10, "Sucursal": "Bamoa"}],
+            [{"Sucursal": "Bamoa"}],
+        ):
+            with self.subTest(rows=rows), self.assertRaises(PointLiveInventoryLookupError):
+                self._service()._find_branch_row(
+                    stock_rows=rows, sucursal=self.sucursal, point_branch=self.point_branch,
+                )
+
+    def test_nonnumeric_point_alias_uses_only_its_point_name(self):
+        self.point_branch.external_id = "Bamoa"
+        rows = [{"PK_Sucursal": 10, "Sucursal": "Crucero"}, {"PK_Sucursal": 2, "Sucursal": "Bamoa"}]
+        self.assertIs(self._service()._find_branch_row(
+            stock_rows=rows, sucursal=self.sucursal, point_branch=self.point_branch,
+        ), rows[1])
+        for candidates in (rows[:1], [rows[1], {"PK_Sucursal": 3, "Sucursal": "Bamoa"}]):
+            with self.subTest(rows=candidates), self.assertRaises(PointLiveInventoryLookupError):
+                self._service()._find_branch_row(
+                    stock_rows=candidates, sucursal=self.sucursal, point_branch=self.point_branch,
+                )
+
+    def test_legacy_erp_name_match_requires_one_candidate(self):
+        rows = [{"PK_Sucursal": 2, "Sucursal": "Sucursal Bamoa"}]
+        self.assertIs(self._service()._find_branch_row(
+            stock_rows=rows, sucursal=self.sucursal, point_branch=None,
+        ), rows[0])
+        with self.assertRaises(PointLiveInventoryLookupError):
+            self._service()._find_branch_row(
+                stock_rows=rows + [{"PK_Sucursal": 10, "Sucursal": "Crucero"}],
+                sucursal=self.sucursal, point_branch=None,
+            )
+
+    def test_blank_point_name_does_not_match_a_row_without_source_identity(self):
+        self.point_branch.external_id = "Bamoa"
+        self.point_branch.name = " "
+        with self.assertRaises(PointLiveInventoryLookupError):
+            self._service()._find_branch_row(
+                stock_rows=[{"Cantidad": 3}], sucursal=self.sucursal, point_branch=self.point_branch,
+            )
 
     @patch("pos_bridge.services.live_inventory_lookup_service.point_account_session_lock")
     def test_live_lookup_does_not_open_a_session_while_monthly_sync_owns_point(self, session_lock):
