@@ -2,6 +2,8 @@
 
 Fecha: 2026-09-30
 
+Aprobación operativa: el alcance retroactivo solicitado corresponde a Beatriz y Clarisela (solicitudes 281–284). El resto del rezago de la semana conserva su estado `PENDIENTE`; este despliegue no autoriza, rechaza, paga ni modifica tiempos.
+
 ## Resultado esperado
 
 Una hora extra pendiente al momento de ejecutar el corte no entra a esa nómina. Cuando se autorice después, queda disponible para el siguiente corte. Cada solicitud puede pertenecer a un solo corte y la pantalla debe mostrar claramente su situación de pago sin cambiar la fecha real trabajada.
