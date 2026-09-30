@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from decimal import Decimal
 import time
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import requests
@@ -140,6 +141,20 @@ class LiveSalePriceApiTests(APITestCase):
         response = self.read()
         self.assert_unknown(response, 503)
         self.assertNotIn("secret", str(response.data))
+
+    def test_real_login_malformed_json_returns_unknown_service_unavailable(self):
+        self.client.raise_request_exception = False
+        self.login_patch.stop()
+        self.settings_patch.stop()
+        from pos_bridge.tests.test_point_http_client import PointHttpSessionClientTests
+        settings = SimpleNamespace(base_url="https://point.test", username="reader", password="secret", timeout_ms=30000, retry_attempts=1)
+        for path in ("/Account/SignIn_click", "/Account/get_workSpaces", "/Account/SetCurrentAccount", "/Account/get_acctok"):
+            for payload in (None, []):
+                with self.subTest(path=path, payload=payload):
+                    transport = PointHttpSessionClientTests._login_transport(malformed_path=path, malformed_payload=payload)
+                    with patch("pos_bridge.config.load_point_bridge_settings", return_value=settings), patch("requests.Session.request", side_effect=transport):
+                        self.assert_unknown(self.read(), 503)
+        self.get_detail.assert_not_called()
 
     def test_busy_point_lock_does_not_login(self):
         with patch("pos_bridge.services.point_account_session_lock.point_account_session_lock", unavailable_lock):
