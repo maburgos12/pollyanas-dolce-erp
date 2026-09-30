@@ -74,10 +74,11 @@ class ProductsViewSet(ReadOnlyModelViewSet):
         finally:
             DEADLINE.reset(token)
 
+        point_ids = [detail[key] for key in ("PK_Producto", "PK") if key in detail] if isinstance(detail, dict) else []
         if (
             not isinstance(detail, dict)
-            or type(detail.get("PK")) not in (int, str)
-            or str(detail["PK"]) != product.external_id
+            or not point_ids
+            or any(type(value) not in (int, str) or str(value) != product.external_id for value in point_ids)
             or detail.get("Codigo") != product.sku
             or not product.name.strip()
             or detail.get("Nombre") != product.name
@@ -91,7 +92,7 @@ class ProductsViewSet(ReadOnlyModelViewSet):
         if not amount.is_finite() or amount <= 0:
             return Response(payload, status=status.HTTP_502_BAD_GATEWAY)
         payload.update(
-            status="VERIFIED", point_product_id=str(detail["PK"]),
+            status="VERIFIED", point_product_id=str(point_ids[0]),
             point_product_code=detail["Codigo"], point_product_name=detail["Nombre"],
             amount=str(amount), is_fresh=True, checked_at=checked_at.isoformat(),
         )
