@@ -8,7 +8,6 @@ from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from django.conf import settings
-from django.core.cache import cache
 from django.db import transaction
 from django.db.models import Max, Q, Sum
 from django.db.models.functions import Coalesce
@@ -97,10 +96,6 @@ class PickupAvailabilityService:
         configured_freshness = max(int(getattr(settings, "PICKUP_AVAILABILITY_FRESHNESS_MINUTES", 20)), 1)
         realtime_interval_minutes = max(int(os.getenv("POS_BRIDGE_REALTIME_INTERVAL_MINUTES", "0") or "0"), 0)
         self.freshness_minutes = max(configured_freshness, realtime_interval_minutes) if realtime_interval_minutes else configured_freshness
-        self.expiry_sweep_debounce_seconds = max(
-            int(getattr(settings, "PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS", 30)),
-            0,
-        )
         self.default_buffer_qty = self._decimal(getattr(settings, "PICKUP_STOCK_BUFFER_DEFAULT", "1"))
         self.low_stock_threshold = self._decimal(getattr(settings, "PICKUP_LOW_STOCK_THRESHOLD", "3"))
         self.default_ttl_minutes = max(int(getattr(settings, "PICKUP_RESERVATION_TTL_MINUTES", 15)), 1)
@@ -285,27 +280,16 @@ class PickupAvailabilityService:
             expires_at__lt=now,
         ).update(status=PickupReservation.STATUS_EXPIRED, released_at=now)
 
-    def _expire_stale_reservations_if_due(self) -> int:
-        if self.expiry_sweep_debounce_seconds <= 0:
-            return self.expire_stale_reservations()
-        if not cache.add(
-            "crm:pickup:expire_stale_reservations",
-            timezone.now().isoformat(),
-            timeout=self.expiry_sweep_debounce_seconds,
-        ):
-            return 0
-        return self.expire_stale_reservations()
-
-    def _reserved_qty(self, *, receta: Receta, sucursal: Sucursal, debounce_expiration: bool = False) -> Decimal:
-        if debounce_expiration:
-            self._expire_stale_reservations_if_due()
-        else:
-            self.expire_stale_reservations()
+    def _reserved_qty(self, *, receta: Receta, sucursal: Sucursal, now: datetime) -> Decimal:
         return (
             PickupReservation.objects.filter(
+                Q(status=PickupReservation.STATUS_CONFIRMED)
+                | (
+                    Q(status=PickupReservation.STATUS_ACTIVE)
+                    & (Q(expires_at__isnull=True) | Q(expires_at__gte=now))
+                ),
                 receta=receta,
                 sucursal=sucursal,
-                status__in=[PickupReservation.STATUS_ACTIVE, PickupReservation.STATUS_CONFIRMED],
             )
             .aggregate(total=Coalesce(Sum("quantity"), ZERO))
             .get("total")
@@ -317,8 +301,8 @@ class PickupAvailabilityService:
         receta = self._resolve_receta(product_code)
         sucursal, point_branch = self._resolve_sucursal(branch_code)
         point_product, snapshot = self._resolve_point_product(receta, point_branch)
-        reserved_qty = self._reserved_qty(receta=receta, sucursal=sucursal, debounce_expiration=True)
         now = timezone.now()
+        reserved_qty = self._reserved_qty(receta=receta, sucursal=sucursal, now=now)
         stock_qty = snapshot.stock if snapshot else ZERO
         stock_source = "ERP_POS_BRIDGE"
         stock_captured_at = None
