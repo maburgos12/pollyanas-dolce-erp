@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block title %}Activos - Planes de mantenimiento{% endblock %}
-{% block page_title %}Activos · Planes{% endblock %}
+{% block page_title %}Mantenimiento preventivo{% endblock %}
 {% block body_class %}page-activos-planes{% endblock %}
 
 {% block extra_css %}
@@ -10,11 +10,13 @@
 {% endblock %}
 
 {% block content %}
-<div class="module-tabs">
-  {% for tab in module_tabs %}
-    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
-  {% endfor %}
+
+<div class="quick-actions pd-mb-3">
+  <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
 </div>
+{% if not kpi.total %}
+<p class="alert alert-warning">Sin cobertura preventiva registrada. Crea un plan para programar el mantenimiento de un equipo.</p>
+{% endif %}
 
 <!-- KPIs -->
 <div class="planes-kpi">
@@ -23,15 +25,15 @@
     <div class="planes-kpi-label">Planes totales</div>
   </div>
   <div class="planes-kpi-card">
-    <div class="planes-kpi-num ok">{{ kpi.activos }}</div>
-    <div class="planes-kpi-label">Activos</div>
+    <div class="planes-kpi-num {% if kpi.total %}ok{% endif %}">{{ kpi.activos }}</div>
+    <div class="planes-kpi-label">Planes activos</div>
   </div>
   <div class="planes-kpi-card">
-    <div class="planes-kpi-num {% if kpi.vencidos %}bad{% else %}ok{% endif %}">{{ kpi.vencidos }}</div>
+    <div class="planes-kpi-num {% if kpi.vencidos %}bad{% elif kpi.total %}ok{% endif %}">{{ kpi.vencidos }}</div>
     <div class="planes-kpi-label">Vencidos</div>
   </div>
   <div class="planes-kpi-card">
-    <div class="planes-kpi-num {% if kpi.proximos_semana %}warn{% else %}ok{% endif %}">{{ kpi.proximos_semana }}</div>
+    <div class="planes-kpi-num {% if kpi.proximos_semana %}warn{% elif kpi.total %}ok{% endif %}">{{ kpi.proximos_semana }}</div>
     <div class="planes-kpi-label">Próximos 7 días</div>
   </div>
 </div>

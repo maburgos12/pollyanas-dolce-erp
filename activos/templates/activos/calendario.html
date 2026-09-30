@@ -4,11 +4,7 @@
 {% block page_title %}Activos · Calendario{% endblock %}
 
 {% block content %}
-<div class="module-tabs">
-  {% for tab in module_tabs %}
-    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
-  {% endfor %}
-</div>
+<div class="quick-actions pd-mb-3"><a class="btn btn-secondary" href="{% url 'activos:planes' %}">Volver a mantenimiento preventivo</a></div>
 
 <section class="card">
   <div class="card-header">Centro de mando ERP</div>
