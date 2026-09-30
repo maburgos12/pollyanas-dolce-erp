@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.utils import timezone
@@ -16,6 +17,10 @@ from logistica.models import (
     RutaEntrega,
 )
 from pos_bridge.models import PointBranch, PointProduct, PointTransferLine
+from pos_bridge.services.daily_inventory_break_service import (
+    DailyBreakProjection,
+    DailyBreakStatus,
+)
 from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
 from rrhh.models import Empleado
 
@@ -371,11 +376,23 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(first.last_notified_fingerprint, first.investigation_fingerprint)
         self.assertEqual(second.last_notified_fingerprint, second.investigation_fingerprint)
 
-    def test_dry_run_writes_nothing(self):
+    @patch("reportes.services_inventory_audit_agent.DailyInventoryBreakService")
+    def test_dry_run_writes_nothing(self, service_class):
         case = self.make_case(
             issue_codes=["MISSING_CONVERSION_ORIGIN"],
             conversion_in=Decimal("12"),
         )
+        service_class.return_value.build_month.return_value = {
+            case.id: DailyBreakProjection(
+                status=DailyBreakStatus.FOUND,
+                last_matching_checkpoint=None,
+                first_mismatch_checkpoint=None,
+                minimum=Decimal("8"),
+                maximum=Decimal("8"),
+                movement_ids_by_source={},
+                warnings=(),
+            )
+        }
         before = {
             "attention_level": case.attention_level,
             "responsible_area": case.responsible_area,
@@ -404,3 +421,24 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             before,
         )
         self.assertFalse(Notificacion.objects.exists())
+        service_class.return_value.build_month.assert_called_once()
+        InventoryAuditAgent().run_month(self.month)
+        case.refresh_from_db()
+        self.assertEqual(case.investigation_summary["daily_break"]["status"], "FOUND")
+
+        service_class.return_value.build_month.side_effect = RuntimeError("fuente temporal")
+        with self.assertLogs(
+            "reportes.services_inventory_audit_agent", level="ERROR"
+        ):
+            failed = InventoryAuditAgent().run_month(self.month)
+        repeated = InventoryAuditAgent().run_month(self.month)
+
+        case.refresh_from_db()
+        self.assertEqual(failed["total"], 1)
+        self.assertEqual(
+            case.investigation_summary["daily_break"]["status"],
+            "INSUFFICIENT_EVIDENCE",
+        )
+        self.assertTrue(case.investigation_summary["daily_break"]["warnings"])
+        self.assertEqual(repeated["updated"], 0)
+        self.assertEqual(repeated["notifications"], 0)
