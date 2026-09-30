@@ -29,6 +29,11 @@ FACT_SOURCE_PRIORITY = [
 ]
 
 
+def point_sales_evidence_by_ids(*, sale_ids: list[int]):
+    """Read referenced evidence as stored, without source selection or aggregation."""
+    return PointDailySale.objects.filter(pk__in=sale_ids).select_related("branch")
+
+
 def _resolve_sucursal_id(sucursal: Sucursal | int) -> int:
     if isinstance(sucursal, Sucursal):
         return int(sucursal.id)
