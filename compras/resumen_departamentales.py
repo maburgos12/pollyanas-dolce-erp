@@ -4,7 +4,7 @@ from io import BytesIO
 from urllib.parse import urlencode
 
 from django import forms
-from django.db.models import BooleanField, Case, Exists, F, OuterRef, Prefetch, Q, Sum, Value, When
+from django.db.models import BooleanField, Case, Count, Exists, F, OuterRef, Prefetch, Q, Sum, Value, When
 from django.db.models.functions import Coalesce
 from django.http import HttpResponse
 from django.urls import reverse
@@ -24,6 +24,13 @@ TERMINALES = (
     ItemCompraDepartamental.ESTADO_CANCELADO,
 )
 ESTADOS = [(value, label) for value, label in ItemCompraDepartamental.ESTADO_CHOICES if value not in TERMINALES]
+ETAPAS_PENDIENTES = (
+    ('todos', 'Todos pendientes'),
+    ('nunca_cotizados', 'Nunca cotizados'),
+    ('cotizacion_en_proceso', 'Cotización en proceso'),
+    ('comprados_sin_entregar', 'Comprados sin entregar'),
+    ('pendientes_confirmacion', 'Pendientes de confirmación'),
+)
 ALCANCE = ('Los indicadores operativos incluyen artículos pendientes de solicitudes enviadas; '
            'excluyen borradores, canceladas, completadas, rechazados y recibidos conforme. '
            'También se muestran artículos con reembolso pendiente, aunque estén cerrados o no '
@@ -38,7 +45,7 @@ ETAPAS = ('Importes en MXN. Solicitado y cotizado son etapas de precio; Comprome
 
 class FiltrosResumenDepartamental(forms.Form):
     periodo = forms.DateField(
-        label='Mes planeado', required=False, input_formats=['%Y-%m'],
+        label='Pendientes hasta', required=False, input_formats=['%Y-%m'],
         widget=forms.DateInput(format='%Y-%m', attrs={'type': 'month'}),
     )
     area = forms.ModelChoiceField(
@@ -47,6 +54,8 @@ class FiltrosResumenDepartamental(forms.Form):
     )
     estado = forms.ChoiceField(label='Estado del artículo', required=False, choices=[('', 'Todos los pendientes'), *ESTADOS],
                               widget=forms.Select(attrs={'data-native-select': 'true'}))
+    etapa = forms.ChoiceField(required=False, choices=ETAPAS_PENDIENTES, initial='todos',
+                              widget=forms.HiddenInput())
 
 
 def _importe(value):
@@ -60,6 +69,11 @@ def _totales():
 
 
 def construir_resumen_departamental(params):
+    params = params.copy()
+    if not params.get('periodo'):
+        params['periodo'] = timezone.localdate().replace(day=1).strftime('%Y-%m')
+    if not params.get('etapa'):
+        params['etapa'] = 'todos'
     filtros = FiltrosResumenDepartamental(params)
     valido = filtros.is_valid()
     alcance_operativo = ~Q(estado__in=TERMINALES) & ~Q(solicitud__estado__in=[
@@ -74,11 +88,57 @@ def construir_resumen_departamental(params):
     ).annotate(recibido=Coalesce(Sum('reembolsos__importe'), Decimal('0'))).filter(
         reembolso_solicitado__gt=F('recibido'),
     )
+    cotizaciones = CotizacionCompraDepartamental.objects.filter(item_id=OuterRef('pk'))
     items = ItemCompraDepartamental.objects.annotate(
+        tiene_cotizaciones=Exists(cotizaciones),
+        tiene_cotizacion_seleccionada=Exists(cotizaciones.filter(seleccionada=True)),
+        tiene_reembolso_pendiente=Exists(saldos_pendientes),
+    )
+    query = {}
+    conteos_etapas = {clave: 0 for clave, _ in ETAPAS_PENDIENTES}
+    if not valido:
+        items = items.none()
+    else:
+        for campo, lookup in [('periodo', 'solicitud__periodo__lte'), ('area', 'solicitud__area')]:
+            valor = filtros.cleaned_data[campo]
+            if valor:
+                items = items.filter(**{lookup: valor})
+                query[campo] = valor.strftime('%Y-%m') if campo == 'periodo' else valor.pk
+        if filtros.cleaned_data['estado']:
+            query['estado'] = filtros.cleaned_data['estado']
+        etapa = filtros.cleaned_data['etapa'] or 'todos'
+        query['etapa'] = etapa
+        conteos_etapas = items.aggregate(
+            todos=Count('pk', filter=alcance_operativo),
+            nunca_cotizados=Count('pk', filter=alcance_operativo & Q(tiene_cotizaciones=False)),
+            cotizacion_en_proceso=Count(
+                'pk', filter=alcance_operativo & Q(tiene_cotizaciones=True, tiene_cotizacion_seleccionada=False),
+            ),
+            comprados_sin_entregar=Count(
+                'pk', filter=alcance_operativo & Q(estado__in=[
+                    ItemCompraDepartamental.ESTADO_COMPRADO,
+                    ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL,
+                ]),
+            ),
+            pendientes_confirmacion=Count(
+                'pk', filter=alcance_operativo & Q(estado=ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION),
+            ),
+        )
+        if etapa == 'nunca_cotizados':
+            alcance_operativo &= Q(tiene_cotizaciones=False)
+        elif etapa == 'cotizacion_en_proceso':
+            alcance_operativo &= Q(tiene_cotizaciones=True, tiene_cotizacion_seleccionada=False)
+        elif etapa == 'comprados_sin_entregar':
+            alcance_operativo &= Q(estado__in=[
+                ItemCompraDepartamental.ESTADO_COMPRADO,
+                ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL,
+            ])
+        elif etapa == 'pendientes_confirmacion':
+            alcance_operativo &= Q(estado=ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION)
+    items = items.annotate(
         resumen_en_alcance_operativo=Case(
             When(alcance_operativo, then=Value(True)), default=Value(False), output_field=BooleanField(),
         ),
-        tiene_reembolso_pendiente=Exists(saldos_pendientes),
     ).filter(Q(resumen_en_alcance_operativo=True) | Q(tiene_reembolso_pendiente=True)).select_related(
         'solicitud__area', 'solicitud__solicitante', 'solicitud__comprador_asignado',
     ).prefetch_related(Prefetch(
@@ -93,16 +153,6 @@ def construir_resumen_departamental(params):
         )).order_by('-numero', '-pk'),
         to_attr='intentos_compra_prefetched',
     )).order_by('solicitud__area__nombre', 'solicitud_id', 'id')
-    query = {}
-    if not valido:
-        items = items.none()
-    else:
-        for campo, lookup in [('periodo', 'solicitud__periodo'), ('area', 'solicitud__area'), ('estado', 'estado')]:
-            valor = filtros.cleaned_data[campo]
-            if valor:
-                if campo != 'estado':
-                    items = items.filter(**{lookup: valor})
-                query[campo] = valor.strftime('%Y-%m') if campo == 'periodo' else (valor.pk if campo == 'area' else valor)
     items = list(items)
     total = _totales()
     departamentos = {}
@@ -111,6 +161,9 @@ def construir_resumen_departamental(params):
         grupo = departamentos.setdefault(area.pk, {**_totales(), 'nombre': area.nombre, 'id': area.pk})
         estimado = item.subtotal_estimado
         quote = next(iter(item.cotizaciones_seleccionadas), None)
+        item.resumen_arrastrado = bool(
+            valido and filtros.cleaned_data['periodo'] and item.solicitud.periodo < filtros.cleaned_data['periodo']
+        )
         item.resumen_comprometido = Decimal('0')
         item.resumen_reembolso_pendiente = Decimal('0')
         item.resumen_reembolsado = Decimal('0')
@@ -153,7 +206,9 @@ def construir_resumen_departamental(params):
     return {
         'filtros': filtros, 'items': items, 'resumen': total,
         'departamentos': list(departamentos.values()), 'alcance_resumen': ALCANCE,
-        'etapas_resumen': ETAPAS, 'exportar_url': base + '?' + urlencode({**query, 'exportar': 'xlsx'}),
+        'etapas_resumen': ETAPAS, 'conteos_etapas': conteos_etapas,
+        'etapa_activa': query.get('etapa', 'todos'), 'query_filtros': query,
+        'exportar_url': base + '?' + urlencode({**query, 'exportar': 'xlsx'}),
     }
 
 
