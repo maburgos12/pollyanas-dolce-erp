@@ -376,11 +376,23 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(first.last_notified_fingerprint, first.investigation_fingerprint)
         self.assertEqual(second.last_notified_fingerprint, second.investigation_fingerprint)
 
-    def test_dry_run_writes_nothing(self):
+    @patch("reportes.services_inventory_audit_agent.DailyInventoryBreakService")
+    def test_dry_run_writes_nothing(self, service_class):
         case = self.make_case(
             issue_codes=["MISSING_CONVERSION_ORIGIN"],
             conversion_in=Decimal("12"),
         )
+        service_class.return_value.build_month.return_value = {
+            case.id: DailyBreakProjection(
+                status=DailyBreakStatus.FOUND,
+                last_matching_checkpoint=None,
+                first_mismatch_checkpoint=None,
+                minimum=Decimal("8"),
+                maximum=Decimal("8"),
+                movement_ids_by_source={},
+                warnings=(),
+            )
+        }
         before = {
             "attention_level": case.attention_level,
             "responsible_area": case.responsible_area,
@@ -409,58 +421,24 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             before,
         )
         self.assertFalse(Notificacion.objects.exists())
-
-    @patch("reportes.services_inventory_audit_agent.DailyInventoryBreakService")
-    def test_run_month_builds_daily_projection_once(self, service_class):
-        case = self.make_case()
-        service_class.return_value.build_month.return_value = {
-            case.id: DailyBreakProjection(
-                status=DailyBreakStatus.FOUND,
-                last_matching_checkpoint=None,
-                first_mismatch_checkpoint=None,
-                minimum=Decimal("8"),
-                maximum=Decimal("8"),
-                movement_ids_by_source={},
-                warnings=(),
-            )
-        }
-
-        from reportes.services_inventory_audit_agent import InventoryAuditAgent
-
-        InventoryAuditAgent().run_month(self.month)
-
         service_class.return_value.build_month.assert_called_once()
+        InventoryAuditAgent().run_month(self.month)
         case.refresh_from_db()
         self.assertEqual(case.investigation_summary["daily_break"]["status"], "FOUND")
 
-    @patch("reportes.services_inventory_audit_agent.DailyInventoryBreakService")
-    def test_daily_projection_failure_keeps_month_investigation(self, service_class):
-        case = self.make_case()
         service_class.return_value.build_month.side_effect = RuntimeError("fuente temporal")
-
-        from reportes.services_inventory_audit_agent import InventoryAuditAgent
-
         with self.assertLogs(
             "reportes.services_inventory_audit_agent", level="ERROR"
         ):
-            result = InventoryAuditAgent().run_month(self.month)
+            failed = InventoryAuditAgent().run_month(self.month)
+        repeated = InventoryAuditAgent().run_month(self.month)
 
         case.refresh_from_db()
-        self.assertEqual(result["total"], 1)
+        self.assertEqual(failed["total"], 1)
         self.assertEqual(
             case.investigation_summary["daily_break"]["status"],
             "INSUFFICIENT_EVIDENCE",
         )
         self.assertTrue(case.investigation_summary["daily_break"]["warnings"])
-
-    def test_same_daily_projection_keeps_second_run_idempotent(self):
-        self.make_case()
-
-        from reportes.services_inventory_audit_agent import InventoryAuditAgent
-
-        first = InventoryAuditAgent().run_month(self.month)
-        second = InventoryAuditAgent().run_month(self.month)
-
-        self.assertEqual(first["updated"], 1)
-        self.assertEqual(second["updated"], 0)
-        self.assertEqual(second["notifications"], 0)
+        self.assertEqual(repeated["updated"], 0)
+        self.assertEqual(repeated["notifications"], 0)
