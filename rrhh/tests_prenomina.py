@@ -149,6 +149,70 @@ class PrenominaModelTests(TestCase):
             with transaction.atomic():
                 PrenominaMovimiento.objects.create(**base)
 
+    def test_hora_extra_nueva_participa_en_prenomina(self):
+        extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 30),
+            horas=Decimal("1.00"),
+        )
+
+        self.assertTrue(extra.requiere_aplicacion_prenomina)
+
+    def test_hora_extra_no_puede_asignarse_a_dos_cortes(self):
+        extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 15),
+            horas=Decimal("1.00"),
+        )
+        corte_1 = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 9, 1),
+            fecha_fin=date(2026, 9, 15),
+            fecha_corte=date(2026, 9, 15),
+            creado_por=self.user,
+        )
+        corte_2 = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 9, 16),
+            fecha_fin=date(2026, 9, 30),
+            fecha_corte=date(2026, 9, 30),
+            creado_por=self.user,
+        )
+        datos = {
+            "empleado": self.empleado,
+            "fecha": extra.fecha,
+            "tipo_movimiento_erp": PrenominaMovimiento.TIPO_HORA_EXTRA,
+            "fuente_modelo": "rrhh.HoraExtra",
+            "fuente_id": str(extra.pk),
+            "horas": extra.horas,
+        }
+        PrenominaMovimiento.objects.create(corte=corte_1, **datos)
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            PrenominaMovimiento.objects.create(corte=corte_2, **datos)
+
+    def test_migracion_protege_resueltas_y_conserva_pendientes(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        pendiente = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 29),
+            horas=Decimal("1.00"),
+        )
+        historica = HoraExtra.objects.create(
+            empleado=self.otro_empleado,
+            fecha=date(2026, 9, 15),
+            horas=Decimal("1.00"),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+        migracion = import_module("rrhh.migrations.0053_horaextra_seguimiento_prenomina")
+        migracion.proteger_historico_horas_extra(apps, None)
+        pendiente.refresh_from_db()
+        historica.refresh_from_db()
+
+        self.assertTrue(pendiente.requiere_aplicacion_prenomina)
+        self.assertFalse(historica.requiere_aplicacion_prenomina)
+
     def test_ajuste_asistencia_guarda_valores_anteriores_y_propuestos(self):
         asistencia = AsistenciaEmpleado.objects.create(
             empleado=self.empleado,
