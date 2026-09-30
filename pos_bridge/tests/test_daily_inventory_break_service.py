@@ -269,3 +269,26 @@ class DailyInventoryBreakServiceTests(TestCase):
 
         self.assertEqual(len(single_queries), len(doubled_queries))
         self.assertLessEqual(len(doubled_queries), 7)
+
+    def test_open_transfer_snapshot_without_event_time_is_insufficient(self):
+        case = self.make_case(
+            source_trace={"open_transfer_snapshot_out": [999]},
+            transfer_out=Decimal("1"),
+            expected_closing=Decimal("9"),
+            point_closing=Decimal("9"),
+        )
+        self.snapshot(day=1, stock="9")
+
+        result = DailyInventoryBreakService().build_month(self.month, [case])[case.id]
+
+        self.assertEqual(result.status, DailyBreakStatus.INSUFFICIENT_EVIDENCE)
+        self.assertTrue(any("hora" in warning for warning in result.warnings))
+
+    def test_missing_referenced_row_is_insufficient_instead_of_false_break(self):
+        case = self.make_case(source_trace={"production": [999]})
+        self.snapshot(day=1, stock="9")
+
+        result = DailyInventoryBreakService().build_month(self.month, [case])[case.id]
+
+        self.assertEqual(result.status, DailyBreakStatus.INSUFFICIENT_EVIDENCE)
+        self.assertTrue(any("#999" in warning for warning in result.warnings))

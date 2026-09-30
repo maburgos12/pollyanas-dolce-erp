@@ -331,6 +331,8 @@ class DailyInventoryBreakService:
             if warnings:
                 projection = replace(
                     projection,
+                    status=DailyBreakStatus.INSUFFICIENT_EVIDENCE,
+                    first_mismatch_checkpoint=None,
                     warnings=tuple(dict.fromkeys((*projection.warnings, *warnings))),
                 )
             results[case.id] = projection
@@ -461,6 +463,31 @@ class DailyInventoryBreakService:
                         (row.id,),
                     )
                 )
+
+        undirected_transfers = {
+            int(value) for value in trace.get("transfers", ())
+        } - transfer_in_ids - transfer_out_ids
+        if undirected_transfers:
+            warnings.append(
+                "Hay transferencias conservadas sin dirección de entrada o salida."
+            )
+        undirected_conversions = {
+            int(value) for value in trace.get("conversions", ())
+        } - conversion_in_ids - conversion_out_ids
+        if undirected_conversions:
+            warnings.append(
+                "Hay conversiones conservadas sin dirección de entrada o salida."
+            )
+        if trace.get("open_transfer_snapshot_in") or trace.get(
+            "open_transfer_snapshot_out"
+        ):
+            warnings.append(
+                "El corte de transferencias abiertas no conserva la hora del movimiento."
+            )
+        if trace.get("adjustments") or Decimal(case.identified_adjustment) != 0:
+            warnings.append(
+                "El ajuste identificado no conserva una hora aplicable al corte diario."
+            )
         return movements, warnings
 
     @staticmethod
