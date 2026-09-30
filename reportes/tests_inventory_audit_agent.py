@@ -1,7 +1,10 @@
+from contextlib import nullcontext
 from datetime import date
 from decimal import Decimal
+from io import StringIO
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -179,6 +182,139 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             creado_por=assigned_to,
         )
         return transfer, discrepancy
+
+    def test_point_history_explains_conversion_without_inventing_destination(self):
+        case = self.make_case(
+            opening_point=Decimal("23"),
+            production=Decimal("518"),
+            transfer_in=Decimal("2"),
+            transfer_out=Decimal("533"),
+            conversion_in=Decimal("2"),
+            conversion_out=Decimal("10"),
+            identified_adjustment=Decimal("4"),
+            expected_closing=Decimal("6"),
+            point_closing=Decimal("6"),
+            difference=Decimal("0"),
+            movement_status=ProductInventoryAuditCase.MovementStatus.BALANCED,
+            source_trace={
+                "point_history": {
+                    "coverage_status": "COMPLETE",
+                    "conversion_in": "2",
+                    "conversion_out": "10",
+                    "expected_closing": "6",
+                    "point_closing": "6",
+                    "unexplained_remainder": "0",
+                    "movement_ids": [1, 2, 3, 4, 5, 6],
+                    "movement_ids_by_category": {
+                        "conversion_in": [2],
+                        "conversion_out": [5],
+                    },
+                    "unknown_movement_ids": [],
+                    "aggregate_comparison": {
+                        "conversion_out": {
+                            "aggregate": "0.0000",
+                            "point_history": "10.0000",
+                            "difference": "10.0000",
+                        }
+                    },
+                }
+            },
+        )
+
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+
+        result = InventoryAuditAgent().investigate_case(case)
+
+        facts = " ".join(result.summary["facts"])
+        self.assertIn("10 piezas de salida por conversión", facts)
+        self.assertIn("2 piezas de entrada por conversión", facts)
+        self.assertIn("cierre de 6", facts)
+        self.assertIn("reporte agregado no incluyó 10", facts.lower())
+        self.assertTrue(
+            any("destino" in item.lower() for item in result.summary["hypotheses"])
+        )
+        self.assertNotIn("rebanadas", facts.lower())
+        self.assertEqual(
+            result.summary["point_history"],
+            case.source_trace["point_history"],
+        )
+
+    @patch(
+        "reportes.management.commands.investigate_inventory_audit_cases."
+        "InventoryAuditMaterializer"
+    )
+    @patch(
+        "reportes.management.commands.investigate_inventory_audit_cases."
+        "PointHttpSessionClient"
+    )
+    @patch(
+        "reportes.management.commands.investigate_inventory_audit_cases."
+        "point_account_session_lock",
+        return_value=nullcontext(True),
+    )
+    def test_command_refreshes_point_only_for_discrepant_cases(
+        self,
+        _lock,
+        client_class,
+        materializer_class,
+    ):
+        discrepant = self.make_case()
+        self.make_case(
+            branch=PointBranch.objects.create(
+                external_id="AUDITOR-BALANCED-BRANCH",
+                name="Sucursal conciliada",
+            ),
+            difference=Decimal("0"),
+            point_closing=Decimal("10"),
+            movement_status=ProductInventoryAuditCase.MovementStatus.BALANCED,
+            calculation_fingerprint="c" * 64,
+        )
+        client = client_class.return_value.__enter__.return_value
+        client.get_stock_history.return_value = [
+            {
+                "FK_Movimiento": 501,
+                "Movimiento": "AJUSTE SALIDA INVENTARIO",
+                "Fecha": "2026-08-10T10:00:00-07:00",
+                "Cantidad": -1,
+                "Existencia_anterior": 10,
+                "Existencia_nueva": 9,
+                "Cancelado": False,
+            }
+        ]
+        output = StringIO()
+
+        call_command(
+            "investigate_inventory_audit_cases",
+            month="2026-08",
+            refresh_point_history=True,
+            stdout=output,
+        )
+
+        client.login.assert_called_once_with()
+        client.get_stock_history.assert_called_once_with(
+            discrepant.product.external_id,
+            discrepant.branch.external_id,
+            movements=500,
+        )
+        materializer_class.return_value.rebuild.assert_called_once_with(self.month)
+        self.assertIn("historiales=1", output.getvalue())
+
+    @patch(
+        "reportes.management.commands.investigate_inventory_audit_cases."
+        "PointHttpSessionClient"
+    )
+    def test_command_dry_run_never_calls_point(self, client_class):
+        self.make_case()
+
+        call_command(
+            "investigate_inventory_audit_cases",
+            month="2026-08",
+            refresh_point_history=True,
+            dry_run=True,
+            stdout=StringIO(),
+        )
+
+        client_class.assert_not_called()
 
     def test_exact_transfer_relation_reuses_logistics_owner(self):
         logistics_owner = self._head(

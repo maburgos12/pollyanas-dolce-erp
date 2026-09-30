@@ -40,6 +40,10 @@ SOURCE_LABELS = {
 }
 
 
+def _quantity_label(value) -> str:
+    return format(Decimal(str(value or 0)).normalize(), "f")
+
+
 @dataclass(frozen=True)
 class InvestigationResult:
     attention_level: str
@@ -288,6 +292,46 @@ class InventoryAuditAgent:
         facts = self._facts(case, discrepancies)
         hypotheses: list[str] = []
         missing: list[str] = []
+        point_history = (case.source_trace or {}).get("point_history")
+        if not isinstance(point_history, dict):
+            point_history = {}
+        if point_history.get("coverage_status") == "COMPLETE":
+            conversion_out = Decimal(str(point_history.get("conversion_out") or 0))
+            conversion_in = Decimal(str(point_history.get("conversion_in") or 0))
+            remainder = Decimal(
+                str(point_history.get("unexplained_remainder") or 0)
+            )
+            if conversion_out or conversion_in:
+                net_out = conversion_out - conversion_in
+                net_label = (
+                    f"una salida de {_quantity_label(net_out)}"
+                    if net_out >= 0
+                    else f"una entrada de {_quantity_label(abs(net_out))}"
+                )
+                facts.append(
+                    "Point acredita "
+                    f"{_quantity_label(conversion_out)} piezas de salida por conversión "
+                    f"y {_quantity_label(conversion_in)} piezas de entrada por conversión; "
+                    f"el efecto neto es {net_label} y el cierre de "
+                    f"{_quantity_label(point_history.get('point_closing'))} queda conciliado."
+                )
+                hypotheses.append(
+                    "El producto destino de estas conversiones no está identificado "
+                    "explícitamente por Point; no se asigna por aproximación."
+                )
+            comparison = point_history.get("aggregate_comparison") or {}
+            conversion_gap = comparison.get("conversion_out") or {}
+            if conversion_gap:
+                facts.append(
+                    "El reporte agregado no incluyó "
+                    f"{_quantity_label(conversion_gap.get('difference'))} piezas de salida "
+                    "por conversión; el historial transaccional sí las conserva."
+                )
+            if remainder == 0:
+                facts.append(
+                    "El historial transaccional de Point explica el saldo final sin "
+                    "unidades pendientes de localizar."
+                )
         daily_break = (
             self._daily_break_cache.get(case.id)
             if self._daily_break_cache is not None
@@ -346,6 +390,7 @@ class InventoryAuditAgent:
             "hypotheses": hypotheses,
             "missing": missing,
             "daily_break": self._daily_break_summary(case, daily_break),
+            "point_history": point_history,
             "related_logistics_discrepancy_ids": [item.id for item in discrepancies],
             "recurrence_count": recurrence_count,
             "grouping_key": self._grouping_key(case, issue_codes),
