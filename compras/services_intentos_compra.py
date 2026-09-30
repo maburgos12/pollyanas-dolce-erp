@@ -7,6 +7,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import UploadedFile
+from django.core.validators import DecimalValidator
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -21,8 +22,17 @@ from .models import (
     RecepcionItemDepartamental,
     ReembolsoCompraDepartamental,
 )
+from .validaciones_archivos import validar_comprobante
 
 logger = logging.getLogger(__name__)
+_VALIDAR_IMPORTE = DecimalValidator(max_digits=14, decimal_places=2)
+
+
+def _validar_digitos_importe(importe, *, nombre):
+    try:
+        _VALIDAR_IMPORTE(importe)
+    except ValidationError as exc:
+        raise ValidationError({nombre: exc.messages}) from None
 
 
 def _importe_positivo(value, *, nombre):
@@ -34,6 +44,20 @@ def _importe_positivo(value, *, nombre):
         raise ValidationError({nombre: "El importe debe ser mayor que cero."})
     if importe.as_tuple().exponent < -2:
         raise ValidationError({nombre: "El importe debe tener como máximo dos decimales."})
+    _validar_digitos_importe(importe, nombre=nombre)
+    return importe
+
+
+def _importe_no_negativo(value, *, nombre):
+    try:
+        importe = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({nombre: "Captura un importe válido."}) from None
+    if not importe.is_finite() or importe < 0:
+        raise ValidationError({nombre: "El importe debe ser mayor o igual que cero."})
+    if importe.as_tuple().exponent < -2:
+        raise ValidationError({nombre: "El importe debe tener como máximo dos decimales."})
+    _validar_digitos_importe(importe, nombre=nombre)
     return importe
 
 
@@ -96,13 +120,14 @@ def _liberar_compromiso(compromiso):
 def cancelar_intento_compra(
     intento, *, version, motivo, detalle, actor,
     reembolso_solicitado_en=None, reembolso_solicitado=None,
-    evidencia_solicitud_reembolso=None,
+    reembolso_cargos_adicionales=None, evidencia_solicitud_reembolso=None,
 ):
     with _transaccion_con_archivos() as nuevos:
         return _cancelar_intento_compra(
             intento, version=version, motivo=motivo, detalle=detalle, actor=actor,
             reembolso_solicitado_en=reembolso_solicitado_en,
             reembolso_solicitado=reembolso_solicitado,
+            reembolso_cargos_adicionales=reembolso_cargos_adicionales,
             evidencia_solicitud_reembolso=evidencia_solicitud_reembolso,
             nuevos=nuevos,
         )
@@ -111,7 +136,7 @@ def cancelar_intento_compra(
 def _cancelar_intento_compra(
     intento, *, version, motivo, detalle, actor,
     reembolso_solicitado_en, reembolso_solicitado,
-    evidencia_solicitud_reembolso, nuevos,
+    reembolso_cargos_adicionales, evidencia_solicitud_reembolso, nuevos,
 ):
     item, intento = _bloquear_item_e_intento(intento)
     if intento.version != version:
@@ -132,21 +157,51 @@ def _cancelar_intento_compra(
     if compra:
         fecha = _fecha_valida(reembolso_solicitado_en, nombre="reembolso_solicitado_en")
         importe = _importe_positivo(reembolso_solicitado, nombre="reembolso_solicitado")
-        if importe > compra.importe_final:
-            raise ValidationError({"reembolso_solicitado": "El reembolso no puede superar la compra pagada."})
+        cargos = _importe_no_negativo(
+            Decimal("0") if reembolso_cargos_adicionales is None else reembolso_cargos_adicionales,
+            nombre="reembolso_cargos_adicionales",
+        )
+        if cargos > importe:
+            raise ValidationError({
+                "reembolso_cargos_adicionales":
+                    "Los cargos adicionales no pueden superar el total solicitado."
+            })
+        if importe - cargos > compra.importe_final:
+            raise ValidationError({
+                "reembolso_solicitado": "La parte del producto no puede superar la compra pagada."
+            })
+        if cargos > 0 and not evidencia_solicitud_reembolso:
+            raise ValidationError({
+                "evidencia_solicitud_reembolso":
+                    "Adjunta evidencia cuando el reembolso incluya cargos adicionales."
+            })
+        if evidencia_solicitud_reembolso is not None:
+            try:
+                evidencia_solicitud_reembolso = validar_comprobante(
+                    evidencia_solicitud_reembolso, exigir_archivo_nuevo=True,
+                )
+            except ValidationError as exc:
+                raise ValidationError({
+                    "evidencia_solicitud_reembolso": exc.messages,
+                }) from None
         if compromiso is None or not compromiso.activo:
             raise ValidationError("La compra pagada no tiene un compromiso activo. Revisa su registro financiero antes de cancelar.", code="conflict")
         intento.estado = IntentoCompraDepartamental.ESTADO_REEMBOLSO_SOLICITADO
         intento.reembolso_solicitado_en = fecha
         intento.reembolso_solicitado = importe
+        intento.reembolso_cargos_adicionales = cargos
         intento.evidencia_solicitud_reembolso = _guardar_archivo_nuevo(
             IntentoCompraDepartamental, "evidencia_solicitud_reembolso",
             intento, evidencia_solicitud_reembolso, nuevos,
         )
-        campos = ["reembolso_solicitado_en", "reembolso_solicitado", "evidencia_solicitud_reembolso"]
+        campos = [
+            "reembolso_solicitado_en", "reembolso_solicitado",
+            "reembolso_cargos_adicionales", "evidencia_solicitud_reembolso",
+        ]
     else:
         if any(value is not None for value in (
-            reembolso_solicitado_en, reembolso_solicitado, evidencia_solicitud_reembolso,
+            reembolso_solicitado_en, reembolso_solicitado,
+            reembolso_cargos_adicionales, evidencia_solicitud_reembolso,
         )):
             raise ValidationError("Un intento sin compra pagada no requiere solicitud de reembolso.")
         intento.estado = IntentoCompraDepartamental.ESTADO_CANCELADO_SIN_PAGO
@@ -176,11 +231,20 @@ def _cancelar_intento_compra(
                  f"{intento.detalle_cancelacion} Estado: {intento.get_estado_display()}."),
     )
     if compra:
+        if intento.reembolso_cargos_adicionales > 0:
+            producto = intento.reembolso_solicitado - intento.reembolso_cargos_adicionales
+            detalle_reembolso = (
+                f"producto ${producto:.2f}, cargos adicionales documentados "
+                f"${intento.reembolso_cargos_adicionales:.2f}, total "
+                f"${intento.reembolso_solicitado:.2f}"
+            )
+        else:
+            detalle_reembolso = f"${intento.reembolso_solicitado:.2f}"
         EventoCompraDepartamental.objects.create(
             solicitud=item.solicitud, item=item, actor=actor, tipo="REEMBOLSO_SOLICITADO",
             detalle=(f"Intento #{intento.numero}: solicitud del "
                      f"{intento.reembolso_solicitado_en:%Y-%m-%d} por "
-                     f"${intento.reembolso_solicitado:.2f}."),
+                     f"{detalle_reembolso}."),
         )
     return intento
 

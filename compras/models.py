@@ -486,7 +486,8 @@ def _validar_vinculos_compra(item_id, cotizacion_id, intento_id=None, *, using="
 
 class IntentoCompraQuerySet(models.QuerySet):
     CAMPOS_REEMBOLSO = frozenset({
-        "reembolso_solicitado", "reembolso_solicitado_en", "evidencia_solicitud_reembolso",
+        "reembolso_solicitado", "reembolso_cargos_adicionales", "reembolso_solicitado_en",
+        "evidencia_solicitud_reembolso",
     })
 
     def update(self, **kwargs):
@@ -538,6 +539,9 @@ class IntentoCompraDepartamental(models.Model):
         related_name="intentos_compra_cancelados",
     )
     reembolso_solicitado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    reembolso_cargos_adicionales = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0.00"),
+    )
     reembolso_solicitado_en = models.DateField(null=True, blank=True)
     evidencia_solicitud_reembolso = models.FileField(
         upload_to="compras/departamentales/reembolsos/solicitudes/%Y/%m/", null=True, blank=True
@@ -559,6 +563,21 @@ class IntentoCompraDepartamental(models.Model):
                 check=models.Q(reembolso_solicitado__isnull=True) | models.Q(reembolso_solicitado__gt=0),
                 name="comp_dept_solicitud_reembolso_positiva",
             ),
+            models.CheckConstraint(
+                check=models.Q(reembolso_cargos_adicionales__gte=0),
+                name="comp_dept_reembolso_cargos_no_negativos",
+            ),
+            models.CheckConstraint(
+                check=models.Q(reembolso_solicitado__isnull=False) | models.Q(reembolso_cargos_adicionales=0),
+                name="comp_dept_reembolso_cargos_requieren_total",
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(reembolso_solicitado__isnull=True)
+                    | models.Q(reembolso_cargos_adicionales__lte=models.F("reembolso_solicitado"))
+                ),
+                name="comp_dept_reembolso_cargos_hasta_total",
+            ),
         ]
 
     def clean(self):
@@ -577,27 +596,51 @@ class IntentoCompraDepartamental(models.Model):
             relaciones["item"], relaciones["cotizacion"],
             using=db,
         )
+        update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
+
+        def validar_reembolso(guardado=None):
+            solicitado = (
+                self.reembolso_solicitado
+                if guardado is None or update_fields is None or "reembolso_solicitado" in update_fields
+                else guardado.reembolso_solicitado
+            )
+            cargos = (
+                self.reembolso_cargos_adicionales
+                if guardado is None or update_fields is None or "reembolso_cargos_adicionales" in update_fields
+                else guardado.reembolso_cargos_adicionales
+            )
+            solicitado = self._meta.get_field("reembolso_solicitado").to_python(solicitado)
+            cargos = self._meta.get_field("reembolso_cargos_adicionales").to_python(cargos)
+            if cargos is None or cargos < 0:
+                raise ValidationError({
+                    "reembolso_cargos_adicionales": "Los cargos adicionales no pueden ser negativos."
+                })
+            if solicitado is None and cargos:
+                raise ValidationError({
+                    "reembolso_cargos_adicionales": "Los cargos adicionales requieren una solicitud de reembolso."
+                })
+            if solicitado is not None and cargos > solicitado:
+                raise ValidationError({
+                    "reembolso_cargos_adicionales": "Los cargos adicionales no pueden superar el total solicitado."
+                })
+            return solicitado
+
         if self._state.adding and not self.numero:
+            validar_reembolso()
             with transaction.atomic(using=db):
                 ItemCompraDepartamental.objects.using(db).select_for_update().get(pk=self.item_id)
                 ultimo = type(self).objects.using(db).filter(item_id=self.item_id).aggregate(models.Max("numero"))["numero__max"]
                 self.numero = (ultimo or 0) + 1
                 return super().save(*args, **kwargs)
         if not self._state.adding:
-            update_fields = kwargs.get("update_fields", args[3] if len(args) > 3 else None)
             with transaction.atomic(using=db):
                 guardado = type(self).objects.using(db).select_for_update().get(pk=self.pk)
-                solicitado = (
-                    self.reembolso_solicitado
-                    if update_fields is None or "reembolso_solicitado" in update_fields
-                    else guardado.reembolso_solicitado
-                )
-                if solicitado is not None:
-                    solicitado = self._meta.get_field("reembolso_solicitado").to_python(solicitado)
+                solicitado = validar_reembolso(guardado)
                 recibido = self.reembolsos.using(db).aggregate(total=models.Sum("importe"))["total"] or Decimal("0")
                 if recibido and (solicitado is None or solicitado < recibido):
                     raise ValidationError({"reembolso_solicitado": "La solicitud no puede ser menor que lo reembolsado."})
                 return super().save(*args, **kwargs)
+        validar_reembolso()
         return super().save(*args, **kwargs)
 
     @property

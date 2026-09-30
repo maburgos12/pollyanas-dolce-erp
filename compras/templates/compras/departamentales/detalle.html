@@ -65,7 +65,9 @@
                 {% if intento.reembolso_solicitado %}
                 <div class="cd-refund-state {% if intento.saldo_reembolso_visible %}cd-refund-state--pending{% else %}cd-refund-state--complete{% endif %}">
                   <strong>{% if intento.saldo_reembolso_visible %}Reembolso pendiente{% else %}Reembolso completado{% endif %}</strong>
-                  <span>Solicitado ${{ intento.reembolso_solicitado|floatformat:2|intcomma }}{% if intento.reembolso_solicitado_en %} el {{ intento.reembolso_solicitado_en|date:"d M Y" }}{% endif %}</span>
+                  <span>Total solicitado ${{ intento.reembolso_solicitado|floatformat:2|intcomma }}{% if intento.reembolso_solicitado_en %} el {{ intento.reembolso_solicitado_en|date:"d M Y" }}{% endif %}</span>
+                  <span>Producto ${{ intento.reembolso_producto_visible|floatformat:2|intcomma }}</span>
+                  {% if intento.reembolso_cargos_adicionales %}<span>Cargos adicionales ${{ intento.reembolso_cargos_adicionales|floatformat:2|intcomma }}</span>{% endif %}
                   <span>Recibido ${{ intento.total_reembolsado_visible|floatformat:2|intcomma }}</span>
                   <span>Saldo pendiente ${{ intento.saldo_reembolso_visible|floatformat:2|intcomma }}</span>
                   {% if intento.evidencia_solicitud_reembolso %}<span>Solicitud con evidencia adjunta</span>{% endif %}

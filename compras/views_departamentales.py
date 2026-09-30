@@ -331,6 +331,11 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             historico.compra_visible = getattr(historico, "compra", None)
             historico.reembolsos_visibles = historico.reembolsos_prefetched
             historico.total_reembolsado_visible = sum((r.importe for r in historico.reembolsos_visibles), Decimal("0"))
+            historico.reembolso_producto_visible = max(
+                (historico.reembolso_solicitado or Decimal("0"))
+                - historico.reembolso_cargos_adicionales,
+                Decimal("0"),
+            )
             historico.saldo_reembolso_visible = max(
                 (historico.reembolso_solicitado or Decimal("0")) - historico.total_reembolsado_visible,
                 Decimal("0"),

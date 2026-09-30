@@ -6,8 +6,8 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from .forms_edicion_compra import validar_comprobante
 from .models import CompraRealizadaDepartamental, IntentoCompraDepartamental
+from .validaciones_archivos import validar_comprobante
 
 
 class CancelarIntentoCompraForm(forms.Form):
@@ -27,12 +27,19 @@ class CancelarIntentoCompraForm(forms.Form):
             )
             self.fields["reembolso_solicitado"] = forms.DecimalField(
                 label="Importe solicitado", min_value=Decimal("0.01"),
-                max_value=self.compra.importe_final,
                 max_digits=14, decimal_places=2,
-                help_text=f"Máximo reembolsable: ${self.compra.importe_final:.2f}",
-                error_messages={
-                    "max_value": "El reembolso no puede superar la compra pagada.",
-                },
+                help_text=(
+                    f"Producto pagado: ${self.compra.importe_final:.2f}. "
+                    "Cualquier exceso necesita cargos adicionales documentados."
+                ),
+            )
+            self.fields["reembolso_cargos_adicionales"] = forms.DecimalField(
+                label="Cargos adicionales documentados",
+                min_value=Decimal("0.00"), initial=Decimal("0.00"), required=False,
+                max_digits=14, decimal_places=2,
+                help_text=(
+                    "Envío, ajuste u otro cargo incluido por el proveedor en esta devolución."
+                ),
             )
             self.fields["evidencia_solicitud_reembolso"] = forms.FileField(
                 label="Evidencia de solicitud", required=False,
@@ -51,14 +58,36 @@ class CancelarIntentoCompraForm(forms.Form):
             raise ValidationError("La fecha no puede ser futura.")
         return fecha
 
-    def clean_reembolso_solicitado(self):
-        importe = self.cleaned_data["reembolso_solicitado"]
-        if importe > self.compra.importe_final:
-            raise ValidationError("El reembolso no puede superar la compra pagada.")
-        return importe
+    def clean_reembolso_cargos_adicionales(self):
+        return self.cleaned_data.get("reembolso_cargos_adicionales") or Decimal("0.00")
 
     def clean_evidencia_solicitud_reembolso(self):
         return validar_comprobante(self.cleaned_data.get("evidencia_solicitud_reembolso"))
+
+    def clean(self):
+        cleaned = super().clean()
+        if not self.compra:
+            return cleaned
+        total = cleaned.get("reembolso_solicitado")
+        cargos = cleaned.get("reembolso_cargos_adicionales")
+        evidencia = cleaned.get("evidencia_solicitud_reembolso")
+        if total is not None and cargos is not None:
+            if cargos > total:
+                self.add_error(
+                    "reembolso_cargos_adicionales",
+                    "Los cargos adicionales no pueden superar el total solicitado.",
+                )
+            elif total - cargos > self.compra.importe_final:
+                self.add_error(
+                    "reembolso_solicitado",
+                    "La parte del producto no puede superar la compra pagada.",
+                )
+            if cargos > 0 and not evidencia:
+                self.add_error(
+                    "evidencia_solicitud_reembolso",
+                    "Adjunta evidencia cuando el reembolso incluya cargos adicionales.",
+                )
+        return cleaned
 
 
 class RegistrarReembolsoCompraForm(forms.Form):
