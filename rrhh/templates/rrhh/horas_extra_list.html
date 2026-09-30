@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Horas extra{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260923-extra-bloques-v2">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260930-corte-prenomina">
 {% endblock %}
 
 {% block content %}
@@ -44,6 +44,13 @@
             <p class="ch-calculation-warning" role="status">La jefatura cambió. Sincroniza esta detección antes de resolverla.</p>
           {% endif %}
           {% if he.notas %}<p>{{ he.notas|truncatechars:140 }}</p>{% endif %}
+          {% if he.movimiento_prenomina %}
+            <p class="ch-payroll-status">Pago: {{ he.movimiento_prenomina.corte.folio }} · {{ he.movimiento_prenomina.corte.fecha_inicio|date:"d/m/Y" }}–{{ he.movimiento_prenomina.corte.fecha_fin|date:"d/m/Y" }}</p>
+          {% elif he.requiere_aplicacion_prenomina and key == "pendiente" %}
+            <p class="ch-payroll-status">Pendiente de autorizar · siguiente corte</p>
+          {% elif he.requiere_aplicacion_prenomina and key == "autorizado" %}
+            <p class="ch-payroll-status">Pendiente del próximo corte</p>
+          {% endif %}
         </div>
         <div>{{ he.fecha|date:"Y-m-d" }}</div>
         <div>{% if he.jefe_directo %}Jefe directo: {{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>

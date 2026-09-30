@@ -994,6 +994,73 @@ class PrenominaExportTests(TestCase):
         self.assertEqual([cell.value for cell in workbook["Movimientos_CONTPAQi"][1]], MOVIMIENTOS_HEADERS)
 
 
+class HorasExtraCorteViewTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(
+            username="admin-horas-corte",
+            email="admin-horas-corte@example.com",
+            password="test",
+        )
+        self.client.force_login(self.user)
+        self.empleado = Empleado.objects.create(
+            codigo="HE-CORTE-1",
+            nombre="EMPLEADA CORTE PRENOMINA",
+            fecha_ingreso=date(2026, 9, 1),
+            activo=True,
+            sucursal="Matriz",
+        )
+        self.corte = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 9, 1),
+            fecha_fin=date(2026, 9, 15),
+            fecha_corte=date(2026, 9, 15),
+            creado_por=self.user,
+        )
+
+    def test_bandeja_muestra_situacion_del_corte_sin_fracciones(self):
+        HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 29),
+            horas=Decimal("1.00"),
+            estado=HoraExtra.ESTADO_PENDIENTE,
+            notas="Pendiente semanal",
+        )
+        HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 28),
+            horas=Decimal("1.50"),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+            fecha_autorizacion_jefe=timezone.now(),
+            notas="Autorizada sin corte",
+        )
+        asignada = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 9, 14),
+            horas=Decimal("2.00"),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+            fecha_autorizacion_jefe=timezone.now(),
+            notas="Autorizada con corte",
+        )
+        PrenominaMovimiento.objects.create(
+            corte=self.corte,
+            empleado=self.empleado,
+            fecha=asignada.fecha,
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+            fuente_modelo="rrhh.HoraExtra",
+            fuente_id=str(asignada.pk),
+            horas=asignada.horas,
+        )
+
+        response = self.client.get(reverse("rrhh:rrhh_he_list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Pendiente de autorizar · siguiente corte")
+        self.assertContains(response, "Pendiente del próximo corte")
+        self.assertContains(response, f"Pago: {self.corte.folio}")
+        self.assertContains(response, "01/09/2026–15/09/2026")
+        self.assertContains(response, "1 h 30 min")
+        self.assertNotContains(response, "1.50 h")
+
+
 class PrenominaViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
