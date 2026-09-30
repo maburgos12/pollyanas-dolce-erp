@@ -203,6 +203,21 @@ class EffectiveHoursTests(TestCase):
         self.special(status="EJECUTADO")
         self.assertEqual(self.read().json()["effective"]["status"], "UNKNOWN")
 
+    def test_unknown_child_execution_status_cannot_confirm_approved_hours(self):
+        for execution_status in ("UNKNOWN", "INVALID"):
+            with self.subTest(execution_status=execution_status):
+                detail = self.special()
+                detail.execution_status = execution_status
+                detail.save()
+                self.assertEqual(self.read().json()["effective"]["status"], "UNKNOWN")
+                detail.request.delete()
+
+    def test_duplicate_json_day_keys_cannot_confirm_regular_hours(self):
+        self.row["schedule"] = '{"mie":"09:00-19:30","mie":"11:30-18:00"}'
+        data = self.read().json()
+        self.assertEqual(data["regular"]["status"], "UNKNOWN")
+        self.assertEqual(data["effective"]["status"], "UNKNOWN")
+
     def test_all_nine_official_branch_identities(self):
         for code, name in (("MATRIZ", "Matriz"), ("PAYAN", "Payán"), ("LAS_GLORIAS", "Plaza Las Glorias"),
                            ("PLAZA_NIO", "Plaza Nío"), ("LEYVA", "Leyva"), ("COLOSIO", "Colosio"),

@@ -55,8 +55,17 @@ def _clock(value):
     return datetime.strptime(f"{hour:02}:{minute:02}", "%H:%M").strftime("%H:%M")
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate schedule key")
+        result[key] = value
+    return result
+
+
 def _regular_windows(schedule, weekday):
-    schedule = json.loads(schedule) if isinstance(schedule, str) else schedule
+    schedule = json.loads(schedule, object_pairs_hook=_unique_json_object) if isinstance(schedule, str) else schedule
     if not isinstance(schedule, dict) or not schedule or len(schedule) > 20:
         return None
     days = {}
@@ -134,7 +143,7 @@ def read_effective_hours(branch_name, target_date):
     invalid = len(details) > 100
     for detail in details:
         windows = _windows(detail.time_windows_json, detail.closed_all_day)
-        if (detail.request.status == "FALLIDO" or detail.execution_status == "FALLIDO"
+        if (detail.request.status == "FALLIDO" or detail.execution_status not in {"PENDIENTE", "EXITOSO"}
                 or (detail.request.status == "EJECUTADO" and detail.execution_status != "EXITOSO")
                 or detail.request.approved_at is None
                 or detail.request.cancelled_at is not None or detail.validation_errors_json != [] or windows is None):
