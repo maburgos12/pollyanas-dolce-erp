@@ -310,6 +310,50 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         )
         self.assertEqual(result.summary["recurrence_count"], 1)
 
+    @patch("reportes.services_inventory_audit_agent.DailyInventoryBreakService")
+    def test_run_month_investigates_only_canonical_point_branch(self, service_class):
+        erp_branch = Sucursal.objects.create(
+            codigo="AUD-CANONICAL",
+            nombre="Sucursal canónica",
+        )
+        self.branch.erp_branch = erp_branch
+        self.branch.save(update_fields=["erp_branch", "updated_at"])
+        canonical_branch = PointBranch.objects.create(
+            external_id="8",
+            name="Sucursal canónica",
+            erp_branch=erp_branch,
+        )
+        legacy_case = self.make_case(branch=self.branch)
+        canonical_case = self.make_case(
+            branch=canonical_branch,
+            calculation_fingerprint="c" * 64,
+        )
+
+        service_class.return_value.build_month.side_effect = lambda _month, cases: {
+            case.id: DailyBreakProjection(
+                status=DailyBreakStatus.INSUFFICIENT_EVIDENCE,
+                last_matching_checkpoint=None,
+                first_mismatch_checkpoint=None,
+                minimum=None,
+                maximum=None,
+                movement_ids_by_source={},
+                warnings=("Sin cortes diarios.",),
+            )
+            for case in cases
+        }
+
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+
+        result = InventoryAuditAgent().run_month(self.month)
+
+        legacy_case.refresh_from_db()
+        canonical_case.refresh_from_db()
+        self.assertEqual(result["total"], 1)
+        self.assertIsNone(legacy_case.investigated_at)
+        self.assertIsNotNone(canonical_case.investigated_at)
+        processed_cases = service_class.return_value.build_month.call_args.args[1]
+        self.assertEqual([case.id for case in processed_cases], [canonical_case.id])
+
     def test_second_equal_run_does_not_duplicate_notification(self):
         logistics_owner = self._head(
             username="jefatura.logistica.idempotente",

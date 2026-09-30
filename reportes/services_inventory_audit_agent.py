@@ -14,6 +14,9 @@ from django.utils import timezone
 from core.models import Notificacion
 from core.notificaciones import crear_notificacion
 from logistica.models import DiscrepanciaLogistica
+from pos_bridge.services.branch_inventory_traceability_service import (
+    canonical_point_branch_identity,
+)
 from pos_bridge.services.daily_inventory_break_service import (
     DailyBreakProjection,
     DailyBreakStatus,
@@ -87,8 +90,12 @@ class InventoryAuditAgent:
             "notifications": 0,
         }
         notification_groups: dict[tuple[int, str], list[tuple[int, str]]] = {}
+        branch_aliases, _ = canonical_point_branch_identity()
         month_rows = list(
-            ProductInventoryAuditCase.objects.filter(month=month)
+            ProductInventoryAuditCase.objects.filter(
+                month=month,
+                branch_id__in=set(branch_aliases.values()),
+            )
             .order_by("id")
             .values("id", "product_id", "branch_id", "branch__erp_branch_id", "source_trace")
         )
