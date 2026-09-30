@@ -1482,6 +1482,11 @@ class HoraExtra(models.Model):
         related_name="horas_extra_autorizadas",
     )
     fecha_autorizacion_jefe = models.DateTimeField(null=True, blank=True)
+    requiere_aplicacion_prenomina = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Incluye esta solicitud en el control de cortes de prenómina.",
+    )
     notas = models.TextField(blank=True)
     # Evidencia de una decisión humana sobre una propuesta originada en asistencia.
     # El saldo y la huella impiden reutilizarla tras modificar la jornada.
@@ -2522,7 +2527,16 @@ class PrenominaMovimiento(models.Model):
                 fields=["corte", "fuente_modelo", "fuente_id", "tipo_movimiento_erp"],
                 condition=Q(fuente_modelo__gt="", fuente_id__gt=""),
                 name="rrhh_prenomina_movimiento_fuente_unica",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=["fuente_modelo", "fuente_id", "tipo_movimiento_erp"],
+                condition=Q(
+                    fuente_modelo="rrhh.HoraExtra",
+                    fuente_id__gt="",
+                    tipo_movimiento_erp="HORA_EXTRA",
+                ),
+                name="rrhh_prenomina_hora_extra_fuente_unica",
+            ),
         ]
 
     def aplicar_equivalencia(self) -> bool:

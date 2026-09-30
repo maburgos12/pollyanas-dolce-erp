@@ -4993,7 +4993,7 @@ class RRHHViewsTests(TestCase):
             'disabled aria-disabled="true"', 'data-async-action data-reset-on-success="false"',
             'data-pending-label="Autorizando…"', 'data-pending-label="Rechazando…"',
             'class="ch-calculation-warning"', 'role="status"', "Asigna el turno",
-            "?v=20260923-extra-bloques-v2",
+            "?v=20260930-corte-prenomina",
         ):
             self.assertContains(response, contenido)
 
