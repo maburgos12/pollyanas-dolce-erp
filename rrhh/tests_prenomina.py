@@ -572,6 +572,44 @@ class PrenominaServiceTests(TestCase):
 
         self.assertFalse(corte.movimientos.filter(fuente_id=str(extra.pk)).exists())
 
+    def test_recalcular_preserva_hora_extra_historica_ya_asignada(self):
+        PrenominaEquivalenciaCONTPAQi.objects.create(
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+            clave_contpaqi="HE",
+            descripcion="Horas extra",
+            aplica_horas=True,
+        )
+        extra = HoraExtra.objects.create(
+            empleado=self.empleado,
+            fecha=date(2026, 6, 12),
+            horas=Decimal("2.00"),
+            estado=HoraExtra.ESTADO_AUTORIZADO,
+            requiere_aplicacion_prenomina=False,
+        )
+        corte = PrenominaCorte.objects.create(
+            fecha_inicio=date(2026, 6, 1),
+            fecha_fin=date(2026, 6, 15),
+            fecha_corte=date(2026, 6, 15),
+            creado_por=self.user,
+        )
+        PrenominaMovimiento.objects.create(
+            corte=corte,
+            empleado=self.empleado,
+            fecha=extra.fecha,
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+            horas=extra.horas,
+            fuente_modelo="rrhh.HoraExtra",
+            fuente_id=str(extra.pk),
+        )
+
+        recalcular_corte_prenomina(corte)
+
+        self.assertTrue(corte.movimientos.filter(fuente_id=str(extra.pk)).exists())
+        self.assertEqual(
+            corte.resumenes.get(empleado=self.empleado).horas_extra_autorizadas,
+            Decimal("2.00"),
+        )
+
     def test_incapacidad_genera_movimiento_y_recalculo_idempotente(self):
         PrenominaEquivalenciaCONTPAQi.objects.create(
             tipo_movimiento_erp=PrenominaMovimiento.TIPO_INCAPACIDAD,

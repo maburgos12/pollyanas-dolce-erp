@@ -84,6 +84,14 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     if corte.estado in {PrenominaCorte.ESTADO_EXPORTADO, PrenominaCorte.ESTADO_CERRADO}:
         raise ValidationError("No se puede recalcular un corte exportado o cerrado.")
 
+    horas_extra_asignadas_ids = {
+        int(pk)
+        for pk in corte.movimientos.filter(
+            fuente_modelo="rrhh.HoraExtra",
+            tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+        ).values_list("fuente_id", flat=True)
+        if pk.isdigit()
+    }
     corte.resumenes.all().delete()
     corte.movimientos.filter(fuente_modelo__in=FUENTES_AUTOMATICAS).exclude(
         estado=PrenominaMovimiento.ESTADO_EXPORTADO
@@ -96,7 +104,11 @@ def recalcular_corte_prenomina(corte: PrenominaCorte) -> PrenominaCorte:
     incidencias_por_empleado = _incidencias_por_empleado(corte, empleado_ids)
     asistencias_por_empleado = _asistencias_por_empleado(corte, empleado_ids)
     ajustes_pendientes_por_empleado = _ajustes_pendientes_por_empleado(corte, empleado_ids)
-    horas_extra_por_empleado = _horas_extra_por_empleado(corte, empleado_ids)
+    horas_extra_por_empleado = _horas_extra_por_empleado(
+        corte,
+        empleado_ids,
+        horas_extra_asignadas_ids,
+    )
     incapacidades_por_empleado = _incapacidades_por_empleado(corte, empleado_ids)
 
     for empleado in empleados:
@@ -175,7 +187,11 @@ def _ajustes_pendientes_por_empleado(corte: PrenominaCorte, empleado_ids: list[i
     return grouped
 
 
-def _horas_extra_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
+def _horas_extra_por_empleado(
+    corte: PrenominaCorte,
+    empleado_ids: list[int],
+    asignadas_al_corte_ids: set[int],
+):
     grouped = defaultdict(list)
     asignadas = PrenominaMovimiento.objects.filter(
         fuente_modelo="rrhh.HoraExtra",
@@ -186,8 +202,12 @@ def _horas_extra_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
         empleado_id__in=empleado_ids,
         fecha__lte=corte.fecha_fin,
         estado=HoraExtra.ESTADO_AUTORIZADO,
-        fecha_autorizacion_jefe__lte=corte.creado_en,
-        requiere_aplicacion_prenomina=True,
+    ).filter(
+        Q(pk__in=asignadas_al_corte_ids)
+        | Q(
+            fecha_autorizacion_jefe__lte=corte.creado_en,
+            requiere_aplicacion_prenomina=True,
+        )
     ).exclude(pk__in=asignadas_ids).order_by("empleado_id", "fecha", "id")
     for hora_extra in horas_extra:
         grouped[hora_extra.empleado_id].append(hora_extra)
