@@ -2,7 +2,7 @@
 {% load static humanize %}
 {% block title %}{{ solicitud.folio }} · Compra departamental{% endblock %}
 {% block page_title %}Seguimiento {{ solicitud.folio }}{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260928-intentos-1"><link rel="stylesheet" href="{% static 'css/compras_departamentales_budget.css' %}?v=20260803-1">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260930-imagenes-responsive-1"><link rel="stylesheet" href="{% static 'css/compras_departamentales_budget.css' %}?v=20260803-1">{% endblock %}
 {% block content %}
 <main class="cd-shell cd-detalle">
   <a class="cd-back" href="{% url 'compras:departamental_inicio' %}">← Volver</a>
@@ -26,7 +26,7 @@
   {% if es_compras and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
   <section class="cd-items-detail">
     {% for item in solicitud.items.all %}<article class="cd-card cd-item-detail" id="item-{{ item.pk }}">
-      <div class="cd-item-visual">{% if item.imagen %}<img src="{{ item.imagen.url }}" alt="Imagen de referencia de {{ item.descripcion }}">{% else %}<div class="cd-image-empty"><span>{{ item.descripcion|slice:":1" }}</span><small>Sin imagen de referencia</small></div>{% endif %}</div>
+      <div class="cd-item-visual">{% if item.imagen %}<button type="button" class="cd-detail-image-trigger" data-image-preview="{{ item.imagen.url }}" data-image-alt="Imagen de referencia de {{ item.descripcion }}" aria-label="Ver imagen completa de {{ item.descripcion }}"><img src="{{ item.imagen.url }}" alt=""><span>Ver imagen completa</span></button>{% else %}<div class="cd-image-empty"><span>{{ item.descripcion|slice:":1" }}</span><small>Sin imagen de referencia</small></div>{% endif %}</div>
       <div class="cd-item-body">
         <div class="cd-item-title"><div><span class="cd-pill">{{ item.categoria|default:"Sin categoría" }}</span><h2>{{ item.descripcion }}</h2><p>{{ item.cantidad|floatformat:-3 }} {{ item.unidad }} · requerida {{ item.fecha_requerida|date:"d M Y"|default:"sin fecha límite" }}</p></div><span class="cd-priority {{ item.prioridad|lower }}">{{ item.get_prioridad_display }}</span></div>
         <div class="cd-flow"><div><span>Estado actual</span><strong>{{ item.get_estado_display }}</strong></div><div><span>Siguiente acción</span><strong>{% if solicitud.estado == "BORRADOR" %}Pendiente de envío del área{% elif item.estado == 'PENDIENTE_CONFIRMACION' %}Confirmación del área {{ solicitud.area.nombre }}{% elif item.estado == 'RECIBIDO_CONFORME' %}Sin acción pendiente{% else %}{{ item.get_siguiente_responsable_display }}{% endif %}</strong></div><div><span>Costo estimado</span><strong>{% if item.costo_unitario_estimado is not None %}${{ item.costo_unitario_estimado|floatformat:2|intcomma }} c/u{% else %}No capturado{% endif %}</strong></div></div>
@@ -129,6 +129,7 @@
     </article>{% endfor %}
   </section>
   {% if es_compras %}<form method="post" action="{% url 'compras:departamental_generar_ordenes' solicitud.pk %}" data-async-action class="cd-sticky-action">{% csrf_token %}<div><strong>Órdenes por proveedor</strong><span>Solo incluye artículos autorizados con cotización seleccionada.</span></div><button class="cd-button primary">Generar órdenes disponibles</button></form>{% endif %}
+  {% include "compras/departamentales/partials/image_viewer.html" %}
 </main>
 {% endblock %}
 {% block extra_js %}
