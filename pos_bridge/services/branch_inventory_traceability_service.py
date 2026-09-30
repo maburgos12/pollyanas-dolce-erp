@@ -1180,6 +1180,15 @@ class BranchInventoryTraceabilityService:
                 and row.received_at is not None
                 and lower_bound <= row.received_at < upper_bound
             )
+            sent_quantity = Decimal(row.sent_quantity)
+            received_quantity = Decimal(row.received_quantity)
+            returned_quantity = (
+                sent_quantity - received_quantity
+                if destination_in_month
+                and row.is_finalized
+                and received_quantity < sent_quantity
+                else ZERO
+            )
             if product_id is None:
                 issues.append(
                     TraceSourceIssue(
@@ -1198,7 +1207,7 @@ class BranchInventoryTraceabilityService:
                 self._add_balance(
                     transfer_out,
                     (row.origin_branch_id, product_id),
-                    row.sent_quantity,
+                    sent_quantity,
                     row.id,
                 )
                 if used_fallback:
@@ -1223,11 +1232,18 @@ class BranchInventoryTraceabilityService:
                 self._add_balance(
                     transfer_in,
                     (row.destination_branch_id, product_id),
-                    row.received_quantity,
+                    received_quantity,
+                    row.id,
+                )
+            if returned_quantity > ZERO:
+                self._add_balance(
+                    transfer_in,
+                    (row.origin_branch_id, product_id),
+                    returned_quantity,
                     row.id,
                 )
             affected_branches = []
-            if origin_in_month:
+            if origin_in_month or returned_quantity > ZERO:
                 affected_branches.append(row.origin_branch_id)
             if destination_in_month:
                 affected_branches.append(row.destination_branch_id)
@@ -1248,8 +1264,13 @@ class BranchInventoryTraceabilityService:
             if (
                 row.is_received
                 and row.received_at is not None
-                and Decimal(row.sent_quantity) != Decimal(row.received_quantity)
+                and sent_quantity != received_quantity
             ):
+                return_detail = (
+                    f" Point retornó {returned_quantity} al almacén origen."
+                    if returned_quantity > ZERO
+                    else ""
+                )
                 for affected_branch_id in dict.fromkeys(affected_branches):
                     issues.append(
                         TraceSourceIssue(
@@ -1259,6 +1280,7 @@ class BranchInventoryTraceabilityService:
                                 f"{row.detail_external_id} registra "
                                 f"{row.sent_quantity} enviadas y "
                                 f"{row.received_quantity} recibidas."
+                                f"{return_detail}"
                             ),
                             branch_id=affected_branch_id,
                             product_id=product_id,

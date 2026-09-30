@@ -1496,6 +1496,56 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertNotIn("PLAZA", by_branch)
         self.assertEqual(by_branch["CENTRO"].source_trace["transfers"], (transfer.id,))
 
+    def test_partial_transfer_return_uses_received_month(self):
+        local_tz = timezone.get_current_timezone()
+        transfer = self._transfer(
+            sent_quantity="4",
+            received_quantity="3",
+            sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=local_tz),
+            received_at=datetime(2026, 9, 1, 0, 5, tzinfo=local_tz),
+        )
+        product_indexes = self.service._build_product_indexes([self.product])
+
+        def apply_for_month(lower_bound, upper_bound):
+            transfer_in = {}
+            transfer_out = {}
+            issues = []
+            self.service._apply_transfers(
+                rows=[transfer],
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+                product_indexes=product_indexes,
+                transfer_in=transfer_in,
+                transfer_out=transfer_out,
+                issues=issues,
+            )
+            return transfer_in, transfer_out, issues
+
+        august_in, august_out, _august_issues = apply_for_month(
+            datetime(2026, 8, 1, tzinfo=local_tz),
+            datetime(2026, 9, 1, tzinfo=local_tz),
+        )
+        september_in, september_out, september_issues = apply_for_month(
+            datetime(2026, 9, 1, tzinfo=local_tz),
+            datetime(2026, 10, 1, tzinfo=local_tz),
+        )
+
+        self.assertEqual(
+            august_out[(self.centro.id, self.product.id)][0], Decimal("4")
+        )
+        self.assertNotIn((self.centro.id, self.product.id), august_in)
+        self.assertFalse(september_out)
+        self.assertEqual(
+            september_in[(self.centro.id, self.product.id)][0], Decimal("1")
+        )
+        self.assertEqual(
+            september_in[(self.plaza.id, self.product.id)][0], Decimal("3")
+        )
+        self.assertEqual(
+            {issue.branch_id for issue in september_issues},
+            {self.centro.id, self.plaza.id},
+        )
+
     def test_exact_month_transfer_contract_is_independent_of_later_operational_legs(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
@@ -1898,6 +1948,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
 
         by_branch = {line.branch.external_id: line for line in result.lines}
         self.assertEqual(by_branch["CENTRO"].transfer_out, Decimal("4"))
+        self.assertEqual(by_branch["CENTRO"].transfer_in, Decimal("1"))
         self.assertEqual(by_branch["PLAZA"].transfer_in, Decimal("3"))
         for branch_code in ("CENTRO", "PLAZA"):
             issue = next(
@@ -1906,6 +1957,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 if issue.code == "TRANSFER_QUANTITY_MISMATCH"
             )
             self.assertEqual(issue.source_ids, (transfer.id,))
+            self.assertIn("Point retornó 1", issue.message)
 
     def test_blank_conversion_origin_keeps_destination_without_parent_outflow(self):
         whole = PointProduct.objects.create(
