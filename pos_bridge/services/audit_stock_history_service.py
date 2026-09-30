@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 
 from pos_bridge.models import (
@@ -103,6 +104,12 @@ def _normalized(value: str) -> str:
     )
 
 
+def _boolean(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _normalized(value) in {"1", "TRUE", "SI", "YES"}
+
+
 def _month_bounds(month: date) -> tuple[datetime, datetime]:
     month = month.replace(day=1)
     next_month = (
@@ -152,12 +159,21 @@ class AuditStockHistoryService:
     def _covers_month(record, month: date) -> bool:
         if record is None:
             return False
-        fetched_rows = int((record.raw_metadata or {}).get("fetched_rows") or 0)
-        history_limit = int((record.raw_metadata or {}).get("history_limit") or HISTORY_LIMIT)
+        metadata = record.raw_metadata or {}
+        if "fetched_rows" not in metadata:
+            return False
+        fetched_rows = int(metadata.get("fetched_rows") or 0)
+        history_limit = int(metadata.get("history_limit") or HISTORY_LIMIT)
         if fetched_rows < history_limit:
             return True
         month_start, _ = _month_bounds(month)
-        return record.rows.filter(movement_at__lte=month_start).exists()
+        earliest = str(metadata.get("earliest_movement_at") or "")
+        if not earliest:
+            return False
+        try:
+            return datetime.fromisoformat(earliest) <= month_start
+        except ValueError:
+            return False
 
     def capture(self, branch, product, month: date, *, force: bool = False):
         record = self._existing_import(branch, product)
@@ -222,13 +238,12 @@ class AuditStockHistoryService:
             "new_existence": _decimal(row.get("Existencia_nueva")),
             "total_cost": _decimal(row.get("Costo_Total") or row.get("Costo total")),
             "unit_cost": _decimal(row.get("Costo_Unitario") or row.get("Costo unitario")),
-            "cancelled": bool(row.get("Cancelado")),
+            "cancelled": _boolean(row.get("Cancelado")),
             "raw_payload": row,
         }
 
     def reconcile(self, branch, product, month: date) -> PointHistoryReconciliation:
         record = self._existing_import(branch, product)
-        coverage_status = "COMPLETE" if self._covers_month(record, month) else "INCOMPLETE"
         if record is None:
             return PointHistoryReconciliation(coverage_status="MISSING")
 
@@ -240,6 +255,46 @@ class AuditStockHistoryService:
                 cancelled=False,
             ).order_by("movement_at", "row_number")
         )
+        return self._reconcile_record(record, month, rows)
+
+    def reconcile_many(self, lines, month: date) -> dict[tuple[int, int], PointHistoryReconciliation]:
+        keys = {
+            (line.branch.id, line.product.id)
+            for line in lines
+            if Decimal(line.difference) != 0
+        }
+        if not keys:
+            return {}
+        month_start, month_end = _month_bounds(month)
+        month_rows = PointProductHistoryRow.objects.filter(
+            movement_at__gte=month_start,
+            movement_at__lt=month_end,
+            cancelled=False,
+        ).order_by("movement_at", "row_number")
+        records = PointProductHistoryImport.objects.filter(
+            point_branch_id__in={key[0] for key in keys},
+            point_product_id__in={key[1] for key in keys},
+            raw_metadata__source=SOURCE_NAME,
+        ).prefetch_related(
+            Prefetch("rows", queryset=month_rows, to_attr="audit_month_rows")
+        )
+        return {
+            (record.point_branch_id, record.point_product_id): self._reconcile_record(
+                record,
+                month,
+                record.audit_month_rows,
+            )
+            for record in records
+            if (record.point_branch_id, record.point_product_id) in keys
+        }
+
+    def _reconcile_record(
+        self,
+        record,
+        month: date,
+        rows,
+    ) -> PointHistoryReconciliation:
+        coverage_status = "COMPLETE" if self._covers_month(record, month) else "INCOMPLETE"
         totals = {
             "production": Decimal("0"),
             "sales": Decimal("0"),

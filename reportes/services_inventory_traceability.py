@@ -152,8 +152,17 @@ class InventoryAuditMaterializer:
                     dry_run=dry_run,
                 )
 
+            point_histories = AuditStockHistoryService().reconcile_many(
+                traceability.lines,
+                month_start,
+            )
             prepared_lines = [
-                self._prepare_line(line, month=month_start)
+                self._prepare_line(
+                    line,
+                    point_history=point_histories.get(
+                        (line.branch.id, line.product.id)
+                    ),
+                )
                 for line in traceability.lines
             ]
             branch_aliases, _branch_objects = canonical_point_branch_identity()
@@ -367,7 +376,7 @@ class InventoryAuditMaterializer:
         )
         return counts
 
-    def _prepare_line(self, line, *, month: date) -> dict[str, object]:
+    def _prepare_line(self, line, *, point_history=None) -> dict[str, object]:
         issues = _sorted_issue_payloads(line.issues)
         source_trace = _source_trace_payload(line.source_trace)
         normalized_quantities = {
@@ -386,30 +395,30 @@ class InventoryAuditMaterializer:
             "point_closing": Decimal(line.point_closing).quantize(_QUANTITY),
             "difference": Decimal(line.difference).quantize(_QUANTITY),
         }
-        reconciliation = AuditStockHistoryService().reconcile(
-            line.branch,
-            line.product,
-            month,
-        )
-        history_remainder = reconciliation.unexplained_remainder(
-            Decimal(line.opening),
-            Decimal(line.point_closing),
+        history_remainder = (
+            point_history.unexplained_remainder(
+                Decimal(line.opening),
+                Decimal(line.point_closing),
+            )
+            if point_history is not None
+            else None
         )
         if (
             Decimal(line.difference) != 0
-            and reconciliation.coverage_status == "COMPLETE"
-            and not reconciliation.unknown_movement_ids
+            and point_history is not None
+            and point_history.coverage_status == "COMPLETE"
+            and not point_history.unknown_movement_ids
             and history_remainder == 0
         ):
             history_values = {
-                "production": reconciliation.production,
-                "sales": reconciliation.sales,
-                "waste": reconciliation.waste,
-                "transfer_in": reconciliation.transfer_in,
-                "transfer_out": reconciliation.transfer_out,
-                "conversion_in": reconciliation.conversion_in,
-                "conversion_out": reconciliation.conversion_out,
-                "identified_adjustment": reconciliation.identified_adjustment,
+                "production": point_history.production,
+                "sales": point_history.sales,
+                "waste": point_history.waste,
+                "transfer_in": point_history.transfer_in,
+                "transfer_out": point_history.transfer_out,
+                "conversion_in": point_history.conversion_in,
+                "conversion_out": point_history.conversion_out,
+                "identified_adjustment": point_history.identified_adjustment,
             }
             comparison = {}
             for field, history_value in history_values.items():
@@ -421,17 +430,17 @@ class InventoryAuditMaterializer:
                         "difference": _decimal_text(history_value - source_value),
                     }
                 normalized_quantities[field] = history_value.quantize(_QUANTITY)
-            expected = reconciliation.expected_closing(Decimal(line.opening))
+            expected = point_history.expected_closing(Decimal(line.opening))
             normalized_quantities["expected_closing"] = expected.quantize(_QUANTITY)
             normalized_quantities["difference"] = (
                 Decimal(line.point_closing) - expected
             ).quantize(_QUANTITY)
-            point_history = reconciliation.as_dict(
+            point_history_payload = point_history.as_dict(
                 opening=Decimal(line.opening),
                 point_closing=Decimal(line.point_closing),
             )
-            point_history["aggregate_comparison"] = comparison
-            source_trace["point_history"] = point_history
+            point_history_payload["aggregate_comparison"] = comparison
+            source_trace["point_history"] = point_history_payload
         quantities = {
             name: _decimal_text(value)
             for name, value in normalized_quantities.items()

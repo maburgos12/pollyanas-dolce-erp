@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.test import TestCase
 
@@ -129,6 +130,7 @@ class AuditStockHistoryServiceTests(TestCase):
                 cancelled=True,
             ),
         ]
+        rows[4]["Cancelado"] = "false"
         result = AuditStockHistoryService(client=_FakePointClient(rows)).capture(
             self.branch,
             self.product,
@@ -166,3 +168,45 @@ class AuditStockHistoryServiceTests(TestCase):
         )
 
         self.assertEqual(result.coverage_status, "INCOMPLETE")
+
+    def test_reconcile_many_loads_all_cached_histories_in_two_queries(self):
+        second_product = PointProduct.objects.create(
+            external_id="110",
+            sku="0110",
+            name="Segundo producto",
+        )
+        client = _FakePointClient(
+            [
+                _row(
+                    201,
+                    "AJUSTE ENTRADA INVENTARIO",
+                    "2026-08-10T10:00:00-07:00",
+                    1,
+                    0,
+                    1,
+                )
+            ]
+        )
+        service = AuditStockHistoryService(client=client)
+        service.capture(self.branch, self.product, self.month)
+        service.capture(self.branch, second_product, self.month, force=True)
+        lines = [
+            SimpleNamespace(
+                branch=self.branch,
+                product=self.product,
+                difference=Decimal("-1"),
+            ),
+            SimpleNamespace(
+                branch=self.branch,
+                product=second_product,
+                difference=Decimal("-1"),
+            ),
+        ]
+
+        with self.assertNumQueries(2):
+            reconciliations = AuditStockHistoryService().reconcile_many(
+                lines,
+                self.month,
+            )
+
+        self.assertEqual(len(reconciliations), 2)

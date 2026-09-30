@@ -238,6 +238,8 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             result.summary["point_history"],
             case.source_trace["point_history"],
         )
+        self.assertEqual(result.summary["daily_break"], {})
+        self.assertEqual(result.summary["missing"], [])
 
     @patch(
         "reportes.management.commands.investigate_inventory_audit_cases."

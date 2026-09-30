@@ -295,6 +295,7 @@ class InventoryAuditAgent:
         point_history = (case.source_trace or {}).get("point_history")
         if not isinstance(point_history, dict):
             point_history = {}
+        history_resolved = False
         if point_history.get("coverage_status") == "COMPLETE":
             conversion_out = Decimal(str(point_history.get("conversion_out") or 0))
             conversion_in = Decimal(str(point_history.get("conversion_in") or 0))
@@ -328,6 +329,7 @@ class InventoryAuditAgent:
                     "por conversión; el historial transaccional sí las conserva."
                 )
             if remainder == 0:
+                history_resolved = True
                 facts.append(
                     "El historial transaccional de Point explica el saldo final sin "
                     "unidades pendientes de localizar."
@@ -367,7 +369,9 @@ class InventoryAuditAgent:
             if "TRANSFER_QUANTITY_MISMATCH" in issue_codes and not discrepancies:
                 missing.append("Relacionar la transferencia con una evidencia logística explícita.")
 
-        if daily_break.status == DailyBreakStatus.FOUND:
+        if history_resolved:
+            pass
+        elif daily_break.status == DailyBreakStatus.FOUND:
             checkpoint = daily_break.first_mismatch_checkpoint
             if checkpoint is not None:
                 facts.append(
@@ -389,7 +393,9 @@ class InventoryAuditAgent:
             "facts": facts,
             "hypotheses": hypotheses,
             "missing": missing,
-            "daily_break": self._daily_break_summary(case, daily_break),
+            "daily_break": (
+                {} if history_resolved else self._daily_break_summary(case, daily_break)
+            ),
             "point_history": point_history,
             "related_logistics_discrepancy_ids": [item.id for item in discrepancies],
             "recurrence_count": recurrence_count,
