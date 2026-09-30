@@ -86,6 +86,44 @@ class LiveSalePriceApiTests(APITestCase):
         self.assertEqual(self.read().status_code, 401)
         self.get_detail.assert_not_called()
 
+    def test_real_point_product_detail_identifier_returns_verified_price(self):
+        self.product.name = "Pastel de Fresas Con Crema Chico"
+        self.product.save()
+        self.detail = {
+            "PK_Producto": 101, "Codigo": "0101", "Nombre": self.product.name,
+            "Activo": True, "Precio_default": 340.0,
+        }
+        for identifier in (101, "101"):
+            with self.subTest(identifier=identifier):
+                self.detail["PK_Producto"] = identifier
+                response = self.read()
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.data["status"], "VERIFIED")
+                self.assertEqual(response.data["point_product_id"], "101")
+                self.assertEqual(response.data["amount"], "340.0")
+
+    def test_product_detail_identifier_aliases_must_all_match(self):
+        original = dict(self.detail)
+        for value in (None, True, False, 145, 101.0, "0101", "١٠١", "0", [], {}):
+            with self.subTest(real_identifier=value):
+                self.detail = {**original, "PK_Producto": value}
+                self.assert_unknown(self.read(), 502)
+        for legacy_value in (None, True, 145, 101.0):
+            with self.subTest(legacy_identifier=legacy_value):
+                self.detail = {**original, "PK_Producto": 101, "PK": legacy_value}
+                self.assert_unknown(self.read(), 502)
+        self.detail = {**original, "PK_Producto": "101"}
+        self.assertEqual(self.read().status_code, 200)
+
+    def test_real_identifier_missing_invalid_or_wrong_never_falls_back_to_request(self):
+        original = {key: value for key, value in self.detail.items() if key != "PK"}
+        self.detail = original
+        self.assert_unknown(self.read(), 502)
+        for value in (None, True, False, 145, 101.0, "0101", "-101", "0", [], {}):
+            with self.subTest(identifier=value):
+                self.detail = {**original, "PK_Producto": value}
+                self.assert_unknown(self.read(), 502)
+
     def test_invalid_or_missing_code_does_not_contact_point(self):
         for params in ({"product_code": ""}, {"product_code": "x" * 121}, {"other": "0101"}):
             with self.subTest(params=params):
