@@ -27,7 +27,6 @@ from mantenimiento.evidence_validation import (
 )
 from pos_bridge.models import (
     PointConversionLine,
-    PointDailySale,
     PointHistoricalInventoryClosingLine,
     PointOpenTransferSnapshotMember,
     PointProductionLine,
@@ -42,6 +41,7 @@ from reportes.models import (
     ProductInventoryAuditEvent,
     ProductInventoryAuditRun,
 )
+from ventas.services.sales_read_service import point_sales_evidence_by_ids
 
 MAX_EVIDENCE_SIZE = 10 * 1024 * 1024
 MAX_NOTES_LENGTH = 4000
@@ -283,9 +283,7 @@ def _source_evidence_by_step(
     }
     sales = {
         row.pk: row
-        for row in PointDailySale.objects.filter(
-            pk__in=ids_for("sales")
-        ).select_related("branch")
+        for row in point_sales_evidence_by_ids(sale_ids=ids_for("sales"))
     }
     production = {
         row.pk: row
