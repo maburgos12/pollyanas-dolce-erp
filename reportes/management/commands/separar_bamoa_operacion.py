@@ -142,6 +142,7 @@ class Command(BaseCommand):
             total += self._bloque(cur, "POR FECHA", self._sql_fecha(), params)
             total += self._bloque(cur, "POR PERIODO DEL PADRE", self._sql_padre(), params)
             total += self._bloque(cur, "ESTADO ACTUAL DE LA TIENDA", self._sql_estado(), params)
+            self._reportar_conflictos(cur, params)
             total += self._activos(cur, bamoa)
             self._fiscal(cur, bamoa)
             self.stdout.write("")
@@ -164,14 +165,44 @@ class Command(BaseCommand):
         existentes = set(connection.introspection.table_names())
         return sorted(nombradas - existentes)
 
+    @staticmethod
+    def _llave_unica(tabla: str, col: str) -> list[str]:
+        """Columnas con las que la tabla distingue un renglón, además de la sucursal.
+
+        Point siguió escribiendo con el registro nuevo desde que se repuntó, así
+        que el destino ya puede tener el renglón que vamos a mover. Sin esto la
+        migración aborta por llave duplicada a media faena.
+        """
+        with connection.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.attname
+                FROM pg_constraint c
+                JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+                WHERE c.conrelid = %s::regclass AND c.contype = 'u'
+                  AND %s = ANY(SELECT att.attname FROM pg_attribute att
+                               WHERE att.attrelid = c.conrelid AND att.attnum = ANY(c.conkey))
+                """,
+                [tabla, col],
+            )
+            return [fila[0] for fila in cur.fetchall() if fila[0] != col]
+
     def _sql_fecha(self):
         for tabla, col, fecha, corte in POR_FECHA:
             if tabla not in connection.introspection.table_names():
                 continue
+            resguardo = ""
+            claves = self._llave_unica(tabla, col)
+            if claves:
+                iguales = " AND ".join(f'o."{k}" = "{tabla}"."{k}"' for k in claves)
+                resguardo = (
+                    f' AND NOT EXISTS (SELECT 1 FROM "{tabla}" o '
+                    f'WHERE o."{col}" = %(destino)s AND {iguales})'
+                )
             yield (
                 f"{tabla}.{col}",
                 f'UPDATE "{tabla}" SET "{col}" = %(destino)s '
-                f'WHERE "{col}" = %(origen)s AND "{fecha}" >= \'{corte}\'',
+                f'WHERE "{col}" = %(origen)s AND "{fecha}" >= \'{corte}\'{resguardo}',
             )
 
     def _sql_padre(self):
@@ -220,6 +251,32 @@ class Command(BaseCommand):
             )
             creados += cur.rowcount
         self.stdout.write(f"  patrones de texto propios de Bamoa dados de alta{'':<3} {creados:>7,}")
+
+    def _reportar_conflictos(self, cur, params) -> None:
+        """Lo que se quedó en Crucero porque el destino ya lo tenía.
+
+        No se borra: un renglón que no se pudo mover se enseña para que una
+        persona decida, en vez de desaparecer sin que nadie lo note.
+        """
+        pendientes = []
+        for tabla, col, fecha, corte in POR_FECHA:
+            if tabla not in connection.introspection.table_names():
+                continue
+            cur.execute(
+                f'SELECT COUNT(*) FROM "{tabla}" WHERE "{col}" = %(origen)s '
+                f'AND "{fecha}" >= \'{corte}\'',
+                params,
+            )
+            quedan = cur.fetchone()[0]
+            if quedan:
+                pendientes.append((tabla, col, quedan))
+        if not pendientes:
+            return
+        self.stdout.write("")
+        self.stdout.write(self.style.WARNING("SE QUEDARON EN CRUCERO · el destino ya tenía ese renglón"))
+        for tabla, col, quedan in pendientes:
+            self.stdout.write(f"  {tabla}.{col:<28} {quedan:>7,}")
+        self.stdout.write("  Point los reescribió con el registro nuevo; conviene revisarlos.")
 
     def _activos(self, cur, bamoa) -> int:
         """A dónde se llevaron los equipos lo sabe operaciones, no una fecha."""
