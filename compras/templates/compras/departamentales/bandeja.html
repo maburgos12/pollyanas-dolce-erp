@@ -42,7 +42,7 @@
     <div class="cd-card-head"><div><h2>Artículos que requieren atención</h2></div></div>
     <div class="cd-table-wrap table-responsive"><table class="cd-table"><thead><tr><th>Artículo</th><th>Solicitud</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Solicitado estimado</th><th>Cotizado</th><th>Comprometido vigente</th><th>Reembolso pendiente</th><th>Reembolsado</th><th>Siguiente acción</th><th>Detalle</th></tr></thead><tbody>
       {% for item in items %}<tr>
-        <td><div class="cd-product">{% if item.imagen %}<img src="{{ item.imagen.url }}" alt="Referencia de {{ item.descripcion }}">{% else %}<span class="cd-thumb">{{ item.descripcion|slice:":1" }}</span>{% endif %}<div><strong>{{ item.descripcion }}</strong><small>{{ item.cantidad|floatformat:-3 }} {{ item.unidad }}</small></div></div></td>
+        <td><div class="cd-product">{% if item.imagen %}<button type="button" class="cd-image-trigger" data-image-preview="{{ item.imagen.url }}" data-image-alt="Referencia de {{ item.descripcion }}" aria-label="Ver imagen completa de {{ item.descripcion }}"><img class="cd-product-image" src="{{ item.imagen.url }}" alt=""></button>{% else %}<span class="cd-thumb">{{ item.descripcion|slice:":1" }}</span>{% endif %}<div><strong>{{ item.descripcion }}</strong><small>{{ item.cantidad|floatformat:-3 }} {{ item.unidad }}</small></div></div></td>
         <td>{{ item.solicitud.folio }}<small>{{ item.solicitud.get_tipo_display }}</small>{% if item.resumen_arrastrado %}<small class="cd-carryover">Arrastrado desde {{ item.solicitud.periodo|date:"F \d\e Y"|lower }}</small>{% endif %}</td><td>{{ item.solicitud.area.nombre }}</td>
         <td><span class="cd-priority {{ item.prioridad|lower }}">{{ item.get_prioridad_display }}</span></td>
         <td><span class="cd-status">{{ item.get_estado_display }}</span>{% if not item.resumen_en_alcance_operativo %}<small>Solo seguimiento de reembolso</small>{% endif %}</td><td>{% if not item.resumen_en_alcance_operativo %}—{% elif item.resumen_estimado is not None %}${{ item.resumen_estimado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin estimación</span>{% endif %}</td><td>{% if not item.resumen_en_alcance_operativo %}—{% elif item.resumen_cotizado is not None %}${{ item.resumen_cotizado|floatformat:2|intcomma }}{% else %}<span class="cd-muted">Sin cotización</span>{% endif %}</td><td>${{ item.resumen_comprometido|floatformat:2|intcomma }}</td><td>${{ item.resumen_reembolso_pendiente|floatformat:2|intcomma }}</td><td>${{ item.resumen_reembolsado|floatformat:2|intcomma }}</td><td>{% if not item.resumen_en_alcance_operativo %}Compras · recuperar reembolso{% else %}{{ item.get_siguiente_responsable_display }}{% endif %}</td>
@@ -50,5 +50,6 @@
       </tr>{% empty %}<tr><td colspan="12"><div class="cd-empty"><strong>No hay artículos con estos filtros.</strong><span>Puedes limpiar los filtros para revisar todos los pendientes.</span></div></td></tr>{% endfor %}
     </tbody></table></div>
   </section>
+  {% include "compras/departamentales/partials/image_viewer.html" %}
 </main>
 {% endblock %}

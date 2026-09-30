@@ -1,0 +1,30 @@
+<dialog class="cd-image-viewer" id="cd-image-viewer" aria-labelledby="cd-image-viewer-title">
+  <div class="cd-image-viewer-head">
+    <strong id="cd-image-viewer-title">Imagen de referencia</strong>
+    <form method="dialog"><button class="cd-image-viewer-close" aria-label="Cerrar imagen">×</button></form>
+  </div>
+  <img src="" alt="">
+</dialog>
+<script>
+(function () {
+  var dialogo = document.getElementById('cd-image-viewer');
+  if (!dialogo) { return; }
+  var imagen = dialogo.querySelector('img');
+  var ultimoDisparador = null;
+  document.addEventListener('click', function (evento) {
+    var disparador = evento.target.closest('[data-image-preview]');
+    if (!disparador) { return; }
+    ultimoDisparador = disparador;
+    imagen.src = disparador.dataset.imagePreview;
+    imagen.alt = disparador.dataset.imageAlt || 'Imagen de referencia';
+    dialogo.showModal();
+  });
+  dialogo.addEventListener('click', function (evento) {
+    if (evento.target === dialogo) { dialogo.close(); }
+  });
+  dialogo.addEventListener('close', function () {
+    imagen.removeAttribute('src');
+    if (ultimoDisparador) { ultimoDisparador.focus(); }
+  });
+})();
+</script>

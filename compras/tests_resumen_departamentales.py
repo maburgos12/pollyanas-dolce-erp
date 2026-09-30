@@ -190,6 +190,15 @@ class ResumenDepartamentalTests(TestCase):
         self.assertContains(response, 'Arrastrado desde agosto de 2026')
         self.assertIn('etapa=nunca_cotizados', response.context['exportar_url'])
 
+    def test_bandeja_abre_imagen_completa_sin_recortarla(self):
+        self.item(imagen='compras/departamentales/2026/09/equipo.jpg')
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, 'data-image-preview')
+        self.assertContains(response, 'id="cd-image-viewer"')
+        self.assertContains(response, 'class="cd-product-image"')
+
     def test_excel_conserva_periodo_original_y_agrega_etapa_y_arrastre(self):
         self.item(self.solicitud(periodo=date(2026, 8, 1)), descripcion='Pendiente anterior')
 

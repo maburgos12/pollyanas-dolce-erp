@@ -633,3 +633,25 @@ class ComprasDepartamentalesViewTests(TestCase):
                 self.ajena, "compras/departamentales/2026/09/rack.jpg"
             )
         )
+
+    def test_detalle_permite_abrir_imagen_completa(self):
+        solicitud = SolicitudCompraDepartamental.objects.create(
+            area=self.area,
+            solicitante=self.responsable,
+            tipo=SolicitudCompraDepartamental.TIPO_EXTRAORDINARIA,
+            periodo=date(2026, 9, 1),
+            justificacion_extraordinaria="Imprevisto",
+        )
+        ItemCompraDepartamental.objects.create(
+            solicitud=solicitud,
+            descripcion="Rack",
+            cantidad=1,
+            imagen="compras/departamentales/2026/09/rack.jpg",
+        )
+        self.client.force_login(self.responsable)
+
+        response = self.client.get(reverse("compras:departamental_detalle", args=[solicitud.pk]))
+
+        self.assertContains(response, 'data-image-preview')
+        self.assertContains(response, 'id="cd-image-viewer"')
+        self.assertContains(response, 'Ver imagen completa')
