@@ -35,7 +35,7 @@ La auditoría mensual debe señalar el primer corte comprobado en el que el sald
 
 Extender la investigación regenerable del expediente existente. Un servicio mensual reutilizará las fuentes persistidas, construirá puntos de control por producto y ubicación y comparará el saldo acumulado con el último snapshot disponible de cada fecha local. Guardará solamente el resumen del primer quiebre y su ventana de movimientos dentro de `investigation_summary`; no creará tabla, importador, descarga Point ni captura paralela.
 
-El cálculo se ejecutará en lote para el mes y cargará cada fuente una sola vez. El detalle del caso leerá la proyección almacenada. Cuando no exista snapshot suficiente, el expediente dirá “sin corte intermedio comprobable” y conservará la diferencia mensual.
+El cálculo se ejecutará en lote para el mes y cargará cada fuente una sola vez. El detalle del caso leerá la proyección almacenada. Para movimientos que solo informan fecha, un snapshot intradía se compara contra el rango mínimo/máximo posible y no contra un orden inventado. Cuando no exista snapshot suficiente, el expediente dirá “sin corte intermedio comprobable” y conservará la diferencia mensual.
 
 Consultas o procedimiento reproducible:
 

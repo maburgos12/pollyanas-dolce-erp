@@ -56,6 +56,18 @@ En cada fecha con snapshot persistido se toma la última observación disponible
 
 La comparación utiliza `America/Mazatlan`. Una observación no se presenta como cierre oficial del día.
 
+### Movimientos sin hora y rango conservador
+
+Las ventas y parte de la producción solo informan fecha. Para un snapshot tomado durante esa misma fecha no es posible saber cuáles de esos movimientos ya habían ocurrido. El servicio no escogerá un orden arbitrario:
+
+1. aplica exactamente los movimientos con fecha-hora anterior al snapshot;
+2. calcula, con los movimientos sin hora de la fecha, el saldo mínimo posible si primero ocurrieron todas las salidas;
+3. calcula el saldo máximo posible si primero ocurrieron todas las entradas;
+4. considera el corte compatible cuando el stock observado cae dentro de ese rango;
+5. declara diferencia comprobada solo cuando el stock observado queda fuera del rango completo.
+
+Un corte compatible no equivale a “cuadrado”; queda como `INCONCLUSIVE` hasta que un corte posterior o el cierre mensual permita comprobarlo. Así se evita señalar un falso quiebre por desconocer el orden intradía.
+
 ## Precisión y límites
 
 `PointDailySale` conserva ventas por día, no la hora de cada ticket. Por eso el resultado identifica un intervalo diario comprobado, no necesariamente una transacción culpable. Los movimientos con hora posterior al snapshot no pueden imputarse a ese corte. El servicio debe separar:
@@ -116,6 +128,8 @@ La corrida mensual del agente calcula la proyección una sola vez y añade al `i
 }
 ```
 
+El estado interno también admite `INCONCLUSIVE` para meses con snapshots compatibles pero sin un punto intermedio exacto. La pantalla lo traduce a “corte compatible; orden del día no comprobable”.
+
 La huella de investigación incorpora esta proyección. Una segunda ejecución idéntica no modifica expedientes ni duplica notificaciones.
 
 ### Detalle del expediente
@@ -171,7 +185,7 @@ Pruebas unitarias mínimas:
 2. inicia la ventana en la apertura cuando el primer snapshot ya difiere;
 3. respeta `America/Mazatlan` en límites de fecha;
 4. no aplica un movimiento posterior al corte;
-5. marca precisión diaria para ventas sin hora;
+5. usa un rango conservador para ventas o producción sin hora y no genera un falso quiebre;
 6. agrupa transferencias y retornos sin doble conteo;
 7. conserva conversión sin origen como advertencia;
 8. no ejecuta consultas por expediente;
