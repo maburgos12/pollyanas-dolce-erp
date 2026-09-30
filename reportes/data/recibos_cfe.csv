@@ -1,0 +1,27 @@
+# Recibos de CFE con su medidor. El CFDI no dice a qué servicio pertenece —no trae
+# el número de servicio, ni el medidor, ni el domicilio— así que la liga se hace por
+# importe contra el recibo físico. Cada renglón es un recibo que alguien tuvo en la
+# mano. Agregar aquí los nuevos conforme lleguen.
+#
+# cobertura_inicio/fin son opcionales: cuando se conocen, el importe se prorratea
+# entre esos meses; cuando no, el gasto queda en el mes en que se emitió la factura,
+# que es lo único verificable sin el recibo.
+no_servicio,centro_costo,importe,cobertura_inicio,cobertura_fin,evidencia
+543230202528,COMPARTIDO_MC,25065.08,2026-01,2026-01,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,20778.19,2026-02,2026-02,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,21958.35,2026-03,2026-03,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,30097.56,2026-04,2026-04,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,29816.34,2026-05,2026-05,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,36209.81,2026-06,2026-06,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,36014.32,2026-07,2026-07,GDMTO 45 kW · facturación mensual
+543230202528,COMPARTIDO_MC,39205.12,2026-08,2026-08,GDMTO 45 kW · recibo cubre 10-jul a 11-ago
+543191000998,COMPARTIDO_CRUCERO,16883.88,,,Medidor Niños Héroes · local anterior, baja jun-2026
+543230102442,LAS_GLORIAS,14374.16,,,Recibo del medidor CXN448
+543250103917,EL_TUNEL,12130.38,,,Recibo del medidor WEU204
+543230100661,LEYVA,18027.08,,,Recibo del medidor DDK214
+543230302212,PLAZA_NIO,10890.09,,,Recibo del medidor CPT568
+543230100687,PAYAN,10327.69,,,Recibo del medidor YF281N
+543230100679,COLOSIO,15430.85,,,Recibo del medidor MH951R
+545230101121,GUAMUCHIL,20152.20,,,Recibo del medidor DDL594 · CP 81400
+545230101121,GUAMUCHIL,13805.11,,,CP 81400 exclusivo de Guamúchil
+545230101121,GUAMUCHIL,212.79,,,CP 81400 exclusivo de Guamúchil
