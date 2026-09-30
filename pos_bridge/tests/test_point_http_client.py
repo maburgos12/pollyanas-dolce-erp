@@ -8,10 +8,62 @@ import requests
 from django.test import SimpleTestCase
 
 from pos_bridge.services.point_http_client import PointHttpSessionClient
-from pos_bridge.utils.exceptions import ExtractionError
+from pos_bridge.utils.exceptions import AuthenticationError, ExtractionError
 
 
 class PointHttpSessionClientTests(SimpleTestCase):
+    @staticmethod
+    def _login_transport(*, malformed_path=None, malformed_payload=None):
+        workspaces = [{"id_suc": 2, "wsName": "Bamoa", "wsID": "w2"}]
+        accounts = [{"ACC_ID": "a1", "ACC_NAME": "Pollyanas", "JSON_WORKSPACES": json.dumps(workspaces)}]
+        payloads = {
+            "/Account/SignIn_click": {"redirectToUrl": "/Account/workSpaces"},
+            "/Account/get_workSpaces": {"json": json.dumps(accounts)},
+            "/Account/SetCurrentAccount": {"success": True},
+            "/Account/get_acctok": {"redirectToUrl": "/Home/Index"},
+        }
+        def request(method, url, **kwargs):
+            from urllib.parse import urlparse
+            path = urlparse(url).path
+            response = requests.Response()
+            response.status_code = 200
+            response.url = url
+            payload = malformed_payload if path == malformed_path else payloads.get(path)
+            response._content = json.dumps(payload).encode() if path in payloads else b"<html>Point</html>"
+            return response
+        return request
+
+    def test_real_login_rejects_non_object_authentication_responses(self):
+        for path in ("/Account/SignIn_click", "/Account/get_workSpaces", "/Account/SetCurrentAccount", "/Account/get_acctok"):
+            for payload in (None, [], True, 42, "unexpected"):
+                with self.subTest(path=path, payload=payload):
+                    with PointHttpSessionClient(self._settings(retry_attempts=1)) as client:
+                        with patch.object(client.session, "request", side_effect=self._login_transport(malformed_path=path, malformed_payload=payload)):
+                            with self.assertRaises(ExtractionError):
+                                client.login()
+
+    def test_real_login_rejects_malformed_account_and_workspace_structures(self):
+        account = {"ACC_ID": "a1", "JSON_WORKSPACES": "[]"}
+        invalid_accounts = [None, {}, [None], [[]], [42], ["account"], [True]]
+        for workspaces in (None, {}, [None], [[]], [42], ["workspace"], [True]):
+            invalid_accounts.append([{**account, "JSON_WORKSPACES": json.dumps(workspaces)}])
+        for accounts in invalid_accounts:
+            with self.subTest(accounts=accounts):
+                with PointHttpSessionClient(self._settings(retry_attempts=1)) as client:
+                    with patch.object(client.session, "request", side_effect=self._login_transport(
+                        malformed_path="/Account/get_workSpaces", malformed_payload={"json": json.dumps(accounts)},
+                    )):
+                        with self.assertRaises(AuthenticationError):
+                            client.login()
+
+    def test_real_login_keeps_valid_workspace_contract(self):
+        with PointHttpSessionClient(self._settings(retry_attempts=1)) as client:
+            with patch.object(client.session, "request", side_effect=self._login_transport()):
+                workspace = client.login(branch_hint="BAMOA")
+        self.assertEqual(workspace["account_id"], "a1")
+        self.assertEqual(workspace["branch_id"], 2)
+        self.assertEqual(workspace["branch_name"], "Bamoa")
+
     def test_full_catalog_uses_families_without_losing_products_above_150(self):
         client = PointHttpSessionClient(self._settings())
         client._ENUM_SEEDS = "x"

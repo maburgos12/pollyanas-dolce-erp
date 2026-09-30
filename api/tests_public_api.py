@@ -15,7 +15,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 
 from core.models import Sucursal
-from crm.models import Cliente, PedidoCliente
+from crm.models import Cliente, PedidoCliente, PickupReservation
 from crm.services import PickupAvailabilityService
 from integraciones.models import PublicApiAccessLog, PublicApiClient
 from inventario.models import ExistenciaInsumo
@@ -512,22 +512,28 @@ class PublicApiTests(APITestCase):
         PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0,
     )
     def test_pickup_availability_prefers_live_point_stock(self):
+        self.sucursal.codigo = "CRUCERO"
+        self.sucursal.nombre = "Sucursal Bamoa"
+        self.sucursal.save(update_fields=["codigo", "nombre"])
+        self.point_branch.external_id = "Bamoa"
+        self.point_branch.name = "Bamoa"
+        self.point_branch.save(update_fields=["external_id", "name"])
         PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(minutes=5), stock=Decimal("0"))
         live_result = PointLiveInventoryResult(
-            product_code="01PSV",
-            product_name="Pastel Selva Negra",
-            point_product_id="1001",
-            point_branch_id="1",
-            point_branch_name="Matriz",
+            product_code="POINT-SOURCE-CODE",
+            product_name="Point source product",
+            point_product_id="101",
+            point_branch_id="2",
+            point_branch_name="Bamoa",
             stock_qty=Decimal("7"),
             captured_at=timezone.now(),
-            raw_payload={"Cantidad": 7, "Sucursal": "Matriz"},
+            raw_payload={"Cantidad": 7, "Sucursal": "Bamoa"},
         )
 
         with patch("pos_bridge.services.live_inventory_lookup_service.PointLiveInventoryLookupService.get_stock", return_value=live_result):
             response = self.client.get(
                 reverse("api_public_pickup_availability"),
-                {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                {"product_code": "01PSV", "branch_code": "Bamoa", "quantity": "1"},
                 **self._auth_headers(),
             )
 
@@ -535,6 +541,13 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["status"], "AVAILABLE")
         self.assertEqual(response.data["source"], "ERP_POS_BRIDGE_LIVE_POINT")
         self.assertEqual(response.data["available_to_promise"], "6")
+        self.assertEqual(response.data["branch_code"], "CRUCERO")
+        self.assertIn("point_branch_id", response.data)
+        self.assertEqual(response.data["point_branch_id"], "2")
+        self.assertEqual(response.data["point_branch_name"], "Bamoa")
+        self.assertEqual(response.data["point_product_id"], "101")
+        self.assertEqual(response.data["point_product_code"], "POINT-SOURCE-CODE")
+        self.assertEqual(response.data["point_product_name"], "Point source product")
 
     @override_settings(
         SECURE_SSL_REDIRECT=False,
@@ -561,6 +574,9 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.data["status"], "UNKNOWN")
         self.assertEqual(response.data["source"], "ERP_POS_BRIDGE")
         self.assertEqual(response.data["available_to_promise"], "4.000")
+        for field in ("point_product_id", "point_product_code", "point_product_name", "point_branch_id", "point_branch_name"):
+            self.assertIn(field, response.data)
+            self.assertIsNone(response.data[field])
 
     @override_settings(
         PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
@@ -693,10 +709,73 @@ class PublicApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertEqual(response.data["code"], "inventory_timeout")
 
-    @override_settings(PICKUP_RESERVATION_EXPIRY_SWEEP_DEBOUNCE_SECONDS=30)
-    def test_pickup_availability_debounces_expired_reservation_sweep(self):
+    @override_settings(PICKUP_AVAILABILITY_RESPONSE_CACHE_SECONDS=0, PICKUP_STOCK_BUFFER_DEFAULT="1")
+    def test_pickup_availability_excludes_expired_holds_without_changing_reservations(self):
+        now = timezone.now()
+        PointInventorySnapshot.objects.all().update(stock=Decimal("20"))
+        for reservation_status, expires_at, quantity in (
+            (PickupReservation.STATUS_ACTIVE, now - timedelta(seconds=1), "99"),
+            (PickupReservation.STATUS_ACTIVE, now + timedelta(minutes=1), "1"),
+            (PickupReservation.STATUS_ACTIVE, None, "2"),
+            (PickupReservation.STATUS_ACTIVE, now, "3"),
+            (PickupReservation.STATUS_CONFIRMED, now - timedelta(days=1), "4"),
+            (PickupReservation.STATUS_RELEASED, None, "99"),
+        ):
+            PickupReservation.objects.create(
+                token=uuid4().hex,
+                receta=self.pickup_receta,
+                sucursal=self.sucursal,
+                quantity=Decimal(quantity),
+                status=reservation_status,
+                expires_at=expires_at,
+            )
+        before = list(PickupReservation.objects.order_by("pk").values())
+        with patch("crm.services.pickup.timezone.now", return_value=now):
+            for _ in range(2):
+                response = self.client.get(
+                    reverse("api_public_pickup_availability"),
+                    {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                    **self._auth_headers(),
+                )
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(Decimal(response.data["reserved_qty"]), Decimal("10"))
+                self.assertEqual(Decimal(response.data["available_to_promise"]), Decimal("9"))
+                self.assertEqual(list(PickupReservation.objects.order_by("pk").values()), before)
+        self.assertFalse(PedidoCliente.objects.exists())
+
+    def test_pickup_reservation_create_still_expires_holds_and_reuses_external_reference(self):
+        expired = PickupReservation.objects.create(
+            token=uuid4().hex,
+            receta=self.pickup_receta,
+            sucursal=self.sucursal,
+            quantity=Decimal("99"),
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
         service = PickupAvailabilityService()
-        with patch.object(service, "expire_stale_reservations", wraps=service.expire_stale_reservations) as mocked_expire:
-            service.get_availability(product_code="01PSV", branch_code="MATRIZ", quantity="1")
-            service.get_availability(product_code="01PSV", branch_code="MATRIZ", quantity="1")
-        self.assertEqual(mocked_expire.call_count, 1)
+        params = dict(product_code="01PSV", branch_code="MATRIZ", external_reference="READONLY-REGRESSION")
+        reservation = service.create_reservation(**params)
+        expired.refresh_from_db()
+        self.assertEqual(expired.status, PickupReservation.STATUS_EXPIRED)
+        self.assertIsNotNone(expired.released_at)
+        self.assertEqual(reservation.reserved_qty_at_creation, Decimal("0"))
+        self.assertEqual(service.create_reservation(**params).pk, reservation.pk)
+        self.assertEqual(PickupReservation.objects.count(), 2)
+
+    @override_settings(PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20, PICKUP_STOCK_BUFFER_DEFAULT="1")
+    def test_pickup_reservation_create_preserves_stock_and_freshness_guards(self):
+        for quantity, age, code in (
+            ("5", timedelta(0), "insufficient_stock"),
+            ("1", timedelta(days=3), "inventory_not_fresh"),
+        ):
+            with self.subTest(code=code):
+                PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - age)
+                response = self.client.post(
+                    reverse("api_public_pickup_reservations"),
+                    {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": quantity},
+                    format="json",
+                    **self._auth_headers(),
+                )
+                self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertEqual(response.data["code"], code)
+                self.assertFalse(PickupReservation.objects.exists())
+                self.assertFalse(PedidoCliente.objects.exists())

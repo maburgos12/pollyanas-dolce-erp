@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
@@ -67,6 +68,26 @@ def _serialize_request(obj: SolicitudHorarioEspecial) -> dict:
 
 
 logger = logging.getLogger(__name__)
+
+
+class SpecialHoursEffectiveView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from horarios_especiales.services.effective_hours import read_effective_hours
+
+        name = request.query_params.get("branch_name", "").strip()
+        raw_date = request.query_params.get("target_date", "")
+        try:
+            if not name or len(name) > 120 or len(raw_date) != 10:
+                raise ValueError("Invalid input")
+            target_date = date.fromisoformat(raw_date)
+            if target_date.isoformat() != raw_date:
+                raise ValueError("Invalid date")
+            payload = read_effective_hours(name, target_date)
+        except ValueError:
+            return Response({"detail": "Se requiere sucursal operativa única y fecha ISO válida."}, status=400)
+        return Response(payload)
 
 
 class SpecialHoursPreviewView(APIView):
@@ -231,4 +252,3 @@ class SpecialHoursCancelView(APIView):
         cancel_request(request_obj=obj, actor=request.user, reason=serializer.validated_data.get("comment") or "")
         obj.refresh_from_db()
         return Response({"request": _serialize_request(obj)}, status=status.HTTP_200_OK)
-
