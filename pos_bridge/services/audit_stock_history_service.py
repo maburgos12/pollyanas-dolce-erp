@@ -342,13 +342,17 @@ class AuditStockHistoryService:
         if "MERMA" in words:
             return "waste"
         if "TRANSFERENCIA" in words:
-            if "RETORNO" in words or "ENTRADA" in words or quantity > 0:
+            if "RETORNO" in words or "ENTRADA" in words:
                 return "transfer_in"
-            return "transfer_out"
+            if "SALIDA" in words:
+                return "transfer_out"
+            return "transfer_in" if quantity > 0 else "transfer_out"
         if "CONVERSION" in words:
-            if "ENTRADA" in words or quantity > 0:
+            if "ENTRADA" in words:
                 return "conversion_in"
-            return "conversion_out"
+            if "SALIDA" in words:
+                return "conversion_out"
+            return "conversion_in" if quantity > 0 else "conversion_out"
         if "AJUSTE" in words or "INVENTARIO" in words:
             return "identified_adjustment"
         return None
