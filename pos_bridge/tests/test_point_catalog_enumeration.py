@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from unittest.mock import patch
 
@@ -82,7 +82,7 @@ class EnumeracionCatalogoTests(SimpleTestCase):
             client._enumerate_catalog(fetch, pk_field="PK", label="test", max_failures=3, pause_seconds=0)
 
 
-class ConversionUnidadSyncAlmacenTests(SimpleTestCase):
+class ConversionUnidadSyncAlmacenTests(TestCase):
     """La cantidad de Point se convierte a la unidad base del insumo ERP."""
 
     databases = "__all__"
@@ -147,7 +147,7 @@ class EnumeracionV4Tests(SimpleTestCase):
         self.assertGreaterEqual(logins["n"], 2)
 
 
-class ConversionTransfersTests(SimpleTestCase):
+class ConversionTransfersTests(TestCase):
     """Transfers y producción convierten la unidad Point a la del ERP."""
 
     databases = "__all__"
