@@ -118,8 +118,8 @@ class AuditStockHistoryServiceTests(TestCase):
             _row(2, "ENTRADA POR CONVERSIÓN", "2026-08-14T10:00:00-07:00", 2, 541, 543),
             _row(3, "AJUSTE ENTRADA INVENTARIO", "2026-08-15T10:00:00-07:00", 4, 543, 547),
             _row(4, "RETORNO POR TRANSFERENCIA", "2026-08-16T10:00:00-07:00", 2, 547, 549),
-            _row(5, "SALIDA POR CONVERSIÓN", "2026-08-20T10:00:00-07:00", -10, 549, 539),
-            _row(6, "SALIDA POR TRANSFERENCIA", "2026-08-31T20:00:00-07:00", -533, 539, 6),
+            _row(5, "SALIDA POR CONVERSIÓN", "2026-08-20T10:00:00-07:00", 10, 549, 539),
+            _row(6, "SALIDA POR TRANSFERENCIA", "2026-08-31T20:00:00-07:00", 533, 539, 6),
             _row(
                 7,
                 "SALIDA POR CONVERSIÓN",
