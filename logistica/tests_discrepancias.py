@@ -159,3 +159,34 @@ class DiscrepanciasLogisticaTests(PersistenciaCargaSucursalTests):
         self.assertRedirects(response, reverse("logistica:revisiones_entrega"))
         caso.refresh_from_db()
         self.assertEqual(caso.estado, DiscrepanciaLogistica.ESTADO_VALIDADA_REAL)
+
+    def test_bandeja_muestra_repartidor_de_ruta_no_actor_tecnico(self):
+        UserModuleAccess.objects.create(
+            user=self.jefe,
+            module="logistica.rutas",
+            access=UserModuleAccess.ACCESS_MANAGE,
+            updated_by=self.jefe,
+        )
+        actor_tecnico = User.objects.create_user(
+            username="actor.tecnico",
+            first_name="Actor",
+            last_name="Técnico",
+        )
+        DiscrepanciaLogistica.objects.create(
+            ruta=self.ruta,
+            parada=self.parada,
+            linea_carga=self.linea,
+            origen=DiscrepanciaLogistica.ORIGEN_RECEPCION,
+            cantidad_enviada=Decimal("2"),
+            cantidad_cargada=Decimal("2"),
+            cantidad_recibida=Decimal("1"),
+            motivo="diferencia_recepcion_point",
+            asignado_a=self.jefe,
+            creado_por=actor_tecnico,
+        )
+        self.client.force_login(self.jefe)
+
+        response = self.client.get(reverse("logistica:revisiones_entrega"))
+
+        self.assertContains(response, self.ruta.repartidor.user.get_full_name())
+        self.assertNotContains(response, actor_tecnico.get_full_name())

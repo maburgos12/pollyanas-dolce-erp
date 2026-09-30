@@ -10,7 +10,7 @@
     <tbody>
     {% for caso in discrepancias_logistica %}<tr id="discrepancia-{{ caso.id }}">
       <td>{{ caso.ruta.folio }}</td><td>{{ caso.parada.punto_nombre_snapshot }}</td>
-      <td>{{ caso.creado_por.get_full_name|default:caso.creado_por.username }}</td>
+      <td>{{ caso.ruta.repartidor.user.get_full_name|default:caso.ruta.repartidor.user.username }}</td>
       <td>
         <strong>{{ caso.linea_carga.item_name }}</strong><br>
         Enviado {{ caso.cantidad_enviada }} → Cargado {{ caso.cantidad_cargada|default:"—" }} → Recibido {{ caso.cantidad_recibida|default:"—" }}<br>
