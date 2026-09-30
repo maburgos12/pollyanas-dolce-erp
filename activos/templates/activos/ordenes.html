@@ -1,531 +1,27 @@
 {% extends "base.html" %}
 
 {% load humanize %}
-{% block title %}Activos - Órdenes{% endblock %}
-{% block page_title %}Activos · Órdenes{% endblock %}
+{% block title %}Órdenes de mantenimiento{% endblock %}
+{% block page_title %}Órdenes de mantenimiento{% endblock %}
 {% block body_class %}page-activos-ordenes{% endblock %}
 
 {% block content %}
-<div class="module-tabs">
-  {% for tab in module_tabs %}
-    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
-  {% endfor %}
+<div class="quick-actions pd-mb-3">
+  <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
+  {% if can_manage_activos %}<a class="btn btn-primary" href="#nueva-orden" onclick="document.getElementById('nueva-orden').open = true">Nueva orden</a>
+  <a class="btn btn-primary" href="{% url 'activos:registro_rapido' %}">Registrar mantenimiento realizado</a>{% endif %}
 </div>
 
-<section class="card">
-  <div class="card-header">Centro de mando ERP</div>
-  <div class="kpi-grid kpi-mini">
-    <article class="kpi-card">
-      <div class="kpi-label">Responsable principal</div>
-      <div class="pd-u-4304c62622">{{ erp_command_center.owner }}</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number {% if erp_command_center.tone == 'danger' %}is-danger{% elif erp_command_center.tone == 'warning' %}is-warning{% else %}is-success{% endif %}">{{ erp_command_center.status }}</div>
-      <div class="kpi-label">Semáforo global</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ erp_command_center.blockers }}</div>
-      <div class="kpi-label">Bloqueos abiertos</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente paso</div>
-      <div class="muted pd-u-332dbeaac1">{{ erp_command_center.next_step }}</div>
-      <a class="btn btn-secondary btn-small" href="{{ erp_command_center.url }}">{{ erp_command_center.cta }}</a>
-    </article>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Expediente ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table">
-      <tbody>
-        <tr>
-          <td class="pd-u-e5897dceea"><strong>Documento</strong></td>
-          <td>Órdenes preventivas y correctivas con prioridad, responsable, costo y cierre técnico.</td>
-        </tr>
-        <tr>
-          <td><strong>Fuente de control</strong></td>
-          <td>Plan de mantenimiento, reporte de falla, activo listo para operar y ejecución documentada.</td>
-        </tr>
-        <tr>
-          <td><strong>Etapa ERP</strong></td>
-          <td>Ejecución del mantenimiento y cierre económico-operativo de la intervención.</td>
-        </tr>
-        <tr>
-          <td><strong>Propósito</strong></td>
-          <td>Formalizar la atención del activo, registrar costo real y sostener trazabilidad de servicio.</td>
-        </tr>
-        <tr>
-          <td><strong>Regla de salida</strong></td>
-          <td>Orden con responsable, costos completos, estatus correcto y evidencia suficiente para auditoría.</td>
-        </tr>
-        <tr>
-          <td><strong>Siguiente paso</strong></td>
-          <td>Prioriza correctivos críticos, registra costos y evita órdenes abiertas sin siguiente movimiento.</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Workflow ERP del módulo</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Entrada</th>
-          <th>Control</th>
-          <th>Salida</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>01 · Orden emitida</td>
-          <td>Mantenimiento / Ejecución</td>
-          <td>Plan o incidente</td>
-          <td>Responsable, prioridad y fecha</td>
-          <td>Orden programada</td>
-        </tr>
-        <tr>
-          <td>02 · Ejecución técnica</td>
-          <td>Mantenimiento / Ejecución</td>
-          <td>Atención en curso</td>
-          <td>Estatus y seguimiento</td>
-          <td>Servicio completado</td>
-        </tr>
-        <tr>
-          <td>03 · Cierre económico</td>
-          <td>DG / Auditoría</td>
-          <td>Costos capturados</td>
-          <td>Repuestos, mano de obra y otros</td>
-          <td>Orden cerrada y auditable</td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena documental ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_chain %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.step }} · {{ item.title }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div class="pd-u-d8a81eac84">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena troncal del mantenimiento</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Depende de</th>
-          <th>Responsable</th>
-          <th>Cierre</th>
-          <th>Estatus</th>
-          <th>Dependencia</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in enterprise_chain %}
-          <tr>
-            <td><strong>{{ item.step }} · {{ item.title }}</strong></td>
-            <td>{{ item.depends_on }}</td>
-            <td>{{ item.owner }}</td>
-            <td>{{ item.completion }}%</td>
-            <td>{{ item.status }}</td>
-            <td>{{ item.dependency_status }}</td>
-            <td>{{ item.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-
-{% if critical_path_rows %}
-<section class="card">
-  <div class="card-header">Ruta crítica ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Prioridad</th>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Lectura ejecutiva</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in critical_path_rows %}
-          <tr>
-            <td>{{ row.priority }}</td>
-            <td><strong>{{ row.title }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-{% if executive_radar_rows %}
-<section class="card">
-  <div class="card-header">Radar ejecutivo ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Tramo</th>
-          <th>Responsable</th>
-          <th>Bloqueo dominante</th>
-          <th>Depende de</th>
-          <th>Cierre</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in executive_radar_rows %}
-          <tr>
-            <td><strong>{{ row.phase }}</strong><div class="muted">{{ row.status }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.dominant_blocker }}</td>
-            <td><strong>{{ row.depends_on }}</strong><div class="muted">{{ row.dependency_status }}</div></td>
-            <td>{{ row.progress_pct }}%</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Madurez ERP de activos</div>
-  <div class="kpi-grid">
-    <article class="kpi-card">
-      <div class="kpi-number is-success">{{ enterprise_maturity_summary.completed_steps }}</div>
-      <div class="kpi-label">Etapas estabilizadas</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number is-warning">{{ enterprise_maturity_summary.attention_steps }}</div>
-      <div class="kpi-label">Etapas con atención</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-number">{{ enterprise_maturity_summary.coverage_pct }}%</div>
-      <div class="kpi-label">Cobertura documental</div>
-    </article>
-    <article class="kpi-card">
-      <div class="kpi-label">Siguiente prioridad</div>
-      <div class="pd-u-06a806e885">{{ enterprise_maturity_summary.next_priority_title }}</div>
-      <div class="muted">{{ enterprise_maturity_summary.next_priority_detail }}</div>
-      <div class="pd-u-d8a81eac84">
-        <a class="btn btn-secondary btn-small" href="{{ enterprise_maturity_summary.next_priority_url }}">{{ enterprise_maturity_summary.next_priority_cta }}</a>
-      </div>
-    </article>
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Criterios de cierre ERP</div>
-  <div class="enterprise-kpi-strip enterprise-kpi-strip-compact">
-    <article class="enterprise-kpi-card">
-      <div class="enterprise-kpi-label">Cierre global</div>
-      <div class="kpi-number">{{ release_gate_completion }}%</div>
-      <div class="muted">Órdenes, control de ejecución, costo de cierre y origen preventivo alineados para auditoría.</div>
-    </article>
-  </div>
-  <div class="blocker-list">
-    {% for row in release_gate_rows %}
-      <article class="stage-row">
-        <div class="stage-step">{{ row.step }}</div>
-        <div class="blocker-meta">
-          <strong>{{ row.title }}</strong>
-          <small>{{ row.detail }}</small>
-        </div>
-        <div class="module-chip-list">
-          <span class="module-chip manage">Cerrados {{ row.completed }}</span>
-          <span class="module-chip {% if row.tone == 'success' %}manage{% else %}blocked{% endif %}">Abiertos {{ row.open_count }}</span>
-        </div>
-        <div class="blocker-action">
-          <a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cadena de control ERP</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_handoff_map %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.label }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
-        <div class="muted">{{ item.status }}</div>
-        <div class="pd-u-d8a81eac84">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-{% if enterprise_handoff_map %}
-<section class="card">
-  <div class="card-header">Entrega de activos a downstream</div>
-  <p class="muted mb-2">
-    Expone si el módulo ya puede bajar con control hacia planes, órdenes y bitácora, junto con el criterio de salida documental de cada tramo.
-  </p>
-  <div class="table-responsive">
-    <table class="table table-striped align-middle">
-      <thead>
-        <tr>
-          <th>Destino</th>
-          <th>Responsable</th>
-          <th>Estatus</th>
-          <th class="text-end">Bloqueos</th>
-          <th>Cierre</th>
-          <th>Depende de</th>
-          <th>Criterio de salida</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in enterprise_handoff_map %}
-          <tr>
-            <td><strong>{{ row.label }}</strong><div class="muted">{{ row.detail }}</div></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.status }}</td>
-            <td class="text-end">{{ row.count }}</td>
-            <td class="pd-u-1cf294634a">
-              <div class="erp-progress">
-                <div class="erp-progress-fill {% if row.tone == 'danger' %}is-danger{% elif row.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-js-width" data-pd-width="{{ row.completion }}%"></div>
-              </div>
-              <div class="muted mt-1">{{ row.completion }}%</div>
-            </td>
-            <td>{{ row.depends_on }}</td>
-            <td>{{ row.exit_criteria }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
-
-<section class="card">
-  <div class="card-header">Salud operativa ERP</div>
-  <div class="kpi-grid">
-    {% for card in operational_health_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-      </article>
-    {% endfor %}
-  </div>
-</section>
-
-<section class="card">
-  <div class="card-header">Cockpit documental de órdenes</div>
-  <div class="enterprise-pill-grid enterprise-pill-grid-compact">
-    {% for item in enterprise_focus_cards %}
-      <article class="enterprise-pill-card {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-active{% endif %}">
-        <div class="enterprise-pill-title">{{ item.label }}</div>
-        <div class="enterprise-pill-text">{{ item.detail }}</div>
-        <div class="kpi-number {% if item.tone == 'danger' %}is-danger{% elif item.tone == 'warning' %}is-warning{% else %}is-success{% endif %} pd-u-d8a81eac84">{{ item.count }}</div>
-        <div class="pd-u-d8a81eac84">
-          <a class="btn btn-secondary btn-small" href="{{ item.url }}">{{ item.cta }}</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-  {% if focus_summary %}
-    <div class="notice-card notice-card-warning pd-u-9374e84210">
-      <strong>Vista enfocada:</strong> {{ focus_summary.label }}. {{ focus_summary.detail }}
-      <div class="pd-u-b1ecc496e0">
-        <a class="btn btn-secondary btn-small" href="{{ focus_summary.clear_url }}">Quitar foco</a>
-      </div>
-    </div>
-  {% endif %}
-</section>
-
-{% if can_manage_activos %}
-<section class="card">
-  <div class="card-header">Nueva orden de mantenimiento</div>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="create_orden">
-    <div class="row pd-u-6136e5cbe4">
-      <div>
-        <label>Activo</label>
-        <select name="activo_id" required>
-          <option value="">Selecciona...</option>
-          {% for a in activos %}
-            <option value="{{ a.id }}">{{ a.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Plan (opcional)</label>
-        <select name="plan_id">
-          <option value="">Sin plan</option>
-          {% for p in planes %}
-            <option value="{{ p.id }}">{{ p.activo_ref.nombre }} · {{ p.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Tipo</label>
-        <select name="tipo">
-          <option value="PREVENTIVO">Preventivo</option>
-          <option value="CORRECTIVO">Correctivo</option>
-        </select>
-      </div>
-      <div>
-        <label>Prioridad</label>
-        <select name="prioridad">
-          <option value="MEDIA">Media</option>
-          <option value="ALTA">Alta</option>
-          <option value="CRITICA">Crítica</option>
-          <option value="BAJA">Baja</option>
-        </select>
-      </div>
-      <div>
-        <label>Fecha programada</label>
-        <input type="date" name="fecha_programada">
-      </div>
-      <div>
-        <label>Responsable</label>
-        <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable">
-      </div>
-      <div class="pd-u-1f61f29863">
-        <label>Descripción</label>
-        <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento">
-      </div>
-    </div>
-    <div class="pd-u-9c9cee2093">
-      <button type="submit" class="btn btn-primary">Crear orden</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">Registrar costos / cierre de orden</div>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="update_costos">
-    <div class="row pd-u-83b35046ef">
-      <div>
-        <label>Orden</label>
-        <select name="orden_id" required>
-          <option value="">Selecciona...</option>
-          {% for o in ordenes_editables %}
-            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }} · {{ o.estatus }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Costo repuestos</label>
-        <input type="number" step="0.01" min="0" name="costo_repuestos" value="0">
-      </div>
-      <div>
-        <label>Costo mano de obra</label>
-        <input type="number" step="0.01" min="0" name="costo_mano_obra" value="0">
-      </div>
-      <div>
-        <label>Otros costos</label>
-        <input type="number" step="0.01" min="0" name="costo_otros" value="0">
-      </div>
-      <div class="pd-u-27231daefd">
-        <label class="pd-u-27231daefd">
-          <input type="checkbox" name="cerrar_orden" value="1">
-          Cerrar orden
-        </label>
-      </div>
-    </div>
-    <div class="pd-u-9c9cee2093">
-      <button type="submit" class="btn btn-primary">Guardar costos</button>
-    </div>
-  </form>
-</section>
-
-<section class="card">
-  <div class="card-header">Registrar factura / nota de remisión</div>
-  <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="update_factura">
-    <div class="pd-u-088e1d31a8">
-      <div>
-        <label>Orden</label>
-        <select name="orden_id" required>
-          <option value="">Selecciona...</option>
-          {% for o in ordenes_editables %}
-            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <label>Número de factura / remisión</label>
-        <input type="text" name="numero_factura" placeholder="FAC-2024-00123">
-      </div>
-      <div>
-        <label>Archivo de factura (PDF / imagen)</label>
-        <input type="file" name="factura_archivo" accept=".pdf,image/*" class="pd-u-44cd1236df">
-      </div>
-      <div>
-        <label>Nota del trabajo</label>
-        <input type="text" name="nota_trabajo" placeholder="Descripción breve del trabajo">
-      </div>
-    </div>
-    <div class="pd-u-9374e84210">
-      <button type="submit" class="btn btn-primary">Guardar factura</button>
-      <span class="muted pd-u-37bb8a806b">
-        Para notas largas usa la vista de evidencias de la orden.
-      </span>
-    </div>
-  </form>
-</section>
+{% if focus_summary %}
+<p class="pd-mb-3"><strong>Vista enfocada · {{ focus_summary.label }}</strong> · {{ focus_summary.detail }}
+  <a class="btn btn-secondary btn-small" href="{{ focus_summary.clear_url }}">Quitar foco</a>
+</p>
 {% endif %}
 
 <section class="card">
   <div class="card-header">Órdenes registradas</div>
+  <details class="pd-mb-3">
+    <summary>Datos pendientes en órdenes</summary>
   <div class="kpi-grid pd-u-af3fee87a1">
     {% for card in enterprise_cards %}
       <article class="kpi-card">
@@ -537,6 +33,7 @@
       </article>
     {% endfor %}
   </div>
+  </details>
   <div class="quick-actions pd-u-af3fee87a1">
     <a href="?estatus=abiertas" class="btn btn-secondary">Abiertas</a>
     <a href="?estatus=PENDIENTE" class="btn btn-secondary">Pendientes</a>
@@ -549,7 +46,7 @@
   <form method="get" class="pd-u-af3fee87a1">
     <div class="row pd-u-471ccadd32">
       <div>
-        <label>Bloqueo ERP</label>
+        <label>Datos pendientes</label>
         <select name="enterprise_gap">
           <option value="">Todos</option>
           {% for card in enterprise_cards %}
@@ -559,7 +56,7 @@
         <input type="hidden" name="estatus" value="{{ estado }}">
       </div>
       <div class="quick-actions">
-        <button class="btn btn-primary" type="submit">Filtrar bloqueo</button>
+        <button class="btn btn-primary" type="submit">Filtrar datos pendientes</button>
         <a href="?estatus={{ estado|urlencode }}" class="btn btn-secondary">Limpiar</a>
       </div>
     </div>
@@ -625,69 +122,142 @@
   </div>
 </section>
 
-<section class="card">
-  <div class="card-header">Cierre por etapa documental</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Etapa</th>
-          <th>Responsable</th>
-          <th>Abiertos</th>
-          <th>Cerrados</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in document_stage_rows %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td>{{ row.owner|default:"Operación ERP" }}</td>
-            <td>{{ row.open }}</td>
-            <td>{{ row.closed }}</td>
-            <td>{{ row.completion|default:0 }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step|default:"Revisar etapa" }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">Abrir</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+{% if can_manage_activos %}
+<details class="card" id="nueva-orden">
+  <summary class="card-header">Nueva orden de mantenimiento</summary>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="create_orden">
+    <div class="row pd-u-6136e5cbe4">
+      <div>
+        <label>Activo</label>
+        <select name="activo_id" required>
+          <option value="">Selecciona...</option>
+          {% for a in activos %}
+            <option value="{{ a.id }}">{{ a.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Plan (opcional)</label>
+        <select name="plan_id">
+          <option value="">Sin plan</option>
+          {% for p in planes %}
+            <option value="{{ p.id }}">{{ p.activo_ref.nombre }} · {{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Tipo</label>
+        <select name="tipo">
+          <option value="PREVENTIVO">Preventivo</option>
+          <option value="CORRECTIVO">Correctivo</option>
+        </select>
+      </div>
+      <div>
+        <label>Prioridad</label>
+        <select name="prioridad">
+          <option value="MEDIA">Media</option>
+          <option value="ALTA">Alta</option>
+          <option value="CRITICA">Crítica</option>
+          <option value="BAJA">Baja</option>
+        </select>
+      </div>
+      <div>
+        <label>Fecha programada</label>
+        <input type="date" name="fecha_programada">
+      </div>
+      <div>
+        <label>Responsable</label>
+        <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable">
+      </div>
+      <div class="pd-u-1f61f29863">
+        <label>Descripción</label>
+        <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento">
+      </div>
+    </div>
+    <div class="pd-u-9c9cee2093">
+      <button type="submit" class="btn btn-primary">Crear orden</button>
+    </div>
+  </form>
+</details>
 
-<section class="card">
-  <div class="card-header">Mesa de gobierno ERP</div>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Frente</th>
-          <th>Responsable</th>
-          <th>Bloqueos</th>
-          <th>Cierre</th>
-          <th>Detalle</th>
-          <th>Siguiente paso</th>
-          <th>Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in erp_governance_rows %}
-          <tr>
-            <td><strong>{{ row.front }}</strong></td>
-            <td>{{ row.owner }}</td>
-            <td>{{ row.blockers }}</td>
-            <td>{{ row.completion }}%</td>
-            <td>{{ row.detail }}</td>
-            <td>{{ row.next_step }}</td>
-            <td><a class="btn btn-secondary btn-small" href="{{ row.url }}">{{ row.cta }}</a></td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+<details class="card">
+  <summary class="card-header">Registrar costos / cierre de orden</summary>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_costos">
+    <div class="row pd-u-83b35046ef">
+      <div>
+        <label>Orden</label>
+        <select name="orden_id" required>
+          <option value="">Selecciona...</option>
+          {% for o in ordenes_editables %}
+            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }} · {{ o.estatus }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Costo repuestos</label>
+        <input type="number" step="0.01" min="0" name="costo_repuestos" value="0">
+      </div>
+      <div>
+        <label>Costo mano de obra</label>
+        <input type="number" step="0.01" min="0" name="costo_mano_obra" value="0">
+      </div>
+      <div>
+        <label>Otros costos</label>
+        <input type="number" step="0.01" min="0" name="costo_otros" value="0">
+      </div>
+      <div class="pd-u-27231daefd">
+        <label class="pd-u-27231daefd">
+          <input type="checkbox" name="cerrar_orden" value="1">
+          Cerrar orden
+        </label>
+      </div>
+    </div>
+    <div class="pd-u-9c9cee2093">
+      <button type="submit" class="btn btn-primary">Guardar costos</button>
+    </div>
+  </form>
+</details>
+
+<details class="card">
+  <summary class="card-header">Registrar factura / nota de remisión</summary>
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="update_factura">
+    <div class="pd-u-088e1d31a8">
+      <div>
+        <label>Orden</label>
+        <select name="orden_id" required>
+          <option value="">Selecciona...</option>
+          {% for o in ordenes_editables %}
+            <option value="{{ o.id }}">{{ o.folio }} · {{ o.activo_ref.nombre }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>Número de factura / remisión</label>
+        <input type="text" name="numero_factura" placeholder="FAC-2024-00123">
+      </div>
+      <div>
+        <label>Archivo de factura (PDF / imagen)</label>
+        <input type="file" name="factura_archivo" accept=".pdf,image/*" class="pd-u-44cd1236df">
+      </div>
+      <div>
+        <label>Nota del trabajo</label>
+        <input type="text" name="nota_trabajo" placeholder="Descripción breve del trabajo">
+      </div>
+    </div>
+    <div class="pd-u-9374e84210">
+      <button type="submit" class="btn btn-primary">Guardar factura</button>
+      <span class="muted pd-u-37bb8a806b">
+        Para notas largas usa la vista de evidencias de la orden.
+      </span>
+    </div>
+  </form>
+</details>
+{% endif %}
+
 {% endblock %}
