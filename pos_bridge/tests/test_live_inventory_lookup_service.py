@@ -7,12 +7,14 @@ from django.core.cache import cache
 from django.test import TestCase
 
 from core.models import Sucursal
+from crm.services.pickup import PickupAvailability
 from maestros.models import Insumo
 from pos_bridge.models import PointBranch
 from pos_bridge.services.live_inventory_lookup_service import (
     PointLiveInventoryLookupError,
     PointLiveInventoryLookupService,
 )
+from recetas.models import Receta
 
 
 class _FakePointClient:
@@ -92,8 +94,8 @@ class PointLiveInventoryLookupServiceTests(TestCase):
         )
 
         self.assertEqual(result.stock_qty, Decimal("53.47099999999971"))
-        self.assertEqual(result.point_branch_id, "2")
-        self.assertEqual(result.point_branch_name, "Bamoa")
+        self.assertEqual(result.point_branch_id, "")
+        self.assertEqual(result.point_branch_name, "")
         self.client.get_branch_insumos.assert_called_once_with(
             branch_id="2",
             category_id=12,
@@ -166,6 +168,35 @@ class PointLiveInventoryLookupServiceTests(TestCase):
         )
         self.assertEqual((result.point_branch_id, result.point_branch_name, result.stock_qty),
                          ("2", "Bamoa", Decimal("3")))
+
+    def test_live_provenance_does_not_fill_missing_source_fields_from_request_or_alias(self):
+        self.client.get_stock_products.return_value = [{"PK": 101, "isInsumo": False}]
+        for alias, row, expected_id, expected_name in (
+            ("Bamoa", {"Sucursal": "Bamoa", "Cantidad": 3}, "", "Bamoa"),
+            ("2", {"PK_Sucursal": 2, "Cantidad": 3}, "2", ""),
+        ):
+            with self.subTest(row=row):
+                cache.clear()
+                self.point_branch.external_id = alias
+                self.client.get_product_stock.return_value = [row]
+                result = self._service().get_stock(
+                    product_codes=["REQUESTED-ALIAS"], sucursal=self.sucursal, point_branch=self.point_branch,
+                )
+                self.assertEqual((result.product_code, result.product_name), ("", ""))
+                self.assertEqual((result.point_branch_id, result.point_branch_name), (expected_id, expected_name))
+                availability = PickupAvailability(
+                    receta=Receta(codigo_point="REQUESTED-ALIAS", nombre="ERP product"),
+                    sucursal=self.sucursal, point_branch=self.point_branch, point_product=None, snapshot=None,
+                    snapshot_stock_qty=result.stock_qty, reserved_qty=Decimal("0"), buffer_qty=Decimal("0"),
+                    available_to_promise=result.stock_qty, requested_qty=Decimal("1"), is_fresh=True,
+                    freshness_seconds=60, snapshot_age_seconds=0, status="AVAILABLE", live_result=result,
+                ).to_dict()
+                self.assertEqual(availability["stock_qty"], "3")
+                self.assertEqual(availability["point_product_id"], "101")
+                self.assertIsNone(availability["point_product_code"])
+                self.assertIsNone(availability["point_product_name"])
+                self.assertEqual(availability["point_branch_id"], expected_id or None)
+                self.assertEqual(availability["point_branch_name"], expected_name or None)
 
     def test_ambiguous_or_missing_point_identity_fails_closed(self):
         for rows in (

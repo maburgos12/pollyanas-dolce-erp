@@ -126,16 +126,16 @@ class PointLiveInventoryLookupService:
 
         captured_at = timezone.now()
         result = PointLiveInventoryResult(
-            product_code=str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or codes[0]),
+            product_code=str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or ""),
             product_name=str(_first_present(product, ("Nombre", "nombre", "Name", "name")) or ""),
             point_product_id=str(product_id),
             point_branch_id=str(
                 _first_present(branch_row, ("PK_Sucursal", "pk_sucursal", "SucursalID", "id_sucursal"))
-                or (point_branch.external_id if point_branch else "")
+                or ""
             ),
             point_branch_name=str(
                 _first_present(branch_row, ("Sucursal", "sucursal", "NombreSucursal", "name"))
-                or (point_branch.name if point_branch else "")
+                or ""
             ),
             stock_qty=_decimal(_first_present(branch_row, ("Cantidad", "cantidad", "Stock", "stock"))),
             captured_at=captured_at,
