@@ -13,6 +13,8 @@ Por omisión es simulacro. Escribe sólo con --apply.
 
 from __future__ import annotations
 
+import re
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection, transaction
 
@@ -104,7 +106,7 @@ POR_PADRE = [
     ),
     (
         "bonos_ventas_bonoventasempleado", "sucursal_id",
-        "periodo_id IN (SELECT id FROM bonos_ventas_configbonoperiodo "
+        "periodo_id IN (SELECT id FROM bonos_ventas_configbonoventasperiodo "
         "WHERE (anio > 2026) OR (anio = 2026 AND mes >= 7))",
     ),
 ]
@@ -155,6 +157,10 @@ class Command(BaseCommand):
     def _tablas_ausentes() -> list[str]:
         """Una migración que nombra 30 tablas comprueba que existan antes de tocar nada."""
         nombradas = {t for t, *_ in POR_FECHA} | {t for t, *_ in POR_PADRE} | {t for t, *_ in ESTADO_ACTUAL}
+        # Las tablas que sólo se consultan dentro de un subselect también tienen
+        # que existir: si no, el error aparece a media migración.
+        for _tabla, _col, condicion in POR_PADRE:
+            nombradas |= set(re.findall(r"FROM\s+([a-z_]+)", condicion))
         existentes = set(connection.introspection.table_names())
         return sorted(nombradas - existentes)
 
