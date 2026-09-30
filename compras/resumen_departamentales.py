@@ -164,6 +164,21 @@ def construir_resumen_departamental(params):
         item.resumen_arrastrado = bool(
             valido and filtros.cleaned_data['periodo'] and item.solicitud.periodo < filtros.cleaned_data['periodo']
         )
+        if not item.resumen_en_alcance_operativo:
+            item.resumen_etapa = 'Solo seguimiento de reembolso'
+        elif item.estado in (
+            ItemCompraDepartamental.ESTADO_COMPRADO,
+            ItemCompraDepartamental.ESTADO_RECIBIDO_PARCIAL,
+        ):
+            item.resumen_etapa = 'Comprado sin entregar'
+        elif item.estado == ItemCompraDepartamental.ESTADO_PENDIENTE_CONFIRMACION:
+            item.resumen_etapa = 'Pendiente de confirmación'
+        elif not item.tiene_cotizaciones:
+            item.resumen_etapa = 'Nunca cotizado'
+        elif not item.tiene_cotizacion_seleccionada:
+            item.resumen_etapa = 'Cotización en proceso'
+        else:
+            item.resumen_etapa = 'Otro pendiente'
         item.resumen_comprometido = Decimal('0')
         item.resumen_reembolso_pendiente = Decimal('0')
         item.resumen_reembolsado = Decimal('0')
@@ -203,10 +218,19 @@ def construir_resumen_departamental(params):
     base = reverse('compras:departamental_bandeja')
     for grupo in departamentos.values():
         grupo['url'] = base + '?' + urlencode({**query, 'area': grupo['id']}) + '#articulos'
+    query_sin_etapa = {clave: valor for clave, valor in query.items() if clave != 'etapa'}
+    etapas_filtros = [{
+        'clave': clave,
+        'etiqueta': etiqueta,
+        'conteo': conteos_etapas[clave],
+        'activa': query.get('etapa', 'todos') == clave,
+        'url': base + '?' + urlencode({**query_sin_etapa, 'etapa': clave}),
+    } for clave, etiqueta in ETAPAS_PENDIENTES]
     return {
         'filtros': filtros, 'items': items, 'resumen': total,
         'departamentos': list(departamentos.values()), 'alcance_resumen': ALCANCE,
         'etapas_resumen': ETAPAS, 'conteos_etapas': conteos_etapas,
+        'etapas_filtros': etapas_filtros,
         'etapa_activa': query.get('etapa', 'todos'), 'query_filtros': query,
         'exportar_url': base + '?' + urlencode({**query, 'exportar': 'xlsx'}),
     }
@@ -217,8 +241,8 @@ def exportar_resumen_departamental(contexto):
     filtros = contexto['filtros']
     datos = filtros.cleaned_data
     filtros_texto = (
-        f"Mes planeado: {datos['periodo']:%Y-%m}" if datos['periodo'] else 'Mes planeado: todos'
-    ) + f" · Departamento: {datos['area'].nombre if datos['area'] else 'todos'}" + f" · Estado: {dict(ESTADOS).get(datos['estado'], 'todos los pendientes')}"
+        f"Pendientes hasta: {datos['periodo']:%Y-%m}" if datos['periodo'] else 'Pendientes hasta: todos'
+    ) + f" · Departamento: {datos['area'].nombre if datos['area'] else 'todos'}" + f" · Estado: {dict(ESTADOS).get(datos['estado'], 'todos los pendientes')}" + f" · Etapa: {dict(ETAPAS_PENDIENTES).get(datos['etapa'], 'Todos pendientes')}"
     wb = Workbook()
     wb.active.title = 'Resumen'
     detalle = wb.create_sheet('Artículos')
@@ -240,11 +264,13 @@ def exportar_resumen_departamental(contexto):
             'reembolso_pendiente', 'reembolsado', 'sin_estimacion', 'sin_cotizacion',
         )]])
     detalle.append(['Solicitud', 'Departamento', 'Mes planeado', 'Artículo', 'Cantidad', 'Unidad',
-                    'Estado', 'Costo unitario estimado', 'Solicitado estimado', 'Cotizado',
+                    'Estado', 'Etapa pendiente', 'Arrastre', 'Costo unitario estimado', 'Solicitado estimado', 'Cotizado',
                     'Comprometido vigente', 'Reembolso pendiente', 'Reembolsado', 'Sin precio', 'Seguimiento'])
     for item in contexto['items']:
         detalle.append([item.solicitud.folio, item.solicitud.area.nombre, item.solicitud.periodo.strftime('%Y-%m'),
-                        item.descripcion, item.cantidad, item.unidad, item.get_estado_display(), item.costo_unitario_estimado,
+                        item.descripcion, item.cantidad, item.unidad, item.get_estado_display(), item.resumen_etapa,
+                        f'Sí, desde {item.solicitud.periodo:%Y-%m}' if item.resumen_arrastrado else 'No',
+                        item.costo_unitario_estimado,
                         item.resumen_estimado, item.resumen_cotizado, item.resumen_comprometido,
                         item.resumen_reembolso_pendiente, item.resumen_reembolsado,
                         'Sí' if item.resumen_sin_precio else 'No',
@@ -261,7 +287,7 @@ def exportar_resumen_departamental(contexto):
                     cell.font = Font(color='FFFFFF', bold=True)
                 if cell.row >= 8:
                     cell.alignment = Alignment(vertical='top', wrap_text=True)
-                money_cols = (5, 6, 7, 8, 9) if ws.title == 'Resumen' else (8, 9, 10, 11, 12, 13)
+                money_cols = (5, 6, 7, 8, 9) if ws.title == 'Resumen' else (10, 11, 12, 13, 14, 15)
                 if cell.row > 8 and cell.column in money_cols:
                     cell.number_format = '"$"#,##0.00'
         for col in range(1, ws.max_column + 1):

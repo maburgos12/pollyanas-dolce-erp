@@ -176,6 +176,37 @@ class ResumenDepartamentalTests(TestCase):
         self.assertEqual(data[0][header.index('Cotizado')], None)
         self.assertFalse(any(cell.data_type == 'f' for ws in wb for row in ws for cell in row))
 
+    def test_bandeja_muestra_filtros_rapidos_y_arrastre(self):
+        arrastrado = self.item(self.solicitud(periodo=date(2026, 8, 1)), descripcion='Pendiente anterior')
+
+        response = self.client.get(self.url, {'periodo': '2026-09', 'etapa': 'nunca_cotizados'})
+
+        self.assertEqual([item.pk for item in response.context['items']], [arrastrado.pk])
+        self.assertContains(response, 'Nunca cotizados')
+        self.assertContains(response, 'Cotización en proceso')
+        self.assertContains(response, 'Comprados sin entregar')
+        self.assertContains(response, 'Pendientes de confirmación')
+        self.assertContains(response, 'aria-pressed="true"')
+        self.assertContains(response, 'Arrastrado desde agosto de 2026')
+        self.assertIn('etapa=nunca_cotizados', response.context['exportar_url'])
+
+    def test_excel_conserva_periodo_original_y_agrega_etapa_y_arrastre(self):
+        self.item(self.solicitud(periodo=date(2026, 8, 1)), descripcion='Pendiente anterior')
+
+        response = self.client.get(self.url, {
+            'periodo': '2026-09', 'etapa': 'nunca_cotizados', 'exportar': 'xlsx',
+        })
+        wb = load_workbook(BytesIO(response.content))
+        rows = list(wb['Artículos'].values)
+        header = next(row for row in rows if row[0] == 'Solicitud')
+        data = rows[rows.index(header) + 1]
+
+        self.assertIn('Etapa pendiente', header)
+        self.assertIn('Arrastre', header)
+        self.assertEqual(data[header.index('Mes planeado')], '2026-08')
+        self.assertEqual(data[header.index('Etapa pendiente')], 'Nunca cotizado')
+        self.assertEqual(data[header.index('Arrastre')], 'Sí, desde 2026-08')
+
     def test_compromiso_inactivo_no_se_suma_y_centavos_concilian(self):
         item = self.item(cantidad=Decimal('0.333'), costo_unitario_estimado=Decimal('1.01'))
         quote = self.cotizacion(item)
