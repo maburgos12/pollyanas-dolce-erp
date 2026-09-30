@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
+from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.urls import reverse
@@ -11,8 +14,27 @@ from django.utils import timezone
 from core.models import Notificacion
 from core.notificaciones import crear_notificacion
 from logistica.models import DiscrepanciaLogistica
+from pos_bridge.services.daily_inventory_break_service import (
+    DailyBreakProjection,
+    DailyBreakStatus,
+    DailyInventoryBreakService,
+)
 from reportes.models import ProductInventoryAuditCase
 from rrhh.models import Empleado
+
+
+logger = logging.getLogger(__name__)
+LOCAL_TZ = ZoneInfo("America/Mazatlan")
+SOURCE_LABELS = {
+    "sales": "ventas",
+    "production": "producciones",
+    "waste": "mermas",
+    "transfer_in": "entradas por transferencia",
+    "transfer_out": "salidas por transferencia",
+    "transfer_return": "retornos al origen",
+    "conversion_in": "entradas por conversión",
+    "conversion_out": "salidas por conversión",
+}
 
 
 @dataclass(frozen=True)
@@ -49,6 +71,7 @@ class InventoryAuditAgent:
         self._discrepancy_cache = None
         self._head_cache: dict[str, tuple[int | None, str]] = {}
         self._recurrence_cache = None
+        self._daily_break_cache = None
 
     def run_month(self, month, *, dry_run: bool = False) -> dict[str, int]:
         month = month.replace(day=1)
@@ -131,6 +154,7 @@ class InventoryAuditAgent:
             self._discrepancy_cache = None
             self._head_cache = {}
             self._recurrence_cache = None
+            self._daily_break_cache = None
         return counters
 
     @staticmethod
@@ -230,6 +254,26 @@ class InventoryAuditAgent:
             key: len(months) for key, months in recurrence_sets.items()
         }
 
+        cases = list(
+            ProductInventoryAuditCase.objects.filter(
+                id__in=[row["id"] for row in month_rows]
+            )
+            .select_related("branch", "product")
+            .order_by("id")
+        )
+        try:
+            self._daily_break_cache = DailyInventoryBreakService().build_month(
+                month, cases
+            )
+        except Exception:
+            logger.exception("No fue posible proyectar los cortes diarios de inventario")
+            self._daily_break_cache = {
+                case.id: self._insufficient_projection(
+                    "No fue posible leer los cortes diarios conservados."
+                )
+                for case in cases
+            }
+
     def investigate_case(self, case: ProductInventoryAuditCase) -> InvestigationResult:
         issue_codes = sorted(set(case.issue_codes or []))
         discrepancies = self._related_logistics_discrepancies(case)
@@ -237,6 +281,13 @@ class InventoryAuditAgent:
         facts = self._facts(case, discrepancies)
         hypotheses: list[str] = []
         missing: list[str] = []
+        daily_break = (
+            self._daily_break_cache.get(case.id)
+            if self._daily_break_cache is not None
+            else None
+        ) or self._insufficient_projection(
+            "No se preparó una proyección diaria para este expediente."
+        )
 
         if case.movement_status == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE:
             attention = ProductInventoryAuditCase.AttentionLevel.GROUPED
@@ -265,10 +316,29 @@ class InventoryAuditAgent:
             if "TRANSFER_QUANTITY_MISMATCH" in issue_codes and not discrepancies:
                 missing.append("Relacionar la transferencia con una evidencia logística explícita.")
 
+        if daily_break.status == DailyBreakStatus.FOUND:
+            checkpoint = daily_break.first_mismatch_checkpoint
+            if checkpoint is not None:
+                facts.append(
+                    "El primer corte fuera del saldo posible fue "
+                    f"{self._checkpoint_label(checkpoint)} con diferencia "
+                    f"{checkpoint.difference}."
+                )
+        elif daily_break.status == DailyBreakStatus.INCONCLUSIVE:
+            missing.append(
+                "Point no informa la hora de todos los movimientos del día; "
+                "el corte permanece dentro del rango posible."
+            )
+        elif daily_break.status == DailyBreakStatus.INSUFFICIENT_EVIDENCE:
+            missing.append(
+                "No existe un corte intermedio suficiente para localizar el inicio de la diferencia."
+            )
+
         summary = {
             "facts": facts,
             "hypotheses": hypotheses,
             "missing": missing,
+            "daily_break": self._daily_break_summary(case, daily_break),
             "related_logistics_discrepancy_ids": [item.id for item in discrepancies],
             "recurrence_count": recurrence_count,
             "grouping_key": self._grouping_key(case, issue_codes),
@@ -292,6 +362,46 @@ class InventoryAuditAgent:
             summary=summary,
             fingerprint=fingerprint,
         )
+
+    @staticmethod
+    def _insufficient_projection(message):
+        return DailyBreakProjection(
+            status=DailyBreakStatus.INSUFFICIENT_EVIDENCE,
+            last_matching_checkpoint=None,
+            first_mismatch_checkpoint=None,
+            minimum=None,
+            maximum=None,
+            movement_ids_by_source={},
+            warnings=(message,),
+        )
+
+    def _daily_break_summary(self, case, projection):
+        data = projection.as_dict()
+        data.update(
+            {
+                "last_matching_label": self._checkpoint_label(
+                    projection.last_matching_checkpoint
+                ),
+                "first_mismatch_label": self._checkpoint_label(
+                    projection.first_mismatch_checkpoint
+                ),
+                "unlocated_quantity": format(abs(Decimal(case.difference)), "f"),
+                "movement_labels": [
+                    f"{len(ids)} movimiento(s) de {SOURCE_LABELS.get(source, source)}"
+                    for source, ids in sorted(
+                        projection.movement_ids_by_source.items()
+                    )
+                    if ids
+                ],
+            }
+        )
+        return data
+
+    @staticmethod
+    def _checkpoint_label(checkpoint):
+        if checkpoint is None:
+            return "Sin corte anterior comprobado"
+        return checkpoint.captured_at.astimezone(LOCAL_TZ).strftime("%d/%m/%Y %H:%M")
 
     @staticmethod
     def _projection_changed(case, result):
