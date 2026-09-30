@@ -844,6 +844,65 @@ class InventoryTraceabilityViewsTests(TestCase):
         stylesheet = Path("static/css/inventory_audit_v1.css").read_text()
         self.assertIn(".inventory-audit-heading h1", stylesheet)
         self.assertIn("font-family: 'Playfair Display', serif", stylesheet)
+        scenarios = (
+            (
+                {
+                    "status": "FOUND",
+                    "last_matching_label": "10/08/2026 22:31",
+                    "first_mismatch_label": "11/08/2026 22:31",
+                    "unlocated_quantity": "2",
+                    "movement_labels": [
+                        "2 movimiento(s) de producciones",
+                        "3 movimiento(s) de salidas por transferencia",
+                    ],
+                    "warnings": [],
+                },
+                ("Primer corte con diferencia", "11/08/2026 22:31", "2 unidades continúan sin localizar"),
+            ),
+            (
+                {
+                    "status": "INCONCLUSIVE",
+                    "minimum": "6",
+                    "maximum": "15",
+                    "movement_labels": [],
+                    "warnings": [],
+                },
+                ("Point no informa el orden", "saldo entre", "<strong>6</strong>", "<strong>15</strong>"),
+            ),
+            (
+                {
+                    "status": "INSUFFICIENT_EVIDENCE",
+                    "movement_labels": [],
+                    "warnings": ["No existen cortes intermedios de Point para este caso."],
+                },
+                ("No existe un corte intermedio suficiente",),
+            ),
+        )
+        for daily_break, expected in scenarios:
+            with self.subTest(status=daily_break["status"]):
+                self.case.investigation_summary = {
+                    "facts": [],
+                    "hypotheses": [],
+                    "missing": [],
+                    "daily_break": daily_break,
+                }
+                self.case.difference = Decimal("-2")
+                self.case.save(
+                    update_fields=["investigation_summary", "difference", "updated_at"]
+                )
+                response = self.client.get(
+                    reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+                    HTTP_ACCEPT="text/html",
+                )
+                content = response.content.decode()
+                for text in expected:
+                    self.assertIn(text, content)
+                self.assertNotIn(f">{daily_break['status']}<", content)
+                if daily_break["status"] == "FOUND":
+                    daily_block = content[
+                        content.index("inventory-audit-daily-break") : content.index("balance-title")
+                    ]
+                    self.assertNotIn("transfer_out", daily_block)
 
     def test_browser_detail_prefetches_event_actors_without_query_per_event(self):
         for index in range(8):

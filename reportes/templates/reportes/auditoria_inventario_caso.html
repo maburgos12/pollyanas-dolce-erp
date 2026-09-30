@@ -46,6 +46,25 @@
   </section>
   {% endif %}
 
+  {% with daily=case.investigation_summary.daily_break %}
+  {% if daily %}
+  <section class="inventory-audit-explanation inventory-audit-daily-break" aria-labelledby="daily-break-title">
+    <h2 id="daily-break-title">Primer intervalo a revisar</h2>
+    {% if daily.status == "FOUND" %}
+      <p>El último corte compatible fue {{ daily.last_matching_label }}. <strong>Primer corte con diferencia:</strong> {{ daily.first_mismatch_label }}.</p>
+      <p><strong>{{ daily.unlocated_quantity }} unidades continúan sin localizar.</strong></p>
+      {% if daily.movement_labels %}
+      <p>Movimientos considerados: {% for item in daily.movement_labels %}{{ item }}{% if not forloop.last %}; {% endif %}{% endfor %}.</p>
+      {% endif %}
+    {% elif daily.status == "INCONCLUSIVE" %}
+      <p>Point no informa el orden de todos los movimientos del día. El corte observado todavía es compatible con un saldo entre <strong>{{ daily.minimum }}</strong> y <strong>{{ daily.maximum }}</strong>.</p>
+    {% else %}
+      <p>No existe un corte intermedio suficiente para localizar el inicio de la diferencia.</p>
+    {% endif %}
+  </section>
+  {% endif %}
+  {% endwith %}
+
   <section class="inventory-audit-balance" aria-labelledby="balance-title">
     <div class="inventory-audit-results-heading">
       <div><h2 id="balance-title">Secuencia del saldo</h2><p>Los pasos se presentan en el mismo orden del cálculo mensual.</p></div>
