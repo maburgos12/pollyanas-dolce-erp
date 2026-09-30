@@ -89,13 +89,66 @@ class ResumenDepartamentalTests(TestCase):
     def test_filtros_combinados_y_enlace_por_departamento(self):
         visible = self.item(estado=Item.ESTADO_POR_COTIZAR)
         self.item(self.solicitud(area=self.otra), estado=Item.ESTADO_POR_COTIZAR)
-        self.item(self.solicitud(periodo=date(2026, 8, 1)), estado=Item.ESTADO_POR_COTIZAR)
+        arrastrado = self.item(self.solicitud(periodo=date(2026, 8, 1)), estado=Item.ESTADO_POR_COTIZAR)
         self.item()
         params = {'area': self.area.pk, 'periodo': '2026-09', 'estado': Item.ESTADO_POR_COTIZAR}
         response = self.client.get(self.url, params)
-        self.assertEqual([i.pk for i in response.context['items']], [visible.pk])
-        self.assertEqual(response.context['departamentos'][0]['solicitado'], Decimal('200.50'))
+        self.assertEqual([i.pk for i in response.context['items']], [visible.pk, arrastrado.pk])
+        self.assertEqual(response.context['departamentos'][0]['solicitado'], Decimal('401.00'))
         self.assertIn('periodo=2026-09', response.context['departamentos'][0]['url'])
+
+    def test_periodo_es_corte_inclusivo_y_marca_arrastre(self):
+        from .resumen_departamentales import construir_resumen_departamental
+
+        agosto = self.item(self.solicitud(periodo=date(2026, 8, 1)))
+        septiembre = self.item(self.solicitud(periodo=date(2026, 9, 1)))
+        self.item(self.solicitud(periodo=date(2026, 10, 1)))
+
+        contexto = construir_resumen_departamental({'periodo': '2026-09'})
+
+        self.assertEqual([item.pk for item in contexto['items']], [agosto.pk, septiembre.pk])
+        self.assertTrue(contexto['items'][0].resumen_arrastrado)
+        self.assertFalse(contexto['items'][1].resumen_arrastrado)
+
+    def test_etapas_distinguen_cero_cotizaciones_y_no_seleccionada(self):
+        from .resumen_departamentales import construir_resumen_departamental
+
+        nunca = self.item()
+        en_proceso = self.item()
+        self.cotizacion(en_proceso, seleccionada=False)
+        seleccionada = self.item()
+        self.cotizacion(seleccionada)
+
+        nunca_contexto = construir_resumen_departamental({'etapa': 'nunca_cotizados'})
+        proceso_contexto = construir_resumen_departamental({'etapa': 'cotizacion_en_proceso'})
+
+        self.assertEqual([item.pk for item in nunca_contexto['items']], [nunca.pk])
+        self.assertEqual([item.pk for item in proceso_contexto['items']], [en_proceso.pk])
+        self.assertEqual(nunca_contexto['conteos_etapas']['todos'], 3)
+        self.assertEqual(nunca_contexto['conteos_etapas']['nunca_cotizados'], 1)
+        self.assertEqual(nunca_contexto['conteos_etapas']['cotizacion_en_proceso'], 1)
+
+    def test_etapas_compradas_y_pendientes_de_confirmacion(self):
+        from .resumen_departamentales import construir_resumen_departamental
+
+        comprado = self.item(estado=Item.ESTADO_COMPRADO)
+        parcial = self.item(estado=Item.ESTADO_RECIBIDO_PARCIAL)
+        confirmacion = self.item(estado=Item.ESTADO_PENDIENTE_CONFIRMACION)
+        self.item(estado=Item.ESTADO_POR_COTIZAR)
+
+        comprados = construir_resumen_departamental({'etapa': 'comprados_sin_entregar'})
+        por_confirmar = construir_resumen_departamental({'etapa': 'pendientes_confirmacion'})
+
+        self.assertEqual([item.pk for item in comprados['items']], [comprado.pk, parcial.pk])
+        self.assertEqual([item.pk for item in por_confirmar['items']], [confirmacion.pk])
+
+    def test_etapa_invalida_no_amplia_consulta(self):
+        self.item()
+
+        response = self.client.get(self.url, {'etapa': 'desconocida'})
+
+        self.assertTrue(response.context['filtros'].errors)
+        self.assertEqual(response.context['resumen']['articulos'], 0)
 
     def test_filtros_invalidos_no_amplian_consulta(self):
         self.item()
@@ -123,6 +176,46 @@ class ResumenDepartamentalTests(TestCase):
         self.assertEqual(data[0][header.index('Cotizado')], None)
         self.assertFalse(any(cell.data_type == 'f' for ws in wb for row in ws for cell in row))
 
+    def test_bandeja_muestra_filtros_rapidos_y_arrastre(self):
+        arrastrado = self.item(self.solicitud(periodo=date(2026, 8, 1)), descripcion='Pendiente anterior')
+
+        response = self.client.get(self.url, {'periodo': '2026-09', 'etapa': 'nunca_cotizados'})
+
+        self.assertEqual([item.pk for item in response.context['items']], [arrastrado.pk])
+        self.assertContains(response, 'Nunca cotizados')
+        self.assertContains(response, 'Cotización en proceso')
+        self.assertContains(response, 'Comprados sin entregar')
+        self.assertContains(response, 'Pendientes de confirmación')
+        self.assertContains(response, 'aria-pressed="true"')
+        self.assertContains(response, 'Arrastrado desde agosto de 2026')
+        self.assertIn('etapa=nunca_cotizados', response.context['exportar_url'])
+
+    def test_bandeja_abre_imagen_completa_sin_recortarla(self):
+        self.item(imagen='compras/departamentales/2026/09/equipo.jpg')
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, 'data-image-preview')
+        self.assertContains(response, 'id="cd-image-viewer"')
+        self.assertContains(response, 'class="cd-product-image"')
+
+    def test_excel_conserva_periodo_original_y_agrega_etapa_y_arrastre(self):
+        self.item(self.solicitud(periodo=date(2026, 8, 1)), descripcion='Pendiente anterior')
+
+        response = self.client.get(self.url, {
+            'periodo': '2026-09', 'etapa': 'nunca_cotizados', 'exportar': 'xlsx',
+        })
+        wb = load_workbook(BytesIO(response.content))
+        rows = list(wb['Artículos'].values)
+        header = next(row for row in rows if row[0] == 'Solicitud')
+        data = rows[rows.index(header) + 1]
+
+        self.assertIn('Etapa pendiente', header)
+        self.assertIn('Arrastre', header)
+        self.assertEqual(data[header.index('Mes planeado')], '2026-08')
+        self.assertEqual(data[header.index('Etapa pendiente')], 'Nunca cotizado')
+        self.assertEqual(data[header.index('Arrastre')], 'Sí, desde 2026-08')
+
     def test_compromiso_inactivo_no_se_suma_y_centavos_concilian(self):
         item = self.item(cantidad=Decimal('0.333'), costo_unitario_estimado=Decimal('1.01'))
         quote = self.cotizacion(item)
@@ -148,7 +241,7 @@ class ResumenDepartamentalTests(TestCase):
             for _ in range(2):
                 Reembolso.objects.create(intento=intento, importe=Decimal('10'),
                                         fecha=timezone.localdate(), registrado_por=self.user)
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             contexto = construir_resumen_departamental({})
         self.assertEqual(contexto['resumen']['articulos'], 5)
         self.assertEqual(contexto['resumen']['reembolso_pendiente'], Decimal('400'))
@@ -199,7 +292,7 @@ class ResumenDepartamentalTests(TestCase):
                     estado=Intento.ESTADO_REEMBOLSO_SOLICITADO, reembolso_solicitado=Decimal('100'))
                 Reembolso.objects.create(intento=intento, importe=Decimal('10'),
                     fecha=timezone.localdate(), registrado_por=self.user)
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(5):
             contexto = construir_resumen_departamental({'estado': Item.ESTADO_POR_COTIZAR})
         self.assertEqual(len(contexto['items']), 5)
         self.assertEqual(contexto['resumen']['articulos'], 0)
