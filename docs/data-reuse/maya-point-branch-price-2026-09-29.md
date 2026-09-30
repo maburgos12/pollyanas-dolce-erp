@@ -43,3 +43,17 @@ No usar `Costo_U`/`Costo_T` del stock como precio de venta. No activar precio en
 - No se repitió el GET público de disponibilidad: su código actual puede barrer reservas vencidas. Su respuesta previa no revela la sucursal Point real y no se toma como prueba de stock de Bamoa.
 
 Los valores observados son evidencia fechada, no disponibilidad futura. Sigue pendiente configurar la sucursal Bamoa en el catálogo Maya mediante una acción revisada y validar el consumidor después del despliegue.
+
+## Ampliación aprobada el 30 de septiembre
+
+Mauricio confirmó `Precio_default` como precio de venta uniforme para todas las sucursales. Se autoriza implementar lectura viva y horarios efectivos en pruebas locales, sin reservas, cobros ni despliegue. Las observaciones monetarias anteriores siguen siendo fechadas, no precios actuales.
+
+Reutilizar `PointProduct` exclusivamente como mapa activo unívoco hacia `PointHttpSessionClient.get_product_detail`, el bloqueo de sesión y la acción GET autenticada del catálogo. Moneda MXN por política del proyecto, no por campo Point observado. No guardar otra tabla de precios ni usar costos/replica como respaldo.
+
+Horarios: `core.Sucursal` carece de campo semanal. Fuente oficial `https://pollyanasdolce.com/api/branches/` leída hoy: nueve sucursales, `schedule` JSON con grupos de días en español y horas AM/PM. Bamoa habitual lun–sáb 09:00–19:30, dom 10:00–18:00. Horarios especiales ya tienen modelos `SolicitudHorarioEspecial`, `HorarioEspecialDetalle`, `SucursalPlataformaExterna` y cliente Google existente: reutilizarlos. Excepciones aprobadas por fecha, conflictos y fuentes ausentes deben distinguirse del horario habitual. Credenciales OAuth y ubicación Business Profile Bamoa siguen sin comprobarse; no usar ubicación histórica Crucero ni Maps place_id.
+
+Implementación nueva aislada: `codex/maya-point-price-hours`, base main `d0d2222`, con cuatro commits anteriores propios recuperados; PostgreSQL 16 puerto 55594. No se modificó la configuración de fuentes de producción.
+
+Inventario reproducido en esa base local migrada: `inventario_fuentes_datos --term horario --term especial --presence --limit 8`, seis candidatos, incluidas las cuatro entidades de solicitud/detalle/publicación/bitácora existentes. Es metadato local sin registros de negocio: no demuestra presencia o ausencia actual en producción ni autoriza crear otra tabla de horarios.
+
+Resultado local del 30 de septiembre: lectura viva de venta `products/sale-price` (`8ba641f3`), validación de estructuras de autenticación compartida (`aed8e89e`) y horario efectivo (`4521d52d`, `c9260fbb`). Revisiones de especificación y calidad aprobadas. Coordinador: 122 pruebas combinadas API/Point/horarios en PostgreSQL 16 aislado, check y migraciones sin pendientes. Se reutilizan fuentes/modelos existentes; sin tablas, dependencias ni configuración productiva nuevas. Fuente fija habitual final: `https://www.pollyanasdolce.com/api/branches/`; lectura pública real validó los nueve horarios en siete días. Una respuesta REGULAR_ONLY o UNKNOWN nunca prueba apertura/cierre efectivo.
