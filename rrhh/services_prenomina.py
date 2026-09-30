@@ -177,11 +177,18 @@ def _ajustes_pendientes_por_empleado(corte: PrenominaCorte, empleado_ids: list[i
 
 def _horas_extra_por_empleado(corte: PrenominaCorte, empleado_ids: list[int]):
     grouped = defaultdict(list)
+    asignadas = PrenominaMovimiento.objects.filter(
+        fuente_modelo="rrhh.HoraExtra",
+        tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+    ).exclude(corte=corte).values_list("fuente_id", flat=True)
+    asignadas_ids = [int(pk) for pk in asignadas if pk.isdigit()]
     horas_extra = HoraExtra.objects.filter(
         empleado_id__in=empleado_ids,
-        fecha__range=(corte.fecha_inicio, corte.fecha_fin),
+        fecha__lte=corte.fecha_fin,
         estado=HoraExtra.ESTADO_AUTORIZADO,
-    ).order_by("empleado_id", "fecha", "id")
+        fecha_autorizacion_jefe__lte=corte.creado_en,
+        requiere_aplicacion_prenomina=True,
+    ).exclude(pk__in=asignadas_ids).order_by("empleado_id", "fecha", "id")
     for hora_extra in horas_extra:
         grouped[hora_extra.empleado_id].append(hora_extra)
     return grouped
