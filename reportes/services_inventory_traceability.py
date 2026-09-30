@@ -15,6 +15,7 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     TraceSourceIssue,
     canonical_point_branch_identity,
 )
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.product_month_source_mutex import (
     lock_product_month_sources,
 )
@@ -88,6 +89,9 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
     payload: dict[str, object] = {}
     for source_name, source_value in sorted(source_trace.items()):
         name = str(source_name)
+        if name == "point_history":
+            payload[name] = source_value if isinstance(source_value, Mapping) else {}
+            continue
         if name in _TRACE_IMPACT_KEYS:
             if not isinstance(source_value, Mapping):
                 payload[name] = {}
@@ -149,7 +153,8 @@ class InventoryAuditMaterializer:
                 )
 
             prepared_lines = [
-                self._prepare_line(line) for line in traceability.lines
+                self._prepare_line(line, month=month_start)
+                for line in traceability.lines
             ]
             branch_aliases, _branch_objects = canonical_point_branch_identity()
             existing_cases = self._canonical_existing_cases(
@@ -362,7 +367,7 @@ class InventoryAuditMaterializer:
         )
         return counts
 
-    def _prepare_line(self, line) -> dict[str, object]:
+    def _prepare_line(self, line, *, month: date) -> dict[str, object]:
         issues = _sorted_issue_payloads(line.issues)
         source_trace = _source_trace_payload(line.source_trace)
         normalized_quantities = {
@@ -381,6 +386,52 @@ class InventoryAuditMaterializer:
             "point_closing": Decimal(line.point_closing).quantize(_QUANTITY),
             "difference": Decimal(line.difference).quantize(_QUANTITY),
         }
+        reconciliation = AuditStockHistoryService().reconcile(
+            line.branch,
+            line.product,
+            month,
+        )
+        history_remainder = reconciliation.unexplained_remainder(
+            Decimal(line.opening),
+            Decimal(line.point_closing),
+        )
+        if (
+            Decimal(line.difference) != 0
+            and reconciliation.coverage_status == "COMPLETE"
+            and not reconciliation.unknown_movement_ids
+            and history_remainder == 0
+        ):
+            history_values = {
+                "production": reconciliation.production,
+                "sales": reconciliation.sales,
+                "waste": reconciliation.waste,
+                "transfer_in": reconciliation.transfer_in,
+                "transfer_out": reconciliation.transfer_out,
+                "conversion_in": reconciliation.conversion_in,
+                "conversion_out": reconciliation.conversion_out,
+                "identified_adjustment": reconciliation.identified_adjustment,
+            }
+            comparison = {}
+            for field, history_value in history_values.items():
+                source_value = Decimal(getattr(line, field))
+                if source_value != history_value:
+                    comparison[field] = {
+                        "aggregate": _decimal_text(source_value),
+                        "point_history": _decimal_text(history_value),
+                        "difference": _decimal_text(history_value - source_value),
+                    }
+                normalized_quantities[field] = history_value.quantize(_QUANTITY)
+            expected = reconciliation.expected_closing(Decimal(line.opening))
+            normalized_quantities["expected_closing"] = expected.quantize(_QUANTITY)
+            normalized_quantities["difference"] = (
+                Decimal(line.point_closing) - expected
+            ).quantize(_QUANTITY)
+            point_history = reconciliation.as_dict(
+                opening=Decimal(line.opening),
+                point_closing=Decimal(line.point_closing),
+            )
+            point_history["aggregate_comparison"] = comparison
+            source_trace["point_history"] = point_history
         quantities = {
             name: _decimal_text(value)
             for name, value in normalized_quantities.items()
