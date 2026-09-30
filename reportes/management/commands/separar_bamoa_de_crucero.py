@@ -146,7 +146,33 @@ class Command(BaseCommand):
             equivalencia[original.pk] = espejo
         self.stdout.write(f"  {len(originales)} rubros se quedan con Crucero")
         self.stdout.write(f"  {len(equivalencia)} rubros espejo creados para Bamoa")
+        self.stdout.write(f"  {self._clonar_reglas(equivalencia)} reglas copiadas al espejo")
         return equivalencia
+
+    def _clonar_reglas(self, equivalencia) -> int:
+        """Un rubro sin regla no se vuelve a llenar: se queda en la última foto.
+
+        Las reglas se resuelven contra la sucursal de su rubro, así que la copia
+        queda apuntando a Bamoa sola. Las de obligación no se copian aquí porque
+        viajan con su contrato.
+        """
+        copiadas = 0
+        for original_id, espejo in equivalencia.items():
+            existentes = set(
+                espejo.reglas_fuente.values_list("tipo_fuente", "categoria_gasto_id", "centro_costo_id")
+            )
+            for regla in ReglaFuenteRubro.objects.filter(rubro_id=original_id, activa=True).exclude(
+                tipo_fuente=ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO
+            ):
+                huella = (regla.tipo_fuente, regla.categoria_gasto_id, regla.centro_costo_id)
+                if huella in existentes:
+                    continue
+                regla.pk = None
+                regla.rubro = espejo
+                regla.save()
+                existentes.add(huella)
+                copiadas += 1
+        return copiadas
 
     def _presupuesto(self, equivalencia):
         """De julio en adelante el presupuesto es de Bamoa; antes, de Crucero."""
