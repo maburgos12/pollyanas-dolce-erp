@@ -20,9 +20,10 @@ Para una recepción parcial finalizada:
 
 1. conservar enviado y recibido como evidencia;
 2. calcular `retorno = enviado - recibido`;
-3. aplicar al origen una salida neta de `enviado - retorno`;
-4. aplicar al destino la entrada recibida;
-5. mantener `TRANSFER_QUANTITY_MISMATCH` como explicación y mostrar el retorno Point, no como faltante en tránsito.
+3. conservar la salida enviada en la fecha de envío;
+4. aplicar el retorno como entrada al origen en la fecha de recepción;
+5. aplicar al destino la entrada recibida;
+6. mantener `TRANSFER_QUANTITY_MISMATCH` como explicación y mostrar el retorno Point, no como faltante en tránsito.
 
 ## Interfaz de revisiones
 
@@ -38,7 +39,7 @@ La columna **Repartidor** de las discrepancias usa `caso.ruta.repartidor.user`. 
 
 ## Validación
 
-- El caso 37934 debe producir salida neta 1 en CEDIS, entrada 1 en Bamoa y retorno comprobado 1.
+- El caso 37934 debe producir salida 2 y retorno 1 en CEDIS, entrada 1 en Bamoa y salida neta 1.
 - Una reconstrucción de agosto debe reducir el falso faltante del origen sin modificar el cierre Point.
 - Los casos abiertos continúan identificados como tránsito.
 - La bandeja muestra Carlos Anaya para `RUT-202608-0029`; Mauricio permanece únicamente como creador técnico del registro.
