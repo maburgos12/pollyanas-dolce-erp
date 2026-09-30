@@ -845,6 +845,91 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertIn(".inventory-audit-heading h1", stylesheet)
         self.assertIn("font-family: 'Playfair Display', serif", stylesheet)
 
+    def test_case_detail_shows_first_observed_break_without_internal_tokens(self):
+        self.case.investigation_summary = {
+            "facts": [],
+            "hypotheses": [],
+            "missing": [],
+            "daily_break": {
+                "status": "FOUND",
+                "last_matching_label": "10/08/2026 22:31",
+                "first_mismatch_label": "11/08/2026 22:31",
+                "unlocated_quantity": "2",
+                "movement_labels": [
+                    "2 movimiento(s) de producciones",
+                    "3 movimiento(s) de salidas por transferencia",
+                ],
+                "warnings": [],
+            },
+        }
+        self.case.difference = Decimal("-2")
+        self.case.save(update_fields=["investigation_summary", "difference", "updated_at"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertContains(response, "Primer corte con diferencia")
+        self.assertContains(response, "11/08/2026 22:31")
+        self.assertContains(response, "2 unidades continúan sin localizar")
+        self.assertNotContains(response, ">FOUND<")
+        content = response.content.decode()
+        daily_block = content[
+            content.index("inventory-audit-daily-break") : content.index("balance-title")
+        ]
+        self.assertNotIn("transfer_out", daily_block)
+
+    def test_case_detail_explains_inconclusive_daily_order(self):
+        self.case.investigation_summary = {
+            "facts": [],
+            "hypotheses": [],
+            "missing": [],
+            "daily_break": {
+                "status": "INCONCLUSIVE",
+                "minimum": "6",
+                "maximum": "15",
+                "movement_labels": [],
+                "warnings": [],
+            },
+        }
+        self.case.save(update_fields=["investigation_summary", "updated_at"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertContains(response, "Point no informa el orden")
+        self.assertContains(response, "saldo entre")
+        self.assertIn("<strong>6</strong>", response.content.decode())
+        self.assertIn("<strong>15</strong>", response.content.decode())
+        self.assertNotContains(response, ">INCONCLUSIVE<")
+
+    def test_case_detail_explains_when_intermediate_cut_is_missing(self):
+        self.case.investigation_summary = {
+            "facts": [],
+            "hypotheses": [],
+            "missing": [],
+            "daily_break": {
+                "status": "INSUFFICIENT_EVIDENCE",
+                "movement_labels": [],
+                "warnings": ["No existen cortes intermedios de Point para este caso."],
+            },
+        }
+        self.case.save(update_fields=["investigation_summary", "updated_at"])
+        self.client.force_login(self.viewer)
+
+        response = self.client.get(
+            reverse("reportes:inventory_audit_case", args=[self.case.pk]),
+            HTTP_ACCEPT="text/html",
+        )
+
+        self.assertContains(response, "No existe un corte intermedio suficiente")
+        self.assertNotContains(response, ">INSUFFICIENT_EVIDENCE<")
+
     def test_browser_detail_prefetches_event_actors_without_query_per_event(self):
         for index in range(8):
             ProductInventoryAuditEvent.objects.create(
