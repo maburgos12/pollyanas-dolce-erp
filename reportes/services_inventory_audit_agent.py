@@ -38,6 +38,14 @@ SOURCE_LABELS = {
     "conversion_in": "entradas por conversión",
     "conversion_out": "salidas por conversión",
 }
+POINT_HISTORY_LABELS = {
+    "production": "producción",
+    "sales": "ventas",
+    "waste": "mermas",
+    "transfer_in": "entradas por transferencia",
+    "transfer_out": "salidas por transferencia",
+    "identified_adjustment": "ajustes de inventario",
+}
 
 
 def _quantity_label(value) -> str:
@@ -321,6 +329,15 @@ class InventoryAuditAgent:
                     "explícitamente por Point; no se asigna por aproximación."
                 )
             comparison = point_history.get("aggregate_comparison") or {}
+            for source, label in POINT_HISTORY_LABELS.items():
+                gap = comparison.get(source) or {}
+                if gap:
+                    facts.append(
+                        "El historial Point registra "
+                        f"{_quantity_label(gap.get('point_history'))} piezas de {label}; "
+                        "el reporte agregado registraba "
+                        f"{_quantity_label(gap.get('aggregate'))}."
+                    )
             conversion_gap = comparison.get("conversion_out") or {}
             if conversion_gap:
                 facts.append(

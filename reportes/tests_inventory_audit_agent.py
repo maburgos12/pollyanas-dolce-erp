@@ -211,6 +211,11 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
                     },
                     "unknown_movement_ids": [],
                     "aggregate_comparison": {
+                        "identified_adjustment": {
+                            "aggregate": "0.0000",
+                            "point_history": "4.0000",
+                            "difference": "4.0000",
+                        },
                         "conversion_out": {
                             "aggregate": "0.0000",
                             "point_history": "10.0000",
@@ -230,6 +235,10 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("2 piezas de entrada por conversión", facts)
         self.assertIn("cierre de 6", facts)
         self.assertIn("reporte agregado no incluyó 10", facts.lower())
+        self.assertIn(
+            "historial point registra 4 piezas de ajustes de inventario",
+            facts.lower(),
+        )
         self.assertTrue(
             any("destino" in item.lower() for item in result.summary["hypotheses"])
         )
