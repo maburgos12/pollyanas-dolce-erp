@@ -30,6 +30,8 @@
       const API_V2 = `${API}/v2`;
       const AUTH_API = "/api/logistica";
       const app = document.getElementById("app");
+      const entrada = new URLSearchParams(window.location.search);
+      const vistaInicial = entrada.get("vista") === "historial" ? "historial" : "dashboard";
       const state = {
         token: localStorage.getItem("pd_mantenimiento_access") || "",
         refreshToken: localStorage.getItem("pd_mantenimiento_refresh") || "",
@@ -50,7 +52,7 @@
         bandeja: [],
         bandejaFiltro: "todos",
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
-        history: {periodo: "30d", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1, results: [], hasNext: false},
+        history: {periodo: vistaInicial === "historial" ? "todo" : "30d", activo: vistaInicial === "historial" ? (entrada.get("activo") || "") : "", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1, results: [], hasNext: false},
         detailCache: new Map(),
         detailReturn: {screen: "pendientes", uid: null},
         requestGeneration: {inbox: 0, history: 0, detail: 0},
@@ -316,7 +318,7 @@
         });
         if (!res.ok) return renderLogin("Usuario o contraseña incorrectos");
         setTokens(await res.json());
-        await showScreen("dashboard");
+        await showScreen(vistaInicial);
       }
 
       async function loadPerfil() {
@@ -2149,6 +2151,11 @@
         state.requestGeneration.history += 1;
         state.historyLoading = false;
         state.history[name] = value;
+        if (name === "activo" && !value) {
+          const url = new URL(window.location.href);
+          url.searchParams.delete("activo");
+          window.history.replaceState(null, "", url);
+        }
         state.history.page = 1;
         state.history.results = [];
         renderHistorial();
@@ -2183,7 +2190,7 @@
         if (generation !== state.requestGeneration.history) { state.historyLoading = false; return; }
         const requestedPage = state.history.page;
         if (!loadMore) render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1><div class="skeleton" aria-label="Cargando historial"></div>`));
-        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&unidad=${encodeURIComponent(state.history.unidad)}&autor=${encodeURIComponent(state.history.autor)}&page=${requestedPage}&page_size=25`;
+        const query = `periodo=${encodeURIComponent(state.history.periodo)}&tipo=${encodeURIComponent(state.history.tipo)}&estado=${encodeURIComponent(state.history.estado)}&sucursal=${encodeURIComponent(state.history.sucursal)}&unidad=${encodeURIComponent(state.history.unidad)}&activo=${encodeURIComponent(state.history.activo)}&autor=${encodeURIComponent(state.history.autor)}&page=${requestedPage}&page_size=25`;
         let res;
         try { res = await apiV2Fetch(`/historial/?${query}`); }
         catch (error) {
@@ -2201,7 +2208,9 @@
         const branchOptions = state.sucursales.map(s => `<option value="${s.id}" ${String(s.id) === String(state.history.sucursal) ? "selected" : ""}>${esc(s.nombre)}</option>`).join("");
         const unitOptions = state.unidades.map(unit => `<option value="${unit.id}" ${String(unit.id) === String(state.history.unidad) ? "selected" : ""}>${esc(unit.codigo)} · ${esc(unit.descripcion || "Sin descripción")}</option>`).join("");
         const authorOptions = (state.catalogos?.autores_mantenimiento || []).map(user => `<option value="${user.id}" ${String(user.id) === String(state.history.autor) ? "selected" : ""}>${esc(user.nombre)}${user.activo === false ? " · Inactivo" : ""}</option>`).join("");
-        return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Historial</h1>
+        return render(shell(`<button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button><h1 class="screen-title screen-title-spaced">Trabajos y servicios</h1>
+          ${state.history.activo ? `<p>Documentos de este equipo. <button class="secondary-btn" onclick="setHistoryFilter('activo','')">Ver historial completo</button></p>` : ""}
+          <p class="muted">Reportes, órdenes y servicios con sus documentos originales.</p>
           <fieldset class="history-scope">
             <legend>Vista del historial</legend>
             <div class="history-scope-actions" role="group" aria-label="Vista del historial">
@@ -2211,7 +2220,7 @@
           </fieldset>
           <div class="history-filters" aria-label="Filtros de historial">
             <label>Periodo<select onchange="setHistoryFilter('periodo',this.value)">${[["30d","30 días"],["semana","Semana"],["mes","Mes"],["90d","90 días"],["todo","Todo"]].map(([v,l])=>`<option value="${v}" ${state.history.periodo===v?"selected":""}>${l}</option>`).join("")}</select></label>
-            <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios"],["sin_reporte","Directos"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
+            <label>Tipo<select onchange="setHistoryFilter('tipo',this.value)">${[["todo","Todos"],["reporte","Reportes"],["orden","Órdenes"],["reparacion","Reparaciones"],["servicio_unidad","Servicios de flota"],["sin_reporte","Servicios directos de equipo"]].map(([v,l])=>`<option value="${v}" ${state.history.tipo===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Estado<select onchange="setHistoryFilter('estado',this.value)">${[["todo","Todos"],["abierto","Abierto"],["en_proceso","En proceso"],["cerrado","Cerrado"],["cancelado","Cancelado"]].map(([v,l])=>`<option value="${v}" ${state.history.estado===v?"selected":""}>${l}</option>`).join("")}</select></label>
             <label>Sucursal<select onchange="setHistoryFilter('sucursal',this.value)"><option value="">Todas</option>${branchOptions}</select></label>
             <label class="history-unit-filter">Unidad<select onchange="setHistoryFilter('unidad',this.value)"><option value="">Todas las unidades</option>${unitOptions}</select></label>
@@ -2393,12 +2402,12 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20260927-higiene-consolidacion-v1", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261001-historial-compartido-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {
           if (await useDjangoSessionToken()) {
-            await showScreen("dashboard");
+            await showScreen(vistaInicial);
             return;
           }
         } catch (error) {
@@ -2407,7 +2416,7 @@
 
         if (state.token) {
           try {
-            await showScreen("dashboard");
+            await showScreen(vistaInicial);
             return;
           } catch (error) {
             logout(false);
