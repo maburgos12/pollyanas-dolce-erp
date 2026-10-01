@@ -213,6 +213,17 @@ class InventoryAuditMaterializer:
                     existing is not None
                     and existing.calculation_fingerprint == prepared["fingerprint"]
                 ):
+                    effective_status = self._effective_status(
+                        prepared_status=prepared["movement_status"],
+                        existing=existing,
+                        unchanged=True,
+                    )
+                    if existing.movement_status != effective_status:
+                        existing.movement_status = effective_status
+                        existing.rebuilt_at = source_built_at
+                        existing.save(
+                            update_fields=["movement_status", "rebuilt_at", "updated_at"]
+                        )
                     if existing.source_trace != prepared["source_trace"]:
                         existing.source_trace = prepared["source_trace"]
                         existing.rebuilt_at = source_built_at
@@ -579,7 +590,9 @@ class InventoryAuditMaterializer:
         issue_codes = sorted({str(issue["code"]) for issue in issues})
         if "SOURCE_INCOMPLETE" in issue_codes:
             movement_status = ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
-        elif normalized_quantities["difference"] == 0 and not issue_codes:
+        elif normalized_quantities["difference"] == 0 and not (
+            set(issue_codes) - {"PRODUCT_RESOLVED_BY_SKU", "PRODUCT_RESOLVED_BY_NAME"}
+        ):
             movement_status = ProductInventoryAuditCase.MovementStatus.BALANCED
         else:
             movement_status = ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
@@ -606,9 +619,17 @@ class InventoryAuditMaterializer:
                 existing is not None
                 and existing.calculation_fingerprint == prepared["fingerprint"]
             )
+            classification_unchanged = (
+                unchanged
+                and existing.movement_status == self._effective_status(
+                    prepared_status=prepared["movement_status"],
+                    existing=existing,
+                    unchanged=True,
+                )
+            )
             if existing is None:
                 counts["created"] += 1
-            elif unchanged:
+            elif classification_unchanged:
                 counts["unchanged"] += 1
             else:
                 counts["updated"] += 1
@@ -658,7 +679,10 @@ class InventoryAuditMaterializer:
 
     @staticmethod
     def _effective_status(*, prepared_status, existing, unchanged):
-        if unchanged:
+        if unchanged and existing.movement_status in {
+            ProductInventoryAuditCase.MovementStatus.RESOLVED,
+            ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+        }:
             return existing.movement_status
         if (
             existing is not None

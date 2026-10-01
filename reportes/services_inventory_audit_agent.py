@@ -254,10 +254,12 @@ class InventoryAuditAgent:
             prior_rows = (
                 ProductInventoryAuditCase.objects.filter(product_id__in=product_ids)
                 .exclude(month=month)
+                .exclude(difference=0)
                 .exclude(
                     movement_status__in=(
                         ProductInventoryAuditCase.MovementStatus.BALANCED,
                         ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                        ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
                     )
                 )
                 .values("product_id", "branch_id", "branch__erp_branch_id", "month")
@@ -515,10 +517,13 @@ class InventoryAuditAgent:
 
     @staticmethod
     def _facts(case, discrepancies):
-        facts = [
-            f"Point cerró con {case.point_closing}; el saldo calculado es {case.expected_closing}.",
-            f"La diferencia comprobada es {case.difference} unidad(es).",
-        ]
+        if case.movement_status == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE:
+            facts = ["La fuente está incompleta; aún no se puede confirmar el saldo ni la diferencia."]
+        else:
+            facts = [
+                f"Point cerró con {case.point_closing}; el saldo calculado es {case.expected_closing}.",
+                f"La diferencia comprobada es {case.difference} unidad(es).",
+            ]
         facts.extend(
             f"La discrepancia logística #{item.id} está ligada a la ruta {item.ruta.folio}."
             for item in discrepancies
@@ -535,11 +540,16 @@ class InventoryAuditAgent:
         return ProductInventoryAuditCase.ResponsibleArea.ADMINISTRATION
 
     def _attention_level(self, case, issue_codes, discrepancies, recurrence_count):
+        if case.movement_status in {
+            ProductInventoryAuditCase.MovementStatus.BALANCED,
+            ProductInventoryAuditCase.MovementStatus.RESOLVED,
+        } and not discrepancies:
+            return ProductInventoryAuditCase.AttentionLevel.GROUPED
         if (
             discrepancies
             or self.HIGH_ISSUES.intersection(issue_codes)
             or case.expected_closing < 0
-            or recurrence_count > 0
+            or (case.difference != 0 and recurrence_count > 0)
         ):
             return ProductInventoryAuditCase.AttentionLevel.HIGH
         if abs(case.difference) <= 1:
@@ -559,10 +569,12 @@ class InventoryAuditAgent:
                 **branch_filter,
             )
             .exclude(month=case.month)
+            .exclude(difference=0)
             .exclude(
                 movement_status__in=(
                     ProductInventoryAuditCase.MovementStatus.BALANCED,
                     ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                    ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE,
                 )
             )
             .values("month")
