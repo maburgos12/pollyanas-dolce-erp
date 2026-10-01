@@ -18,109 +18,7 @@
 </p>
 {% endif %}
 
-<section class="card">
-  <div class="card-header">Órdenes registradas</div>
-  <details class="pd-mb-3">
-    <summary>Datos pendientes en órdenes</summary>
-  <div class="kpi-grid pd-u-af3fee87a1">
-    {% for card in enterprise_cards %}
-      <article class="kpi-card">
-        <div class="kpi-number {% if card.tone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ card.count }}</div>
-        <div class="kpi-label">{{ card.label }}</div>
-        <div class="pd-u-d8a81eac84">
-          <a class="btn btn-secondary" href="?estatus={{ estado|urlencode }}&enterprise_gap={{ card.key|urlencode }}">Abrir</a>
-        </div>
-      </article>
-    {% endfor %}
-  </div>
-  </details>
-  <div class="quick-actions pd-u-af3fee87a1">
-    <a href="?estatus=abiertas" class="btn btn-secondary">Abiertas</a>
-    <a href="?estatus=PENDIENTE" class="btn btn-secondary">Pendientes</a>
-    <a href="?estatus=EN_PROCESO" class="btn btn-secondary">En proceso</a>
-    <a href="?estatus=CERRADA" class="btn btn-secondary">Cerradas</a>
-    <a href="?estatus=CANCELADA" class="btn btn-secondary">Canceladas</a>
-    <a href="?estatus={{ estado|urlencode }}&enterprise_gap={{ enterprise_gap|urlencode }}&export=csv" class="btn btn-secondary">Export CSV</a>
-    <a href="?estatus={{ estado|urlencode }}&enterprise_gap={{ enterprise_gap|urlencode }}&export=xlsx" class="btn btn-secondary">Export XLSX</a>
-  </div>
-  <form method="get" class="pd-u-af3fee87a1">
-    <div class="row pd-u-471ccadd32">
-      <div>
-        <label>Datos pendientes</label>
-        <select name="enterprise_gap">
-          <option value="">Todos</option>
-          {% for card in enterprise_cards %}
-            <option value="{{ card.key }}" {% if enterprise_gap == card.key %}selected{% endif %}>{{ card.label }}</option>
-          {% endfor %}
-        </select>
-        <input type="hidden" name="estatus" value="{{ estado }}">
-      </div>
-      <div class="quick-actions">
-        <button class="btn btn-primary" type="submit">Filtrar datos pendientes</button>
-        <a href="?estatus={{ estado|urlencode }}" class="btn btn-secondary">Limpiar</a>
-      </div>
-    </div>
-  </form>
-  <div class="table-responsive">
-    <table class="table table-striped">
-      <thead>
-        <tr>
-          <th>Folio</th>
-          <th>Activo</th>
-          <th>Tipo</th>
-          <th>Prioridad</th>
-          <th>Programada</th>
-          <th>Estatus</th>
-          <th>Costo</th>
-          <th>Estado ERP</th>
-          <th>Siguiente acción</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in ordenes_rows %}
-          {% with o=row.orden enterprise=row.enterprise %}
-          <tr>
-            <td>{{ o.folio }}</td>
-            <td>{{ o.activo_ref.nombre }}</td>
-            <td>{{ o.get_tipo_display }}</td>
-            <td>{{ o.get_prioridad_display }}</td>
-            <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>
-            <td><span class="badge badge-primary">{{ o.estatus }}</span></td>
-            <td>${{ o.costo_total|floatformat:2|intcomma }}</td>
-            <td><span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span></td>
-            <td>{{ enterprise.next_action }}</td>
-            <td>
-              {% if can_manage_activos %}
-                <div class="quick-actions pd-u-d45c7097fc">
-                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'EN_PROCESO' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-secondary" type="submit">En proceso</button>
-                  </form>
-                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'CERRADA' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-primary" type="submit">Cerrar</button>
-                  </form>
-                  <form method="post" action="{% url 'activos:orden_estatus' o.id 'CANCELADA' %}">
-                    {% csrf_token %}
-                    <button class="btn btn-danger" type="submit">Cancelar</button>
-                  </form>
-                </div>
-              {% else %}
-                -
-              {% endif %}
-            </td>
-          </tr>
-          {% endwith %}
-        {% empty %}
-          <tr>
-            <td colspan="10" class="text-muted">Sin órdenes para el filtro actual.</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
+{% include "activos/_ordenes_registradas.html" %}
 
 {% if can_manage_activos %}
 <details class="card" id="nueva-orden">
@@ -260,4 +158,39 @@
 </details>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  var panel = document.getElementById('ordenes-registradas');
+  if (!panel) return;
+  var pendiente = null;
+  document.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!form.matches('#ordenes-registradas form[data-async-action]')) return;
+    panel = form.closest('#ordenes-registradas');
+    pendiente = {
+      panel: panel, rowId: form.closest('tr').id, action: form.getAttribute('action'),
+      left: panel.querySelector('.table-responsive').scrollLeft,
+      detailsOpen: panel.querySelector('details').open,
+      x: window.scrollX, y: window.scrollY,
+    };
+  }, true);
+  new MutationObserver(function () {
+    if (!pendiente || pendiente.panel.isConnected) return;
+    panel = document.getElementById('ordenes-registradas');
+    var row = document.getElementById(pendiente.rowId);
+    var target = row && (Array.from(row.querySelectorAll('form')).find(function (form) {
+      return form.getAttribute('action') === pendiente.action;
+    }) || row.querySelector('form'));
+    target = target ? target.querySelector('button') : document.getElementById('ordenes-encabezado');
+    panel.querySelector('details').open = pendiente.detailsOpen;
+    panel.querySelector('.table-responsive').scrollLeft = pendiente.left;
+    if (target) target.focus({preventScroll: true});
+    window.scrollTo(pendiente.x, pendiente.y);
+    pendiente = null;
+  }).observe(panel.parentNode, {childList: true});
+})();
+</script>
 {% endblock %}

@@ -21,6 +21,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from activos.services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from control.models import MermaPOS, VentaPOS
 from control.services import build_discrepancias_report, resolve_period_range
 from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
@@ -541,67 +542,18 @@ class ActivosOrdenStatusUpdateView(APIView):
         ser = ActivosOrdenStatusSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         estatus_new = ser.validated_data["estatus"]
-        estatus_prev = orden.estatus
-        if estatus_prev == estatus_new:
+        try:
+            orden, estatus_prev, updated = cambiar_estatus_orden(
+                orden.id, estatus_new, request.user, source="api",
+            )
+        except TransicionOrdenInvalida as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not updated:
             return Response(
-                {
-                    "id": orden.id,
-                    "folio": orden.folio,
-                    "from": estatus_prev,
-                    "to": estatus_new,
-                    "updated": False,
-                },
+                {"id": orden.id, "folio": orden.folio, "from": estatus_prev,
+                 "to": estatus_new, "updated": False},
                 status=status.HTTP_200_OK,
             )
-
-        allowed_transitions = {
-            OrdenMantenimiento.ESTATUS_PENDIENTE: {
-                OrdenMantenimiento.ESTATUS_EN_PROCESO,
-                OrdenMantenimiento.ESTATUS_CERRADA,
-                OrdenMantenimiento.ESTATUS_CANCELADA,
-            },
-            OrdenMantenimiento.ESTATUS_EN_PROCESO: {
-                OrdenMantenimiento.ESTATUS_CERRADA,
-                OrdenMantenimiento.ESTATUS_CANCELADA,
-            },
-            OrdenMantenimiento.ESTATUS_CERRADA: set(),
-            OrdenMantenimiento.ESTATUS_CANCELADA: set(),
-        }
-        if estatus_new not in allowed_transitions.get(estatus_prev, set()):
-            return Response(
-                {"detail": f"Transición inválida: {estatus_prev} -> {estatus_new}."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        today = timezone.localdate()
-        orden.estatus = estatus_new
-        update_fields = ["estatus", "actualizado_en"]
-        if estatus_new == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
-            orden.fecha_inicio = today
-            update_fields.append("fecha_inicio")
-        if estatus_new == OrdenMantenimiento.ESTATUS_CERRADA:
-            orden.fecha_cierre = today
-            update_fields.append("fecha_cierre")
-            if orden.plan_ref_id:
-                plan = orden.plan_ref
-                plan.ultima_ejecucion = today
-                plan.recompute_next_date()
-                plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
-        orden.save(update_fields=update_fields)
-
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="ESTATUS",
-            comentario=f"{estatus_prev} -> {estatus_new}",
-            usuario=request.user,
-        )
-        log_event(
-            request.user,
-            "UPDATE",
-            "activos.OrdenMantenimiento",
-            orden.id,
-            {"from": estatus_prev, "to": estatus_new, "folio": orden.folio, "source": "api"},
-        )
 
         return Response(
             {
