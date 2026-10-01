@@ -13,7 +13,7 @@ from pos_bridge.services.production_entry_extractor import PointProductionEntryE
 
 class PointProductionEntryExtractorTests(SimpleTestCase):
     @patch("pos_bridge.services.production_entry_extractor.write_json_file")
-    def test_retries_transient_point_error_in_production_detail(self, _write_json_file):
+    def test_retries_transient_empty_list_and_production_detail_error(self, _write_json_file):
         production = {
             "FK_Produccion": 23220,
             "Sucursal": "CEDIS",
@@ -31,6 +31,7 @@ class PointProductionEntryExtractorTests(SimpleTestCase):
             "IsInsumo": False,
         }
         responses = [
+            Mock(text=json.dumps([]), raise_for_status=Mock()),
             Mock(text=json.dumps([production]), raise_for_status=Mock()),
             Mock(
                 text=json.dumps(
@@ -63,4 +64,4 @@ class PointProductionEntryExtractorTests(SimpleTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].production_external_id, "23220")
         self.assertEqual(rows[0].detail_external_id, "88012")
-        self.assertEqual(session.get.call_count, 3)
+        self.assertEqual(session.get.call_count, 4)
