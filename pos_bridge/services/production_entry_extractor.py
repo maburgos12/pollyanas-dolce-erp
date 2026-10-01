@@ -91,13 +91,27 @@ class PointProductionEntryExtractor:
             production_id = str(production.get("FK_Produccion") or "").strip()
             if not production_id:
                 continue
-            detail_response = auth_session.session.get(
-                urljoin(self.settings.base_url.rstrip("/") + "/", self.DETAIL_PATH.lstrip("/")),
-                params={"pkLista": production_id},
-                timeout=self.settings.timeout_ms / 1000,
-            )
-            detail_response.raise_for_status()
-            details = json.loads(detail_response.text)
+            details = None
+            for _attempt in range(max(1, self.settings.retry_attempts)):
+                detail_response = auth_session.session.get(
+                    urljoin(self.settings.base_url.rstrip("/") + "/", self.DETAIL_PATH.lstrip("/")),
+                    params={"pkLista": production_id},
+                    timeout=self.settings.timeout_ms / 1000,
+                )
+                detail_response.raise_for_status()
+                try:
+                    candidate_details = json.loads(detail_response.text)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(candidate_details, list) and all(
+                    isinstance(detail, dict) for detail in candidate_details
+                ):
+                    details = candidate_details
+                    break
+            if details is None:
+                raise ExtractionError(
+                    f"Point devolvió detalles inválidos para la producción {production_id}."
+                )
             raw_export["productions"].append({"production": production, "details": details})
             production_date = datetime.fromisoformat(str(production.get("Fecha")).replace("Z", "+00:00")).date()
             branch_label = str(production.get("Sucursal") or "").strip()
