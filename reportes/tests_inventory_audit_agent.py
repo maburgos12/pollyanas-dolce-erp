@@ -307,7 +307,14 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             discrepant.branch.external_id,
             movements=500,
         )
-        materializer_class.return_value.rebuild.assert_called_once_with(self.month)
+        reconcile = (
+            materializer_class.return_value.reconcile_existing_cases_from_point_history
+        )
+        reconcile.assert_called_once_with(
+            self.month,
+            case_ids=[discrepant.id],
+        )
+        materializer_class.return_value.rebuild.assert_not_called()
         self.assertIn("historiales=1", output.getvalue())
 
     @patch(
