@@ -289,6 +289,43 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
             ProductInventoryAuditCase.MovementStatus.BALANCED,
         )
 
+    @patch(
+        "reportes.services_inventory_traceability._POINT_HISTORY_BATCH_SIZE",
+        1,
+    )
+    @patch(
+        "reportes.services_inventory_traceability."
+        "AuditStockHistoryService.reconcile_many",
+        return_value={},
+    )
+    def test_existing_cases_load_cached_histories_in_bounded_batches(
+        self, reconcile_many
+    ):
+        second_branch = PointBranch.objects.create(
+            external_id="SUCURSAL-2",
+            name="Sucursal 2",
+        )
+        second_product = PointProduct.objects.create(
+            external_id="PASTEL-002",
+            sku="PASTEL-002",
+            name="Segundo pastel",
+        )
+        second_line = replace(
+            self._line(),
+            branch=second_branch,
+            product=second_product,
+        )
+        self._materializer(self._result(self._line(), second_line)).rebuild(MONTH)
+        reconcile_many.reset_mock()
+
+        counts = InventoryAuditMaterializer().reconcile_existing_cases_from_point_history(
+            MONTH
+        )
+
+        self.assertEqual(counts, {"selected": 2, "reconciled": 0, "pending": 2})
+        self.assertEqual(reconcile_many.call_count, 2)
+        self.assertTrue(all(len(call.args[0]) == 1 for call in reconcile_many.call_args_list))
+
     def test_unknown_point_history_movement_does_not_replace_aggregate_balance(self):
         line = self._line(closing=Decimal("11"))
 
