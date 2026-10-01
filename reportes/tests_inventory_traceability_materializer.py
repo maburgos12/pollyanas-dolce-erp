@@ -142,6 +142,38 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_identity_provenance_does_not_make_balanced_stock_an_exception(self):
+        issues = tuple(
+            TraceSourceIssue(code=code, message="Identidad resuelta")
+            for code in ("PRODUCT_RESOLVED_BY_SKU", "PRODUCT_RESOLVED_BY_NAME")
+        )
+        with self.captureOnCommitCallbacks(execute=True):
+            self._materializer(self._result(self._line(closing=Decimal("10"), issues=issues))).rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(case.movement_status, ProductInventoryAuditCase.MovementStatus.BALANCED)
+        self.assertEqual(set(case.issue_codes), {issue.code for issue in issues})
+        self.assertIsNotNone(case.investigated_at)
+        self.assertEqual(case.attention_level, ProductInventoryAuditCase.AttentionLevel.GROUPED)
+
+    def test_real_trace_issue_remains_pending_when_stock_balances(self):
+        issue = TraceSourceIssue(code="TRANSFER_QUANTITY_MISMATCH", message="Recepción pendiente")
+        self._materializer(self._result(self._line(closing=Decimal("10"), issues=(issue,)))).rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(case.movement_status, ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION)
+
+    def test_rebuild_corrects_stale_classification_without_duplicate_case(self):
+        materializer = self._materializer(self._result(self._line(closing=Decimal("10"))))
+        materializer.rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+        case.movement_status = ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION
+        case.save(update_fields=["movement_status", "updated_at"])
+        counts = materializer.rebuild(MONTH)
+        case.refresh_from_db()
+        self.assertEqual(case.movement_status, ProductInventoryAuditCase.MovementStatus.BALANCED)
+        self.assertEqual(counts["updated"], 1)
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertEqual(materializer.rebuild(MONTH)["unchanged"], 1)
+
     def test_complete_point_history_closes_missing_conversion_output(self):
         line = replace(
             self._line(closing=Decimal("6")),
