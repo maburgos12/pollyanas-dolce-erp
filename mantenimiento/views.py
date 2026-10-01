@@ -23,6 +23,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
+from activos.services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from mantenimiento.models import SolicitudCancelacion, ProveedorServicio
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mantenimiento.services_access import (
@@ -1475,27 +1476,27 @@ def actualizar_item(request, tipo, pk):
 
     if tipo == "orden":
         orden = get_object_or_404(authorized_orders(request.user), pk=pk)
-        estatus = (request.data.get("estatus") or orden.estatus).strip().upper()
-        if estatus not in {value for value, _label in OrdenMantenimiento.ESTATUS_CHOICES}:
+        estatus = (request.data.get("estatus") or "").strip().upper() or None
+        if estatus and estatus not in {value for value, _label in OrdenMantenimiento.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
-        orden.estatus = estatus
-        if estatus == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
-            orden.fecha_inicio = timezone.localdate()
-        if estatus == OrdenMantenimiento.ESTATUS_CERRADA and not orden.fecha_cierre:
-            orden.fecha_cierre = timezone.localdate()
+        try:
+            orden, _, _, bitacora = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
+        except TransicionOrdenInvalida as exc:
+            return Response({"error": str(exc)}, status=400)
+        if not proveedor and costo_real is None and not comentario:
+            return _update_response(request, _branch_order_item(orden))
         if proveedor:
             _ensure_provider(proveedor)
             orden.responsable = proveedor
         if costo_real is not None:
             orden.costo_otros = costo_real
-        orden.save()
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            usuario=request.user,
-            accion="Seguimiento desde Mantenimiento",
-            comentario=comentario or "Orden actualizada desde bandeja de mantenimiento.",
-            costo_adicional=costo_real or Decimal("0"),
-        )
+        orden.save(update_fields=["responsable", "costo_otros", "actualizado_en"])
+        bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+        transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+        bitacora.accion = "Seguimiento desde Mantenimiento"
+        bitacora.comentario = transicion + (comentario or "Orden actualizada desde bandeja de mantenimiento.")
+        bitacora.costo_adicional = costo_real or Decimal("0")
+        bitacora.save()
         return _update_response(request, _branch_order_item(orden))
 
     return Response({"error": "Tipo no válido."}, status=400)

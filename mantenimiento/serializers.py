@@ -7,10 +7,11 @@ existentes de activos y logística.
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
-from django.utils import timezone
+from django.db import transaction
 from rest_framework import serializers
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
+from activos.services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 
 
@@ -294,6 +295,7 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
             raise serializers.ValidationError("No hay cambios para guardar.")
         return attrs
 
+    @transaction.atomic
     def save(self, **kwargs):
         orden = self.context["orden"]
         request = self.context["request"]
@@ -304,15 +306,18 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
         comentario = self.validated_data.get("comentario", "").strip()
         costo_adicional = self.validated_data.get("costo_adicional")
 
-        if estatus and estatus != orden.estatus:
-            orden.estatus = estatus
+        try:
+            orden, _, updated, bitacora = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
+        except TransicionOrdenInvalida as exc:
+            raise serializers.ValidationError({"estatus": str(exc)}) from exc
+        if updated:
             cambios.append(f"Estatus: {orden.get_estatus_display()}")
-            today = timezone.localdate()
-            if estatus == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
-                orden.fecha_inicio = today
-            if estatus == OrdenMantenimiento.ESTATUS_CERRADA and not orden.fecha_cierre:
-                orden.fecha_cierre = today
-                orden.ejecutado_por = request.user
+        if updated and estatus == OrdenMantenimiento.ESTATUS_CERRADA:
+            orden.ejecutado_por = request.user
+        if not any(key != "estatus" for key in self.validated_data):
+            if updated and estatus == OrdenMantenimiento.ESTATUS_CERRADA:
+                orden.save(update_fields=["ejecutado_por", "actualizado_en"])
+            return orden
 
         if responsable is not None and responsable.strip() != orden.responsable:
             orden.responsable = responsable.strip()
@@ -338,13 +343,12 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
         bitacora_texto = comentario
         if cambios:
             bitacora_texto = " | ".join(cambios + ([comentario] if comentario else []))
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            usuario=request.user,
-            accion=accion,
-            comentario=bitacora_texto,
-            costo_adicional=costo_adicional or Decimal("0"),
-        )
+        bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+        transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+        bitacora.accion = accion
+        bitacora.comentario = transicion + bitacora_texto
+        bitacora.costo_adicional = costo_adicional or Decimal("0")
+        bitacora.save()
         return orden
 
 

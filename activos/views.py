@@ -1,7 +1,9 @@
 import csv
+from copy import copy
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -9,10 +11,11 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.db.models.functions import Lower
-from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse, QueryDict
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
+from django.template.response import TemplateResponse
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
@@ -29,6 +32,7 @@ from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
 
+from .services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from .services_pasaporte import activos_autorizados, svg_qr_activo
 
 from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
@@ -2636,49 +2640,51 @@ def ordenes(request):
             if not orden_id:
                 messages.error(request, "Selecciona una orden válida.")
                 return redirect("activos:ordenes")
-            orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
-            orden.costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
-            orden.costo_mano_obra = _safe_decimal(request.POST.get("costo_mano_obra"))
-            orden.costo_otros = _safe_decimal(request.POST.get("costo_otros"))
-            close_now = (request.POST.get("cerrar_orden") or "").strip().lower() in {"1", "on", "true", "yes"}
-            if close_now and orden.estatus != OrdenMantenimiento.ESTATUS_CERRADA:
-                orden.estatus = OrdenMantenimiento.ESTATUS_CERRADA
-                if not orden.fecha_inicio:
-                    orden.fecha_inicio = timezone.localdate()
-                orden.fecha_cierre = timezone.localdate()
-            orden.save(
-                update_fields=[
-                    "costo_repuestos",
-                    "costo_mano_obra",
-                    "costo_otros",
-                    "estatus",
-                    "fecha_inicio",
-                    "fecha_cierre",
-                    "actualizado_en",
-                ]
-            )
-            BitacoraMantenimiento.objects.create(
-                orden=orden,
-                accion="COSTOS",
-                comentario=(
-                    f"Costos actualizados: repuestos={orden.costo_repuestos}, "
-                    f"mano_obra={orden.costo_mano_obra}, otros={orden.costo_otros}"
-                ),
-                usuario=request.user,
-            )
-            log_event(
-                request.user,
-                "UPDATE",
-                "activos.OrdenMantenimiento",
-                orden.id,
-                {
-                    "folio": orden.folio,
-                    "costo_repuestos": str(orden.costo_repuestos),
-                    "costo_mano_obra": str(orden.costo_mano_obra),
-                    "costo_otros": str(orden.costo_otros),
-                    "estatus": orden.estatus,
-                },
-            )
+            try:
+                with transaction.atomic():
+                    orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
+                    close_now = (request.POST.get("cerrar_orden") or "").strip().lower() in {"1", "on", "true", "yes"}
+                    orden, _, updated, bitacora = cambiar_estatus_orden(
+                        orden.id, OrdenMantenimiento.ESTATUS_CERRADA if close_now else None, request.user,
+                    )
+                    orden.costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
+                    orden.costo_mano_obra = _safe_decimal(request.POST.get("costo_mano_obra"))
+                    orden.costo_otros = _safe_decimal(request.POST.get("costo_otros"))
+                    if close_now and updated and not orden.fecha_inicio:
+                        orden.fecha_inicio = timezone.localdate()
+                    orden.save(
+                        update_fields=[
+                            "costo_repuestos",
+                            "costo_mano_obra",
+                            "costo_otros",
+                            "fecha_inicio",
+                            "actualizado_en",
+                        ]
+                    )
+                    bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+                    transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+                    bitacora.accion = "COSTOS"
+                    bitacora.comentario = transicion + (
+                        f"Costos actualizados: repuestos={orden.costo_repuestos}, "
+                        f"mano_obra={orden.costo_mano_obra}, otros={orden.costo_otros}"
+                    )
+                    bitacora.save()
+                    log_event(
+                        request.user,
+                        "UPDATE",
+                        "activos.OrdenMantenimiento",
+                        orden.id,
+                        {
+                            "folio": orden.folio,
+                            "costo_repuestos": str(orden.costo_repuestos),
+                            "costo_mano_obra": str(orden.costo_mano_obra),
+                            "costo_otros": str(orden.costo_otros),
+                            "estatus": orden.estatus,
+                        },
+                    )
+            except TransicionOrdenInvalida as exc:
+                messages.error(request, str(exc))
+                return redirect("activos:ordenes")
             messages.success(request, f"Orden {orden.folio} actualizada (costos).")
             return redirect("activos:ordenes")
 
@@ -2924,7 +2930,41 @@ def ordenes(request):
         context["document_stage_rows"],
         context["enterprise_chain"],
     )
-    return render(request, "activos/ordenes.html", context)
+    return TemplateResponse(request, "activos/ordenes.html", context)
+
+
+def _respuesta_estatus_orden(request, *, orden=None, error="", updated=False):
+    query = request.POST.get("return_query", "")
+    filtros = QueryDict(query)
+    filtros = {key: filtros[key] for key in ("estatus", "enterprise_gap") if key in filtros}
+    destino = reverse("activos:ordenes")
+    if filtros:
+        destino += "?" + urlencode(filtros)
+    mensaje = error or (
+        f"Orden {orden.folio} actualizada a {orden.estatus}." if updated
+        else f"Orden {orden.folio} ya está en {orden.estatus}."
+    )
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        payload = {"ok": not error, "toast": {
+            "type": "error" if error else "success" if updated else "info",
+            "message": mensaje, "persistent": bool(error),
+        }}
+        if not error:
+            lectura = copy(request)
+            lectura.method = "GET"
+            lectura.GET = QueryDict(urlencode(filtros))
+            context = ordenes(lectura).context_data
+            payload.update(target="#ordenes-registradas", html=render_to_string(
+                "activos/_ordenes_registradas.html", context, request=lectura,
+            ), updated=updated)
+        return JsonResponse(payload, status=400 if error else 200)
+    if error:
+        messages.error(request, mensaje)
+    elif updated:
+        messages.success(request, mensaje)
+    else:
+        messages.info(request, mensaje)
+    return redirect(destino + "#ordenes-registradas")
 
 
 @login_required
@@ -2933,43 +2973,15 @@ def actualizar_orden_estatus(request, pk: int, estatus: str):
         return redirect("activos:ordenes")
     if not can_manage_inventario(request.user):
         raise PermissionDenied("No tienes permisos para gestionar órdenes de mantenimiento.")
-
     estatus = (estatus or "").strip().upper()
     if estatus not in {x[0] for x in OrdenMantenimiento.ESTATUS_CHOICES}:
-        messages.error(request, "Estatus inválido.")
-        return redirect("activos:ordenes")
-
-    orden = get_object_or_404(OrdenMantenimiento, pk=pk)
-    from_status = orden.estatus
-    if from_status == estatus:
-        return redirect("activos:ordenes")
-    orden.estatus = estatus
-    today = timezone.localdate()
-    if estatus == OrdenMantenimiento.ESTATUS_EN_PROCESO and not orden.fecha_inicio:
-        orden.fecha_inicio = today
-    if estatus == OrdenMantenimiento.ESTATUS_CERRADA:
-        orden.fecha_cierre = today
-        if orden.plan_ref_id:
-            plan = orden.plan_ref
-            plan.ultima_ejecucion = today
-            plan.recompute_next_date()
-            plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
-    orden.save(update_fields=["estatus", "fecha_inicio", "fecha_cierre", "actualizado_en"])
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        accion="ESTATUS",
-        comentario=f"{from_status} -> {estatus}",
-        usuario=request.user,
-    )
-    log_event(
-        request.user,
-        "UPDATE",
-        "activos.OrdenMantenimiento",
-        orden.id,
-        {"from": from_status, "to": estatus, "folio": orden.folio},
-    )
-    messages.success(request, f"Orden {orden.folio} actualizada a {estatus}.")
-    return redirect("activos:ordenes")
+        return _respuesta_estatus_orden(request, error="Estatus inválido.")
+    get_object_or_404(OrdenMantenimiento, pk=pk)
+    try:
+        orden, _, updated, _ = cambiar_estatus_orden(pk, estatus, request.user)
+    except TransicionOrdenInvalida as exc:
+        return _respuesta_estatus_orden(request, error=str(exc))
+    return _respuesta_estatus_orden(request, orden=orden, updated=updated)
 
 
 @login_required
