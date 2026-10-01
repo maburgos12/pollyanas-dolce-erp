@@ -27,6 +27,7 @@ body.etiquetas {
 
 /* --- Etiqueta carta: se conserva su formato original --- */
 .label {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 3mm;
@@ -44,6 +45,19 @@ body.etiquetas {
 }
 
 .label p { margin: 0; }
+
+.label-marca,
+.label-grupo {
+  position: absolute;
+  left: 2.5mm;
+  right: 2.5mm;
+  text-align: center;
+  font-size: 7pt;
+  line-height: 1.15;
+}
+
+.label-marca { top: 1mm; font-weight: 700; }
+.label-grupo { bottom: 1mm; }
 
 .label-codigo {
   font-size: 9pt;
@@ -121,7 +135,7 @@ body.etiquetas {
 .etiquetas-termica .label {
   width: 80mm;
   height: 40mm;
-  padding: 2.5mm;
+  padding: 5mm 2.5mm;
   gap: 2mm;
 }
 
