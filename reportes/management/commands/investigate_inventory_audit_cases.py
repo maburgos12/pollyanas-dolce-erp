@@ -86,11 +86,14 @@ class Command(BaseCommand):
                             f"caso={case.id} historial_no_disponible={exc}"
                         )
 
-        counts = InventoryAuditMaterializer().rebuild(month)
+        counts = InventoryAuditMaterializer().reconcile_existing_cases_from_point_history(
+            month,
+            case_ids=[case.id for case in cases],
+        )
         self.stdout.write(
             f"POINT · {month:%Y-%m} · historiales={captured} · errores={errors}"
         )
         self.stdout.write(
-            "RECONSTRUIDO · "
+            "CONCILIADO · "
             + " · ".join(f"{key}={value}" for key, value in counts.items())
         )

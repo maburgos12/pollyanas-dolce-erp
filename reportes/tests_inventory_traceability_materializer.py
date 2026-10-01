@@ -206,6 +206,89 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
             [5],
         )
 
+    def test_cached_point_history_reconciles_existing_case_without_month_rebuild(self):
+        line = replace(
+            self._line(closing=Decimal("6")),
+            opening=Decimal("23"),
+            production=Decimal("518"),
+            sales=ZERO,
+            transfer_in=Decimal("2"),
+            transfer_out=Decimal("529"),
+            conversion_in=Decimal("2"),
+            conversion_out=ZERO,
+            expected_closing=Decimal("16"),
+            point_closing=Decimal("6"),
+            difference=Decimal("-10"),
+            issues=(
+                TraceSourceIssue(
+                    code="TRANSFER_QUANTITY_MISMATCH",
+                    message="El agregado no coincide.",
+                ),
+            ),
+        )
+        self._materializer(self._result(line)).rebuild(MONTH)
+        case = ProductInventoryAuditCase.objects.get()
+
+        class Client:
+            @staticmethod
+            def get_stock_history(product_id, branch_id, *, movements=500):
+                movements = (
+                    (1, "ENTRADA POR PRODUCCIÓN", 518, 23, 541),
+                    (2, "ENTRADA POR CONVERSIÓN", 2, 541, 543),
+                    (3, "AJUSTE ENTRADA INVENTARIO", 4, 543, 547),
+                    (4, "RETORNO POR TRANSFERENCIA", 2, 547, 549),
+                    (5, "SALIDA POR CONVERSIÓN", 10, 549, 539),
+                    (6, "SALIDA POR TRANSFERENCIA", 533, 539, 6),
+                )
+                return [
+                    {
+                        "FK_Movimiento": movement_id,
+                        "Movimiento": movement,
+                        "Fecha": f"2026-08-{movement_id + 1:02d}T10:00:00-07:00",
+                        "Cantidad": quantity,
+                        "Existencia_anterior": previous,
+                        "Existencia_nueva": new,
+                        "Cancelado": False,
+                    }
+                    for movement_id, movement, quantity, previous, new in movements
+                ]
+
+        AuditStockHistoryService(client=Client()).capture(
+            self.branch,
+            self.product,
+            MONTH,
+        )
+        incomplete = MutableTraceabilityService(
+            self._result(
+                source_complete=False,
+                global_issues=(
+                    TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta fuente"),
+                ),
+            )
+        )
+
+        counts = InventoryAuditMaterializer(
+            traceability_service=incomplete
+        ).reconcile_existing_cases_from_point_history(MONTH, case_ids=[case.id])
+
+        case.refresh_from_db()
+        self.assertEqual(incomplete.months, [])
+        self.assertEqual(counts, {"selected": 1, "reconciled": 1, "pending": 0})
+        self.assertEqual(case.conversion_out, Decimal("10"))
+        self.assertEqual(case.transfer_out, Decimal("533"))
+        self.assertEqual(case.identified_adjustment, Decimal("4"))
+        self.assertEqual(case.expected_closing, Decimal("6"))
+        self.assertEqual(case.difference, ZERO)
+        self.assertEqual(case.issue_codes, [])
+        self.assertEqual(
+            case.source_trace["point_history"]["superseded_issue_codes"],
+            ["TRANSFER_QUANTITY_MISMATCH"],
+        )
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.BALANCED,
+        )
+
     def test_unknown_point_history_movement_does_not_replace_aggregate_balance(self):
         line = self._line(closing=Decimal("11"))
 
