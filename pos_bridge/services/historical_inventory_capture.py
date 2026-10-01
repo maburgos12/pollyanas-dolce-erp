@@ -162,17 +162,52 @@ class HistoricalPointInventoryClosingCapture:
                 f"sucursales={invalid_branches}, productos={invalid_products}."
             )
 
+        expected_branch_ids = [branch.id for branch in branches]
+        expected_product_ids = [product.id for product in products]
+        resume_closing = next(
+            (
+                closing
+                for closing in PointHistoricalInventoryClosing.objects.filter(
+                    operational_date=operational_date,
+                    status=PointHistoricalInventoryClosing.STATUS_DRAFT,
+                )
+                .prefetch_related("lines__branch", "lines__product")
+                .order_by("-id")
+                if set(closing.expected_branch_ids) == set(expected_branch_ids)
+                and set(closing.expected_product_ids) == set(expected_product_ids)
+            ),
+            None,
+        )
+        resolved = [
+            {
+                "branch": line.branch,
+                "product": line.product,
+                "stock": line.stock,
+                "evidence": line.evidence,
+            }
+            for line in (resume_closing.lines.all() if resume_closing else ())
+        ]
+        existing_keys = {
+            (row["branch"].id, row["product"].id) for row in resolved
+        }
+
         self.client.login()
-        resolved = []
         unresolved = []
         for product in products:
+            pending_branches = [
+                branch
+                for branch in branches
+                if (branch.id, product.id) not in existing_keys
+            ]
+            if not pending_branches:
+                continue
             try:
                 current_rows = self._call_point(
                     lambda: self.client.get_product_stock(product.external_id)
                 )
                 current = self._current_stock_by_branch(current_rows)
             except Exception as exc:
-                for branch in branches:
+                for branch in pending_branches:
                     unresolved.append({
                         "branch_id": branch.id,
                         "branch_external_id": branch.external_id,
@@ -181,7 +216,7 @@ class HistoricalPointInventoryClosingCapture:
                         "reason": str(exc),
                     })
                 continue
-            for branch in branches:
+            for branch in pending_branches:
                 try:
                     history = self._call_point(
                         lambda: self.client.get_stock_history(
@@ -242,18 +277,41 @@ class HistoricalPointInventoryClosingCapture:
 
         with transaction.atomic():
             lock_product_month_sources([operational_date])
-            closing, created = PointHistoricalInventoryClosing.objects.get_or_create(
-                operational_date=operational_date,
-                source_fingerprint=fingerprint,
-                defaults={
-                    "status": status,
-                    "source": PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
-                    "expected_branch_ids": [branch.id for branch in branches],
-                    "expected_product_ids": [product.id for product in products],
-                    "metadata": metadata,
-                    "retrieved_at": timezone.now(),
-                },
-            )
+            if resume_closing is not None:
+                closing = PointHistoricalInventoryClosing.objects.select_for_update().get(
+                    pk=resume_closing.pk
+                )
+                created = False
+                closing.status = status
+                closing.source_fingerprint = fingerprint
+                closing.expected_branch_ids = expected_branch_ids
+                closing.expected_product_ids = expected_product_ids
+                closing.metadata = metadata
+                closing.retrieved_at = timezone.now()
+                closing.save(
+                    update_fields=[
+                        "status",
+                        "source_fingerprint",
+                        "expected_branch_ids",
+                        "expected_product_ids",
+                        "metadata",
+                        "retrieved_at",
+                        "updated_at",
+                    ]
+                )
+            else:
+                closing, created = PointHistoricalInventoryClosing.objects.get_or_create(
+                    operational_date=operational_date,
+                    source_fingerprint=fingerprint,
+                    defaults={
+                        "status": status,
+                        "source": PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+                        "expected_branch_ids": expected_branch_ids,
+                        "expected_product_ids": expected_product_ids,
+                        "metadata": metadata,
+                        "retrieved_at": timezone.now(),
+                    },
+                )
             if created:
                 PointHistoricalInventoryClosingLine.objects.bulk_create([
                     PointHistoricalInventoryClosingLine(
@@ -264,6 +322,18 @@ class HistoricalPointInventoryClosingCapture:
                         evidence=row["evidence"],
                     )
                     for row in resolved
+                ])
+            elif resume_closing is not None:
+                PointHistoricalInventoryClosingLine.objects.bulk_create([
+                    PointHistoricalInventoryClosingLine(
+                        closing=closing,
+                        branch=row["branch"],
+                        product=row["product"],
+                        stock=row["stock"],
+                        evidence=row["evidence"],
+                    )
+                    for row in resolved
+                    if (row["branch"].id, row["product"].id) not in existing_keys
                 ])
         return HistoricalInventoryCaptureResult(
             closing=closing,
