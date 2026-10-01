@@ -109,7 +109,15 @@ def _parada_puede_quitarse(parada: ParadaRuta) -> tuple[bool, str]:
         return False, "No se puede quitar una parada que ya tiene visita o entrega registrada."
     if parada.evidencias_entrega.exists():
         return False, "No se puede quitar una parada que ya tiene evidencia registrada."
-    lineas = parada.lineas_carga.all()
+    # Point rellena el cero automáticamente; no es una validación humana.
+    lineas = parada.lineas_carga.exclude(
+        estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        cantidad_enviada_esperada=0,
+        cantidad_cargada=0,
+        validado_en__isnull=True,
+        validado_por__isnull=True,
+        client_event_id="",
+    )
     if lineas.exclude(
         estatus__in=[RutaCargaChecklistLinea.ESTATUS_PENDIENTE, RutaCargaChecklistLinea.ESTATUS_SUPERADA]
     ).exists():
@@ -2767,7 +2775,12 @@ def ruta_detail(request, pk: int):
                     puede_quitarse, motivo = _parada_puede_quitarse(parada)
                     if not puede_quitarse:
                         raise ValidationError(motivo)
-                    parada.lineas_carga.filter(estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE).delete()
+                    parada.lineas_carga.filter(
+                        estatus__in=[
+                            RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+                            RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+                        ]
+                    ).delete()
                     parada.delete()
                     for index, item in enumerate(
                         (item for item in paradas_bloqueadas if item.id != parada_id_log and item.orden > orden_eliminado),
