@@ -22,6 +22,7 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     BranchProductBalance,
     TraceSourceIssue,
 )
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from reportes.models import (
     ProductInventoryAuditCase,
@@ -141,6 +142,101 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_complete_point_history_closes_missing_conversion_output(self):
+        line = replace(
+            self._line(closing=Decimal("6")),
+            opening=Decimal("23"),
+            production=Decimal("518"),
+            sales=ZERO,
+            transfer_in=Decimal("2"),
+            transfer_out=Decimal("529"),
+            conversion_in=Decimal("2"),
+            conversion_out=ZERO,
+            expected_closing=Decimal("16"),
+            point_closing=Decimal("6"),
+            difference=Decimal("-10"),
+        )
+
+        class Client:
+            @staticmethod
+            def get_stock_history(product_id, branch_id, *, movements=500):
+                movements = (
+                    (1, "ENTRADA POR PRODUCCIÓN", 518, 23, 541),
+                    (2, "ENTRADA POR CONVERSIÓN", 2, 541, 543),
+                    (3, "AJUSTE ENTRADA INVENTARIO", 4, 543, 547),
+                    (4, "RETORNO POR TRANSFERENCIA", 2, 547, 549),
+                    (5, "SALIDA POR CONVERSIÓN", -10, 549, 539),
+                    (6, "SALIDA POR TRANSFERENCIA", -533, 539, 6),
+                )
+                return [
+                    {
+                        "FK_Movimiento": movement_id,
+                        "Movimiento": movement,
+                        "Fecha": f"2026-08-{movement_id + 1:02d}T10:00:00-07:00",
+                        "Cantidad": quantity,
+                        "Existencia_anterior": previous,
+                        "Existencia_nueva": new,
+                        "Cancelado": False,
+                    }
+                    for movement_id, movement, quantity, previous, new in movements
+                ]
+
+        AuditStockHistoryService(client=Client()).capture(
+            self.branch,
+            self.product,
+            MONTH,
+        )
+
+        self._materializer(self._result(line)).rebuild(MONTH)
+
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(case.conversion_out, Decimal("10"))
+        self.assertEqual(case.transfer_out, Decimal("533"))
+        self.assertEqual(case.identified_adjustment, Decimal("4"))
+        self.assertEqual(case.expected_closing, Decimal("6"))
+        self.assertEqual(case.point_closing, Decimal("6"))
+        self.assertEqual(case.difference, ZERO)
+        self.assertEqual(
+            case.movement_status,
+            ProductInventoryAuditCase.MovementStatus.BALANCED,
+        )
+        self.assertEqual(
+            case.source_trace["point_history"]["movement_ids_by_category"]
+            ["conversion_out"],
+            [5],
+        )
+
+    def test_unknown_point_history_movement_does_not_replace_aggregate_balance(self):
+        line = self._line(closing=Decimal("11"))
+
+        class Client:
+            @staticmethod
+            def get_stock_history(product_id, branch_id, *, movements=500):
+                return [
+                    {
+                        "FK_Movimiento": 99,
+                        "Movimiento": "MOVIMIENTO ESPECIAL",
+                        "Fecha": "2026-08-10T10:00:00-07:00",
+                        "Cantidad": 1,
+                        "Existencia_anterior": 10,
+                        "Existencia_nueva": 11,
+                        "Cancelado": False,
+                    }
+                ]
+
+        AuditStockHistoryService(client=Client()).capture(
+            self.branch,
+            self.product,
+            MONTH,
+        )
+
+        self._materializer(self._result(line)).rebuild(MONTH)
+
+        case = ProductInventoryAuditCase.objects.get()
+        self.assertEqual(case.expected_closing, Decimal("10"))
+        self.assertEqual(case.difference, Decimal("1"))
+        self.assertNotIn("point_history", case.source_trace)
+
     @patch("reportes.services_inventory_traceability.transaction.on_commit")
     def test_complete_rebuild_schedules_agent_after_commit(self, on_commit):
         self._materializer(self._result(self._line())).rebuild(MONTH)

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% load static humanize %}
 
-{% block title %}Activos y mantenimiento · Dashboard DG{% endblock %}
-{% block page_title %}Activos y mantenimiento · Dashboard DG{% endblock %}
+{% block title %}Resumen de mantenimiento{% endblock %}
+{% block page_title %}Resumen de mantenimiento{% endblock %}
 {% block body_class %}page-activos-dashboard{% endblock %}
 
 {% block extra_css %}
@@ -12,17 +12,11 @@
 
 {% block content %}
 <div class="module-shell bi-shell" id="exec-app">
-  <nav class="module-tabs">
-    <a href="{% url 'activos:dashboard' %}" class="module-tab active">Dashboard DG</a>
-    <a href="{% url 'activos:seguimiento-compras' %}" class="module-tab">Seguimiento de mantenimiento</a>
-    <a href="{% url 'fallas:dashboard' %}" class="module-tab">Fallas</a>
-    <a href="{% url 'activos:ordenes' %}" class="module-tab">Órdenes</a>
-  </nav>
 
   <section class="bi-hero">
     <div class="bi-hero-main">
       <div class="bi-kicker">Director General</div>
-      <h1 class="bi-hero-title">Panel de mantenimiento</h1>
+      <h1 class="bi-hero-title">Resumen de mantenimiento</h1>
       <p class="bi-copy">Vista consolidada de fallas activas, mantenimiento en curso, costos recientes y estado de la flota.</p>
     </div>
     <div class="bi-hero-side">
@@ -34,6 +28,11 @@
       </div>
     </div>
   </section>
+
+  <div class="quick-actions pd-mb-3">
+    <a class="btn btn-secondary" href="{% url 'activos:seguimiento-compras' %}">Seguimiento de mantenimiento</a>
+    <a class="btn btn-secondary" href="{% url 'fallas:dashboard' %}">Revisar fallas</a>
+  </div>
 
   <div class="exec-alerta pd-hidden" id="alerta-sucursal">
     <span id="alerta-sucursal-texto"></span>

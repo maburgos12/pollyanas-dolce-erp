@@ -50,14 +50,20 @@ class PointHttpSessionClient:
         base = (self.settings.base_url or "").rstrip("/")
         return f"{base}/{path.lstrip('/')}"
 
-    def _parse_json(self, response: requests.Response, *, label: str) -> Any:
+    def _parse_json(self, response: requests.Response, *, label: str, expected_type: type | None = None) -> Any:
         try:
-            return response.json()
+            payload = response.json()
         except ValueError as exc:
             raise ExtractionError(
                 f"Point devolvió una respuesta no JSON en {label}.",
                 context={"status_code": response.status_code, "body_preview": response.text[:500]},
             ) from exc
+        if expected_type is not None and not isinstance(payload, expected_type):
+            raise ExtractionError(
+                f"Point devolvió un payload inválido en {label}.",
+                context={"status_code": response.status_code},
+            )
+        return payload
 
     def _request(self, method: str, path: str, **kwargs) -> requests.Response:
         timeout = kwargs.pop("timeout", max(self.settings.timeout_ms // 1000, 5))
@@ -155,7 +161,7 @@ class PointHttpSessionClient:
                 "timeZone": 0,
             },
         )
-        payload = self._parse_json(response, label="login Point")
+        payload = self._parse_json(response, label="login Point", expected_type=dict)
         redirect = str(payload.get("redirectToUrl") or "").strip()
         if not redirect:
             raise AuthenticationError("Point no devolvió redirectToUrl al autenticarse.", context={"payload": payload})
@@ -174,7 +180,7 @@ class PointHttpSessionClient:
                 "accId": workspace["account_id"],
             },
         )
-        set_current_payload = self._parse_json(set_current, label="selección de cuenta activa Point")
+        set_current_payload = self._parse_json(set_current, label="selección de cuenta activa Point", expected_type=dict)
         if not set_current_payload.get("success"):
             raise AuthenticationError("Point no confirmó la selección de la cuenta activa.", context={"payload": set_current_payload})
         self._request("GET", "/Home/Index")
@@ -187,7 +193,7 @@ class PointHttpSessionClient:
                 "sucname": workspace.get("branch_name"),
             },
         )
-        acctok_payload = self._parse_json(acctok_response, label="selección de workspace Point")
+        acctok_payload = self._parse_json(acctok_response, label="selección de workspace Point", expected_type=dict)
         next_url = str(acctok_payload.get("redirectToUrl") or "").strip() or "/Home/Index"
         self._request("GET", next_url)
         self._workspace = workspace
@@ -195,7 +201,7 @@ class PointHttpSessionClient:
 
     def _fetch_workspaces_payload(self) -> list[dict]:
         response = self._request("POST", "/Account/get_workSpaces", data={})
-        payload = self._parse_json(response, label="workspaces Point")
+        payload = self._parse_json(response, label="workspaces Point", expected_type=dict)
         raw_json = payload.get("json")
         if not raw_json:
             raise AuthenticationError("Point no devolvió workspaces tras autenticar.", context={"payload": payload})
@@ -203,7 +209,7 @@ class PointHttpSessionClient:
             accounts = json.loads(raw_json)
         except (TypeError, ValueError) as exc:
             raise AuthenticationError("No se pudo parsear el catálogo de workspaces Point.") from exc
-        if not isinstance(accounts, list):
+        if not isinstance(accounts, list) or any(not isinstance(account, dict) for account in accounts):
             raise AuthenticationError("El catálogo de workspaces Point tiene formato inesperado.")
         return accounts
 
@@ -222,8 +228,10 @@ class PointHttpSessionClient:
         for account in accounts:
             try:
                 workspaces = json.loads(account.get("JSON_WORKSPACES") or "[]")
-            except (TypeError, ValueError):
-                workspaces = []
+            except (TypeError, ValueError) as exc:
+                raise AuthenticationError("No se pudo parsear el catálogo de sucursales Point.") from exc
+            if not isinstance(workspaces, list) or any(not isinstance(workspace, dict) for workspace in workspaces):
+                raise AuthenticationError("El catálogo de sucursales Point tiene formato inesperado.")
             for workspace in workspaces:
                 candidates.append(
                     {

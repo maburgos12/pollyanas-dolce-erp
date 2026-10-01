@@ -204,6 +204,7 @@ from .public_views import (
     PublicPedidosCreateView,
 )
 from .special_hours_views import (
+    SpecialHoursEffectiveView,
     SpecialHoursApproveView,
     SpecialHoursCancelView,
     SpecialHoursDetailView,
@@ -306,6 +307,11 @@ urlpatterns = [
         "integraciones/point/operaciones/historial/",
         IntegracionesOperationsHistoryView.as_view(),
         name="api_integraciones_operations_history",
+    ),
+    path(
+        "integraciones/horarios-especiales/effective/",
+        SpecialHoursEffectiveView.as_view(),
+        name="api_integraciones_special_hours_effective",
     ),
     path(
         "integraciones/horarios-especiales/preview/",

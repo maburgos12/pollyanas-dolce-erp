@@ -48,6 +48,7 @@ from .models import (
     MovimientoVacaciones,
     PermisoSalida,
     PlantillaAutorizada,
+    PrenominaMovimiento,
     Prestamo,
     ReglamentoLaboral,
     ReglaLaboral,
@@ -3048,8 +3049,19 @@ def horas_extra_list(request):
     if not can_view_rrhh(request.user):
         horas_extra = horas_extra.filter(jefe_directo=request.user)
     horas_extra = list(horas_extra)
+    movimientos_prenomina = PrenominaMovimiento.objects.filter(
+        fuente_modelo="rrhh.HoraExtra",
+        tipo_movimiento_erp=PrenominaMovimiento.TIPO_HORA_EXTRA,
+        fuente_id__in=[str(he.pk) for he in horas_extra],
+    ).select_related("corte")
+    movimiento_por_hora = {
+        int(movimiento.fuente_id): movimiento
+        for movimiento in movimientos_prenomina
+        if movimiento.fuente_id.isdigit()
+    }
     for he in horas_extra:
         he.jefatura_actualizada = jefatura_hora_extra_actualizada(he)
+        he.movimiento_prenomina = movimiento_por_hora.get(he.pk)
     if not can_view_rrhh(request.user):
         horas_extra = [he for he in horas_extra if he.jefatura_actualizada]
     dias_automaticos = {
