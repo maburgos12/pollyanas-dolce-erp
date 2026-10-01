@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Max, Q, Sum
+from django.db.models import Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -188,13 +188,11 @@ class PickupAvailabilityService:
         if not branches:
             return None
 
+        # ponytail: one indexed probe per candidate; revisit if branch aliases become numerous.
         latest_snapshot_map = {
-            row["branch_id"]: row["latest_captured_at"]
-            for row in (
-                PointInventorySnapshot.objects.filter(branch_id__in=[branch.id for branch in branches])
-                .values("branch_id")
-                .annotate(latest_captured_at=Max("captured_at"))
-            )
+            branch.id: PointInventorySnapshot.objects.filter(branch_id=branch.id, captured_at__isnull=False)
+            .order_by("-captured_at").values_list("captured_at", flat=True).first()
+            for branch in branches
         }
 
         def _stamp(value):
