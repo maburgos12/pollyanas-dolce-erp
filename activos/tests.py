@@ -1186,3 +1186,253 @@ class ActivoFichaTecnicaUITests(TestCase):
         self.assertEqual(exito["toast"]["type"], "success")
         self.assertFalse(fallo["ok"])
         self.assertEqual(fallo["toast"]["type"], "error")
+
+
+class ActivoDatosEquipoTests(TestCase):
+    def setUp(self):
+        from core.models import Sucursal
+        self.sucursal = Sucursal.objects.create(codigo="P2", nombre="Sucursal P2")
+        self.admin = get_user_model().objects.create_user("admin_datos_equipo")
+        self.admin.groups.add(Group.objects.get_or_create(name=ROLE_ADMIN)[0])
+        self.client.force_login(self.admin)
+        self.activo = Activo.objects.create(
+            nombre="Batidora P2", categoria="Producción", sucursal=self.sucursal,
+            ubicacion="Área de mezclado", marca="Hobart", numero_serie="P2-777",
+            costo_adquisicion=Decimal("12345.67"), notas="Original",
+        )
+        self.url = reverse("activos:activos") + "?q=Batidora&solo_activos=0"
+        self.data = {
+            "action": "update_description", "activo_id": self.activo.pk,
+            "actualizado_en": self.activo.actualizado_en.isoformat(),
+            "nombre": "Batidora P2", "categoria": "Producción",
+            "criticidad": "MEDIA", "notas": "Original",
+        }
+
+    def post(self, **changes):
+        return self.client.post(self.url, {**self.data, **changes}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def test_edicion_preserva_todos_los_datos_ajenos_y_audita_solo_cambios(self):
+        before = Activo.objects.values().get(pk=self.activo.pk)
+        response = self.post(nombre="Batidora corregida", notas="Nota nueva", costo_adquisicion="1", sucursal_id="", codigo="CAMBIO", marca="OTRA")
+        self.assertEqual(response.status_code, 200)
+        after = Activo.objects.values().get(pk=self.activo.pk)
+        for key in before.keys() - {"nombre", "notas", "actualizado_en"}:
+            self.assertEqual(after[key], before[key], key)
+        audit = AuditLog.objects.get(model="activos.Activo", object_id=str(self.activo.pk))
+        self.assertEqual(audit.payload, {"datos_equipo": {
+            "nombre": {"antes": "Batidora P2", "despues": "Batidora corregida"},
+            "notas": {"antes": "Original", "despues": "Nota nueva"},
+        }})
+        self.assertTrue(response.json()["ok"])
+        self.assertIn('name="actualizado_en"', response.json()["html"])
+        self.assertNotIn("12345.67", response.json()["html"])
+        self.assertNotIn("costo_adquisicion", response.json())
+
+    def test_campos_invalidos_no_truncan_ni_guardan(self):
+        for changes in ({"nombre": ""}, {"nombre": "x" * 181}, {"categoria": "x" * 121}, {"criticidad": "OTRA"}):
+            with self.subTest(changes=changes):
+                response = self.post(**changes)
+                self.assertEqual(response.status_code, 400)
+                self.assertFalse(response.json()["ok"])
+                self.assertTrue(response.json()["field_errors"])
+                self.activo.refresh_from_db()
+                self.assertEqual(self.activo.nombre, "Batidora P2")
+                self.assertFalse(AuditLog.objects.filter(model="activos.Activo").exists())
+
+    def test_formulario_viejo_no_pisa_edicion_nueva(self):
+        self.assertEqual(self.post(nombre="Corrección nueva").status_code, 200)
+        response = self.post(nombre="Corrección antigua")
+        self.assertEqual(response.status_code, 409)
+        self.activo.refresh_from_db()
+        self.assertEqual(self.activo.nombre, "Corrección nueva")
+        self.assertEqual(AuditLog.objects.filter(model="activos.Activo").count(), 1)
+
+    def test_reenvio_igual_no_actualiza_fecha_ni_audita(self):
+        self.assertEqual(self.post(nombre="Corregido").status_code, 200)
+        self.activo.refresh_from_db()
+        stamp = self.activo.actualizado_en
+        self.assertEqual(self.post(nombre="Corregido").status_code, 200)
+        self.activo.refresh_from_db()
+        self.assertEqual(self.activo.actualizado_en, stamp)
+        self.assertEqual(AuditLog.objects.filter(model="activos.Activo").count(), 1)
+
+    def test_auditoria_y_cambio_son_atomicos(self):
+        with patch("activos.views.log_event", side_effect=RuntimeError("audit fail")):
+            with self.assertRaises(RuntimeError):
+                self.post(nombre="No debe persistir")
+        self.activo.refresh_from_db()
+        self.assertEqual(self.activo.nombre, "Batidora P2")
+
+    @patch("activos.views.can_manage_inventario", return_value=False)
+    def test_solo_lectura_no_puede_editar(self, permission):
+        self.assertEqual(self.post(nombre="No autorizado").status_code, 403)
+        self.assertNotContains(self.client.get(self.url), 'value="update_description"')
+        self.activo.refresh_from_db()
+        self.assertEqual(self.activo.nombre, "Batidora P2")
+
+    def test_alta_sucursal_canonica_o_null_sin_inferir_ubicacion(self):
+        for branch_id in (str(self.sucursal.pk), ""):
+            response = self.client.post(self.url, {
+                "action": "create_activo", "nombre": "Alta P2", "sucursal_id": branch_id,
+                "ubicacion": self.sucursal.nombre, "activo": "1",
+            })
+            self.assertEqual(response.status_code, 302)
+            activo = Activo.objects.latest("pk")
+            self.assertEqual(activo.sucursal_id, self.sucursal.pk if branch_id else None)
+            self.assertTrue(activo.codigo)
+            self.assertTrue(activo.qr_token)
+        self.assertEqual(Activo.objects.filter(nombre="Alta P2").count(), 2)
+
+    def test_alta_fk_invalida_no_crea_y_conserva_inputs_en_html(self):
+        for branch_id in ("99999999", "texto", "-1", "1.0", "9999999999999999999", "9" * 100):
+            with self.subTest(branch_id=branch_id):
+                response = self.client.post(self.url, {
+                    "action": "create_activo", "nombre": "Mi borrador", "sucursal_id": branch_id,
+                    "ubicacion": "Mi área", "notas": "Mis notas", "marca": "Mi marca",
+                })
+                self.assertEqual(response.status_code, 400)
+                self.assertContains(response, 'value="Mi borrador"', status_code=400)
+                self.assertContains(response, 'value="Mi marca"', status_code=400)
+                self.assertEqual(Activo.objects.count(), 1)
+
+    def test_error_tradicional_conserva_datos_y_filtro(self):
+        response = self.client.post(self.url, {**self.data, "nombre": "", "notas": "Borrador retenido"})
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "Borrador retenido", status_code=400)
+        self.assertContains(response, 'aria-invalid="true"', status_code=400)
+        self.assertEqual(response.context["filters"]["q"], "Batidora")
+
+    def test_exito_tradicional_vuelve_a_filtro_y_ancla(self):
+        response = self.client.post(self.url, {**self.data, "nombre": "Guardado"})
+        self.assertRedirects(response, f"{self.url}#activo-{self.activo.pk}", fetch_redirect_response=False)
+
+    def test_enlace_pasaporte_solo_autorizado_y_ubicaciones_separadas(self):
+        response = self.client.get(self.url)
+        self.assertContains(response, reverse("operacion:activo_pasaporte", args=[self.activo.qr_token]))
+        self.assertContains(response, "Sucursal P2")
+        self.assertContains(response, "Área/ubicación interna")
+        from core.models import UserModuleAccess
+        reader = get_user_model().objects.create_user("inventario_sin_pasaporte")
+        UserModuleAccess.objects.create(user=reader, module="inventario", access="view")
+        self.client.force_login(reader)
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, reverse("operacion:activo_pasaporte", args=[self.activo.qr_token]))
+
+    def test_nombres_repetidos_conservan_identidades_independientes(self):
+        otro = Activo.objects.create(nombre="Mismo nombre")
+        self.assertEqual(self.post(nombre="Mismo nombre").status_code, 200)
+        self.activo.refresh_from_db()
+        self.assertNotEqual(otro.qr_token, self.activo.qr_token)
+        self.assertEqual(Activo.objects.filter(nombre="Mismo nombre").count(), 2)
+
+    def test_id_equipo_fuera_de_rango_no_produce_error_de_base(self):
+        for activo_id in ("9999999999999999999", "9" * 100, "texto", "-1"):
+            with self.subTest(activo_id=activo_id):
+                self.assertEqual(self.post(activo_id=activo_id).status_code, 404)
+
+    def test_nuevo_guardado_renderiza_token_y_estados_vigentes_sin_recargar(self):
+        self.activo.estado = Activo.ESTADO_FUERA_SERVICIO
+        self.activo.save(update_fields=["estado", "actualizado_en"])
+        self.data["actualizado_en"] = self.activo.actualizado_en.isoformat()
+        response = self.post(criticidad="ALTA", categoria="")
+        self.assertEqual(response.status_code, 200)
+        self.activo.refresh_from_db()
+        html = response.json()["html"]
+        self.assertIn(self.activo.actualizado_en.isoformat(), html)
+        self.assertIn("Crítico", html)
+        self.assertIn("Sin categoría", html)
+        self.assertNotIn("reload", response.json())
+        self.data["actualizado_en"] = self.activo.actualizado_en.isoformat()
+        self.assertEqual(self.post(criticidad="MEDIA", categoria="Refrigeración").status_code, 200)
+
+    def test_alta_async_reutiliza_envelope_con_contexto_y_error_de_campo(self):
+        response = self.client.post(self.url, {
+            "action": "create_activo", "nombre": "Borrador", "sucursal_id": "inexistente",
+        }, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Sucursal:", response.json()["toast"]["message"])
+        self.assertIn("sucursal_id", response.json()["field_errors"])
+        response = self.client.post(self.url, {
+            "action": "create_activo", "nombre": "Alta async", "sucursal_id": "", "activo": "1",
+        }, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ok"])
+        self.assertEqual(response.json()["redirect"], self.url + "#nuevo-equipo")
+
+    def test_error_html_conserva_version_vieja_para_no_bypasear_conflicto(self):
+        version_vieja = self.data["actualizado_en"]
+        self.post(nombre="Cambio nuevo")
+        response = self.client.post(self.url, {**self.data, "nombre": "Mi borrador"})
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, version_vieja, status_code=409)
+        self.assertContains(response, 'value="Mi borrador"', status_code=409)
+
+    def test_token_html_real_puede_guardarse_sin_falso_conflicto_de_zona_horaria(self):
+        import re
+        response = self.client.get(self.url)
+        token = re.search(r'name="actualizado_en" value="([^"]+)"', response.content.decode()).group(1)
+        self.assertEqual(self.post(actualizado_en=token, nombre="Guardado desde HTML").status_code, 200)
+
+    def test_token_ausente_rechazado_y_fallback_no_inventa_token_nuevo(self):
+        response = self.client.post(self.url, {**self.data, "actualizado_en": "", "nombre": "Borrador"})
+        self.assertEqual(response.status_code, 409)
+        self.assertContains(response, 'name="actualizado_en" value=""', status_code=409)
+        self.activo.refresh_from_db()
+        self.assertEqual(self.activo.nombre, "Batidora P2")
+
+    def test_alta_criticidad_invalida_conserva_opcion_e_inputs(self):
+        response = self.client.post(self.url, {
+            "action": "create_activo", "nombre": "Borrador", "criticidad": "INVALIDA", "notas": "Captura pendiente",
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, '<option value="INVALIDA" selected>INVALIDA</option>', status_code=400, html=True)
+        self.assertContains(response, 'value="Captura pendiente"', status_code=400)
+        self.assertEqual(Activo.objects.count(), 1)
+
+    def test_foco_local_retorna_tras_exito_sin_mover_scroll_y_no_en_error(self):
+        import re
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        if not shutil.which("node"):
+            self.skipTest("Node.js no está disponible en este runtime")
+        template = Path(__file__).parent / "templates" / "activos" / "activos.html"
+        script = re.search(r"<script>(.*?)</script>", template.read_text(), re.S).group(1)
+        harness = r'''
+const assert = require('node:assert/strict');
+let onSubmit, onMutation, focusCalls = [];
+const replacement = {focus: options => focusCalls.push(options)};
+const tbody = {addEventListener: (name, callback) => { onSubmit = callback; }};
+global.document = {
+  querySelector: () => tbody,
+  getElementById: id => { assert.equal(id, 'nombre-equipo-7'); return replacement; }
+};
+global.MutationObserver = class {
+  constructor(callback) { onMutation = callback; }
+  observe() {}
+};
+'''
+        checks = r'''
+function form(action) {
+  return {isConnected: true, matches: () => true,
+    elements: {action: {value: action}},
+    querySelector: () => ({id: 'nombre-equipo-7'})};
+}
+// Errors leave the original form connected: preserve its focused input.
+let original = form('update_description');
+onSubmit({target: original}); onMutation(); assert.equal(focusCalls.length, 0);
+// Successful replacements restore focus without changing scroll, repeatedly.
+for (let i = 0; i < 3; i++) {
+  original = form('update_description'); onSubmit({target: original});
+  original.isConnected = false; onMutation();
+}
+assert.equal(focusCalls.length, 3);
+assert.deepEqual(focusCalls, Array(3).fill({preventScroll: true}));
+// Unrelated mutations and technical actions never steal focus.
+onMutation(); original = form('update_identity'); onSubmit({target: original});
+original.isConnected = false; onMutation(); assert.equal(focusCalls.length, 3);
+'''
+        result = subprocess.run(["node", "-e", harness + script + checks], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
