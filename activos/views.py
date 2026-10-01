@@ -5,12 +5,14 @@ from io import BytesIO
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import transaction
 from django.db.models import Case, Count, IntegerField, Q, Sum, When
 from django.db.models.functions import Lower
-from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.views.decorators.http import require_POST
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import Workbook
@@ -27,7 +29,7 @@ from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
 
-from .services_pasaporte import svg_qr_activo
+from .services_pasaporte import activos_autorizados, svg_qr_activo
 
 from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
 from .utils.bitacora_import import import_bitacora
@@ -1697,50 +1699,110 @@ def activos_catalog(request):
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Activos.")
 
+    form_errors = {}
+    edit_id = None
+    edit_data = {}
+    create_data = {}
+    error_status = 400
     if request.method == "POST":
         if not can_manage_inventario(request.user):
             raise PermissionDenied("No tienes permisos para gestionar Activos.")
         action = (request.POST.get("action") or "create_activo").strip().lower()
         if action == "create_activo":
+            create_data = request.POST
             nombre = (request.POST.get("nombre") or "").strip()
-            if not nombre:
-                messages.error(request, "Nombre del activo es obligatorio.")
-                return redirect("activos:activos")
             estado = (request.POST.get("estado") or Activo.ESTADO_OPERATIVO).strip().upper()
             criticidad = (request.POST.get("criticidad") or Activo.CRITICIDAD_MEDIA).strip().upper()
             proveedor_id = _safe_int(request.POST.get("proveedor_mantenimiento_id"))
+            campos = {
+                "nombre": nombre, "categoria": (request.POST.get("categoria") or "").strip(),
+                "criticidad": criticidad, "notas": (request.POST.get("notas") or "").strip(),
+                "ubicacion": (request.POST.get("ubicacion") or "").strip(),
+            }
+            for campo, valor in campos.items():
+                try:
+                    Activo._meta.get_field(campo).clean(valor, None)
+                except ValidationError as exc:
+                    form_errors[campo] = " ".join(exc.messages)
+            sucursal_id = (request.POST.get("sucursal_id") or "").strip()
+            sucursal = None
+            if sucursal_id:
+                if sucursal_id.isascii() and sucursal_id.isdigit() and len(sucursal_id) <= 19 and int(sucursal_id) <= 9223372036854775807:
+                    sucursal = Sucursal.objects.filter(pk=int(sucursal_id)).first()
+                if sucursal is None:
+                    form_errors["sucursal_id"] = "La sucursal seleccionada no existe."
             try:
                 ficha = _ficha_tecnica_desde_post(request.POST, parcial=False)
             except FichaTecnicaInvalida as exc:
-                messages.error(request, str(exc))
-                return redirect("activos:activos")
-            activo = Activo.objects.create(
-                **ficha,
-                nombre=nombre,
-                creado_por=request.user,
-                categoria=(request.POST.get("categoria") or "").strip(),
-                ubicacion=(request.POST.get("ubicacion") or "").strip(),
-                estado=estado if estado in {x[0] for x in Activo.ESTADO_CHOICES} else Activo.ESTADO_OPERATIVO,
-                criticidad=(
-                    criticidad if criticidad in {x[0] for x in Activo.CRITICIDAD_CHOICES} else Activo.CRITICIDAD_MEDIA
-                ),
-                proveedor_mantenimiento_id=proveedor_id if proveedor_id > 0 else None,
-                fecha_alta=_parse_date(request.POST.get("fecha_alta")) or timezone.localdate(),
-                valor_reposicion=_safe_decimal(request.POST.get("valor_reposicion")),
-                vida_util_meses=max(1, _safe_int(request.POST.get("vida_util_meses"), default=60)),
-                horas_uso_promedio_mes=_safe_decimal(request.POST.get("horas_uso_promedio_mes")),
-                notas=(request.POST.get("notas") or "").strip(),
-                activo=(request.POST.get("activo") or "").strip().lower() in {"1", "on", "true", "yes"},
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "activos.Activo",
-                activo.id,
-                {"codigo": activo.codigo, "nombre": activo.nombre, "estado": activo.estado},
-            )
-            messages.success(request, f"Activo {activo.codigo} creado.")
-            return redirect("activos:activos")
+                form_errors["ficha_tecnica"] = str(exc)
+            if not form_errors:
+                activo = Activo.objects.create(
+                    **ficha, **campos, sucursal=sucursal,
+                    creado_por=request.user,
+                    estado=estado if estado in {x[0] for x in Activo.ESTADO_CHOICES} else Activo.ESTADO_OPERATIVO,
+                    proveedor_mantenimiento_id=proveedor_id if proveedor_id > 0 else None,
+                    fecha_alta=_parse_date(request.POST.get("fecha_alta")) or timezone.localdate(),
+                    valor_reposicion=_safe_decimal(request.POST.get("valor_reposicion")),
+                    vida_util_meses=max(1, _safe_int(request.POST.get("vida_util_meses"), default=60)),
+                    horas_uso_promedio_mes=_safe_decimal(request.POST.get("horas_uso_promedio_mes")),
+                    activo=(request.POST.get("activo") or "").strip().lower() in {"1", "on", "true", "yes"},
+                )
+                log_event(request.user, "CREATE", "activos.Activo", activo.id,
+                          {"codigo": activo.codigo, "nombre": activo.nombre, "estado": activo.estado})
+                mensaje = f"Activo {activo.codigo} creado."
+                destino = f"{request.get_full_path()}#nuevo-equipo"
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return JsonResponse({"ok": True, "toast": {"type": "success", "message": mensaje},
+                                         "redirect": destino, "reload": True})
+                messages.success(request, mensaje)
+                return redirect(destino)
+
+        if action == "update_description":
+            edit_id = _safe_int(request.POST.get("activo_id"))
+            if not 0 < edit_id <= 9223372036854775807:
+                raise Http404("Equipo inexistente.")
+            edit_data = {campo: (request.POST.get(campo) or "").strip()
+                         for campo in ("nombre", "categoria", "criticidad", "notas")}
+            with transaction.atomic():
+                activo_obj = get_object_or_404(Activo.objects.select_for_update(), pk=edit_id)
+                for campo, valor in edit_data.items():
+                    try:
+                        Activo._meta.get_field(campo).clean(valor, activo_obj)
+                    except ValidationError as exc:
+                        form_errors[campo] = " ".join(exc.messages)
+                cambios = {campo: {"antes": getattr(activo_obj, campo), "despues": valor}
+                           for campo, valor in edit_data.items() if getattr(activo_obj, campo) != valor}
+                if not form_errors and cambios and request.POST.get("actualizado_en") != activo_obj.actualizado_en.isoformat():
+                    form_errors["actualizado_en"] = "Otro usuario modificó este equipo. Recarga la ficha y revisa los datos antes de guardar."
+                    error_status = 409
+                if not form_errors:
+                    if cambios:
+                        for campo in cambios:
+                            setattr(activo_obj, campo, edit_data[campo])
+                        activo_obj.save(update_fields=[*cambios, "actualizado_en"])
+                        log_event(request.user, "UPDATE", "activos.Activo", activo_obj.pk, {"datos_equipo": cambios})
+                    mensaje = f"Datos de {activo_obj.codigo} actualizados." if cambios else "Los datos del equipo ya están guardados."
+                    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                        planes_activo = PlanMantenimiento.objects.filter(activo_ref=activo_obj, activo=True, estatus=PlanMantenimiento.ESTATUS_ACTIVO)
+                        profile = _activo_enterprise_profile(
+                            activo_obj,
+                            active_plan_asset_ids=set(planes_activo.values_list("activo_ref_id", flat=True)),
+                            overdue_plan_asset_ids=set(planes_activo.filter(proxima_ejecucion__lt=timezone.localdate()).values_list("activo_ref_id", flat=True)),
+                            critical_open_asset_ids=set(OrdenMantenimiento.objects.filter(
+                                activo_ref=activo_obj, estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO],
+                                tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
+                                prioridad__in=[OrdenMantenimiento.PRIORIDAD_CRITICA, OrdenMantenimiento.PRIORIDAD_ALTA],
+                            ).values_list("activo_ref_id", flat=True)),
+                        )
+                        html = render_to_string("activos/_datos_equipo.html", {
+                            "a": activo_obj, "datos": activo_obj, "enterprise": profile, "can_manage_activos": True,
+                            "criticidad_choices": Activo.CRITICIDAD_CHOICES, "editar_abierto": True,
+                            "catalogo_url": request.get_full_path(),
+                        }, request=request)
+                        return JsonResponse({"ok": True, "toast": {"type": "success", "message": mensaje},
+                                             "target": f"#datos-equipo-{activo_obj.pk}", "html": html})
+                    messages.success(request, mensaje)
+                    return redirect(f"{request.get_full_path()}#activo-{activo_obj.pk}")
 
         if action == "update_identity":
             activo_obj = get_object_or_404(Activo, pk=_safe_int(request.POST.get("activo_id")))
@@ -1851,8 +1913,17 @@ def activos_catalog(request):
             )
             return redirect("activos:activos")
 
-        messages.error(request, "Acción no reconocida.")
-        return redirect("activos:activos")
+        if not form_errors:
+            messages.error(request, "Acción no reconocida.")
+            return redirect("activos:activos")
+        labels = {"nombre": "Nombre", "categoria": "Categoría", "criticidad": "Criticidad",
+                  "notas": "Notas", "sucursal_id": "Sucursal", "ubicacion": "Área/ubicación interna",
+                  "actualizado_en": "Edición simultánea", "ficha_tecnica": "Ficha técnica"}
+        mensaje = " ".join(f"{labels.get(campo, campo)}: {error}" for campo, error in form_errors.items())
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse({"ok": False, "field_errors": form_errors,
+                                 "toast": {"type": "error", "message": mensaje, "persistent": True}}, status=error_status)
+        messages.error(request, mensaje)
 
     q = (request.GET.get("q") or "").strip()
     estado = (request.GET.get("estado") or "").strip().upper()
@@ -1864,7 +1935,7 @@ def activos_catalog(request):
     import_format = (request.GET.get("import_format") or "ALL").strip().upper()
 
     today = timezone.localdate()
-    all_activos_qs = Activo.objects.select_related("proveedor_mantenimiento").order_by("nombre", "id")
+    all_activos_qs = Activo.objects.select_related("proveedor_mantenimiento", "sucursal").order_by("nombre", "id")
     all_planes_qs = PlanMantenimiento.objects.filter(estatus=PlanMantenimiento.ESTATUS_ACTIVO, activo=True)
     all_ordenes_qs = OrdenMantenimiento.objects.filter(
         estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO]
@@ -1946,7 +2017,13 @@ def activos_catalog(request):
         return _export_activos_depuracion_xlsx(dep_rows)
 
     activos_rows = []
-    for activo in list(qs[:300]):
+    activos_visibles = list(qs[:300])
+    # Keep a rejected traditional submission visible even when its fields no longer match the filter.
+    if edit_id and all(activo.pk != edit_id for activo in activos_visibles):
+        activos_visibles.append(get_object_or_404(all_activos_qs, pk=edit_id))
+    pasaporte_ids = set(activos_autorizados(request.user).filter(
+        pk__in=[activo.pk for activo in activos_visibles]).values_list("pk", flat=True))
+    for activo in activos_visibles:
         profile = _activo_enterprise_profile(
             activo,
             overdue_plan_asset_ids=overdue_plan_asset_ids,
@@ -1957,6 +2034,11 @@ def activos_catalog(request):
             {
                 "activo": activo,
                 "enterprise": profile,
+                "puede_ver_ficha": activo.pk in pasaporte_ids,
+                "datos": edit_data if activo.pk == edit_id else activo,
+                "errores": form_errors if activo.pk == edit_id else {},
+                "editar_abierto": activo.pk == edit_id,
+                "version_enviada": request.POST.get("actualizado_en", "") if activo.pk == edit_id else "",
             }
         )
 
@@ -2051,6 +2133,10 @@ def activos_catalog(request):
     ])
 
     context = {
+        "catalogo_url": request.get_full_path(),
+        "create_data": create_data,
+        "create_errors": form_errors if create_data else {},
+        "sucursales": Sucursal.objects.order_by("nombre"),
         "module_tabs": _module_tabs("activos"),
         "activos_rows": activos_rows,
         "proveedores": list(Proveedor.objects.filter(activo=True).order_by("nombre")[:800]),
@@ -2095,7 +2181,7 @@ def activos_catalog(request):
         context["document_stage_rows"],
         context["enterprise_chain"],
     )
-    return render(request, "activos/activos.html", context)
+    return render(request, "activos/activos.html", context, status=error_status if form_errors else 200)
 
 
 @login_required

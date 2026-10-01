@@ -103,14 +103,11 @@
         <tr>
           <th>Código</th>
           <th>Equipo</th>
-          <th>Categoría</th>
-          <th>Ubicación</th>
+          <th>Sucursal</th>
+          <th>Área/ubicación interna</th>
           <th>Estado</th>
-          <th>Criticidad</th>
           <th>Proveedor</th>
           <th>Ficha técnica</th>
-          <th>Datos pendientes</th>
-          <th>Siguiente acción</th>
           <th>Habilitado</th>
           <th>Acciones</th>
         </tr>
@@ -118,15 +115,14 @@
       <tbody>
         {% for row in activos_rows %}
           {% with a=row.activo enterprise=row.enterprise %}
-          <tr>
+          <tr id="activo-{{ a.id }}">
             <td>{{ a.codigo }}</td>
-            <td>{{ a.nombre }}</td>
-            <td>{{ a.categoria|default:'-' }}</td>
+            {% include "activos/_datos_equipo.html" with datos=row.datos errores=row.errores editar_abierto=row.editar_abierto version_enviada=row.version_enviada %}
+            <td>{{ a.sucursal.nombre|default:'Sin sucursal asignada' }}</td>
             <td>{{ a.ubicacion|default:'-' }}</td>
             <td><span class="badge badge-primary">{{ a.get_estado_display }}</span></td>
-            <td>{{ a.get_criticidad_display }}</td>
             <td>{% if a.proveedor_mantenimiento %}{{ a.proveedor_mantenimiento.nombre }}{% else %}-{% endif %}</td>
-            <td id="activo-{{ a.id }}">
+            <td>
               {% if a.marca or a.modelo or a.numero_serie %}
                 <div>{{ a.marca }}{% if a.marca and a.modelo %} · {% endif %}{{ a.modelo }}</div>
                 {% if a.numero_serie %}<div class="text-muted">Serie {{ a.numero_serie }}</div>{% endif %}
@@ -164,15 +160,9 @@
                 </details>
               {% endif %}
             </td>
-            <td>
-              <span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span>
-              {% if enterprise.gaps %}
-                <div class="text-muted pd-mt-2">{{ enterprise.gaps.0.label }}</div>
-              {% endif %}
-            </td>
-            <td>{{ enterprise.next_action }}</td>
             <td>{% if a.activo %}<span class="badge badge-success">Sí</span>{% else %}<span class="badge badge-danger">No</span>{% endif %}</td>
             <td>
+              {% if row.puede_ver_ficha %}<a class="btn btn-secondary" href="{% url 'operacion:activo_pasaporte' a.qr_token %}">Ver ficha</a>{% endif %}
               {% if can_manage_activos %}
                 <div class="quick-actions pd-flex-actions-wrap">
                   <form method="post">
@@ -202,7 +192,7 @@
           </tr>
           {% endwith %}
         {% empty %}
-          <tr><td colspan="12" class="text-muted">Sin equipos para el filtro actual.</td></tr>
+          <tr><td colspan="9" class="text-muted">Sin equipos para el filtro actual.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -210,30 +200,39 @@
 </section>
 
 {% if can_manage_activos %}
-<details class="card" id="nuevo-equipo">
+<details class="card" id="nuevo-equipo" {% if create_errors %}open{% endif %}>
   <summary class="card-header">Nuevo equipo</summary>
-  <form method="post">
+  <form method="post" data-async-action action="{{ catalogo_url }}#nuevo-equipo">
     {% csrf_token %}
     <input type="hidden" name="action" value="create_activo">
     <div class="row pd-grid-form-4">
       <div>
         <label>Nombre</label>
-        <input type="text" name="nombre" required>
+        <input type="text" name="nombre" maxlength="180" required value="{{ create_data.nombre }}" {% if create_errors.nombre %}aria-invalid="true"{% endif %}>
       </div>
       <div>
         <label>Categoría</label>
-        <input type="text" name="categoria" placeholder="Refrigeración, AA, Horno...">
+        <input type="text" maxlength="120" name="categoria" placeholder="Refrigeración, AA, Horno..." value="{{ create_data.categoria }}" {% if create_errors.categoria %}aria-invalid="true"{% endif %}>
       </div>
       <div>
-        <label>Ubicación</label>
-        <input type="text" name="ubicacion" placeholder="Sucursal / Área">
+        <label for="alta-sucursal">Sucursal</label>
+        <select id="alta-sucursal" name="sucursal_id" {% if create_errors.sucursal_id %}aria-invalid="true" aria-describedby="error-alta-sucursal"{% endif %}>
+          <option value="">Sin asignar</option>
+          {% if create_errors.sucursal_id %}<option value="{{ create_data.sucursal_id }}" selected>Selección inválida: {{ create_data.sucursal_id }}</option>{% endif %}
+          {% for sucursal in sucursales %}<option value="{{ sucursal.pk }}" {% if create_data.sucursal_id == sucursal.pk|stringformat:'s' %}selected{% endif %}>{{ sucursal.nombre }}{% if not sucursal.activa %} (inactiva){% endif %}</option>{% endfor %}
+        </select>
+        {% if create_errors.sucursal_id %}<p id="error-alta-sucursal" role="alert">{{ create_errors.sucursal_id }}</p>{% endif %}
+      </div>
+      <div>
+        <label>Área/ubicación interna</label>
+        <input type="text" name="ubicacion" maxlength="160" value="{{ create_data.ubicacion }}" placeholder="Ej. Hornos / Almacén">
       </div>
       <div>
         <label>Proveedor mantenimiento</label>
         <select name="proveedor_mantenimiento_id">
           <option value="">Sin proveedor</option>
           {% for p in proveedores %}
-            <option value="{{ p.id }}">{{ p.nombre }}</option>
+            <option value="{{ p.id }}" {% if create_data.proveedor_mantenimiento_id == p.id|stringformat:'s' %}selected{% endif %}>{{ p.nombre }}</option>
           {% endfor %}
         </select>
       </div>
@@ -241,80 +240,81 @@
         <label>Estado</label>
         <select name="estado">
           {% for v, l in estado_choices %}
-            <option value="{{ v }}">{{ l }}</option>
+            <option value="{{ v }}" {% if create_data.estado == v %}selected{% endif %}>{{ l }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Criticidad</label>
-        <select name="criticidad">
+        <select name="criticidad" {% if create_errors.criticidad %}aria-invalid="true"{% endif %}>
+          {% if create_errors.criticidad %}<option value="{{ create_data.criticidad }}" selected>{{ create_data.criticidad }}</option>{% endif %}
           {% for v, l in criticidad_choices %}
-            <option value="{{ v }}">{{ l }}</option>
+            <option value="{{ v }}" {% if create_data.criticidad == v %}selected{% endif %}>{{ l }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Fecha alta</label>
-        <input type="date" name="fecha_alta">
+        <input type="date" name="fecha_alta" value="{{ create_data.fecha_alta }}">
       </div>
       <div>
         <label>Vida útil (meses)</label>
-        <input type="number" name="vida_util_meses" min="1" value="60">
+        <input type="number" name="vida_util_meses" min="1" value="{{ create_data.vida_util_meses|default:'60' }}">
       </div>
       <div>
         <label>Valor reposición</label>
-        <input type="number" step="0.01" min="0" name="valor_reposicion" value="0">
+        <input type="number" step="0.01" min="0" name="valor_reposicion" value="{{ create_data.valor_reposicion|default:'0' }}">
       </div>
       <div>
         <label>Horas uso promedio mes</label>
-        <input type="number" step="0.01" min="0" name="horas_uso_promedio_mes" value="0">
+        <input type="number" step="0.01" min="0" name="horas_uso_promedio_mes" value="{{ create_data.horas_uso_promedio_mes|default:'0' }}">
       </div>
       <div>
         <label>Marca</label>
-        <input type="text" name="marca" maxlength="100" placeholder="Déjalo vacío si no la sabes">
+        <input type="text" name="marca" maxlength="100" placeholder="Déjalo vacío si no la sabes" value="{{ create_data.marca }}">
       </div>
       <div>
         <label>Modelo</label>
-        <input type="text" name="modelo" maxlength="120" placeholder="Déjalo vacío si no lo sabes">
+        <input type="text" name="modelo" maxlength="120" placeholder="Déjalo vacío si no lo sabes" value="{{ create_data.modelo }}">
       </div>
       <div>
         <label>Número de serie</label>
-        <input type="text" name="numero_serie" maxlength="160" placeholder="Sólo si la placa es legible">
+        <input type="text" name="numero_serie" maxlength="160" placeholder="Sólo si la placa es legible" value="{{ create_data.numero_serie }}">
       </div>
       <div>
         <label>Proveedor de compra</label>
         <select name="proveedor_compra_id">
           <option value="">Sin capturar</option>
           {% for p in proveedores %}
-            <option value="{{ p.id }}">{{ p.nombre }}</option>
+            <option value="{{ p.id }}" {% if create_data.proveedor_compra_id == p.id|stringformat:'s' %}selected{% endif %}>{{ p.nombre }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Fecha de compra</label>
-        <input type="date" name="fecha_compra">
+        <input type="date" name="fecha_compra" value="{{ create_data.fecha_compra }}">
       </div>
       <div>
         <label>Costo de adquisición</label>
-        <input type="number" step="0.01" min="0" name="costo_adquisicion" placeholder="Sin capturar">
+        <input type="number" step="0.01" min="0" name="costo_adquisicion" placeholder="Sin capturar" value="{{ create_data.costo_adquisicion }}">
       </div>
       <div>
         <label>Garantía hasta</label>
-        <input type="date" name="garantia_hasta">
+        <input type="date" name="garantia_hasta" value="{{ create_data.garantia_hasta }}">
       </div>
       <div class="pd-grid-span-2">
         <label>Notas</label>
-        <input type="text" name="notas" placeholder="Observaciones del equipo">
+        <input type="text" name="notas" placeholder="Observaciones del equipo" value="{{ create_data.notas }}">
       </div>
       <div class="pd-align-end">
         <label class="pd-inline-check">
-          <input type="checkbox" name="activo" value="1" checked>
+          <input type="checkbox" name="activo" value="1" {% if not create_errors or create_data.activo %}checked{% endif %}>
           Activo habilitado
         </label>
       </div>
     </div>
     <div class="pd-kpi-action">
-      <button class="btn btn-primary" type="submit">Guardar equipo</button>
+      <button class="btn btn-primary" type="submit" data-pending-label="Guardando…">Guardar equipo</button>
     </div>
   </form>
 </details>
@@ -428,4 +428,22 @@
   {% endif %}
 </details>
 
+<script>
+(function () {
+  var tabla = document.querySelector('#catalogo-equipos tbody');
+  if (!tabla) return;
+  var pendiente = null;
+  tabla.addEventListener('submit', function (event) {
+    var form = event.target;
+    if (!form.matches('form[data-async-action]') || form.elements.action.value !== 'update_description') return;
+    pendiente = {form: form, inputId: form.querySelector('[name="nombre"]').id};
+  }, true);
+  new MutationObserver(function () {
+    if (!pendiente || pendiente.form.isConnected) return;
+    var input = document.getElementById(pendiente.inputId);
+    pendiente = null;
+    if (input) input.focus({preventScroll: true});
+  }).observe(tabla, {childList: true, subtree: true});
+})();
+</script>
 {% endblock %}

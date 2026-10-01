@@ -1,0 +1,38 @@
+<td id="datos-equipo-{{ a.id }}">
+  <strong>{{ a.nombre }}</strong>
+  <div>Categoría: {{ a.categoria|default:'Sin categoría' }}</div>
+  <div>Criticidad: {{ a.get_criticidad_display }}</div>
+  {% if a.notas %}<div>Notas: {{ a.notas }}</div>{% endif %}
+  {% if enterprise %}
+    <div class="pd-mt-2"><span class="badge badge-{% if enterprise.status_tone == 'success' %}success{% elif enterprise.status_tone == 'danger' %}danger{% else %}warning{% endif %}">{{ enterprise.status_label }}</span></div>
+    {% if enterprise.gaps %}<div class="text-muted">{{ enterprise.gaps.0.label }}</div>{% endif %}
+    <div class="text-muted">{{ enterprise.next_action }}</div>
+  {% endif %}
+  {% if can_manage_activos %}
+    <details class="pd-mt-2" {% if editar_abierto %}open{% endif %}>
+      <summary>Editar datos del equipo</summary>
+      <form method="post" data-async-action action="{{ catalogo_url }}#activo-{{ a.id }}">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="update_description">
+        <input type="hidden" name="activo_id" value="{{ a.id }}">
+        <input type="hidden" name="actualizado_en" value="{% if errores %}{{ version_enviada }}{% else %}{{ a.actualizado_en.isoformat }}{% endif %}">
+        {% if errores.actualizado_en %}<p role="alert">{{ errores.actualizado_en }}</p>{% endif %}
+        <label for="nombre-equipo-{{ a.id }}">Nombre</label>
+        <input id="nombre-equipo-{{ a.id }}" name="nombre" value="{{ datos.nombre }}" maxlength="180" required {% if errores.nombre %}aria-invalid="true" aria-describedby="error-nombre-{{ a.id }}"{% endif %}>
+        {% if errores.nombre %}<p id="error-nombre-{{ a.id }}" role="alert">{{ errores.nombre }}</p>{% endif %}
+        <label for="categoria-equipo-{{ a.id }}">Categoría</label>
+        <input id="categoria-equipo-{{ a.id }}" name="categoria" value="{{ datos.categoria }}" maxlength="120" {% if errores.categoria %}aria-invalid="true" aria-describedby="error-categoria-{{ a.id }}"{% endif %}>
+        {% if errores.categoria %}<p id="error-categoria-{{ a.id }}" role="alert">{{ errores.categoria }}</p>{% endif %}
+        <label for="criticidad-equipo-{{ a.id }}">Criticidad</label>
+        <select id="criticidad-equipo-{{ a.id }}" name="criticidad" {% if errores.criticidad %}aria-invalid="true" aria-describedby="error-criticidad-{{ a.id }}"{% endif %}>
+          {% if errores.criticidad %}<option value="{{ datos.criticidad }}" selected>{{ datos.criticidad }}</option>{% endif %}
+          {% for v, l in criticidad_choices %}<option value="{{ v }}" {% if datos.criticidad == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+        </select>
+        {% if errores.criticidad %}<p id="error-criticidad-{{ a.id }}" role="alert">{{ errores.criticidad }}</p>{% endif %}
+        <label for="notas-equipo-{{ a.id }}">Notas</label>
+        <textarea id="notas-equipo-{{ a.id }}" name="notas">{{ datos.notas }}</textarea>
+        <button class="btn btn-secondary" type="submit" data-pending-label="Guardando…">Guardar datos</button>
+      </form>
+    </details>
+  {% endif %}
+</td>
