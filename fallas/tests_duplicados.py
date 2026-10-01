@@ -185,7 +185,8 @@ class DuplicadosFallasTests(TestCase):
 
 
 class DuplicadosHigieneConcurrenciaTests(TransactionTestCase):
-    reset_sequences = True
+    # No fixed IDs are needed. Resetting sequences collides with migrated branches
+    # when this is the first TransactionTestCase in an isolated CI shard.
 
     def setUp(self):
         user_model = get_user_model()

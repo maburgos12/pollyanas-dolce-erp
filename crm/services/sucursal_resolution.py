@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 
-from django.db.models import Max
-
 from core.branch_catalog import eligible_operational_branch_qs
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot
@@ -138,13 +136,11 @@ class SucursalResolverService:
         return self._pick_best_point_branch(branches)
 
     def _pick_best_point_branch(self, branches: list[PointBranch]) -> PointBranch:
+        # ponytail: one indexed probe per candidate; revisit if branch aliases become numerous.
         latest_snapshot_map = {
-            row["branch_id"]: row["latest_captured_at"]
-            for row in (
-                PointInventorySnapshot.objects.filter(branch_id__in=[branch.id for branch in branches])
-                .values("branch_id")
-                .annotate(latest_captured_at=Max("captured_at"))
-            )
+            branch.id: PointInventorySnapshot.objects.filter(branch_id=branch.id, captured_at__isnull=False)
+            .order_by("-captured_at").values_list("captured_at", flat=True).first()
+            for branch in branches
         }
 
         def _stamp(value):
