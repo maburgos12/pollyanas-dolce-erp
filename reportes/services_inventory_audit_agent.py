@@ -253,7 +253,7 @@ class InventoryAuditAgent:
         if product_ids:
             prior_rows = (
                 ProductInventoryAuditCase.objects.filter(product_id__in=product_ids)
-                .exclude(month=month)
+                .filter(month__lt=month)
                 .exclude(difference=0)
                 .exclude(
                     movement_status__in=(
@@ -568,7 +568,7 @@ class InventoryAuditAgent:
                 product_id=case.product_id,
                 **branch_filter,
             )
-            .exclude(month=case.month)
+            .filter(month__lt=case.month)
             .exclude(difference=0)
             .exclude(
                 movement_status__in=(

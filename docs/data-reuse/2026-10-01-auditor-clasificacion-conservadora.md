@@ -27,7 +27,7 @@ Clasificar cada expediente mensual de producto y ubicación sin confundir eviden
 
 Extender los dos servicios actuales, sin nuevas tablas, capturas, descargas ni modelos de aprendizaje. Mantener los códigos informativos y su evidencia; ignorarlos únicamente para decidir si un saldo cero es excepción. Actualizar clasificaciones obsoletas aunque el fingerprint de cantidades permanezca igual. Preservar aprobaciones y resoluciones humanas cuando la evidencia no cambió.
 
-Un expediente conciliado no se eleva por antecedentes sin discrepancia logística abierta. La reincidencia de inventario requiere diferencia numérica actual y previa, con fuente previa completa. Una fuente incompleta no acredita una diferencia ni un saldo cero. La asignación conserva únicamente responsables explícitos o jefaturas únicas; no se reasignan casos a una persona arbitraria.
+Un expediente conciliado no se eleva por antecedentes sin discrepancia logística abierta. La reincidencia de inventario requiere diferencia numérica actual y de un mes anterior, con fuente previa completa; los meses posteriores no cuentan como antecedentes. Una fuente incompleta no acredita una diferencia ni un saldo cero. La asignación conserva únicamente responsables explícitos o jefaturas únicas; no se reasignan casos a una persona arbitraria.
 
 La reconstrucción existente ya ejecuta InventoryAuditAgent.run_month mediante transaction.on_commit; se reutiliza ese contrato y se prueba la ejecución efectiva. Las notificaciones mantienen fingerprints para evitar repetición.
 

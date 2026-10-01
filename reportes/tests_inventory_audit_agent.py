@@ -133,6 +133,22 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         result = InventoryAuditAgent().investigate_case(case)
         self.assertNotIn("diferencia comprobada", " ".join(result.summary["facts"]).lower())
 
+    def test_future_month_is_not_a_previous_stock_recurrence(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        future_run = ProductInventoryAuditRun.objects.create(
+            month=date(2026, 9, 1), status=ProductInventoryAuditRun.Status.READY,
+            calculation_fingerprint="d" * 64,
+        )
+        self.make_case(run=future_run, month=future_run.month, calculation_fingerprint="e" * 64)
+        current = self.make_case()
+        agent = InventoryAuditAgent()
+        self.assertEqual(agent._recurrence_count(current), 0)
+        rows = list(ProductInventoryAuditCase.objects.filter(pk=current.pk).values(
+            "id", "product_id", "branch_id", "branch__erp_branch_id", "source_trace"
+        ))
+        agent._prepare_month_context(self.month, rows)
+        self.assertEqual(agent._recurrence_count(current), 0)
+
     def _head(self, *, username, department):
         user = get_user_model().objects.create_user(username=username)
         Empleado.objects.create(
