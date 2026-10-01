@@ -45,6 +45,7 @@ from inventario.models import ALMACEN_CHOICES, LoteProduccion
 from maestros.models import Insumo, UnidadMedida
 from maestros.utils.canonical_catalog import canonicalized_active_insumos
 from mermas.models import MermaInsumo, OrdenAjustePoint
+from mantenimiento.services_access import can_access_mantenimiento
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mermas.services_insumos import (
     consultar_existencia_insumo_point, decidir_merma_insumo, enviar_merma_insumo,
@@ -200,6 +201,7 @@ def activo_pasaporte(request, qr_token):
 
     log_event(request.user, "SCAN", "activos.Activo", activo.pk, {"qr": True})
     contexto = construir_pasaporte(activo, request.user)
+    contexto["puede_ver_historial"] = can_access_mantenimiento(request.user)
     contexto["reportar_url"] = (
         f"{reverse('operacion:sucursal_tools')}?tab=fallas&activo={activo.pk}#falla-form"
         if contexto["puede_reportar"]

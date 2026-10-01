@@ -5878,6 +5878,50 @@ class LogisticaControlRutasTests(TestCase):
         self.assertFalse(ParadaRuta.objects.filter(pk=self.parada.id).exists())
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(source_hash="pendiente-quitar").exists())
 
+    def test_quitar_parada_con_cero_point_solo_sin_captura_humana(self):
+        self.client.force_login(self.user)
+        UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)
+        self.ruta.estatus = RutaEntrega.ESTATUS_PLANEADA
+        self.ruta.save(update_fields=["estatus"])
+        otra_parada = ParadaRuta.objects.create(ruta=self.ruta, punto=self.punto, orden=2)
+        transferencia = self._crear_transferencia_point_abierta(source_hash="cero-quitar")
+        transferencia.sent_quantity = Decimal("0")
+        transferencia.save(update_fields=["sent_quantity"])
+        checklist = RutaCargaChecklist.objects.create(ruta=self.ruta)
+        linea = RutaCargaChecklistLinea.objects.create(
+            checklist=checklist, parada=self.parada, point_transfer_line=transferencia,
+            transfer_external_id=transferencia.transfer_external_id,
+            detail_external_id=transferencia.detail_external_id,
+            source_hash="cero-quitar", item_name="Pastel enviado en cero",
+            cantidad_enviada_esperada=0, cantidad_cargada=0,
+            estatus=RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED,
+        )
+        url = reverse("logistica:ruta_detail", kwargs={"pk": self.ruta.id})
+        datos = {"action": "delete_parada", "parada_id": self.parada.id}
+        automatico = {
+            "validado_en": None, "validado_por": None, "client_event_id": "",
+            "cantidad_cargada": Decimal("0"), "cantidad_enviada_esperada": Decimal("0"),
+        }
+        for cambio in (
+            {"validado_en": timezone.now()}, {"validado_por": self.user},
+            {"client_event_id": "captura-humana"}, {"cantidad_cargada": Decimal("1")},
+            {"cantidad_enviada_esperada": Decimal("1")},
+        ):
+            with self.subTest(cambio=cambio):
+                RutaCargaChecklistLinea.objects.filter(pk=linea.pk).update(**(automatico | cambio))
+                response = self.client.post(url, datos, follow=True)
+                self.assertContains(response, "ya tiene carga validada")
+                self.assertTrue(ParadaRuta.objects.filter(pk=self.parada.pk).exists())
+                self.assertTrue(RutaCargaChecklistLinea.objects.filter(pk=linea.pk).exists())
+        RutaCargaChecklistLinea.objects.filter(pk=linea.pk).update(**automatico)
+        response = self.client.post(url, datos, follow=True)
+        self.assertContains(response, "eliminada")
+        self.assertFalse(ParadaRuta.objects.filter(pk=self.parada.pk).exists())
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(pk=linea.pk).exists())
+        self.assertTrue(PointTransferLine.objects.filter(pk=transferencia.pk).exists())
+        otra_parada.refresh_from_db()
+        self.assertEqual(otra_parada.orden, 1)
+
     def test_ruta_en_ruta_bloquea_quitar_parada_con_carga(self):
         self.client.force_login(self.user)
         UserModuleAccess.objects.create(user=self.user, module="logistica", access=ACCESS_MANAGE)

@@ -13,7 +13,7 @@ from pos_bridge.services.production_entry_extractor import PointProductionEntryE
 
 class PointProductionEntryExtractorTests(SimpleTestCase):
     @patch("pos_bridge.services.production_entry_extractor.write_json_file")
-    def test_retries_transient_point_error_in_production_detail(self, _write_json_file):
+    def test_retries_transient_empty_list_and_production_detail_error(self, _write_json_file):
         production = {
             "FK_Produccion": 23220,
             "Sucursal": "CEDIS",
@@ -30,7 +30,9 @@ class PointProductionEntryExtractorTests(SimpleTestCase):
             "Cantidad_producida": 15,
             "IsInsumo": False,
         }
-        responses = [
+        sessions = [Mock(), Mock(), Mock()]
+        sessions[0].get.return_value = Mock(text=json.dumps([]), raise_for_status=Mock())
+        sessions[1].get.side_effect = [
             Mock(text=json.dumps([production]), raise_for_status=Mock()),
             Mock(
                 text=json.dumps(
@@ -42,12 +44,10 @@ class PointProductionEntryExtractorTests(SimpleTestCase):
                 ),
                 raise_for_status=Mock(),
             ),
-            Mock(text=json.dumps([detail]), raise_for_status=Mock()),
         ]
-        session = Mock()
-        session.get.side_effect = responses
+        sessions[2].get.return_value = Mock(text=json.dumps([detail]), raise_for_status=Mock())
         session_service = Mock()
-        session_service.create.return_value = SimpleNamespace(session=session)
+        session_service.create.side_effect = [SimpleNamespace(session=session) for session in sessions]
         settings = SimpleNamespace(
             base_url="https://app.pointmeup.com",
             timeout_ms=30000,
@@ -63,4 +63,4 @@ class PointProductionEntryExtractorTests(SimpleTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].production_external_id, "23220")
         self.assertEqual(rows[0].detail_external_id, "88012")
-        self.assertEqual(session.get.call_count, 3)
+        self.assertEqual(session_service.create.call_count, 3)

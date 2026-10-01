@@ -31,6 +31,7 @@ from core.models import AuditLog, Sucursal
 from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
+from mantenimiento.services_access import can_access_mantenimiento
 
 from .services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from .services_pasaporte import activos_autorizados, svg_qr_activo
@@ -2149,6 +2150,7 @@ def activos_catalog(request):
         "filters": {"q": q, "estado": estado, "criticidad": criticidad, "solo_activos": solo_activos, "master_gap": master_gap},
         "import_filters": {"import_q": import_q, "import_mode": import_mode, "import_format": import_format},
         "can_manage_activos": can_manage_inventario(request.user),
+        "puede_ver_historial": can_access_mantenimiento(request.user),
         "import_runs": list(import_runs_qs[:10]),
         "enterprise_cards": enterprise_cards,
         "enterprise_chain": enterprise_chain,
@@ -2871,6 +2873,7 @@ def ordenes(request):
         ),
         "estado": estado,
         "can_manage_activos": can_manage_inventario(request.user),
+        "puede_ver_historial": can_access_mantenimiento(request.user),
         "enterprise_gap": enterprise_gap,
         "enterprise_cards": enterprise_cards,
         "enterprise_focus_cards": enterprise_focus_cards,

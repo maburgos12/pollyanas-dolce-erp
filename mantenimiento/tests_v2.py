@@ -922,6 +922,27 @@ class MaintenanceInboxV2Tests(TestCase):
 
 
 class MaintenanceUnifiedHistoryV2Tests(TestCase):
+    def test_asset_filter_counts_only_its_documents_without_fleet_pages(self):
+        order = OrdenMantenimiento.objects.create(activo_ref=self.asset, descripcion="Servicio directo")
+        falla = ReporteFalla.objects.create(
+            sucursal=self.branch, activo_relacionado=self.asset, categoria=self.category,
+            titulo="Falla del equipo", descripcion="x", reportado_por=self.actor,
+            foto_evidencia="fallas/evidencias/history.jpg",
+        )
+        ReporteUnidad.objects.create(unidad=self.unit, tipo="falla", descripcion="Otra fuente")
+        ReparacionUnidad.objects.create(unidad=self.unit, fecha_ingreso=timezone.localdate(), descripcion_falla="Motor")
+        ServicioRealizadoUnidad.objects.create(
+            unidad=self.unit, tipo_servicio=self.service_type, fecha_servicio=timezone.localdate(),
+        )
+        params = {"periodo": "todo", "activo": self.asset.pk, "page_size": 1}
+        first = self.client.get("/api/mantenimiento/v2/historial/", params).json()
+        second = self.client.get("/api/mantenimiento/v2/historial/", {**params, "page": 2}).json()
+        self.assertEqual(first["pagination"]["total"], 2)
+        self.assertTrue(first["pagination"]["has_next"])
+        self.assertFalse(second["pagination"]["has_next"])
+        self.assertEqual({row["uid"] for row in first["results"] + second["results"]},
+                         {f"orden:{order.pk}", f"falla:{falla.pk}"})
+
     @classmethod
     def setUpTestData(cls):
         cls.user = get_user_model().objects.create_superuser("history-admin", "history@example.com", "test")

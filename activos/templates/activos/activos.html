@@ -162,7 +162,8 @@
             </td>
             <td>{% if a.activo %}<span class="badge badge-success">Sí</span>{% else %}<span class="badge badge-danger">No</span>{% endif %}</td>
             <td>
-              {% if row.puede_ver_ficha %}<a class="btn btn-secondary" href="{% url 'operacion:activo_pasaporte' a.qr_token %}">Ver ficha</a>{% endif %}
+              {% if row.puede_ver_ficha %}<a class="btn btn-secondary" href="{% url 'operacion:activo_pasaporte' a.qr_token %}">Ver ficha</a>
+              {% if puede_ver_historial %}<a class="btn btn-secondary" href="{% url 'mantenimiento:app' %}?vista=historial&amp;activo={{ a.pk }}">Trabajos y servicios</a>{% endif %}{% endif %}
               {% if can_manage_activos %}
                 <div class="quick-actions pd-flex-actions-wrap">
                   <form method="post">

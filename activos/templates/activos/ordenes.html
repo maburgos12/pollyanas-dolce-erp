@@ -8,6 +8,7 @@
 {% block content %}
 <div class="quick-actions pd-mb-3">
   <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
+  {% if puede_ver_historial %}<a class="btn btn-secondary" href="{% url 'mantenimiento:app' %}?vista=historial">Trabajos y servicios</a>{% endif %}
   {% if can_manage_activos %}<a class="btn btn-primary" href="#nueva-orden" onclick="document.getElementById('nueva-orden').open = true">Nueva orden</a>
   <a class="btn btn-primary" href="{% url 'activos:registro_rapido' %}">Registrar mantenimiento realizado</a>{% endif %}
 </div>

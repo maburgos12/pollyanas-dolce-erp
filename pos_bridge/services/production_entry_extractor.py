@@ -60,25 +60,38 @@ class PointProductionEntryExtractor:
         auth_session = self.http_session_service.create()
         branch_name = (branch_filter or "TODAS LAS SUCURSALES").strip()
         branch_param = branch_filter or "null"
-        response = auth_session.session.get(
-            urljoin(self.settings.base_url.rstrip("/") + "/", self.LIST_PATH.lstrip("/")),
-            params={
-                "pkSucursal": branch_param,
-                "sucursal": branch_name,
-                "fechaInicio": str(self._to_epoch_ms(start_date)),
-                "fechaFinal": str(self._to_epoch_ms(end_date)),
-                "produccion": "3",
-                "activo": "true",
-                "estado": "PROCESADOS / TERMINADOS",
-                "empresa": "MATRIZ",
-            },
-            timeout=self.settings.timeout_ms / 1000,
-        )
-        response.raise_for_status()
-        try:
-            productions = json.loads(response.text)
-        except json.JSONDecodeError as exc:
-            raise ExtractionError("Point devolvió un listado de producción inválido.") from exc
+        attempts = max(1, self.settings.retry_attempts)
+        productions = None
+        for attempt in range(attempts):
+            response = auth_session.session.get(
+                urljoin(self.settings.base_url.rstrip("/") + "/", self.LIST_PATH.lstrip("/")),
+                params={
+                    "pkSucursal": branch_param,
+                    "sucursal": branch_name,
+                    "fechaInicio": str(self._to_epoch_ms(start_date)),
+                    "fechaFinal": str(self._to_epoch_ms(end_date)),
+                    "produccion": "3",
+                    "activo": "true",
+                    "estado": "PROCESADOS / TERMINADOS",
+                    "empresa": "MATRIZ",
+                },
+                timeout=self.settings.timeout_ms / 1000,
+            )
+            response.raise_for_status()
+            try:
+                candidate_productions = json.loads(response.text)
+            except json.JSONDecodeError:
+                candidate_productions = None
+            if isinstance(candidate_productions, list) and all(
+                isinstance(production, dict) for production in candidate_productions
+            ):
+                productions = candidate_productions
+                if productions or attempt == attempts - 1:
+                    break
+            if attempt < attempts - 1:
+                auth_session = self.http_session_service.create()
+        if productions is None:
+            raise ExtractionError("Point devolvió un listado de producción inválido.")
 
         extracted: list[ExtractedProductionLine] = []
         raw_export = {
@@ -92,7 +105,7 @@ class PointProductionEntryExtractor:
             if not production_id:
                 continue
             details = None
-            for _attempt in range(max(1, self.settings.retry_attempts)):
+            for attempt in range(attempts):
                 detail_response = auth_session.session.get(
                     urljoin(self.settings.base_url.rstrip("/") + "/", self.DETAIL_PATH.lstrip("/")),
                     params={"pkLista": production_id},
@@ -102,12 +115,14 @@ class PointProductionEntryExtractor:
                 try:
                     candidate_details = json.loads(detail_response.text)
                 except json.JSONDecodeError:
-                    continue
+                    candidate_details = None
                 if isinstance(candidate_details, list) and all(
                     isinstance(detail, dict) for detail in candidate_details
                 ):
                     details = candidate_details
                     break
+                if attempt < attempts - 1:
+                    auth_session = self.http_session_service.create()
             if details is None:
                 raise ExtractionError(
                     f"Point devolvió detalles inválidos para la producción {production_id}."
