@@ -29,6 +29,7 @@ from reportes.models import (
 
 
 _QUANTITY = Decimal("0.0001")
+_POINT_HISTORY_BATCH_SIZE = 50
 _MISSING_CASE_ISSUE = "CASE_MISSING_FROM_REBUILD"
 _LEGACY_FINGERPRINT_TRACE_KEYS = (
     "opening",
@@ -256,97 +257,110 @@ class InventoryAuditMaterializer:
         with transaction.atomic():
             self._lock_source_months(month_start)
             branch_aliases, _ = canonical_point_branch_identity()
-            cases = ProductInventoryAuditCase.objects.select_for_update().filter(
+            candidates = ProductInventoryAuditCase.objects.filter(
                 month=month_start,
                 branch_id__in=set(branch_aliases.values()),
             ).exclude(difference=0)
             if case_ids is not None:
-                cases = cases.filter(id__in=case_ids)
-            cases = list(
-                cases.select_related("branch", "product", "run").order_by("id")
+                candidates = candidates.filter(id__in=case_ids)
+            selected_ids = list(
+                candidates.order_by("id").values_list("id", flat=True)
             )
-            histories = AuditStockHistoryService().reconcile_many(cases, month_start)
-            counts = {"selected": len(cases), "reconciled": 0, "pending": 0}
+            counts = {"selected": len(selected_ids), "reconciled": 0, "pending": 0}
             changed = False
             now = timezone.now()
 
-            for case in cases:
-                history = histories.get((case.branch_id, case.product_id))
-                if (
-                    history is None
-                    or history.coverage_status != "COMPLETE"
-                    or history.unknown_movement_ids
-                    or history.unexplained_remainder(
-                        case.opening_point, case.point_closing
-                    )
-                    != 0
-                ):
-                    counts["pending"] += 1
-                    continue
+            for offset in range(0, len(selected_ids), _POINT_HISTORY_BATCH_SIZE):
+                batch_ids = selected_ids[offset : offset + _POINT_HISTORY_BATCH_SIZE]
+                cases = list(
+                    ProductInventoryAuditCase.objects.select_for_update()
+                    .filter(id__in=batch_ids)
+                    .select_related("branch", "product", "run")
+                    .order_by("id")
+                )
+                histories = AuditStockHistoryService().reconcile_many(
+                    cases, month_start
+                )
+                for case in cases:
+                    history = histories.get((case.branch_id, case.product_id))
+                    if (
+                        history is None
+                        or history.coverage_status != "COMPLETE"
+                        or history.unknown_movement_ids
+                        or history.unexplained_remainder(
+                            case.opening_point, case.point_closing
+                        )
+                        != 0
+                    ):
+                        counts["pending"] += 1
+                        continue
 
-                line = SimpleNamespace(
-                    branch=case.branch,
-                    product=case.product,
-                    opening=case.opening_point,
-                    production=case.production,
-                    sales=case.sales,
-                    waste=case.waste,
-                    transfer_in=case.transfer_in,
-                    transfer_out=case.transfer_out,
-                    conversion_in=case.conversion_in,
-                    conversion_out=case.conversion_out,
-                    identified_adjustment=case.identified_adjustment,
-                    expected_closing=case.expected_closing,
-                    point_closing=case.point_closing,
-                    difference=case.difference,
-                    source_trace=case.source_trace,
-                    issues=(),
-                )
-                prepared = self._prepare_line(line, point_history=history)
-                if case.issue_codes:
-                    prepared["source_trace"]["point_history"][
-                        "superseded_issue_codes"
-                    ] = sorted(case.issue_codes)
-                normalized = prepared["normalized_quantities"]
-                previous_fingerprint = case.calculation_fingerprint
-                should_reopen = case.movement_status in {
-                    ProductInventoryAuditCase.MovementStatus.RESOLVED,
-                    ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
-                }
-                movement_status = self._effective_status(
-                    prepared_status=prepared["movement_status"],
-                    existing=case,
-                    unchanged=False,
-                )
-                for field, value in normalized.items():
-                    setattr(case, field, value)
-                case.issue_codes = prepared["issue_codes"]
-                case.source_trace = prepared["source_trace"]
-                case.calculation_fingerprint = prepared["fingerprint"]
-                case.movement_status = movement_status
-                case.rebuilt_at = now
-                case.save(
-                    update_fields=[
-                        *normalized,
-                        "issue_codes",
-                        "source_trace",
-                        "calculation_fingerprint",
-                        "movement_status",
-                        "rebuilt_at",
-                        "updated_at",
-                    ]
-                )
-                changed = True
-                if should_reopen:
-                    self._create_reopen_event(
-                        case=case,
-                        previous_fingerprint=previous_fingerprint,
-                        new_fingerprint=prepared["fingerprint"],
+                    line = SimpleNamespace(
+                        branch=case.branch,
+                        product=case.product,
+                        opening=case.opening_point,
+                        production=case.production,
+                        sales=case.sales,
+                        waste=case.waste,
+                        transfer_in=case.transfer_in,
+                        transfer_out=case.transfer_out,
+                        conversion_in=case.conversion_in,
+                        conversion_out=case.conversion_out,
+                        identified_adjustment=case.identified_adjustment,
+                        expected_closing=case.expected_closing,
+                        point_closing=case.point_closing,
+                        difference=case.difference,
+                        source_trace=case.source_trace,
+                        issues=(),
                     )
-                if movement_status == ProductInventoryAuditCase.MovementStatus.BALANCED:
-                    counts["reconciled"] += 1
-                else:
-                    counts["pending"] += 1
+                    prepared = self._prepare_line(line, point_history=history)
+                    if case.issue_codes:
+                        prepared["source_trace"]["point_history"][
+                            "superseded_issue_codes"
+                        ] = sorted(case.issue_codes)
+                    normalized = prepared["normalized_quantities"]
+                    previous_fingerprint = case.calculation_fingerprint
+                    should_reopen = case.movement_status in {
+                        ProductInventoryAuditCase.MovementStatus.RESOLVED,
+                        ProductInventoryAuditCase.MovementStatus.PENDING_APPROVAL,
+                    }
+                    movement_status = self._effective_status(
+                        prepared_status=prepared["movement_status"],
+                        existing=case,
+                        unchanged=False,
+                    )
+                    for field, value in normalized.items():
+                        setattr(case, field, value)
+                    case.issue_codes = prepared["issue_codes"]
+                    case.source_trace = prepared["source_trace"]
+                    case.calculation_fingerprint = prepared["fingerprint"]
+                    case.movement_status = movement_status
+                    case.rebuilt_at = now
+                    case.save(
+                        update_fields=[
+                            *normalized,
+                            "issue_codes",
+                            "source_trace",
+                            "calculation_fingerprint",
+                            "movement_status",
+                            "rebuilt_at",
+                            "updated_at",
+                        ]
+                    )
+                    changed = True
+                    if should_reopen:
+                        self._create_reopen_event(
+                            case=case,
+                            previous_fingerprint=previous_fingerprint,
+                            new_fingerprint=prepared["fingerprint"],
+                        )
+                    if (
+                        movement_status
+                        == ProductInventoryAuditCase.MovementStatus.BALANCED
+                    ):
+                        counts["reconciled"] += 1
+                    else:
+                        counts["pending"] += 1
 
             if changed:
                 transaction.on_commit(
