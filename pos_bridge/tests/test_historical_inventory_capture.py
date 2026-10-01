@@ -95,14 +95,18 @@ class _FakePointClient:
         self.current_by_product = current_by_product
         self.current_failures = current_failures
         self.login_calls = 0
+        self.history_calls = []
+        self.product_stock_calls = []
 
     def login(self):
         self.login_calls += 1
 
     def get_stock_history(self, product_id, branch_id, *, movements=500):
+        self.history_calls.append((str(branch_id), str(product_id)))
         return self.history_by_key[(str(branch_id), str(product_id))]
 
     def get_product_stock(self, product_id):
+        self.product_stock_calls.append(str(product_id))
         if self.current_failures:
             self.current_failures -= 1
             raise HistoricalInventoryCaptureError("respuesta de sesión inesperada")
@@ -205,6 +209,69 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(result.closing.lines.count(), 0)
         self.assertEqual(result.unresolved_count, 1)
         self.assertEqual(result.closing.metadata["unresolved"][0]["branch_external_id"], "1")
+
+    def test_retry_reuses_resolved_draft_lines_and_fetches_only_pending_pairs(self):
+        second_erp = Sucursal.objects.create(codigo="CENTRO", nombre="Centro")
+        second_branch = PointBranch.objects.create(
+            external_id="2", name="Centro", erp_branch=second_erp
+        )
+        first_client = _FakePointClient(
+            history_by_key={
+                ("1", "857"): [
+                    {
+                        "Fecha": "2026-07-31T22:00:00",
+                        "FK_Movimiento": 123,
+                        "Existencia_anterior": 4,
+                        "Existencia_nueva": 3,
+                        "Cancelado": False,
+                    }
+                ],
+                ("2", "857"): [],
+            },
+            current_by_product={
+                "857": [
+                    {"PK_Sucursal": 1, "Cantidad": 3},
+                    {"PK_Sucursal": 2, "Cantidad": 2},
+                ]
+            },
+        )
+        first = HistoricalPointInventoryClosingCapture(client=first_client).capture(
+            operational_date=date(2026, 7, 31),
+            branches=[self.branch, second_branch],
+            products=[self.product],
+        )
+        self.assertEqual(first.closing.status, PointHistoricalInventoryClosing.STATUS_DRAFT)
+        self.assertEqual(first.closing.lines.count(), 1)
+
+        retry_client = _FakePointClient(
+            history_by_key={
+                ("2", "857"): [
+                    {
+                        "Fecha": "2026-07-31T21:00:00",
+                        "FK_Movimiento": 456,
+                        "Existencia_anterior": 3,
+                        "Existencia_nueva": 2,
+                        "Cancelado": False,
+                    }
+                ]
+            },
+            current_by_product={
+                "857": [
+                    {"PK_Sucursal": 1, "Cantidad": 3},
+                    {"PK_Sucursal": 2, "Cantidad": 2},
+                ]
+            },
+        )
+        retried = HistoricalPointInventoryClosingCapture(client=retry_client).capture(
+            operational_date=date(2026, 7, 31),
+            branches=[self.branch, second_branch],
+            products=[self.product],
+        )
+
+        self.assertEqual(retried.closing.pk, first.closing.pk)
+        self.assertEqual(retried.closing.status, PointHistoricalInventoryClosing.STATUS_VERIFIED)
+        self.assertEqual(retried.closing.lines.count(), 2)
+        self.assertEqual(retry_client.history_calls, [("2", "857")])
 
     def test_relogs_once_when_point_session_expires_mid_capture(self):
         client = _FakePointClient(
