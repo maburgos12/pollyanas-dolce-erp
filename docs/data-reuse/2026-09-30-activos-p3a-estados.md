@@ -38,3 +38,5 @@ Riesgos y pendientes: no hay enlace documental ReporteFalla-OrdenMantenimiento; 
 ## Baseline P3A autorizado
 
 PostgreSQL de producción: ATOMIC_REQUESTS=False. Antes de cambio: Activo185, OrdenMantenimiento63, PlanMantenimiento0, BitacoraMantenimiento63, ReporteFalla107. Huellas de todos sus campos por PK almacenadas como digest en evidencia externa; no se exportaron valores sensibles. El inventario se repitió con términos orden/plan/mantenimiento, en transacción READ ONLY. Crear/actualizar fuente sigue siendo el handler existente; P3A reutiliza esos identificadores y reglas monetarias. Escritores adicionales de estado encontrados: seguimiento móvil, serializer de seguimiento y cierre desde update_costos; todos deben compartir transición. `_registrar_plan` en Mantenimiento crea nuevas órdenes y queda fuera de P3A.
+
+Una captura conjunta de estado y seguimiento/costo en los tres escritores con metadatos conserva una sola entrada de intervención: se completa únicamente el evento recién creado en la misma transacción, sin buscar ni editar históricos; mantiene texto de transición y auditoría canónica. La suite original de Operación valida este contrato.

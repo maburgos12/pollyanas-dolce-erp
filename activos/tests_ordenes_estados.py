@@ -117,25 +117,57 @@ class OrdenStatesTests(TestCase):
         self.assertNotContains(page, reverse("activos:orden_estatus", args=[order.id, "EN_PROCESO"]))
         self.assertNotContains(page, reverse("activos:orden_estatus", args=[order.id, "CANCELADA"]))
 
+    def test_combined_status_and_capture_remain_one_intervention(self):
+        for channel in ("mobile", "detail", "costs"):
+            order = self.order()
+            if channel == "costs":
+                response = self.client.post(reverse("activos:ordenes"), {
+                    "action": "update_costos", "orden_id": order.id,
+                    "cerrar_orden": "1", "costo_otros": "125.50",
+                })
+                self.assertEqual(response.status_code, 302)
+            else:
+                response = self.write(channel, order, "CERRADA", comentario="Servicio revisado",
+                                      costo_real="125.50", costo_adicional="125.50")
+                self.assertEqual(response.status_code, 200)
+            order.refresh_from_db()
+            self.assertEqual(order.costo_otros, Decimal("125.50"))
+            event = order.bitacora.get()
+            self.assertIn("PENDIENTE -> CERRADA", event.comentario)
+            self.assertIn("Costos actualizados" if channel == "costs" else "Servicio revisado", event.comentario)
+            self.assertEqual(AuditLog.objects.filter(
+                model="activos.OrdenMantenimiento", object_id=str(order.id),
+                payload__from="PENDIENTE", payload__to="CERRADA",
+            ).count(), 1)
+
     def test_metadata_failure_rolls_back_transition_and_plan(self):
-        order = self.order()
-        before = (self.plan.ultima_ejecucion, self.plan.proxima_ejecucion)
-        # First bitacora is canonical status, second explicit follow-up fails.
-        original = BitacoraMantenimiento.objects.create
-        def create(**kwargs):
-            if kwargs["accion"] != "ESTATUS":
-                raise RuntimeError("fallo metadata")
-            return original(**kwargs)
-        with patch("mantenimiento.views.BitacoraMantenimiento.objects.create", side_effect=create):
-            with self.assertRaises(RuntimeError):
-                self.write("mobile", order, "CERRADA", costo_real="300", comentario="Servicio")
-        order.refresh_from_db()
-        self.plan.refresh_from_db()
-        self.assertEqual(order.estatus, "PENDIENTE")
-        self.assertEqual(order.costo_otros, Decimal("0"))
-        self.assertEqual((self.plan.ultima_ejecucion, self.plan.proxima_ejecucion), before)
-        self.assertFalse(order.bitacora.exists())
-        self.assertFalse(AuditLog.objects.filter(model="activos.OrdenMantenimiento", object_id=str(order.id)).exists())
+        # Canonical CREATE succeeds, explicit follow-up SAVE then fails.
+        original_save = BitacoraMantenimiento.save
+        def save_and_fail(event, *args, **kwargs):
+            original_save(event, *args, **kwargs)
+            if event.accion != "ESTATUS":
+                raise RuntimeError("fallo después de guardar metadata")
+        for channel in ("mobile", "detail", "costs"):
+            order = self.order()
+            before = (self.plan.ultima_ejecucion, self.plan.proxima_ejecucion)
+            with patch.object(BitacoraMantenimiento, "save", new=save_and_fail):
+                with self.assertRaises(RuntimeError):
+                    if channel == "costs":
+                        self.client.post(reverse("activos:ordenes"), {
+                            "action": "update_costos", "orden_id": order.id,
+                            "cerrar_orden": "1", "costo_otros": "300",
+                        })
+                    else:
+                        self.write(channel, order, "CERRADA", costo_real="300",
+                                   costo_adicional="300", comentario="Servicio")
+            order.refresh_from_db()
+            self.plan.refresh_from_db()
+            self.assertEqual(order.estatus, "PENDIENTE")
+            self.assertEqual(order.costo_otros, Decimal("0"))
+            self.assertIsNone(order.fecha_cierre)
+            self.assertEqual((self.plan.ultima_ejecucion, self.plan.proxima_ejecucion), before)
+            self.assertFalse(order.bitacora.exists())
+            self.assertFalse(AuditLog.objects.filter(model="activos.OrdenMantenimiento", object_id=str(order.id)).exists())
 
     def test_write_permissions_remain_required(self):
         viewer = get_user_model().objects.create_user("sin_acceso", password="test")

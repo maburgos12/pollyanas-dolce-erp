@@ -543,7 +543,7 @@ class ActivosOrdenStatusUpdateView(APIView):
         ser.is_valid(raise_exception=True)
         estatus_new = ser.validated_data["estatus"]
         try:
-            orden, estatus_prev, updated = cambiar_estatus_orden(
+            orden, estatus_prev, updated, _ = cambiar_estatus_orden(
                 orden.id, estatus_new, request.user, source="api",
             )
         except TransicionOrdenInvalida as exc:

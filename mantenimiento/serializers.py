@@ -307,9 +307,11 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
         costo_adicional = self.validated_data.get("costo_adicional")
 
         try:
-            orden, _, updated = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
+            orden, _, updated, bitacora = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
         except TransicionOrdenInvalida as exc:
             raise serializers.ValidationError({"estatus": str(exc)}) from exc
+        if updated:
+            cambios.append(f"Estatus: {orden.get_estatus_display()}")
         if updated and estatus == OrdenMantenimiento.ESTATUS_CERRADA:
             orden.ejecutado_por = request.user
         if not any(key != "estatus" for key in self.validated_data):
@@ -341,13 +343,12 @@ class OrdenMantenimientoSeguimientoSerializer(serializers.Serializer):
         bitacora_texto = comentario
         if cambios:
             bitacora_texto = " | ".join(cambios + ([comentario] if comentario else []))
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            usuario=request.user,
-            accion=accion,
-            comentario=bitacora_texto,
-            costo_adicional=costo_adicional or Decimal("0"),
-        )
+        bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+        transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+        bitacora.accion = accion
+        bitacora.comentario = transicion + bitacora_texto
+        bitacora.costo_adicional = costo_adicional or Decimal("0")
+        bitacora.save()
         return orden
 
 

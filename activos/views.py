@@ -2644,7 +2644,7 @@ def ordenes(request):
                 with transaction.atomic():
                     orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
                     close_now = (request.POST.get("cerrar_orden") or "").strip().lower() in {"1", "on", "true", "yes"}
-                    orden, _, updated = cambiar_estatus_orden(
+                    orden, _, updated, bitacora = cambiar_estatus_orden(
                         orden.id, OrdenMantenimiento.ESTATUS_CERRADA if close_now else None, request.user,
                     )
                     orden.costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
@@ -2661,15 +2661,14 @@ def ordenes(request):
                             "actualizado_en",
                         ]
                     )
-                    BitacoraMantenimiento.objects.create(
-                        orden=orden,
-                        accion="COSTOS",
-                        comentario=(
-                            f"Costos actualizados: repuestos={orden.costo_repuestos}, "
-                            f"mano_obra={orden.costo_mano_obra}, otros={orden.costo_otros}"
-                        ),
-                        usuario=request.user,
+                    bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+                    transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+                    bitacora.accion = "COSTOS"
+                    bitacora.comentario = transicion + (
+                        f"Costos actualizados: repuestos={orden.costo_repuestos}, "
+                        f"mano_obra={orden.costo_mano_obra}, otros={orden.costo_otros}"
                     )
+                    bitacora.save()
                     log_event(
                         request.user,
                         "UPDATE",
@@ -2979,7 +2978,7 @@ def actualizar_orden_estatus(request, pk: int, estatus: str):
         return _respuesta_estatus_orden(request, error="Estatus inválido.")
     get_object_or_404(OrdenMantenimiento, pk=pk)
     try:
-        orden, _, updated = cambiar_estatus_orden(pk, estatus, request.user)
+        orden, _, updated, _ = cambiar_estatus_orden(pk, estatus, request.user)
     except TransicionOrdenInvalida as exc:
         return _respuesta_estatus_orden(request, error=str(exc))
     return _respuesta_estatus_orden(request, orden=orden, updated=updated)

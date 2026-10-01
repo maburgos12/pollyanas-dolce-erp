@@ -30,7 +30,7 @@ def cambiar_estatus_orden(orden_id, estatus, user, *, source=None):
     anterior = orden.estatus
     destino = estatus or anterior
     if destino == anterior:
-        return orden, anterior, False
+        return orden, anterior, False, None
     if destino not in TRANSICIONES_ORDEN.get(anterior, ()):
         raise TransicionOrdenInvalida(f"Transición inválida: {anterior} -> {destino}.")
 
@@ -49,11 +49,11 @@ def cambiar_estatus_orden(orden_id, estatus, user, *, source=None):
             plan.recompute_next_date()
             plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
     orden.save(update_fields=campos)
-    BitacoraMantenimiento.objects.create(
+    bitacora = BitacoraMantenimiento.objects.create(
         orden=orden, accion="ESTATUS", comentario=f"{anterior} -> {destino}", usuario=user,
     )
     payload = {"from": anterior, "to": destino, "folio": orden.folio}
     if source:
         payload["source"] = source
     log_event(user, "UPDATE", "activos.OrdenMantenimiento", orden.id, payload)
-    return orden, anterior, True
+    return orden, anterior, True, bitacora

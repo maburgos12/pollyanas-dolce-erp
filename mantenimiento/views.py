@@ -1480,7 +1480,7 @@ def actualizar_item(request, tipo, pk):
         if estatus and estatus not in {value for value, _label in OrdenMantenimiento.ESTATUS_CHOICES}:
             return Response({"error": "Estatus no válido."}, status=400)
         try:
-            orden, _, _ = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
+            orden, _, _, bitacora = cambiar_estatus_orden(orden.id, estatus, request.user, source="mantenimiento")
         except TransicionOrdenInvalida as exc:
             return Response({"error": str(exc)}, status=400)
         if not proveedor and costo_real is None and not comentario:
@@ -1491,13 +1491,12 @@ def actualizar_item(request, tipo, pk):
         if costo_real is not None:
             orden.costo_otros = costo_real
         orden.save(update_fields=["responsable", "costo_otros", "actualizado_en"])
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            usuario=request.user,
-            accion="Seguimiento desde Mantenimiento",
-            comentario=comentario or "Orden actualizada desde bandeja de mantenimiento.",
-            costo_adicional=costo_real or Decimal("0"),
-        )
+        bitacora = bitacora or BitacoraMantenimiento(orden=orden, usuario=request.user)
+        transicion = f"{bitacora.comentario} | " if bitacora.pk else ""
+        bitacora.accion = "Seguimiento desde Mantenimiento"
+        bitacora.comentario = transicion + (comentario or "Orden actualizada desde bandeja de mantenimiento.")
+        bitacora.costo_adicional = costo_real or Decimal("0")
+        bitacora.save()
         return _update_response(request, _branch_order_item(orden))
 
     return Response({"error": "Tipo no válido."}, status=400)
