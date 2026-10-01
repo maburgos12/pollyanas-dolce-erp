@@ -68,6 +68,7 @@
 
     <section class="bloque" aria-labelledby="mantenimiento">
       <h2 id="mantenimiento">Mantenimiento</h2>
+      {% if puede_ver_historial %}<a class="btn btn-secundario" href="{% url 'mantenimiento:app' %}?vista=historial&amp;activo={{ activo.pk }}">Trabajos y servicios de este equipo</a>{% endif %}
       {% if ultimo_mantenimiento %}
         <p class="dato"><span>Último cierre</span><b>{{ ultimo_mantenimiento.fecha|date:"d/m/Y" }} · {{ ultimo_mantenimiento.folio }}</b></p>
       {% else %}

@@ -322,6 +322,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
             ))
 
     reports = authorized_unit_reports(user)
+    if filters.get("activo"): reports = reports.none()
     if filters.get("tipo") not in {None, "todo", "reporte"}: reports = reports.none()
     if filters.get("sucursal"): reports = reports.filter(unidad__sucursal_id=filters["sucursal"])
     if filters.get("unidad"): reports = reports.filter(unidad_id=filters["unidad"])
@@ -360,7 +361,7 @@ def unified_history_rows(user, *, period, include_costs=False, filters=None, can
                 origin="reporte_unidad", title=item["tipo"], description=item["descripcion"], unit_id=item["unidad_id"]))
 
     for kind, queryset, date_field in (("reparacion", authorized_repairs(user), "fecha_ingreso"), ("servicio_unidad", authorized_unit_services(user), "fecha_servicio")):
-        if filters.get("tipo") not in {None, "todo", kind}:
+        if filters.get("activo") or filters.get("tipo") not in {None, "todo", kind}:
             continue
         if filters.get("sucursal"): queryset = queryset.filter(unidad__sucursal_id=filters["sucursal"])
         if filters.get("unidad"): queryset = queryset.filter(unidad_id=filters["unidad"])
