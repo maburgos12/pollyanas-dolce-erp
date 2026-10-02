@@ -697,7 +697,6 @@ def _sales_fact_daily_map(*, start_date: date, end_date: date) -> dict[date, tup
             fecha__gte=start_date,
             fecha__lte=end_date,
             sucursal_id__isnull=False,
-            sucursal__activa=True,
         )
         .values("fecha")
         .annotate(
@@ -720,7 +719,6 @@ def _indicator_daily_ticket_map(*, start_date: date, end_date: date) -> dict[dat
             indicator_date__gte=start_date,
             indicator_date__lte=end_date,
             branch__erp_branch_id__isnull=False,
-            branch__erp_branch__activa=True,
         )
         .values("indicator_date")
         .annotate(total_tickets=Sum("total_tickets"))
@@ -747,6 +745,15 @@ def _sum_sales_daily_map(
             quantity += row[1]
         cursor += timedelta(days=1)
     return amount, quantity
+
+
+def _historical_sales_amount_quantity(sales_daily_map, *, start_date: date, end_date: date):
+    # A closed branch still belongs to the network in the period when it sold.
+    # Use the same canonical selection as this year's totals, not its analytic copy.
+    totals = canonical_point_sales_range_total(start_date=start_date, end_date=end_date)
+    if totals["source_detail"] != "none":
+        return totals["value"], totals["quantity"]
+    return _sum_sales_daily_map(sales_daily_map, start_date=start_date, end_date=end_date)
 
 
 def _sum_ticket_daily_map(
@@ -1071,9 +1078,8 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
             prev_qty = _to_decimal(prev_partial_payload.get("total_quantity"))
             prev_tickets = 0
             prev_avg_ticket = None
-        elif not prev_is_full_month:
-            # Fallback: calcular desde sales_daily_map aunque sea mes parcial del año previo
-            prev_amount, prev_qty = _sum_sales_daily_map(
+        else:
+            prev_amount, prev_qty = _historical_sales_amount_quantity(
                 sales_daily_map,
                 start_date=prev_year_start,
                 end_date=prev_year_end,
@@ -1084,22 +1090,10 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
                 end_date=prev_year_end,
             )
             prev_avg_ticket = (prev_amount / Decimal(str(prev_tickets))) if prev_tickets > 0 else ZERO
-            if prev_amount == ZERO:
+            if not prev_is_full_month and prev_amount == ZERO:
                 prev_amount = None
                 prev_qty = None
                 prev_avg_ticket = None
-        else:
-            prev_amount, prev_qty = _sum_sales_daily_map(
-                sales_daily_map,
-                start_date=prev_year_start,
-                end_date=prev_year_end,
-            )
-            prev_tickets = _sum_ticket_daily_map(
-                ticket_daily_map,
-                start_date=prev_year_start,
-                end_date=prev_year_end,
-            )
-            prev_avg_ticket = (prev_amount / Decimal(str(prev_tickets))) if prev_tickets > 0 else ZERO
 
         prev2_official_available = bool(prev2_month_cache and prev2_is_full_month)
         if prev2_official_available:
@@ -1116,8 +1110,8 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
             prev2_qty = _to_decimal(prev2_partial_payload.get("total_quantity"))
             prev2_tickets = 0
             prev2_avg_ticket = None
-        elif not prev2_is_full_month:
-            prev2_amount, prev2_qty = _sum_sales_daily_map(
+        else:
+            prev2_amount, prev2_qty = _historical_sales_amount_quantity(
                 sales_daily_map,
                 start_date=prev2_year_start,
                 end_date=prev2_year_end,
@@ -1128,22 +1122,10 @@ def build_monthly_yoy_panel(*, latest_date: date | None = None, months: int = 6)
                 end_date=prev2_year_end,
             )
             prev2_avg_ticket = (prev2_amount / Decimal(str(prev2_tickets))) if prev2_tickets > 0 else ZERO
-            if prev2_amount == ZERO:
+            if not prev2_is_full_month and prev2_amount == ZERO:
                 prev2_amount = None
                 prev2_qty = None
                 prev2_avg_ticket = None
-        else:
-            prev2_amount, prev2_qty = _sum_sales_daily_map(
-                sales_daily_map,
-                start_date=prev2_year_start,
-                end_date=prev2_year_end,
-            )
-            prev2_tickets = _sum_ticket_daily_map(
-                ticket_daily_map,
-                start_date=prev2_year_start,
-                end_date=prev2_year_end,
-            )
-            prev2_avg_ticket = (prev2_amount / Decimal(str(prev2_tickets))) if prev2_tickets > 0 else ZERO
 
         amount_delta = (amount - prev_amount) if prev_amount is not None else None
         qty_delta = (qty - prev_qty) if prev_qty is not None else None
