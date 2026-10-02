@@ -10,7 +10,7 @@ from django.utils import timezone
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointExtractionLog, PointSyncJob
 from ventas.services.sales_read_service import get_daily_sales_bulk
 
-CLOSED_SALES_VERSION = 'closed-sales-v3-official-zero-evidence'
+CLOSED_SALES_VERSION = 'closed-sales-v4-historical-network'
 MONTHS = ('', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
 
 
