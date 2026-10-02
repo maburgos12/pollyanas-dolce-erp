@@ -65,6 +65,7 @@
 .inventory-audit-state-strip span { color: #67565f; font-size: .78rem; font-weight: 800; }
 .inventory-audit-kpis strong { color: var(--vino); font-size: 1.45rem; font-variant-numeric: tabular-nums; }
 .inventory-audit-state-strip strong { color: #31242b; font-size: .94rem; }
+.inventory-audit-state-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .inventory-audit-filters {
   display: flex;
   align-items: end;
