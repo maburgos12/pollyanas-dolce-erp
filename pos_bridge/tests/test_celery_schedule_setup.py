@@ -154,6 +154,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: snapshot operacion dg",
                 "reportes: enviar reporte diario",
                 "logistica: detectar GPS perdido rutas activas",
+                "logistica: regularizar turnos de rutas completadas",
                 "orquestacion: plan diario faltante",
                 "orquestacion: cadena plan demanda-produccion-compras",
                 "orquestacion: excepciones compra DG",
@@ -162,7 +163,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 44)
+        self.assertEqual(PeriodicTask.objects.count(), 45)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -203,6 +204,16 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(gps_perdido.interval.every, 5)
         self.assertEqual(gps_perdido.interval.period, "minutes")
         self.assertEqual(gps_perdido.kwargs, '{"umbral_minutos": 10}')
+        regularizar_turnos = PeriodicTask.objects.get(
+            name="logistica: regularizar turnos de rutas completadas"
+        )
+        self.assertEqual(
+            regularizar_turnos.task,
+            "logistica.tasks.regularizar_turnos_de_rutas_completadas",
+        )
+        self.assertEqual(regularizar_turnos.crontab.hour, "5")
+        self.assertEqual(regularizar_turnos.crontab.minute, "0")
+        self.assertEqual(str(regularizar_turnos.crontab.timezone), "America/Mazatlan")
         inventory_close = PeriodicTask.objects.get(name="pos_bridge: inventario cierre diario")
         self.assertEqual(inventory_close.task, "pos_bridge.inventory_sync")
         self.assertEqual(inventory_close.crontab.hour, "23")
