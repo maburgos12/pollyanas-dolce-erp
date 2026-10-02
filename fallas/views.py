@@ -1,12 +1,14 @@
 from datetime import timedelta
 
+from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Avg, Count, DurationField, ExpressionWrapper, F, Prefetch, Q
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from rest_framework import generics, permissions
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -14,6 +16,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.response import Response
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from mantenimiento.services_vinculos import PROTECTED_MESSAGE
 from activos.models import Activo
 from core.access import (
     can_manage_submodule,
@@ -566,7 +569,15 @@ def pwa_eliminar_reporte(request, pk):
         raise PermissionDenied
 
     reporte_id = reporte.id
-    reporte.delete()
+    try:
+        with transaction.atomic():
+            reporte = get_object_or_404(ReporteFalla.objects.select_for_update(), pk=reporte_id)
+            if not _puede_modificar_reporte_propio(reporte, request.user):
+                raise PermissionDenied
+            reporte.delete()
+    except ProtectedError:
+        messages.error(request, PROTECTED_MESSAGE)
+        return redirect("fallas:pwa-mis-reportes")
     messages.success(request, f"Reporte de falla #{reporte_id} eliminado correctamente.")
     return redirect("fallas:pwa-mis-reportes")
 

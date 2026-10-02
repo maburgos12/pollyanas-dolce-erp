@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260721-fecha-mobile-v5">
     <style>
       .compact-item{display:grid;grid-template-columns:64px 1fr;gap:12px;align-items:start}.compact-item.no-thumb{grid-template-columns:1fr}.compact-thumb{width:64px;height:64px;object-fit:cover;border-radius:10px;background:#eee}.kpi-button{border:0;background:transparent;width:100%;font:inherit;color:inherit;cursor:pointer}.history-scope{border:0;padding:0;margin:16px 0 0}.history-scope legend{font-size:.8rem;font-weight:800;margin-bottom:6px}.history-scope-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:4px;border:1px solid var(--pd-line);border-radius:8px;background:var(--pd-card)}.history-scope-actions button{min-height:42px;border:0;border-radius:5px;background:transparent;color:var(--pd-ink);font:inherit;font-weight:800}.history-scope-actions button[aria-pressed="true"]{background:var(--pd-wine);color:#fff}.history-scope-actions button:focus-visible{outline:3px solid rgba(201,168,76,.45);outline-offset:2px}.history-scope-actions button:active{transform:scale(.97)}.history-filters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 16px}.history-filters label{font-size:.8rem;font-weight:700}.history-filters select{width:100%;margin-top:4px}.history-unit-filter,.history-author-filter{grid-column:1/-1}.history-actor{margin-top:6px}.detail-list{display:grid;gap:8px;margin:16px 0}.detail-row{display:grid;grid-template-columns:minmax(100px,35%) 1fr;gap:10px}.timeline{list-style:none;padding:0}.timeline li{padding:0 0 16px 18px;border-left:2px solid #ddd;position:relative}.timeline li::before{content:"";position:absolute;left:-6px;top:3px;width:10px;height:10px;border-radius:50%;background:#8b2252}.gallery{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.gallery button{border:0;padding:0;background:none}.gallery img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}.image-viewer{position:fixed;inset:0;z-index:40;background:rgba(0,0,0,.94);display:grid;place-items:center;padding:56px 12px 12px}.image-viewer img{max-width:100%;max-height:100%;object-fit:contain}.viewer-close{position:absolute;right:8px;top:max(8px,env(safe-area-inset-top));width:44px;height:44px;border-radius:50%;border:0;font-size:28px}.error-state{padding:20px;text-align:center}.skeleton{min-height:100px;background:#eee;animation:pulse 1s ease-in-out infinite alternate}@keyframes pulse{to{opacity:.55}}
+      .linked-documents{list-style:none;padding:0}.linked-documents li{padding:12px 0;border-bottom:1px solid var(--pd-line)}#detail-links details{margin:12px 0}#detail-links summary{cursor:pointer;font-weight:800;min-height:44px;display:flex;align-items:center}#detail-links form{display:grid;gap:12px;margin:12px 0}#detail-links label{display:grid;gap:6px;font-weight:700}#detail-links select,#detail-links textarea{width:100%;max-width:100%;box-sizing:border-box}#detail-links textarea{min-height:80px}.link-pages{display:flex;gap:12px}.link-feedback{overflow-wrap:anywhere}
       @media (prefers-reduced-motion: reduce) { .image-viewer, .detail-list, .gallery, .skeleton { animation: none !important; transition: none !important; } }
     </style>
   </head>
@@ -1565,8 +1566,10 @@
       }
 
       async function renderFallaDetalle(item) {
+        const generation = ++state.requestGeneration.detail;
         await ensureProveedores();
-        render(shell(`
+        if (generation !== state.requestGeneration.detail) return;
+        await render(shell(`
           <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Falla #${esc(String(item.id))}</h1>
           <section class="card report-card">
@@ -1578,6 +1581,7 @@
             ${item.activo ? `<div class="kv"><b>Equipo</b><span>${esc(item.activo)}</span></div>` : ""}
             <p class="card-copy">${esc(item.descripcion || "Sin descripción")}</p>
           </section>
+          <section id="detail-links" data-return-mode="legacy" aria-label="Vínculos de atención"></section>
           <section class="card report-card report-card-spaced">
             <p class="screen-kicker">Dar seguimiento</p>
             <div class="field">
@@ -1609,6 +1613,7 @@
             <button class="primary-btn" onclick="guardarSeguimientoFalla(${item.id})">Guardar seguimiento</button>
           </section>
         `));
+        loadDetailLinks(`falla:${item.id}`, generation);
       }
 
       async function guardarSeguimientoFalla(id) {
@@ -1710,10 +1715,12 @@
       }
 
       async function renderOrdenDetalle(error = "") {
+        const generation = ++state.requestGeneration.detail;
         await Promise.all([ensureProveedores(), ensureCatalogos()]);
         const orden = state.ordenActual;
         if (!orden) return showScreen("seguimiento");
-        render(shell(`
+        if (generation !== state.requestGeneration.detail) return;
+        await render(shell(`
           <button class="secondary-btn" onclick="showScreen('seguimiento')">Volver</button>
           <h1 class="screen-title screen-title-spaced">${esc(orden.folio)}</h1>
           <section class="card report-card">
@@ -1728,6 +1735,7 @@
             <div class="kv"><b>Costo</b><span>${orden.costo_total ? "$" + Number(orden.costo_total).toLocaleString("es-MX") : "-"}</span></div>
             <p>${esc(orden.descripcion || "Sin descripción")}</p>
           </section>
+          <section id="detail-links" data-return-mode="legacy" aria-label="Vínculos de atención"></section>
           <section class="card report-card">
             <div class="field">
               <label>Estatus</label>
@@ -1769,6 +1777,7 @@
             </article>
           `).join("") || `<div class="empty">Sin seguimiento registrado.</div>`}
         `));
+        loadDetailLinks(`orden:${orden.id}`, generation);
       }
 
       async function guardarSeguimientoOrden() {
@@ -2318,20 +2327,123 @@
         state.evidenceBlobCache.clear();
       }
 
-      async function openItemDetail(uid, trigger) {
+      function linksPath(uid) {
+        const [tipo, id] = uid.split(":");
+        return `/items/${tipo}/${id}/vinculos/`;
+      }
+
+      async function linksRequest(path, options = {}) {
+        let response;
+        try { response = await apiV2Fetch(path, options); }
+        catch (error) { throw new Error("Revisa tu conexión e intenta nuevamente."); }
+        const payload = await response.json().catch(() => ({error:"No se recibió una respuesta válida. Revisa el vínculo y reintenta sin duplicarlo."}));
+        if (!response.ok || payload.error) throw new Error(payload.error || payload.detail || "No se pudo completar la acción.");
+        return payload;
+      }
+
+      async function loadDetailLinks(uid, generation, page = 1, message = "") {
+        const section = document.getElementById("detail-links");
+        if (!section || generation !== state.requestGeneration.detail) return;
+        const requestId = (section.linkRequestId || 0) + 1;
+        section.linkRequestId = requestId;
+        const heading = uid.startsWith("falla:") ? "Trabajos vinculados" : "Reportes atendidos";
+        section.innerHTML = `<h2>${heading}</h2><p role="status">Cargando vínculos…</p>`;
+        try {
+          const data = await linksRequest(`${linksPath(uid)}?page=${page}`);
+          if (generation !== state.requestGeneration.detail || !document.contains(section) || section.linkRequestId !== requestId) return;
+          section.innerHTML = `<h2 tabindex="-1">${heading}</h2><p class="muted">Conservan sus estados, evidencias e importes originales.</p>
+            ${message ? `<p role="status">${esc(message)}</p>` : ""}
+            <ul class="linked-documents">${data.results.map(row => `<li><button type="button" class="secondary-btn" data-linked-uid="${esc(row.documento.uid)}">${esc(row.documento.titulo)}</button><p>${esc(row.documento.estatus)} · ${esc(row.motivo)}</p>
+              ${data.can_manage ? `<details><summary>Retirar vínculo</summary><form data-async-action data-link-remove="${row.id}" data-counterpart="${esc(row.documento.uid)}" data-document-title="${esc(row.documento.titulo)}"><label>Motivo para retirar<textarea name="motivo" required maxlength="2000"></textarea></label><button type="submit" class="secondary-btn">Confirmar retiro</button><p class="link-feedback" role="status"></p></form></details>` : ""}</li>`).join("") || `<li class="empty">Sin documentos vinculados. Los vínculos relacionan la atención de este equipo.</li>`}</ul>
+            <div class="link-pages">${page > 1 ? `<button type="button" class="secondary-btn" data-links-page="${page - 1}">Anterior</button>` : ""}${data.pagination.has_next ? `<button type="button" class="secondary-btn" data-links-page="${page + 1}">Siguiente</button>` : ""}</div>
+            ${data.can_manage ? `<details id="link-selector"><summary>${uid.startsWith("falla:") ? "Vincular orden existente" : "Vincular reporte existente"}</summary><div id="link-candidates"></div></details>` : ""}`;
+          section.querySelectorAll("[data-linked-uid]").forEach(button => button.onclick = () => {
+            if (section.dataset.returnMode === "legacy") {
+              state.detailReturn = {screen:state.pantalla, uid, html:app.innerHTML, scroll:window.scrollY, linkUid:uid,
+                values:[...app.querySelectorAll("input,select,textarea")].map(control => control.value)};
+            }
+            openItemDetail(button.dataset.linkedUid, button, true);
+          });
+          section.querySelectorAll("[data-links-page]").forEach(button => button.onclick = () => loadDetailLinks(uid, generation, Number(button.dataset.linksPage)));
+          section.querySelectorAll("[data-link-remove]").forEach(form => form.onsubmit = event => submitLinkAction(event, uid, generation));
+          const selector = section.querySelector("#link-selector");
+          if (selector) selector.addEventListener("toggle", () => {
+            if (selector.open && !selector.dataset.loaded) { selector.dataset.loaded = "true"; loadLinkCandidates(uid, generation); }
+          });
+        } catch (error) {
+          if (generation !== state.requestGeneration.detail || !document.contains(section) || section.linkRequestId !== requestId) return;
+          section.innerHTML = `<h2>${heading}</h2><p class="error-msg" role="alert">${esc(error.message)}</p><button type="button" class="secondary-btn">Reintentar</button>`;
+          section.querySelector("button").onclick = () => loadDetailLinks(uid, generation, page);
+        }
+      }
+
+      async function loadLinkCandidates(uid, generation, page = 1) {
+        const container = document.getElementById("link-candidates");
+        if (!container || generation !== state.requestGeneration.detail) return;
+        const requestId = (container.linkRequestId || 0) + 1;
+        container.linkRequestId = requestId;
+        container.innerHTML = `<p role="status">Cargando documentos del mismo equipo…</p>`;
+        try {
+          const data = await linksRequest(`${linksPath(uid)}?candidatos=1&page=${page}`);
+          if (generation !== state.requestGeneration.detail || !document.contains(container) || container.linkRequestId !== requestId) return;
+          container.innerHTML = data.results.length ? `<form data-async-action data-link-create><label>Selecciona un documento<select name="documento_id" required><option value="">Selecciona un documento</option>${data.results.map(row => `<option value="${row.id}" data-uid="${esc(row.uid)}">${esc(row.titulo)} · ${esc(row.estatus)}</option>`).join("")}</select></label><label>Motivo del vínculo<textarea name="motivo" required maxlength="2000"></textarea></label><button type="submit" class="primary-btn">Confirmar vínculo</button><p class="link-feedback" role="status"></p></form>` : `<p class="empty">No hay documentos disponibles del mismo equipo y sucursal.</p>`;
+          container.insertAdjacentHTML("beforeend", `<div class="link-pages">${page > 1 ? `<button type="button" class="secondary-btn" data-candidates-page="${page - 1}">Anterior</button>` : ""}${data.pagination.has_next ? `<button type="button" class="secondary-btn" data-candidates-page="${page + 1}">Siguiente</button>` : ""}</div>`);
+          container.querySelectorAll("[data-candidates-page]").forEach(button => button.onclick = () => loadLinkCandidates(uid, generation, Number(button.dataset.candidatesPage)));
+          const form = container.querySelector("form");
+          if (form) form.onsubmit = event => submitLinkAction(event, uid, generation);
+        } catch (error) {
+          if (generation !== state.requestGeneration.detail || !document.contains(container) || container.linkRequestId !== requestId) return;
+          container.innerHTML = `<p class="error-msg" role="alert">${esc(error.message)}</p><button type="button" class="secondary-btn">Reintentar</button>`;
+          container.querySelector("button").onclick = () => loadLinkCandidates(uid, generation, page);
+        }
+      }
+
+      async function submitLinkAction(event, uid, generation) {
+        event.preventDefault();
+        const form = event.currentTarget;
+        if (form.dataset.actionPending === "true" || !form.reportValidity()) return;
+        const remove = Boolean(form.dataset.linkRemove);
+        const selected = form.querySelector("select")?.selectedOptions[0];
+        const documentTitle = remove ? form.dataset.documentTitle : selected?.textContent;
+        const motivo = form.elements.motivo.value.trim();
+        const feedback = form.querySelector(".link-feedback");
+        if (!motivo) { feedback.textContent = "Indica el motivo."; form.elements.motivo.focus(); return; }
+        if (!window.confirm(`${remove ? "Retirar vínculo con" : "Vincular"} ${documentTitle} al documento abierto: ${document.querySelector(".screen-title")?.textContent || uid}?`)) return;
+        const button = form.querySelector('[type="submit"]');
+        const originalLabel = button.textContent;
+        const scroll = window.scrollY;
+        form.dataset.actionPending = "true"; button.disabled = true; button.textContent = "Guardando…";
+        feedback.textContent = "";
+        try {
+          const body = {motivo};
+          if (!remove) body[uid.startsWith("falla:") ? "orden_id" : "reporte_id"] = Number(selected.value);
+          const result = await linksRequest(remove ? `/vinculos/${form.dataset.linkRemove}/` : linksPath(uid), {method:remove ? "DELETE" : "POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+          invalidateDetail(uid); invalidateDetail(remove ? form.dataset.counterpart : selected.dataset.uid);
+          if (generation !== state.requestGeneration.detail) return;
+          await loadDetailLinks(uid, generation, 1, remove ? "Vínculo retirado. Los documentos se conservan." : result.creado ? "Vínculo guardado." : "El vínculo ya existía.");
+          document.querySelector("#detail-links h2")?.focus({preventScroll:true}); window.scrollTo(0, scroll);
+        } catch (error) {
+          if (document.contains(form)) { feedback.textContent = error.message; feedback.setAttribute("role", "alert"); }
+        } finally {
+          form.dataset.actionPending = "false"; button.disabled = false; button.textContent = originalLabel;
+        }
+      }
+
+      async function openItemDetail(uid, trigger, fromLinked = false) {
         const [tipo, id] = String(uid).split(":");
         const generation = ++state.requestGeneration.detail;
         state.viewerReturnFocus = trigger || document.activeElement;
-        state.detailReturn = {screen: trigger?.closest("#app")?.querySelector(".history-filters") ? "historial" : "pendientes", uid};
-        render(shell(`<button class="secondary-btn" onclick="history.back();showScreen('pendientes')">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
+        if (!fromLinked) state.detailReturn = {screen: trigger?.closest("#app")?.querySelector(".history-filters") ? "historial" : "pendientes", uid, html: app.innerHTML, scroll: window.scrollY};
+        render(shell(`<button class="secondary-btn" onclick="returnFromDetail()">Volver</button><div class="skeleton" aria-label="Cargando detalle"></div>`));
         let data = state.detailCache.get(uid);
         if (!data) {
           let res;
           try { res = await apiV2Fetch(`/items/${tipo}/${id}/`); }
-          catch (error) { if (generation === state.requestGeneration.detail) render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Revisa tu conexión e intenta nuevamente.</p><button onclick="showScreen('pendientes')">Volver</button></div>`)); return; }
+          catch (error) { if (generation === state.requestGeneration.detail) render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Revisa tu conexión e intenta nuevamente.</p><button onclick="returnFromDetail()">Volver</button></div>`)); return; }
           if (generation !== state.requestGeneration.detail) return;
-          if (!res.ok) return render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Puede que ya no tengas acceso o el registro no exista.</p><button onclick="showScreen('pendientes')">Volver</button></div>`));
+          if (!res.ok) return render(shell(`<div class="error-state" role="alert"><h1>No se pudo abrir el detalle</h1><p>Puede que ya no tengas acceso o el registro no exista.</p><button onclick="returnFromDetail()">Volver</button></div>`));
           data = await res.json();
+          if (generation !== state.requestGeneration.detail) return;
           state.detailCache.delete(uid); state.detailCache.set(uid, data);
           while (state.detailCache.size > 20) state.detailCache.delete(state.detailCache.keys().next().value);
         }
@@ -2348,17 +2460,29 @@
               </li>`).join("")}</ol>`
           : `<div class="empty">Sin revisiones diarias relacionadas.</div>`;
         const initialEvidences = [initial.foto, initial.factura].filter(Boolean);
-        render(shell(`<button class="secondary-btn" onclick="returnFromDetail()">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
+        await render(shell(`<button class="secondary-btn" onclick="returnFromDetail()">Volver</button><h1 class="screen-title screen-title-spaced">${esc(initial.titulo || "Detalle de mantenimiento")}</h1>
           <section class="card report-card"><div class="detail-list">${detailRows(initial)}${detailRows(data.fechas,"fecha ")}${detailRows(data.responsables,"responsable ")}</div><p>${esc(initial.descripcion || "Sin descripción registrada.")}</p></section>
+          ${["falla","orden"].includes(tipo) ? `<section id="detail-links" aria-label="Vínculos de atención"></section>` : ""}
           <h2>Evidencias iniciales</h2>${evidenceGallery(initialEvidences)}${hygieneSection}<h2>Seguimiento</h2>${timeline.length ? `<ol class="timeline">${timeline.map(row=>`<li><strong>${esc(row.usuario?.nombre || "Sistema")}</strong><p class="muted">${esc(row.fecha || "Sin fecha")} · ${esc(row.estatus_nuevo || "Actualización")}</p><p>${esc(row.comentario || "Sin comentario")}</p>${evidenceGallery(row.evidencias)}</li>`).join("")}</ol>` : `<div class="empty">Aún no hay actualizaciones de seguimiento.</div>`}`));
+        if (generation !== state.requestGeneration.detail) return;
+        window.scrollTo(0, 0);
+        if (["falla","orden"].includes(tipo)) loadDetailLinks(uid, generation);
       }
 
       async function returnFromDetail() {
-        const target = state.detailReturn.screen || "pendientes";
-        await showScreen(target);
-        const uid = state.detailReturn.uid;
-        if (!uid) return;
-        document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus();
+        const context = state.detailReturn;
+        state.requestGeneration.detail += 1;
+        if (context.html) {
+          await render(context.html);
+          if (context.values) app.querySelectorAll("input,select,textarea").forEach((control, index) => { control.value = context.values[index]; });
+          if (context.linkUid) await loadDetailLinks(context.linkUid, state.requestGeneration.detail);
+          const uid = context.uid;
+          if (uid) document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus({preventScroll:true});
+          if (context.linkUid) document.querySelector("#detail-links h2")?.focus({preventScroll:true});
+          window.scrollTo(0, context.scroll);
+        } else {
+          await showScreen(context.screen || "pendientes");
+        }
       }
 
       function invalidateDetail(uid) { if (uid) state.detailCache.delete(uid); }
@@ -2402,7 +2526,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261001-historial-compartido-v1", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-vinculos-atencion-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

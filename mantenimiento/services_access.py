@@ -92,3 +92,17 @@ def authorized_unit_services(user):
 def can_view_costs(user):
     """Costs remain restricted to current global Mantenimiento managers."""
     return is_admin_or_dg(user) or can_manage_module(user, "mantenimiento")
+
+
+def can_write_mantenimiento(user) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+    grupos = set(user.groups.values_list("name", flat=True))
+    return (
+        is_admin_or_dg(user)
+        or bool(grupos & {"dg", "DG", "mantenimiento", "MANTENIMIENTO"})
+        or can_manage_module(user, "mantenimiento")
+        or can_manage_submodule(user, "mantenimiento", "app")
+        or can_manage_submodule(user, "mantenimiento", "bandeja")
+        or can_manage_submodule(user, "mantenimiento", "dashboard")
+    )

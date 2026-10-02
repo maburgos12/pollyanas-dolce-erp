@@ -213,3 +213,84 @@ def evidencia_v2(request, tipo, pk):
     response["Cache-Control"] = "private, no-store"
     response["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+def _vinculo_documento(obj, tipo):
+    """Identidad navegable, sin evidencia ni importes."""
+    return {'id':obj.pk, 'tipo':tipo, 'uid':f'{tipo}:{obj.pk}',
+            'titulo':f'Orden {obj.folio}' if tipo == 'orden' else f'Reporte #{obj.pk} · {obj.titulo}',
+            'estatus':obj.get_estatus_display()}
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def vinculos_v2(request, tipo, pk):
+    from django.core.exceptions import ValidationError
+    from django.shortcuts import get_object_or_404
+    from mantenimiento.services_access import can_write_mantenimiento
+    from mantenimiento.services_vinculos import authorized_vinculos, crear_vinculo
+
+    if tipo not in {'orden', 'falla'}:
+        return Response({'error':'Tipo de documento no válido.'}, status=400)
+    source = get_object_or_404(authorized_orders(request.user).select_related('activo_ref') if tipo == 'orden'
+                               else authorized_fallas(request.user), pk=pk)
+    if request.method == 'POST':
+        field = 'reporte_id' if tipo == 'orden' else 'orden_id'
+        raw_target = request.data.get(field)
+        target_id = _positive_int(raw_target, None) if type(raw_target) in (int, str) else None
+        if target_id is None:
+            return Response({'error':'Selecciona un documento existente.'}, status=400)
+        try:
+            vinculo, created = crear_vinculo(request.user, pk if tipo == 'orden' else target_id,
+                                            target_id if tipo == 'orden' else pk, request.data.get('motivo'))
+        except ValidationError as error:
+            return Response({'error':' '.join(error.messages)}, status=400)
+        return Response({'ok':True, 'id':vinculo.pk, 'creado':created}, status=201 if created else 200)
+    page = _positive_int(request.query_params.get('page'), 1)
+    page_size = _positive_int(request.query_params.get('page_size'), 25)
+    candidates = request.query_params.get('candidatos', '0')
+    if page is None or page_size is None or candidates not in {'0','1'}:
+        return Response({'error':'Paginación o selección no válida.'}, status=400)
+    page_size = min(page_size, 100)
+    links = authorized_vinculos(request.user).filter(**{f'{"orden" if tipo == "orden" else "reporte"}_id':pk})
+    counterpart = 'falla' if tipo == 'orden' else 'orden'
+    if candidates == '1':
+        if tipo == 'orden':
+            queryset = authorized_fallas(request.user).filter(
+                activo_relacionado_id=source.activo_ref_id, sucursal_id=source.activo_ref.sucursal_id,
+                tipo_objetivo='EQUIPO', duplicado_de__isnull=True,
+            ).exclude(pk__in=links.values('reporte_id')).order_by('-fecha_reporte','-pk')
+            if not source.activo_ref.sucursal_id:
+                queryset = queryset.none()
+        else:
+            queryset = authorized_orders(request.user).filter(
+                activo_ref_id=source.activo_relacionado_id, activo_ref__sucursal_id=source.sucursal_id,
+            ).exclude(pk__in=links.values('orden_id')).order_by('-fecha_programada','-pk')
+            if not source.activo_relacionado_id or source.duplicado_de_id or source.tipo_objetivo != source.OBJETIVO_EQUIPO:
+                queryset = queryset.none()
+    else:
+        queryset = links.select_related('orden', 'reporte')
+    total = queryset.count()
+    start = (page - 1) * page_size
+    if candidates == '1':
+        results = [_vinculo_documento(obj, counterpart) for obj in queryset[start:start+page_size]]
+    else:
+        results = [{'id':link.pk, 'motivo':link.motivo, 'creado_en':link.creado_en.isoformat(),
+                    'documento':_vinculo_documento(link.reporte if tipo == 'orden' else link.orden, counterpart)}
+                   for link in queryset[start:start+page_size]]
+    return Response({'can_manage':can_write_mantenimiento(request.user), 'results':results,
+                     'pagination':{'page':page,'page_size':page_size,'total':total,'has_next':start+page_size<total}})
+
+
+@api_view(['DELETE'])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def retirar_vinculo_v2(request, pk):
+    from django.core.exceptions import ValidationError
+    from mantenimiento.services_vinculos import retirar_vinculo
+    try:
+        retirar_vinculo(request.user, pk, request.data.get('motivo'))
+    except ValidationError as error:
+        return Response({'error':' '.join(error.messages)}, status=400)
+    return Response({'ok':True})

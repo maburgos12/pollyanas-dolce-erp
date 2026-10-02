@@ -959,6 +959,16 @@ class ActivoPasaporteMigracionTests(TransactionTestCase):
 
     available_apps = None
 
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(self._restaurar_migraciones_actuales)
+
+    def _restaurar_migraciones_actuales(self):
+        # Revertir activos también revierte sus dependientes; restaurar todos
+        # antes del flush, incluso cuando falle una aserción del backfill.
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
     def test_backfill_genera_un_uuid_por_fila_existente(self):
         executor = MigrationExecutor(connection)
         executor.migrate([("activos", "0005_trazabilidad_mantenimiento")])

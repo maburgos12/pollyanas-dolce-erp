@@ -82,13 +82,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261001-historial-compartido-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-vinculos-atencion-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v26-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v27-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -576,9 +576,11 @@ class MantenimientoUnifiedAccessTests(TestCase):
         return_start = source.index("async function returnFromDetail")
         return_end = source.index("function invalidateDetail", return_start)
         return_source = source[return_start:return_end]
-        self.assertIn("await showScreen(target)", return_source)
-        self.assertIn("state.detailReturn.uid", return_source)
-        self.assertIn('document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus()', return_source)
+        self.assertIn("await render(context.html)", return_source)
+        self.assertIn("window.scrollTo(0, context.scroll)", return_source)
+        self.assertIn("const context = state.detailReturn", return_source)
+        self.assertIn("const uid = context.uid", return_source)
+        self.assertIn('document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus({preventScroll:true})', return_source)
         self.assertNotIn("detailReturn.focus", return_source)
 
         render_start = source.index("function render(html")
@@ -1634,7 +1636,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261001-historial-compartido-v1", sw)
+        self.assertIn("20261002-vinculos-atencion-v1", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):
