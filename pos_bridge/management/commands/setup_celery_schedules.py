@@ -42,6 +42,17 @@ class Command(BaseCommand):
 
         timezone_name = getattr(settings, "TIME_ZONE", "America/Mazatlan")
 
+        audit_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="15", hour="4", day_of_week="*", day_of_month="*",
+            month_of_year="*", timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="reportes: auditor inventario diario",
+            defaults={"task": "reportes.refresh_inventory_audit_daily", "crontab": audit_cron,
+                      "interval": None, "kwargs": "{}",
+                      "enabled": preserve_enabled("reportes: auditor inventario diario")},
+        )
+
         sales_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="1",

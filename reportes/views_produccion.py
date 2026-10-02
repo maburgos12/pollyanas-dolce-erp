@@ -12,7 +12,6 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db.models.functions import TruncMonth
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
@@ -20,18 +19,11 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from control.models import MermaMensualSucursal
 from core.access import can_view_reportes
-from pos_bridge.models import (
-    PointConversionLine,
-    PointProductionLine,
-    PointWasteLine,
-)
-from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from recetas.models import ProductoMonthClosure, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
-from reportes.models import FactProduccionDiaria
-from ventas.services.sales_canonical_source import canonical_sales_evidence_months
+from reportes.models import ProductInventoryAuditRun
+from reportes.services_inventory_audit_report import read_audit_report, audit_report_version
 
 
 ZERO = Decimal("0")
@@ -78,6 +70,11 @@ PRODUCTION_EXPORT_COLUMNS = [
     ("inventario_final_point_total", "Fin. Point", "number"),
     ("diferencia_inventario", "Dif. Point", "number"),
     ("estado_inventario", "Estado", "text"),
+    ("transferencia_entrada", "Transferencia entrada", "number"),
+    ("transferencia_salida", "Transferencia salida", "number"),
+    ("ajuste_identificado", "Ajuste identificado", "number"),
+    ("sucursal_reporte", "Sucursal o almacén", "text"),
+    ("revision_reporte", "Última revisión", "text"),
 ]
 
 PDF_EXPORT_COLUMNS = [
@@ -235,6 +232,9 @@ def _export_rows(context: dict[str, Any]) -> list[dict[str, Any]]:
         }
     )
     rows.append(total)
+    for row in rows:
+        row["sucursal_reporte"] = context["audit_metadata"]["branch_label"]
+        row["revision_reporte"] = context["audit_metadata"]["updated_at"]
     return rows
 
 
@@ -313,6 +313,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        if request.GET.get("metadata") == "1":
+            period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
+            month = date.fromisoformat(period.value + "-01")
+            return JsonResponse({"version": audit_report_version(month, request.GET.get("branch", ""))})
         context = self._build_context(request)
         if request.resolver_match and request.resolver_match.url_name == "producido_vs_vendido_data":
             return JsonResponse(
@@ -321,6 +325,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                     "fuentes": context["fuentes"],
                     "rows": context["json_rows"],
                     "totals": context["grand_total"],
+                    "audit": context["audit_metadata"],
                 }
             )
         export_format = (request.GET.get("export") or "").strip().lower()
@@ -369,6 +374,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             f"Inventario: {context['fuentes']['inventario']['label']}"
         )
         sheet["A3"] = f"Categoría: {context.get('selected_categoria') or 'Todas'}"
+        sheet["A4"] = f"{context['audit_metadata']['branch_label']} | Revisión: {context['audit_metadata']['updated_at'] or 'Sin revisión'}"
 
         header_row = 5
         for col_idx, (_, label, _) in enumerate(PRODUCTION_EXPORT_COLUMNS, start=1):
@@ -438,6 +444,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         lines = [
             f"Periodo: {context.get('selected_period_label') or period}",
             f"Categoria: {context.get('selected_categoria') or 'Todas'}",
+            f"Sucursal: {context['audit_metadata']['branch_label']} | Revision: {context['audit_metadata']['updated_at'] or 'Sin revision'}",
             (
                 f"Fuentes - Ventas: {context['fuentes']['ventas']['label']} | "
                 f"Produccion: {context['fuentes']['produccion']['label']} | "
@@ -467,6 +474,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                 lines.append(f"Procedencia conversion: {provenance}")
             costo = _export_display_value(row, "costo_merma", "currency") or "$0.00"
             lines.append(f"Costo merma: {costo}")
+            lines.append(" | ".join(f"{label}: {_export_display_value(row, key, 'number')}" for key, label in (
+                ("transferencia_entrada", "Transferencia entrada"), ("transferencia_salida", "Transferencia salida"),
+                ("ajuste_identificado", "Ajuste identificado"))))
             lines.append("")
 
         pdf = _pdf_bytes(title="Producido vs Vendido", lines=lines)
@@ -478,36 +488,30 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
         categoria = (request.GET.get("categoria") or request.GET.get("familia") or "").strip()
 
-        # This report is deliberately read-only: the canonical balance service defaults
-        # to local facts/snapshots and never requests a Point refresh from this path.
-        balance = MonthlyPointProductBalanceService().build(month=period.value)
-        recipe_ids = set(balance.rows)
-
-        recipes_qs = Receta.objects.filter(
-            id__in=recipe_ids,
-            tipo=Receta.TIPO_PRODUCTO_FINAL,
-        )
-        if categoria:
-            recipes_qs = recipes_qs.filter(categoria=categoria)
-        recipes = sorted(
-            list(recipes_qs),
-            key=lambda recipe: (_category_sort_key(recipe.categoria), recipe.nombre.lower()),
-        )
-
-        cost_recipe_ids = [
-            recipe.id
-            for recipe in recipes
-            if balance.rows[recipe.id].waste != ZERO
-        ]
+        month = date.fromisoformat(period.value + "-01")
+        report = read_audit_report(month, branch=request.GET.get("branch", ""))
+        categories = sorted({r["categoria"] for r in report["rows"]}, key=_category_sort_key)
+        rows = sorted((r for r in report["rows"] if not categoria or r["categoria"] == categoria),
+                      key=lambda r: (_category_sort_key(r["categoria"]), r["receta"].lower()))
+        cost_recipe_ids = sorted({r["receta_id"] for r in rows if r["receta_id"] and r["merma_reportada"]})
         cost_map = get_total_cost_map(cost_recipe_ids)
-        rows = [
-            self._build_row(recipe, balance.rows[recipe.id], cost_map, balance.sources)
-            for recipe in recipes
-        ]
+        for row in rows:
+            raw_dif = row["producido"] - row["vendido"] if row["producido"] is not None and row["vendido"] is not None else None
+            row["dif"] = None if row["produccion_referencia"] else raw_dif
+            row["dif_referencia"] = raw_dif if row["produccion_referencia"] else None
+            waste, sold, cost = row["merma_reportada"], row["vendido"], cost_map.get(row["receta_id"])
+            row["costo_merma"] = ZERO if waste == ZERO else waste * cost if waste is not None and cost else None
+            row["pct_merma"] = waste / sold * 100 if waste is not None and sold and sold > ZERO else None
+            row["json"] = {k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()}
         groups, grand_total = self._group_rows(rows)
-        fuentes = self._canonical_sources(balance)
-        banners = self._canonical_banners(balance, fuentes)
-        operational_summary = self._operational_summary(balance, period_label=period.label)
+        fuentes = {key: {"label": "Auditoría guardada / evidencia Point local"} for key in ("ventas", "produccion", "merma", "inventario")}
+        updated = report["updated_at"]
+        metadata = {"status": report["audit_status"], "stale": report["stale"],
+                    "updated_at": updated.isoformat() if updated else None, "counts": report["counts"],
+                    "branch": report["selected_branch"], "branch_label": report["selected_branch_label"]}
+        operational_summary = {"tone": "success" if report["audit_status"] == "Conciliado" and not report["stale"] else "warning",
+                               "title": "Pendiente de actualización" if report["stale"] else report["audit_status"],
+                               "message": report["selected_branch_label"]}
         periodos = self._available_periods(selected=period.value)
 
         return {
@@ -517,369 +521,29 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "periodos": periodos,
             "selected_categoria": categoria,
             "selected_familia": categoria,
-            "categorias": self._categories(),
-            "familias": self._categories(),
+            "categorias": categories,
+            "familias": categories,
             "groups": groups,
             "grand_total": grand_total,
             "json_rows": [row["json"] for row in rows],
             "fuentes": fuentes,
-            "banners": banners,
+            "banners": [],
             "operational_summary": operational_summary,
-            "is_open_period": bool((balance.sources.get("period") or {}).get("is_open")),
-            "source_dates": balance.effective_snapshot_dates,
+            "is_open_period": month >= timezone.localdate().replace(day=1),
+            "audit_metadata": metadata,
+            "audit_version": audit_report_version(month, report["selected_branch"]),
+            "audit_updated_at": updated,
+            "branches": report["branches"], "selected_branch": report["selected_branch"],
+            "opening_reference": report["opening_reference"],
+            "closing_reference": date(month.year, month.month, monthrange(month.year, month.month)[1]),
         }
 
-    def _build_row(
-        self,
-        recipe: Receta,
-        balance_row,
-        cost_map: dict[int, Decimal],
-        sources: dict[str, Any],
-    ) -> dict[str, Any]:
-        vendido = self._movement_value(balance_row.sales, sources.get("sales"))
-        producido = self._movement_value(balance_row.production, sources.get("production"))
-        merma_reportada = self._movement_value(balance_row.waste, sources.get("waste"))
-        conversion_entrada = self._movement_value(balance_row.conversion_in, sources.get("conversions"))
-        conversion_salida = self._movement_value(balance_row.conversion_out, sources.get("conversions"))
-        categoria = _category_label(recipe.categoria)
-        produccion_referencia = not bool(recipe.pasa_modulo_produccion)
-        dif = None
-        dif_referencia = None
-        if producido is not None and vendido is not None:
-            raw_dif = producido - vendido
-            if produccion_referencia:
-                dif_referencia = raw_dif
-            else:
-                dif = raw_dif
-        costo_unitario = cost_map.get(recipe.id, ZERO)
-        if merma_reportada == ZERO:
-            costo_merma = ZERO
-        else:
-            costo_merma = merma_reportada * costo_unitario if merma_reportada is not None and costo_unitario else None
-        pct_merma = None
-        if merma_reportada is not None and vendido and vendido > ZERO:
-            pct_merma = (merma_reportada / vendido) * Decimal("100")
-        row = {
-            "receta_id": recipe.id,
-            "receta": recipe.nombre,
-            "categoria": categoria,
-            "familia": categoria,
-            "vendido": vendido,
-            "producido": producido,
-            "dif": dif,
-            "dif_referencia": dif_referencia,
-            "produccion_referencia": produccion_referencia,
-            "merma_reportada": merma_reportada,
-            "costo_merma": costo_merma,
-            "pct_merma": pct_merma,
-            "convertido": conversion_entrada,
-            "enteros_equivalentes": conversion_salida,
-            "conversion_entrada": conversion_entrada,
-            "conversion_salida": conversion_salida,
-            "conversion_provenance": balance_row.conversion_origin or "Sin dato",
-            "conversion_provenance_label": self._conversion_provenance_label(balance_row.conversion_origin),
-            "inventario_inicial": balance_row.opening_point,
-            "inventario_final_teorico": balance_row.calculated_closing,
-            "inventario_final_point_total": balance_row.closing_point,
-            "diferencia_inventario": balance_row.difference_point,
-            "estado_inventario": self._point_status_label(balance_row.status),
-        }
-        row["json"] = {
-            key: (str(value) if isinstance(value, Decimal) else value)
-            for key, value in row.items()
-            if key != "json"
-        }
-        return row
-
-    @staticmethod
-    def _movement_value(value: Decimal, source: dict[str, Any] | None) -> Decimal | None:
-        if source and source.get("source_present") is False:
-            return None
-        return value
-
-    @staticmethod
-    def _snapshots_are_authoritative(sources: dict[str, Any]) -> bool:
-        return all(bool((sources.get(key) or {}).get("authoritative")) for key in ("opening_snapshot", "closing_snapshot"))
-
-    @staticmethod
-    def _point_status_label(status: str) -> str:
-        return {
-            "COINCIDE": "Coincide",
-            "POINT_MAYOR": "Point mayor",
-            "POINT_MENOR": "Point menor",
-            "EN_CURSO": "Periodo en curso",
-            "REVISAR_FUENTE": "Revisar fuente",
-        }.get(status, "Revisar fuente")
-
-    @staticmethod
-    def _conversion_provenance_label(origin: str) -> str:
-        return {
-            "POINT": "Point",
-            "EQUIVALENCIA_CONFIGURADA": "equivalencia configurada",
-            "MIXED": "mixta",
-            "UNRESOLVED": "sin resolver",
-        }.get(origin, "Sin dato")
-
-    @staticmethod
-    def _source_descriptor(source: dict[str, Any] | None) -> dict[str, Any]:
-        source = dict(source or {})
-        return {
-            "source": source.get("source") or "Sin dato",
-            "selected_source": source.get("selected_source") or source.get("source") or "Sin dato",
-            "mode": source.get("mode") or source.get("configured_source_mode") or "Sin dato",
-            "authoritative": source.get("authoritative"),
-            "source_present": source.get("source_present"),
-            "effective_date": source.get("effective_date"),
-            "coverage": source.get("applied_coverage_key_count"),
-            "target_date": source.get("target_date"),
-            "selected_dates": source.get("selected_dates") or (),
-            "fallback_used": bool(source.get("fallback_used")),
-            "authority_issues": tuple(source.get("authority_issues") or ()),
-            "job_status": source.get("job_status"),
-            "selected_sync_job_ids": source.get("selected_sync_job_ids") or (),
-            "coverage_scope": source.get("coverage_scope"),
-            "coverage_start": source.get("coverage_start"),
-            "coverage_end": source.get("coverage_end"),
-            "not_due": bool(source.get("not_due")),
-        }
-
-    @staticmethod
-    def _authority_issue_label(issue: str) -> str:
-        suffix_labels = {
-            "SYNC_JOB_MISSING": "falta job Point del mes",
-            "SYNC_JOB_FAILED": "job Point fallido",
-            "SYNC_JOB_PARTIAL": "job Point parcial",
-            "SYNC_JOB_INCOMPLETE": "job Point incompleto",
-            "SYNC_RANGE_INCOMPLETE": "rango mensual incompleto",
-            "SYNC_JOB_RESTRICTED": "job Point filtrado por sucursal",
-            "SYNC_CONTRACT_INCOMPLETE": "contrato del job incompleto",
-            "SYNC_COUNT_MISMATCH": "conteo del job no reconcilia",
-            "SYNC_BRANCH_COVERAGE_INCOMPLETE": "cobertura de sucursales incompleta",
-            "SYNC_JOB_MIXED": "filas mezcladas entre jobs",
-        }
-        issue = str(issue or "")
-        for suffix, label in suffix_labels.items():
-            if issue.endswith(suffix):
-                return label
-        return issue or "razón de autoridad no informada"
-
-    def _canonical_sources(self, balance) -> dict[str, Any]:
-        canonical = {
-            "opening": self._source_descriptor(balance.sources.get("opening_snapshot")),
-            "closing": self._source_descriptor(balance.sources.get("closing_snapshot")),
-            "production": self._source_descriptor(balance.sources.get("production")),
-            "sales": self._source_descriptor(balance.sources.get("sales")),
-            "waste": self._source_descriptor(balance.sources.get("waste")),
-            "conversions": self._source_descriptor(balance.sources.get("conversions")),
-            "period": dict(balance.sources.get("period") or {}),
-            "snapshot_dates": dict(balance.effective_snapshot_dates),
-        }
-        canonical["authority"] = self._canonical_authority(balance, canonical)
-        return {
-            "ventas": {"label": canonical["sales"]["selected_source"], **canonical["sales"]},
-            "produccion": {"label": canonical["production"]["source"], **canonical["production"]},
-            "merma": {"label": canonical["waste"]["source"], **canonical["waste"]},
-            "inventario": {"label": "Snapshots Point", **canonical["closing"]},
-            "canonical": canonical,
-        }
-
-    @staticmethod
-    def _canonical_authority(balance, canonical: dict[str, Any]) -> dict[str, Any]:
-        reasons: list[str] = []
-        in_progress = bool(canonical.get("period", {}).get("is_open"))
-        for key, label in (
-            ("opening", "Snapshot inicial Point"),
-            ("closing", "Snapshot final Point"),
-            ("sales", "Ventas"),
-            ("production", "Producción"),
-            ("waste", "Merma"),
-        ):
-            source = canonical[key]
-            if key == "closing" and source.get("not_due"):
-                continue
-            if in_progress and key in {"sales", "production", "waste"} and source["source_present"] is not False:
-                continue
-            if source["source_present"] is False:
-                reasons.append(f"{label}: {source['selected_source']} no disponible")
-            if not source["authoritative"]:
-                reasons.append(f"{label}: {source['selected_source']} sin autoridad")
-            reasons.extend(
-                f"{label}: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
-                for issue in source["authority_issues"]
-            )
-        conversions = canonical["conversions"]
-        if conversions["source_present"] is False:
-            reasons.append(f"Conversiones: {conversions['selected_source']} no disponible")
-        if not conversions["authoritative"] and not (in_progress and conversions["source_present"] is not False):
-            reasons.append(f"Conversiones: {conversions['selected_source']} sin autoridad")
-        if not (in_progress and conversions["source_present"] is not False):
-            reasons.extend(
-                f"Conversiones: {ProducidoVsVendidoMermaView._authority_issue_label(issue)}"
-                for issue in conversions["authority_issues"]
-            )
-
-        sales = canonical["sales"]
-        if sales["mode"] == "BRIDGE_HISTORY":
-            reasons.append("Ventas: BRIDGE_HISTORY")
-        material_issues = set(getattr(balance, "issues", ()))
-        if in_progress:
-            material_issues.discard("MONTH_SOURCE_INCOMPLETE")
-        if material_issues:
-            reasons.append("Incidencias canónicas pendientes")
-        if getattr(balance, "unresolved_movements", ()) or getattr(balance, "unresolved_conversions", ()):
-            reasons.append("Movimientos Point pendientes de resolver")
-        if any(row.status == "REVISAR_FUENTE" for row in balance.rows.values()):
-            reasons.append("Filas Point en revisión")
-        return {
-            "verified": not reasons,
-            "in_progress": in_progress,
-            "label": "Periodo en curso" if in_progress and not reasons else ("Verificada" if not reasons else "Revisar fuentes"),
-            "reason": " · ".join(reasons),
-        }
-
-    def _canonical_banners(self, balance, fuentes: dict[str, Any]) -> list[str]:
-        sales = fuentes["canonical"]["sales"]
-        opening = fuentes["canonical"]["opening"]
-        closing = fuentes["canonical"]["closing"]
-        banners = [
-            "Fuente Point: ventas {sales}; inicial {opening}; final {closing}.".format(
-                sales=sales["selected_source"],
-                opening=opening["source"],
-                closing=closing["source"],
-            )
-        ]
-        closing_not_due = bool((balance.sources.get("closing_snapshot") or {}).get("not_due"))
-        opening_authoritative = bool((balance.sources.get("opening_snapshot") or {}).get("authoritative"))
-        if not opening_authoritative or (not closing_not_due and not self._snapshots_are_authoritative(balance.sources)):
-            banners.append("Se muestran los saldos Point disponibles. Las incidencias de cobertura se indican aparte; no equivalen a ausencia del dato.")
-        banners.extend(str(warning) for warning in balance.warnings)
-        banners.extend(
-            str(issue)
-            for issue in balance.issues
-            if not (closing_not_due and issue == "MONTH_SOURCE_INCOMPLETE")
-        )
-        return list(dict.fromkeys(banners))
-
-    @staticmethod
-    def _calculation_blockers(balance) -> list[str]:
-        blockers = []
-        for key, label in (
-            ("sales", "ventas"),
-            ("production", "producción"),
-            ("waste", "merma"),
-            ("conversions", "conversiones"),
-        ):
-            source = balance.sources.get(key) or {}
-            if source.get("source_present") is False or not source.get("authoritative"):
-                blockers.append(label)
-        if not blockers and "CALCULATED_CLOSING_MISSING" in set(balance.issues):
-            blockers.append("productos sin todos sus movimientos o saldos")
-        return blockers
-
-    @staticmethod
-    def _join_spanish(items: list[str]) -> str:
-        if len(items) < 2:
-            return "".join(items)
-        return f"{', '.join(items[:-1])} y {items[-1]}"
-
-    @classmethod
-    def _operational_summary(cls, balance, *, period_label: str = "El periodo") -> dict[str, str]:
-        opening_meta = balance.sources.get("opening_snapshot") or {}
-        closing_meta = balance.sources.get("closing_snapshot") or {}
-        opening_target = opening_meta.get("target_date")
-        closing_target = closing_meta.get("target_date")
-        opening_date = balance.effective_snapshot_dates.get("opening")
-        closing_date = balance.effective_snapshot_dates.get("closing")
-        period_meta = balance.sources.get("period") or {}
-
-        def display(value):
-            return value.strftime("%d/%m/%Y") if value else "la fecha requerida"
-
-        if closing_meta.get("not_due"):
-            month_start = period_meta.get("month_start") or closing_target.replace(day=1)
-            data_through = period_meta.get("data_through") or min(closing_target, timezone.localdate() - timedelta(days=1))
-            return {
-                "tone": "info",
-                "title": "Periodo en curso",
-                "message": (
-                    f"Se muestran movimientos Point del {display(month_start)} al {display(data_through)}. "
-                    f"El cierre Point final del {display(closing_target)} se obtiene al terminar el mes."
-                ),
-                "closing_label": f"Al cierre del {display(closing_target)}",
-            }
-
-        if opening_date and closing_date:
-            blockers = cls._calculation_blockers(balance)
-            if blockers:
-                blocker_text = cls._join_spanish(blockers)
-                return {
-                    "tone": "warning",
-                    "title": "Cierres confirmados; conciliación pendiente",
-                    "message": (
-                        f"{period_label} inicia contra el cierre Point del {display(opening_date)} "
-                        f"y compara contra el cierre Point final del {display(closing_date)}. "
-                        f"Falta validar {blocker_text} del mes para calcular el saldo y la diferencia."
-                    ),
-                    "closing_label": display(closing_date),
-                }
-            return {
-                "tone": "success",
-                "title": "Conciliación Point completa",
-                "message": (
-                    f"{period_label} inicia contra el cierre Point del {display(opening_date)} "
-                    f"y compara contra el cierre Point final del {display(closing_date)}."
-                ),
-                "closing_label": display(closing_date),
-            }
-        if not opening_date and closing_date:
-            return {
-                "tone": "warning",
-                "title": "Información parcial",
-                "message": (
-                    f"Falta recuperar el cierre Point del {display(opening_target)}. "
-                    f"El cierre Point del {display(closing_date)} sí está disponible y se muestra."
-                ),
-                "closing_label": display(closing_date),
-            }
-        if opening_date and not closing_date:
-            return {
-                "tone": "warning",
-                "title": "Información parcial",
-                "message": (
-                    f"El cierre inicial del {display(opening_date)} sí está disponible. "
-                    f"Falta recuperar el cierre Point final del {display(closing_target)}."
-                ),
-                "closing_label": "Pendiente",
-            }
-        return {
-            "tone": "warning",
-            "title": "Cierres Point pendientes",
-            "message": (
-                f"Falta recuperar el cierre inicial del {display(opening_target)} "
-                f"y el cierre final del {display(closing_target)}."
-            ),
-            "closing_label": "Pendiente",
-        }
 
     def _available_periods(self, *, selected: str) -> list[str]:
-        months = {selected, *canonical_sales_evidence_months()}
-        for model, field in (
-            (ProductoMonthClosure, "month_start"),
-            (FactProduccionDiaria, "fecha"),
-            (PointProductionLine, "production_date"),
-            (PointConversionLine, "movement_at"),
-            (PointWasteLine, "movement_at"),
-            (MermaMensualSucursal, "periodo"),
-        ):
-            values = (
-                model.objects.annotate(report_month=TruncMonth(field))
-                .order_by()
-                .values_list("report_month", flat=True)
-                .distinct()
-            )
-            for value in values:
-                if value:
-                    months.add(value.strftime("%Y-%m"))
+        current = timezone.localdate().replace(day=1)
+        months = {selected, current.strftime("%Y-%m"), (current - timedelta(days=1)).strftime("%Y-%m")}
+        for model, field in ((ProductInventoryAuditRun, "month"), (ProductoMonthClosure, "month_start")):
+            months.update(value.strftime("%Y-%m") for value in model.objects.values_list(field, flat=True))
         return sorted(months, reverse=True)
 
     def _group_rows(self, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -913,6 +577,9 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "enteros_equivalentes": _sum_or_none(rows, "enteros_equivalentes"),
             "conversion_entrada": _sum_or_none(rows, "conversion_entrada"),
             "conversion_salida": _sum_or_none(rows, "conversion_salida"),
+            "transferencia_entrada": _sum_or_none(rows, "transferencia_entrada"),
+            "transferencia_salida": _sum_or_none(rows, "transferencia_salida"),
+            "ajuste_identificado": _sum_or_none(rows, "ajuste_identificado"),
             "inventario_inicial": _sum_or_none(rows, "inventario_inicial"),
             "inventario_final_teorico": _sum_or_none(rows, "inventario_final_teorico"),
             "inventario_final_point_total": _sum_or_none(rows, "inventario_final_point_total"),

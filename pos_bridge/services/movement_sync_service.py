@@ -792,6 +792,8 @@ class PointMovementSyncService:
             if value is not None
         ]
         lock_product_month_sources([*scope_dates, *movement_dates, *historical_dates])
+        from reportes.services_inventory_audit_refresh import enqueue_inventory_audit_months
+        enqueue_inventory_audit_months([*scope_dates, *movement_dates, *historical_dates])
         staged_created = 0
         staged_updated = 0
         inventory_entries_created = 0

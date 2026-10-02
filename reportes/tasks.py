@@ -7,6 +7,34 @@ from celery import shared_task
 from reportes.analytics_service import rebuild_production_facts
 
 
+@shared_task(name="reportes.refresh_inventory_audit_month", ignore_result=True)
+def refresh_inventory_audit_month_task(month, token=None):
+    from django.core.cache import cache
+    from reportes.services_inventory_audit_refresh import refresh_inventory_audit_month, enqueue_inventory_audit_months
+    key = f"inventory-audit:queued:{month}-01"
+    dirty_key = f"inventory-audit:dirty:{month}-01"
+    started_revision = cache.get(dirty_key)
+    try:
+        return refresh_inventory_audit_month(month)
+    finally:
+        if token and cache.get(key) == token:
+            cache.delete(key)
+            if cache.get(dirty_key) != started_revision:
+                enqueue_inventory_audit_months([month])
+
+
+@shared_task(name="reportes.refresh_inventory_audit_daily")
+def refresh_inventory_audit_daily_task():
+    from reportes.services_inventory_audit_refresh import inventory_audit_review_months, refresh_inventory_audit_month
+    results = []
+    for month in inventory_audit_review_months():
+        try:
+            results.append(refresh_inventory_audit_month(month))
+        except Exception as exc:
+            results.append({"month": str(month), "status": "error", "error": str(exc)})
+    return results
+
+
 @shared_task(name="reportes.snapshot_historical_costing_task")
 def snapshot_historical_costing_task():
     """Congela costo historico del mes anterior al dia 1 de cada mes."""

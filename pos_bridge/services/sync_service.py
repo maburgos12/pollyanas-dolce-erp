@@ -192,6 +192,8 @@ class PointSyncService:
             )
 
         PointInventorySnapshot.objects.bulk_create(snapshots_to_create, batch_size=500)
+        from reportes.services_inventory_audit_refresh import enqueue_inventory_audit_months
+        enqueue_inventory_audit_months(snapshot_affected_months(branch_result.captured_at))
         if snapshots_to_create:
             bump_cache_scopes("dashboard")
             captured_days = [timezone.localtime(row.captured_at).date() if timezone.is_aware(row.captured_at) else row.captured_at.date() for row in snapshots_to_create]
