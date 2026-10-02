@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20260928-seguimiento-colaboradores-tipos-v1";
+const CACHE_NAME = "pollyanas-erp-shell-20261001-auditor-producido-vendido-v1";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

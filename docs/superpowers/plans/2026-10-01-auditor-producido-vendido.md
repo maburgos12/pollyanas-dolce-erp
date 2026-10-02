@@ -182,3 +182,22 @@ PeriodicTask.objects.update_or_create(
 ## Revisión del plan
 
 Cobertura: fuentes y no duplicación (Tasks 1–3), automatización (2–4), pantalla/exportaciones (5–6), evidencia y validación productiva (7). No hay autorizaciones automáticas de pérdidas/cierres. No hay nuevas equivalencias de identidad. La ejecución continúa en el worktree registrado; no requiere otra rama ni volver a aprobar el mismo diseño.
+
+## Evidencia de implementación — 1 de octubre
+
+Implementados lector compartido, coordinador local con locks, eventos después del commit,
+schedule diario y reporte/exportaciones por sucursal. Se reutilizan helpers y escritor
+existentes; no hay modelos ni migraciones nuevas. Se omite `force`: sin cambios de fuentes
+no hace falta reconstruir. Los meses revisables son actual, anterior y auditorías existentes
+no bloqueadas; el respaldo diario también detecta cambios bulk sin señales.
+
+Validación local PostgreSQL 16: 120 pruebas del reporte, coordinador, materializador,
+agente, schedules e importadores pasaron; 23 pruebas de reporte/coordinador pasaron
+después de añadir sucursal, revisión y transferencias a exportaciones. Check sin errores,
+migrate --check sin pendientes, makemigrations --check sin cambios. El test DB conservado
+advierte ausencia de cinco reglas críticas de catálogo; la base local operativa tiene check limpio.
+Navegador autenticado local: filtro por sucursal y trazabilidad, sin errores JS.
+VPS sólo lectura: baseline 1,958 casos y checksum documentados en ficha; la pantalla
+anterior afirmaba conciliación completa pese a casos pendientes. No usar esa leyenda
+como evidencia de conciliación. CI completo, despliegue, schedule real y verificación
+autenticada de la nueva pantalla siguen pendientes al preparar el PR.

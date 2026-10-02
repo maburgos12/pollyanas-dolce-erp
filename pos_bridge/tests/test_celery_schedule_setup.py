@@ -147,6 +147,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "recetas: consolidado nocturno CEDIS",
                 "recetas: inventario final cierre email",
                 "reportes: refresh analytics operativo",
+                "reportes: auditor inventario diario",
                 "reportes: refresh snapshots inversion",
                 "erp-doctor: reporte diario",
                 "ventas: sync ventas autoritativas mensual",
@@ -161,7 +162,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 43)
+        self.assertEqual(PeriodicTask.objects.count(), 44)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -175,6 +176,10 @@ class SetupCelerySchedulesCommandTests(TestCase):
             PeriodicTask.objects.filter(name="syncfy: sincronizacion bancaria nocturna").exists()
         )
         intraday_sales = PeriodicTask.objects.get(name="pos_bridge: ventas intradia actual")
+        auditor = PeriodicTask.objects.get(name="reportes: auditor inventario diario")
+        self.assertEqual(auditor.task, "reportes.refresh_inventory_audit_daily")
+        self.assertEqual((auditor.crontab.hour, auditor.crontab.minute), ("4", "15"))
+        self.assertEqual(str(auditor.crontab.timezone), "America/Mazatlan")
         self.assertEqual(intraday_sales.task, "pos_bridge.daily_sales_sync")
         self.assertEqual(intraday_sales.crontab.hour, "8-22")
         self.assertEqual(intraday_sales.crontab.minute, "0")

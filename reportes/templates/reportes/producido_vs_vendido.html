@@ -25,37 +25,24 @@
       <div>
         <div class="executive-eyebrow">Reportes</div>
         <h1 class="card-header">Producido vs Vendido</h1>
-        <p class="executive-section-copy">Comparativo operativo por receta y categoría para {{ selected_period_label }}.</p>
+        <p class="executive-section-copy">{{ selected_period_label }} · {{ audit_metadata.branch_label }}</p>
       </div>
       <div class="production-export-actions">
-        <a class="btn btn-primary" href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}">Auditar por sucursal</a>
-        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=csv">CSV</a>
-        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=xlsx">Excel XLSX</a>
-        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=pdf">PDF</a>
+        <a class="btn btn-primary" href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}&branch={{ selected_branch }}">Auditar por sucursal</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=csv">CSV</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=xlsx">Excel XLSX</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=pdf">PDF</a>
       </div>
     </div>
-    <div class="production-source-list" aria-label="Fuentes de datos">
-      <span class="badge bg-primary">Ventas Point: {{ fuentes.ventas.label }}</span>
-      <span class="badge bg-primary">Producción: {{ fuentes.produccion.label }}</span>
-      <span class="badge bg-primary">Merma: {{ fuentes.merma.label }}</span>
-      <span class="badge bg-primary">Conversiones Point: {{ fuentes.canonical.conversions.source }}</span>
-      <span class="badge bg-primary">Cierre: {{ fuentes.inventario.label }}</span>
-      <span class="badge {% if fuentes.canonical.authority.in_progress %}bg-primary{% elif fuentes.canonical.authority.verified %}bg-success{% else %}bg-warning{% endif %}">Autoridad Point: {{ fuentes.canonical.authority.label }}</span>
-      <span class="badge bg-primary">Periodo mostrado: {{ selected_period_label }}</span>
-      <span class="badge bg-primary">Cierres Point · Inicial: {% if fuentes.canonical.snapshot_dates.opening %}{{ fuentes.canonical.snapshot_dates.opening|date:"d/m/Y" }}{% else %}Pendiente{% endif %} · Final: {% if fuentes.canonical.snapshot_dates.closing %}{{ fuentes.canonical.snapshot_dates.closing|date:"d/m/Y" }}{% else %}{{ operational_summary.closing_label }}{% endif %}</span>
-    </div>
-    <p class="executive-section-copy">La fecha operativa determina el mes: el inicial corresponde al cierre del último día del mes anterior y el final al último día del mes seleccionado. Recibir el correo al día siguiente no cambia esas fechas. Son saldos de Point, no conteos físicos.</p>
-    <div class="production-source-summary is-{{ operational_summary.tone }}" role="status">
+    <div id="audit-summary" class="production-source-summary is-{{ operational_summary.tone }}" role="status" data-version="{{ audit_version }}">
       <strong>{{ operational_summary.title }}</strong>
-      <span>{{ operational_summary.message }}</span>
+      <span>{% if audit_updated_at %}Actualizado {{ audit_updated_at|date:"d/m/Y H:i" }}{% else %}Sin revisión publicada{% endif %}</span>
     </div>
-    {% if not fuentes.canonical.authority.verified or banners %}
     <details class="production-source-diagnostics">
-      <summary>Ver diagnóstico técnico</summary>
-      <p>{{ fuentes.canonical.authority.reason }}</p>
-      {% for banner in banners %}<p>{{ banner }}</p>{% endfor %}
+      <summary>Referencias del corte</summary>
+      <p>Inicial: cierre del {{ opening_reference|date:"d/m/Y" }}. Final: cierre del {{ closing_reference|date:"d/m/Y" }}. La fecha operativa determina el mes; son saldos de Point, no conteos físicos.</p>
+      <p>Se reutiliza la evidencia guardada de ventas, producción, merma, conversiones, transferencias e historial. El detalle por sucursal está en cada producto.</p>
     </details>
-    {% endif %}
   </section>
 
   <section class="card">
@@ -83,10 +70,17 @@
       <div class="production-filter-action">
         <button class="btn btn-primary w-100" type="submit">Filtrar</button>
       </div>
+      <div>
+        <label class="form-label" for="branch">Sucursal o almacén</label>
+        <select class="form-select" id="branch" name="branch">
+          <option value="">Todas</option>
+          {% for branch in branches %}<option value="{{ branch.id }}" {% if branch.id|stringformat:"s" == selected_branch %}selected{% endif %}>{{ branch.nombre }}</option>{% endfor %}
+        </select>
+      </div>
     </form>
   </section>
 
-  <section class="kpi-grid production-kpi-grid">
+  <section id="audit-kpis" class="kpi-grid production-kpi-grid">
     <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
         <div class="kpi-icon">
@@ -133,13 +127,13 @@
     </article>
   </section>
 
-  <section class="card production-table-card">
+  <section id="audit-table" class="card production-table-card">
     <div class="section-header production-section-header">
       <div>
         <h2 class="section-header-title">Detalle operativo por categoría y receta</h2>
-        <p class="production-table-meta">Saldo calculado = inicial Point + producción + conversión de entrada − venta − merma − conversión de salida. Dif. Point = final Point − saldo calculado.</p>
-        <p class="production-table-meta">Lectura de Dif. Point: positivo = Point reporta más; negativo = Point reporta menos; cero = coincide; cualquier valor distinto de cero requiere revisión y no es por sí mismo bueno ni malo.</p>
-        <p class="production-table-meta">La Dif. Point no identifica ni explica por sí sola la causa y no atribuye responsabilidad.</p>
+        <details class="production-table-meta"><summary>Cómo se calcula</summary>
+        <p>Saldo calculado = inicial Point + producción + entradas por transferencia + conversión de entrada − venta − merma − salidas por transferencia − conversión de salida + ajustes identificados. Dif. Point = final Point − saldo calculado.</p>
+        <p>Positivo: Point reporta más; negativo: reporta menos. Cero no concilia diferencias que se compensan entre sucursales. Las diferencias requieren evidencia, no atribuyen responsabilidad.</p></details>
       </div>
     </div>
     {% if groups %}
@@ -231,7 +225,12 @@
           </tr>
           {% for row in group.rows %}
           <tr>
-            <td class="cell-wrap">{{ row.receta }}</td>
+            <td class="cell-wrap">{{ row.receta }}
+              <details id="trace-product-{{ row.product_id }}"><summary>Ver trazabilidad</summary>
+                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · {{ case.status }}</p>{% endfor %}
+                <p>Transferencias: +{{ row.transferencia_entrada|floatformat:"-3" }} / −{{ row.transferencia_salida|floatformat:"-3" }}. Ajustes identificados: {{ row.ajuste_identificado|floatformat:"-3" }}.</p>
+              </details>
+            </td>
             <td class="cell-wrap">{{ row.categoria }}</td>
             <td class="text-end">{% if row.vendido is None %}<span class="muted">—</span>{% else %}{{ row.vendido|floatformat:"-3"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.producido is None %}<span class="muted">—</span>{% else %}{{ row.producido|floatformat:"-3"|intcomma }}{% endif %}</td>
@@ -276,10 +275,10 @@
             <td class="text-end">{% if row.inventario_inicial is None %}<span class="muted">Sin dato</span>{% else %}{{ row.inventario_inicial|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% if row.inventario_final_point_total is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Sin dato{% endif %}</span>{% else %}{{ row.inventario_final_point_total|floatformat:"-1"|intcomma }}{% endif %}</td>
-            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% elif row.estado_inventario == 'Conciliado' %}text-success{% else %}muted{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
-              <span class="production-state-label {% if row.estado_inventario == 'Coincide' %}is-success{% elif row.estado_inventario == 'Point mayor' %}is-warning{% elif row.estado_inventario == 'Point menor' %}is-danger{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
+              <span class="production-state-label {% if row.estado_inventario == 'Conciliado' %}is-success{% elif row.estado_inventario == 'Pendiente de conciliar' %}is-warning{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
               {% else %}
               <span class="muted">—</span>
               {% endif %}
@@ -341,12 +340,51 @@
   var form = document.querySelector('[data-period-autosubmit]');
   var period = form && form.querySelector('[name="periodo"]');
   if (!form || !period) return;
+  var busy = false, submitting = false;
+  form.addEventListener('submit', function () { submitting = true; });
   period.addEventListener('change', function () {
     form.setAttribute('aria-busy', 'true');
     var button = form.querySelector('[type="submit"]');
     if (button) button.textContent = 'Aplicando…';
     form.requestSubmit();
   });
+  async function refreshAudit() {
+    if (document.hidden || busy || submitting) return;
+    busy = true;
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.delete('export');
+      url.searchParams.set('metadata', '1');
+      var response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok || !response.headers.get('content-type').includes('application/json')) return;
+      var metadata = await response.json();
+      var summary = document.getElementById('audit-summary');
+      if (metadata.version === summary.dataset.version || submitting) return;
+      url.searchParams.delete('metadata');
+      response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok || submitting) return;
+      var page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      var wrap = document.querySelector('.production-table-wrap');
+      var scroll = wrap ? [wrap.scrollLeft, wrap.scrollTop] : [0, 0];
+      var opened = Array.from(document.querySelectorAll('#audit-table details[id][open]')).map(function (d) { return d.id; });
+      // Keep an open/focused investigation stable; update on the next quiet poll.
+      if (document.getElementById('audit-table').contains(document.activeElement)) return;
+      var ids = ['audit-summary', 'audit-kpis', 'audit-table'];
+      var replacements = ids.map(function (id) { return page.getElementById(id); });
+      if (replacements.some(function (node) { return !node; })) throw new Error('Respuesta de reporte incompleta');
+      var windowScroll = [window.scrollX, window.scrollY];
+      ids.forEach(function (id, i) { document.getElementById(id).replaceWith(replacements[i]); });
+      wrap = document.querySelector('.production-table-wrap');
+      if (wrap) { wrap.scrollLeft = scroll[0]; wrap.scrollTop = scroll[1]; }
+      opened.forEach(function (id) { var d = document.getElementById(id); if (d) d.open = true; });
+      window.scrollTo(windowScroll[0], windowScroll[1]);
+    } catch (error) {
+      // Retain the last visible, valid report on transient network failures.
+      console.warn('No se pudo actualizar el reporte de auditoría', error);
+    } finally { busy = false; }
+  }
+  window.setInterval(refreshAudit, 60000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshAudit(); });
 })();
 </script>
 {% endblock %}

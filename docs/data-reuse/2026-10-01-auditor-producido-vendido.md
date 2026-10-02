@@ -31,4 +31,19 @@ Extender proyección, disparadores y consumidores existentes. No crear maestros,
 
 Procedimiento reproducible: inventario_fuentes_datos --term auditoria --term cierre --term inventario con PostgreSQL; consultas acotadas al mes 2026-09 y preview AuditStockHistoryService.reconcile_many en lotes de 50, sin HTTP. El catálogo arroja candidatos léxicos, no prueba equivalencias.
 
-Riesgos y pendientes: cobertura insuficiente en septiembre; orígenes de conversión no identificados; disparadores que deben verificarse contra escritores reales, incluidos bulk updates. La revisión diaria recupera omisiones. El job mensual de Point desactivado refresca fuentes y no sustituye al auditor; no se activa en este diseño. Responsables faltantes y resoluciones humanas se preservan. La implementación y su validación en producción aún no se han realizado.
+Riesgos y pendientes: cobertura insuficiente en septiembre; orígenes de conversión no identificados. La revisión diaria recupera omisiones. El job mensual de Point desactivado refresca fuentes y no sustituye al auditor; no se activa. Responsables faltantes y resoluciones humanas se preservan.
+
+## Escritores y disparadores comprobados en implementación
+
+| Fuente | Finalización reutilizada | Fecha y meses afectados |
+| --- | --- | --- |
+| Ventas oficiales | PointDailySale y PointSyncJob finalizado (incluye bulk) | sale_date / parameters.start_date y end_date |
+| Producción y merma | PointMovementSyncService y signals existentes; estado terminal del job | production_date / movement_at, mes operativa Mazatlán |
+| Conversiones | PointConversionLine y job finalizado | movement_at; no inferir producto origen |
+| Transferencias | persist_transfer_lines: reutilizar scope_dates, movement_dates y historical_dates, después del commit | registered_at, sent_at, received_at; incluye el mes anterior al mover una transferencia |
+| Snapshots | persist_branch_inventory, después de bulk_create; signal individual | snapshot_affected_months: cierre y apertura siguiente, ventana canónica existente |
+| Cierres históricos | guardado/verificación de PointHistoricalInventoryClosing | operational_date: mes de cierre y siguiente |
+| Historial local | guardado final de PointProductHistoryImport, después de filas y cobertura | intervalo de movement_at intersectado con meses auditados existentes |
+| Logística | carga de RutaCargaChecklistLinea, recepción de ParadaRuta y DiscrepanciaLogistica | ruta.fecha_ruta; respaldo diario detecta actualizaciones bulk |
+
+No se crean tablas ni PointSyncJob. Se extiende la programación existente con una revisión diaria local a las 04:15 America/Mazatlan. El reporte y CSV/XLSX/PDF leen ProductInventoryAuditCase; la consulta ligera de vigencia no costea ni reconstruye. El checksum previo al despliegue para las 1,958 cantidades de septiembre fue c860e77381192a23356c2ec01fcb7ef7fc4c87f3189188a7144d70c5257d5a11 (campos de saldo/movimiento, orden branch_id/product_id); status 1,259/220/479 y is_locked=False, verificados directamente en PostgreSQL del VPS el 1 de octubre.
