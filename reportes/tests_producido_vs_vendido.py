@@ -52,6 +52,16 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
             self.assertEqual(row[field], value, field)
         self.assertEqual(row["estado_inventario"], "Pendiente de conciliar")
 
+    def test_balanced_stock_keeps_pending_transfer_visible(self):
+        self.make_case(difference=0, movement_status="NEEDS_EXPLANATION",
+                       issue_codes=["INCOMPLETE_TRANSFER"])
+        context = self.context()
+        row = context["groups"][0]["rows"][0]
+        self.assertEqual(row["estado_inventario"], "Conciliado")
+        self.assertEqual(row["estado_trazabilidad"], "Pendiente de conciliar")
+        self.assertIn("Trazabilidad pendiente", self.render(context))
+        self.assertIn("Saldo conciliado · trazabilidad pendiente", self.view._export_csv(context).content.decode())
+
     def test_missing_opening_preserves_known_closing_in_html_and_exports(self):
         self.make_case(opening_point=0, point_closing=22, movement_status="SOURCE_INCOMPLETE",
             source_trace={"opening": [], "closing": [1]}, issue_codes=["SOURCE_INCOMPLETE"])

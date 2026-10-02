@@ -266,11 +266,11 @@ class AuditStockHistoryService:
         )
         return self._reconcile_record(record, month, rows)
 
-    def reconcile_many(self, lines, month: date) -> dict[tuple[int, int], PointHistoryReconciliation]:
+    def reconcile_many(self, lines, month: date, *, include_zero_difference=False) -> dict[tuple[int, int], PointHistoryReconciliation]:
         keys = {
             (line.branch.id, line.product.id)
             for line in lines
-            if Decimal(line.difference) != 0
+            if include_zero_difference or Decimal(line.difference) != 0
         }
         if not keys:
             return {}

@@ -91,6 +91,9 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
     payload: dict[str, object] = {}
     for source_name, source_value in sorted(source_trace.items()):
         name = str(source_name)
+        if name == "source_issues":
+            payload[name] = list(source_value)
+            continue
         if name == "point_history":
             payload[name] = source_value if isinstance(source_value, Mapping) else {}
             continue
@@ -295,7 +298,8 @@ class InventoryAuditMaterializer:
                 for case in cases:
                     history = histories.get((case.branch_id, case.product_id))
                     if (
-                        history is None
+                        case.movement_status == ProductInventoryAuditCase.MovementStatus.SOURCE_INCOMPLETE
+                        or history is None
                         or history.coverage_status != "COMPLETE"
                         or history.unknown_movement_ids
                         or history.unexplained_remainder(
@@ -322,13 +326,17 @@ class InventoryAuditMaterializer:
                         point_closing=case.point_closing,
                         difference=case.difference,
                         source_trace=case.source_trace,
-                        issues=(),
+                        issues=tuple(TraceSourceIssue(
+                            code=issue["code"], message=issue["message"],
+                            branch_id=issue.get("branch_id"), product_id=issue.get("product_id"),
+                            source_ids=tuple(issue.get("source_ids", ())),
+                        ) for issue in (case.source_trace or {}).get("source_issues", ())),
                     )
                     prepared = self._prepare_line(line, point_history=history)
                     if case.issue_codes:
                         prepared["source_trace"]["point_history"][
                             "superseded_issue_codes"
-                        ] = sorted(case.issue_codes)
+                        ] = sorted(set(case.issue_codes) - set(prepared["issue_codes"]))
                     normalized = prepared["normalized_quantities"]
                     previous_fingerprint = case.calculation_fingerprint
                     should_reopen = case.movement_status in {
@@ -512,6 +520,9 @@ class InventoryAuditMaterializer:
     def _prepare_line(self, line, *, point_history=None) -> dict[str, object]:
         issues = _sorted_issue_payloads(line.issues)
         source_trace = _source_trace_payload(line.source_trace)
+        source_trace.pop("source_issues", None)
+        if issues:
+            source_trace["source_issues"] = issues
         normalized_quantities = {
             "opening_point": Decimal(line.opening).quantize(_QUANTITY),
             "production": Decimal(line.production).quantize(_QUANTITY),
@@ -538,6 +549,7 @@ class InventoryAuditMaterializer:
         )
         if (
             Decimal(line.difference) != 0
+            and not any(issue["code"] == "SOURCE_INCOMPLETE" for issue in issues)
             and point_history is not None
             and point_history.coverage_status == "COMPLETE"
             and not point_history.unknown_movement_ids

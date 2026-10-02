@@ -52,6 +52,14 @@ class _FakePointClient:
 
 
 class AuditStockHistoryServiceTests(TestCase):
+    def test_zero_difference_trace_case_can_review_cached_history(self):
+        service = AuditStockHistoryService(client=_FakePointClient([
+            _row(900, 'ENTRADA POR PRODUCCIÓN', '2026-08-10T10:00:00-07:00', 1, 0, 1)]))
+        service.capture(self.branch, self.product, self.month)
+        case = SimpleNamespace(branch=self.branch, product=self.product, difference=Decimal('0'))
+        result = AuditStockHistoryService().reconcile_many([case], self.month, include_zero_difference=True)
+        self.assertEqual(result[(self.branch.pk, self.product.pk)].production, Decimal('1'))
+
     def setUp(self):
         self.month = date(2026, 8, 1)
         self.branch = PointBranch.objects.create(external_id="8", name="CEDIS")

@@ -13,12 +13,13 @@
       <h1>{{ case.product.name }}</h1>
       <p>{{ case.branch.name }} · {{ case.month|date:"F Y"|capfirst }}{% if case.product.sku %} · {{ case.product.sku }}{% endif %}</p>
     </div>
-    <p class="inventory-audit-difference-summary"><span>Diferencia</span><strong>{{ case.difference|floatformat:"-4"|intcomma }}</strong></p>
+    <p class="inventory-audit-difference-summary"><span>Diferencia</span><strong>{% if difference == None %}Sin comprobar{% else %}{{ difference|floatformat:"-4"|intcomma }}{% endif %}</strong></p>
   </header>
 
   <section class="inventory-audit-state-strip" aria-label="Estado del caso">
     <div><span>Cierre Point</span><strong>{{ status.point }}</strong></div>
-    <div><span>Movimientos</span><strong>{{ status.movement }}</strong></div>
+    <div><span>Saldo de inventario</span><strong>{{ status.balance }}</strong></div>
+    <div><span>Movimientos / trazabilidad</span><strong>{{ status.movement }}</strong></div>
     <div><span>Conteo físico</span><strong>{{ status.physical }}</strong></div>
   </section>
 
@@ -75,7 +76,7 @@
         <span class="inventory-audit-step-number">{{ step.number }}</span>
         <span class="inventory-audit-step-label">{{ step.label }}</span>
         <span class="inventory-audit-step-operator" aria-hidden="true">{{ step.operator }}</span>
-        <strong>{{ step.value|floatformat:"-4"|intcomma }}</strong>
+        <strong>{% if step.value == None %}Sin comprobar{% else %}{{ step.value|floatformat:"-4"|intcomma }}{% endif %}</strong>
         {% if step.evidence %}
         <details class="inventory-audit-step-evidence">
           <summary>Ver evidencia ({{ step.evidence|length }})</summary>

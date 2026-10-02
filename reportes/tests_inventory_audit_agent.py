@@ -94,6 +94,56 @@ class InventoryAuditAgentModelTests(InventoryAuditAgentFixtures, TestCase):
 
 
 class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
+    def test_zero_stock_difference_keeps_traceability_separate(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        case = self.make_case(difference=Decimal('0'), point_closing=Decimal('10'),
+                              issue_codes=['INCOMPLETE_TRANSFER'])
+        result = InventoryAuditAgent().investigate_case(case)
+        self.assertEqual(result.summary['balance_status'], 'BALANCED')
+        self.assertEqual(result.summary['traceability_status'], 'PENDING')
+        self.assertEqual(result.summary['daily_break'], {})
+
+    def test_missing_closings_identifies_dates_product_and_location(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        case = self.make_case(movement_status='SOURCE_INCOMPLETE',
+                              issue_codes=['SOURCE_INCOMPLETE'],
+                              source_trace={'opening': [], 'closing': []})
+        result = InventoryAuditAgent().investigate_case(case)
+        text = ' '.join(result.summary['missing'])
+        self.assertIn('31/07/2026', text)
+        self.assertIn('31/08/2026', text)
+        self.assertIn(self.product.name, text)
+        self.assertIn(self.branch.name, text)
+        self.assertEqual(result.summary['balance_status'], 'SOURCE_INCOMPLETE')
+
+    def test_incomplete_transfer_names_actual_folio_and_destination(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        transfer = PointTransferLine.objects.create(
+            origin_branch=self.branch, destination_branch=self.branch,
+            transfer_external_id='TEST-TRANSFER', detail_external_id='TEST-LINE',
+            source_hash='7' * 64, registered_at=timezone.now(),
+            sent_at=timezone.now(), item_name=self.product.name,
+            item_code=self.product.sku, sent_quantity=Decimal('1'),
+            received_quantity=Decimal('0'), is_received=False, is_finalized=False)
+        case = self.make_case(difference=Decimal('0'),
+                              issue_codes=['INCOMPLETE_TRANSFER'],
+                              source_trace={'transfers': [transfer.pk]})
+        result = InventoryAuditAgent().investigate_case(case)
+        self.assertIn('TEST-TRANSFER/TEST-LINE', ' '.join(result.summary['facts']))
+        self.assertIn(self.branch.name, ' '.join(result.summary['missing']))
+        self.assertEqual(result.summary['transfer_evidence'][0]['sent'], '1')
+        self.assertFalse(result.summary['transfer_evidence'][0]['received'])
+
+    def test_missing_conversion_origin_retains_exact_source_issue(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        case = self.make_case(issue_codes=['MISSING_CONVERSION_ORIGIN'],
+            source_trace={'source_issues': [{'code': 'MISSING_CONVERSION_ORIGIN',
+                'message': 'Conversión Point 987: 414 rebanadas sin producto origen.',
+                'source_ids': [987]}]})
+        result = InventoryAuditAgent().investigate_case(case)
+        self.assertIn('987', ' '.join(result.summary['missing']))
+        self.assertIn('414', ' '.join(result.summary['missing']))
+
     def test_balanced_case_is_not_promoted_by_previous_month(self):
         from reportes.services_inventory_audit_agent import InventoryAuditAgent
         case = self.make_case(difference=Decimal("0"), point_closing=Decimal("10"),
@@ -294,7 +344,7 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             "historial point registra 4 piezas de ajustes de inventario",
             facts.lower(),
         )
-        self.assertTrue(
+        self.assertFalse(
             any("destino" in item.lower() for item in result.summary["hypotheses"])
         )
         self.assertNotIn("rebanadas", facts.lower())
