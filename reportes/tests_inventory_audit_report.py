@@ -12,6 +12,13 @@ from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 
 
 class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
+    def test_stock_balances_without_claiming_traceability_is_closed(self):
+        self.make_case(difference=Decimal('0'), point_closing=Decimal('10'),
+                       issue_codes=['INCOMPLETE_TRANSFER'])
+        row = self.service().read_audit_report(self.month)['rows'][0]
+        self.assertEqual(row['estado_inventario'], 'Conciliado')
+        self.assertEqual(row['estado_trazabilidad'], 'Pendiente de conciliar')
+
     def service(self):
         name = "reportes.services_inventory_audit_report"
         self.assertIsNotNone(util.find_spec(name), "Falta la lectura compartida del auditor")

@@ -142,6 +142,24 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_history_does_not_certify_a_balance_with_missing_closings(self):
+        line = self._line(issues=(TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta cierre"),))
+        history = SimpleNamespace(
+            coverage_status="COMPLETE", unknown_movement_ids=(),
+            unexplained_remainder=lambda opening, closing: ZERO,
+        )
+        prepared = InventoryAuditMaterializer()._prepare_line(line, point_history=history)
+        self.assertEqual(prepared["normalized_quantities"]["difference"], line.difference)
+        self.assertNotIn("point_history", prepared["source_trace"])
+
+    def test_persists_source_issue_detail_without_losing_ids(self):
+        issue = TraceSourceIssue(code='SOURCE_INCOMPLETE',
+            message='Falta apertura 31/07 para producto y sucursal.',
+            branch_id=self.branch.pk, product_id=self.product.pk, source_ids=(123,))
+        prepared = self._materializer(self._result())._prepare_line(self._line(issues=(issue,)))
+        self.assertEqual(prepared['source_trace']['source_issues'][0]['message'], issue.message)
+        self.assertEqual(prepared['source_trace']['source_issues'][0]['source_ids'], [123])
+
     def test_identity_provenance_does_not_make_balanced_stock_an_exception(self):
         issues = tuple(
             TraceSourceIssue(code=code, message="Identidad resuelta")
@@ -305,20 +323,21 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
 
         case.refresh_from_db()
         self.assertEqual(incomplete.months, [])
-        self.assertEqual(counts, {"selected": 1, "reconciled": 1, "pending": 0})
+        self.assertEqual(counts, {"selected": 1, "reconciled": 0, "pending": 1})
         self.assertEqual(case.conversion_out, Decimal("10"))
         self.assertEqual(case.transfer_out, Decimal("533"))
         self.assertEqual(case.identified_adjustment, Decimal("4"))
         self.assertEqual(case.expected_closing, Decimal("6"))
         self.assertEqual(case.difference, ZERO)
-        self.assertEqual(case.issue_codes, [])
+        self.assertEqual(case.issue_codes, ["TRANSFER_QUANTITY_MISMATCH"])
+        self.assertEqual(case.source_trace["source_issues"][0]["message"], "El agregado no coincide.")
         self.assertEqual(
             case.source_trace["point_history"]["superseded_issue_codes"],
-            ["TRANSFER_QUANTITY_MISMATCH"],
+            [],
         )
         self.assertEqual(
             case.movement_status,
-            ProductInventoryAuditCase.MovementStatus.BALANCED,
+            ProductInventoryAuditCase.MovementStatus.NEEDS_EXPLANATION,
         )
 
     @patch(

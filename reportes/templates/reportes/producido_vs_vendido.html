@@ -279,6 +279,7 @@
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Conciliado' %}is-success{% elif row.estado_inventario == 'Pendiente de conciliar' %}is-warning{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
+              {% if row.estado_inventario == 'Conciliado' and row.estado_trazabilidad != 'Conciliado' %}<small class="muted">Trazabilidad pendiente</small>{% endif %}
               {% else %}
               <span class="muted">—</span>
               {% endif %}
