@@ -61,6 +61,16 @@ class AuditStockHistoryServiceTests(TestCase):
             name="Pastel de 3 Pecados Chico",
         )
 
+    def test_cache_must_have_been_fetched_after_the_month_finished(self):
+        metadata = {"fetched_rows": 2, "history_limit": 500}
+        record = SimpleNamespace(raw_metadata=metadata)
+        for fetched_at in (None, "invalid", "2026-09-30T23:59:59-07:00", "2026-10-01T06:59:59+00:00", "2026-10-01T07:00:00"):
+            with self.subTest(fetched_at=fetched_at):
+                metadata["fetched_at"] = fetched_at
+                self.assertFalse(AuditStockHistoryService._covers_month(record, date(2026, 9, 1)))
+        metadata["fetched_at"] = "2026-10-01T07:00:00+00:00"
+        self.assertTrue(AuditStockHistoryService._covers_month(record, date(2026, 9, 1)))
+
     def test_repeated_capture_upserts_the_same_point_movements(self):
         client = _FakePointClient(
             [

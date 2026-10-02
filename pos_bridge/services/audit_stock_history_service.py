@@ -162,6 +162,13 @@ class AuditStockHistoryService:
         metadata = record.raw_metadata or {}
         if "fetched_rows" not in metadata:
             return False
+        _, month_end = _month_bounds(month)
+        try:
+            fetched_at = datetime.fromisoformat(str(metadata.get("fetched_at") or ""))
+        except ValueError:
+            return False
+        if timezone.is_naive(fetched_at) or fetched_at < month_end:
+            return False
         fetched_rows = int(metadata.get("fetched_rows") or 0)
         history_limit = int(metadata.get("history_limit") or HISTORY_LIMIT)
         if fetched_rows < history_limit:
