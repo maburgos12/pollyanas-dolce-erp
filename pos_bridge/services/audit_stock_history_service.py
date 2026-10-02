@@ -323,7 +323,12 @@ class AuditStockHistoryService:
                     unknown_ids.append(row.row_number)
                 continue
             amount = row.quantity
-            if category != "identified_adjustment":
+            if _normalized(row.movement_type) == "CANCELACION VENTA":
+                if row.new_existence - row.previous_existence != abs(amount):
+                    unknown_ids.append(row.row_number)
+                    continue
+                amount = -abs(amount)
+            elif category != "identified_adjustment":
                 amount = abs(amount)
             totals[category] += amount
             ids_by_category[category].append(row.row_number)
@@ -342,6 +347,8 @@ class AuditStockHistoryService:
     def _category(movement_type: str, quantity: Decimal) -> str | None:
         movement = _normalized(movement_type)
         words = set(movement.split())
+        if "CANCELACION" in words and movement != "CANCELACION VENTA":
+            return None
         if "PRODUCCION" in words:
             return "production"
         if "VENTA" in words:
