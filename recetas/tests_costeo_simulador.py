@@ -78,8 +78,8 @@ class CosteoSimulatorTests(TestCase):
                 "lines": [
                     {
                         "insumo_id": self.insumo.id,
-                        "cantidad": "250",
-                        "unidad_id": self.g.id,
+                        "cantidad": "0.25",
+                        "unidad_id": self.kg.id,
                     }
                 ],
             },
@@ -99,7 +99,8 @@ class CosteoSimulatorTests(TestCase):
 
         line = CosteoProductoDraftLinea.objects.get(draft=draft)
         self.assertEqual(line.insumo, self.insumo)
-        self.assertEqual(line.costo_unitario_snapshot, Decimal("0.120000"))
+        self.assertEqual(line.cantidad, Decimal("0.250000"))
+        self.assertEqual(line.costo_unitario_snapshot, Decimal("120.000000"))
         self.assertEqual(line.costo_total_snapshot, Decimal("30.000000"))
 
     def test_costeo_dashboard_renders_simulator_as_separate_tab_without_yield_fields(self):
