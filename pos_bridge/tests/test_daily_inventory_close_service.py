@@ -107,6 +107,26 @@ class DailyInventoryCloseServiceTests(TestCase):
         self.assertEqual(sheet["E6"].value, 10.0)
         self.assertEqual(sheet["F6"].value, 14.0)
 
+    def test_bamoa_is_in_closing_network_since_opening_without_crucero_stock(self):
+        from pos_bridge.management.commands.capture_point_historical_closing import select_default_branches
+
+        bamoa = Sucursal.objects.create(codigo="BAMOA", nombre="Sucursal Bamoa", activa=True,
+            fecha_apertura=datetime(2026, 7, 14).date())
+        crucero, _ = Sucursal.objects.update_or_create(codigo="CRUCERO",
+            defaults={"nombre": "Sucursal Crucero", "activa": False})
+        bamoa_point = PointBranch.objects.create(external_id="2", name="Bamoa", erp_branch=bamoa)
+        crucero_point = PointBranch.objects.create(external_id="Crucero", name="Crucero", erp_branch=crucero)
+        self._snapshot(branch=bamoa_point, stock="2", captured_at="2026-09-30T23:00:00")
+        self._snapshot(branch=crucero_point, stock="99", captured_at="2026-09-30T23:00:00")
+
+        service = DailyInventoryCloseService()
+        self.assertNotIn(bamoa, service._target_branches(datetime(2026, 7, 13).date()))
+        self.assertIn(bamoa, service._target_branches(datetime(2026, 7, 14).date()))
+        payload = service.build_close(fecha_operacion=datetime(2026, 9, 30).date())
+        self.assertEqual(payload["rows"][0]["stocks"]["BAMOA"], Decimal("2.000"))
+        self.assertNotIn("CRUCERO", payload["rows"][0]["stocks"])
+        self.assertIn(bamoa_point, select_default_branches(datetime(2026, 9, 30).date()))
+
     def test_build_pdf_exports_readable_paginated_matrix(self):
         self._snapshot(branch=self.matriz_branch, stock="4", captured_at="2026-05-08T23:00:00")
         self._snapshot(branch=self.cedis_branch, stock="10", captured_at="2026-05-08T23:05:00")

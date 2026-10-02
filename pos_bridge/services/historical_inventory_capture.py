@@ -17,6 +17,7 @@ from pos_bridge.models import (
     PointProduct,
 )
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from recetas.models import ProductoMonthClosure
 
 
 HISTORY_LIMIT = 500
@@ -169,11 +170,14 @@ class HistoricalPointInventoryClosingCapture:
                 closing
                 for closing in PointHistoricalInventoryClosing.objects.filter(
                     operational_date=operational_date,
-                    status=PointHistoricalInventoryClosing.STATUS_DRAFT,
+                    status__in=[PointHistoricalInventoryClosing.STATUS_DRAFT, PointHistoricalInventoryClosing.STATUS_VERIFIED],
+                    source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
                 )
                 .prefetch_related("lines__branch", "lines__product")
                 .order_by("-id")
-                if set(closing.expected_branch_ids) == set(expected_branch_ids)
+                if (set(closing.expected_branch_ids) == set(expected_branch_ids)
+                    or (closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+                        and set(closing.expected_branch_ids) < set(expected_branch_ids)))
                 and set(closing.expected_product_ids) == set(expected_product_ids)
             ),
             None,
@@ -190,7 +194,19 @@ class HistoricalPointInventoryClosingCapture:
         existing_keys = {
             (row["branch"].id, row["product"].id) for row in resolved
         }
+        if resume_closing is not None and resume_closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED:
+            original_keys = {(branch_id, product_id) for branch_id in resume_closing.expected_branch_ids
+                for product_id in resume_closing.expected_product_ids}
+            if not original_keys or existing_keys != original_keys:
+                raise HistoricalInventoryCaptureError("El cierre verificado no coincide con su manifiesto; no se puede ampliar.")
+            if set(resume_closing.expected_branch_ids) == set(expected_branch_ids):
+                return HistoricalInventoryCaptureResult(closing=resume_closing,
+                    resolved_count=len(existing_keys), unresolved_count=0)
 
+        # Import local: el auditor comparte el parser de fechas de este módulo.
+        from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+
+        history_service = AuditStockHistoryService(client=self.client)
         self.client.login()
         unresolved = []
         for product in products:
@@ -218,13 +234,13 @@ class HistoricalPointInventoryClosingCapture:
                 continue
             for branch in pending_branches:
                 try:
-                    history = self._call_point(
-                        lambda: self.client.get_stock_history(
-                            product.external_id,
-                            branch.external_id,
-                            movements=HISTORY_LIMIT,
-                        )
-                    )
+                    cached = history_service._existing_import(branch, product)
+                    self._call_point(lambda: history_service.capture(
+                        branch, product, operational_date.replace(day=1),
+                        force=bool(cached and cached.row_count == 0
+                            and current.get(str(branch.external_id)) != Decimal("0"))))
+                    history_record = history_service._existing_import(branch, product)
+                    history = list(history_record.rows.values_list("raw_payload", flat=True))
                     resolution = resolve_stock_at_close(
                         history,
                         operational_date=operational_date,
@@ -267,7 +283,13 @@ class HistoricalPointInventoryClosingCapture:
             if not unresolved and len(resolved) == expected_count
             else PointHistoricalInventoryClosing.STATUS_DRAFT
         )
+        if (resume_closing is not None and resume_closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+            and status != PointHistoricalInventoryClosing.STATUS_VERIFIED):
+            raise HistoricalInventoryCaptureError(
+                f"La ampliación no está completa; se conserva el cierre previo. "
+                f"Pendientes: {len(unresolved)}. Ejemplos: {unresolved[:3]}")
         metadata = {
+            **(resume_closing.metadata if resume_closing is not None else {}),
             "method": "point_stock_history_boundary",
             "expected_line_count": expected_count,
             "resolved_line_count": len(resolved),
@@ -281,6 +303,15 @@ class HistoricalPointInventoryClosingCapture:
                 closing = PointHistoricalInventoryClosing.objects.select_for_update().get(
                     pk=resume_closing.pk
                 )
+                if closing.source_fingerprint != resume_closing.source_fingerprint:
+                    raise HistoricalInventoryCaptureError("El cierre cambió durante la consulta; se conserva la versión vigente.")
+                if set(closing.expected_branch_ids) != set(expected_branch_ids):
+                    if ProductoMonthClosure.objects.filter(
+                        month_start=operational_date.replace(day=1), is_locked=True,
+                    ).exists():
+                        raise HistoricalInventoryCaptureError("El mes está bloqueado; no se puede ampliar su cierre.")
+                    metadata["extension_previous_fingerprint"] = closing.source_fingerprint
+                    metadata["reused_line_count"] = len(existing_keys)
                 created = False
                 closing.status = status
                 closing.source_fingerprint = fingerprint

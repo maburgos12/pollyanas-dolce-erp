@@ -23,6 +23,7 @@ from pos_bridge.services.historical_inventory_capture import (
     resolve_stock_at_close,
 )
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from recetas.models import Receta
 
 
@@ -119,6 +120,20 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.branch = PointBranch.objects.create(external_id="1", name="Matriz", erp_branch=erp)
         self.product = PointProduct.objects.create(external_id="857", sku="P-857", name="Producto")
 
+    def test_closing_reuses_and_retains_canonical_history_for_auditor(self):
+        client = _FakePointClient({("1", "857"): [
+            {"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 123,
+             "Movimiento": "VENTA", "Cantidad": 1,
+             "Existencia_anterior": 4, "Existencia_nueva": 3, "Cancelado": False},
+        ]}, {"857": [{"PK_Sucursal": 1, "Cantidad": 3}]})
+        audit = AuditStockHistoryService(client=client)
+        audit.capture(self.branch, self.product, date(2026, 7, 1))
+        result = HistoricalPointInventoryClosingCapture(client=client).capture(
+            operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product])
+        self.assertEqual(result.closing.lines.get().stock, Decimal("3"))
+        self.assertEqual(client.history_calls, [("1", "857")])
+        self.assertEqual(audit.reconcile(self.branch, self.product, date(2026, 7, 1)).sales, Decimal("1"))
+
     def test_complete_manifest_is_saved_verified_and_is_idempotent(self):
         client = _FakePointClient(
             history_by_key={("1", "857"): [
@@ -140,7 +155,7 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(first.closing.lines.get().stock, Decimal("3"))
         self.assertEqual(first.closing.pk, second.closing.pk)
         self.assertEqual(PointHistoricalInventoryClosing.objects.count(), 1)
-        self.assertEqual(client.login_calls, 2)
+        self.assertEqual(client.login_calls, 1)
 
     def test_capture_locks_operational_month_inside_persistence_transaction(self):
         client = _FakePointClient(
@@ -194,6 +209,68 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(acquired_months, [date(2026, 7, 1)])
         self.assertEqual(lock_depths, [baseline_depth + 1])
         self.assertEqual(persistence_saw_lock, [True])
+
+    def test_verified_closing_adds_only_missing_branch_and_preserves_prior_lines(self):
+        client = _FakePointClient({("1", "857"): [
+            {"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 123,
+             "Existencia_anterior": 4, "Existencia_nueva": 3, "Cancelado": False},
+        ]}, {"857": [{"PK_Sucursal": 1, "Cantidad": 3}]})
+        first = HistoricalPointInventoryClosingCapture(client=client).capture(
+            operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product])
+        previous_line = first.closing.lines.values().get()
+        bamoa = Sucursal.objects.create(codigo="BAMOA", nombre="Bamoa")
+        second_branch = PointBranch.objects.create(external_id="2", name="Bamoa", erp_branch=bamoa)
+        extension_client = _FakePointClient({("2", "857"): [
+            {"Fecha": "2026-07-31T23:00:00", "FK_Movimiento": 456,
+             "Existencia_anterior": 3, "Existencia_nueva": 2, "Cancelado": False},
+        ]}, {"857": [{"PK_Sucursal": 2, "Cantidad": 2}]})
+        extension = HistoricalPointInventoryClosingCapture(client=extension_client)
+        result = extension.capture(operational_date=date(2026, 7, 31),
+            branches=[self.branch, second_branch], products=[self.product])
+        self.assertEqual(result.closing.pk, first.closing.pk)
+        self.assertEqual(result.closing.status, PointHistoricalInventoryClosing.STATUS_VERIFIED)
+        self.assertEqual(result.closing.lines.filter(branch=self.branch).values().get(), previous_line)
+        self.assertEqual(result.closing.lines.count(), 2)
+        self.assertEqual(PointHistoricalInventoryClosing.objects.count(), 1)
+        self.assertEqual(extension_client.history_calls, [("2", "857")])
+        extension.capture(operational_date=date(2026, 7, 31),
+            branches=[self.branch, second_branch], products=[self.product])
+        self.assertEqual(extension_client.history_calls, [("2", "857")])
+
+    def test_failed_verified_extension_leaves_original_closing_untouched(self):
+        original = HistoricalPointInventoryClosingCapture(client=_FakePointClient(
+            {("1", "857"): [{"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 123,
+              "Existencia_nueva": 3, "Cancelado": False}]},
+            {"857": [{"PK_Sucursal": 1, "Cantidad": 3}]})).capture(
+                operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product])
+        before = PointHistoricalInventoryClosing.objects.values().get(pk=original.closing.pk)
+        bamoa = Sucursal.objects.create(codigo="BAMOA", nombre="Bamoa")
+        second_branch = PointBranch.objects.create(external_id="2", name="Bamoa", erp_branch=bamoa)
+        with self.assertRaises(HistoricalInventoryCaptureError):
+            HistoricalPointInventoryClosingCapture(client=_FakePointClient(
+                {("2", "857"): []}, {"857": [{"PK_Sucursal": 2, "Cantidad": 2}]})).capture(
+                    operational_date=date(2026, 7, 31), branches=[self.branch, second_branch], products=[self.product])
+        self.assertEqual(PointHistoricalInventoryClosing.objects.values().get(pk=original.closing.pk), before)
+        self.assertEqual(original.closing.lines.count(), 1)
+        self.assertEqual(PointHistoricalInventoryClosing.objects.count(), 1)
+
+    def test_locked_month_cannot_extend_verified_closing(self):
+        from recetas.models import ProductoMonthClosure
+
+        capture = HistoricalPointInventoryClosingCapture(client=_FakePointClient(
+            {("1", "857"): [{"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 123,
+              "Existencia_nueva": 3, "Cancelado": False}]},
+            {"857": [{"PK_Sucursal": 1, "Cantidad": 3}]}))
+        result = capture.capture(operational_date=date(2026, 7, 31), branches=[self.branch], products=[self.product])
+        ProductoMonthClosure.objects.create(month_start=date(2026, 7, 1), month_end=date(2026, 7, 31), is_locked=True)
+        second_branch = PointBranch.objects.create(external_id="2", name="Bamoa")
+        capture.client.history_by_key[("2", "857")] = [
+            {"Fecha": "2026-07-31T22:00:00", "FK_Movimiento": 456, "Existencia_nueva": 2, "Cancelado": False}]
+        with self.assertRaises(HistoricalInventoryCaptureError):
+            capture.capture(operational_date=date(2026, 7, 31), branches=[self.branch, second_branch], products=[self.product])
+        result.closing.refresh_from_db()
+        self.assertEqual(result.closing.expected_branch_ids, [self.branch.id])
+        self.assertEqual(result.closing.lines.count(), 1)
 
     def test_unresolved_manifest_is_saved_as_draft_not_verified(self):
         client = _FakePointClient(
