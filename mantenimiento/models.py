@@ -88,3 +88,16 @@ class VinculoAtencionEquipo(models.Model):
     class Meta:
         ordering = ['-creado_en', '-pk']
         constraints = [models.UniqueConstraint(fields=['orden', 'reporte'], name='mantenimiento_vinculo_orden_reporte_uniq')]
+
+
+class ComprobanteCapturaEquipo(models.Model):
+    """Recibo técnico del intento; la orden conserva todos los datos de negocio."""
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    operacion = models.CharField(max_length=32)
+    clave = models.UUIDField()
+    huella = models.CharField(max_length=64)
+    orden = models.ForeignKey('activos.OrdenMantenimiento', on_delete=models.SET_NULL, null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_captura_usuario_op_clave_uniq')]

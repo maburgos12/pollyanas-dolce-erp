@@ -1,4 +1,6 @@
 import re
+from uuid import uuid4
+from collections.abc import Mapping
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -11,8 +13,9 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Prefetch, Q
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.html import format_html
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from rest_framework import generics, status
@@ -37,6 +40,7 @@ from mantenimiento.services_access import (
     can_access_mantenimiento,
     can_write_mantenimiento,
 )
+from mantenimiento.services_capturas_equipos import capturar_equipo, guardar_factura, CapturaEquipoError, validar_equipo
 from mantenimiento.services_history import continuidad_por_principal
 from mantenimiento.services_vinculos import PROTECTED_MESSAGE
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
@@ -594,6 +598,12 @@ class TipoServicioListView(generics.ListAPIView):
 class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
     authentication_classes = AUTH
     permission_classes = [EsMantenimiento]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=200 if serializer.captura_repetida else 201)
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -1242,12 +1252,39 @@ def crear_falla_movil(request):
     return Response(_branch_falla_item(reporte), status=201)
 
 
+def _validar_costo_equipo(data):
+    from rest_framework import serializers
+    raw = data.get("costo_total")
+    if raw in (None, ""):
+        return
+    try:
+        serializers.DecimalField(max_digits=18, decimal_places=2, min_value=Decimal("0")).run_validation(raw)
+    except serializers.ValidationError:
+        raise CapturaEquipoError("Captura un importe válido, no negativo y con máximo dos decimales.", 400)
+
+
+def _contenido_servicio(data, factura=None):
+    campos = ("modo_servicio", "alcance", "sucursal_id", "activo_id", "fecha_objetivo", "proveedor_servicio",
+              "responsable", "descripcion", "costo_total", "nota_trabajo", "tipo", "prioridad", "origen", "cerrar_servicio")
+    contenido = {campo: str(data.get(campo) or "").strip() for campo in campos}
+    contenido["costo_total"] = _parse_decimal(data.get("costo_total")) or Decimal("0")
+    if factura:
+        contenido["factura"] = factura
+    return contenido
+
+
 @api_view(["POST"])
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def crear_servicio_movil(request):
     from django.utils.dateparse import parse_date
 
+    if not isinstance(request.data, Mapping):
+        return Response({"error": "Envía un objeto con los datos de la captura."}, status=400)
+
+    for field in ("modo_servicio", "alcance", "descripcion", "fecha_objetivo", "proveedor_servicio", "responsable", "nota_trabajo", "tipo", "prioridad"):
+        if request.data.get(field) is not None and not isinstance(request.data.get(field), str):
+            return Response({"error": f"El campo {field} debe ser texto."}, status=400)
     modo = (request.data.get("modo_servicio") or "realizado").strip().lower()
     alcance = (request.data.get("alcance") or "activo").strip().lower()
     descripcion = (request.data.get("descripcion") or "").strip()
@@ -1258,6 +1295,11 @@ def crear_servicio_movil(request):
     if alcance not in {"activo", "unidad", "instalacion"} or not descripcion:
         return Response({"error": "Alcance y descripción son obligatorios."}, status=400)
 
+    if alcance == "activo":
+        _validar_costo_equipo(request.data)
+        for field, choices in (("tipo", OrdenMantenimiento.TIPO_CHOICES), ("prioridad", OrdenMantenimiento.PRIORIDAD_CHOICES)):
+            if request.data.get(field) and request.data[field].strip().upper() not in {value for value, label in choices}:
+                return Response({"error": f"El campo {field} no es válido."}, status=400)
     branch_ids = authorized_branch_ids(request.user)
     fecha_objetivo = parse_date((request.data.get("fecha_objetivo") or "").strip())
     if not fecha_objetivo:
@@ -1292,7 +1334,7 @@ def crear_servicio_movil(request):
     if branch_ids is not None:
         sucursales = sucursales.filter(pk__in=branch_ids)
     sucursal = get_object_or_404(sucursales, pk=_safe_int(request.data.get("sucursal_id")))
-    proveedor_obj = _ensure_provider(proveedor_nombre)
+    proveedor_obj = _ensure_provider(proveedor_nombre) if alcance == "instalacion" else None
     if alcance == "instalacion":
         activo_obj = _get_installation_asset(
             sucursal,
@@ -1301,28 +1343,43 @@ def crear_servicio_movil(request):
         )
     else:
         activo_obj = get_object_or_404(Activo, pk=_safe_int(request.data.get("activo_id")), activo=True, sucursal=sucursal)
-    orden = OrdenMantenimiento.objects.create(
-        activo_ref=activo_obj,
-        tipo=(request.data.get("tipo") or OrdenMantenimiento.TIPO_CORRECTIVO).strip().upper(),
-        prioridad=(request.data.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper(),
-        estatus=OrdenMantenimiento.ESTATUS_PENDIENTE if modo == "pendiente" else OrdenMantenimiento.ESTATUS_EN_PROCESO,
-        fecha_programada=fecha_objetivo,
-        fecha_inicio=None if modo == "pendiente" else fecha_objetivo,
-        responsable=responsable,
-        descripcion=descripcion,
-        costo_otros=Decimal("0") if modo == "pendiente" else costo_total,
-        origen=OrdenMantenimiento.ORIGEN_INICIATIVA if modo == "pendiente" else OrdenMantenimiento.ORIGEN_EMERGENCIA,
-        nota_trabajo=nota_trabajo,
-        proveedor_servicio=proveedor_obj,
-        creado_por=request.user,
-    )
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        usuario=request.user,
-        accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
-        comentario=nota_trabajo or descripcion,
-    )
-    return Response(OrdenMantenimientoListSerializer(orden).data, status=201)
+    proveedor_instalacion = proveedor_obj
+
+    def crear(archivos_nuevos):
+        proveedor_obj = _ensure_provider(proveedor_nombre) if alcance == "activo" else proveedor_instalacion
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo_obj,
+            tipo=(request.data.get("tipo") or OrdenMantenimiento.TIPO_CORRECTIVO).strip().upper(),
+            prioridad=(request.data.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper(),
+            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE if modo == "pendiente" else OrdenMantenimiento.ESTATUS_EN_PROCESO,
+            fecha_programada=fecha_objetivo,
+            fecha_inicio=None if modo == "pendiente" else fecha_objetivo,
+            responsable=responsable,
+            descripcion=descripcion,
+            costo_otros=Decimal("0") if modo == "pendiente" else costo_total,
+            origen=OrdenMantenimiento.ORIGEN_INICIATIVA if modo == "pendiente" else OrdenMantenimiento.ORIGEN_EMERGENCIA,
+            nota_trabajo=nota_trabajo,
+            proveedor_servicio=proveedor_obj,
+            creado_por=request.user,
+        )
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            usuario=request.user,
+            accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
+            comentario=nota_trabajo or descripcion,
+        )
+        return orden
+
+    if alcance == "activo":
+        orden, repetida = capturar_equipo(
+            usuario=request.user, activo=activo_obj, operacion="servicio_pwa",
+            clave=request.data.get("clave_captura"),
+            contenido=_contenido_servicio(request.data), crear=crear,
+        )
+    else:
+        orden, repetida = crear([]), False
+    return Response(OrdenMantenimientoListSerializer(orden).data, status=200 if repetida else 201)
+
 
 
 @api_view(["POST"])
@@ -1576,6 +1633,33 @@ def crear_falla(request):
     return redirect("mantenimiento:dashboard")
 
 
+def _respuesta_servicio(request, mensaje, *, orden=None, status_code=200):
+    if (request.POST.get("alcance") or "activo").strip().lower() != "activo":
+        from django.contrib import messages
+        if orden:
+            messages.success(request, mensaje)
+        else:
+            messages.error(request, mensaje)
+        return redirect("mantenimiento:dashboard")
+    if request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", ""):
+        payload = {"ok": orden is not None, "orden_id": orden.pk if orden else None,
+                   "toast": {"type": "success" if orden else "error", "message": mensaje, "persistent": orden is None}}
+        if orden and (request.POST.get("alcance") or "activo") == "activo":
+            payload.update(target="#ordenServicioResultado", html=str(format_html(
+                '<div id="ordenServicioResultado" role="status" aria-live="polite"><p>{}</p>'
+                '<button type="button" class="btn btn-secondary" onclick="nuevaCapturaEquipo()">Nueva captura</button></div>', mensaje,
+            )))
+        return JsonResponse(payload, status=status_code)
+    if orden:
+        from django.contrib import messages
+        messages.success(request, mensaje)
+        return redirect("mantenimiento:dashboard")
+    request.captura_error = mensaje
+    response = dashboard(request)
+    response.status_code = status_code
+    return response
+
+
 @login_required
 def crear_servicio_mantenimiento(request):
     """Registra un servicio realizado o programa una orden puntual sin reporte previo."""
@@ -1620,9 +1704,13 @@ def crear_servicio_mantenimiento(request):
     if modo == "pendiente" and not fecha_objetivo:
         errores.append("Indica la fecha objetivo del servicio pendiente.")
     if errores:
-        for error in errores:
-            msg.error(request, error)
-        return redirect("mantenimiento:dashboard")
+        return _respuesta_servicio(request, " ".join(errores), status_code=400)
+
+    if alcance == "activo":
+        try:
+            _validar_costo_equipo(request.POST)
+        except CapturaEquipoError as exc:
+            return _respuesta_servicio(request, str(exc.detail), status_code=exc.status_code)
 
     proveedor_nombre = (request.POST.get("proveedor_servicio") or "").strip()
     responsable = (request.POST.get("responsable") or "").strip() or proveedor_nombre
@@ -1632,8 +1720,7 @@ def crear_servicio_mantenimiento(request):
 
     factura_archivo = request.FILES.get("factura_archivo")
     if factura_archivo and factura_archivo.size > 30 * 1024 * 1024:
-        msg.error(request, "El archivo supera el límite de 30 MB.")
-        return redirect("mantenimiento:dashboard")
+        return _respuesta_servicio(request, "El archivo supera el límite de 30 MB.", status_code=400)
 
     if alcance == "unidad":
         unidades = Unidad.objects.filter(activa=True)
@@ -1674,17 +1761,15 @@ def crear_servicio_mantenimiento(request):
         sucursales = sucursales.filter(pk__in=branch_ids)
     sucursal = sucursales.filter(pk=sucursal_id).first()
     if not sucursal:
-        msg.error(request, "Selecciona una sucursal válida.")
-        return redirect("mantenimiento:dashboard")
+        return _respuesta_servicio(request, "Selecciona una sucursal válida.", status_code=400)
 
-    proveedor_obj = _ensure_provider(proveedor_nombre)
+    proveedor_obj = _ensure_provider(proveedor_nombre) if alcance == "instalacion" else None
     if alcance == "instalacion":
         activo_obj = _get_installation_asset(sucursal, instalacion_categoria, proveedor_obj)
     else:
         activo_obj = get_object_or_404(Activo, pk=activo_id, activo=True)
         if activo_obj.sucursal_id != sucursal.id:
-            msg.error(request, "El activo no pertenece a la sucursal seleccionada.")
-            return redirect("mantenimiento:dashboard")
+            return _respuesta_servicio(request, "El activo no pertenece a la sucursal seleccionada.", status_code=400)
 
     tipo_raw = (request.POST.get("tipo") or "").strip().upper()
     tipo_default = OrdenMantenimiento.TIPO_PREVENTIVO if modo == "pendiente" else OrdenMantenimiento.TIPO_CORRECTIVO
@@ -1709,38 +1794,51 @@ def crear_servicio_mantenimiento(request):
         fecha_inicio = fecha_objetivo
         fecha_cierre = fecha_objetivo if cerrar_servicio else None
 
-    orden = OrdenMantenimiento.objects.create(
-        activo_ref=activo_obj,
-        tipo=tipo,
-        prioridad=prioridad,
-        estatus=estatus,
-        fecha_programada=fecha_objetivo or timezone.localdate(),
-        fecha_inicio=fecha_inicio,
-        fecha_cierre=fecha_cierre,
-        responsable=responsable,
-        descripcion=descripcion,
-        costo_otros=costo_total,
-        origen=origen,
-        nota_trabajo=nota_trabajo,
-        proveedor_servicio=proveedor_obj,
-        creado_por=request.user,
-    )
-    if factura_archivo:
-        orden.factura_archivo = factura_archivo
-        orden.save(update_fields=["factura_archivo"])
+    proveedor_instalacion = proveedor_obj
 
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        usuario=request.user,
-        accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
-        comentario=nota_trabajo or descripcion,
-    )
+    def crear(archivos_nuevos):
+        proveedor_obj = _ensure_provider(proveedor_nombre) if alcance == "activo" else proveedor_instalacion
+        orden = OrdenMantenimiento.objects.create(
+            activo_ref=activo_obj,
+            tipo=tipo,
+            prioridad=prioridad,
+            estatus=estatus,
+            fecha_programada=fecha_objetivo or timezone.localdate(),
+            fecha_inicio=fecha_inicio,
+            fecha_cierre=fecha_cierre,
+            responsable=responsable,
+            descripcion=descripcion,
+            costo_otros=costo_total,
+            origen=origen,
+            nota_trabajo=nota_trabajo,
+            proveedor_servicio=proveedor_obj,
+            creado_por=request.user,
+        )
+        if factura_archivo:
+            guardar_factura(orden, factura_archivo, archivos_nuevos)
 
-    if modo == "pendiente":
-        msg.success(request, f"Servicio puntual programado: {orden.folio} · {orden.fecha_programada:%d/%m/%Y}.")
+        BitacoraMantenimiento.objects.create(
+            orden=orden,
+            usuario=request.user,
+            accion="SERVICIO_PROGRAMADO" if modo == "pendiente" else "SERVICIO_REGISTRADO",
+            comentario=nota_trabajo or descripcion,
+        )
+
+        return orden
+
+    if alcance == "activo":
+        try:
+            orden, repetida = capturar_equipo(
+                usuario=request.user, activo=activo_obj, operacion="servicio_web",
+                clave=request.POST.get("clave_captura"),
+                contenido=_contenido_servicio(request.POST, factura_archivo), crear=crear,
+            )
+        except CapturaEquipoError as exc:
+            return _respuesta_servicio(request, str(exc.detail), status_code=exc.status_code)
     else:
-        msg.success(request, f"Servicio sin orden previa registrado: {orden.folio}.")
-    return redirect("mantenimiento:dashboard")
+        orden, repetida = crear([]), False
+    mensaje = f"Servicio puntual programado: {orden.folio}." if modo == "pendiente" else f"Servicio registrado: {orden.folio}."
+    return _respuesta_servicio(request, mensaje, orden=orden, status_code=200 if repetida else 201)
 
 def crear_reporte_unidad(request):
     """Crea un ReporteUnidad desde Mantenimiento cuando el repartidor no lo capturó."""
@@ -1966,6 +2064,9 @@ def dashboard(request):
             "solicitudes_cancelacion": solicitudes_cancelacion,
             "puede_eliminar": _puede_eliminar(request.user),
             "today": today,
+            "clave_captura": request.POST.get("clave_captura") or str(uuid4()),
+            "captura_error": getattr(request, "captura_error", ""),
+            "captura_datos": dict(request.POST.items()) if getattr(request, "captura_error", "") else {},
             "plan_tipo_choices": PlanMantenimiento.TIPO_CHOICES,
             "plan_estatus_choices": PlanMantenimiento.ESTATUS_CHOICES,
             "orden_tipo_choices": OrdenMantenimiento.TIPO_CHOICES,
