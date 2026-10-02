@@ -55,15 +55,16 @@ class ProductsViewSet(ReadOnlyModelViewSet):
         if len(products) != 1 or not re.fullmatch(r"[1-9][0-9]*", products[0].external_id):
             return Response(payload, status=status.HTTP_409_CONFLICT)
         product = products[0]
-        # ponytail: shared HTTP client's deadline bounds this read; no second timeout mechanism.
-        deadline = time.monotonic() + 10
+        # ponytail: shared deadline fits Maya's 8s HTTP timeout; no second timeout mechanism.
+        deadline = time.monotonic() + 6
         outer_deadline = DEADLINE.get()
         token = DEADLINE.set(min(deadline, outer_deadline) if outer_deadline is not None else deadline)
         try:
             remaining_seconds()
-            with point_account_session_lock(wait=False) as acquired:
+            with point_account_session_lock(wait=True) as acquired:
                 if not acquired:
                     return Response(payload, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+                remaining_seconds()
                 with PointHttpSessionClient(load_point_bridge_settings()) as client:
                     client.login()
                     detail = client.get_product_detail(product.external_id)
