@@ -16,6 +16,9 @@
 .cd-bandeja .cd-money-kpis{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
 .cd-bandeja .cd-money-kpis strong{font-family:Nunito,sans-serif;font-size:25px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
 .cd-bandeja .cd-card{border-radius:12px;box-shadow:none}
+.cd-bandeja .cd-table .cd-product{width:320px;max-width:320px;white-space:normal}
+.cd-bandeja .cd-table .cd-product>div{min-width:0;overflow-wrap:anywhere}
+.cd-bandeja .cd-table .cd-product>.cd-image-trigger,.cd-bandeja .cd-table .cd-product>.cd-thumb{flex:0 0 48px}
 .cd-bandeja .cd-departamentos{min-width:1100px}
 .cd-bandeja .cd-departamentos tbody th{font-size:14px;letter-spacing:normal;text-transform:none;min-width:160px}
 .cd-bandeja .cd-departamentos td{font-variant-numeric:tabular-nums;text-align:right}

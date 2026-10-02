@@ -11,6 +11,7 @@ from django.utils.html import strip_tags
 
 from core.access import can_view_module, group_name_variants
 from core.email_rendering import render_email_to_string
+from core.models import AuditLog
 
 from .models import (
     AuditoriaEntregaCursor,
@@ -107,6 +108,66 @@ def detectar_gps_perdido_rutas(umbral_minutos: int = 10):
         "fecha": fecha.isoformat(),
         "rutas_revisadas": revisadas,
         "eventos_gps_perdido": len(set(eventos)),
+    }
+
+
+@shared_task(name="logistica.tasks.regularizar_turnos_de_rutas_completadas")
+def regularizar_turnos_de_rutas_completadas():
+    fecha = timezone.localdate()
+    ids = list(
+        RutaEntrega.objects.filter(
+            fecha_ruta__lt=fecha,
+            estatus=RutaEntrega.ESTATUS_COMPLETADA,
+            bitacora_salida__cerrada=False,
+        )
+        .exclude(bitacora_salida=None)
+        .values_list("bitacora_salida_id", flat=True)
+        .distinct()
+    )
+    regularizados = 0
+    omitidos_ambiguos = 0
+
+    for bitacora_id in ids:
+        with transaction.atomic():
+            bitacora = BitacoraSalidaLlegada.objects.select_for_update().get(pk=bitacora_id)
+            if bitacora.cerrada:
+                continue
+            rutas = list(RutaEntrega.objects.select_for_update().filter(bitacora_salida=bitacora))
+            if len(rutas) != 1 or rutas[0].estatus != RutaEntrega.ESTATUS_COMPLETADA or rutas[0].fecha_ruta >= fecha:
+                omitidos_ambiguos += 1
+                continue
+
+            ruta = rutas[0]
+            before = {
+                "cerrada": False,
+                "hora_llegada": bitacora.hora_llegada.isoformat() if bitacora.hora_llegada else None,
+                "km_llegada": bitacora.km_llegada,
+                "nivel_gas_llegada": bitacora.nivel_gas_llegada or "",
+            }
+            bitacora.cerrada = True
+            bitacora.save(update_fields=["cerrada"])
+            AuditLog.objects.create(
+                action="REGULARIZACION_AUTOMATICA_TURNO",
+                model="logistica.BitacoraSalidaLlegada",
+                object_id=str(bitacora.id),
+                payload={
+                    "folio": bitacora.folio,
+                    "ruta": ruta.folio,
+                    "motivo": "Ruta vinculada completada en un día anterior con turno todavía abierto.",
+                    "before": before,
+                    "after": {**before, "cerrada": True},
+                    "sin_datos_llegada_inventados": True,
+                    "no_recorrido_imputado": True,
+                    "origen": "tarea_automatica_logistica",
+                },
+            )
+            regularizados += 1
+
+    return {
+        "fecha": fecha.isoformat(),
+        "turnos_revisados": len(ids),
+        "turnos_regularizados": regularizados,
+        "turnos_omitidos_ambiguos": omitidos_ambiguos,
     }
 
 

@@ -404,6 +404,11 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 5 * 60,
         "kwargs": {"umbral_minutos": 10},
     },
+    "logistica-regularizar-turnos-rutas-completadas-diario": {
+        "task": "logistica.tasks.regularizar_turnos_de_rutas_completadas",
+        "schedule": crontab(hour=5, minute=0),
+        "options": {"timezone": TIME_ZONE},
+    },
     # --- Sync diario de ventas Point ---
     "pos_bridge: sync ventas diario": {
         "task": "pos_bridge.daily_sales_sync",
