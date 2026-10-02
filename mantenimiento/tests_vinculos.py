@@ -1,4 +1,5 @@
 """Vínculos de atención: no consolidan trabajos, estados ni importes."""
+import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from decimal import Decimal
 from threading import Barrier, Event
@@ -75,6 +76,31 @@ class VinculosTests(VinculosFixture, TestCase):
         self.assertEqual(self.report.costo_real, Decimal('123.45'))
         self.assertEqual(self.order.estatus, OrdenMantenimiento.ESTATUS_PENDIENTE)
         self.assertEqual(self.report.estatus, ReporteFalla.ESTATUS_ABIERTO)
+
+    def test_non_object_json_bodies_return_400_without_mutating_documents_links_or_audits(self):
+        from mantenimiento.models import VinculoAtencionEquipo
+        link, _ = self.link()
+        baseline = {
+            'links':list(VinculoAtencionEquipo.objects.values()),
+            'audits':list(self.audits().values()),
+            'orders':list(OrdenMantenimiento.objects.values()),
+            'reports':list(ReporteFalla.objects.values()),
+        }
+        self.client.raise_request_exception = False
+        endpoints = [
+            ('post', self.url()),
+            ('post', self.url('orden', self.order.pk)),
+            ('delete', f'/api/mantenimiento/v2/vinculos/{link.pk}/'),
+        ]
+        for value in [[], [1], 'texto', 123, 1.5, True, None]:
+            for method, url in endpoints:
+                with self.subTest(body=value, method=method, url=url):
+                    response = getattr(self.client, method)(url, json.dumps(value), content_type='application/json')
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(list(VinculoAtencionEquipo.objects.values()), baseline['links'])
+                    self.assertEqual(list(self.audits().values()), baseline['audits'])
+                    self.assertEqual(list(OrdenMantenimiento.objects.values()), baseline['orders'])
+                    self.assertEqual(list(ReporteFalla.objects.values()), baseline['reports'])
 
     def test_many_real_same_day_jobs_and_reports_remain_distinct(self):
         second_order = self.new_order()

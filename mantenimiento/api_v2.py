@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from pathlib import PurePath
 
 from django.http import FileResponse, Http404
@@ -236,6 +237,8 @@ def vinculos_v2(request, tipo, pk):
     source = get_object_or_404(authorized_orders(request.user).select_related('activo_ref') if tipo == 'orden'
                                else authorized_fallas(request.user), pk=pk)
     if request.method == 'POST':
+        if not isinstance(request.data, Mapping):
+            return Response({'error':'Datos de vínculo no válidos.'}, status=400)
         field = 'reporte_id' if tipo == 'orden' else 'orden_id'
         raw_target = request.data.get(field)
         target_id = _positive_int(raw_target, None) if type(raw_target) in (int, str) else None
@@ -289,6 +292,8 @@ def vinculos_v2(request, tipo, pk):
 def retirar_vinculo_v2(request, pk):
     from django.core.exceptions import ValidationError
     from mantenimiento.services_vinculos import retirar_vinculo
+    if not isinstance(request.data, Mapping):
+        return Response({'error':'Datos de vínculo no válidos.'}, status=400)
     try:
         retirar_vinculo(request.user, pk, request.data.get('motivo'))
     except ValidationError as error:
