@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from decimal import Decimal
 import time
 from types import SimpleNamespace
@@ -200,6 +200,90 @@ class LiveSalePriceApiTests(APITestCase):
         self.login.assert_not_called()
         self.get_detail.assert_not_called()
 
+    @contextmanager
+    def held_point_lock(self):
+        from pos_bridge.services.point_account_session_lock import POINT_ACCOUNT_SESSION_LOCK_ID
+
+        # Separate PostgreSQL session: the endpoint must contend with a real owner.
+        with closing(connection.Database.connect(**connection.get_connection_params())) as owner:
+            owner.autocommit = True
+            with owner.cursor() as cursor:
+                cursor.execute("SELECT pg_advisory_lock(%s)", [POINT_ACCOUNT_SESSION_LOCK_ID])
+                try:
+                    yield lambda: cursor.execute("SELECT pg_advisory_unlock(%s)", [POINT_ACCOUNT_SESSION_LOCK_ID])
+                finally:
+                    cursor.execute("SELECT pg_advisory_unlock_all()")
+                    cursor.execute("SELECT pg_try_advisory_lock(%s)", [POINT_ACCOUNT_SESSION_LOCK_ID])
+                    self.assertTrue(cursor.fetchone()[0], "Endpoint leaked the Point session lock")
+                    cursor.execute("SELECT pg_advisory_unlock_all()")
+
+    def test_briefly_busy_real_point_lock_waits_then_reads_live_price(self):
+        from pos_bridge.services.catalog_recipe_execution import DEADLINE, remaining_seconds
+
+        clock = [1000.0]
+        with self.held_point_lock() as release:
+            def wait(seconds):
+                self.login.assert_not_called()
+                self.get_detail.assert_not_called()
+                clock[0] += seconds
+                release()
+
+            def detail(product_id):
+                self.assertGreater(remaining_seconds(), 0)
+                self.assertLess(remaining_seconds(), 6)
+                return self.detail
+
+            self.get_detail.side_effect = detail
+            with patch("time.monotonic", side_effect=lambda: clock[0]), patch("time.sleep", side_effect=wait) as sleep:
+                response = self.read()
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data["status"], "VERIFIED")
+            self.assertEqual(response.data["amount"], "340.0")
+            sleep.assert_called_once_with(1)
+        self.assertIsNone(DEADLINE.get())
+
+    def test_busy_real_point_lock_exhausts_local_or_shorter_outer_deadline(self):
+        from pos_bridge.services.catalog_recipe_execution import DEADLINE
+
+        for budget in (6, 2):
+            with self.subTest(budget=budget), self.held_point_lock():
+                clock = [1000.0]
+                outer = 1000.0 + budget if budget < 6 else None
+                token = DEADLINE.set(outer)
+                try:
+                    def wait(seconds):
+                        clock[0] += seconds
+
+                    with patch("time.monotonic", side_effect=lambda: clock[0]), patch("time.sleep", side_effect=wait):
+                        self.assert_unknown(self.read(), 503)
+                    self.assertEqual(clock[0], 1000.0 + budget)
+                    self.assertEqual(DEADLINE.get(), outer)
+                finally:
+                    DEADLINE.reset(token)
+        self.login.assert_not_called()
+        self.get_detail.assert_not_called()
+
+    def test_lock_released_after_outer_deadline_never_starts_point_session(self):
+        from pos_bridge.services.catalog_recipe_execution import DEADLINE
+
+        clock = [1000.0]
+        outer = 1000.5
+        token = DEADLINE.set(outer)
+        try:
+            with self.held_point_lock() as release:
+                def wait(seconds):
+                    clock[0] += seconds
+                    release()
+
+                with patch("time.monotonic", side_effect=lambda: clock[0]), patch("time.sleep", side_effect=wait) as sleep:
+                    self.assert_unknown(self.read(), 503)
+                sleep.assert_called_once_with(1)
+            self.assertEqual(DEADLINE.get(), outer)
+        finally:
+            DEADLINE.reset(token)
+        self.login.assert_not_called()
+        self.get_detail.assert_not_called()
+
     def test_point_read_has_local_deadline_and_preserves_outer_deadline(self):
         from pos_bridge.services.catalog_recipe_execution import DEADLINE, remaining_seconds
 
@@ -207,7 +291,7 @@ class LiveSalePriceApiTests(APITestCase):
             remaining = remaining_seconds()
             self.assertIsNotNone(remaining)
             self.assertGreater(remaining, 0)
-            self.assertLessEqual(remaining, 10)
+            self.assertLessEqual(remaining, 6)
             return self.detail
 
         self.get_detail.side_effect = bounded_detail
