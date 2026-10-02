@@ -4,6 +4,15 @@ from django.db import models
 from unidecode import unidecode
 
 
+def inventory_consumption_filter(*, name_field="name", code_field="sku"):
+    """Internal stock consumption, not all accessories or resale merchandise."""
+    return models.Q(**{
+        f"{name_field}__iregex": r"(^|[^a-z])(empaques?|toppings?)([^a-z]|$)",
+    }) | models.Q(**{
+        f"{code_field}__in": PointProductCategory.objects.filter(category="TOPPING").values("codigo_point"),
+    })
+
+
 def _normalize_name(value: str) -> str:
     return " ".join(unidecode((value or "")).lower().strip().split())
 

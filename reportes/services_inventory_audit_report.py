@@ -27,7 +27,7 @@ QUANTITY_FIELDS = {
 
 def audit_report_version(month, branch=""):
     runs = ProductInventoryAuditRun.objects.filter(month=month).values("rebuilt_at", "last_successful_rebuild_at", "status").first()
-    cases = ProductInventoryAuditCase.objects.filter(month=month)
+    cases = ProductInventoryAuditCase.objects.sold_products().filter(month=month)
     if branch:
         if len(str(branch)) > 10 or not str(branch).isdecimal() or int(branch) > 2147483647:
             raise SuspiciousOperation("Sucursal de auditoría inválida")
@@ -87,7 +87,7 @@ def read_audit_report(month, *, branch=""):
             raise SuspiciousOperation("Sucursal de auditoría inválida")
     run = ProductInventoryAuditRun.objects.filter(month=month).first()
     aliases, _ = canonical_point_branch_identity()
-    qs = ProductInventoryAuditCase.objects.filter(month=month).select_related("branch__erp_branch", "product")
+    qs = ProductInventoryAuditCase.objects.sold_products().filter(month=month).select_related("branch__erp_branch", "product")
     if selected:
         qs = qs.filter(branch__erp_branch=selected)
     canonical_cases = {}

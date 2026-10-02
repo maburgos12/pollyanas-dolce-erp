@@ -7,6 +7,7 @@ from core.models import Sucursal, sucursales_operativas_q
 EXCLUDED_BRANCH_CODES: tuple[str, ...] = ("TMP1", "MATRIZDBG")
 
 POINT_NETWORK_BRANCH_CODES = (
+    "BAMOA",
     "COLOSIO",
     "CRUCERO",
     "EL_TUNEL",

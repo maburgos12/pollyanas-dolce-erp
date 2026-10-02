@@ -6,7 +6,8 @@ from django.test import RequestFactory
 from unittest.mock import patch
 
 from core.models import Sucursal
-from pos_bridge.models import PointBranch
+from pos_bridge.models import PointBranch, PointProduct, PointProductCategory
+from reportes.models import ProductInventoryAuditCase
 from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 
 
@@ -62,6 +63,18 @@ class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
         result = self.service().read_audit_report(date(2026, 9, 1))
         self.assertEqual(result["audit_status"], "Aún no auditado")
         self.assertEqual(result["rows"], [])
+
+    def test_consumption_is_separate_without_deleting_cases_or_resale_products(self):
+        for name, code in (("Empaque Pastel", "EMP"), ("TOPPING FRESA", "TOP"),
+                           ("Fresa para consumo", "TOP-CAT"), ("TE DEL JARDIN", "TE"),
+                           ("CAJA G PARA VENTA", "CAJA")):
+            product = PointProduct.objects.create(external_id=code, sku=code, name=name)
+            self.make_case(product=product)
+        PointProductCategory.objects.create(codigo_point="TOP-CAT", nombre="Fresa para consumo", category="TOPPING")
+        report = self.service().read_audit_report(self.month)
+        self.assertEqual({row["receta"] for row in report["rows"]}, {"TE DEL JARDIN", "CAJA G PARA VENTA"})
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 5)
+        self.assertEqual(ProductInventoryAuditCase.objects.sold_products().count(), 2)
 
     def test_view_and_exports_read_persisted_audit_not_another_balance(self):
         from reportes.views_produccion import ProducidoVsVendidoMermaView

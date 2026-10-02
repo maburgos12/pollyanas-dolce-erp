@@ -806,7 +806,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     page_size = 100 if request.GET.get("page_size") == "100" else 50
     if run is not None:
         branch_aliases, _branch_objects = canonical_point_branch_identity()
-        month_cases = ProductInventoryAuditCase.objects.filter(
+        month_cases = ProductInventoryAuditCase.objects.sold_products().filter(
             run=run,
             month=run.month,
             branch_id__in=set(branch_aliases.values()),

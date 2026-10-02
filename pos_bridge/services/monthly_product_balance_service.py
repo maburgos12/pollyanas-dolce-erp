@@ -22,6 +22,7 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
+from pos_bridge.models.product import inventory_consumption_filter
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
@@ -341,7 +342,7 @@ class MonthlyPointProductBalanceService:
                     parameters__date_to=data_through_text,
                 )
             )
-            .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
+            .only("id", "job_type", "status", "started_at", "finished_at", "parameters", "result_summary")
             .order_by("-started_at", "-id")
         )
         opening_target = month_start - timedelta(days=1)
@@ -1166,7 +1167,7 @@ class MonthlyPointProductBalanceService:
                 filters["parameters__source"] = config["source"]
             cached_jobs = list(
                 PointSyncJob.objects.filter(job_type=config["job_type"], **filters)
-                .only("id", "job_type", "status", "started_at", "parameters", "result_summary")
+                .only("id", "job_type", "status", "started_at", "finished_at", "parameters", "result_summary")
                 .order_by("-started_at", "-id")
             )
         jobs = [job for job in cached_jobs if job.job_type == config["job_type"]]
@@ -1207,6 +1208,47 @@ class MonthlyPointProductBalanceService:
             issues.append(f"{prefix}_SYNC_JOB_RESTRICTED")
 
         summary = selected.result_summary or {}
+        composed_job_ids = (selected.id,)
+        foreign_updates_valid = False
+        if family in {"production", "waste"} and any(job_id != selected.id for job_id in row_job_ids):
+            foreign_ids = {job_id for job_id in row_job_ids if job_id != selected.id}
+            foreign_jobs = PointSyncJob.objects.filter(pk__in=foreign_ids).in_bulk()
+            model = PointProductionLine if family == "production" else PointWasteLine
+            date_field = "production_date" if family == "production" else "movement_at__date"
+            month_rows = model.objects.filter(**{f"{date_field}__range": (month_start, month_end)})
+            # Only re-linked existing rows are proven by the original full-month
+            # count. New/deleted monthly rows require a fresh complete manifest.
+            foreign_updates_valid = bool(
+                None not in foreign_ids
+                and len(foreign_jobs) == len(foreign_ids)
+                and selected.finished_at is not None
+                and month_rows.count() == len(row_job_ids)
+                and not month_rows.filter(created_at__gt=selected.finished_at).exists()
+            )
+            for writer in foreign_jobs.values():
+                params = writer.parameters or {}
+                try:
+                    start = date.fromisoformat(str(params.get("start_date") or ""))
+                    end = date.fromisoformat(str(params.get("end_date") or ""))
+                    expected = int((writer.result_summary or {}).get(config["count_key"]))
+                except (TypeError, ValueError):
+                    foreign_updates_valid = False
+                    continue
+                writer_rows = model.objects.filter(sync_job=writer)
+                foreign_updates_valid = foreign_updates_valid and bool(
+                    writer.job_type == config["job_type"]
+                    and writer.status == PointSyncJob.STATUS_SUCCESS
+                    and unrestricted(writer)
+                    and writer.finished_at is not None
+                    and writer.started_at >= selected.finished_at
+                    and start <= end and start <= month_end and end >= month_start
+                    and expected >= 0
+                    and model.objects.filter(created_at__lte=writer.finished_at,
+                        **{f"{date_field}__range": (start, end)}).count() == expected
+                    and not writer_rows.exclude(**{f"{date_field}__range": (start, end)}).exists()
+                )
+            if foreign_updates_valid:
+                composed_job_ids = tuple(sorted({selected.id, *foreign_ids}))
         expected_count = summary.get(config["count_key"])
         if expected_count is None:
             issues.append(f"{prefix}_SYNC_CONTRACT_INCOMPLETE")
@@ -1247,7 +1289,7 @@ class MonthlyPointProductBalanceService:
                                 issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
                             if unmatched:
                                 issues.append(f"{prefix}_SYNC_BRANCH_COVERAGE_INCOMPLETE")
-                elif expected_count != bound_count:
+                elif expected_count != (len(row_job_ids) if foreign_updates_valid else bound_count):
                     issues.append(f"{prefix}_SYNC_COUNT_MISMATCH")
 
         restricted_row_job_ids = {
@@ -1262,14 +1304,14 @@ class MonthlyPointProductBalanceService:
             for job_id in row_job_ids
             if job_id != selected.id and job_id not in restricted_job_ids
         }
-        if foreign_job_ids:
+        if foreign_job_ids and not foreign_updates_valid:
             issues.append(f"{prefix}_SYNC_JOB_MIXED")
         issues = list(dict.fromkeys(issues))
         parameters = selected.parameters or {}
         return {
             "authoritative": not issues,
             "job_present": True,
-            "selected_sync_job_ids": (selected.id,),
+            "selected_sync_job_ids": composed_job_ids,
             "job_status": selected.status,
             "coverage_scope": "all_branches" if unrestricted(selected) else "filtered",
             "coverage_start": parameters.get(config["start_key"]),
@@ -2093,27 +2135,46 @@ class MonthlyPointProductBalanceService:
             issues.append(ISSUE_BRIDGE_UNRESOLVED)
             rejected_provenance.append({"reason": "bridge_rows_without_recipe", "count": bridge_unresolved_count})
         elif bridge_rows:
+            authoritative_rows = list(VentaAutoritativaPoint.objects.filter(
+                sale_date__gte=month_start, sale_date__lte=month_end,
+                branch__isnull=False, product__isnull=False,
+            ).only("product_id", "branch_id", "sale_date", "quantity").order_by("id"))
+            mirror_recipe_ids = {row.receta_id for row in daily_rows if row.receta_id is not None}
+            mirror_recipe_ids.update(row.receta_id for row in bridge_rows)
+            mirror_recipe_ids.update(row.product_id for row in authoritative_rows)
+            # The recipe mirror intentionally omits non-recipe merchandise.
+            # Keep those sales in Point, but compare only the mirror's domain.
+            excluded_mirror_ids = {
+                recipe.id for recipe in Receta.objects.filter(id__in=mirror_recipe_ids).only("id", "nombre", "codigo_point", "categoria")
+                if self.matcher.is_non_recipe_sale_row({
+                    "name": recipe.nombre, "sku": recipe.codigo_point, "category": recipe.categoria,
+                })
+            }
+            excluded_mirror_ids.update(Receta.objects.filter(
+                inventory_consumption_filter(name_field="nombre", code_field="codigo_point")
+            ).values_list("id", flat=True))
             daily_totals: dict[tuple[int, int | None, date], Decimal] = {}
             for row in daily_rows:
-                if row.receta_id is None:
+                if row.receta_id is None or row.receta_id in excluded_mirror_ids:
                     continue
                 key = (row.receta_id, getattr(row.branch, "erp_branch_id", None), row.sale_date)
                 daily_totals[key] = daily_totals.get(key, ZERO) + Decimal(row.quantity)
-            authoritative_rows = VentaAutoritativaPoint.objects.filter(
-                sale_date__gte=month_start,
-                sale_date__lte=month_end,
-                branch__isnull=False,
-                product__isnull=False,
-            ).only("product_id", "branch_id", "sale_date", "quantity").order_by("id")
             for row in authoritative_rows:
+                if row.product_id in excluded_mirror_ids:
+                    continue
                 key = (row.product_id, row.branch_id, row.sale_date)
                 daily_totals[key] = Decimal(row.quantity)
                 authoritative_overlay_count += 1
             bridge_totals: dict[tuple[int, int | None, date], Decimal] = {}
             for row in bridge_rows:
+                if row.receta_id in excluded_mirror_ids:
+                    continue
                 key = (row.receta_id, row.sucursal_id, row.fecha)
                 bridge_totals[key] = bridge_totals.get(key, ZERO) + Decimal(row.cantidad)
-            materialized_bridge_reconciled = daily_totals == bridge_totals
+            materialized_bridge_reconciled = (
+                {key: value for key, value in daily_totals.items() if value != ZERO}
+                == {key: value for key, value in bridge_totals.items() if value != ZERO}
+            )
             if not materialized_bridge_reconciled:
                 issues.append(ISSUE_SALES_SOURCE_MIXED)
                 rejected_provenance.append({"reason": "bridge_rows_diverge_from_selected_daily_sales"})

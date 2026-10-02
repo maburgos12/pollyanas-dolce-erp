@@ -268,7 +268,7 @@ class InventoryAuditMaterializer:
         with transaction.atomic():
             self._lock_source_months(month_start)
             branch_aliases, _ = canonical_point_branch_identity()
-            candidates = ProductInventoryAuditCase.objects.filter(
+            candidates = ProductInventoryAuditCase.objects.sold_products().filter(
                 month=month_start,
                 branch_id__in=set(branch_aliases.values()),
             ).exclude(difference=0)
@@ -410,7 +410,7 @@ class InventoryAuditMaterializer:
             .values_list("case_id", "total")
         )
         cases = list(
-            ProductInventoryAuditCase.objects.select_for_update().filter(
+            ProductInventoryAuditCase.objects.sold_products().select_for_update().filter(
                 month=month
             )
         )
@@ -482,7 +482,7 @@ class InventoryAuditMaterializer:
         started_at,
         dry_run,
     ) -> dict[str, int]:
-        existing_count = ProductInventoryAuditCase.objects.filter(month=month).count()
+        existing_count = ProductInventoryAuditCase.objects.sold_products().filter(month=month).count()
         counts = _empty_counts(required_sources_available=False)
         counts["unchanged"] = existing_count
         counts["source_incomplete"] = max(1, len(traceability.global_issues))

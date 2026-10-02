@@ -162,6 +162,13 @@ class AuditStockHistoryService:
         metadata = record.raw_metadata or {}
         if "fetched_rows" not in metadata:
             return False
+        _, month_end = _month_bounds(month)
+        try:
+            fetched_at = datetime.fromisoformat(str(metadata.get("fetched_at") or ""))
+        except ValueError:
+            return False
+        if timezone.is_naive(fetched_at) or fetched_at < month_end:
+            return False
         fetched_rows = int(metadata.get("fetched_rows") or 0)
         history_limit = int(metadata.get("history_limit") or HISTORY_LIMIT)
         if fetched_rows < history_limit:
@@ -197,7 +204,6 @@ class AuditStockHistoryService:
                     defaults=defaults,
                 )
             all_rows = record.rows.order_by("movement_at", "row_number")
-            first = all_rows.first()
             last = all_rows.last()
             record.source_filename = "point-api-stock-history"
             record.report_path = "/Stock/GetHistorial"
@@ -214,7 +220,10 @@ class AuditStockHistoryService:
                 "source": SOURCE_NAME,
                 "history_limit": HISTORY_LIMIT,
                 "fetched_rows": len(rows),
-                "earliest_movement_at": first.movement_at.isoformat() if first else "",
+                "earliest_movement_at": min(
+                    (values["movement_at"] for _, values in parsed_rows), default=None,
+                ).isoformat() if parsed_rows else "",
+                "fetched_movement_ids": [movement_id for movement_id, _ in parsed_rows],
                 "latest_movement_at": last.movement_at.isoformat() if last else "",
                 "fetched_at": timezone.now().isoformat(),
             }
@@ -316,7 +325,12 @@ class AuditStockHistoryService:
                     unknown_ids.append(row.row_number)
                 continue
             amount = row.quantity
-            if category != "identified_adjustment":
+            if _normalized(row.movement_type) == "CANCELACION VENTA":
+                if row.new_existence - row.previous_existence != abs(amount):
+                    unknown_ids.append(row.row_number)
+                    continue
+                amount = -abs(amount)
+            elif category != "identified_adjustment":
                 amount = abs(amount)
             totals[category] += amount
             ids_by_category[category].append(row.row_number)
@@ -335,6 +349,8 @@ class AuditStockHistoryService:
     def _category(movement_type: str, quantity: Decimal) -> str | None:
         movement = _normalized(movement_type)
         words = set(movement.split())
+        if "CANCELACION" in words and movement != "CANCELACION VENTA":
+            return None
         if "PRODUCCION" in words:
             return "production"
         if "VENTA" in words:

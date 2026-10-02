@@ -3482,7 +3482,10 @@ class ProductInventoryAuditRun(models.Model):
 
 
 class ProductInventoryAuditCaseQuerySet(_NoBulkMutationQuerySet):
-    pass
+    def sold_products(self):
+        from pos_bridge.models.product import inventory_consumption_filter
+
+        return self.exclude(inventory_consumption_filter(name_field="product__name", code_field="product__sku"))
 
 
 class ProductInventoryAuditCase(models.Model):
