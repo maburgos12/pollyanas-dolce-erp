@@ -30,7 +30,7 @@ from rest_framework.test import APIClient
 
 from core.access import ACCESS_MANAGE, ACCESS_VIEW
 from core.email_rendering import render_email_to_string
-from core.models import Notificacion, Sucursal, UserModuleAccess
+from core.models import AuditLog, Notificacion, Sucursal, UserModuleAccess
 from crm.models import Cliente, PedidoCliente
 from api.logistica_serializers import ParadaRutaSerializer, RutaCargaChecklistSerializer
 from logistica.models import (
@@ -80,6 +80,7 @@ from logistica.services_rutas_control import (
     ruta_operativa_para_repartidor,
 )
 from logistica.services_tiempos_ruta import resumen_tiempos_ruta
+from logistica import tasks as logistica_tasks
 from logistica.tasks import _emails_de_grupo, detectar_gps_perdido_rutas
 from api.logistica_views import _can_operate_pwa
 from pos_bridge.models import PointBranch, PointSyncJob, PointTransferLine
@@ -5245,6 +5246,49 @@ class LogisticaControlRutasTests(TestCase):
 
         self.assertEqual(resultado["rutas_revisadas"], 0)
         self.assertFalse(EventoRuta.objects.filter(ruta=self.ruta, tipo=EventoRuta.TIPO_GPS_PERDIDO).exists())
+
+    def test_task_regulariza_turno_abierto_de_ruta_completada_anterior_sin_inventar_llegada(self):
+        task = getattr(logistica_tasks, "regularizar_turnos_de_rutas_completadas", None)
+        self.assertIsNotNone(task)
+        self.ruta.fecha_ruta = timezone.localdate() - timedelta(days=1)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.hora_cierre_real = timezone.now() - timedelta(hours=12)
+        self.ruta.save(update_fields=["fecha_ruta", "estatus", "hora_cierre_real", "updated_at"])
+
+        resultado = task()
+        self.bitacora.refresh_from_db()
+
+        self.assertTrue(self.bitacora.cerrada)
+        self.assertIsNone(self.bitacora.hora_llegada)
+        self.assertIsNone(self.bitacora.km_llegada)
+        self.assertEqual(self.bitacora.nivel_gas_llegada, "")
+        self.assertEqual(resultado["turnos_regularizados"], 1)
+        auditoria = AuditLog.objects.get(
+            action="REGULARIZACION_AUTOMATICA_TURNO",
+            model="logistica.BitacoraSalidaLlegada",
+            object_id=str(self.bitacora.id),
+        )
+        self.assertTrue(auditoria.payload["sin_datos_llegada_inventados"])
+
+        segundo_resultado = task()
+        self.assertEqual(segundo_resultado["turnos_regularizados"], 0)
+        self.assertEqual(
+            AuditLog.objects.filter(action="REGULARIZACION_AUTOMATICA_TURNO").count(),
+            1,
+        )
+
+    def test_task_no_regulariza_turno_de_ruta_completada_hoy(self):
+        task = getattr(logistica_tasks, "regularizar_turnos_de_rutas_completadas", None)
+        self.assertIsNotNone(task)
+        self.ruta.estatus = RutaEntrega.ESTATUS_COMPLETADA
+        self.ruta.hora_cierre_real = timezone.now()
+        self.ruta.save(update_fields=["estatus", "hora_cierre_real", "updated_at"])
+
+        resultado = task()
+        self.bitacora.refresh_from_db()
+
+        self.assertFalse(self.bitacora.cerrada)
+        self.assertEqual(resultado["turnos_regularizados"], 0)
 
     @patch("logistica.views.snap_gps_path_to_roads")
     def test_control_rutas_view_renderiza_panel_interno(self, snap_mock):
