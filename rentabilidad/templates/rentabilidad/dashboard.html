@@ -21,8 +21,8 @@
       </div>
       <div class="rent-actions">
         <div class="periodo-select">
-          <span>Periodo</span>
-          <select id="periodo-select">
+          <span id="periodo-label">Periodo</span>
+          <select id="periodo-select" aria-labelledby="periodo-label" data-native-select="true">
             {% for p in periodos_disponibles %}
             <option value="{{ p|date:'Y-m' }}" {% if p == periodo %}selected{% endif %}>
               {{ p|date:"F Y" }}
