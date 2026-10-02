@@ -202,5 +202,7 @@ def _audit_history_finished(instance, **kwargs):
 @receiver(post_save, sender=RutaCargaChecklistLinea)
 @receiver(post_delete, sender=RutaCargaChecklistLinea)
 def _audit_logistics_changed(instance, **kwargs):
-    route = getattr(instance, "ruta", None) or instance.parada.ruta
-    enqueue_inventory_audit_months([month_start(route.fecha_ruta)])
+    # Checklist writers already carry this parent; do not discover its route per row.
+    route = instance.checklist.ruta if isinstance(instance, RutaCargaChecklistLinea) else (getattr(instance, "ruta", None) or instance.parada.ruta)
+    day = route._meta.get_field("fecha_ruta").to_python(route.fecha_ruta)
+    enqueue_inventory_audit_months([month_start(day)])

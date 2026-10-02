@@ -61,3 +61,9 @@ usa la política existente de Celery con max_retries=0 para fallar rápido y con
 el respaldo diario, sin cambiar configuración global. La prueba de concurrencia
 que falló se repitió con el broker desconectado y pasó; las expectativas de caché
 de core y mantenimiento se actualizan con el bump obligatorio del SW.
+
+El disparador de Logística reutiliza RutaCargaChecklistLinea.checklist.ruta,
+ya cargada por el sincronizador, en lugar de descubrir parada/ruta por cada fila.
+Normaliza fecha_ruta con DateField.to_python: Django permite que un objeto recién
+guardado conserve la fecha ISO como texto. Las tres regresiones de rutas y el
+invariante de consultas de una a cinco líneas pasan sin aumentar sus límites.

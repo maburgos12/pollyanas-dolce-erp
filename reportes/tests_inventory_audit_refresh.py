@@ -52,6 +52,16 @@ class InventoryAuditRefreshTests(TestCase):
                     pass
             send.assert_not_called()
 
+    def test_logistics_uses_loaded_checklist_and_normalizes_written_date_without_queries(self):
+        from logistica.models import RutaEntrega, RutaCargaChecklist, RutaCargaChecklistLinea
+        from reportes.signals import _audit_logistics_changed
+        route = RutaEntrega(fecha_ruta="2026-08-17")
+        line = RutaCargaChecklistLinea(checklist=RutaCargaChecklist(ruta=route))
+        with patch("reportes.signals.enqueue_inventory_audit_months") as send:
+            with self.assertNumQueries(0):
+                _audit_logistics_changed(line)
+        send.assert_called_once_with([date(2026, 8, 1)])
+
     def test_incomplete_sources_do_not_replace_previous_success_or_create_point_jobs(self):
         from pos_bridge.models import PointSyncJob
         from reportes.models import ProductInventoryAuditRun
