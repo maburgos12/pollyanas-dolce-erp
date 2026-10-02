@@ -287,6 +287,19 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             expected_product_ids=expected_product_ids,
         )
 
+    def test_consumption_movements_remain_stored_but_not_in_sold_product_audit(self):
+        consumed = [PointProduct.objects.create(external_id=code, sku=code, name=name)
+            for code, name in (("EMP", "Empaque Pastel"), ("TOP", "TOPPING FRESA"))]
+        self._closing(date(2026, 7, 31), {self.centro: "2", self.plaza: "0"})
+        self._closing(date(2026, 8, 31), {self.centro: "2", self.plaza: "0"})
+        for product in consumed:
+            self._sale(branch=self.centro, quantity="1", sale_date=date(2026, 8, 3), product=product)
+        self._refresh_sales_evidence(self.sales_job)
+        result = self.service.build(date(2026, 8, 1))
+        self.assertTrue(result.source_complete, result.global_issues)
+        self.assertEqual({line.product.id for line in result.lines}, {self.product.id})
+        self.assertEqual(PointDailySale.objects.filter(product__in=consumed).count(), 2)
+
     def _closing_lines(
         self,
         operational_date,

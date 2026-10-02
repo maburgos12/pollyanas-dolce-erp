@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from types import MappingProxyType
 
-from django.db.models import Q
+from django.db.models import BooleanField, Case, Q, Value, When
 from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
@@ -24,7 +24,7 @@ from pos_bridge.models import (
     PointTransferLine,
     PointWasteLine,
 )
-from pos_bridge.models.product import _normalize_name
+from pos_bridge.models.product import _normalize_name, inventory_consumption_filter
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
 )
@@ -190,7 +190,10 @@ class BranchInventoryTraceabilityService:
                 source_complete=False,
             )
 
-        products = list(PointProduct.objects.all().order_by("id"))
+        products = list(PointProduct.objects.annotate(
+            is_consumption=Case(When(inventory_consumption_filter(), then=Value(True)),
+                default=Value(False), output_field=BooleanField()),
+        ).order_by("id"))
         product_indexes = self._build_product_indexes(products)
         (
             sales,
@@ -266,6 +269,12 @@ class BranchInventoryTraceabilityService:
             conversion_in,
             conversion_out,
         )
+        consumption_ids = {product.id for product in products if product.is_consumption}
+        for source in (opening, closing, *movement_sources):
+            for key in list(source):
+                if key[1] in consumption_ids:
+                    del source[key]
+        movement_issues = [issue for issue in movement_issues if issue.product_id not in consumption_ids]
         movement_keys = set().union(*(source.keys() for source in movement_sources))
         uncovered_movement_issues = []
         for branch_id, product_id in sorted(movement_keys):

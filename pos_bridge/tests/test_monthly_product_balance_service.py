@@ -1835,6 +1835,94 @@ class MonthlyProductBalanceLedgerTests(TestCase):
         self.assertNotIn("SALES_SOURCE_MIXED", balance.issues)
         self.assertEqual(balance.rows[self.parent.id].sales, Decimal("3"))
 
+    def test_consumption_and_non_recipe_sales_do_not_require_a_recipe_mirror(self):
+        job = self._official_sales_job()
+        self._daily_sale(self.parent, self.parent_product, "3", date(2026, 7, 3), "cake", sync_job=job)
+        for name, code in (("Empaque Pastel", "EMP"), ("TOPPING FRESA C", "TOP"), ("TE DEL JARDIN", "TE")):
+            recipe = self._recipe(name, code)
+            product = self._product(recipe, code)
+            if code == "TE":
+                recipe.categoria = "TE"
+                recipe.save(update_fields=["categoria"])
+                product.category = "TE"
+                product.save(update_fields=["category"])
+            self._daily_sale(recipe, product, "2", date(2026, 7, 3), code, sync_job=job)
+        job.result_summary["rows_imported"] = 4
+        job.save(update_fields=["result_summary"])
+        VentaHistorica.objects.create(receta=self.parent, sucursal=self.sucursal,
+            fecha=date(2026, 7, 3), cantidad=Decimal("3"), fuente="POINT_BRIDGE_SALES")
+
+        balance = MonthlyPointProductBalanceService().build("2026-07")
+
+        self.assertTrue(balance.sources["sales"]["authoritative"])
+        self.assertTrue(balance.sources["sales"]["materialized_bridge_reconciled"])
+        self.assertEqual(PointDailySale.objects.count(), 4)
+
+    def test_incremental_movement_updates_preserve_month_authority(self):
+        for family in ("production", "waste"):
+            baseline = self._movement_job(family, rows_seen=2)
+            if family == "production":
+                first = self._production(self.parent, "1", date(2026, 7, 10), family+"-first", sync_job=baseline)
+                updated = self._production(self.parent, "2", date(2026, 7, 30), family+"-last", sync_job=baseline)
+            else:
+                first = self._waste(self.parent, "1", datetime(2026, 7, 10, 12), family+"-first", sync_job=baseline)
+                updated = self._waste(self.parent, "2", datetime(2026, 7, 30, 12), family+"-last", sync_job=baseline)
+            baseline.finished_at = timezone.now()
+            baseline.save(update_fields=["finished_at"])
+            rolling = self._movement_job(family, start="2026-07-26", end="2026-08-02", rows_seen=1)
+            rolling.finished_at = timezone.now()
+            rolling.save(update_fields=["finished_at"])
+            updated.sync_job = rolling
+            updated.save(update_fields=["sync_job"])
+            service, _ = self._service()
+            metadata = service._validate_month_movement_job(family=family,
+                month_start=date(2026, 7, 1), month_end=date(2026, 7, 31),
+                row_job_ids=[first.sync_job_id, rolling.id])
+            self.assertTrue(metadata["authoritative"], metadata)
+            self.assertEqual(set(metadata["selected_sync_job_ids"]), {baseline.id, rolling.id})
+            for status, branch_filter in ((PointSyncJob.STATUS_FAILED, ""), (PointSyncJob.STATUS_SUCCESS, "LEDGER")):
+                rolling.status, rolling.parameters["branch_filter"] = status, branch_filter
+                rolling.save(update_fields=["status", "parameters"])
+                metadata = service._validate_month_movement_job(family=family,
+                    month_start=date(2026, 7, 1), month_end=date(2026, 7, 31),
+                    row_job_ids=[first.sync_job_id, rolling.id])
+                self.assertFalse(metadata["authoritative"])
+            rolling.parameters["branch_filter"] = ""
+            rolling.save(update_fields=["parameters"])
+            type(updated).objects.filter(pk=updated.pk).update(created_at=timezone.now())
+            metadata = service._validate_month_movement_job(family=family,
+                month_start=date(2026, 7, 1), month_end=date(2026, 7, 31),
+                row_job_ids=[first.sync_job_id, rolling.id])
+            self.assertFalse(metadata["authoritative"], "New monthly rows cannot masquerade as re-linked originals")
+
+    def test_overlapping_incremental_writers_keep_their_original_count_evidence(self):
+        baseline = self._movement_job("production", rows_seen=3)
+        first = self._production(self.parent, "1", date(2026, 7, 10), "overlap-first", sync_job=baseline)
+        middle = self._production(self.parent, "2", date(2026, 7, 29), "overlap-middle", sync_job=baseline)
+        last = self._production(self.parent, "3", date(2026, 7, 30), "overlap-last", sync_job=baseline)
+        baseline.finished_at = timezone.now()
+        baseline.save(update_fields=["finished_at"])
+        older = self._movement_job("production", start="2026-07-26", end="2026-08-02", rows_seen=2)
+        older.finished_at = timezone.now()
+        older.save(update_fields=["finished_at"])
+        newer = self._movement_job("production", start="2026-07-30", end="2026-08-02", rows_seen=1)
+        newer.finished_at = timezone.now()
+        newer.save(update_fields=["finished_at"])
+        middle.sync_job, last.sync_job = older, newer
+        middle.save(update_fields=["sync_job"])
+        last.save(update_fields=["sync_job"])
+        service, _ = self._service()
+        metadata = service._validate_month_movement_job(family="production",
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31),
+            row_job_ids=[first.sync_job_id, older.id, newer.id])
+        self.assertTrue(metadata["authoritative"], metadata)
+        older.result_summary["production_lines_seen"] = 99
+        older.save(update_fields=["result_summary"])
+        metadata = service._validate_month_movement_job(family="production",
+            month_start=date(2026, 7, 1), month_end=date(2026, 7, 31),
+            row_job_ids=[first.sync_job_id, older.id, newer.id])
+        self.assertFalse(metadata["authoritative"])
+
     def test_authoritative_product_overlay_is_a_valid_materialization_and_sales_source(self):
         self._snapshot(self.parent_product, "10", datetime(2026, 6, 30, 8))
         self._snapshot(self.parent_product, "7", datetime(2026, 7, 31, 8))

@@ -104,7 +104,7 @@ class InventoryAuditAgent:
         notification_groups: dict[tuple[int, str], list[tuple[int, str]]] = {}
         branch_aliases, _ = canonical_point_branch_identity()
         month_rows = list(
-            ProductInventoryAuditCase.objects.filter(
+            ProductInventoryAuditCase.objects.sold_products().filter(
                 month=month,
                 branch_id__in=set(branch_aliases.values()),
             )
