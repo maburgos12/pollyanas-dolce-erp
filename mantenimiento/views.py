@@ -9,6 +9,7 @@ from django.contrib.staticfiles import finders
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Prefetch, Q
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -34,8 +35,10 @@ from mantenimiento.services_access import (
     authorized_unit_reports,
     authorized_unit_services,
     can_access_mantenimiento,
+    can_write_mantenimiento,
 )
 from mantenimiento.services_history import continuidad_por_principal
+from mantenimiento.services_vinculos import PROTECTED_MESSAGE
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
 from core.audit import log_event
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
@@ -85,18 +88,7 @@ def _can_access_mantenimiento(user) -> bool:
     return can_access_mantenimiento(user)
 
 
-def _can_write_mantenimiento(user) -> bool:
-    if not user or not user.is_authenticated:
-        return False
-    grupos = set(user.groups.values_list("name", flat=True))
-    return (
-        is_admin_or_dg(user)
-        or bool(grupos & EsMantenimiento.GRUPOS)
-        or can_manage_module(user, "mantenimiento")
-        or can_manage_submodule(user, "mantenimiento", "app")
-        or can_manage_submodule(user, "mantenimiento", "bandeja")
-        or can_manage_submodule(user, "mantenimiento", "dashboard")
-    )
+_can_write_mantenimiento = can_write_mantenimiento
 
 
 def _require_mantenimiento(user):
@@ -920,12 +912,12 @@ def resolver_cancelacion_movil(request, solicitud_id):
     accion = (request.data.get("accion") or "").strip().lower()
     if accion not in {"aprobar", "rechazar"}:
         return Response({"error": "Acción no válida."}, status=400)
-    eliminado = _resolver_cancelacion_obj(
-        solicitud,
-        request.user,
-        accion,
-        (request.data.get("notas_resolucion") or "").strip(),
-    )
+    try:
+        eliminado = _resolver_cancelacion_obj(
+            solicitud, request.user, accion, (request.data.get("notas_resolucion") or "").strip(),
+        )
+    except ProtectedError:
+        return Response({"error": PROTECTED_MESSAGE}, status=400)
     return Response({"ok": True, "estatus": solicitud.estatus, "eliminado": eliminado})
 
 
@@ -1047,10 +1039,10 @@ def _guardar_plan_desde_data(plan, data):
     return ""
 
 
+@transaction.atomic
 def _resolver_cancelacion_obj(solicitud, user, accion, notas=""):
-    solicitud.resuelto_por = user
-    solicitud.resuelto_en = timezone.now()
-    solicitud.notas_resolucion = notas
+    locked = get_object_or_404(SolicitudCancelacion.objects.select_for_update(), pk=solicitud.pk,
+                               estatus=SolicitudCancelacion.ESTATUS_PENDIENTE)
     eliminado = False
     if accion == "aprobar":
         model_map = {
@@ -1058,15 +1050,19 @@ def _resolver_cancelacion_obj(solicitud, user, accion, notas=""):
             SolicitudCancelacion.TIPO_UNIDAD: ReporteUnidad,
             SolicitudCancelacion.TIPO_ORDEN: OrdenMantenimiento,
         }
-        model = model_map.get(solicitud.tipo)
-        obj = model.objects.filter(pk=solicitud.objeto_id).first() if model else None
+        model = model_map.get(locked.tipo)
+        obj = model.objects.select_for_update().filter(pk=locked.objeto_id).first() if model else None
         if obj:
             obj.delete()
             eliminado = True
-        solicitud.estatus = SolicitudCancelacion.ESTATUS_APROBADA
+        locked.estatus = SolicitudCancelacion.ESTATUS_APROBADA
     else:
-        solicitud.estatus = SolicitudCancelacion.ESTATUS_RECHAZADA
-    solicitud.save()
+        locked.estatus = SolicitudCancelacion.ESTATUS_RECHAZADA
+    locked.resuelto_por = user
+    locked.resuelto_en = timezone.now()
+    locked.notas_resolucion = notas
+    locked.save()
+    solicitud.estatus = locked.estatus
     return eliminado
 
 
@@ -2164,7 +2160,13 @@ def solicitar_cancelacion(request, tipo, pk):
 
     if _puede_eliminar(request.user):
         # DG elimina directo sin pasar por solicitud
-        obj.delete()
+        try:
+            with transaction.atomic():
+                obj = get_object_or_404(type(obj).objects.select_for_update(), pk=obj.pk)
+                obj.delete()
+        except ProtectedError:
+            msg.error(request, PROTECTED_MESSAGE)
+            return redirect("mantenimiento:dashboard")
         msg.success(request, f"{referencia} eliminado.")
         return redirect("mantenimiento:dashboard")
 
@@ -2223,38 +2225,20 @@ def resolver_cancelacion(request, solicitud_id):
     accion = (request.POST.get("accion") or "").strip().lower()
     notas = (request.POST.get("notas_resolucion") or "").strip()
 
-    solicitud.resuelto_por = request.user
-    solicitud.resuelto_en = timezone.now()
-    solicitud.notas_resolucion = notas
-
+    if accion not in {"aprobar", "rechazar"}:
+        msg.error(request, "Acción no válida.")
+        return redirect("mantenimiento:dashboard")
+    try:
+        eliminado = _resolver_cancelacion_obj(solicitud, request.user, accion, notas)
+    except ProtectedError:
+        msg.error(request, PROTECTED_MESSAGE)
+        return redirect("mantenimiento:dashboard")
     if accion == "aprobar":
-        tipo = solicitud.tipo
-        pk = solicitud.objeto_id
-        eliminado = False
-        if tipo == "falla":
-            obj = ReporteFalla.objects.filter(pk=pk).first()
-            if obj:
-                obj.delete()
-                eliminado = True
-        elif tipo == "unidad":
-            obj = ReporteUnidad.objects.filter(pk=pk).first()
-            if obj:
-                obj.delete()
-                eliminado = True
-        elif tipo == "orden":
-            obj = OrdenMantenimiento.objects.filter(pk=pk).first()
-            if obj:
-                obj.delete()
-                eliminado = True
-        solicitud.estatus = SolicitudCancelacion.ESTATUS_APROBADA
-        solicitud.save()
         if eliminado:
             msg.success(request, f"Solicitud #{solicitud.id} aprobada. '{solicitud.referencia}' eliminado.")
         else:
             msg.warning(request, f"Solicitud #{solicitud.id} aprobada, pero el objeto ya no existía.")
     else:
-        solicitud.estatus = SolicitudCancelacion.ESTATUS_RECHAZADA
-        solicitud.save()
         msg.info(request, f"Solicitud #{solicitud.id} rechazada.")
 
     return redirect("mantenimiento:dashboard")

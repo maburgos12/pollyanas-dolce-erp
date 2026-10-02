@@ -1,4 +1,5 @@
 from django.contrib import admin
+from mantenimiento.admin_vinculos import DocumentosAtencionAdmin
 
 from .models import BitacoraFalla, CategoriaFalla, ReporteFalla
 
@@ -19,7 +20,7 @@ class CategoriaFallaAdmin(admin.ModelAdmin):
 
 
 @admin.register(ReporteFalla)
-class ReporteFallaAdmin(admin.ModelAdmin):
+class ReporteFallaAdmin(DocumentosAtencionAdmin):
     list_display = ["id", "sucursal", "titulo", "categoria", "area", "prioridad", "estatus", "reportado_por", "fecha_reporte"]
     list_filter = ["estatus", "prioridad", "area", "sucursal", "categoria"]
     search_fields = ["titulo", "descripcion", "sucursal__nombre"]

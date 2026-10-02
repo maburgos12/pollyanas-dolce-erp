@@ -1,4 +1,5 @@
 from django.contrib import admin
+from mantenimiento.admin_vinculos import DocumentosAtencionAdmin
 
 from .models import Activo, BitacoraMantenimiento, OrdenMantenimiento, PlanMantenimiento
 
@@ -75,7 +76,7 @@ class BitacoraMantenimientoInline(admin.TabularInline):
 
 
 @admin.register(OrdenMantenimiento)
-class OrdenMantenimientoAdmin(admin.ModelAdmin):
+class OrdenMantenimientoAdmin(DocumentosAtencionAdmin):
     list_display = (
         "folio",
         "activo_ref",

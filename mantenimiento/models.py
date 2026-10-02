@@ -75,3 +75,16 @@ class SolicitudCancelacion(models.Model):
 
     def __str__(self):
         return f"{self.get_tipo_display()} #{self.objeto_id} · {self.estatus}"
+
+
+class VinculoAtencionEquipo(models.Model):
+    """Atención documentada entre fuentes; no implica equivalencia financiera."""
+    orden = models.ForeignKey('activos.OrdenMantenimiento', on_delete=models.PROTECT, related_name='vinculos_atencion')
+    reporte = models.ForeignKey('fallas.ReporteFalla', on_delete=models.PROTECT, related_name='vinculos_atencion')
+    creador = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='vinculos_atencion_creados')
+    creado_en = models.DateTimeField(auto_now_add=True)
+    motivo = models.TextField(max_length=2000)
+
+    class Meta:
+        ordering = ['-creado_en', '-pk']
+        constraints = [models.UniqueConstraint(fields=['orden', 'reporte'], name='mantenimiento_vinculo_orden_reporte_uniq')]
