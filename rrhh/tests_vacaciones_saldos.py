@@ -1620,7 +1620,11 @@ class PrepararPeriodosVacacionalesTests(TestCase):
         self.assertEqual(aplicacion.periodo.aniversario, date(2024, 3, 15))
         self.assertIn("REQUIERE_REVISION: 0", salida)
 
-    def test_saldo_inicial_prevalece_si_coincide_con_ultimo_aniversario(self):
+    @patch(
+        "rrhh.management.commands.preparar_periodos_vacacionales.timezone.localdate",
+        return_value=date(2026, 10, 1),
+    )
+    def test_saldo_inicial_prevalece_si_coincide_con_ultimo_aniversario(self, _localdate):
         empleado = Empleado.objects.create(
             nombre="Empleado saldo en aniversario vigente",
             fecha_ingreso=date(2020, 10, 2),
