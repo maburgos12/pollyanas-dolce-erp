@@ -37,6 +37,8 @@ class InventoryAuditRefreshTests(TestCase):
                 service.enqueue_inventory_audit_months([date(2026, 8, 1)])
                 send.assert_not_called()
             self.assertEqual(send.call_count, 1)
+            self.assertTrue(send.call_args.kwargs["retry"])
+            self.assertEqual(send.call_args.kwargs["retry_policy"]["max_retries"], 0)
 
     def test_rollback_does_not_enqueue(self):
         service = self.service()

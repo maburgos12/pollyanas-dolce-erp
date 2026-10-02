@@ -54,3 +54,10 @@ sin actualización), sin llamar cleanup_stale_running_jobs ni cambiar el estado 
 PENDING y RUNNING recientes sí difieren la auditoría; permanecen los locks compartidos
 y la comprobación final de fuentes del materializador. Prueba rojo/verde de job vencido
 sin mutación y prueba de job reciente que difiere.
+
+La suite completa detectó esperas al publicar con el broker desconectado:
+Kombu mantiene reintentos de conexión aun con retry=False. El publicador compartido
+usa la política existente de Celery con max_retries=0 para fallar rápido y conservar
+el respaldo diario, sin cambiar configuración global. La prueba de concurrencia
+que falló se repitió con el broker desconectado y pasó; las expectativas de caché
+de core y mantenimiento se actualizan con el bump obligatorio del SW.

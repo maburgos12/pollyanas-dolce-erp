@@ -139,7 +139,9 @@ def enqueue_inventory_audit_months(months):
             try:
                 cache.set(f"inventory-audit:dirty:{month}", token, timeout=86400)
                 if cache.add(key, token, timeout=300):
-                    refresh_inventory_audit_month_task.apply_async(kwargs={"month": month.strftime("%Y-%m"), "token": token}, countdown=15, retry=False)
+                    # Kombu also applies this policy to the initial connection;
+                    # retry=False alone still waits for broker connection retries.
+                    refresh_inventory_audit_month_task.apply_async(kwargs={"month": month.strftime("%Y-%m"), "token": token}, countdown=15, retry=True, retry_policy={"max_retries": 0})
             except Exception:
                 try:
                     if cache.get(key) == token:
