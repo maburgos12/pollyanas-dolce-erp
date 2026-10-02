@@ -284,7 +284,7 @@ class InventoryAuditMaterializer:
             for offset in range(0, len(selected_ids), _POINT_HISTORY_BATCH_SIZE):
                 batch_ids = selected_ids[offset : offset + _POINT_HISTORY_BATCH_SIZE]
                 cases = list(
-                    ProductInventoryAuditCase.objects.select_for_update()
+                    ProductInventoryAuditCase.objects.select_for_update(of=("self",))
                     .filter(id__in=batch_ids)
                     .select_related("branch", "product", "run")
                     .order_by("id")
@@ -410,9 +410,9 @@ class InventoryAuditMaterializer:
             .values_list("case_id", "total")
         )
         cases = list(
-            ProductInventoryAuditCase.objects.sold_products().select_for_update().filter(
-                month=month
-            )
+            ProductInventoryAuditCase.objects.sold_products()
+            .select_for_update(of=("self",))
+            .filter(month=month)
         )
         for case in cases:
             case.audit_event_count = event_counts.get(case.id, 0)

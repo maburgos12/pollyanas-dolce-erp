@@ -116,7 +116,7 @@ class InventoryAuditAgent:
             for row in month_rows:
                 with transaction.atomic():
                     case = (
-                        ProductInventoryAuditCase.objects.select_for_update()
+                        ProductInventoryAuditCase.objects.select_for_update(of=("self",))
                         .select_related("branch", "product")
                         .get(pk=row["id"])
                     )
