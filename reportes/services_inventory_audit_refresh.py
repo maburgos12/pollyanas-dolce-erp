@@ -90,6 +90,7 @@ def _source_signature(month):
 
 
 def refresh_inventory_audit_month(month):
+    from pos_bridge.tasks.retry_failed_jobs import MAX_RUNNING_HOURS
     month = _month(month)
     key = f"inventory-audit:signature:{month}"
     with transaction.atomic():
@@ -97,7 +98,8 @@ def refresh_inventory_audit_month(month):
         if ProductoMonthClosure.objects.filter(month_start=month, is_locked=True).exists():
             return {"month": str(month), "status": "locked"}
         jobs = apps.get_model("pos_bridge", "PointSyncJob").objects.filter(
-            status__in=["PENDING", "RUNNING"], job_type__in=["inventory", "sales", "production", "waste", "transfers", "conversions"])
+            Q(status="PENDING") | Q(status="RUNNING", updated_at__gte=timezone.now() - timedelta(hours=MAX_RUNNING_HOURS)),
+            job_type__in=["inventory", "sales", "production", "waste", "transfers", "conversions"])
         for params in jobs.values_list("parameters", flat=True):
             if not isinstance(params, dict):
                 continue

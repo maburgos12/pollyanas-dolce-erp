@@ -75,6 +75,19 @@ class InventoryAuditRefreshTests(TestCase):
         service = self.service()
         self.assertEqual(service._month(datetime(2026, 9, 1, 1, tzinfo=timezone.utc)), date(2026, 8, 1))
 
+    def test_abandoned_running_job_does_not_block_audit_or_get_modified(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from pos_bridge.models import PointSyncJob
+        from pos_bridge.tasks.retry_failed_jobs import MAX_RUNNING_HOURS
+        job = PointSyncJob.objects.create(job_type="production", status="RUNNING",
+            parameters={"start_date": "2026-08-01", "end_date": "2026-08-31"})
+        PointSyncJob.objects.filter(pk=job.pk).update(updated_at=timezone.now() - timedelta(hours=MAX_RUNNING_HOURS + 1))
+        result = self.service().refresh_inventory_audit_month("2026-08")
+        self.assertEqual(result["status"], "incomplete")
+        job.refresh_from_db()
+        self.assertEqual(job.status, "RUNNING")
+
 
 class InventoryAuditRefreshMaterializationTests(TraceabilityTestFixtures, TestCase):
     def setUp(self):

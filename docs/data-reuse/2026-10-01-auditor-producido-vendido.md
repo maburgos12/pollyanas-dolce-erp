@@ -47,3 +47,10 @@ Riesgos y pendientes: cobertura insuficiente en septiembre; orígenes de convers
 | Logística | carga de RutaCargaChecklistLinea, recepción de ParadaRuta y DiscrepanciaLogistica | ruta.fecha_ruta; respaldo diario detecta actualizaciones bulk |
 
 No se crean tablas ni PointSyncJob. Se extiende la programación existente con una revisión diaria local a las 04:15 America/Mazatlan. El reporte y CSV/XLSX/PDF leen ProductInventoryAuditCase; la consulta ligera de vigencia no costea ni reconstruye. El checksum previo al despliegue para las 1,958 cantidades de septiembre fue c860e77381192a23356c2ec01fcb7ef7fc4c87f3189188a7144d70c5257d5a11 (campos de saldo/movimiento, orden branch_id/product_id); status 1,259/220/479 y is_locked=False, verificados directamente en PostgreSQL del VPS el 1 de octubre.
+
+El VPS conserva jobs RUNNING de septiembre sin terminar. La exclusión de ejecución
+activa reutiliza MAX_RUNNING_HOURS de pos_bridge.tasks.retry_failed_jobs (dos horas
+sin actualización), sin llamar cleanup_stale_running_jobs ni cambiar el estado del job.
+PENDING y RUNNING recientes sí difieren la auditoría; permanecen los locks compartidos
+y la comprobación final de fuentes del materializador. Prueba rojo/verde de job vencido
+sin mutación y prueba de job reciente que difiere.
