@@ -195,7 +195,9 @@ def _case_status_context(case: ProductInventoryAuditCase) -> dict[str, str]:
         "balance": {"BALANCED": "Saldo conciliado", "SOURCE_INCOMPLETE": "Saldo no comprobado",
                     "NEEDS_EXPLANATION": "Diferencia por explicar"}[case_balance_status(case)],
         "point": (
-            "Cierre protegido"
+            "Sin cierre comprobado"
+            if _case_quantity(case, "point_closing") is None
+            else "Cierre protegido"
             if case.point_closing_status == ProductInventoryAuditCase.PointClosingStatus.PROTECTED
             else "Cierre disponible"
         ),

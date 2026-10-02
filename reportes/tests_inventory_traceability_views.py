@@ -33,6 +33,14 @@ from reportes.models import (
 
 
 class InventoryTraceabilityViewsTests(TestCase):
+    def test_missing_close_is_not_labeled_as_a_proven_zero_or_available_close(self):
+        from reportes.views_inventory_traceability import _case_status_context, _case_payload
+        self.case.movement_status = "SOURCE_INCOMPLETE"
+        self.case.source_trace = {"opening": [], "closing": []}
+        self.assertEqual(_case_status_context(self.case)["point"], "Sin cierre comprobado")
+        self.assertEqual(_case_status_context(self.case)["balance"], "Saldo no comprobado")
+        self.assertIsNone(_case_payload(self.case)["difference"])
+
     def setUp(self):
         self.private_evidence_directory = TemporaryDirectory()
         self.addCleanup(self.private_evidence_directory.cleanup)
