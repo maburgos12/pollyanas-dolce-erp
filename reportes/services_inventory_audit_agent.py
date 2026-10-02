@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from calendar import monthrange
 from dataclasses import dataclass
+from datetime import date, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -13,7 +15,10 @@ from django.utils import timezone
 
 from core.models import Notificacion
 from core.notificaciones import crear_notificacion
-from logistica.models import DiscrepanciaLogistica
+from logistica.models import DiscrepanciaLogistica, RutaCargaChecklistLinea
+from pos_bridge.models import PointTransferLine
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from reportes.services_inventory_audit_report import case_balance_status
 from pos_bridge.services.branch_inventory_traceability_service import (
     canonical_point_branch_identity,
 )
@@ -87,6 +92,8 @@ class InventoryAuditAgent:
         self._head_cache: dict[str, tuple[int | None, str]] = {}
         self._recurrence_cache = None
         self._daily_break_cache = None
+        self._transfer_cache = None
+        self._history_cache = None
 
     def run_month(self, month, *, dry_run: bool = False) -> dict[str, int]:
         month = month.replace(day=1)
@@ -174,6 +181,8 @@ class InventoryAuditAgent:
             self._head_cache = {}
             self._recurrence_cache = None
             self._daily_break_cache = None
+            self._transfer_cache = None
+            self._history_cache = None
         return counters
 
     @staticmethod
@@ -247,6 +256,7 @@ class InventoryAuditAgent:
             for item in discrepancies:
                 discrepancy_cache[item.linea_carga.point_transfer_line_id].append(item)
         self._discrepancy_cache = discrepancy_cache
+        self._transfer_cache = self._transfer_evidence(transfer_ids)
 
         product_ids = {row["product_id"] for row in month_rows}
         recurrence_sets: dict[tuple[int, tuple[str, int]], set] = {}
@@ -282,6 +292,11 @@ class InventoryAuditAgent:
             .select_related("branch", "product")
             .order_by("id")
         )
+        self._history_cache = AuditStockHistoryService().reconcile_many(
+            [case for case in cases if case.movement_status not in {"BALANCED", "RESOLVED"}],
+            month,
+            include_zero_difference=True,
+        )
         try:
             self._daily_break_cache = DailyInventoryBreakService().build_month(
                 month, cases
@@ -302,11 +317,27 @@ class InventoryAuditAgent:
         facts = self._facts(case, discrepancies)
         hypotheses: list[str] = []
         missing: list[str] = []
+        balance_status = case_balance_status(case)
+        transfers = self._case_transfers(case)
+        for transfer in transfers:
+            facts.append(transfer["fact"])
+            if transfer["missing"]:
+                missing.append(transfer["missing"])
+        source_issues = (case.source_trace or {}).get("source_issues", [])
+        for issue in source_issues:
+            if issue.get("code") not in {"PRODUCT_RESOLVED_BY_SKU", "PRODUCT_RESOLVED_BY_NAME"}:
+                missing.append(issue["message"])
         point_history = (case.source_trace or {}).get("point_history")
         if not isinstance(point_history, dict):
             point_history = {}
         history_resolved = False
-        if point_history.get("coverage_status") == "COMPLETE":
+        cached_history = (self._history_cache or {}).get((case.branch_id, case.product_id))
+        if not point_history and cached_history is not None:
+            point_history = cached_history.as_dict(
+                opening=case.opening_point, point_closing=case.point_closing)
+        if (point_history.get("coverage_status") == "COMPLETE"
+                and not point_history.get("unknown_movement_ids")
+                and balance_status != "SOURCE_INCOMPLETE"):
             conversion_out = Decimal(str(point_history.get("conversion_out") or 0))
             conversion_in = Decimal(str(point_history.get("conversion_in") or 0))
             remainder = Decimal(
@@ -323,12 +354,7 @@ class InventoryAuditAgent:
                     "Point acredita "
                     f"{_quantity_label(conversion_out)} piezas de salida por conversión "
                     f"y {_quantity_label(conversion_in)} piezas de entrada por conversión; "
-                    f"el efecto neto es {net_label} y el cierre de "
-                    f"{_quantity_label(point_history.get('point_closing'))} queda conciliado."
-                )
-                hypotheses.append(
-                    "El producto destino de estas conversiones no está identificado "
-                    "explícitamente por Point; no se asigna por aproximación."
+                    f"el efecto neto es {net_label}."
                 )
             comparison = point_history.get("aggregate_comparison") or {}
             for source, label in POINT_HISTORY_LABELS.items():
@@ -350,7 +376,8 @@ class InventoryAuditAgent:
             if remainder == 0:
                 history_resolved = True
                 facts.append(
-                    "El historial transaccional de Point explica el saldo final sin "
+                    f"El historial transaccional de Point explica el cierre de "
+                    f"{_quantity_label(point_history.get('point_closing'))} sin "
                     "unidades pendientes de localizar."
                 )
         daily_break = (
@@ -366,7 +393,20 @@ class InventoryAuditAgent:
             area = ProductInventoryAuditCase.ResponsibleArea.ADMINISTRATION
             assigned_to_id = None
             assignment_reason = "Caso agrupado: la fuente mensual está incompleta."
-            missing.append("Completar o recuperar la fuente faltante antes de conciliar el producto.")
+            opening_date = case.month - timedelta(days=1)
+            closing_date = date(case.month.year, case.month.month,
+                                monthrange(case.month.year, case.month.month)[1])
+            for source, stamp in (("opening", opening_date), ("closing", closing_date)):
+                if not (case.source_trace or {}).get(source):
+                    missing.append(
+                        f"Falta fuente de {'apertura' if source == 'opening' else 'cierre'} Point del "
+                        f"{stamp:%d/%m/%Y}: {case.product.name} en {case.branch.name}. "
+                        "El valor vacío no acredita inventario cero.")
+            if not missing:
+                missing.extend(issue["message"] for issue in case.run.source_issues)
+            if not missing:
+                missing.append(f"No se conservó la evidencia que originó SOURCE_INCOMPLETE "
+                               f"en el expediente {case.pk}; reconstruir desde las fuentes guardadas.")
         else:
             area = self._responsible_area(issue_codes, discrepancies)
             attention = self._attention_level(
@@ -385,10 +425,25 @@ class InventoryAuditAgent:
             if "MISSING_CONVERSION_DESTINATION" in issue_codes:
                 hypotheses.append("Point no identifica el producto destino de la conversión.")
                 missing.append("Identificar el producto destino de la conversión.")
-            if "TRANSFER_QUANTITY_MISMATCH" in issue_codes and not discrepancies:
+            if "TRANSFER_QUANTITY_MISMATCH" in issue_codes and not discrepancies and not transfers:
                 missing.append("Relacionar la transferencia con una evidencia logística explícita.")
 
-        if history_resolved:
+        if balance_status == "BALANCED":
+            facts.append("El saldo de inventario cuadra con Point; los documentos pendientes "
+                         "no se presentan como piezas faltantes.")
+        elif point_history.get("coverage_status") == "INCOMPLETE":
+            missing.append(f"El historial Point conservado de {case.product.name} en "
+                           f"{case.branch.name} no cubre todo {case.month:%m/%Y}; "
+                           "no acredita el saldo mensual completo.")
+        elif not point_history and balance_status == "NEEDS_EXPLANATION":
+            missing.append(f"No hay historial transaccional Point conservado para "
+                           f"{case.product.name} en {case.branch.name} que explique "
+                           f"la diferencia de {_quantity_label(case.difference)} en {case.month:%m/%Y}.")
+        if point_history.get("unknown_movement_ids"):
+            missing.append("Movimientos Point sin efecto identificado: " +
+                           ", ".join(map(str, point_history["unknown_movement_ids"])) + ".")
+
+        if history_resolved or balance_status != "NEEDS_EXPLANATION":
             pass
         elif daily_break.status == DailyBreakStatus.FOUND:
             checkpoint = daily_break.first_mismatch_checkpoint
@@ -409,11 +464,17 @@ class InventoryAuditAgent:
             )
 
         summary = {
+            "balance_status": balance_status,
+            "traceability_status": (
+                "COMPLETE" if case.movement_status in {"BALANCED", "RESOLVED"}
+                and not discrepancies else "PENDING"),
+            "transfer_evidence": transfers,
             "facts": facts,
             "hypotheses": hypotheses,
-            "missing": missing,
+            "missing": list(dict.fromkeys(missing)),
             "daily_break": (
-                {} if history_resolved else self._daily_break_summary(case, daily_break)
+                {} if history_resolved or balance_status != "NEEDS_EXPLANATION"
+                else self._daily_break_summary(case, daily_break)
             ),
             "point_history": point_history,
             "related_logistics_discrepancy_ids": [item.id for item in discrepancies],
@@ -439,6 +500,59 @@ class InventoryAuditAgent:
             summary=summary,
             fingerprint=fingerprint,
         )
+
+    @staticmethod
+    def _transfer_evidence(transfer_ids):
+        """Reuse explicit Point line links; never match a route by name or quantity."""
+        lines = {}
+        for line in RutaCargaChecklistLinea.objects.filter(
+                point_transfer_line_id__in=transfer_ids).exclude(estatus='SUPERADA').select_related('parada__ruta'):
+            lines[line.point_transfer_line_id] = line
+        evidence = {}
+        for transfer in PointTransferLine.objects.filter(id__in=transfer_ids).select_related(
+                'origin_branch', 'destination_branch').order_by('id'):
+            if transfer.is_received and transfer.received_at and transfer.is_finalized and transfer.sent_quantity == transfer.received_quantity:
+                continue
+            ref = f"{transfer.transfer_external_id}/{transfer.detail_external_id}"
+            origin = transfer.origin_branch.name if transfer.origin_branch_id else 'Origen no identificado'
+            destination = transfer.destination_branch.name if transfer.destination_branch_id else 'Destino no identificado'
+            stamp = transfer.sent_at or transfer.registered_at
+            sent, received = _quantity_label(transfer.sent_quantity), _quantity_label(transfer.received_quantity)
+            fact = f"Transferencia Point {ref}, {origin} → {destination}: {sent} enviadas"
+            if stamp:
+                fact += f" el {stamp.astimezone(LOCAL_TZ):%d/%m/%Y}"
+            has_receipt = bool(transfer.is_received and transfer.received_at)
+            fact += f", {received} recibidas." if has_receipt else "; sin recepción registrada."
+            line = lines.get(transfer.pk)
+            route_id = None
+            if line:
+                route_id = line.parada.ruta_id
+                loaded = 'sin captura' if line.cantidad_cargada is None else _quantity_label(line.cantidad_cargada)
+                fact += (f" Logística: ruta {line.parada.ruta.folio}, carga {loaded}, "
+                         f"recepción de parada {line.parada.get_entrega_estado_display()}.")
+            missing = ''
+            if not has_receipt:
+                missing = f"Transferencia {ref}: falta acreditar recepción en {destination} o retorno a {origin} de {sent} unidades."
+            elif not transfer.is_finalized:
+                missing = f"Transferencia {ref}: falta finalización Point; no se presume retorno al origen."
+            elif transfer.sent_quantity != transfer.received_quantity:
+                missing = f"Transferencia {ref}: conciliar {sent} enviadas contra {received} recibidas"
+                if transfer.received_quantity < transfer.sent_quantity:
+                    returned = _quantity_label(transfer.sent_quantity - transfer.received_quantity)
+                    fact += f" Point contabiliza retorno de {returned} al origen {origin}; falta acreditar custodia física."
+                missing += f"; {'revisar evidencia de la ruta' if line else 'no hay línea logística ligada al movimiento Point'} ."
+            evidence[transfer.pk] = {'id': transfer.pk, 'reference': ref, 'origin': origin,
+                'destination': destination, 'sent': sent, 'received_quantity': received,
+                'received': has_receipt, 'finalized': transfer.is_finalized,
+                'route_id': route_id, 'fact': fact, 'missing': missing}
+        return evidence
+
+    def _case_transfers(self, case):
+        ids = (case.source_trace or {}).get('transfers', [])
+        cache = self._transfer_cache
+        if cache is None:
+            cache = self._transfer_evidence(ids)
+        return [cache[key] for key in ids if key in cache]
 
     @staticmethod
     def _insufficient_projection(message):
@@ -531,7 +645,7 @@ class InventoryAuditAgent:
         return facts
 
     def _responsible_area(self, issue_codes, discrepancies):
-        if discrepancies or "TRANSFER_QUANTITY_MISMATCH" in issue_codes:
+        if discrepancies or {"TRANSFER_QUANTITY_MISMATCH", "INCOMPLETE_TRANSFER"} & set(issue_codes):
             return ProductInventoryAuditCase.ResponsibleArea.LOGISTICS
         if {"MISSING_CONVERSION_ORIGIN", "MISSING_CONVERSION_DESTINATION"} & set(issue_codes):
             return ProductInventoryAuditCase.ResponsibleArea.PRODUCTION

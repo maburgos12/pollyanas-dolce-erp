@@ -186,6 +186,8 @@ def _format_decimal(value: Any, *, places: int = 2, trim: bool = True) -> str:
 def _export_raw_value(row: dict[str, Any], key: str) -> Any:
     if key == "dif" and row.get("produccion_referencia"):
         return "Referencia"
+    if key == "estado_inventario" and row.get(key) == "Conciliado" and row.get("estado_trazabilidad") not in (None, "Conciliado"):
+        return "Saldo conciliado · trazabilidad pendiente"
     return row.get(key)
 
 

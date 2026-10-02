@@ -38,7 +38,7 @@ def _source_signature(month):
         revision = cache.get(f"inventory-audit:dirty:{month}")
     except Exception:
         revision = None  # Cache is optional; a missing revision never proves freshness.
-    evidence = [revision]
+    evidence = ["auditor-evidence-v1", revision]
     # Aggregate bounded source records, including deletes and quantity changes.
     for app, name, field, quantity in (
         ("pos_bridge", "PointProductionLine", "production_date", "produced_quantity"),

@@ -109,7 +109,7 @@
           <tr class="{% if case.movement_status == 'BALANCED' or case.movement_status == 'RESOLVED' %}is-secondary{% else %}is-exception{% endif %}">
             <td><strong>{{ case.product.name }}</strong>{% if case.product.sku %}<small>{{ case.product.sku }}</small>{% endif %}</td>
             <td>{{ case.branch.name }}</td>
-            <td class="text-end"><span class="inventory-audit-difference is-{{ case.movement_status|lower }}">{{ case.difference|floatformat:"-4"|intcomma }}</span></td>
+            <td class="text-end"><span class="inventory-audit-difference is-{{ case.movement_status|lower }}">{% if case.ui_difference == None %}Sin comprobar{% else %}{{ case.ui_difference|floatformat:"-4"|intcomma }}{% endif %}</span></td>
             <td>{{ case.ui_possible_cause }}</td>
             <td>
               <span class="inventory-audit-attention is-{{ case.attention_level|lower }}">{{ case.get_attention_level_display }}</span>

@@ -227,7 +227,7 @@
           <tr>
             <td class="cell-wrap">{{ row.receta }}
               <details id="trace-product-{{ row.product_id }}"><summary>Ver trazabilidad</summary>
-                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · {{ case.status }}</p>{% endfor %}
+                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · {{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}</p>{% endfor %}
                 <p>Transferencias: +{{ row.transferencia_entrada|floatformat:"-3" }} / −{{ row.transferencia_salida|floatformat:"-3" }}. Ajustes identificados: {{ row.ajuste_identificado|floatformat:"-3" }}.</p>
               </details>
             </td>
@@ -279,6 +279,7 @@
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Conciliado' %}is-success{% elif row.estado_inventario == 'Pendiente de conciliar' %}is-warning{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
+              {% if row.estado_inventario == 'Conciliado' and row.estado_trazabilidad != 'Conciliado' %}<small class="muted">Trazabilidad pendiente</small>{% endif %}
               {% else %}
               <span class="muted">—</span>
               {% endif %}

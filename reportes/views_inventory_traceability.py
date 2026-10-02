@@ -42,6 +42,7 @@ from reportes.models import (
     ProductInventoryAuditRun,
 )
 from ventas.services.sales_read_service import point_sales_evidence_by_ids
+from reportes.services_inventory_audit_report import case_balance_status, _case_quantity
 
 MAX_EVIDENCE_SIZE = 10 * 1024 * 1024
 MAX_NOTES_LENGTH = 4000
@@ -154,6 +155,8 @@ def _wants_html(request: HttpRequest) -> bool:
 
 def _possible_cause(case: ProductInventoryAuditCase) -> str:
     issue_codes = set(case.issue_codes if isinstance(case.issue_codes, list) else [])
+    if "INCOMPLETE_TRANSFER" in issue_codes:
+        return "Transferencia sin recepción comprobada"
     if "TRANSFER_QUANTITY_MISMATCH" in issue_codes:
         return "Transferencia por conciliar"
     if issue_codes.intersection(
@@ -189,8 +192,12 @@ def _possible_cause(case: ProductInventoryAuditCase) -> str:
 
 def _case_status_context(case: ProductInventoryAuditCase) -> dict[str, str]:
     return {
+        "balance": {"BALANCED": "Saldo conciliado", "SOURCE_INCOMPLETE": "Saldo no comprobado",
+                    "NEEDS_EXPLANATION": "Diferencia por explicar"}[case_balance_status(case)],
         "point": (
-            "Cierre protegido"
+            "Sin cierre comprobado"
+            if _case_quantity(case, "point_closing") is None
+            else "Cierre protegido"
             if case.point_closing_status == ProductInventoryAuditCase.PointClosingStatus.PROTECTED
             else "Cierre disponible"
         ),
@@ -571,13 +578,14 @@ def _case_payload(case: ProductInventoryAuditCase) -> dict[str, object]:
             "name": case.product.name,
         },
         "movement_status": case.movement_status,
+        "balance_status": case_balance_status(case),
         "point_closing_status": case.point_closing_status,
         "physical_status": case.physical_status,
         "attention_level": case.attention_level,
         "responsible_area": case.responsible_area,
         "assigned_to_id": case.assigned_to_id,
         "investigation_summary": case.investigation_summary,
-        "difference": str(case.difference),
+        "difference": (str(case.difference) if case.movement_status != "SOURCE_INCOMPLETE" else None),
     }
 
 
@@ -915,10 +923,13 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         result_count = paginator.count
         cases = list(page_obj.object_list)
         for case in cases:
+            case.ui_difference = _case_quantity(case, "difference")
             case.ui_possible_cause = _possible_cause(case)
             case.ui_movement_status = MOVEMENT_STATUS_LABELS.get(
                 case.movement_status, "Por revisar"
             )
+            if case_balance_status(case) == "BALANCED" and case.movement_status == "NEEDS_EXPLANATION":
+                case.ui_movement_status = "Saldo conciliado · trazabilidad pendiente"
 
     if render_html:
         pagination_params = request.GET.copy()
@@ -1044,13 +1055,14 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
                 "case": case,
                 "status": _case_status_context(case),
                 "possible_cause": _possible_cause(case),
+                "difference": _case_quantity(case, "difference"),
                 "balance_steps": [
                     {
                         "number": index,
                         "field": field,
                         "label": label,
                         "operator": operator,
-                        "value": getattr(case, field),
+                        "value": _case_quantity(case, field),
                         "evidence": source_evidence[field],
                     }
                     for index, (field, label, operator) in enumerate(

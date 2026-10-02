@@ -49,6 +49,13 @@ def audit_status(statuses):
     return "Pendiente de conciliar"
 
 
+def case_balance_status(case):
+    """Stock arithmetic is separate from the case's approval/traceability lifecycle."""
+    if case.movement_status == "SOURCE_INCOMPLETE":
+        return "SOURCE_INCOMPLETE"
+    return "BALANCED" if case.difference == 0 else "NEEDS_EXPLANATION"
+
+
 def _case_quantity(case, field):
     # Missing snapshots are stored as numeric placeholders by the materializer.
     # Do not present those placeholders as evidence of zero stock.
@@ -111,9 +118,12 @@ def read_audit_report(month, *, branch=""):
             "product_id": product_id, "receta_id": recipe.id if recipe else None,
             "receta": product.name, "categoria": recipe.categoria if recipe else (product.category or "Sin categoría"),
             "produccion_referencia": bool(recipe and not recipe.pasa_modulo_produccion),
-            "estado_inventario": audit_status(case.movement_status for case in cases),
+            "estado_inventario": audit_status(case_balance_status(case) for case in cases),
+            "estado_trazabilidad": audit_status(case.movement_status for case in cases),
             "cases": [{"id": c.id, "branch": c.branch.erp_branch.nombre if c.branch.erp_branch_id else c.branch.name,
-                       "status": audit_status([c.movement_status]), "url": reverse("reportes:inventory_audit_case", args=[c.id])}
+                       "status": audit_status([case_balance_status(c)]),
+                       "traceability_status": audit_status([c.movement_status]),
+                       "url": reverse("reportes:inventory_audit_case", args=[c.id])}
                       for c in sorted(cases, key=lambda c: c.branch.name)],
             "conversion_provenance_label": "Origen por identificar" if any(
                 "CONVERSION" in code and any(marker in code for marker in ("UNRESOLVED", "NON_DERIVED", "MISSING", "MISMATCH"))

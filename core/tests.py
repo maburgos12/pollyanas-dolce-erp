@@ -1,6 +1,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
+import re
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from django.conf import settings
@@ -159,7 +160,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20261001-auditor-producido-vendido-v2')", html)
+        self.assertRegex(html, r"navigator\.serviceWorker\.register\('/erp-sw\.js\?v=[^']+'\)")
 
     def test_login_template_also_exposes_pwa_install_metadata(self):
         login = Path(settings.BASE_DIR) / "core" / "templates" / "core" / "login.html"
@@ -169,7 +170,7 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('name="theme-color"', html)
         self.assertIn('name="apple-mobile-web-app-capable"', html)
         self.assertIn('name="apple-mobile-web-app-title"', html)
-        self.assertIn("navigator.serviceWorker.register('/erp-sw.js?v=20261001-auditor-producido-vendido-v2')", html)
+        self.assertRegex(html, r"navigator\.serviceWorker\.register\('/erp-sw\.js\?v=[^']+'\)")
 
     def test_erp_pwa_manifest_and_service_worker_are_minimal(self):
         manifest = (Path(settings.BASE_DIR) / "static" / "manifest.webmanifest").read_text()
@@ -179,7 +180,10 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
         self.assertIn('"start_url": "/dashboard/?source=pwa"', manifest)
         self.assertIn('"scope": "/"', manifest)
         self.assertIn('"sizes": "512x512"', manifest)
-        self.assertIn('const CACHE_NAME = "pollyanas-erp-shell-20261001-auditor-producido-vendido-v2";', sw)
+        shell_version = re.search(r'const CACHE_NAME = "pollyanas-erp-shell-([^\"]+)";', sw).group(1)
+        for template in ("templates/base.html", "core/templates/core/login.html"):
+            self.assertIn(f"navigator.serviceWorker.register('/erp-sw.js?v={shell_version}')",
+                          (Path(settings.BASE_DIR) / template).read_text())
         self.assertIn("self.addEventListener(\"fetch\"", sw)
         self.assertIn("event.respondWith(fetch(event.request))", sw)
 
