@@ -38,6 +38,7 @@ from mantenimiento.services_access import (
     authorized_unit_reports,
     authorized_unit_services,
     can_access_mantenimiento,
+    can_view_costs,
     can_write_mantenimiento,
 )
 from mantenimiento.services_capturas_equipos import capturar_equipo, guardar_factura, CapturaEquipoError, validar_equipo
@@ -595,6 +596,13 @@ class TipoServicioListView(generics.ListAPIView):
     queryset = TipoServicioUnidad.objects.filter(activo=True).order_by("nombre")
 
 
+def _datos_captura_equipo(serializer, usuario, repetida):
+    data = serializer.data
+    if repetida and not can_view_costs(usuario):
+        data = {key: value for key, value in data.items() if key not in {"costo_repuestos", "costo_mano_obra", "costo_otros", "costo_total"}}
+    return data
+
+
 class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
     authentication_classes = AUTH
     permission_classes = [EsMantenimiento]
@@ -603,7 +611,7 @@ class OrdenMantenimientoListCreateView(generics.ListCreateAPIView):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data, status=200 if serializer.captura_repetida else 201)
+        return Response(_datos_captura_equipo(serializer, request.user, serializer.captura_repetida), status=200 if serializer.captura_repetida else 201)
 
     def get_serializer_class(self):
         if self.request.method == "POST":
@@ -1378,7 +1386,7 @@ def crear_servicio_movil(request):
         )
     else:
         orden, repetida = crear([]), False
-    return Response(OrdenMantenimientoListSerializer(orden).data, status=200 if repetida else 201)
+    return Response(_datos_captura_equipo(OrdenMantenimientoListSerializer(orden), request.user, repetida), status=200 if repetida else 201)
 
 
 

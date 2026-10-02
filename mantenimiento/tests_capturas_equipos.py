@@ -178,6 +178,42 @@ class CapturasEquiposEntradasTests(TestCase):
         data['clave_captura'] = 'invalid'
         self.assertEqual(self.api.post('/api/mantenimiento/servicios-puntuales/', data, format='json').status_code, 400)
 
+    def test_replay_hides_updated_costs_from_limited_operator_both_endpoints(self):
+        from decimal import Decimal
+        from django.contrib.auth.models import Group
+        from core.models import UserModuleAccess, UserProfile
+        from mantenimiento.services_access import can_view_costs
+        operator = get_user_model().objects.create_user('cost-limited')
+        operator.groups.add(Group.objects.get_or_create(name='mantenimiento')[0])
+        UserModuleAccess.objects.create(user=operator, module='mantenimiento', access='view')
+        UserProfile.objects.update_or_create(user=operator, defaults={'sucursal': self.branch})
+        self.assertFalse(can_view_costs(operator))
+        cost_fields = {'costo_repuestos', 'costo_mano_obra', 'costo_otros', 'costo_total'}
+        for route in ('/api/mantenimiento/ordenes/', '/api/mantenimiento/servicios-puntuales/'):
+            for actor in (operator, self.user):
+                with self.subTest(route=route, actor=actor.username):
+                    self.api.force_authenticate(actor)
+                    data = dict(activo_ref=self.asset.pk, tipo='CORRECTIVO', descripcion='Trabajo', costo_real='150.00', clave_captura=str(uuid4())) if route.endswith('/ordenes/') else self.datos()
+                    first = self.api.post(route, data, format='json')
+                    self.assertEqual(first.status_code, 201)
+                    self.assertIn('costo_otros', first.data)
+                    self.assertEqual(Decimal(first.data['costo_otros']), Decimal('150'))
+                    # Representa una corrección posterior de costos por un gestor.
+                    OrdenMantenimiento.objects.filter(pk=first.data['id']).update(costo_repuestos='900', costo_mano_obra='800', costo_otros='700')
+                    replay = self.api.post(route, data, format='json')
+                    self.assertEqual(replay.status_code, 200)
+                    self.assertEqual(replay.data['id'], first.data['id'])
+                    if actor == operator:
+                        self.assertTrue(cost_fields.isdisjoint(replay.data))
+                    else:
+                        self.assertEqual(Decimal(replay.data['costo_repuestos']), Decimal('900'))
+                        self.assertEqual(Decimal(replay.data['costo_mano_obra']), Decimal('800'))
+                        self.assertEqual(Decimal(replay.data['costo_otros']), Decimal('700'))
+                        if route.endswith('/servicios-puntuales/'):
+                            self.assertEqual(Decimal(replay.data['costo_total']), Decimal('2400'))
+        self.assertEqual(OrdenMantenimiento.objects.count(), 4)
+        self.assertEqual(ComprobanteCapturaEquipo.objects.count(), 4)
+
     def test_web_invoice_replay_conflict_and_delete(self):
         import tempfile
         from pathlib import Path
