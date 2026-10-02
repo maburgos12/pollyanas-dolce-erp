@@ -237,10 +237,16 @@ class HistoricalPointInventoryClosingCapture:
                     cached = history_service._existing_import(branch, product)
                     self._call_point(lambda: history_service.capture(
                         branch, product, operational_date.replace(day=1),
-                        force=bool(cached and cached.row_count == 0
-                            and current.get(str(branch.external_id)) != Decimal("0"))))
+                        force=bool(cached and (
+                            (cached.row_count == 0 and current.get(str(branch.external_id)) != Decimal("0"))
+                            or ("fetched_movement_ids" not in cached.raw_metadata
+                                and cached.row_count != cached.raw_metadata.get("fetched_rows"))))))
                     history_record = history_service._existing_import(branch, product)
-                    history = list(history_record.rows.values_list("raw_payload", flat=True))
+                    history_rows = history_record.rows.all()
+                    fetched_ids = history_record.raw_metadata.get("fetched_movement_ids")
+                    if fetched_ids is not None:
+                        history_rows = history_rows.filter(row_number__in=fetched_ids)
+                    history = list(history_rows.values_list("raw_payload", flat=True))
                     resolution = resolve_stock_at_close(
                         history,
                         operational_date=operational_date,

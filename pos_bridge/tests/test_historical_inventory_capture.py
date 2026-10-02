@@ -134,6 +134,24 @@ class HistoricalInventoryCapturePersistenceTests(TestCase):
         self.assertEqual(client.history_calls, [("1", "857")])
         self.assertEqual(audit.reconcile(self.branch, self.product, date(2026, 7, 1)).sales, Decimal("1"))
 
+    def test_old_retained_rows_cannot_fill_gap_in_latest_truncated_history(self):
+        client = _FakePointClient({("1", "857"): [
+            {"Fecha": "2026-08-31T22:00:00", "FK_Movimiento": 123,
+             "Existencia_anterior": 4, "Existencia_nueva": 3, "Cancelado": False},
+        ]}, {"857": [{"PK_Sucursal": 1, "Cantidad": 2}]})
+        audit = AuditStockHistoryService(client=client)
+        audit.capture(self.branch, self.product, date(2026, 8, 1), force=True)
+        client.history_by_key[("1", "857")] = [
+            {"Fecha": "2026-10-02T01:00:00", "FK_Movimiento": 1000 + index,
+             "Existencia_anterior": 3, "Existencia_nueva": 2, "Cancelado": False}
+            for index in range(500)]
+        audit.capture(self.branch, self.product, date(2026, 9, 1), force=True)
+        self.assertEqual(audit.reconcile(self.branch, self.product, date(2026, 9, 1)).coverage_status, "INCOMPLETE")
+        result = HistoricalPointInventoryClosingCapture(client=client).capture(
+            operational_date=date(2026, 9, 30), branches=[self.branch], products=[self.product])
+        self.assertEqual(result.closing.status, PointHistoricalInventoryClosing.STATUS_DRAFT)
+        self.assertEqual(result.closing.lines.count(), 0)
+
     def test_complete_manifest_is_saved_verified_and_is_idempotent(self):
         client = _FakePointClient(
             history_by_key={("1", "857"): [
