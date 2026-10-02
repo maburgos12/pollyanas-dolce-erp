@@ -1521,10 +1521,10 @@ class MantenimientoServiceFormMarkupTests(TestCase):
         self.assertIn("20260715-mantenimiento-guardar-v2", base)
         # La versión del shell global cambia con cada entrega y debe coincidir
         # entre la URL de registro y el nombre de caché servido.
-        self.assertIn("20261001-auditor-producido-vendido-v2", base)
+        shell_version = re.search(r'const CACHE_NAME = "pollyanas-erp-shell-([^\"]+)";', service_worker).group(1)
         self.assertIn(
-            'const CACHE_NAME = "pollyanas-erp-shell-20261001-auditor-producido-vendido-v2";',
-            service_worker,
+            f"navigator.serviceWorker.register('/erp-sw.js?v={shell_version}')",
+            base,
         )
         self.assertIn("if (select.disabled || input.disabled) return;", searchable_selects)
         self.assertIn(".mant-form-error", css)
