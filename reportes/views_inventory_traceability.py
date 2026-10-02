@@ -716,7 +716,7 @@ def _action_form_fragment(
 def _locked_case(pk: int) -> ProductInventoryAuditCase:
     try:
         return (
-            ProductInventoryAuditCase.objects.select_for_update()
+            ProductInventoryAuditCase.objects.select_for_update(of=("self",))
             .select_related("branch", "product", "run")
             .get(pk=pk)
         )
