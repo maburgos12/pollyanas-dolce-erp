@@ -320,7 +320,13 @@ class OrdenMantenimiento(models.Model):
     def _next_folio(self):
         ymd = timezone.localdate().strftime("%y%m%d")
         prefix = f"OM-{ymd}-"
-        seq = OrdenMantenimiento.objects.filter(folio__startswith=prefix).count() + 1
+        # Los borrados dejan huecos; el siguiente folio continúa el mayor sufijo
+        # numérico, incluso después de 999. Los folios manuales se conservan.
+        suffixes = (
+            value[len(prefix):]
+            for value in OrdenMantenimiento.objects.filter(folio__startswith=prefix).values_list("folio", flat=True)
+        )
+        seq = max((int(value) for value in suffixes if value.isascii() and value.isdigit()), default=0) + 1
         return f"{prefix}{seq:03d}"
 
     def save(self, *args, **kwargs):

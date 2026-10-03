@@ -1,0 +1,3 @@
+{% load static %}
+{{ captura_borrador|default:None|json_script:"captura-borrador" }}
+<script src="{% static 'activos/capturas.js' %}" defer></script>
