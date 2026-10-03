@@ -299,3 +299,15 @@ def retirar_vinculo_v2(request, pk):
     except ValidationError as error:
         return Response({'error':' '.join(error.messages)}, status=400)
     return Response({'ok':True})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes(AUTH)
+@permission_classes([EsMantenimiento])
+def orden_desde_reporte_v2(request, pk):
+    from mantenimiento.services_reporte_orden import contexto_orden_desde_reporte, crear_orden_desde_reporte
+    if request.method == 'GET':
+        return Response(contexto_orden_desde_reporte(request.user, pk))
+    orden, repetida = crear_orden_desde_reporte(usuario=request.user, reporte_id=pk, datos=request.data)
+    return Response({'ok':True, 'orden_id':orden.pk, 'folio':orden.folio, 'uid':f'orden:{orden.pk}',
+                     'repetida':repetida}, status=200 if repetida else 201)

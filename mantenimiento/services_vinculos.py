@@ -37,13 +37,8 @@ def validar_par(orden, reporte):
         raise ValidationError('El reporte está marcado como repetido. Vincula su reporte principal.')
 
 
-@transaction.atomic
-def crear_vinculo(user, orden_id, reporte_id, motivo):
-    _require_write(user)
-    motivo = validar_motivo(motivo)
-    # Todos los pares bloquean primero orden, después reporte; serializa reintentos.
-    orden = get_object_or_404(authorized_orders(user).select_for_update(of=('self',)).select_related('activo_ref'), pk=orden_id)
-    reporte = get_object_or_404(authorized_fallas(user).select_for_update(), pk=reporte_id)
+def guardar_vinculo(user, orden, reporte, motivo):
+    """Persistir dentro de una transacción que ya serializa ambos documentos."""
     validar_par(orden, reporte)
     vinculo, creado = VinculoAtencionEquipo.objects.get_or_create(
         orden=orden, reporte=reporte, defaults={'creador':user, 'motivo':motivo},
@@ -52,6 +47,16 @@ def crear_vinculo(user, orden_id, reporte_id, motivo):
         log_event(user, 'CREATE', 'mantenimiento.VinculoAtencionEquipo', str(vinculo.pk),
                   {'orden_id':orden.pk, 'reporte_id':reporte.pk, 'motivo':motivo})
     return vinculo, creado
+
+
+@transaction.atomic
+def crear_vinculo(user, orden_id, reporte_id, motivo):
+    _require_write(user)
+    motivo = validar_motivo(motivo)
+    # Todos los pares bloquean primero orden, después reporte; serializa reintentos.
+    orden = get_object_or_404(authorized_orders(user).select_for_update(of=('self',)).select_related('activo_ref'), pk=orden_id)
+    reporte = get_object_or_404(authorized_fallas(user).select_for_update(), pk=reporte_id)
+    return guardar_vinculo(user, orden, reporte, motivo)
 
 
 @transaction.atomic
