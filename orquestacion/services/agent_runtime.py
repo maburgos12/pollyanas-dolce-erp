@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -18,6 +19,7 @@ from orquestacion.models import (
     OrchestrationRun,
 )
 from orquestacion.services.memory_proposals import propose_unresolved_tool_binding_gaps
+from orquestacion.services.inventory_reconciliation import CONTEXT_FILES as RECONCILIATION_CONTEXT_FILES
 from orquestacion.tool_binding import resolve_gateway_tool_alias
 
 
@@ -27,7 +29,7 @@ BASE_CONTEXT_FILES = [
     ".agent/skills/00-core/skill-erp-context/SKILL.md",
     ".agent/skills/00-core/skill-director-general-mode/SKILL.md",
 ]
-GOAL_CONTEXT_FILES: dict[str, list[str]] = {}
+GOAL_CONTEXT_FILES: dict[str, list[str]] = {'reconciliation_guard': RECONCILIATION_CONTEXT_FILES}
 
 
 @dataclass(frozen=True)
@@ -265,7 +267,10 @@ def resolve_tool_registry(goal: Goal) -> ToolRegistry:
             )
         )
 
-    for index, declared_tool_key in enumerate(agent.allowed_tools_json, start=20):
+    # This bounded observer has no external execution capabilities, even when the
+    # legacy catalog declares broad Point aliases for other future workflows.
+    declared_tools = [] if goal.goal_type == 'reconciliation_guard' else agent.allowed_tools_json
+    for index, declared_tool_key in enumerate(declared_tools, start=20):
         resolved_gateway_key = resolve_gateway_tool_alias(declared_tool_key, available_keys=gateway_tools.keys())
         if resolved_gateway_key:
             gateway_tool = gateway_tools[resolved_gateway_key]
@@ -344,6 +349,8 @@ def run_agent_goal(
         requested_action=goal.requested_action,
         metadata=goal.metadata,
     )
+    if normalized_goal.goal_type == 'reconciliation_guard' and normalized_goal.agent_code != handler.agent_code:
+        raise ValueError('La revisión requiere el agente de conciliación activo.')
     agent = _resolve_goal_agent(normalized_goal)
     if normalized_goal.goal_type not in (agent.supported_goal_types_json or []):
         raise ValueError(
@@ -352,6 +359,10 @@ def run_agent_goal(
         )
 
     context = build_agent_context(normalized_goal, base_dir=base_dir)
+    if normalized_goal.goal_type == 'reconciliation_guard':
+        from orquestacion.services.inventory_reconciliation import validate_review, observe_review
+        notes = validate_review(normalized_goal, agent, context)
+        handler = replace(handler, observer=partial(observe_review, notes=notes))
     memory = load_agent_memory(base_dir=base_dir)
     tool_registry = resolve_tool_registry(normalized_goal)
     run = OrchestrationRun.objects.create(
@@ -525,7 +536,7 @@ def _run_single_goal(
             ),
         )
 
-    verification = _verify_goal_outcome(goal, decision=decision)
+    verification = _verify_goal_outcome(goal, decision=decision, observation=observation)
     _create_checkpoint(
         run=run,
         step=ExecutionStep(
@@ -595,6 +606,12 @@ def _finalize_run(
         "verification": verification,
         "delegations": delegations,
     }
+    if goal.goal_type == 'reconciliation_guard':
+        run.result_summary_json.update({
+            'observation': observation,
+            'message': f"Revisión expediente #{goal.entity_id}: {observation['next_step']['reason']} "
+                       "Sin cambios operativos; cierre no autorizado.",
+        })
     run.save(update_fields=["status", "finished_at", "result_summary_json"])
     _create_checkpoint(
         run=run,
@@ -639,7 +656,12 @@ def _create_checkpoint(*, run: OrchestrationRun, step: ExecutionStep) -> AgentLo
     )
 
 
-def _verify_goal_outcome(goal: Goal, *, decision: str) -> dict[str, Any]:
+def _verify_goal_outcome(goal: Goal, *, decision: str, observation=None) -> dict[str, Any]:
+    if goal.goal_type == 'reconciliation_guard':
+        if not observation or observation.get('closure_allowed') is not False or observation['next_step']['point_http_allowed'] is not False:
+            raise ValueError('La revisión no cumple el contrato conservador.')
+        return {'decision': decision, 'status': 'reviewed', 'closure_allowed': False,
+                'summary': 'Revisión documental terminada; no aprueba ni cierra inventario.'}
     return {"decision": decision, "status": "not_applicable"}
 
 def _parse_markdown_sections(raw_markdown: str) -> dict[str, list[str]]:
@@ -678,7 +700,12 @@ def _log_runtime_audit(*, run: OrchestrationRun, task: AgentTask, goal: Goal, de
 
 
 def _goal_handlers() -> dict[str, GoalHandlerDefinition]:
-    return {}
+    from orquestacion.services.inventory_reconciliation import observe_review
+    return {'reconciliation_guard': GoalHandlerDefinition(
+        goal_type='reconciliation_guard', agent_code='agente_conciliacion', tool_hints=[],
+        observer=partial(observe_review, notes=[]),
+        blocking_rules=['Solo revisión documental, sin HTTP Point ni escrituras operativas.'],
+    )}
 
 
 def _map_run_status_to_delegation(status: str) -> str:
