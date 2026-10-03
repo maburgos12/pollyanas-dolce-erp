@@ -71,6 +71,7 @@
         sucursalFiltro: "",
         equipoDraft: emptyEquipoDraft(),
         servicioDraft: null,
+        planExecutionDrafts: new Map(),
         puntoDraft: emptyPuntoDraft(),
         vehiculoDraft: emptyVehiculoDraft(),
       };
@@ -341,16 +342,22 @@
         return state.ordenes;
       }
 
-      async function loadBandeja(force = false) {
-        if (state.bandeja.length && !force) return state.bandeja;
+      async function loadBandeja(force = false, requireFresh = false) {
+        if (state.bandeja.length && !force && !requireFresh) return state.bandeja;
         const generation = ++state.requestGeneration.inbox;
         const res = await apiV2Fetch("/bandeja/?estado=todos&periodo=30d&page_size=100");
-        if (generation !== state.requestGeneration.inbox) return state.bandeja;
+        if (generation !== state.requestGeneration.inbox) {
+          if (requireFresh) throw new Error('bandeja pendiente');
+          return state.bandeja;
+        }
         if (res.ok) {
           const data = await res.json();
+          if (requireFresh && generation !== state.requestGeneration.inbox) throw new Error('bandeja pendiente');
+          if (requireFresh && !['abiertos','en_proceso','criticos','cerrados'].every(key => Number.isInteger(data?.counts?.[key]) && data.counts[key] >= 0)) throw new Error('contadores de bandeja pendientes');
           state.bandeja = data.results || [];
           state.counts = data.counts || state.counts;
         } else {
+          if (requireFresh) throw new Error('bandeja pendiente');
           state.bandeja = [];
         }
         return state.bandeja;
@@ -445,7 +452,7 @@
       function agendaCard(item, compact = false) {
         const estado = item.estado || "programado";
         return `
-          <article class="card report-card agenda-card ${estado}">
+          <article class="card report-card agenda-card ${estado}" ${compact && item.tipo === "plan" ? `data-dashboard-plan="${item.id}"` : ""}>
             <div class="card-head">
               <div>
                 <p class="card-title">${esc(item.titulo)}</p>
@@ -455,6 +462,7 @@
             </div>
             <p class="muted card-copy-muted">${esc(item.sucursal || "Sin sucursal")}${item.responsable ? " · " + esc(item.responsable) : ""}</p>
             ${compact || !item.instrucciones ? "" : `<p class="card-copy">${esc(item.instrucciones)}</p>`}
+            <div id="plan-execution-${item.id}"></div>
             <div class="card-actions">
               ${item.tipo === "plan" ? `<button onclick="ejecutarPlanAgenda(${item.id})">Marcar realizado</button>` : `<button onclick="startVehiculo()">Registrar flota</button>`}
             </div>
@@ -548,18 +556,18 @@
         return render(shell(`
           <p class="screen-kicker">Bandeja de mantenimiento</p>
           <div class="summary-grid">
-            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertos</span></div>
-            <div class="summary-card"><strong>${m.proceso}</strong><span>En proceso</span></div>
-            <div class="summary-card"><strong>${criticos}</strong><span>Críticos</span></div>
-            <div class="summary-card"><button class="kpi-button" onclick="openClosedHistory()"><strong>${m.cerradas}</strong><span>Cerrados</span></button></div>
+            <div class="summary-card"><strong data-plan-count="abiertos">${m.abiertas}</strong><span>Abiertos</span></div>
+            <div class="summary-card"><strong data-plan-count="en_proceso">${m.proceso}</strong><span>En proceso</span></div>
+            <div class="summary-card"><strong data-plan-count="criticos">${criticos}</strong><span>Críticos</span></div>
+            <div class="summary-card"><button class="kpi-button" onclick="openClosedHistory()"><strong data-plan-count="cerrados">${m.cerradas}</strong><span>Cerrados</span></button></div>
           </div>
           <section class="ops-strip">
-            <div><strong>${agendaCounts.vencidos || 0}</strong><span>Vencidos</span></div>
-            <div><strong>${agendaCounts.urgentes || 0}</strong><span>7 días</span></div>
+            <div><strong data-agenda-count="vencidos">${agendaCounts.vencidos || 0}</strong><span>Vencidos</span></div>
+            <div><strong data-agenda-count="urgentes">${agendaCounts.urgentes || 0}</strong><span>7 días</span></div>
             <div><strong>${resumen.summary?.sin_asignar || 0}</strong><span>Sin asignar</span></div>
           </section>
           ${proximo ? `
-            <p class="section-kicker section-kicker-tight">Próximo trabajo</p>
+            <p id="plan-next-work-label" class="section-kicker section-kicker-tight">Próximo trabajo</p>
             ${agendaCard(proximo, true)}
           ` : ""}
           ${quickActions()}
@@ -590,29 +598,121 @@
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Agenda móvil</h1>
           <section class="ops-strip ops-strip-spaced">
-            <div><strong>${counts.vencidos || 0}</strong><span>Vencidos</span></div>
-            <div><strong>${counts.urgentes || 0}</strong><span>Urgentes</span></div>
-            <div><strong>${counts.programados || 0}</strong><span>Programados</span></div>
+            <div><strong data-agenda-count="vencidos">${counts.vencidos || 0}</strong><span>Vencidos</span></div>
+            <div><strong data-agenda-count="urgentes">${counts.urgentes || 0}</strong><span>Urgentes</span></div>
+            <div><strong data-agenda-count="programados">${counts.programados || 0}</strong><span>Programados</span></div>
           </section>
-          ${vencidos.length ? `<p class="section-kicker">Vencidos</p>${vencidos.map((item) => agendaCard(item)).join("")}` : ""}
-          ${urgentes.length ? `<p class="section-kicker">Esta semana</p>${urgentes.map((item) => agendaCard(item)).join("")}` : ""}
-          <p class="section-kicker">Próximos</p>
-          ${proximos.map((item) => agendaCard(item)).join("") || `<div class="empty">Sin planes próximos registrados.</div>`}
+          <section id="plan-execution-results" aria-labelledby="plan-execution-results-title" hidden><h2 id="plan-execution-results-title" class="section-kicker">Ejecuciones guardadas</h2></section>
+          ${vencidos.length ? `<section data-agenda-group><p class="section-kicker">Vencidos</p>${vencidos.map((item) => agendaCard(item)).join("")}</section>` : ""}
+          ${urgentes.length ? `<section data-agenda-group><p class="section-kicker">Esta semana</p>${urgentes.map((item) => agendaCard(item)).join("")}</section>` : ""}
+          <section data-agenda-group><p class="section-kicker">Próximos</p>
+          ${proximos.map((item) => agendaCard(item)).join("") || `<div class="empty">Sin planes próximos registrados.</div>`}</section>
         `));
       }
 
-      async function ejecutarPlanAgenda(id) {
-        const notas = window.prompt("Notas del trabajo realizado", "") || "";
-        const res = await apiFetch(`/resumen/planes/${id}/ejecutar/`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({notas}),
-        });
-        if (res.ok) {
-          state.resumen = null;
-          state.bandeja = [];
-          renderAgenda();
+      async function ejecutarPlanAgenda(id, nueva = false) {
+        const region = document.getElementById(`plan-execution-${id}`);
+        if (!region) return;
+        const draftKey = `pd_plan_execution_${state.perfil.id}_${id}`;
+        let draft = state.planExecutionDrafts.get(draftKey);
+        if (!draft && !nueva) {
+          try {
+            const saved = JSON.parse(sessionStorage.getItem(draftKey) || "null");
+            if (saved?.clave) { draft = {...saved, pending:false}; state.planExecutionDrafts.set(draftKey, draft); }
+          } catch (error) {}
         }
+        if (nueva || !draft) {
+          try {
+            const resumen = await loadResumen(true);
+            if (!resumen || !/^\d{4}-\d{2}-\d{2}$/.test(resumen.fecha)) throw new Error("fecha");
+            draft = {clave:crypto.randomUUID(), fecha:resumen.fecha, notas:"", adicional:false, motivo:"", intento:null, pending:false, guardado:false, resultado:null};
+            state.planExecutionDrafts.set(draftKey, draft);
+            if (nueva) { try { sessionStorage.removeItem(draftKey); } catch (error) {} }
+          } catch (error) {
+            region.innerHTML = `<p role="alert">Recupera la conexión para obtener la fecha del ERP e iniciar una ejecución nueva.</p>`;
+            return;
+          }
+        }
+        region.innerHTML = `<form data-async-action data-plan-execution-pwa="${id}">
+          <fieldset style="border:0;padding:0" ${draft.intento || draft.guardado ? "disabled" : ""}>
+            <label>Fecha de ejecución<input type="date" name="fecha_ejecucion" required value="${esc(draft.fecha)}"></label>
+            <label>Notas del trabajo<textarea name="notas" rows="3">${esc(draft.notas)}</textarea></label>
+            <label><input type="checkbox" name="intervencion_adicional" ${draft.adicional ? "checked" : ""}> Es una intervención adicional independiente</label>
+            <label>Motivo de la intervención adicional<textarea name="motivo_adicional" rows="2">${esc(draft.motivo)}</textarea></label>
+          </fieldset><div class="plan-open-orders"></div><p class="link-feedback" role="status"></p>
+          <button type="submit" class="primary-btn" ${draft.guardado || draft.pending ? "disabled" : ""}>${draft.guardado ? "Ejecución guardada" : draft.intento ? "Reintentar ejecución" : "Guardar ejecución"}</button>
+          ${draft.guardado ? `<p role="status">Ejecución guardada. Próxima: ${esc(formatFechaCorta(draft.resultado.proxima_ejecucion) || "sin fecha")}.</p><button type="button" class="secondary-btn" onclick="openItemDetail('orden:${draft.resultado.orden.id}', this)">Abrir orden ${esc(draft.resultado.orden.folio || draft.resultado.orden.id)} y sus evidencias</button><button type="button" class="secondary-btn" onclick="ejecutarPlanAgenda(${id}, true)">Otra ejecución</button>` : ""}
+        </form>`;
+        const form = region.querySelector('form');
+        const fields = form.querySelector('fieldset');
+        const feedback = form.querySelector('.link-feedback');
+        form.addEventListener('input', () => {
+          if (draft.intento) return;
+          draft.fecha = form.elements.fecha_ejecucion.value;
+          draft.notas = form.elements.notas.value;
+          draft.adicional = form.elements.intervencion_adicional.checked;
+          draft.motivo = form.elements.motivo_adicional.value;
+          form.elements.motivo_adicional.required = draft.adicional;
+        });
+        form.onsubmit = async event => {
+          event.preventDefault();
+          if (draft.pending || draft.guardado || (!draft.intento && !form.reportValidity())) return;
+          if (!draft.intento) draft.intento = {clave_captura:draft.clave, fecha_ejecucion:draft.fecha, notas:draft.notas, intervencion_adicional:draft.adicional, motivo_adicional:draft.motivo};
+          try { sessionStorage.setItem(draftKey, JSON.stringify(draft)); } catch (error) {}
+          draft.pending = true; fields.disabled = true;
+          const button = form.querySelector('[type="submit"]'); button.disabled = true;
+          const scroll = window.scrollY; feedback.textContent = 'Guardando ejecución…';
+          try {
+            const res = await apiFetch(`/resumen/planes/${id}/ejecutar/`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(draft.intento)});
+            const payload = await res.json();
+            if (!res.ok || !payload.ok) {
+              if (payload.error_code === "ordenes_plan_abiertas" && payload.ordenes_abiertas) {
+                form.querySelector('.plan-open-orders').innerHTML = payload.ordenes_abiertas.map(order => `<p><button type="button" onclick="openItemDetail('orden:${order.id}', this)">Abrir orden ${esc(order.folio)}</button></p>`).join('');
+                draft.intento = null; fields.disabled = false;
+                try { sessionStorage.setItem(draftKey, JSON.stringify(draft)); } catch (error) {}
+              } else if (res.status === 400) { draft.intento = null; fields.disabled = false; try { sessionStorage.setItem(draftKey, JSON.stringify(draft)); } catch (error) {} }
+              throw new Error(payload.error || payload.detail || 'No se pudo completar la ejecución.');
+            }
+            try { sessionStorage.removeItem(draftKey); } catch (error) {}
+            draft.guardado = true; draft.resultado = payload; button.textContent = "Ejecución guardada"; state.bandeja = []; state.ordenes = [];
+            const card = region.closest(".card");
+            if (card) {
+              const chip = card.querySelector(".status-chip");
+              if (chip) { chip.textContent = `Próxima: ${formatFechaCorta(payload.proxima_ejecucion) || "sin fecha"}`; chip.className = "status-chip"; }
+              card.classList.remove("vencido", "urgente", "programado");
+              const savedExecutions = document.getElementById('plan-execution-results');
+              if (savedExecutions) {
+                const previousGroup = card.closest('[data-agenda-group]');
+                savedExecutions.hidden = false;
+                savedExecutions.appendChild(card); // Mismo nodo: conserva formulario, handlers y confirmación.
+                if (previousGroup && !previousGroup.querySelector('.agenda-card')) previousGroup.hidden = true;
+              } else if (card.dataset.dashboardPlan === String(id)) {
+                const label = document.getElementById('plan-next-work-label');
+                if (label) label.textContent = 'Última ejecución registrada';
+              }
+            }
+            feedback.textContent = `Ejecución guardada. Próxima: ${formatFechaCorta(payload.proxima_ejecucion) || 'sin fecha'}.`;
+            const open = document.createElement('button'); open.type='button'; open.className='secondary-btn'; open.textContent=`Abrir orden ${payload.orden.folio || payload.orden.id} y sus evidencias`;
+            open.onclick = () => openItemDetail(`orden:${payload.orden.id}`, open); form.appendChild(open);
+            const another = document.createElement('button'); another.type='button'; another.className='secondary-btn'; another.textContent='Otra ejecución';
+            another.onclick = () => ejecutarPlanAgenda(id, true); form.appendChild(another);
+            // Actualizar contadores desde sus consultas actuales sin reemplazar el formulario guardado.
+            try {
+              const [, resumenActual] = await Promise.all([loadBandeja(true, true), loadResumen(true)]);
+              if (!resumenActual?.agenda_counts || !['vencidos','urgentes','programados'].every(key => Number.isInteger(resumenActual.agenda_counts[key]) && resumenActual.agenda_counts[key] >= 0)) throw new Error('resumen pendiente');
+              document.querySelectorAll('[data-agenda-count]').forEach(node => { node.textContent = resumenActual.agenda_counts[node.dataset.agendaCount]; });
+              document.querySelectorAll('[data-plan-count]').forEach(node => { node.textContent = state.counts[node.dataset.planCount] || 0; });
+              const agenda = state.resumen?.agenda?.find(item => item.tipo === 'plan' && item.id === id);
+              if (card && agenda) {
+                const chip = card.querySelector('.status-chip');
+                if (chip) { chip.textContent = agendaLabel(agenda); chip.className = `status-chip ${agenda.estado}`; }
+                card.classList.remove('vencido','urgente','programado'); card.classList.add(agenda.estado);
+              }
+            } catch (error) { feedback.textContent += ' La ejecución está guardada; recupera la conexión para actualizar los contadores.'; }
+
+          } catch (error) { feedback.textContent = `${error.message} Conservamos el intento para reintentarlo.`; }
+          finally { draft.pending = false; button.disabled = draft.guardado; window.scrollTo(0, scroll); }
+        };
       }
 
       function planCard(plan) {
@@ -629,7 +729,7 @@
             <p class="muted card-copy-muted">${esc(plan.sucursal || "Sin sucursal")} · ${esc(plan.tipo_display || plan.tipo)}</p>
             <p class="muted card-copy-muted">Cada ${plan.frecuencia_dias} días${plan.responsable ? " · " + esc(plan.responsable) : ""}</p>
             ${plan.instrucciones ? `<p class="card-copy">${esc(plan.instrucciones)}</p>` : ""}
-            <div class="card-actions">
+            <div id="plan-execution-${plan.id}"></div><div class="card-actions">
               <button onclick="renderPlanForm(${plan.id})">Editar</button>
               <button onclick="ejecutarPlanAgenda(${plan.id})">Realizado</button>
               <button onclick="eliminarPlanMovil(${plan.id})">Pausar</button>
@@ -1335,9 +1435,9 @@
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Reportes</h1>
           <div class="summary-grid">
-            <div class="summary-card"><strong>${m.abiertas}</strong><span>Abiertas</span></div>
+            <div class="summary-card"><strong data-plan-count="abiertos">${m.abiertas}</strong><span>Abiertas</span></div>
             <div class="summary-card"><strong>${m.criticas}</strong><span>Urgentes</span></div>
-            <div class="summary-card"><strong>${m.cerradas}</strong><span>Cerradas</span></div>
+            <div class="summary-card"><strong data-plan-count="cerrados">${m.cerradas}</strong><span>Cerradas</span></div>
             <div class="summary-card"><strong>${state.activos.length}</strong><span>Equipos</span></div>
           </div>
           <p class="section-kicker">Últimos movimientos</p>
@@ -2630,6 +2730,10 @@
         if (context.html) {
           await render(context.html);
           if (context.values) app.querySelectorAll("input,select,textarea").forEach((control, index) => { control.value = context.values[index]; });
+          // Rehidratar después de los valores genéricos: el intento propio conserva su snapshot.
+          for (const form of app.querySelectorAll('[data-plan-execution-pwa]')) {
+            await ejecutarPlanAgenda(Number(form.dataset.planExecutionPwa));
+          }
           if (context.linkUid) await loadDetailLinks(context.linkUid, state.requestGeneration.detail);
           const uid = context.uid;
           if (uid) document.querySelector(`[data-maintenance-uid="${CSS.escape(uid)}"]`)?.focus({preventScroll:true});

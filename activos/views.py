@@ -2252,18 +2252,10 @@ def planes(request):
 
         if action == "registrar_ejecucion":
             plan_id = _safe_int(request.POST.get("plan_id"))
-            plan = get_object_or_404(PlanMantenimiento, pk=plan_id)
+            from activos.services_planes import actualizar_agenda_plan
+            get_object_or_404(PlanMantenimiento, pk=plan_id)
             fecha = _parse_date(request.POST.get("fecha")) or timezone.localdate()
-            plan.ultima_ejecucion = fecha
-            plan.recompute_next_date()
-            plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
-            log_event(
-                request.user,
-                "UPDATE",
-                "activos.PlanMantenimiento",
-                plan.id,
-                {"ultima_ejecucion": str(fecha), "proxima_ejecucion": str(plan.proxima_ejecucion or "")},
-            )
+            plan = actualizar_agenda_plan(usuario=request.user, plan_id=plan_id, fecha=fecha)
             messages.success(request, f"Ejecución registrada para {plan.nombre}.")
             return redirect("activos:planes")
 
@@ -2309,80 +2301,14 @@ def planes(request):
         if action == "generar_ordenes_programadas":
             scope = (request.POST.get("scope") or "overdue").strip().lower()
             dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
-            today = timezone.localdate()
-            if scope == "week":
-                plan_qs = PlanMantenimiento.objects.filter(
-                    estatus=PlanMantenimiento.ESTATUS_ACTIVO,
-                    activo=True,
-                    proxima_ejecucion__isnull=False,
-                    proxima_ejecucion__gte=today,
-                    proxima_ejecucion__lte=today + timedelta(days=7),
-                )
-            else:
-                plan_qs = PlanMantenimiento.objects.filter(
-                    estatus=PlanMantenimiento.ESTATUS_ACTIVO,
-                    activo=True,
-                    proxima_ejecucion__isnull=False,
-                    proxima_ejecucion__lte=today,
-                )
-
-            created = 0
-            skipped = 0
-            plan_qs = plan_qs.select_related("activo_ref").order_by("proxima_ejecucion", "id")
-            for plan in plan_qs:
-                if not plan.activo_ref or not plan.activo_ref.activo:
-                    skipped += 1
-                    continue
-
-                exists = OrdenMantenimiento.objects.filter(
-                    plan_ref=plan,
-                    fecha_programada=plan.proxima_ejecucion,
-                ).exclude(estatus=OrdenMantenimiento.ESTATUS_CANCELADA).exists()
-                if exists:
-                    skipped += 1
-                    continue
-
-                if dry_run:
-                    created += 1
-                    continue
-
-                orden = OrdenMantenimiento.objects.create(
-                    activo_ref=plan.activo_ref,
-                    plan_ref=plan,
-                    tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
-                    prioridad=_prioridad_por_criticidad(plan.activo_ref.criticidad),
-                    estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
-                    fecha_programada=plan.proxima_ejecucion or today,
-                    responsable=plan.responsable or "",
-                    descripcion=f"Orden preventiva automática desde plan: {plan.nombre}",
-                    creado_por=request.user if request.user.is_authenticated else None,
-                )
-                BitacoraMantenimiento.objects.create(
-                    orden=orden,
-                    accion="AUTO_PLAN",
-                    comentario="Generada automáticamente desde plan activo",
-                    usuario=request.user if request.user.is_authenticated else None,
-                    costo_adicional=Decimal("0"),
-                )
-                created += 1
-                log_event(
-                    request.user,
-                    "CREATE",
-                    "activos.OrdenMantenimiento",
-                    orden.id,
-                    {
-                        "origen": "plan_auto",
-                        "plan_id": plan.id,
-                        "fecha_programada": str(plan.proxima_ejecucion or ""),
-                        "folio": orden.folio,
-                    },
-                )
-
+            from activos.services_planes import generar_ordenes_programadas
+            result = generar_ordenes_programadas(usuario=request.user, scope=scope, dry_run=dry_run)
             run_mode = "simulación" if dry_run else "aplicado"
-            messages.success(
-                request,
-                f"Generación de órdenes ({run_mode}): creadas {created}, omitidas {skipped}.",
-            )
+            message = f"Generación de órdenes ({run_mode}): creadas {result['created']}, omitidas {result['skipped']}."
+            if result['failed_plan'] is not None:
+                messages.error(request, message + f" Se detuvo en el plan #{result['failed_plan']}; las órdenes anteriores se conservaron.")
+            else:
+                messages.success(request, message)
             return redirect("activos:planes")
 
         messages.error(request, "Acción no reconocida.")

@@ -15,6 +15,7 @@ from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Prefetch, Q
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.html import format_html
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
@@ -1188,31 +1189,30 @@ def resumen_movil(request):
     )
 
 
-def _registrar_plan(plan, user, fecha, notas):
-    plan.ultima_ejecucion = fecha
-    plan.recompute_next_date()
-    plan.save(update_fields=["ultima_ejecucion", "proxima_ejecucion", "actualizado_en"])
-    orden = OrdenMantenimiento.objects.create(
-        activo_ref=plan.activo_ref,
-        plan_ref=plan,
-        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
-        prioridad=OrdenMantenimiento.PRIORIDAD_BAJA,
-        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
-        fecha_programada=fecha,
-        fecha_inicio=fecha,
-        fecha_cierre=fecha,
-        responsable=user.get_full_name() or user.username,
-        descripcion=notas or f"Ejecución de plan: {plan.nombre}",
-        origen=OrdenMantenimiento.ORIGEN_PLAN,
-        creado_por=user,
-    )
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        usuario=user,
-        accion="Ejecución registrada",
-        comentario=notas or f"Registrado desde bandeja de mantenimiento. Plan: {plan.nombre}",
-    )
-    return orden
+def _datos_ejecucion_plan(data):
+    from django.utils.dateparse import parse_date
+    if not isinstance(data, Mapping):
+        raise CapturaEquipoError("Envía los datos de la ejecución como objeto.", 400)
+    raw = str(data.get("fecha_ejecucion") or "").strip()
+    try:
+        fecha = parse_date(raw) if raw else None
+    except ValueError:
+        fecha = None
+    if raw and fecha is None:
+        raise CapturaEquipoError("Captura una fecha de ejecución válida.", 400)
+    return dict(clave=data.get("clave_captura"), fecha=fecha,
+        notas=str(data.get("notas") or "").strip(),
+        adicional=str(data.get("intervencion_adicional") or "").lower() in {"true", "1", "on", "yes"},
+        motivo_adicional=str(data.get("motivo_adicional") or "").strip())
+
+
+def _error_ejecucion_plan(exc):
+    payload = {"ok": False, "error": str(exc.detail),
+        "toast": {"type": "error", "message": str(exc.detail), "persistent": True}}
+    if hasattr(exc, "ordenes"):
+        payload["ordenes_abiertas"] = exc.ordenes
+        payload["error_code"] = "ordenes_plan_abiertas"
+    return payload
 
 
 @api_view(["POST"])
@@ -1224,18 +1224,20 @@ def ejecutar_plan_movil(request, pk):
     if branch_ids is not None:
         plans = plans.filter(activo_ref__sucursal_id__in=branch_ids)
     plan = get_object_or_404(plans, pk=pk)
-    from django.utils.dateparse import parse_date
-
-    fecha = parse_date((request.data.get("fecha_ejecucion") or "").strip()) or timezone.localdate()
-    notas = (request.data.get("notas") or "").strip()
-    orden = _registrar_plan(plan, request.user, fecha, notas)
-    return Response(
-        {
-            "ok": True,
-            "orden": OrdenMantenimientoListSerializer(orden).data,
-            "proxima_ejecucion": plan.proxima_ejecucion.isoformat() if plan.proxima_ejecucion else None,
-        }
-    )
+    from mantenimiento.services_planes import registrar_ejecucion_plan as ejecutar
+    try:
+        datos = _datos_ejecucion_plan(request.data)
+        orden, repetida = ejecutar(usuario=request.user, plan_id=plan.pk, movil=True, **datos)
+    except CapturaEquipoError as exc:
+        return Response(_error_ejecucion_plan(exc), status=exc.status_code)
+    plan.refresh_from_db()
+    payload = OrdenMantenimientoListSerializer(orden).data
+    current_actor = get_user_model().objects.filter(pk=request.user.pk, is_active=True).first()
+    if datos["clave"] is not None and (current_actor is None or not can_view_costs(current_actor)):
+        payload = {k: v for k, v in payload.items() if k not in {"costo_repuestos", "costo_mano_obra", "costo_otros", "costo_total"}}
+    return Response({"ok": True, "orden": payload,
+        "proxima_ejecucion": plan.proxima_ejecucion.isoformat() if plan.proxima_ejecucion else None},
+        status=200 if repetida or datos["clave"] is None else 201)
 
 
 @api_view(["POST"])
@@ -2035,6 +2037,8 @@ def dashboard(request):
         .order_by("proxima_ejecucion")[:80]
     )
     for plan in planes_proximos:
+        plan.clave_captura = (request.POST.get("clave_captura") if getattr(request, "plan_captura_id", None) == plan.pk else str(uuid4()))
+        plan.ordenes_abiertas = list(OrdenMantenimiento.objects.filter(plan_ref=plan, estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO]))
         plan.dias_para_vencer = (plan.proxima_ejecucion - today).days if plan.proxima_ejecucion else None
         plan.vencido = plan.dias_para_vencer is not None and plan.dias_para_vencer < 0
         plan.urgente = plan.dias_para_vencer is not None and 0 <= plan.dias_para_vencer <= 7
@@ -2090,6 +2094,12 @@ def dashboard(request):
             "areas_falla": ReporteFalla.AREAS,
             "prioridades_falla": ReporteFalla.PRIORIDAD,
             "planes_proximos": planes_proximos,
+            "plan_captura_error": getattr(request, "plan_captura_error", ""),
+            "plan_captura_id": getattr(request, "plan_captura_id", None),
+            "plan_captura_success": getattr(request, "plan_captura_success", None),
+            "plan_captura_orden": getattr(request, "plan_captura_orden", None),
+            "plan_ordenes_abiertas": getattr(request, "plan_ordenes_abiertas", []),
+            "plan_captura_datos": dict(request.POST.items()) if getattr(request, "plan_captura_error", "") else {},
             "servicios_flota": servicios_flota,
             "solicitudes_cancelacion": solicitudes_cancelacion,
             "puede_eliminar": _puede_eliminar(request.user),
@@ -2546,21 +2556,51 @@ def registrar_servicio_flota(request):
 @login_required
 def registrar_ejecucion_plan(request, pk):
     """Registra la ejecución de un plan de mantenimiento recurrente."""
-    _require_mantenimiento(request.user)
     if request.method != "POST":
+        _require_mantenimiento(request.user)
         return redirect("mantenimiento:dashboard")
-
-    plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
-    from django.contrib import messages as msg
-
-    fecha_raw = (request.POST.get("fecha_ejecucion") or "").strip()
-    notas = (request.POST.get("notas") or "").strip()
+    from mantenimiento.services_planes import registrar_ejecucion_plan as ejecutar
+    is_async = request.headers.get("x-requested-with") == "XMLHttpRequest" or "application/json" in request.headers.get("accept", "")
     try:
-        from django.utils.dateparse import parse_date
-        fecha = parse_date(fecha_raw) or timezone.localdate()
-    except Exception:
-        fecha = timezone.localdate()
-
-    _registrar_plan(plan, request.user, fecha, notas)
-    msg.success(request, f"Plan '{plan.nombre}' ejecutado. Próxima: {plan.proxima_ejecucion}")
-    return redirect("mantenimiento:dashboard")
+        _require_mantenimiento(request.user)
+        plan = get_object_or_404(PlanMantenimiento, pk=pk, activo=True)
+        datos = _datos_ejecucion_plan(request.POST)
+        if not datos["clave"]:
+            raise CapturaEquipoError("Falta la clave del intento. Recarga antes de iniciar una ejecución nueva.", 400)
+        orden, repetida = ejecutar(usuario=request.user, plan_id=plan.pk, **datos)
+    except (PermissionDenied, Http404) as exc:
+        if is_async:
+            code = 403 if isinstance(exc, PermissionDenied) else 404
+            message = "El plan ya no está disponible o no tienes permiso para ejecutarlo."
+            return JsonResponse({"ok": False, "error": message, "toast": {"type": "error", "message": message, "persistent": True}}, status=code)
+        raise
+    except CapturaEquipoError as exc:
+        if is_async:
+            return JsonResponse(_error_ejecucion_plan(exc), status=exc.status_code)
+        request.plan_captura_error = str(exc.detail)
+        request.plan_captura_id = plan.pk
+        request.plan_ordenes_abiertas = getattr(exc, "ordenes", [])
+        response = dashboard(request)
+        response.status_code = exc.status_code
+        return response
+    plan.refresh_from_db()
+    mensaje = f"Plan '{plan.nombre}' ejecutado. Próxima: {plan.proxima_ejecucion}"
+    if is_async:
+        days = (plan.proxima_ejecucion - timezone.localdate()).days if plan.proxima_ejecucion else None
+        badge_label = "Sin fecha" if days is None else "Vencido" if days < 0 else "Hoy" if days == 0 else f"{days}d"
+        badge_class = "is-danger" if days is not None and days < 0 else "is-gold" if days == 0 else "is-warning" if days is not None and days <= 7 else "is-success"
+        return JsonResponse({"ok": True, "orden_id": orden.pk,
+            "proxima_label": plan.proxima_ejecucion.strftime("%d/%m/%Y") if plan.proxima_ejecucion else "Sin fecha",
+            "ultima_label": plan.ultima_ejecucion.strftime("%d/%m/%Y") if plan.ultima_ejecucion else "Sin fecha",
+            "dias_para_vencer": days, "badge_label": badge_label, "badge_class": badge_class,
+            "toast": {"type": "success", "message": mensaje},
+            "target": f"#planResultado{plan.pk}", "html": str(format_html(
+                '<div id="planResultado{}" role="status"><p>{}</p>'
+                '<p><a href="{}?open=orden:{}#tab-seguimiento">Abrir orden {} y sus evidencias</a></p>'
+                '<button type="button" class="btn btn-secondary" onclick="otraEjecucionPlan({})">Otra ejecución</button></div>',
+                plan.pk, mensaje, reverse('mantenimiento:dashboard'), orden.pk, orden.folio, plan.pk))}, status=200 if repetida else 201)
+    from django.contrib import messages
+    messages.success(request, mensaje)
+    request.plan_captura_success = plan.pk
+    request.plan_captura_orden = orden
+    return dashboard(request)
