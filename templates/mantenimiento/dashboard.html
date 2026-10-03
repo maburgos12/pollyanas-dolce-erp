@@ -507,6 +507,7 @@
 </div>
 
 <!-- Modal servicio sin orden / pendiente puntual -->
+{{ captura_datos|json_script:"captura-servicio-datos" }}
 <div class="mant-drawer" id="modalOrdenServicio" role="dialog" aria-modal="true" aria-labelledby="modalOrdenServicioTitulo">
   <aside class="mant-drawer-panel">
     <div class="mant-drawer-head">
@@ -516,8 +517,9 @@
       </div>
       <button class="btn btn-secondary btn-sm" type="button" data-close-orden-servicio>Cerrar</button>
     </div>
-    <form class="mant-form" id="ordenServicioForm" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data" novalidate>
+    <form class="mant-form" id="ordenServicioForm" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true" method="post" action="{% url 'mantenimiento:crear-servicio' %}" enctype="multipart/form-data" novalidate>
       {% csrf_token %}
+      <input type="hidden" name="clave_captura" id="ordenServicioClave" value="{{ clave_captura }}">
       <input type="hidden" name="modo_servicio" id="ordenServicioModo" value="realizado">
       <div class="mant-form-grid">
         <label class="mant-field full">Aplica a
@@ -610,7 +612,8 @@
           Cerrar servicio al guardar
         </label>
       </div>
-      <div class="mant-form-error" id="ordenServicioError" role="alert" tabindex="-1" hidden></div>
+      <div id="ordenServicioResultado" role="status" aria-live="polite"></div>
+      <div class="mant-form-error" id="ordenServicioError" role="alert" tabindex="-1" {% if not captura_error %}hidden{% endif %}>{{ captura_error }}</div>
       <button class="btn btn-primary" type="submit" id="ordenServicioSubmit" style="background:#8B2252;border-color:#8B2252;">Guardar servicio</button>
     </form>
   </aside>
@@ -1360,7 +1363,9 @@ function requireElements(scope, elementMap) {
     document.getElementById("ordenServicioFactura").value = "";
     document.getElementById("ordenServicioNota").value = "";
     setSelectValue(document.getElementById("ordenServicioPrioridad"), "MEDIA");
-    filtrarPorSucursal();
+    [sucursal, activo, unidad, instalacion].filter(Boolean).forEach((select) => {
+      select.dispatchEvent(new Event("change", {bubbles: true}));
+    });
   }
 
   function filtrarOpciones(select, emptyText, predicate) {
@@ -1417,6 +1422,8 @@ function requireElements(scope, elementMap) {
   }
 
   function setAlcance(value) {
+    form.dataset.captureSnapshot = value === "activo" ? "true" : "false";
+    form.dataset.actionInlineFeedback = value === "activo" ? "true" : "false";
     const esUnidad = value === "unidad" || value === "flota";
     const esInstalacion = value === "instalacion";
     sucursalField.hidden = esUnidad;
@@ -1453,7 +1460,6 @@ function requireElements(scope, elementMap) {
   function setModo(modo) {
     const esPendiente = modo === "pendiente";
     modoInput.value = modo;
-    clearForm();
     setAlcance(alcance.value);
     titulo.textContent = esPendiente ? "Programar servicio puntual" : "Servicio sin orden previa";
     subtitulo.textContent = esPendiente ? "Pendiente no periódico" : "Servicio ya realizado";
@@ -1474,8 +1480,46 @@ function requireElements(scope, elementMap) {
     submit.textContent = esPendiente ? "Programar servicio" : "Guardar servicio";
   }
 
+  let servicioIniciado = false;
+  const grid = form.querySelector(".mant-form-grid");
+  form.addEventListener("erp:action-start", () => {
+    grid.inert = true;
+    form.dataset.captureCompleted = "false";
+    error.hidden = true;
+  });
+  form.addEventListener("erp:action-error", (event) => {
+    const known = [400, 403, 404].includes(event.detail.statusCode);
+    grid.inert = !known;
+    error.hidden = false;
+    const conflict = [409, 410].includes(event.detail.statusCode);
+    error.textContent = known || conflict ? event.detail.message : `${event.detail.message} Conservamos los datos y la factura del envío. Reintenta Guardar sin cambiar la captura.`;
+  });
+  form.addEventListener("erp:action-success", () => {
+    grid.inert = true;
+    form.dataset.captureCompleted = "true";
+  });
+  window.nuevaCapturaEquipo = function () {
+    if (form.dataset.captureCompleted !== "true") return;
+    form._captureSnapshot = null;
+    form.dataset.captureCompleted = "false";
+    document.getElementById("ordenServicioClave").value = crypto.randomUUID();
+    grid.inert = false;
+    submit.disabled = false;
+    document.getElementById("ordenServicioResultado").textContent = "";
+    clearForm();
+    setModo(modoInput.value);
+  };
+
   function open(modo, unidadId = "", alcanceValue = "activo") {
-    setModo(modo);
+    if (!servicioIniciado && !form._captureSnapshot) {
+      setModo(modo);
+      servicioIniciado = true;
+    }
+    if (!form._captureSnapshot && modoInput.value !== modo) setModo(modo);
+    if (form._captureSnapshot) {
+      modal.classList.add("is-open");
+      return;
+    }
     if (alcanceValue) {
       alcance.value = alcanceValue;
       setAlcance(alcanceValue);
@@ -1497,7 +1541,10 @@ function requireElements(scope, elementMap) {
     open(modo, unidadId, resolvedAlcance);
   };
 
-  alcance.addEventListener("change", () => setAlcance(alcance.value));
+  alcance.addEventListener("change", () => {
+    form.dataset.captureSnapshot = alcance.value === "activo" ? "true" : "false";
+    setAlcance(alcance.value);
+  });
   sucursal.addEventListener("change", filtrarPorSucursal);
   form.addEventListener("submit", (event) => {
     error.hidden = true;
@@ -1508,6 +1555,7 @@ function requireElements(scope, elementMap) {
     setAlcance(alcance.value);
     if (!form.checkValidity()) {
       event.preventDefault();
+      event.stopImmediatePropagation();
       const invalid = Array.from(form.elements).find(
         (field) => field.name && !field.disabled && !field.checkValidity()
       );
@@ -1530,9 +1578,25 @@ function requireElements(scope, elementMap) {
       return;
     }
 
-    submit.disabled = true;
-    submit.textContent = "Guardando…";
+    form.dataset.captureSnapshot = alcance.value === "activo" ? "true" : "false";
+  }, true);
+  {% if captura_error %}
+  const restored = JSON.parse(document.getElementById("captura-servicio-datos").textContent);
+  setModo(restored.modo_servicio || "realizado");
+  alcance.value = restored.alcance || "activo";
+  setAlcance(alcance.value);
+  cerrar.checked = false;
+  Object.entries(restored).forEach(([name, value]) => {
+    const control = form.elements.namedItem(name);
+    if (control && control.type !== "file") {
+      if (control.type === "checkbox") control.checked = ["1", "on", "true"].includes(value);
+      else control.value = value;
+    }
   });
+  filtrarPorSucursal();
+  servicioIniciado = true;
+  modal.classList.add("is-open");
+  {% endif %}
   document.addEventListener("click", (event) => {
     if (event.target.closest("#btnServicioRealizado")) open("realizado");
     if (event.target.closest("#btnServicioPendiente")) open("pendiente");

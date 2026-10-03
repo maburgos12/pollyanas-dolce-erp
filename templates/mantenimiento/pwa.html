@@ -69,12 +69,14 @@
         busquedaEquipo: "",
         sucursalFiltro: "",
         equipoDraft: emptyEquipoDraft(),
+        servicioDraft: null,
         puntoDraft: emptyPuntoDraft(),
         vehiculoDraft: emptyVehiculoDraft(),
       };
 
       function emptyEquipoDraft() {
         return {
+          clave: crypto.randomUUID(), intento: null, pending: false, guardado: false,
           step: 1,
           activo: null,
           activoLabel: "",
@@ -1042,12 +1044,14 @@
 
       async function renderServicioPuntual(modo = "realizado", error = "") {
         await Promise.all([ensureSucursales(), ensureActivos(), ensureVehiculoCatalogos(), ensureCatalogos(), ensureProveedores()]);
+        const draft = state.servicioDraft || (state.servicioDraft = { clave: crypto.randomUUID(), intento: null, pending: false, valores: {}, modo });
         const c = state.catalogos || {};
+        modo = draft.valores.modo_servicio || draft.modo;
         const today = new Date().toISOString().slice(0, 10);
-        render(shell(`
+        const rendered = await render(shell(`
           <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
           <h1 class="screen-title screen-title-spaced">${modo === "pendiente" ? "Programar servicio" : "Servicio sin orden"}</h1>
-          <section class="card report-card">
+          <section class="card report-card" id="servicio-captura">
             <input id="servicio-modo" name="modo_servicio" type="hidden" value="${esc(modo)}">
             <div class="field">
               <label for="servicio-alcance">Aplica a</label>
@@ -1102,14 +1106,33 @@
               <label for="servicio-nota">Nota de trabajo</label>
               <textarea id="servicio-nota" name="nota_trabajo" placeholder="Resultado, condiciones o seguimiento acordado"></textarea>
             </div>
-            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
-            <button class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
+            ${error ? `<p class="error-msg" role="alert">${esc(error)}</p>` : ""}
+            <p id="servicio-error" class="error-msg" role="alert" hidden></p>
+            <button id="servicio-guardar" class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
           </section>
         `));
+        if (!rendered) return;
+        Object.entries(draft.valores).forEach(([name, value]) => {
+          const control = document.querySelector(`#servicio-captura [name="${name}"]`);
+          if (control) control.value = value ?? "";
+        });
         actualizarAlcanceServicio(document.getElementById("servicio-alcance")?.value || "activo");
+        const section = document.getElementById("servicio-captura");
+        section.addEventListener("input", () => {
+          if (draft.intento) return;
+          section.querySelectorAll("[name]").forEach(control => draft.valores[control.name] = control.value);
+        });
+        if (draft.intento) bloquearServicioCaptura(true);
+      }
+
+      function bloquearServicioCaptura(bloquear) {
+        document.querySelectorAll("#servicio-captura input, #servicio-captura select, #servicio-captura textarea").forEach(control => control.disabled = bloquear);
+        if (!bloquear) actualizarAlcanceServicio(document.getElementById("servicio-alcance")?.value || "activo");
       }
 
       async function guardarServicioMovil() {
+        const draft = state.servicioDraft;
+        if (draft.pending) return;
         const alcance = document.getElementById("servicio-alcance")?.value || "activo";
         const esFlota = alcance === "unidad";
         const payload = {
@@ -1125,15 +1148,41 @@
           costo_total: document.getElementById("servicio-costo")?.value,
           nota_trabajo: document.getElementById("servicio-nota")?.value,
         };
-        const res = await apiFetch("/servicios-puntuales/", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) return renderServicioPuntual(payload.modo_servicio, "Revisa alcance, sucursal, equipo/unidad y descripción.");
-        state.bandeja = [];
-        state.resumen = null;
-        showScreen("pendientes");
+        const equipo = alcance === "activo";
+        if (equipo) payload.clave_captura = draft.clave;
+        draft.valores = draft.intento || payload;
+        if (equipo && !draft.intento) draft.intento = payload;
+        draft.pending = true;
+        const button = document.getElementById("servicio-guardar");
+        button.disabled = true;
+        button.textContent = "Guardando…";
+        if (equipo) bloquearServicioCaptura(true);
+        try {
+          const res = await apiFetch("/servicios-puntuales/", {
+            method: "POST", headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(draft.intento || payload),
+          });
+          const data = await res.json();
+          if (!res.ok) {
+            if ([400, 403, 404].includes(res.status)) {
+              draft.intento = null;
+              bloquearServicioCaptura(false);
+            }
+            throw Object.assign(new Error(data.error || data.detail || "Revisa los datos del servicio."), {statusCode: res.status});
+          }
+          state.servicioDraft = null;
+          state.bandeja = [];
+          state.resumen = null;
+          showScreen("pendientes");
+        } catch (error) {
+          const region = document.getElementById("servicio-error");
+          region.hidden = false;
+          region.textContent = `${error.statusCode ? error.message : "No recibimos confirmación."} ${[409, 410].includes(error.statusCode) ? "Conservamos la captura para revisar el conflicto." : draft.intento ? "Reintenta Guardar sin cambiar los datos: conservamos el envío original." : "Revisa los datos y vuelve a guardar."}`;
+        } finally {
+          draft.pending = false;
+          button.disabled = false;
+          button.textContent = "Guardar servicio";
+        }
       }
 
       function setServicioFieldState(fieldId, visible, required = false) {
@@ -1296,6 +1345,10 @@
       }
 
       function startEquipo() {
+        if (state.equipoDraft.intento && !state.equipoDraft.guardado) {
+          showScreen("equipo");
+          return;
+        }
         state.equipoDraft = emptyEquipoDraft();
         showScreen("equipo");
       }
@@ -1406,7 +1459,7 @@
               <label class="file-trigger ${d.foto ? "loaded" : ""}" for="foto-eq">${d.foto ? "Foto cargada" : "Tomar foto"}</label>
               ${d.fotoPreview ? `<img class="thumb" src="${d.fotoPreview}" alt="Vista previa">` : ""}
             </div>
-            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            ${error ? `<p class="error-msg" role="alert">${esc(error)}</p>` : ""}
             <div class="actions">
               <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
               <button id="btn-equipo-revisar" class="primary-btn" onclick="nextEquipoStep()" ${puedeRevisarEquipo() ? "" : "disabled"}>Revisar</button>
@@ -1424,10 +1477,10 @@
               <div class="kv"><b>Descripción</b><span>${esc(d.descripcion)}</span></div>
               <div class="kv"><b>Foto</b><span>${d.foto ? "Adjunta" : "Sin foto"}</span></div>
             </section>
-            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
+            ${error ? `<p class="error-msg" role="alert">${esc(error)}</p>` : ""}
             <div class="actions">
-              <button class="secondary-btn" onclick="prevEquipoStep()">Atrás</button>
-              <button class="primary-btn" onclick="enviarEquipo()">Guardar</button>
+              <button class="secondary-btn" onclick="prevEquipoStep()" ${d.intento ? "disabled" : ""}>Atrás</button>
+              <button id="equipo-guardar" class="primary-btn" onclick="enviarEquipo()" ${d.pending ? "disabled" : ""}>${d.pending ? "Guardando…" : "Guardar"}</button>
             </div>
           `;
         }
@@ -1436,6 +1489,7 @@
       }
 
       async function startPuntoMantenible() {
+        if (state.equipoDraft.intento && !state.equipoDraft.guardado) { showScreen("equipo"); return; }
         await Promise.all([ensureActivos(), ensureSucursales()]);
         state.puntoDraft = emptyPuntoDraft();
         if (state.sucursalFiltro) state.puntoDraft.sucursal = state.sucursalFiltro;
@@ -1515,6 +1569,7 @@
       }
 
       function seleccionarActivo(id) {
+        if (state.equipoDraft.intento) return;
         const activo = state.activos.find((item) => item.id === id);
         if (!activo) return;
         state.equipoDraft.activo = activo.id;
@@ -1523,6 +1578,7 @@
       }
 
       function iniciarEquipoDesdeActivo(id) {
+        if (state.equipoDraft.intento && !state.equipoDraft.guardado) { showScreen("equipo"); return; }
         const activo = state.activos.find((item) => item.id === id);
         if (!activo) return;
         state.equipoDraft = emptyEquipoDraft();
@@ -1882,25 +1938,41 @@
       }
 
       function prevEquipoStep() {
+        if (state.equipoDraft.intento) return;
         state.equipoDraft.step = Math.max(1, state.equipoDraft.step - 1);
         renderEquipoDraft();
       }
 
       async function enviarEquipo() {
         const d = state.equipoDraft;
-        const fd = new FormData();
-        fd.append("activo_ref", d.activo);
-        fd.append("tipo", d.tipo);
-        fd.append("descripcion", d.descripcion.trim());
-        if (d.proveedor) fd.append("proveedor_servicio", d.proveedor.trim());
-        if (d.costoReal) fd.append("costo_real", d.costoReal);
-        if (d.foto) fd.append("foto", d.foto);
-        const res = await apiFetch("/ordenes/", {method: "POST", body: fd});
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          return renderEquipoDraft(Object.values(err).flat().join(" ") || "Error al guardar.");
+        if (d.pending || d.guardado) return;
+        if (!d.intento) {
+          const fd = new FormData();
+          fd.append("clave_captura", d.clave);
+          fd.append("activo_ref", d.activo);
+          fd.append("tipo", d.tipo);
+          fd.append("descripcion", d.descripcion.trim());
+          if (d.proveedor) fd.append("proveedor_servicio", d.proveedor.trim());
+          if (d.costoReal) fd.append("costo_real", d.costoReal);
+          if (d.foto) fd.append("foto", d.foto);
+          d.intento = fd;
         }
-        const data = await res.json();
+        d.pending = true;
+        renderEquipoDraft();
+        let data;
+        try {
+          const res = await apiFetch("/ordenes/", {method: "POST", body: d.intento});
+          data = await res.json();
+          if (!res.ok) {
+            if ([400, 403, 404].includes(res.status)) d.intento = null;
+            throw Object.assign(new Error(Object.values(data).flat().join(" ") || "Error al guardar."), {statusCode: res.status});
+          }
+          d.guardado = true;
+        } catch (error) {
+          d.pending = false;
+          return renderEquipoDraft(`${error.statusCode ? error.message : "No recibimos confirmación."} ${[409, 410].includes(error.statusCode) ? "Conservamos la captura para revisar el conflicto." : d.intento ? "Reintenta Guardar: conservamos el envío original con su foto." : "Revisa los datos y vuelve a guardar."}`);
+        }
+        d.pending = false;
         render(shell(`
           <section class="confirm">
             <div class="confirm-mark">OK</div>
@@ -2526,7 +2598,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-vinculos-atencion-v1", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-capturas-equipos-v1", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

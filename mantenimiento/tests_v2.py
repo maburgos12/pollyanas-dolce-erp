@@ -155,7 +155,9 @@ class MaintenanceHtmlWriteScopeTests(TestCase):
                 "activo_id": self.other_asset.pk, "descripcion": "No crear",
             },
         )
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.context["captura_datos"]["descripcion"], "No crear")
+        self.assertEqual(response.context["captura_error"], "El activo no pertenece a la sucursal seleccionada.")
         self.assertEqual(OrdenMantenimiento.objects.count(), initial_orders)
 
         response = self.client.post(

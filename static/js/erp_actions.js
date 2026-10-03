@@ -118,8 +118,13 @@
     }
 
     try {
-      var formData = new FormData(form);
+      var captures = form.dataset.captureSnapshot === "true";
+      var formData = captures && form._captureSnapshot ? form._captureSnapshot : new FormData(form);
       if (submitter && submitter.name) formData.set(submitter.name, submitter.value);
+      if (captures) {
+        form._captureSnapshot = formData;
+        form.dispatchEvent(new CustomEvent("erp:action-start", { detail: { formData: formData } }));
+      }
       var response = await fetch(form.getAttribute("action") || window.location.href, {
         method: (form.method || "POST").toUpperCase(),
         body: formData,
@@ -130,15 +135,18 @@
       var contentType = response.headers && response.headers.get("content-type") || "";
       if (contentType.indexOf("application/json") === -1) {
         var responseUrl = response.redirected ? safeNavigationUrl(response.url) : null;
-        if (responseUrl) {
+        if (responseUrl && !captures) {
           navigating = true;
           window.location.assign(responseUrl.href);
           return;
         }
-        throw { toast: { type: "error", message: "El servidor devolvió una respuesta inesperada. Recarga la página e inténtalo de nuevo.", persistent: true } };
+        throw { statusCode: captures ? 0 : response.status, toast: { type: "error", message: captures ? "No recibimos confirmación. Conserva este formulario y reintenta; si tu sesión expiró, inicia sesión en otra pestaña." : "El servidor devolvió una respuesta inesperada. Recarga la página e inténtalo de nuevo.", persistent: true } };
       }
       var payload = await response.json();
-      if (!response.ok || !payload.ok) throw payload;
+      if (!response.ok || !payload.ok) {
+        payload.statusCode = response.status;
+        throw payload;
+      }
 
       var target = payload.target ? document.querySelector(payload.target) : null;
       if (target && payload.html) {
@@ -173,7 +181,8 @@
         }
         return;
       }
-      showToast(payload.toast || { type: "success", message: "Acción completada." });
+      if (form.dataset.actionInlineFeedback !== "true") showToast(payload.toast || { type: "success", message: "Acción completada." });
+      if (captures) form.dispatchEvent(new CustomEvent("erp:action-success", { detail: payload }));
     } catch (error) {
       if (error && error.name === "AbortError") {
         error = { toast: { type: "warning", message: "No se recibió respuesta a tiempo. Recarga para consultar si el trabajo inició; puedes reintentar sin duplicarlo.", persistent: true } };
@@ -183,13 +192,18 @@
         message: "No se pudo completar la acción. Revisa tu conexión e inténtalo de nuevo.",
         persistent: true
       };
-      showToast(toast);
+      if (form.dataset.actionInlineFeedback !== "true") showToast(toast);
+      if (form.dataset.captureSnapshot === "true") {
+        var statusCode = error && error.statusCode || 0;
+        if ([400, 403, 404].indexOf(statusCode) !== -1) form._captureSnapshot = null;
+        form.dispatchEvent(new CustomEvent("erp:action-error", { detail: { statusCode: statusCode, message: toast.message } }));
+      }
     } finally {
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (!navigating) {
         form.dataset.actionPending = "false";
         if (submitter && document.contains(submitter)) {
-          submitter.disabled = false;
+          submitter.disabled = form.dataset.captureCompleted === "true";
           submitter.textContent = originalLabel;
         }
       }

@@ -11,6 +11,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
+from mantenimiento.services_capturas_equipos import capturar_equipo, validar_equipo
 from activos.services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, TipoServicioUnidad, Unidad
 
@@ -113,6 +114,7 @@ class ActivoQuickCreateSerializer(serializers.ModelSerializer):
 
 
 class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
+    clave_captura = serializers.UUIDField(required=False, write_only=True)
     costo_real = serializers.DecimalField(max_digits=18, decimal_places=2, required=False, write_only=True)
     proveedor_servicio = serializers.CharField(required=False, allow_blank=True, write_only=True)
     foto = serializers.ImageField(required=False, allow_null=True, write_only=True)
@@ -123,6 +125,7 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
         model = OrdenMantenimiento
         fields = [
             "id",
+            "clave_captura",
             "activo_ref",
             "tipo",
             "prioridad",
@@ -149,34 +152,48 @@ class OrdenMantenimientoCreateSerializer(serializers.ModelSerializer):
             "fecha_programada": {"required": False},
         }
 
+    def validate(self, attrs):
+        validar_equipo(self.context["request"].user, attrs["activo_ref"])
+        return attrs
+
     def create(self, validated_data):
         request = self.context["request"]
-        costo_real = validated_data.pop("costo_real", None)
-        proveedor = validated_data.pop("proveedor_servicio", "")
-        foto = validated_data.pop("foto", None)
-        if costo_real is not None and not validated_data.get("costo_otros"):
-            validated_data["costo_otros"] = costo_real
-        if proveedor and not validated_data.get("responsable"):
-            validated_data["responsable"] = proveedor
-        validated_data["creado_por"] = request.user
-        validated_data["estatus"] = OrdenMantenimiento.ESTATUS_EN_PROCESO
-        orden = super().create(validated_data)
-        comentario = "Orden creada desde PWA de mantenimiento."
-        extras = []
-        if proveedor:
-            extras.append(f"Proveedor: {proveedor}")
-        if costo_real is not None:
-            extras.append(f"Costo capturado: ${costo_real}")
-        if foto:
-            extras.append(f"Foto adjunta: {foto.name}")
-        if extras:
-            comentario = f"{comentario} " + " | ".join(extras)
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            usuario=request.user,
-            accion="Orden creada desde PWA",
-            comentario=comentario,
-            costo_adicional=costo_real or Decimal("0"),
+        clave = validated_data.pop("clave_captura", None)
+        contenido = dict(validated_data)
+
+        def crear(archivos_nuevos):
+            costo_real = validated_data.pop("costo_real", None)
+            proveedor = validated_data.pop("proveedor_servicio", "")
+            foto = validated_data.pop("foto", None)
+            if costo_real is not None and not validated_data.get("costo_otros"):
+                validated_data["costo_otros"] = costo_real
+            if proveedor and not validated_data.get("responsable"):
+                validated_data["responsable"] = proveedor
+            validated_data["creado_por"] = request.user
+            validated_data["estatus"] = OrdenMantenimiento.ESTATUS_EN_PROCESO
+            orden = OrdenMantenimiento.objects.create(**validated_data)
+            comentario = "Orden creada desde PWA de mantenimiento."
+            extras = []
+            if proveedor:
+                extras.append(f"Proveedor: {proveedor}")
+            if costo_real is not None:
+                extras.append(f"Costo capturado: ${costo_real}")
+            if foto:
+                extras.append(f"Foto adjunta: {foto.name}")
+            if extras:
+                comentario = f"{comentario} " + " | ".join(extras)
+            BitacoraMantenimiento.objects.create(
+                orden=orden,
+                usuario=request.user,
+                accion="Orden creada desde PWA",
+                comentario=comentario,
+                costo_adicional=costo_real or Decimal("0"),
+            )
+            return orden
+
+        orden, self.captura_repetida = capturar_equipo(
+            usuario=request.user, activo=validated_data["activo_ref"], operacion="orden_pwa",
+            clave=clave, contenido=contenido, crear=crear,
         )
         return orden
 

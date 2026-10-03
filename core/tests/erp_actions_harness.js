@@ -44,7 +44,8 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   };
   const context = {
     document,
-    FormData: function () { this.set = function () {}; },
+    FormData: function (form) { this.value = form.field.value; this.set = function () {}; },
+    CustomEvent: function (type, options) { this.type = type; this.detail = options.detail; },
     URL, AbortController,
     fetch: async (url, options) => {
       fetchCount += 1;
@@ -163,5 +164,65 @@ async function scenario(payload, fetchImpl, sharedStorage, hasToastRegion = true
   assert.strictEqual(pending.otherButton.disabled, false);
   release({ ok: true, redirected: false, headers: { get: () => "application/json" }, json: async () => ({ ok: true, toast: { message: "ok" } }) });
   await first;
+  const bodies = [];
+  let attempt = 0;
+  const capture = await scenario(null, async (options) => {
+    bodies.push(options.body);
+    attempt += 1;
+    if (attempt === 1) throw new Error("response lost");
+    return { status: 200, ok: true, headers: { get: () => "application/json" }, json: async () => ({ok: true}) };
+  });
+  capture.form.dataset.captureSnapshot = "true";
+  const captureEvents = [];
+  capture.form.dispatchEvent = (event) => captureEvents.push(event);
+  await capture.listener(capture.event);
+  capture.field.value = "changed after uncertain request";
+  await capture.listener(capture.event);
+  assert.strictEqual(bodies[0], bodies[1]);
+  assert.strictEqual(bodies[1].value, "dato sin perder");
+  assert.deepStrictEqual(captureEvents.map(e => e.type), ["erp:action-start", "erp:action-error", "erp:action-start", "erp:action-success"]);
+  const invalid = await scenario(null, async () => ({ status: 400, ok: false, headers: { get: () => "application/json" }, json: async () => ({ok: false}) }));
+  invalid.form.dataset.captureSnapshot = "true";
+  invalid.form.dispatchEvent = () => {};
+  await invalid.listener(invalid.event);
+  assert.strictEqual(invalid.form._captureSnapshot, null);
+  const conflict = await scenario(null, async () => ({ status: 409, ok: false, headers: { get: () => "application/json" }, json: async () => ({ok: false}) }));
+  conflict.form.dataset.captureSnapshot = "true";
+  conflict.form.dispatchEvent = () => {};
+  await conflict.listener(conflict.event);
+  assert.ok(conflict.form._captureSnapshot);
+  const captureLogin = await scenario(null, async () => ({ status: 200, ok: true, redirected: true, url: "https://erp.local/login/", headers: { get: () => "text/html" } }));
+  captureLogin.form.dataset.captureSnapshot = "true";
+  captureLogin.form.dispatchEvent = () => {};
+  await captureLogin.listener(captureLogin.event);
+  assert.deepStrictEqual(captureLogin.events, ["toast"]);
+  assert.ok(captureLogin.form._captureSnapshot);
+  for (const statusCode of [400, 403, 404]) {
+    const unknown = await scenario(null, async () => ({ status: statusCode, ok: false, redirected: false, headers: { get: () => "text/html" } }));
+    unknown.form.dataset.captureSnapshot = "true";
+    const unknownEvents = [];
+    unknown.form.dispatchEvent = (event) => unknownEvents.push(event);
+    await unknown.listener(unknown.event);
+    assert.ok(unknown.form._captureSnapshot, `HTML ${statusCode} debe conservar el envío original`);
+    assert.strictEqual(unknownEvents[1].detail.statusCode, 0);
+  }
+  const inlineError = await scenario(null, async () => { throw new Error("response lost"); });
+  inlineError.form.dataset.captureSnapshot = "true";
+  inlineError.form.dataset.actionInlineFeedback = "true";
+  const inlineErrorEvents = [];
+  inlineError.form.dispatchEvent = (event) => inlineErrorEvents.push(event);
+  await inlineError.listener(inlineError.event);
+  assert.deepStrictEqual(inlineError.events, [], "El feedback inline no debe duplicarse con un toast que tape Guardar");
+  assert.strictEqual(inlineErrorEvents[1].type, "erp:action-error");
+  assert.ok(inlineErrorEvents[1].detail.message);
+  assert.ok(inlineError.form._captureSnapshot);
+  const inlineSuccess = await scenario({ok: true, toast: {message: "Guardado"}});
+  inlineSuccess.form.dataset.captureSnapshot = "true";
+  inlineSuccess.form.dataset.actionInlineFeedback = "true";
+  const inlineSuccessEvents = [];
+  inlineSuccess.form.dispatchEvent = (event) => inlineSuccessEvents.push(event);
+  await inlineSuccess.listener(inlineSuccess.event);
+  assert.deepStrictEqual(inlineSuccess.events, []);
+  assert.strictEqual(inlineSuccessEvents[1].type, "erp:action-success");
   console.log("erp_actions harness: ok");
 })().catch((error) => { console.error(error); process.exit(1); });
