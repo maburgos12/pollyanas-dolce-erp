@@ -11,6 +11,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from crm.models import PedidoCliente, PickupReservation
 from integraciones.models import PublicApiAccessLog, PublicApiClient
@@ -236,6 +237,71 @@ class SalesReadBoundaryTests(TestCase):
         self.public.capabilities.append(PublicApiClient.CAPABILITY_OMNICHANNEL)
         self.public.save(update_fields=["capabilities"])
         self.assert_denied(self.api.post("/api/public/v1/pickup-reservations/", {}, format="json", HTTP_X_API_KEY=self.key))
+
+    def jwt_header(self, user):
+        return {"HTTP_AUTHORIZATION": f"Bearer {RefreshToken.for_user(user).access_token}"}
+
+    def test_sales_jwt_blocks_before_downstream_and_real_logistics_views(self):
+        auth = self.jwt_header(self.user)
+        for path in ("/api/logistica/mi-perfil/", "/api/logistica/unidades/", *self.forbidden_paths):
+            with self.subTest(path=path, layer="middleware"):
+                self.assert_denied(self.invoke(path, **auth))
+            with self.subTest(path=path, layer="real-view"):
+                self.assert_denied(self.api.get(path, **auth))
+        self.assertEqual(self.downstream_calls, 0)
+
+    def test_privileged_sales_jwt_is_denied_even_on_allowed_read(self):
+        auth = self.jwt_header(self.user)
+        for field in ("is_staff", "is_superuser"):
+            setattr(self.user, field, True)
+            self.user.save(update_fields=[field])
+            self.assert_denied(self.invoke(self.token_paths[0], **auth))
+            self.assert_denied(self.api.get("/api/logistica/unidades/", **auth))
+            setattr(self.user, field, False)
+            self.user.save(update_fields=[field])
+        self.assertEqual(self.downstream_calls, 0)
+
+    def test_jwt_intersects_key_and_cannot_override_restricted_session(self):
+        for path in (*self.token_paths, self.pickup_path, "/api/logistica/unidades/"):
+            self.assert_denied(self.invoke(path, HTTP_X_API_KEY=self.key, **self.jwt_header(self.user)))
+        operator_auth = self.jwt_header(self.operator)
+        self.assert_denied(self.invoke(self.token_paths[0], HTTP_X_API_KEY=self.key, **operator_auth))
+        self.assert_denied(self.invoke("/api/logistica/unidades/", user=self.user, **operator_auth))
+        self.assert_denied(self.invoke("/api/logistica/unidades/", user=self.operator, **self.jwt_header(self.user)))
+        self.assertEqual(self.invoke(self.pickup_path, HTTP_X_API_KEY=self.key, **operator_auth).status_code, 200)
+
+    def test_invalid_jwt_neither_authenticates_nor_breaks_normal_rejection(self):
+        expired = RefreshToken.for_user(self.user).access_token
+        from datetime import timedelta
+        expired.set_exp(lifetime=timedelta(seconds=-1))
+        wrong_user = RefreshToken.for_user(self.user).access_token
+        wrong_user["user_id"] = 99999999
+        refresh = RefreshToken.for_user(self.user)
+        access = str(refresh.access_token)
+        invalid_signature = access.rsplit(".", 1)[0] + "." + "A" * 43
+        for raw in ("malformed", "", "invalid.extra.parts", str(expired), str(wrong_user), str(refresh), invalid_signature):
+            with self.subTest(kind="invalid-jwt"):
+                auth = {"HTTP_AUTHORIZATION": f"Bearer {raw}"}
+                self.assertEqual(self.invoke("/api/logistica/unidades/", **auth).status_code, 200)
+                self.assertIn(self.api.get("/api/logistica/unidades/", **auth).status_code, (401, 403))
+                self.assert_denied(self.invoke("/api/logistica/unidades/", user=self.user, **auth))
+
+    def test_jwt_restriction_does_not_grant_authentication_to_allowed_routes(self):
+        auth = self.jwt_header(self.user)
+        for path in self.token_paths:
+            self.assertEqual(self.invoke(path, **auth).status_code, 200)
+            self.assertEqual(self.api.get(path, **auth).status_code, 401)
+
+    def test_oversized_bearer_is_denied_without_orm_or_downstream(self):
+        with CaptureQueriesContext(connection) as queries:
+            self.assert_denied(self.invoke("/api/logistica/unidades/", HTTP_AUTHORIZATION="Bearer " + "x" * 4090))
+        self.assertEqual(len(queries), 0)
+        self.assertEqual(self.downstream_calls, 0)
+
+    def test_operational_jwt_keeps_real_logistics_access(self):
+        auth = self.jwt_header(self.operator)
+        self.assertEqual(self.invoke("/api/logistica/unidades/", **auth).status_code, 200)
+        self.assertEqual(self.api.get("/api/logistica/unidades/", **auth).status_code, 200)
 
 
 class SalesReadPolicyTests(SimpleTestCase):

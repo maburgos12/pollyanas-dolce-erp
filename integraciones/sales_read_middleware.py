@@ -2,6 +2,8 @@
 
 from django.http import JsonResponse
 from rest_framework.authtoken.models import Token
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.authentication import JWTAuthentication
 
 from integraciones.models import PublicApiClient
 from integraciones.sales_read_policy import SALES_GROUP, allows_sales_read
@@ -36,6 +38,16 @@ class SalesReadBoundaryMiddleware:
             token = Token.objects.select_related("user").filter(key=parts[1].decode("ascii")).first()
             if token is not None:
                 principals.append(token.user)
+
+        # Logistics also accepts JWT. Reuse its verifier to identify the same
+        # principal, without granting authentication to other endpoints.
+        if authorization:
+            try:
+                jwt_identity = JWTAuthentication().authenticate(request)
+            except (AuthenticationFailed, UnicodeEncodeError):
+                jwt_identity = None
+            if jwt_identity is not None:
+                principals.append(jwt_identity[0])
 
         kinds = set()
         for principal in principals:
