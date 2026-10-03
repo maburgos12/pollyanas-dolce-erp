@@ -2,6 +2,7 @@
 
 from activos.models import OrdenMantenimiento
 from core.access import (
+    _group_names,
     can_manage_module,
     can_manage_submodule,
     can_view_module,
@@ -18,7 +19,7 @@ MAINTENANCE_GROUPS = {"dg", "mantenimiento"}
 def _maintenance_group_names(user):
     cached = getattr(user, "_maintenance_group_names_cache", None)
     if cached is None:
-        cached = frozenset(name.lower() for name in user.groups.values_list("name", flat=True))
+        cached = frozenset(name.lower() for name in _group_names(user))
         setattr(user, "_maintenance_group_names_cache", cached)
     return cached
 
