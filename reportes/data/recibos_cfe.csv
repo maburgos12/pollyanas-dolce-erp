@@ -1,7 +1,8 @@
 # Recibos de CFE con su medidor. El CFDI no dice a qué servicio pertenece —no trae
 # el número de servicio, ni el medidor, ni el domicilio— así que la liga se hace por
 # importe contra el recibo físico. Cada renglón es un recibo que alguien tuvo en la
-# mano. Agregar aquí los nuevos conforme lleguen.
+# mano, o un importe que el historial por sucursal de Dirección General ya tenía
+# atribuido a ese medidor. Agregar aquí los nuevos conforme lleguen.
 #
 # cobertura_inicio/fin son opcionales: cuando se conocen, el importe se prorratea
 # entre esos meses; cuando no, el gasto queda en el mes en que se emitió la factura,
@@ -15,13 +16,27 @@ no_servicio,centro_costo,importe,cobertura_inicio,cobertura_fin,evidencia
 543230202528,COMPARTIDO_MC,36209.81,2026-06,2026-06,GDMTO 45 kW · facturación mensual
 543230202528,COMPARTIDO_MC,36014.32,2026-07,2026-07,GDMTO 45 kW · facturación mensual
 543230202528,COMPARTIDO_MC,39205.12,2026-08,2026-08,GDMTO 45 kW · recibo cubre 10-jul a 11-ago
-543191000998,COMPARTIDO_CRUCERO,16883.88,,,Medidor Niños Héroes · local anterior, baja jun-2026
+543191000998,COMPARTIDO_CRUCERO,16883.88,,,"Medidor Niños Héroes · local anterior, baja jun-2026"
+543191000998,COMPARTIDO_CRUCERO,10372.73,,,Medidor Niños Héroes · captura de feb del centro CRUCERO
+543191000998,COMPARTIDO_CRUCERO,10377.77,,,Medidor Niños Héroes · captura de abr del centro CRUCERO
 543230102442,LAS_GLORIAS,14374.16,,,Recibo del medidor CXN448
+543230102442,LAS_GLORIAS,9671.47,,,Medidor CXN448 · historial DG de ene
+543230102442,LAS_GLORIAS,8670.01,,,Medidor CXN448 · historial DG de mar
 543250103917,EL_TUNEL,12130.38,,,Recibo del medidor WEU204
+543250103917,EL_TUNEL,7005.84,,,Medidor WEU204 · real legado ene-feb
+543250103917,EL_TUNEL,9041.42,,,Medidor WEU204 · real legado de may
 543230100661,LEYVA,18027.08,,,Recibo del medidor DDK214
+543230100661,LEYVA,8428.29,,,Medidor DDK214 · real legado de feb
+543230100661,LEYVA,12023.41,,,Medidor DDK214 · real legado de abr
 543230302212,PLAZA_NIO,10890.09,,,Recibo del medidor CPT568
+543230302212,PLAZA_NIO,4818.37,,,Medidor CPT568 · real legado de feb
+543230302212,PLAZA_NIO,6183.98,,,Medidor CPT568 · real legado de abr
 543230100687,PAYAN,10327.69,,,Recibo del medidor YF281N
+543230100687,PAYAN,7567.65,,,Medidor YF281N · real legado de feb
+543230100687,PAYAN,7286.57,,,Medidor YF281N · real legado de abr
 543230100679,COLOSIO,15430.85,,,Recibo del medidor MH951R
+543230100679,COLOSIO,10797.62,,,Medidor MH951R · real legado de feb
+543230100679,COLOSIO,11339.80,,,Medidor MH951R · real legado de abr
 545230101121,GUAMUCHIL,20152.20,,,Recibo del medidor DDL594 · CP 81400
 545230101121,GUAMUCHIL,13805.11,,,CP 81400 exclusivo de Guamúchil
 545230101121,GUAMUCHIL,212.79,,,CP 81400 exclusivo de Guamúchil
