@@ -307,17 +307,17 @@ def task_consolidar_presupuesto_real(self, periodo: str | None = None):
 
 @shared_task(name="reportes.conciliar_combustible_mensual", bind=True, max_retries=1, default_retry_delay=600)
 def task_conciliar_combustible_mensual(self):
-    """Día 3 de cada mes: concilia el combustible del mes anterior
-    (facturas SAT vs bitácora) y envía el reporte por correo al DG."""
+    """Enviar cruces documentales y pendientes del mes anterior al DG."""
     from django.conf import settings
     from django.core.mail import send_mail
+    from django.utils import timezone
 
     from reportes.services_conciliacion_combustible import (
         conciliar_combustible,
         render_conciliacion_texto,
     )
 
-    hoy = date.today()
+    hoy = timezone.localdate()
     periodo = (hoy.replace(day=1) - timedelta(days=1)).replace(day=1)
     datos = conciliar_combustible(periodo)
     texto = render_conciliacion_texto(datos)
@@ -327,10 +327,14 @@ def task_conciliar_combustible_mensual(self):
         if e and e.strip()
     ]
     send_mail(
-        subject=f"Conciliación combustible {datos['periodo']} — facturas vs bitácora",
+        subject=f"Conciliación combustible {datos['periodo']} — {datos['estado'].lower()}",
         message=texto,
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "erp@pollyanasdolce.com"),
         recipient_list=destinatarios,
         fail_silently=False,
     )
-    return {"periodo": datos["periodo"], "facturas": len(datos["facturas"]), "diferencia": str(datos["diferencia"])}
+    return {
+        "periodo": datos["periodo"], "facturas": len(datos["facturas"]),
+        "anticipos": len(datos["anticipos"]), "estado": datos["estado"],
+        "total_cruzado": str(datos["total_cruzado"]), "diferencia": None,
+    }
