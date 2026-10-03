@@ -11,6 +11,13 @@ ciclo bimestral o anual a la mitad, y se detiene en el mes que no tiene versión
 vigente en vez de inventar una. Lo que no puede generar se reporta con su
 motivo.
 
+Y antes de generar revisa que el rubro no esté ya leyendo una captura de ese
+mes. La obligación crea su propia fila en `GastoOperativoMensual`; si el rubro
+conserva una regla `GASTO_OPERATIVO` que también lee la captura vieja del Excel,
+las dos filas se suman y el rubro reporta el doble. Pasó una vez con 92
+obligaciones y $477,918.63 de más, así que el contrato se omite y se reporta en
+vez de duplicar.
+
 Por omisión es simulacro. Escribe sólo con --apply.
 """
 
@@ -25,7 +32,7 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from reportes.models import GastoRecurrente
+from reportes.models import GastoOperativoMensual, GastoRecurrente, ReglaFuenteRubro
 from reportes.services_gastos_compromisos import generar_obligacion_recurrente
 
 
@@ -78,6 +85,9 @@ class Command(BaseCommand):
         with transaction.atomic():
             for contrato in contratos:
                 for periodo in _meses(desde, hasta):
+                    if self._duplicaria(contrato, periodo):
+                        omitidas["el rubro ya lee una captura de ese mes"] += 1
+                        continue
                     try:
                         obligacion, nueva = generar_obligacion_recurrente(
                             usuario=usuario, recurrente=contrato, periodo=periodo
@@ -96,6 +106,33 @@ class Command(BaseCommand):
                 transaction.set_rollback(True)
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("[APLICADO]" if aplicar else "[SIMULACRO] nada se escribió"))
+
+    @staticmethod
+    def _duplicaria(contrato: GastoRecurrente, periodo: date) -> bool:
+        """¿El rubro ya lee una captura de ese mes por su propia regla de gasto?
+
+        La obligación se materializa como una captura más. Mientras el rubro
+        tenga una regla canónica `GASTO_OPERATIVO` de la misma categoría y
+        centro, esa regla sumará la captura nueva junto con la que ya existía.
+        """
+        lee_capturas = ReglaFuenteRubro.objects.filter(
+            rubro_id=contrato.rubro_id,
+            tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            modo_asignacion=ReglaFuenteRubro.MODO_CANONICA,
+            categoria_gasto_id=contrato.categoria_gasto_id,
+            activa=True,
+        ).exists()
+        if not lee_capturas:
+            return False
+        return (
+            GastoOperativoMensual.objects.filter(
+                centro_costo_id=contrato.centro_costo_id,
+                categoria_gasto_id=contrato.categoria_gasto_id,
+                periodo=periodo,
+            )
+            .exclude(obligacion_gasto__gasto_recurrente_id=contrato.pk)
+            .exists()
+        )
 
     @staticmethod
     def _motivo(exc: ValidationError) -> str:
