@@ -1,0 +1,25 @@
+{
+  "version": "1",
+  "findings": [
+    {
+      "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "1",
+      "case_reference": 3893, "observed_at": "2026-10-03T14:56:58Z",
+      "note": "Lectura Point puntual guardada acredita 38681/540391 Guamúchil→CEDIS y 38932/542935 Guamúchil→Devoluciones: 1/1, recibidas/finalizadas/no canceladas. Canónicas 45516/47798 estaban 1/0; reutilizar evidencia antes de otra consulta. No persistir automáticamente. Otros documentos 38571/539098 (0/1, carga0) y 39196/545818 (carga sin captura) siguen independientes. Historial680 COMPLETE: no recapturar; no acredita custodia física."
+    },
+    {
+      "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "112",
+      "case_reference": 3963, "observed_at": "2026-10-03T13:54:00Z",
+      "note": "Documento44672 38598/539340 rawFK_articulo112/isInsumoFalse identifica Ciruela aunque SKU0112 sea ambiguo. No fusionar maestros ni usar ID de producto para insumo. Evento1662087 y transferencia separados3ms son candidatos sin FK, no identidad probada. Fuente transfer vacía por resolver compartido; no captura genérica humana. Import707 COMPLETE."
+    },
+    {
+      "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "63",
+      "case_reference": 3911, "observed_at": "2026-10-03T13:58:07Z",
+      "note": "38657/540006,38700/540833,38927/542924,38999/543936,39541/549357 recibidos completos pero lectura actual confirma isFinalizadoFalse. No bandera vieja ni recaptura import691 COMPLETE. Trazabilidad debe seguir pendiente aunque resumen antiguo COMPLETE ignore missing. No finalizar Point ni atribuir cantidades totales de cabecera a Crunch."
+    },
+    {
+      "month": "2026-09-01", "branch_external_id": "1", "product_external_id": "135",
+      "case_reference": 3237, "observed_at": "2026-10-03T12:53:34Z",
+      "note": "1683114:5PZA EmpanadaManzana Matriz, fila1676 eliminada por supersede80579; raw78023/79066, backup original e historia419 acreditan43→38 no cancelado. Ausencia por límites del listado, no cancelación ni offset probado. Autoridad mensual bloqueada; autorización concreta importador/restauración aún pendiente. No reinsertar ni ejecutar sync ni validar proyección antigua por saldo0."
+    }
+  ]
+}

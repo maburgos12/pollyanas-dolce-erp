@@ -24,6 +24,7 @@ Director General mode always applies in this repository.
 - Maintain macOS compatibility for local workflows.
 
 ## Operational playbooks (priority)
+0. `42-domain-inventory/skill-point-inventory-reconciliation` — habilidad ejecutable de revisión del agente de conciliación, evidencia fechada y límites de cierre.
 1. `00-core/skill-director-general-mode/playbooks/dg_daily_operating_cycle.md`
 2. `42-domain-inventory/skill-inventory-ledger/playbooks/ledger_reconciliation_playbook.md`
 3. `42-domain-inventory/skill-minmax-reorder/playbooks/stock_minimo_por_sucursal_playbook.md`

@@ -139,9 +139,10 @@ AGENTS = [
             "retry_sync_request",
             "issue_escalation",
         ],
-        "supported_goal_types_json": [],
+        "supported_goal_types_json": ["reconciliation_guard"],
         "context_files_json": [
             ".agent/skills/60-automation-ops/skill-agent-runtime-foundation/SKILL.md",
+            ".agent/skills/42-domain-inventory/skill-point-inventory-reconciliation/SKILL.md",
         ],
         "blocking_rules_json": [],
         "handoff_targets_json": [],
