@@ -93,6 +93,36 @@ class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(ProductInventoryAuditCase.objects.count(), 5)
         self.assertEqual(ProductInventoryAuditCase.objects.sold_products().count(), 2)
 
+    def test_only_active_approved_addons_are_separate_from_sold_products(self):
+        from recetas.models import Receta, RecetaAgrupacionAddon
+        from pos_bridge.models.product import inventory_consumption_filter
+
+        base = Receta.objects.create(nombre="Pay natural", codigo_point="BASE-PAY", hash_contenido="BASE-PAY")
+        base_product = PointProduct.objects.create(external_id="BASE-PAY", sku="BASE-PAY", name=base.nombre)
+        self.make_case(product=base_product)
+        for code, status, active in (
+            ("APPROVED", "APPROVED", True),
+            ("DETECTED", "DETECTED", True),
+            ("REJECTED", "REJECTED", True),
+            ("INACTIVE", "APPROVED", False),
+        ):
+            recipe = Receta.objects.create(nombre=f"Sabor {code}", codigo_point=code, hash_contenido=code)
+            product = PointProduct.objects.create(external_id=code, sku=code, name=recipe.nombre)
+            self.make_case(product=product, sales=Decimal("14"))
+            RecetaAgrupacionAddon.objects.create(
+                base_receta=base, addon_receta=recipe, addon_codigo_point=code,
+                addon_nombre_point=recipe.nombre, status=status, activo=active,
+            )
+
+        self.assertEqual(set(ProductInventoryAuditCase.objects.sold_products().values_list(
+            "product__sku", flat=True)), {"BASE-PAY", "DETECTED", "REJECTED", "INACTIVE"})
+        self.assertEqual({row["receta"] for row in self.service().read_audit_report(self.month)["rows"]},
+                         {"Pay natural", "Sabor DETECTED", "Sabor REJECTED", "Sabor INACTIVE"})
+        self.assertEqual(set(Receta.objects.filter(inventory_consumption_filter(
+            name_field="nombre", code_field="codigo_point")).values_list("codigo_point", flat=True)), {"APPROVED"})
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 5)
+        self.assertEqual(ProductInventoryAuditCase.objects.get(product__sku="APPROVED").sales, Decimal("14"))
+
     def test_view_and_exports_read_persisted_audit_not_another_balance(self):
         from reportes.views_produccion import ProducidoVsVendidoMermaView
         self.make_case(difference=Decimal("2"), point_closing=Decimal("12"))

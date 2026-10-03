@@ -6,10 +6,16 @@ from unidecode import unidecode
 
 def inventory_consumption_filter(*, name_field="name", code_field="sku"):
     """Internal stock consumption, not all accessories or resale merchandise."""
+    from recetas.models import RecetaAgrupacionAddon
+
     return models.Q(**{
         f"{name_field}__iregex": r"(^|[^a-z])(empaques?|toppings?)([^a-z]|$)",
     }) | models.Q(**{
         f"{code_field}__in": PointProductCategory.objects.filter(category="TOPPING").values("codigo_point"),
+    }) | models.Q(**{
+        f"{code_field}__in": RecetaAgrupacionAddon.objects.filter(
+            activo=True, status=RecetaAgrupacionAddon.STATUS_APPROVED,
+        ).exclude(addon_codigo_point="").values("addon_codigo_point"),
     })
 
 
