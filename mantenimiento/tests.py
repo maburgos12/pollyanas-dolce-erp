@@ -1674,7 +1674,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261003-reporte-orden-v2", sw)
+        self.assertIn("20261003-filtros-cedis", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):
