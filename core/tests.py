@@ -34,7 +34,7 @@ from core.access import (
     has_any_role,
     primary_role,
 )
-from core.branch_catalog import eligible_operational_branch_qs
+from core.branch_catalog import canonical_point_network_branch_qs, eligible_operational_branch_qs
 from core.cache_versions import bump_cache_scopes
 from core.middleware import CanonicalLocalHostMiddleware, RepartidorOnlyMiddleware
 from core.models import AuditLog, Departamento, Notificacion, Sucursal, UserModuleAccess, UserProfile
@@ -717,6 +717,20 @@ class DashboardForecastRobustnessTests(TestCase):
 
 
 class BranchCatalogTests(TestCase):
+    def test_sinaloa_leyva_enters_network_on_opening_and_preserves_leyva(self):
+        opening = date(2026, 10, 3)
+        sinaloa = Sucursal.objects.create(
+            codigo="SINALOA_LEYVA", nombre="Sucursal Sinaloa de Leyva",
+            activa=True, fecha_apertura=opening,
+        )
+        leyva = Sucursal.objects.create(codigo="LEYVA", nombre="Sucursal Leyva", activa=True)
+        self.assertNotIn(sinaloa, canonical_point_network_branch_qs(opening - timedelta(days=1)))
+        self.assertIn(sinaloa, canonical_point_network_branch_qs(opening))
+        self.assertIn(leyva, canonical_point_network_branch_qs(opening))
+        sinaloa.activa = False
+        sinaloa.save(update_fields=["activa"])
+        self.assertNotIn(sinaloa, canonical_point_network_branch_qs(opening))
+
     def test_eligible_operational_branch_qs_excludes_future_openings(self):
         today = timezone.localdate()
         matriz = Sucursal.objects.create(codigo="MATRIZ", nombre="Matriz", activa=True)
