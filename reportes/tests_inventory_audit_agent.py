@@ -288,6 +288,84 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         )
         return transfer, discrepancy
 
+    def test_validated_zero_load_explains_administrative_return_without_closing_case(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        reviewer = get_user_model().objects.create_user(username='load-reviewer')
+        transfer, discrepancy = self._logistics_discrepancy(assigned_to=reviewer)
+        transfer.received_quantity = Decimal('0')
+        transfer.save(update_fields=['received_quantity'])
+        line = discrepancy.linea_carga
+        line.cantidad_cargada = Decimal('0')
+        line.estatus = RutaCargaChecklistLinea.ESTATUS_FALTANTE
+        line.save(update_fields=['cantidad_cargada', 'estatus'])
+        discrepancy.origen = DiscrepanciaLogistica.ORIGEN_CARGA
+        discrepancy.cantidad_cargada = Decimal('0')
+        discrepancy.cantidad_recibida = None
+        discrepancy.estado = DiscrepanciaLogistica.ESTADO_VALIDADA_REAL
+        discrepancy.revisado_por = reviewer
+        discrepancy.revisado_en = timezone.now()
+        discrepancy.save()
+        case = self.make_case(difference=Decimal('0'), point_closing=Decimal('10'),
+            issue_codes=['TRANSFER_QUANTITY_MISMATCH'],
+            source_trace={'transfers': [transfer.pk], 'source_issues': [{
+                'code': 'TRANSFER_QUANTITY_MISMATCH', 'source_ids': [transfer.pk],
+                'message': 'Diferencia de cantidades Point con retorno administrativo.'}]})
+        result = InventoryAuditAgent().investigate_case(case)
+        evidence = result.summary['transfer_evidence'][0]
+        self.assertEqual(evidence.get('validated_no_load_discrepancy_id'), discrepancy.pk)
+        self.assertIn('no se cargó', evidence['fact'])
+        self.assertNotIn('custodia física', evidence['fact'])
+        self.assertNotIn('Diferencia de cantidades Point', ' '.join(result.summary['missing']))
+        self.assertIn('aprobación', evidence['missing'])
+        self.assertEqual(result.summary['related_logistics_discrepancy_ids'], [])
+        self.assertEqual(result.summary['traceability_status'], 'PENDING')
+        case.refresh_from_db()
+        self.assertEqual(case.movement_status, 'NEEDS_EXPLANATION')
+        agent = InventoryAuditAgent()
+        rows = list(ProductInventoryAuditCase.objects.filter(pk=case.pk).values(
+            'id', 'product_id', 'branch_id', 'branch__erp_branch_id', 'source_trace'))
+        agent._prepare_month_context(self.month, rows)
+        self.assertEqual(agent.investigate_case(case).summary['transfer_evidence'],
+                         result.summary['transfer_evidence'])
+        for field, invalid_value in [('received_quantity', Decimal('1')),
+                                     ('is_finalized', False), ('is_received', False),
+                                     ('is_cancelled', True), ('received_at', None)]:
+            with self.subTest(transfer_field=field):
+                original = getattr(transfer, field)
+                setattr(transfer, field, invalid_value)
+                transfer.save(update_fields=[field])
+                self.assertIsNone(InventoryAuditAgent()._transfer_evidence([transfer.pk])[
+                    transfer.pk].get('validated_no_load_discrepancy_id'))
+                setattr(transfer, field, original)
+                transfer.save(update_fields=[field])
+        for field, invalid_value in [('estado', DiscrepanciaLogistica.ESTADO_PENDIENTE_JEFE),
+                                     ('revisado_por', None), ('revisado_en', None),
+                                     ('cantidad_cargada', Decimal('1')),
+                                     ('cantidad_recibida', Decimal('1')),
+                                     ('cantidad_enviada', Decimal('3')),
+                                     ('origen', DiscrepanciaLogistica.ORIGEN_RECEPCION)]:
+            with self.subTest(field=field):
+                original = getattr(discrepancy, field)
+                setattr(discrepancy, field, invalid_value)
+                discrepancy.save()
+                self.assertIsNone(InventoryAuditAgent()._transfer_evidence([transfer.pk])[
+                    transfer.pk].get('validated_no_load_discrepancy_id'))
+                setattr(discrepancy, field, original)
+                discrepancy.save()
+        line.cantidad_cargada = Decimal('1')
+        line.save(update_fields=['cantidad_cargada'])
+        self.assertIsNone(InventoryAuditAgent()._transfer_evidence([transfer.pk])[
+            transfer.pk].get('validated_no_load_discrepancy_id'))
+        line.cantidad_cargada = Decimal('0')
+        line.save(update_fields=['cantidad_cargada'])
+        DiscrepanciaLogistica.objects.create(
+            ruta=discrepancy.ruta, parada=discrepancy.parada, linea_carga=line,
+            origen=DiscrepanciaLogistica.ORIGEN_CARGA,
+            cantidad_enviada=transfer.sent_quantity, cantidad_cargada=Decimal('0'),
+            motivo='sin_stock', creado_por=reviewer)
+        self.assertIsNone(InventoryAuditAgent()._transfer_evidence([transfer.pk])[
+            transfer.pk].get('validated_no_load_discrepancy_id'))
+
     def test_point_history_explains_conversion_without_inventing_destination(self):
         case = self.make_case(
             opening_point=Decimal("23"),

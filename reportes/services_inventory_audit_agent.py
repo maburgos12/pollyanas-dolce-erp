@@ -324,7 +324,15 @@ class InventoryAuditAgent:
             if transfer["missing"]:
                 missing.append(transfer["missing"])
         source_issues = (case.source_trace or {}).get("source_issues", [])
+        validated_no_load_ids = {
+            item['id'] for item in transfers if item.get('validated_no_load_discrepancy_id')
+        }
         for issue in source_issues:
+            source_ids = set(issue.get('source_ids') or [])
+            if (issue.get('code') == 'TRANSFER_QUANTITY_MISMATCH' and source_ids
+                    and source_ids <= validated_no_load_ids):
+                facts.append(issue['message'])
+                continue
             if issue.get("code") not in {"PRODUCT_RESOLVED_BY_SKU", "PRODUCT_RESOLVED_BY_NAME"}:
                 missing.append(issue["message"])
         point_history = (case.source_trace or {}).get("point_history")
@@ -508,6 +516,11 @@ class InventoryAuditAgent:
         for line in RutaCargaChecklistLinea.objects.filter(
                 point_transfer_line_id__in=transfer_ids).exclude(estatus='SUPERADA').select_related('parada__ruta'):
             lines[line.point_transfer_line_id] = line
+        load_reviews = {}
+        for review in DiscrepanciaLogistica.objects.filter(
+                linea_carga_id__in=[line.pk for line in lines.values()],
+                origen=DiscrepanciaLogistica.ORIGEN_CARGA).order_by('-creado_en', '-pk'):
+            load_reviews.setdefault(review.linea_carga_id, review)
         evidence = {}
         for transfer in PointTransferLine.objects.filter(id__in=transfer_ids).select_related(
                 'origin_branch', 'destination_branch').order_by('id'):
@@ -531,7 +544,26 @@ class InventoryAuditAgent:
                 fact += (f" Logística: ruta {line.parada.ruta.folio}, carga {loaded}, "
                          f"recepción de parada {line.parada.get_entrega_estado_display()}.")
             missing = ''
-            if not has_receipt:
+            review = load_reviews.get(line.pk) if line else None
+            validated_no_load = bool(
+                review and review.estado == DiscrepanciaLogistica.ESTADO_VALIDADA_REAL
+                and review.revisado_por_id and review.revisado_en
+                and review.ruta_id == route_id and review.parada_id == line.parada_id
+                and review.cantidad_cargada == line.cantidad_cargada == 0
+                and review.cantidad_recibida in (None, 0)
+                and line.estatus == RutaCargaChecklistLinea.ESTATUS_FALTANTE
+                and review.cantidad_enviada == line.cantidad_enviada_esperada == transfer.sent_quantity
+                and transfer.sent_quantity > 0 and transfer.received_quantity == 0
+                and has_receipt and transfer.is_finalized and not transfer.is_cancelled
+            )
+            if validated_no_load:
+                fact += (f" Discrepancia de carga {review.pk}, validada el "
+                         f"{review.revisado_en.astimezone(LOCAL_TZ):%d/%m/%Y}: no se cargó el producto. "
+                         f"El retorno Point de {sent} al origen {origin} es administrativo; "
+                         "no acredita una devolución física ni una pérdida.")
+                missing = (f"Transferencia {ref}: la evidencia de carga {review.pk} explica "
+                           "el movimiento; incorporar esta explicación al expediente para aprobación separada.")
+            elif not has_receipt:
                 missing = f"Transferencia {ref}: falta acreditar recepción en {destination} o retorno a {origin} de {sent} unidades."
             elif not transfer.is_finalized:
                 missing = f"Transferencia {ref}: falta finalización Point; no se presume retorno al origen."
@@ -545,6 +577,8 @@ class InventoryAuditAgent:
                 'destination': destination, 'sent': sent, 'received_quantity': received,
                 'received': has_receipt, 'finalized': transfer.is_finalized,
                 'route_id': route_id, 'fact': fact, 'missing': missing}
+            if validated_no_load:
+                evidence[transfer.pk]['validated_no_load_discrepancy_id'] = review.pk
         return evidence
 
     def _case_transfers(self, case):
