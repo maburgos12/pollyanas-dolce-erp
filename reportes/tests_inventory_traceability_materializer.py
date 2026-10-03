@@ -22,7 +22,9 @@ from pos_bridge.services.branch_inventory_traceability_service import (
     BranchProductBalance,
     TraceSourceIssue,
 )
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.services.audit_stock_history_service import (
+    AuditStockHistoryService, PointHistoryReconciliation,
+)
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from reportes.models import (
     ProductInventoryAuditCase,
@@ -142,6 +144,24 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_history_does_not_replace_commercial_sales_with_unverified_stock_effect(self):
+        line = replace(self._line(closing=ZERO), production=ZERO,
+                       sales=Decimal("5"), expected_closing=Decimal("5"),
+                       difference=Decimal("-5"))
+        history = PointHistoryReconciliation(
+            coverage_status="COMPLETE", identified_adjustment=Decimal("-10"),
+            movement_ids=(901,), movement_ids_by_category={"identified_adjustment": (901,)},
+        )
+        prepared = InventoryAuditMaterializer()._prepare_line(line, point_history=history)
+        self.assertEqual(prepared["normalized_quantities"]["sales"], Decimal("5"))
+        self.assertEqual(prepared["movement_status"], "SOURCE_INCOMPLETE")
+        issue = prepared["source_trace"]["source_issues"][0]
+        self.assertEqual(issue["source_ids"], [33, 34])
+        self.assertIn("5", issue["message"])
+        self.assertIn("0", issue["message"])
+        self.assertEqual(prepared["source_trace"]["point_history"]["unapplied_reason"],
+                         "SALES_STOCK_EFFECT_UNVERIFIED")
+
     def test_history_does_not_certify_a_balance_with_missing_closings(self):
         line = self._line(issues=(TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta cierre"),))
         history = SimpleNamespace(

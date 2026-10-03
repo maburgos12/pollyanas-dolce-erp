@@ -12,6 +12,16 @@ from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 
 
 class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
+    def test_commercial_sales_are_preserved_in_legacy_history_projection(self):
+        self.make_case(sales=Decimal("0"), source_trace={"point_history": {
+            "aggregate_comparison": {"sales": {
+                "aggregate": "5", "point_history": "0", "difference": "-5",
+            }},
+        }})
+        row = self.service().read_audit_report(self.month)["rows"][0]
+        self.assertEqual(row["vendido"], Decimal("5"))
+        self.assertEqual(ProductInventoryAuditCase.objects.get().sales, Decimal("0"))
+
     def test_stock_balances_without_claiming_traceability_is_closed(self):
         self.make_case(difference=Decimal('0'), point_closing=Decimal('10'),
                        issue_codes=['INCOMPLETE_TRANSFER'])
