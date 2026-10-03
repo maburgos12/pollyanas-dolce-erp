@@ -474,6 +474,24 @@ def _unified_counts(user):
     }
 
 
+def _dashboard_origin_items(items):
+    """Separate CEDIS for the desktop board without changing mobile origins."""
+    falla_ids = [item["id"] for item in items if item["tipo"] == "falla"]
+    order_ids = [item["id"] for item in items if item["tipo"] == "orden"]
+    cedis_uids = {
+        f"falla:{pk}" for pk in ReporteFalla.objects.filter(
+            pk__in=falla_ids, sucursal__codigo="CEDIS"
+        ).values_list("pk", flat=True)
+    }
+    cedis_uids.update(
+        f"orden:{pk}" for pk in OrdenMantenimiento.objects.filter(
+            pk__in=order_ids, activo_ref__sucursal__codigo="CEDIS"
+        ).values_list("pk", flat=True)
+    )
+    return [dict(item, origen_tablero="cedis" if item["uid"] in cedis_uids else item["origen"])
+            for item in items]
+
+
 def _item_stage(item):
     estatus = str(item.get("estatus") or "").lower()
     proveedor = bool(item.get("proveedor"))
@@ -1974,9 +1992,13 @@ def crear_reporte_unidad(request):
 def dashboard(request):
     _require_mantenimiento(request.user)
     origen = (request.GET.get("origen") or "").strip().lower()
-    if origen not in {"", "sucursales", "logistica"}:
+    if origen not in {"", "sucursales", "cedis", "logistica"}:
         return redirect("mantenimiento:dashboard")
-    items = _unified_items(origen, request.user)
+    all_items = _dashboard_origin_items(_unified_items("", request.user))
+    counts = {key: sum(item["origen_tablero"] == key for item in all_items)
+              for key in ("sucursales", "cedis", "logistica")}
+    counts["total"] = len(all_items)
+    items = [item for item in all_items if not origen or item["origen_tablero"] == origen]
     requested_open = (request.GET.get("open") or "").strip()
     open_item_uid = requested_open if any(item["uid"] == requested_open for item in items) else ""
     display_items = list(items)
@@ -1989,7 +2011,7 @@ def dashboard(request):
                 limit=1,
             )
             if requested:
-                requested_item = _branch_falla_item(requested[0])
+                requested_item = _dashboard_origin_items([_branch_falla_item(requested[0])])[0]
                 display_items.append(requested_item)
                 open_item_uid = requested_item["uid"]
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
@@ -2061,7 +2083,7 @@ def dashboard(request):
             "sucursales_list": sucursales_list,
             "categorias_list": categorias_list,
             "origen": origen or "todos",
-            "counts": _unified_counts(request.user),
+            "counts": counts,
             "estatus_fallas": ReporteFalla.ESTATUS,
             "estatus_unidad": ReporteUnidad.ESTATUS_CHOICES,
             "estatus_orden": OrdenMantenimiento.ESTATUS_CHOICES,

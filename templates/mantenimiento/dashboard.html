@@ -107,8 +107,9 @@
         </div>
       </div>
       <div class="mant-origin-tabs mant-origin-tabs-spaced" aria-label="Filtro de origen">
-        <a href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">Todo <span class="mant-origin-count">{{ counts.sucursales|add:counts.logistica }}</span></a>
-        <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales#tab-seguimiento" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">Sucursales / CEDIS <span class="mant-origin-count">{{ counts.sucursales }}</span></a>
+        <a href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento" class="mant-origin-tab {% if origen == 'todos' %}active{% endif %}">Todo <span class="mant-origin-count">{{ counts.total }}</span></a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=sucursales#tab-seguimiento" class="mant-origin-tab {% if origen == 'sucursales' %}active{% endif %}">Sucursales <span class="mant-origin-count">{{ counts.sucursales }}</span></a>
+        <a href="{% url 'mantenimiento:dashboard' %}?origen=cedis#tab-seguimiento" class="mant-origin-tab {% if origen == 'cedis' %}active{% endif %}">CEDIS <span class="mant-origin-count">{{ counts.cedis }}</span></a>
         <a href="{% url 'mantenimiento:dashboard' %}?origen=logistica#tab-seguimiento" class="mant-origin-tab {% if origen == 'logistica' %}active{% endif %}">Logística <span class="mant-origin-count">{{ counts.logistica }}</span></a>
       </div>
       <div class="mant-board-tools">
@@ -126,7 +127,7 @@
               {% for item in column.items %}
                 <article class="mant-ticket">
                   <div class="mant-ticket-tags">
-                    <span class="mant-badge {{ item.origen }}">{% if item.origen == 'logistica' %}Flota{% else %}Sucursal{% endif %}</span>
+                    <span class="mant-badge {{ item.origen }}">{% if item.origen_tablero == 'logistica' %}Flota{% elif item.origen_tablero == 'cedis' %}CEDIS{% else %}Sucursal{% endif %}</span>
                     <span class="mant-badge">{{ item.prioridad }}</span>
                     {% if not item.asignado %}<span class="mant-badge sin-asignar">Sin asignar</span>{% endif %}
                     {% if item.duplicados_total %}<span class="mant-badge is-warning" title="Otros reportes del mismo problema, ligados a este">Reportado {{ item.duplicados_total|add:1 }} veces</span>{% endif %}

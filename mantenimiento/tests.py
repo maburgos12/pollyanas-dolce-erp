@@ -62,7 +62,8 @@ class MantenimientoUnifiedAccessTests(TestCase):
         perfil = self.client.get("/api/mantenimiento/me/")
 
         self.assertEqual(portal.status_code, 200)
-        self.assertContains(portal, "Sucursales / CEDIS")
+        self.assertContains(portal, "Sucursales")
+        self.assertContains(portal, "?origen=cedis#tab-seguimiento")
         self.assertContains(portal, "Logística")
         self.assertEqual(
             [p.nombre for p in portal.context["provider_options"]],
@@ -82,13 +83,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-reporte-orden-v2", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-filtros-cedis", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v29-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v30-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -675,6 +676,40 @@ class MantenimientoUnifiedInboxTests(TestCase):
         self.assertIn(f"falla:{self.falla.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"orden:{self.orden.id}", [item["uid"] for item in sucursales["items"]])
         self.assertIn(f"unidad:{self.reporte_unidad.id}", [item["uid"] for item in logistica["items"]])
+
+    def test_dashboard_splits_cedis_from_branches_without_changing_mobile_inbox(self):
+        cedis, _ = Sucursal.objects.update_or_create(
+            codigo="CEDIS", defaults={"nombre": "Centro de distribución", "activa": True}
+        )
+        self.falla.sucursal = cedis
+        self.falla.save(update_fields=["sucursal"])
+        self.activo.sucursal = cedis
+        self.activo.save(update_fields=["sucursal"])
+        branch_report = ReporteFalla.objects.create(
+            sucursal=self.other_branch, categoria=self.categoria,
+            titulo="Falla sucursal", descripcion="Equipo de ventas", reportado_por=self.reporter,
+        )
+        self.client.force_login(self.user)
+        expected = {
+            "cedis": {f"falla:{self.falla.pk}", f"orden:{self.orden.pk}"},
+            "sucursales": {f"falla:{branch_report.pk}"},
+            "logistica": {f"unidad:{self.reporte_unidad.pk}"},
+        }
+        for origin, uids in expected.items():
+            with self.subTest(origin=origin):
+                response = self.client.get("/mantenimiento/", {"origen": origin})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual({item["uid"] for item in response.context["items"]}, uids)
+                self.assertEqual(response.context["counts"], {
+                    "sucursales": 1, "cedis": 2, "logistica": 1, "total": 4,
+                })
+                self.assertContains(response, "?origen=cedis#tab-seguimiento")
+                self.assertNotContains(response, "Sucursales / CEDIS")
+        all_reports = self.client.get("/mantenimiento/")
+        self.assertEqual(len(all_reports.context["items"]), 4)
+        mobile = self.client.get("/api/mantenimiento/bandeja/", {"origen": "sucursales"}).json()
+        self.assertEqual({item["uid"] for item in mobile["items"]},
+                         expected["cedis"] | expected["sucursales"])
 
     def test_mobile_summary_includes_plan_and_fleet_agenda(self):
         today = timezone.localdate()
@@ -1639,7 +1674,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261003-reporte-orden-v2", sw)
+        self.assertIn("20261003-filtros-cedis", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):
