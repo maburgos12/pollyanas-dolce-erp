@@ -79,6 +79,38 @@ class AuditStockHistoryServiceTests(TestCase):
         metadata["fetched_at"] = "2026-10-01T07:00:00+00:00"
         self.assertTrue(AuditStockHistoryService._covers_month(record, date(2026, 9, 1)))
 
+    def test_adjustment_uses_verified_stock_effect_not_raw_quantity_sign(self):
+        scenarios = (
+            ("AJUSTE SALIDA INVENTARIO", 10, 20, 10, -10),
+            ("AJUSTE SALIDA INVENTARIO", -10, 20, 10, -10),
+            ("AJUSTE ENTRADA INVENTARIO", 10, 10, 20, 10),
+            ("AJUSTE INVENTARIO", -10, 20, 10, -10),
+            ("AJUSTE INVENTARIO", 10, 10, 20, 10),
+            ("AJUSTE SALIDA INVENTARIO", 10, 20, 11, None),
+            ("AJUSTE SALIDA INVENTARIO", 10, 10, 20, None),
+            ("AJUSTE ENTRADA INVENTARIO", 10, 20, 10, None),
+            ("AJUSTE SALIDA INVENTARIO", 10, 20, 20, None),
+        )
+        service = AuditStockHistoryService()
+        record = SimpleNamespace(raw_metadata={})
+        for movement, quantity, previous, new, expected in scenarios:
+            with self.subTest(movement=movement, quantity=quantity, new=new):
+                row = SimpleNamespace(
+                    row_number=901, movement_type=movement,
+                    quantity=Decimal(quantity), previous_existence=Decimal(previous),
+                    new_existence=Decimal(new),
+                )
+                result = service._reconcile_record(record, self.month, [row])
+                if expected is None:
+                    self.assertEqual(result.identified_adjustment, Decimal("0"))
+                    self.assertEqual(result.unknown_movement_ids, (901,))
+                    self.assertNotIn("identified_adjustment", result.movement_ids_by_category)
+                else:
+                    self.assertEqual(result.identified_adjustment, Decimal(expected))
+                    self.assertEqual(result.expected_closing(Decimal(previous)), Decimal(new))
+                    self.assertEqual(result.unknown_movement_ids, ())
+                    self.assertEqual(result.movement_ids_by_category["identified_adjustment"], (901,))
+
     def test_repeated_capture_upserts_the_same_point_movements(self):
         client = _FakePointClient(
             [
