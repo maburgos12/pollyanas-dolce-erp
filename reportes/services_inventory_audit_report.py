@@ -67,6 +67,12 @@ def _case_quantity(case, field):
         source = {"opening_point": "opening", "point_closing": "closing"}.get(field)
         if source and not case.source_trace.get(source):
             return None
+    if field == "sales":
+        comparison = (case.source_trace or {}).get("point_history", {}).get(
+            "aggregate_comparison", {}
+        ).get("sales", {})
+        if "aggregate" in comparison:
+            return Decimal(str(comparison["aggregate"]))
     return getattr(case, field)
 
 

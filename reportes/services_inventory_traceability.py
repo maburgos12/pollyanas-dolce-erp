@@ -548,6 +548,38 @@ class InventoryAuditMaterializer:
             else None
         )
         if (
+            not any(issue["code"] == "SOURCE_INCOMPLETE" for issue in issues)
+            and point_history is not None
+            and point_history.coverage_status == "COMPLETE"
+            and not point_history.unknown_movement_ids
+            and history_remainder == 0
+            and Decimal(line.sales) != point_history.sales
+        ):
+            issues = _sorted_issue_payloads((*line.issues, TraceSourceIssue(
+                code="SOURCE_INCOMPLETE",
+                message=(
+                    f"Venta comercial {_decimal_text(line.sales)} y efecto de stock "
+                    f"{_decimal_text(point_history.sales)} no coinciden para "
+                    f"{line.product} en {line.branch}. Verificar fechas de registro, "
+                    "control de inventario y relación con el producto base antes "
+                    "de conciliar; conservar las ventas originales."
+                ),
+                branch_id=line.branch.id,
+                product_id=line.product.id,
+                source_ids=tuple(line.source_trace.get("sales", ())),
+            )))
+            source_trace["source_issues"] = issues
+            payload = point_history.as_dict(
+                opening=Decimal(line.opening), point_closing=Decimal(line.point_closing),
+            )
+            payload["unapplied_reason"] = "SALES_STOCK_EFFECT_UNVERIFIED"
+            payload["aggregate_comparison"] = {"sales": {
+                "aggregate": _decimal_text(line.sales),
+                "point_history": _decimal_text(point_history.sales),
+                "difference": _decimal_text(point_history.sales - Decimal(line.sales)),
+            }}
+            source_trace["point_history"] = payload
+        if (
             Decimal(line.difference) != 0
             and not any(issue["code"] == "SOURCE_INCOMPLETE" for issue in issues)
             and point_history is not None
