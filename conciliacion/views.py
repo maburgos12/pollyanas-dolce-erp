@@ -134,7 +134,12 @@ def conciliacion_bancaria_view(request: HttpRequest) -> HttpResponse:
 
     contexto.update(
         {
-            "cuentas": CuentaBancaria.objects.filter(activa=True).order_by("banco"),
+            "cuentas": CuentaBancaria.objects.filter(activa=True).order_by(
+                "banco",
+                "cuenta_principal_id",
+                "tipo_cuenta",
+                "numero_cuenta",
+            ),
             "sat_cfdis_total": CfdiDescargado.objects.count(),
             "sat_estado_label": sat_estado_label,
             "sat_estado_tone": sat_estado_tone,
