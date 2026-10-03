@@ -330,7 +330,17 @@ class AuditStockHistoryService:
                     unknown_ids.append(row.row_number)
                     continue
                 amount = -abs(amount)
-            elif category != "identified_adjustment":
+            elif category == "identified_adjustment":
+                amount = row.new_existence - row.previous_existence
+                words = set(_normalized(row.movement_type).split())
+                if (
+                    abs(amount) != abs(row.quantity)
+                    or ("SALIDA" in words and amount > 0)
+                    or ("ENTRADA" in words and amount < 0)
+                ):
+                    unknown_ids.append(row.row_number)
+                    continue
+            else:
                 amount = abs(amount)
             totals[category] += amount
             ids_by_category[category].append(row.row_number)
