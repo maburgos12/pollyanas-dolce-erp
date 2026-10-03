@@ -215,11 +215,15 @@ class Command(BaseCommand):
             contrato.concepto = contrato.concepto.replace("Crucero", "Bamoa")
             campos = ["centro_costo", "concepto", "actualizado_en"]
             if espejo is not None:
-                # La regla que lee la obligación tiene que seguir al rubro.
-                ReglaFuenteRubro.objects.filter(
+                # La regla que lee la obligación tiene que seguir al rubro, y
+                # tiene que pasar por save(): la clave canónica se calcula ahí,
+                # y un update() la dejaría apuntando al rubro anterior.
+                for regla in ReglaFuenteRubro.objects.filter(
                     rubro_id=contrato.rubro_id,
                     tipo_fuente=ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO,
-                ).update(rubro=espejo)
+                ):
+                    regla.rubro = espejo
+                    regla.save()
                 contrato.rubro = espejo
                 campos.append("rubro")
             contrato.save(update_fields=campos)
