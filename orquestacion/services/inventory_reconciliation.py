@@ -9,6 +9,9 @@ from pos_bridge.services.audit_stock_history_service import AuditStockHistorySer
 from reportes.models import ProductInventoryAuditCase
 from reportes.services_inventory_audit_agent import InventoryAuditAgent
 from reportes.services_inventory_audit_report import _case_quantity, case_balance_status
+from orquestacion.services.inventory_reconciliation_plan import (
+    validate_plan_metadata, recorded_state_signature, observe_month_plan,
+)
 
 
 SKILL_ROOT = '.agent/skills/42-domain-inventory/skill-point-inventory-reconciliation'
@@ -32,6 +35,7 @@ def validate_review(goal, agent, context):
         raise ValueError('Se requiere un expediente ProductInventoryAuditCase exacto.')
     if not ProductInventoryAuditCase.objects.filter(pk=goal.entity_id).exists():
         raise ValueError('El expediente solicitado no existe.')
+    validate_plan_metadata(goal.metadata)
     if any(path not in context.loaded_files for path in CONTEXT_FILES):
         raise ValueError('Falta contexto obligatorio de la habilidad de conciliación.')
     # Read the same bytes loaded into the audited context, not a second mutable file.
@@ -52,6 +56,8 @@ def validate_review(goal, agent, context):
 
 def observe_review(goal, *, notes):
     case = ProductInventoryAuditCase.objects.select_related('run', 'branch', 'product').get(pk=goal.entity_id)
+    if goal.metadata.get('mode') == 'plan_month':
+        return observe_month_plan(case, goal, notes)
     history = AuditStockHistoryService().reconcile(case.branch, case.product, case.month)
     investigation = InventoryAuditAgent().investigate_case(case).summary
     commercial = _case_quantity(case, 'sales')
@@ -140,6 +146,7 @@ def observe_review(goal, *, notes):
     observation = {
         'skill': {'id': 'point-inventory-reconciliation', 'version': '1'},
         'case_id': case.pk, 'month': case.month.isoformat(),
+        'recorded_state_signature': recorded_state_signature(case, notes),
         'branch_external_id': case.branch.external_id, 'product_external_id': case.product.external_id,
         'case_balance_status': case_balance_status(case), 'difference': str(case.difference),
         'source_authoritative': authoritative, 'source_issues': issues,

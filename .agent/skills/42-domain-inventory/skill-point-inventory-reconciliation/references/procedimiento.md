@@ -1,5 +1,33 @@
 # Procedimiento por expediente
 
+## 0. Plan de trabajo, sin reconstruir toda la investigación
+
+Antes de revisar muchos expedientes invocar reconciliation_guard con mode=plan_month
+o CLI --plan-month. La corrida del expediente ancla fija el período; sold_products
+es el contrato de selección. Una barrera mensual se atiende una sola vez, no como
+1650 solicitudes idénticas. Tras el bloqueo global, atender divergencias comerciales,
+remanentes/desconocidos, documentos verificados/negativos heredados, historia y
+documentación restante, y finalmente aprobación/conteo físico. Dentro de cada nivel
+priorizar impacto registrado y atención HIGH. Un grupo genérico grande no desplaza
+una diferencia comercial concreta nueva.
+
+Ejecutar después únicamente las revisiones propuestas que aporten evidencia nueva.
+Reutilizar bitácoras cuyo estado registrado no cambió, con runID trazable; no
+recalcular su investigación por rutina. El plan nunca certifica fuentes vivas ni
+ejecuta el lote. Una nueva respuesta humana/cambio de corrida/expediente invalida
+la firma. Si cambió un documento externo sin actualizar la proyección, invocar una
+revisión individual explícita: no suponer que updated_at del caso lo detecta.
+
+Máximo diez IDs por propuesta. Guardar next_after_case_id y plan_fingerprint para
+continuar; cambios de huella reinician el cursor y requieren revisar el nuevo plan.
+Muestras documentales limitadas no descartan pendientes originales. Sin autoridad
+mensual, seguir investigaciones independientes pero NO materializar o declarar cierre.
+
+Evitar estos atajos: repetir todo para «estar seguros», detener todo por una fuente,
+tomar firma de proyección por frescura Point, normalizar ventas o restaurar merma
+sin autorización para «ganar tiempo». El progreso distingue magnitudes y evidencia,
+no ofrece fecha o porcentaje de cierre sin base verificable.
+
 ## 1. Inventario mínimo de evidencia, antes de HTTP
 
 Registrar período local, producto/receta, sucursal ERP y Point, dominio, SKU y claves externas. Verificar alias existentes; Bamoa no equivale automáticamente a Crucero histórico ni PK ERP a ID Point. Usar los modelos/servicios actuales, no nombres de tabla o firma supuestos.
