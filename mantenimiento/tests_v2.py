@@ -1555,12 +1555,12 @@ class MaintenanceDetailV2Tests(TestCase):
 
     def test_multiple_timeline_rows_keep_fixed_query_budget(self):
         self.client.force_login(self.user)
-        with self.assertNumQueries(11):
+        with self.assertNumQueries(10):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
         for index in range(5):
             row = BitacoraFalla.objects.create(reporte=self.report, usuario=self.user, comentario=str(index))
             EvidenciaSeguimientoFalla.objects.create(bitacora=row, archivo=f"fallas/seguimiento/{index}.jpg", subido_por=self.user)
-        with self.assertNumQueries(11):
+        with self.assertNumQueries(10):
             self.client.get(f"/api/mantenimiento/v2/items/falla/{self.report.pk}/")
 
 

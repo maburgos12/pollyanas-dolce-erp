@@ -5,6 +5,7 @@ from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
 
+from core.access import _group_names
 from integraciones.models import PublicApiClient
 from integraciones.sales_read_policy import SALES_GROUP, allows_sales_read
 
@@ -51,7 +52,7 @@ class SalesReadBoundaryMiddleware:
 
         kinds = set()
         for principal in principals:
-            if principal.groups.filter(name=SALES_GROUP).exists():
+            if SALES_GROUP in _group_names(principal):
                 if not principal.is_active or principal.is_staff or principal.is_superuser:
                     return self._denied()
                 kinds.add("token")

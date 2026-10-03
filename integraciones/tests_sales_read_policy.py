@@ -298,10 +298,54 @@ class SalesReadBoundaryTests(TestCase):
         self.assertEqual(len(queries), 0)
         self.assertEqual(self.downstream_calls, 0)
 
+    def test_maintenance_group_cache_preserves_case_and_instance_semantics(self):
+        from core.access import _group_names
+        from mantenimiento.services_access import _maintenance_group_names
+
+        self.operator.groups.add(Group.objects.get_or_create(name="MANTENIMIENTO")[0])
+        principal = get_user_model().objects.get(pk=self.operator.pk)
+        with CaptureQueriesContext(connection) as queries:
+            self.assertEqual(_group_names(principal), {"MANTENIMIENTO"})
+            self.assertEqual(_maintenance_group_names(principal), frozenset({"mantenimiento"}))
+            self.assertEqual(_maintenance_group_names(principal), frozenset({"mantenimiento"}))
+        self.assertEqual(len(queries), 1)
+        self.assertIsInstance(principal._maintenance_group_names_cache, frozenset)
+        self.operator.groups.add(Group.objects.get_or_create(name="DG")[0])
+        fresh_principal = get_user_model().objects.get(pk=self.operator.pk)
+        self.assertEqual(_maintenance_group_names(fresh_principal), frozenset({"dg", "mantenimiento"}))
+
     def test_operational_jwt_keeps_real_logistics_access(self):
         auth = self.jwt_header(self.operator)
         self.assertEqual(self.invoke("/api/logistica/unidades/", **auth).status_code, 200)
         self.assertEqual(self.api.get("/api/logistica/unidades/", **auth).status_code, 200)
+
+    def test_guard_reuses_group_cache_per_instance_without_sharing_identities(self):
+        from core.access import _group_names
+        from mantenimiento.services_access import _maintenance_group_names
+
+        operator = get_user_model().objects.get(pk=self.operator.pk)
+        with CaptureQueriesContext(connection) as queries:
+            self.assertEqual(self.invoke("/admin/", user=operator).status_code, 200)
+            self.assertEqual(_group_names(operator), set())
+            self.assertEqual(_maintenance_group_names(operator), frozenset())
+            self.assertEqual(self.invoke("/admin/", user=operator).status_code, 200)
+        self.assertEqual(len(queries), 1)
+
+        # A fresh principal observes a newly assigned restriction. Neither an
+        # earlier instance nor a different user's cache can grant access.
+        operator.groups.add(Group.objects.get(name=SALES_GROUP))
+        fresh_operator = get_user_model().objects.get(pk=operator.pk)
+        with CaptureQueriesContext(connection) as queries:
+            self.assert_denied(self.invoke("/admin/", user=fresh_operator))
+            self.assertEqual(_group_names(fresh_operator), {SALES_GROUP})
+            self.assert_denied(self.invoke("/admin/", user=self.user))
+        self.assertEqual(len(queries), 2)
+
+        prefetched_user = get_user_model().objects.prefetch_related("groups").get(pk=self.user.pk)
+        with CaptureQueriesContext(connection) as queries:
+            self.assert_denied(self.invoke("/admin/", user=prefetched_user))
+            self.assertEqual(_group_names(prefetched_user), {SALES_GROUP})
+        self.assertEqual(len(queries), 0)
 
 
 class SalesReadPolicyTests(SimpleTestCase):
