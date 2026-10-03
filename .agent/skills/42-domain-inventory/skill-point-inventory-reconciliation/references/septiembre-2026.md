@@ -26,7 +26,7 @@ Verificadas en este seguimiento: canónicas existentes, remanente cero, sin desc
 
 Consultar estados por servicio/base cuando haga falta, no usar la lista como permiso para cerrar. Los casos 2453,2613,2614 también quedaron stock0/BALANCED documentalmente, sin que eso autorice cierre físico.
 
-## Bloqueo autoridad de merma: autorización pendiente
+## Bloqueo autoridad de merma: reparación autorizada, verificar resultado
 
 Caso3237 Empanada Manzana/Matriz conserva proyección 0+518−477−41=0, pero fuente actual no autoritativa. PointWasteLine1676 y MermaPOS desaparecieron; movimiento1683114, 5PZA, fecha raw27/09/2026 19:01:00.49, motivo Merma desde la caja, hash9f27f6de945bbc8b19cd. Backup existente `/opt/backups/erp/backup_20261003_020001.sql.gz` y rawjobs78023/79066 lo conservan. Historia419 y detalle actual Point confirman MERMA43→38, Canceladofalse.
 
@@ -34,7 +34,16 @@ Job80579 rangoSep27–Oct3 omitió el folio y superseded1 eliminó la fila. List
 
 Autoridad mensual elegía78023 fullSept seen267 vs actuales266; writers234/78023,4/79066,28/80579. Errores WASTE_SYNC_COUNT_MISMATCH/WASTE_SYNC_JOB_MIXED. unchanged1650/source_incomplete13450 NO significa13450filas faltantes: incluye hechos de resolución de productos.
 
-Ya se pidió autorización concreta a Mauricio para proteger importador compartido y recuperar ÚNICAMENTE registro original1683114 con IDs/dedup, sin crear merma Point ni ajustar stock. A este corte sin respuesta. No repetir pregunta ni implementar/restaurar/persist/sync. Un lector que ignore validación no resuelve omisión real. No forzar materialización mensual mientras siga bloqueada.
+Mauricio respondió «si» a la autorización concreta para proteger importador y
+recuperar exclusivamente el par original1683114, sin crear merma Point ni ajustar
+stock. Backup confirma ambos PK1676, branch original24/Matriz ERP1, receta16,
+writer79066 y timestamps originales. No reemplazar alias por otra PK. Recuperación
+exacta mediante scripts/recover_point_waste_1683114.py: dry-run por defecto, apply
+explícito, colisión diferente aborta, originales íntegros y segunda ejecución no-op.
+La protección del importador aborta atómicamente extracciones completas que omitan
+hashes existentes; margen de consulta no acredita exhaustividad. La publicación y
+recuperación deben comprobarse en VPS/UI antes de considerarse realizadas. No
+editar resúmenes viejos ni forzar autoridad mensual/materialización por conteos.
 
 ## Identidad Ciruela: documento existe, lector ambiguo
 

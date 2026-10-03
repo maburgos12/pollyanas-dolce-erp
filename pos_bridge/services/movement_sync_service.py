@@ -177,7 +177,7 @@ class PointMovementSyncService:
         return created
 
     def _supersede_stale_waste_rows(self, *, sync_job: PointSyncJob, current_hashes: set[str]) -> tuple[int, int]:
-        """Replace a complete Point waste period without touching partial branch syncs."""
+        """Reject missing period rows: absence from Point does not prove cancellation."""
         parameters = getattr(sync_job, "parameters", {}) or {}
         if not parameters.get("start_date") or not parameters.get("end_date"):
             return 0, 0
@@ -196,16 +196,27 @@ class PointMovementSyncService:
             movement_at__gte=start_at,
             movement_at__lt=end_at,
         ).exclude(source_hash__in=current_hashes)
-        stale_hashes = list(stale_rows.values_list("source_hash", flat=True))
-        if not stale_hashes:
+        missing_count = stale_rows.count()
+        if not missing_count:
             return 0, 0
 
-        merma_count, _ = MermaPOS.objects.filter(
-            source_hash__in=stale_hashes,
-            fuente=self.WASTE_SOURCE,
-        ).delete()
-        waste_count, _ = stale_rows.delete()
-        return waste_count, merma_count
+        missing_sample = list(stale_rows.order_by("id").values(
+            "id", "source_hash", "movement_external_id", "branch_id", "item_code", "quantity",
+        )[:20])
+        for row in missing_sample:
+            row["quantity"] = str(row["quantity"])
+        # Raised inside persist_waste_lines' transaction so every staged/ledger
+        # update rolls back before run_waste_sync records the FAILED job.
+        raise PersistenceError(
+            f"Extracción de mermas Point omitió {missing_count} filas existentes; "
+            "sin evidencia de cancelación no se reemplaza el período.",
+            context={
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "waste_coverage_missing_count": missing_count,
+                "waste_coverage_missing_sample": missing_sample,
+            },
+        )
 
     def _point_inventory_location(self, branch: PointBranch | None) -> str | None:
         if branch is None:
