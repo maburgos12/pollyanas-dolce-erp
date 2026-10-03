@@ -1,11 +1,13 @@
 from django.urls import path
 
 from . import views
+from .views_reporte_orden import orden_desde_reporte
 from .views_consolidacion_higiene import consolidacion_higiene
 
 app_name = "mantenimiento"
 
 urlpatterns = [
+    path("reportes/<int:pk>/orden/", orden_desde_reporte, name="orden-desde-reporte"),
     path("", views.dashboard, name="dashboard"),
     path(
         "consolidacion-higiene/",

@@ -82,13 +82,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-capturas-equipos-v1", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-reporte-orden-v2", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v28-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v29-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -206,7 +206,8 @@ class MantenimientoUnifiedAccessTests(TestCase):
 
         self.assertContains(response, 'window.addEventListener("hashchange", syncTabFromHash);')
         self.assertContains(response, 'if (location.hash === `#${tabId}`) {')
-        self.assertContains(response, 'const button = event.target.closest("[data-open-follow]");')
+        self.assertContains(response, 'const orderLink = event.target.closest("[data-open-report-order]");')
+        self.assertContains(response, 'const button = orderLink ? orderLink.closest(".mant-ticket-actions").querySelector("[data-open-follow]") : event.target.closest("[data-open-follow]");')
         self.assertContains(response, 'const btn = event.target.closest("[data-open-cancelar]");')
         self.assertContains(response, 'if (event.target.closest("#btnNuevaFalla")) modal.classList.add("is-open");')
         self.assertContains(response, 'if (event.target.closest("#btnServicioRealizado")) open("realizado");')
@@ -1638,7 +1639,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261002-capturas-equipos-v1", sw)
+        self.assertIn("20261003-reporte-orden-v2", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):

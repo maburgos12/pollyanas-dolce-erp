@@ -185,6 +185,7 @@
                       data-latest-note="{{ item.ultimo_avance|default:'' }}"
                       data-latest-date="{% if item.ultimo_avance_fecha %}{{ item.ultimo_avance_fecha|date:'d/m/Y H:i' }}{% endif %}"
                     >Trabajar</button>
+                    {% if item.tipo == "falla" %}<a class="btn btn-secondary btn-sm" data-open-report-order href="{% url 'mantenimiento:orden-desde-reporte' item.id %}">Trabajos y orden</a>{% endif %}
                     {% if item.tipo != "orden" and puede_escribir %}
                     <button class="btn btn-secondary btn-sm" type="button" data-open-duplicado
                       data-action="{% url 'mantenimiento:mant-duplicado' item.tipo item.id %}"
@@ -658,6 +659,7 @@
       <span>Último avance</span>
       <div id="mantDrawerLatestNote"></div>
     </div>
+    <div id="reporteOrdenContext" hidden></div>
     <form class="mant-form" id="mantFollowForm" method="post" enctype="multipart/form-data">
       {% csrf_token %}
       <div class="mant-form-grid">
@@ -971,6 +973,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'mantenimiento/reporte_orden.js' %}?v=20261003-reporte-orden-v2"></script>
 <script>
 function reportMaintenanceInitFailure(scope, missingIds) {
   const message = `[mantenimiento] ${scope} sin inicializar. Faltan nodos: ${missingIds.join(", ")}`;
@@ -1157,6 +1160,9 @@ function requireElements(scope, elementMap) {
 	    } else if (latestBlock) {
 	      latestBlock.classList.add("pd-is-hidden");
 	    }
+    const orderContext = document.getElementById("reporteOrdenContext");
+    orderContext.hidden = button.dataset.type !== "falla";
+    if (!orderContext.hidden) window.showReporteOrdenPanel(orderContext, button.dataset.maintenanceUid.split(":")[1]);
     drawer.classList.add("is-open");
   }
 
@@ -1174,9 +1180,12 @@ function requireElements(scope, elementMap) {
   if (boardSearch) boardSearch.addEventListener("input", filterBoard);
 
   document.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-open-follow]");
+    const orderLink = event.target.closest("[data-open-report-order]");
+    const button = orderLink ? orderLink.closest(".mant-ticket-actions").querySelector("[data-open-follow]") : event.target.closest("[data-open-follow]");
     if (!button) return;
+    if (orderLink) event.preventDefault();
     openDrawer(button);
+    if (orderLink) drawerTrigger = orderLink;
   });
 
   const board = document.querySelector(".mant-board");

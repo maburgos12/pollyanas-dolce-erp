@@ -1,0 +1,26 @@
+<section tabindex="-1" id="reporteOrdenResultado-{{ reporte_id }}" aria-label="Orden desde reporte">
+  <h3>Trabajos vinculados</h3>
+  <p>Los detalles y el historial se abren en otra pestaña para conservar este reporte y tu posición.</p>
+  {% for orden in ordenes %}<p><a target="_blank" rel="noopener" href="{% url 'mantenimiento:app' %}?item={{ orden.uid|urlencode }}">Orden {{ orden.folio }} · Abrir en otra pestaña</a> · {{ orden.estado }}</p>{% empty %}<p>Sin trabajos vinculados.</p>{% endfor %}
+  {% if resultado %}<p role="status">{{ resultado }}</p>{% endif %}
+  {% if error %}<p role="alert">{{ error }}</p>{% endif %}
+  {% if puede_crear or error %}
+  <details {% if error %}open{% endif %}><summary>Crear orden de trabajo{% if ordenes %} · Nueva intervención{% endif %}</summary>
+    <p>{{ activo.nombre }} · {{ sucursal.nombre }}</p>
+    <p>El equipo y la sucursal son fijos. El reporte conserva sus costos y evidencias.</p>
+    <form class="mant-form" method="post" action="{% url 'mantenimiento:orden-desde-reporte' reporte_id %}" data-report-order data-reporte-id="{{ reporte_id }}" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true">
+      {% csrf_token %}<input type="hidden" name="clave_captura" value="{{ clave_captura }}">
+      <label class="mant-field">Descripción<textarea class="mant-input" name="descripcion" required maxlength="10000">{{ datos.descripcion }}</textarea></label>
+      <label class="mant-field">Prioridad<select class="mant-input" name="prioridad" required>
+        <option value="BAJA" {% if datos.prioridad == 'BAJA' %}selected{% endif %}>Baja</option><option value="MEDIA" {% if datos.prioridad == 'MEDIA' %}selected{% endif %}>Media</option><option value="ALTA" {% if datos.prioridad == 'ALTA' %}selected{% endif %}>Alta</option><option value="CRITICA" {% if datos.prioridad == 'CRITICA' %}selected{% endif %}>Crítica</option>
+      </select></label>
+      <label class="mant-field">Fecha programada<input class="mant-input" type="date" name="fecha_programada" required value="{{ datos.fecha_programada }}"></label>
+      <label class="mant-field">Responsable<input class="mant-input" name="responsable" maxlength="120" value="{{ datos.responsable }}"></label>
+      <button class="btn btn-primary" type="submit">Crear orden vinculada</button>
+      <p class="async-action-feedback" role="status"></p>
+    </form>
+  </details>
+  {% elif motivo %}<p role="status">{{ motivo }}</p>{% endif %}
+  <a target="_blank" rel="noopener" href="{% url 'mantenimiento:app' %}?item=falla:{{ reporte_id }}">Detalle del reporte · Abrir en otra pestaña</a>
+  {% if activo.id %}<a target="_blank" rel="noopener" href="{% url 'mantenimiento:app' %}?vista=historial&amp;activo={{ activo.id }}">Historial del equipo · Abrir en otra pestaña</a>{% endif %}
+</section>

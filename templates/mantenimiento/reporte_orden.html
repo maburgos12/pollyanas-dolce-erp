@@ -1,0 +1,11 @@
+{% extends 'base.html' %}
+{% load static %}
+{% block title %}Orden desde reporte{% endblock %}
+{% block page_title %}Reporte #{{ reporte_id }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/template_modules/templates-mantenimiento-dashboard.css' %}">{% endblock %}
+{% block content %}
+<a data-report-order-back href="{% url 'mantenimiento:dashboard' %}#tab-seguimiento">Volver a Mantenimiento</a>
+{% include 'mantenimiento/reporte_orden_form.html' %}
+{% endblock %}
+
+{% block extra_js %}<script src="{% static 'mantenimiento/reporte_orden.js' %}?v=20261003-reporte-orden-v2"></script>{% endblock %}

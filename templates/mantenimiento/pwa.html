@@ -54,6 +54,7 @@
         bandejaFiltro: "todos",
         counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0},
         history: {periodo: vistaInicial === "historial" ? "todo" : "30d", activo: vistaInicial === "historial" ? (entrada.get("activo") || "") : "", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1, results: [], hasNext: false},
+        reportOrderDrafts: new Map(),
         detailCache: new Map(),
         detailReturn: {screen: "pendientes", uid: null},
         requestGeneration: {inbox: 0, history: 0, detail: 0},
@@ -2438,6 +2439,7 @@
           });
           section.querySelectorAll("[data-links-page]").forEach(button => button.onclick = () => loadDetailLinks(uid, generation, Number(button.dataset.linksPage)));
           section.querySelectorAll("[data-link-remove]").forEach(form => form.onsubmit = event => submitLinkAction(event, uid, generation));
+          if (uid.startsWith("falla:")) loadReportOrder(uid, generation, section);
           const selector = section.querySelector("#link-selector");
           if (selector) selector.addEventListener("toggle", () => {
             if (selector.open && !selector.dataset.loaded) { selector.dataset.loaded = "true"; loadLinkCandidates(uid, generation); }
@@ -2446,6 +2448,87 @@
           if (generation !== state.requestGeneration.detail || !document.contains(section) || section.linkRequestId !== requestId) return;
           section.innerHTML = `<h2>${heading}</h2><p class="error-msg" role="alert">${esc(error.message)}</p><button type="button" class="secondary-btn">Reintentar</button>`;
           section.querySelector("button").onclick = () => loadDetailLinks(uid, generation, page);
+        }
+      }
+
+      async function loadReportOrder(uid, generation, section) {
+        const reportId = uid.split(":")[1];
+        const region = document.createElement("section");
+        region.className = "report-order-action";
+        section.appendChild(region);
+        region.innerHTML = '<p role="status">Consultando la atención del reporte…</p>';
+        try {
+          const context = await linksRequest(`/reportes/${reportId}/orden/`);
+          if (generation !== state.requestGeneration.detail || !document.contains(region)) return;
+          const draftKey = `pd_report_order_${state.perfil.id}_${reportId}`;
+          let draft = state.reportOrderDrafts.get(uid);
+          if (!draft) {
+            try { const saved = JSON.parse(sessionStorage.getItem(draftKey) || "null"); if (saved?.intento?.clave_captura) draft = {...saved,pending:false}; } catch (error) {}
+            if (draft) state.reportOrderDrafts.set(uid, draft);
+          }
+          if (!context.puede_crear && !draft?.intento) {
+            region.innerHTML = `<p role="status">${esc(context.motivo)}</p>${context.activas.map(order => `<button type="button" class="secondary-btn" data-active-order="${esc(order.uid)}">Abrir orden ${esc(order.folio)}</button>`).join("")}`;
+            region.querySelectorAll("[data-active-order]").forEach(button => button.onclick = () => openItemDetail(button.dataset.activeOrder, button, true));
+            return;
+          }
+          if (!draft) {
+            draft = {clave:crypto.randomUUID(), intento:null, pending:false, valores:{descripcion:context.descripcion, prioridad:context.prioridad, fecha_programada:context.fecha_programada, responsable:""}};
+            state.reportOrderDrafts.set(uid, draft);
+          }
+          const values = draft.intento || draft.valores;
+          region.innerHTML = `<details ${draft.intento ? "open" : ""}><summary>Crear orden de trabajo${context.ordenes.length ? " · Nueva intervención" : ""}</summary>
+            <p>${esc(context.activo.nombre)} · ${esc(context.sucursal.nombre)}</p><p>El equipo y la sucursal son fijos. El reporte conserva sus costos y evidencias.</p>
+            <form data-async-action data-report-order-pwa><fieldset style="border:0;padding:0" ${draft.intento || draft.pending ? "disabled" : ""}>
+              <label>Descripción<textarea name="descripcion" required maxlength="10000">${esc(values.descripcion)}</textarea></label>
+              <label>Prioridad<select name="prioridad" required>${[["BAJA","Baja"],["MEDIA","Media"],["ALTA","Alta"],["CRITICA","Crítica"]].map(([value,label]) => `<option value="${value}" ${values.prioridad === value ? "selected" : ""}>${label}</option>`).join("")}</select></label>
+              <label>Fecha programada<input name="fecha_programada" type="date" required value="${esc(values.fecha_programada)}"></label>
+              <label>Responsable<input name="responsable" maxlength="120" value="${esc(values.responsable)}"></label>
+            </fieldset><button type="submit" class="primary-btn" ${draft.pending ? "disabled" : ""}>${draft.intento ? "Reintentar creación" : "Crear orden vinculada"}</button><p class="link-feedback" role="status"></p></form></details>`;
+          const form = region.querySelector("form");
+          form.addEventListener("input", () => { if (!draft.intento) draft.valores = Object.fromEntries(new FormData(form)); });
+          form.onsubmit = async event => {
+            event.preventDefault();
+            if (draft.pending || !form.reportValidity()) return;
+            if (!draft.intento) draft.intento = {...Object.fromEntries(new FormData(form)), clave_captura:draft.clave};
+            try { sessionStorage.setItem(draftKey, JSON.stringify({clave:draft.clave,intento:draft.intento,valores:draft.valores})); } catch (error) {}
+            draft.pending = true;
+            form.querySelector("fieldset").disabled = true;
+            const button = form.querySelector('[type="submit"]');
+            button.disabled = true;
+            const feedback = form.querySelector(".link-feedback");
+            feedback.textContent = "Creando orden…";
+            const scroll = window.scrollY;
+            try {
+              const response = await apiV2Fetch(`/reportes/${reportId}/orden/`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(draft.intento)});
+              const result = await response.json();
+              if (!response.ok || !result.ok) throw Object.assign(new Error(result.error || result.detail || "No se pudo completar la acción."), {statusCode:response.status});
+              state.reportOrderDrafts.delete(uid);
+              try { sessionStorage.removeItem(draftKey); } catch (error) {}
+              invalidateDetail(uid); invalidateDetail(result.uid);
+              state.bandeja = []; state.ordenes = []; state.resumen = null;
+              if (document.contains(region)) {
+                region.innerHTML = `<p role="status">Orden ${esc(result.folio)} vinculada. El reporte conserva sus estados, importes y evidencias.</p><button type="button" class="secondary-btn">Abrir orden ${esc(result.folio)}</button>`;
+                region.querySelector("button").onclick = event => openItemDetail(result.uid, event.currentTarget, true);
+                window.scrollTo(0, scroll);
+              }
+            } catch (error) {
+              if ([400,403,404].includes(error.statusCode)) { draft.intento = null; form.querySelector("fieldset").disabled = false; try { sessionStorage.removeItem(draftKey); } catch (storageError) {} }
+              if (document.contains(form)) {
+                const message = error.statusCode ? error.message : "No pudimos confirmar el resultado.";
+                feedback.textContent = message + (draft.intento && ![409,410].includes(error.statusCode) ? " Conservamos este intento. Reintenta sin cambiar los datos." : "");
+                feedback.setAttribute("role", "alert");
+              }
+            } finally {
+              draft.pending = false;
+              button.disabled = false;
+              button.textContent = draft.intento ? "Reintentar creación" : "Crear orden vinculada";
+            }
+          };
+        } catch (error) {
+          if (document.contains(region)) {
+            region.innerHTML = `<p role="alert">${esc(error.message)}</p><button type="button" class="secondary-btn">Reintentar consulta</button>`;
+            region.querySelector("button").onclick = () => { region.remove(); loadReportOrder(uid, generation, section); };
+          }
         }
       }
 
@@ -2598,12 +2681,13 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261002-capturas-equipos-v1", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-reporte-orden-v2", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {
           if (await useDjangoSessionToken()) {
             await showScreen(vistaInicial);
+            if (/^(falla|orden):[1-9][0-9]*$/.test(entrada.get("item") || "")) await openItemDetail(entrada.get("item"));
             return;
           }
         } catch (error) {
@@ -2613,6 +2697,7 @@
         if (state.token) {
           try {
             await showScreen(vistaInicial);
+            if (/^(falla|orden):[1-9][0-9]*$/.test(entrada.get("item") || "")) await openItemDetail(entrada.get("item"));
             return;
           } catch (error) {
             logout(false);
