@@ -50,6 +50,29 @@ físico. No consultar otra vez un folio verificado sin evidencia nueva.
 
 ## Límites y siguiente paso
 
+### Plan mensual antes de revisar uno por uno
+
+Usar el mismo goal con `metadata={"mode":"plan_month","batch_size":10}` y un
+expediente ancla del mes. CLI: `run_agent_goal --goal reconciliation_guard
+--event-id ID --entity-type ProductInventoryAuditCase --plan-month`.
+El plan reutiliza expedientes y bitácoras existentes, sin reinvestigar el mes ni
+ejecutar el lote. Muestra un bloqueo mensual compartido una vez, grupos por
+comprobación pendiente, progreso registrado y hasta diez IDs de próxima revisión.
+Atender primero el bloqueo global según autorización y avanzar investigaciones
+independientes; no detener todo ni repetir la misma solicitud por cada expediente.
+
+Revisiones con firma idéntica de caso/corrida/eventos/hallazgos se reutilizan SOLO
+para planificación. Cambios registrados regresan el caso a la cola. Una firma de
+proyección NO certifica fuentes externas actuales: no llamar «vigente en Point» a
+una bitácora guardada. Si hay evidencia externa nueva, revisar ese expediente
+explícitamente con el contrato individual; no esperar que un caché la adivine.
+
+Para continuar el lote usar `--after-case-id` y `--expected-plan-fingerprint`
+devueltos por el plan. Si cambia la evidencia, el cursor se reinicia y lo informa.
+Lotes no autorizan HTTP, captura o notificaciones. No fabricar porcentaje de cierre
+a partir de BALANCED; estado documental, aprobación y conteo físico siguen aparte.
+Los expedientes excluidos por sold_products se conservan, no se consideran cerrados.
+
 La prioridad es autoridad mensual, divergencia venta comercial/stock, evidencia
 guardada, desconocidos y cobertura. Solo recomienda verificar cobertura cuando
 existe diferencia real, apertura/cierre referenciados, remanente cero y ventas

@@ -609,7 +609,8 @@ def _finalize_run(
     if goal.goal_type == 'reconciliation_guard':
         run.result_summary_json.update({
             'observation': observation,
-            'message': f"Revisión expediente #{goal.entity_id}: {observation['next_step']['reason']} "
+            'message': (f"Plan conciliación {observation['month']}: " if observation.get('mode') == 'plan_month'
+                        else f"Revisión expediente #{goal.entity_id}: ") + f"{observation['next_step']['reason']} "
                        "Sin cambios operativos; cierre no autorizado.",
         })
     run.save(update_fields=["status", "finished_at", "result_summary_json"])

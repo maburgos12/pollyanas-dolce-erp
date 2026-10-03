@@ -28,8 +28,17 @@ class Command(BaseCommand):
         )
         parser.add_argument("--username", default="", help="Usuario que dispara la ejecución para trazabilidad.")
         parser.add_argument("--objective", default="", help="Descripción humana del objetivo.")
+        parser.add_argument('--plan-month', action='store_true', help='Plan agrupado del mes del expediente, sin reinvestigar ni ejecutar.')
+        parser.add_argument('--batch-size', type=int, default=10, help='Máximo de revisiones propuestas (1–10).')
+        parser.add_argument('--after-case-id', type=int, default=0, help='Cursor del plan anterior.')
+        parser.add_argument('--expected-plan-fingerprint', default='', help='Huella del plan anterior para reanudar sin omisiones.')
 
     def handle(self, *args, **options):
+        if not options['plan_month'] and (options['after_case_id'] or options['expected_plan_fingerprint']
+                                           or options['batch_size'] != 10):
+            raise CommandError('Opciones de lote requieren --plan-month.')
+        if options['plan_month'] and options['goal'] != 'reconciliation_guard':
+            raise CommandError('--plan-month requiere reconciliation_guard.')
         actor = resolve_runtime_actor(str(options.get("username") or "").strip())
         if options.get("username") and actor is None:
             raise CommandError(f"No existe el usuario '{options['username']}'.")
@@ -41,6 +50,10 @@ class Command(BaseCommand):
             entity_type=str(options.get("entity_type") or "").strip(),
             entity_id=int(options["event_id"]),
             requested_action=str(options.get("requested_action") or "review").strip(),
+            metadata=({'mode': 'plan_month', 'batch_size': options['batch_size'],
+                       'after_case_id': options['after_case_id'],
+                       'expected_plan_fingerprint': options['expected_plan_fingerprint']}
+                      if options['plan_month'] else {}),
         )
         try:
             result = run_agent_goal(goal, actor=actor, base_dir=settings.BASE_DIR)
@@ -56,6 +69,8 @@ class Command(BaseCommand):
                         "status": result.status,
                         "decision": result.decision,
                         "next_step": result.observation.get("next_step"),
+                        "mode": result.observation.get('mode', 'review'),
+                        "plan": result.observation.get('plan'),
                         "blocking_findings": [finding.as_dict() for finding in result.blocking_findings],
                     },
                     ensure_ascii=False,
