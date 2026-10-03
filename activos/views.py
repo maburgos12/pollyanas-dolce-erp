@@ -4,6 +4,7 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
 from urllib.parse import urlencode
+from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -32,6 +33,9 @@ from fallas.models import ReporteFalla
 from logistica.models import ReparacionUnidad, ServicioRealizadoUnidad, Unidad
 from maestros.models import Proveedor
 from mantenimiento.services_access import can_access_mantenimiento
+
+from .services_capturas import crear_captura_activos
+from mantenimiento.services_capturas_equipos import CapturaEquipoError
 
 from .services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from .services_pasaporte import activos_autorizados, svg_qr_activo
@@ -2569,73 +2573,63 @@ def planes(request):
     return render(request, "activos/planes.html", context)
 
 
+def _permiso_captura_denegado(request, mensaje):
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": False, "toast": {"type": "error", "message": mensaje, "persistent": True}}, status=403)
+    raise PermissionDenied(mensaje)
+
+
+def _crear_captura_web(request, *, modo, vista, destino):
+    """Un único alta para JSON y navegación nativa; los errores conservan intento."""
+    try:
+        orden, replay = crear_captura_activos(usuario=request.user, datos=request.POST,
+            archivos=request.FILES, modo=modo)
+    except PermissionDenied as exc:
+        return _permiso_captura_denegado(request, str(exc))
+    except (CapturaEquipoError, Http404) as exc:
+        mensaje = str(exc.detail) if isinstance(exc, CapturaEquipoError) else "El equipo o plan seleccionado ya no está disponible. Revisa la selección."
+        status_code = exc.status_code if isinstance(exc, CapturaEquipoError) else 400
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse({"ok": False, "toast": {"type": "error", "message": mensaje, "persistent": True}}, status=status_code)
+        lectura = copy(request)
+        lectura.method = "GET"
+        response = vista(lectura)
+        clave = request.POST.get("clave_captura") or str(uuid4())
+        borrador = {k:request.POST.getlist(k) for k in request.POST if k != "csrfmiddlewaretoken"}
+        borrador["clave_captura"] = [clave]
+        response.context_data.update(clave_captura=clave,
+            captura_datos=request.POST.dict(), captura_error=mensaje, captura_borrador=borrador,
+            captura_archivos_perdidos=bool(request.FILES))
+        response.status_code = status_code
+        return response
+    mensaje = f"Orden {orden.folio} recuperada; no se duplicó." if replay else f"Orden {orden.folio} registrada."
+    enlace = reverse("activos:orden_evidencias", args=[orden.pk])
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return JsonResponse({"ok": True, "replay": replay, "id": orden.pk,
+            "folio": orden.folio, "enlace": enlace, "siguiente_clave": str(uuid4()),
+            "toast": {"type": "info" if replay else "success", "message": mensaje}}, status=200 if replay else 201)
+    messages.info(request, mensaje) if replay else messages.success(request, mensaje)
+    destino_url = reverse(destino)
+    if request.GET:
+        destino_url += "?" + request.GET.urlencode()
+    return redirect(enlace if modo == "rapido" else destino_url)
+
+
 @login_required
 def ordenes(request):
     if not can_view_inventario(request.user):
+        if request.method == "POST" and (request.POST.get("action") or "create_orden").strip().lower() == "create_orden":
+            return _permiso_captura_denegado(request, "No tienes permisos para ver Activos.")
         raise PermissionDenied("No tienes permisos para ver Activos.")
 
     if request.method == "POST":
         if not can_manage_inventario(request.user):
+            if (request.POST.get("action") or "create_orden").strip().lower() == "create_orden":
+                return _permiso_captura_denegado(request, "No tienes permisos para gestionar órdenes de mantenimiento.")
             raise PermissionDenied("No tienes permisos para gestionar órdenes de mantenimiento.")
         action = (request.POST.get("action") or "create_orden").strip().lower()
         if action == "create_orden":
-            activo_id = (request.POST.get("activo_id") or "").strip()
-            plan_id = (request.POST.get("plan_id") or "").strip()
-            tipo = (request.POST.get("tipo") or OrdenMantenimiento.TIPO_PREVENTIVO).strip().upper()
-            prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper()
-            descripcion = (request.POST.get("descripcion") or "").strip()
-            responsable = (request.POST.get("responsable") or "").strip()
-            fecha_programada_raw = (request.POST.get("fecha_programada") or "").strip()
-            try:
-                fecha_programada = (
-                    timezone.datetime.fromisoformat(fecha_programada_raw).date()
-                    if fecha_programada_raw
-                    else timezone.localdate()
-                )
-            except ValueError:
-                fecha_programada = timezone.localdate()
-            if not activo_id.isdigit():
-                messages.error(request, "Selecciona un activo válido.")
-                return redirect("activos:ordenes")
-            activo_obj = get_object_or_404(Activo, pk=int(activo_id))
-            plan_obj = None
-            if plan_id.isdigit():
-                plan_obj = PlanMantenimiento.objects.filter(pk=int(plan_id), activo_ref=activo_obj).first()
-            orden = OrdenMantenimiento.objects.create(
-                activo_ref=activo_obj,
-                plan_ref=plan_obj,
-                tipo=tipo if tipo in {x[0] for x in OrdenMantenimiento.TIPO_CHOICES} else OrdenMantenimiento.TIPO_PREVENTIVO,
-                prioridad=(
-                    prioridad
-                    if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES}
-                    else OrdenMantenimiento.PRIORIDAD_MEDIA
-                ),
-                descripcion=descripcion,
-                responsable=responsable,
-                fecha_programada=fecha_programada,
-                creado_por=request.user,
-            )
-            BitacoraMantenimiento.objects.create(
-                orden=orden,
-                accion="CREADA",
-                comentario="Orden creada desde UI",
-                usuario=request.user,
-            )
-            log_event(
-                request.user,
-                "CREATE",
-                "activos.OrdenMantenimiento",
-                orden.id,
-                {
-                    "folio": orden.folio,
-                    "activo_id": orden.activo_ref_id,
-                    "tipo": orden.tipo,
-                    "prioridad": orden.prioridad,
-                    "estatus": orden.estatus,
-                },
-            )
-            messages.success(request, f"Orden {orden.folio} creada.")
-            return redirect("activos:ordenes")
+            return _crear_captura_web(request, modo="orden", vista=ordenes, destino="activos:ordenes")
 
         if action == "update_costos":
             orden_id = _safe_int(request.POST.get("orden_id"))
@@ -2854,6 +2848,7 @@ def ordenes(request):
         bitacora_30d=BitacoraMantenimiento.objects.filter(fecha__date__gte=today - timedelta(days=30)).count(),
     )
     context = {
+        "clave_captura": str(uuid4()),
         "module_tabs": _module_tabs("ordenes"),
         "ordenes_rows": ordenes_rows,
         "ordenes_editables": list(
@@ -2990,54 +2985,12 @@ def actualizar_orden_estatus(request, pk: int, estatus: str):
 @login_required
 def reportes_servicio(request):
     if not can_view_inventario(request.user):
+        if request.method == "POST":
+            return _permiso_captura_denegado(request, "No tienes permisos para ver Activos.")
         raise PermissionDenied("No tienes permisos para ver Activos.")
 
     if request.method == "POST":
-        activo_id = _safe_int(request.POST.get("activo_id"))
-        descripcion = (request.POST.get("descripcion") or "").strip()
-        if not activo_id or not descripcion:
-            messages.error(request, "Activo y descripción del reporte son obligatorios.")
-            return redirect("activos:reportes")
-        activo_obj = get_object_or_404(Activo, pk=activo_id)
-        prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA).strip().upper()
-        prioridad = (
-            prioridad if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES} else OrdenMantenimiento.PRIORIDAD_MEDIA
-        )
-        perfil = getattr(request.user, "userprofile", None)
-        area = perfil.departamento.nombre if perfil and perfil.departamento_id else ""
-        sucursal = perfil.sucursal.nombre if perfil and perfil.sucursal_id else ""
-        responsable = (request.POST.get("responsable") or "").strip() or request.user.get_full_name() or request.user.username
-        fecha_programada = _parse_date(request.POST.get("fecha_programada")) or timezone.localdate()
-        orden = OrdenMantenimiento.objects.create(
-            activo_ref=activo_obj,
-            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
-            prioridad=prioridad,
-            estatus=OrdenMantenimiento.ESTATUS_PENDIENTE,
-            fecha_programada=fecha_programada,
-            responsable=responsable,
-            descripcion=descripcion,
-            creado_por=request.user,
-        )
-        contexto = []
-        if area:
-            contexto.append(f"Área: {area}")
-        if sucursal:
-            contexto.append(f"Sucursal: {sucursal}")
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="REPORTE_FALLA",
-            comentario=" · ".join(contexto) if contexto else "Reporte desde módulo Activos",
-            usuario=request.user,
-        )
-        log_event(
-            request.user,
-            "CREATE",
-            "activos.OrdenMantenimiento",
-            orden.id,
-            {"folio": orden.folio, "tipo": "REPORTE_FALLA", "activo_id": activo_obj.id, "prioridad": prioridad},
-        )
-        messages.success(request, f"Reporte levantado. Orden generada: {orden.folio}.")
-        return redirect("activos:reportes")
+        return _crear_captura_web(request, modo="reporte", vista=reportes_servicio, destino="activos:reportes")
 
     estado = (request.GET.get("estatus") or "ABIERTAS").strip().upper()
     semaforo_filter = (request.GET.get("semaforo") or "").strip().upper()
@@ -3209,7 +3162,8 @@ def reportes_servicio(request):
         context["document_stage_rows"],
         context["enterprise_chain"],
     )
-    return render(request, "activos/reportes.html", context)
+    context["clave_captura"] = str(uuid4())
+    return TemplateResponse(request, "activos/reportes.html", context)
 
 
 @login_required
@@ -3730,116 +3684,22 @@ def eliminar_evidencia(request, evidencia_id):
 def registro_rapido(request):
     """Vista mobile-first para registrar un mantenimiento correctivo en campo."""
     if not can_view_inventario(request.user):
+        if request.method == "POST":
+            return _permiso_captura_denegado(request, "No tienes permisos para ver Activos.")
         raise PermissionDenied
 
     if request.method == "POST":
         if not can_manage_inventario(request.user):
-            raise PermissionDenied
+            return _permiso_captura_denegado(request, "No tienes permisos para registrar mantenimiento.")
 
-        activo_id = (request.POST.get("activo_id") or "").strip()
-        descripcion = (request.POST.get("descripcion") or "").strip()
-        prioridad = (request.POST.get("prioridad") or OrdenMantenimiento.PRIORIDAD_ALTA).strip().upper()
-        origen = (request.POST.get("origen") or OrdenMantenimiento.ORIGEN_EMERGENCIA).strip().upper()
-        responsable = (request.POST.get("responsable") or "").strip()
-        proveedor_id = (request.POST.get("proveedor_id") or "").strip()
-        costo_repuestos = _safe_decimal(request.POST.get("costo_repuestos"))
-        costo_mano_obra = _safe_decimal(request.POST.get("costo_mano_obra"))
-        costo_otros = _safe_decimal(request.POST.get("costo_otros"))
-        proxima_revision_raw = (request.POST.get("proxima_revision") or "").strip()
-        solicitudes_ids = request.POST.getlist("solicitud_id")
-        numero_factura = (request.POST.get("numero_factura") or "").strip()
-        nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
-        factura_archivo = request.FILES.get("factura_archivo")
-
-        if not activo_id.isdigit() or not descripcion:
-            messages.error(request, "Selecciona un equipo y describe el mantenimiento.")
-            return redirect("activos:registro_rapido")
-
-        activo_obj = get_object_or_404(Activo, pk=int(activo_id))
-        proveedor_obj = None
-        if proveedor_id.isdigit():
-            proveedor_obj = Proveedor.objects.filter(pk=int(proveedor_id)).first()
-
-        try:
-            proxima_revision = (
-                timezone.datetime.fromisoformat(proxima_revision_raw).date()
-                if proxima_revision_raw else None
-            )
-        except ValueError:
-            proxima_revision = None
-
-        orden = OrdenMantenimiento.objects.create(
-            activo_ref=activo_obj,
-            tipo=OrdenMantenimiento.TIPO_CORRECTIVO,
-            prioridad=prioridad if prioridad in {x[0] for x in OrdenMantenimiento.PRIORIDAD_CHOICES} else OrdenMantenimiento.PRIORIDAD_ALTA,
-            origen=origen if origen in {x[0] for x in OrdenMantenimiento.ORIGEN_CHOICES} else OrdenMantenimiento.ORIGEN_EMERGENCIA,
-            descripcion=descripcion,
-            responsable=responsable or request.user.get_full_name() or request.user.username,
-            proveedor_servicio=proveedor_obj,
-            proxima_revision=proxima_revision,
-            costo_repuestos=costo_repuestos,
-            costo_mano_obra=costo_mano_obra,
-            costo_otros=costo_otros,
-            numero_factura=numero_factura,
-            nota_trabajo=nota_trabajo,
-            fecha_programada=timezone.localdate(),
-            fecha_inicio=timezone.localdate(),
-            estatus=OrdenMantenimiento.ESTATUS_EN_PROCESO,
-            creado_por=request.user,
-        )
-        # Guardar factura si se adjuntó
-        if factura_archivo and factura_archivo.size <= 30 * 1024 * 1024:
-            orden.factura_archivo = factura_archivo
-            orden.save(update_fields=["factura_archivo"])
-
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="CREADA",
-            comentario=f"Orden de emergencia registrada desde dispositivo móvil. Origen: {orden.get_origen_display()}",
-            usuario=request.user,
-        )
-
-        # Vincular solicitudes de falla seleccionadas
-        for sid in solicitudes_ids:
-            if sid.isdigit():
-                sf = SolicitudFalla.objects.filter(pk=int(sid), activo_ref=activo_obj).first()
-                if sf:
-                    sf.estatus = SolicitudFalla.ESTATUS_EN_PROCESO
-                    sf.orden_atencion = orden
-                    sf.save(update_fields=["estatus", "orden_atencion", "actualizado_en"])
-
-        # Subir evidencias adjuntas
-        archivos = request.FILES.getlist("evidencias")
-        for archivo in archivos[:10]:
-            if archivo.size <= 30 * 1024 * 1024:
-                tipo_ev = EvidenciaOrden.TIPO_FOTO
-                ext = archivo.name.rsplit(".", 1)[-1].lower() if "." in archivo.name else ""
-                if ext in {"mp4", "mov", "avi", "mkv"}:
-                    tipo_ev = EvidenciaOrden.TIPO_VIDEO
-                elif ext in {"pdf", "doc", "docx", "xls", "xlsx"}:
-                    tipo_ev = EvidenciaOrden.TIPO_DOCUMENTO
-                EvidenciaOrden.objects.create(
-                    orden=orden,
-                    archivo=archivo,
-                    tipo=tipo_ev,
-                    descripcion="Evidencia del mantenimiento",
-                    subido_por=request.user,
-                )
-
-        log_event(request.user, "CREATE", "activos.OrdenMantenimiento", orden.id, {
-            "folio": orden.folio,
-            "activo": activo_obj.nombre,
-            "origen": orden.origen,
-            "tipo": orden.tipo,
-        })
-        messages.success(request, f"Mantenimiento {orden.folio} registrado correctamente.")
-        return redirect("activos:orden_evidencias", orden_id=orden.id)
+        return _crear_captura_web(request, modo="rapido", vista=registro_rapido, destino="activos:registro_rapido")
 
     activos = Activo.objects.filter(activo=True).select_related("sucursal").order_by("nombre")
     proveedores = Proveedor.objects.filter(activo=True).order_by("nombre")
-    return render(request, "activos/registro_rapido.html", {
+    return TemplateResponse(request, "activos/registro_rapido.html", {
         "activos": activos,
         "proveedores": proveedores,
+        "clave_captura": str(uuid4()),
         "prioridades": OrdenMantenimiento.PRIORIDAD_CHOICES,
         "origenes": OrdenMantenimiento.ORIGEN_CHOICES,
         "module_tabs": _module_tabs("activos:ordenes"),

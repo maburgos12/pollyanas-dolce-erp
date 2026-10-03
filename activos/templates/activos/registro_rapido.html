@@ -8,6 +8,7 @@
 {% endblock %}
 
 {% block content %}
+{% include "activos/_captura_contexto.html" %}
 <div class="quick-actions pd-mb-3"><a class="btn btn-secondary" href="{% url 'activos:ordenes' %}">Volver a órdenes de mantenimiento</a></div>
 
 {% if messages %}
@@ -21,8 +22,14 @@
     Falla Registrar mantenimiento no planeado
   </div>
 
-  <form method="post" enctype="multipart/form-data" id="form-registro-rapido">
+  <form method="post" enctype="multipart/form-data" id="form-registro-rapido" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true" data-captura-activos>
     {% csrf_token %}
+    <input type="hidden" name="clave_captura" value="{{ clave_captura }}">
+    {% if captura_borrador.solicitud_id %}<p>Solicitudes conservadas del intento. Puedes desmarcarlas si necesitas corregir la selección.</p>{% endif %}
+    {% for sid in captura_borrador.solicitud_id %}<label data-solicitud-borrador><input type="checkbox" name="solicitud_id" value="{{ sid }}" checked> Solicitud #{{ sid }}</label>{% endfor %}
+    <div data-captura-feedback role="status" aria-live="polite">{% if captura_error %}{{ captura_error }}{% endif %}</div>
+    {% if captura_archivos_perdidos %}<p role="alert">Vuelve a seleccionar los archivos antes de reintentar; el navegador no conserva adjuntos después de este envío.</p>{% endif %}
+
 
     <!-- ① EQUIPO -->
     <div class="rr-section">
@@ -31,9 +38,9 @@
       <div class="mobile-form-group">
         <label>Equipo *</label>
         <select name="activo_id" id="sel-activo" required>
-          <option value="">— Busca y selecciona el equipo —</option>
+          <option value=""{% if captura_datos %}{% if captura_datos.activo_id == '' %} selected{% endif %}{% endif %}>— Busca y selecciona el equipo —</option>
           {% for a in activos %}
-            <option value="{{ a.id }}">{{ a.nombre }}{% if a.sucursal %} · {{ a.sucursal.nombre }}{% endif %}</option>
+            <option value="{{ a.id }}"{% if captura_datos %}{% if captura_datos.activo_id == a.id|stringformat:"s" %} selected{% endif %}{% endif %}>{{ a.nombre }}{% if a.sucursal %} · {{ a.sucursal.nombre }}{% endif %}</option>
           {% endfor %}
         </select>
       </div>
@@ -55,28 +62,28 @@
         <label>Origen del mantenimiento *</label>
         <select name="origen" required>
           {% for val, label in origenes %}
-            <option value="{{ val }}" {% if val == "EMERGENCIA" %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ val }}" {% if captura_datos %}{% if captura_datos.origen == val %} selected{% endif %}{% else %}{% if val == "EMERGENCIA" %}selected{% endif %}{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
 
       <div class="mobile-form-group">
         <label>Descripción del trabajo realizado *</label>
-        <textarea name="descripcion" placeholder="Ej: Se reemplazó resistencia quemada del horno 3. Se verificó temperatura tras encendido. Equipo vuelve a operar normal." required></textarea>
+        <textarea name="descripcion" placeholder="Ej: Se reemplazó resistencia quemada del horno 3. Se verificó temperatura tras encendido. Equipo vuelve a operar normal." required>{% if captura_datos %}{{ captura_datos.descripcion }}{% else %}{% endif %}</textarea>
       </div>
 
       <div class="mobile-form-group">
         <label>Prioridad</label>
         <select name="prioridad">
           {% for val, label in prioridades %}
-            <option value="{{ val }}" {% if val == "ALTA" %}selected{% endif %}>{{ label }}</option>
+            <option value="{{ val }}" {% if captura_datos %}{% if captura_datos.prioridad == val %} selected{% endif %}{% else %}{% if val == "ALTA" %}selected{% endif %}{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </div>
 
       <div class="mobile-form-group">
         <label>Técnico / Responsable</label>
-        <input type="text" name="responsable" placeholder="Nombre del técnico que realizó el trabajo" value="{{ request.user.get_full_name }}">
+        <input type="text" name="responsable" placeholder="Nombre del técnico que realizó el trabajo" value="{% if captura_datos %}{{ captura_datos.responsable }}{% else %}{{ request.user.get_full_name }}{% endif %}">
       </div>
     </div>
 
@@ -87,9 +94,9 @@
       <div class="mobile-form-group">
         <label>Proveedor</label>
         <select name="proveedor_id">
-          <option value="">— Servicio interno / sin proveedor —</option>
+          <option value=""{% if captura_datos %}{% if captura_datos.proveedor_id == '' %} selected{% endif %}{% endif %}>— Servicio interno / sin proveedor —</option>
           {% for p in proveedores %}
-            <option value="{{ p.id }}">{{ p.nombre }}</option>
+            <option value="{{ p.id }}"{% if captura_datos %}{% if captura_datos.proveedor_id == p.id|stringformat:"s" %} selected{% endif %}{% endif %}>{{ p.nombre }}</option>
           {% endfor %}
         </select>
         <div class="hint">Si fue técnico de la empresa, deja en blanco.</div>
@@ -103,15 +110,15 @@
       <div class="costos-grid">
         <div class="mobile-form-group">
           <label>Repuestos $</label>
-          <input type="number" step="0.01" min="0" name="costo_repuestos" value="0" placeholder="0.00">
+          <input type="number" step="0.01" min="0" name="costo_repuestos" value="{% if captura_datos %}{{ captura_datos.costo_repuestos }}{% else %}0{% endif %}" placeholder="0.00">
         </div>
         <div class="mobile-form-group">
           <label>Mano de obra $</label>
-          <input type="number" step="0.01" min="0" name="costo_mano_obra" value="0" placeholder="0.00">
+          <input type="number" step="0.01" min="0" name="costo_mano_obra" value="{% if captura_datos %}{{ captura_datos.costo_mano_obra }}{% else %}0{% endif %}" placeholder="0.00">
         </div>
         <div class="mobile-form-group">
           <label>Otros $</label>
-          <input type="number" step="0.01" min="0" name="costo_otros" value="0" placeholder="0.00">
+          <input type="number" step="0.01" min="0" name="costo_otros" value="{% if captura_datos %}{{ captura_datos.costo_otros }}{% else %}0{% endif %}" placeholder="0.00">
         </div>
       </div>
     </div>
@@ -122,7 +129,7 @@
 
       <div class="mobile-form-group">
         <label>Número de factura o remisión</label>
-        <input type="text" name="numero_factura" placeholder="Ej: FAC-2024-00123 o R-456">
+        <input type="text" name="numero_factura" placeholder="Ej: FAC-2024-00123 o R-456" value="{% if captura_datos %}{{ captura_datos.numero_factura }}{% else %}{% endif %}">
       </div>
 
       <div class="mobile-form-group">
@@ -139,7 +146,7 @@
 
       <div class="mobile-form-group">
         <label>Nota del trabajo realizado</label>
-        <textarea name="nota_trabajo" placeholder="Ej: Se reemplazó resistencia quemada en horno 3. Prueba de temperatura 30 min. Equipo operativo."></textarea>
+        <textarea name="nota_trabajo" placeholder="Ej: Se reemplazó resistencia quemada en horno 3. Prueba de temperatura 30 min. Equipo operativo.">{% if captura_datos %}{{ captura_datos.nota_trabajo }}{% else %}{% endif %}</textarea>
       </div>
     </div>
 
@@ -149,7 +156,7 @@
 
       <div class="mobile-form-group">
         <label>Fecha de seguimiento recomendada</label>
-        <input type="date" name="proxima_revision">
+        <input type="date" name="proxima_revision" value="{% if captura_datos %}{{ captura_datos.proxima_revision }}{% else %}{% endif %}">
         <div class="hint">Si el equipo necesita revisión posterior, marca la fecha aquí.</div>
       </div>
     </div>
@@ -204,8 +211,13 @@ const selActivo = document.getElementById('sel-activo');
 const fallasContainer = document.getElementById('fallas-container');
 const fallasLista = document.getElementById('fallas-lista');
 
-selActivo.addEventListener('change', function() {
-  const activoId = this.value;
+function cargarFallas(activoId, conservar) {
+  const formulario = document.getElementById('form-registro-rapido');
+  const borradores = Array.from(formulario.querySelectorAll('[data-solicitud-borrador]'));
+  const seleccionadas = new Set(conservar ? borradores.flatMap(label => {
+    const control = label.querySelector('input'); return control.checked ? [control.value] : [];
+  }) : []);
+  if (!conservar) borradores.forEach(label => label.remove());
   if (!activoId) { fallasContainer.style.display = 'none'; return; }
 
   fallasContainer.style.display = 'block';
@@ -214,6 +226,7 @@ selActivo.addEventListener('change', function() {
   fetch(`/activos/api/fallas-por-activo/${activoId}/`)
     .then(r => r.json())
     .then(data => {
+      if (selActivo.value !== activoId) return;
       if (!data.fallas || data.fallas.length === 0) {
         fallasLista.innerHTML = '<p class="fallas-empty">No hay fallas abiertas para este equipo.</p>';
         return;
@@ -229,10 +242,23 @@ selActivo.addEventListener('change', function() {
           </div>
         </label>
       `).join('');
+      fallasLista.querySelectorAll('input[name="solicitud_id"]').forEach(control => {
+        control.checked = seleccionadas.has(control.value);
+        control.closest('.falla-item').classList.toggle('selected', control.checked);
+        if (formulario._captureSnapshot) { control.disabled = true; control.dataset.captureLocked = 'true'; }
+        borradores.forEach(label => {
+          if (label.querySelector('input').value === control.value) label.remove();
+        });
+      });
     })
     .catch(() => {
+      if (selActivo.value !== activoId) return;
       fallasLista.innerHTML = '<p class="fallas-empty">Error al cargar fallas. Continúa sin vincular.</p>';
     });
+}
+selActivo.addEventListener('change', function () { cargarFallas(this.value, false); });
+document.addEventListener('DOMContentLoaded', function () {
+  if (selActivo.value && document.querySelector('[data-solicitud-borrador]')) cargarFallas(selActivo.value, true);
 });
 
 // ──────────────────────────────────────────
@@ -242,6 +268,10 @@ const inputEvidencias = document.getElementById('input-evidencias');
 const previewGrid = document.getElementById('preview-grid');
 const uploadArea = document.getElementById('upload-area');
 let selectedFiles = [];
+
+document.getElementById('form-registro-rapido').addEventListener('activos:nueva-captura', function () {
+  selectedFiles = []; renderPreviews(); syncFileInput(); previewFactura.innerHTML = ''; fallasLista.innerHTML = ''; fallasContainer.style.display = 'none';
+});
 
 // Drag & drop
 uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('drag-over'); });
@@ -254,10 +284,11 @@ uploadArea.addEventListener('drop', e => {
 
 inputEvidencias.addEventListener('change', function() {
   addFiles(Array.from(this.files));
-  this.value = ''; // reset so same file can be added again if needed
+  syncFileInput(); // conservar archivos para envío y reintento
 });
 
 function addFiles(files) {
+  if (document.getElementById('form-registro-rapido')._captureSnapshot) return;
   files.forEach(file => {
     if (file.size > 30 * 1024 * 1024) {
       alert(`"${file.name}" supera el límite de 30 MB y no se agregó.`);
@@ -299,7 +330,10 @@ function renderPreviews() {
 
     const btn = document.createElement('button');
     btn.className = 'preview-remove'; btn.type = 'button'; btn.textContent = '×';
-    btn.onclick = () => { selectedFiles.splice(idx, 1); renderPreviews(); syncFileInput(); };
+    btn.onclick = () => {
+      if (document.getElementById('form-registro-rapido')._captureSnapshot) return;
+      selectedFiles.splice(idx, 1); renderPreviews(); syncFileInput();
+    };
     div.appendChild(btn);
 
     previewGrid.appendChild(div);

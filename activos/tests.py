@@ -2,6 +2,7 @@ from decimal import Decimal
 from io import BytesIO
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -131,6 +132,7 @@ class ActivosFlowsTests(TestCase):
             reverse("activos:reportes"),
             {
                 "activo_id": str(activo.id),
+                "clave_captura": str(uuid4()),
                 "prioridad": "MEDIA",
                 "descripcion": "No enfría correctamente",
             },

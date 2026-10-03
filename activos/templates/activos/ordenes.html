@@ -6,6 +6,7 @@
 {% block body_class %}page-activos-ordenes{% endblock %}
 
 {% block content %}
+{% include "activos/_captura_contexto.html" %}
 <div class="quick-actions pd-mb-3">
   <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
   {% if puede_ver_historial %}<a class="btn btn-secondary" href="{% url 'mantenimiento:app' %}?vista=historial">Trabajos y servicios</a>{% endif %}
@@ -22,57 +23,61 @@
 {% include "activos/_ordenes_registradas.html" %}
 
 {% if can_manage_activos %}
-<details class="card" id="nueva-orden">
+<details class="card" id="nueva-orden" {% if captura_error %}open{% endif %}>
   <summary class="card-header">Nueva orden de mantenimiento</summary>
-  <form method="post">
+  <form method="post" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true" data-captura-activos>
     {% csrf_token %}
+    <input type="hidden" name="clave_captura" value="{{ clave_captura }}">
+    <div data-captura-feedback role="status" aria-live="polite">{% if captura_error %}{{ captura_error }}{% endif %}</div>
+    {% if captura_archivos_perdidos %}<p role="alert">Vuelve a seleccionar los archivos antes de reintentar; el navegador no conserva adjuntos después de este envío.</p>{% endif %}
+
     <input type="hidden" name="action" value="create_orden">
     <div class="row pd-u-6136e5cbe4">
       <div>
         <label>Activo</label>
         <select name="activo_id" required>
-          <option value="">Selecciona...</option>
+          <option value=""{% if captura_datos %}{% if captura_datos.activo_id == '' %} selected{% endif %}{% endif %}>Selecciona...</option>
           {% for a in activos %}
-            <option value="{{ a.id }}">{{ a.nombre }}</option>
+            <option value="{{ a.id }}"{% if captura_datos %}{% if captura_datos.activo_id == a.id|stringformat:"s" %} selected{% endif %}{% endif %}>{{ a.nombre }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Plan (opcional)</label>
         <select name="plan_id">
-          <option value="">Sin plan</option>
+          <option value=""{% if captura_datos %}{% if captura_datos.plan_id == '' %} selected{% endif %}{% endif %}>Sin plan</option>
           {% for p in planes %}
-            <option value="{{ p.id }}">{{ p.activo_ref.nombre }} · {{ p.nombre }}</option>
+            <option value="{{ p.id }}"{% if captura_datos %}{% if captura_datos.plan_id == p.id|stringformat:"s" %} selected{% endif %}{% endif %}>{{ p.activo_ref.nombre }} · {{ p.nombre }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Tipo</label>
         <select name="tipo">
-          <option value="PREVENTIVO">Preventivo</option>
-          <option value="CORRECTIVO">Correctivo</option>
+          <option value="PREVENTIVO"{% if captura_datos %}{% if captura_datos.tipo == 'PREVENTIVO' %} selected{% endif %}{% endif %}>Preventivo</option>
+          <option value="CORRECTIVO"{% if captura_datos %}{% if captura_datos.tipo == 'CORRECTIVO' %} selected{% endif %}{% endif %}>Correctivo</option>
         </select>
       </div>
       <div>
         <label>Prioridad</label>
         <select name="prioridad">
-          <option value="MEDIA">Media</option>
-          <option value="ALTA">Alta</option>
-          <option value="CRITICA">Crítica</option>
-          <option value="BAJA">Baja</option>
+          <option value="MEDIA"{% if captura_datos %}{% if captura_datos.prioridad == 'MEDIA' %} selected{% endif %}{% endif %}>Media</option>
+          <option value="ALTA"{% if captura_datos %}{% if captura_datos.prioridad == 'ALTA' %} selected{% endif %}{% endif %}>Alta</option>
+          <option value="CRITICA"{% if captura_datos %}{% if captura_datos.prioridad == 'CRITICA' %} selected{% endif %}{% endif %}>Crítica</option>
+          <option value="BAJA"{% if captura_datos %}{% if captura_datos.prioridad == 'BAJA' %} selected{% endif %}{% endif %}>Baja</option>
         </select>
       </div>
       <div>
         <label>Fecha programada</label>
-        <input type="date" name="fecha_programada">
+        <input type="date" name="fecha_programada" value="{% if captura_datos %}{{ captura_datos.fecha_programada }}{% else %}{% endif %}">
       </div>
       <div>
         <label>Responsable</label>
-        <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable">
+        <input type="text" name="responsable" maxlength="120" placeholder="Nombre responsable" value="{% if captura_datos %}{{ captura_datos.responsable }}{% else %}{% endif %}">
       </div>
       <div class="pd-u-1f61f29863">
         <label>Descripción</label>
-        <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento">
+        <input type="text" name="descripcion" maxlength="255" placeholder="Detalle del mantenimiento" value="{% if captura_datos %}{{ captura_datos.descripcion }}{% else %}{% endif %}">
       </div>
     </div>
     <div class="pd-u-9c9cee2093">

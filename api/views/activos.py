@@ -1,3 +1,4 @@
+from activos.services_capturas import crear_captura_activos
 import csv
 import json
 from collections import defaultdict
@@ -471,48 +472,13 @@ class ActivosOrdenesView(APIView):
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 
-        activo = get_object_or_404(Activo, pk=data["activo_id"], activo=True)
-        plan = None
-        plan_id = data.get("plan_id")
-        if plan_id:
-            plan = get_object_or_404(PlanMantenimiento, pk=plan_id, activo_ref=activo)
-
-        fecha_programada = data.get("fecha_programada") or timezone.localdate()
-        orden = OrdenMantenimiento.objects.create(
-            activo_ref=activo,
-            plan_ref=plan,
-            tipo=data.get("tipo") or OrdenMantenimiento.TIPO_PREVENTIVO,
-            prioridad=data.get("prioridad") or OrdenMantenimiento.PRIORIDAD_MEDIA,
-            fecha_programada=fecha_programada,
-            responsable=(data.get("responsable") or "").strip(),
-            descripcion=(data.get("descripcion") or "").strip(),
-            creado_por=request.user,
-        )
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="CREADA",
-            comentario="Orden creada desde API",
-            usuario=request.user,
-        )
-        log_event(
-            request.user,
-            "CREATE",
-            "activos.OrdenMantenimiento",
-            orden.id,
-            {
-                "folio": orden.folio,
-                "activo_id": orden.activo_ref_id,
-                "plan_id": orden.plan_ref_id,
-                "tipo": orden.tipo,
-                "prioridad": orden.prioridad,
-                "estatus": orden.estatus,
-                "source": "api",
-            },
-        )
+        orden, replay = crear_captura_activos(usuario=request.user, datos=data, modo="api")
 
         return Response(
             {
                 "id": orden.id,
+                "replay": replay,
+                "idempotente": bool(data.get("clave_captura")),
                 "folio": orden.folio,
                 "activo_id": orden.activo_ref_id,
                 "activo": orden.activo_ref.nombre,
@@ -524,7 +490,7 @@ class ActivosOrdenesView(APIView):
                 "responsable": orden.responsable,
                 "descripcion": orden.descripcion,
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_200_OK if replay else status.HTTP_201_CREATED,
         )
 
 
