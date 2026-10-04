@@ -54,6 +54,18 @@ Aplicar proyección mediante `InventoryAuditMaterializer` solo si fuentes son au
 
 Buscar folio/detalle y línea canónica, raw de cabecera y detalle, snapshots y carga por FK exacta. Mantener separado recibido, finalizado, cancelado, cantidades del detalle y total de cabecera; el total de todos los artículos no es cantidad del producto auditado.
 
+Cuando SKU sea ambiguo, revisar identidad explícita del detalle, no pedir otra
+captura del documento que ya existe. Para transferencia mutable, FK_articulo
+positivo y dominio isInsumo=false identifica PointProduct.external_id únicamente
+cuando el dominio de la fila también es producto. Clave presente inválida,
+desconocida, dominio contradictorio o SKU único de otro producto conserva issue:
+no usar fallback por nombre para ocultarlo. Clave ausente conserva contrato previo.
+Este contrato es específico de transferencia, no de venta/merma/conversión.
+Snapshot inmutable sin esa FK conserva evidencia congelada; jamás enriquecer desde
+línea mutable. Leer raw_payload en consulta original evita N+1. Una identidad
+resuelta recupera documentos y cantidades, no vincula un evento por milisegundos,
+no elimina diferencias comerciales ni acredita custodia/conteo físico.
+
 Si falta estado posterior, consulta read-only puntual de cabecera/detalle, con sucursal/intervalo y folio exactos documentados antes de HTTP. No extractor completo ni descarga mensual para comprobar un estado. Los filtros recibido true/false pueden excluir un folio cuyo estado cambió: inspeccionar contrato y seleccionar coincidencia exacta. No persistir automáticamente por haber encontrado una respuesta nueva; `persist_transfers` u otro sincronizador puede tener efectos operativos que exigen inspección y autorización.
 
 Una revisión de carga cerrada sigue siendo evidencia: reutilizar FK y resolución validada con revisor/fecha/cantidades coherentes. No limitarse a discrepancias abiertas. No crear actor, explicación ni nueva discrepancia para simular aprobación.

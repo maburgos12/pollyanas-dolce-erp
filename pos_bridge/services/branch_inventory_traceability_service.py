@@ -559,6 +559,7 @@ class BranchInventoryTraceabilityService:
                 "received_at",
                 "item_code",
                 "item_name",
+                "raw_payload",
                 "sent_quantity",
                 "received_quantity",
                 "is_insumo",
@@ -1171,13 +1172,36 @@ class BranchInventoryTraceabilityService:
         issues,
     ):
         for row in rows:
-            if (
-                row.is_cancelled
-                or not getattr(row, "is_current_snapshot", True)
-                or row.is_insumo
-            ):
+            if row.is_cancelled or not getattr(row, "is_current_snapshot", True):
                 continue
-            product_id, issue_code = self._resolve_product(row, product_indexes)
+            if row.is_insumo:
+                raw_payload = getattr(row, "raw_payload", None)
+                detail = (
+                    raw_payload.get("detail")
+                    if isinstance(raw_payload, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(detail, Mapping)
+                    and "FK_articulo" in detail
+                    and detail.get("isInsumo") is False
+                ):
+                    issues.append(
+                        TraceSourceIssue(
+                            code="TRANSFER_PRODUCT_DOMAIN_CONFLICT",
+                            message=(
+                                f"La transferencia {row.transfer_external_id}/"
+                                f"{row.detail_external_id} contradice el dominio "
+                                "de producto reportado por Point."
+                            ),
+                            branch_id=row.origin_branch_id,
+                            source_ids=(row.id,),
+                        )
+                    )
+                continue
+            product_id, issue_code = self._resolve_transfer_product(
+                row, product_indexes
+            )
             origin_at = row.sent_at
             used_fallback = False
             if origin_at is None and row.is_finalized:
@@ -1625,6 +1649,36 @@ class BranchInventoryTraceabilityService:
         if len(name_matches) > 1:
             return None, "AMBIGUOUS_PRODUCT"
         return None, "UNRESOLVED_PRODUCT"
+
+    @classmethod
+    def _resolve_transfer_product(
+        cls, row, indexes
+    ) -> tuple[int | None, str | None]:
+        raw_payload = getattr(row, "raw_payload", None)
+        detail = raw_payload.get("detail") if isinstance(raw_payload, Mapping) else None
+        if not isinstance(detail, Mapping) or "FK_articulo" not in detail:
+            return cls._resolve_product(row, indexes)
+
+        raw_fk = detail["FK_articulo"]
+        fk_text = str(raw_fk).strip()
+        if (
+            isinstance(raw_fk, bool)
+            or not fk_text.isdecimal()
+            or int(fk_text) <= 0
+        ):
+            return None, "TRANSFER_PRODUCT_FK_INVALID"
+        if detail.get("isInsumo") is not False or row.is_insumo is not False:
+            return None, "TRANSFER_PRODUCT_DOMAIN_CONFLICT"
+
+        fk_product_id = indexes["external_id"].get(str(int(fk_text)))
+        if fk_product_id is None:
+            return None, "TRANSFER_PRODUCT_FK_UNKNOWN"
+
+        item_code = str(getattr(row, "item_code", "") or "").strip()
+        sku_matches = indexes["sku"].get(item_code, ()) if item_code else ()
+        if len(sku_matches) == 1 and int(sku_matches[0]) != int(fk_product_id):
+            return None, "TRANSFER_PRODUCT_IDENTITY_CONFLICT"
+        return int(fk_product_id), None
 
     @staticmethod
     def _record_direct_row(

@@ -45,6 +45,17 @@ hashes existentes; margen de consulta no acredita exhaustividad. La publicación
 recuperación deben comprobarse en VPS/UI antes de considerarse realizadas. No
 editar resúmenes viejos ni forzar autoridad mensual/materialización por conteos.
 
+Actualización verificada 3oct17:16 Mazatlán: PR1455 publicado, merge75fb0de1,
+CI37162776413 completo PASS y204 pruebas locales. Recuperación exacta del par
+PointWasteLine1676/MermaPOS1676 ejecutada desde backup read-only: primera2filas,
+segunda0, HTTP0, writer79066/alias/timestamps originales. Otros registros de
+merma/waste/casos/ventas/stock/imports/historia/avisos intactos. UI autenticada3237
+volvió a mostrar5PZA/folio1683114, ventas477/merma41 conservadas y consola0.
+No repetir recuperación ni despliegue. El contador septiembre ahora267, pero
+autoridad78023 sigue bloqueada:234 vinculadas y WASTE_SYNC_COUNT_MISMATCH/JOB_MIXED.
+Una sincronización mensual nueva es alcance adicional, no consecuencia automática
+de recuperar dos originales; no ejecutarla sin aprobación específica. No cerrar mes.
+
 ## Identidad Ciruela: documento existe, lector ambiguo
 
 3963/history707: 1inicial−1transferencia=0. Línea44672 folio38598/539340 Guamúchil13→Devoluciones12,1/1 finalizada. Rawdetalle FK_articulo112/isInsumoFalse→producto541 external112, receta199. SKU0112 comparte541Ciruela,427official:0112navideño,965external948navideño; normalized_name427 conservaCiruela. No fusionar/corregir maestros.
