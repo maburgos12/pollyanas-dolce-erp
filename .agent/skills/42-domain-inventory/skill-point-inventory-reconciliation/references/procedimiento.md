@@ -132,9 +132,26 @@ inventar parámetros ni subir automáticamente a500/descargar el mes completo.
 Agotar fuentes existentes y probar contrato literal de filtro antes de ampliación.
 Subagentes investigan fuentes guardadas; solo principal abre una sesión protegida.
 
+Opciones literales del frontend:5/10/15/50/100/300/500.101 no es un límite válido:
+un error/no-lista no acredita ausencia ni autoriza escalar automáticamente. Una
+consulta corta que no cruza el corte no prueba la frontera; conservar raw/par/
+SHA/primera-últimaFecha y secuencia para no repetirla. El cliente no acredita
+paginación/filtro de fecha; PrintHistorial con mismosN no resuelve ese límite.
+GetHeader/GetDetalle puede acreditar folio/componente, no stock de frontera.
+
 Si cobertura ya COMPLETE, no HTTP Point. Si falta exclusivamente cobertura posterior al cierre y el caso cumple las condiciones, documentar ese faltante y capturar únicamente el historial necesario: lote de hasta diez, una sola sesión protegida por `point_account_session_lock`, adquisición sin interferir con sesiones ajenas. Si ocupado, consultar titular en pg_locks/pg_stat_activity read-only cuando haga falta; no liberar candado ni reiniciar servicios. Cerrar sesión en finally.
 
 Usar `AuditStockHistoryService.capture` **sin force**, sobre la importación canónica existente. Verificar que no crea otra importación y deduplica por FK_Movimiento. Inspeccionar firmas/callers actuales antes de preparar un comando; no proporcionar un importador genérico que eluda estos controles.
+
+Registrar una evidencia reciente por par y no derivar cantidades de la posición
+de una tupla: separar sales/transfer_in/transfer_out/ajuste/conversión. Un preflight
+que encuentra ventas distintas aborta antes de sesión; diagnosticar contra fuente,
+no corregir ERP para hacer coincidir un literal. Conteo retenido mayor500 puede ser
+conservación de originales; no prueba una consulta mayor500. Después de COMPLETE,
+segunda capture con HTTP prohibido y mismas filas/canónica/avisos; no recapturar.
+Si el guard mensual sigue falso, conservar la proyección anterior como pendiente:
+ni helper independiente de frontera ni captura individual autorizan materializar.
+Un hallazgo fechado COMPLETE no sustituye reconcile actual ni transforma MISSING.
 
 Comprobar ajustes por delta existencia_nueva−existencia_anterior y consistencia de magnitud/dirección; quantity positiva puede ser SALIDA. No invertir dos veces cantidades firmadas ni resolver contradicciones como cero. Preservar unknown cuando la evidencia contradiga el movimiento.
 

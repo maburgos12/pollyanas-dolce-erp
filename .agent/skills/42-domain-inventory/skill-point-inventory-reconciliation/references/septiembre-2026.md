@@ -30,8 +30,15 @@ Mauricio autorizó integrar snapshots originales para553pares ambos extremos y
 resolver17aperturas/23cierres restantes con fuentes existentes luego Point
 acotado que cruce el corte, sin descargar septiembre completo. La autorización
 sustituye permiso pendiente anterior; NO vuelve a preguntarse. Implementación
-tarea `auditor-snapshots-corte` base4900b18d en preparación: esta nota no acredita
-su publicación. Ver procedimiento/ficha fuentes para guards e identidad exacta.
+tarea `auditor-snapshots-corte` ya publicada/aceptada: PR1458 merge4dae7f99 y
+PR1461 mergee898f61b (manifiesto explícito Opening6 necesario), CI completo PASS
+37216478756/37216478787 y deploy oficial4oct17:01UTC/check0/migrate0/readiness301.
+Dos lecturas frescas iguales HTTP0/ops0:598aperturas y585cierres por snapshot,
+557pares con ambos (universo actual distinto de553 iniciales); cobertura MISSING,
+canonical_history_verifiedFalse y físico no acreditado. No repetir entrega.
+Reviews2085 runs4983/4984/context13/HTTP0/ops0/avisos0 y dashboard autenticado/consola[];
+source_authoritativeFalse/closureFalse, no cierre. Tarea/rama/worktree/entorno5472/6472
+retirados exclusivamente con respaldo verificado. Ver procedimiento/ficha guards.
 
 Frontend Ult_Mov UTC confirmado por `/Stock/tab_almacen` SHA8a0516c8bd2b2d3735ec8f65d92ca5305ebab8fb902fc9b7270bd218bfb829a4.
 576pares sin canónica:559aperturas553cierres,553intersección. Snapshot28797567
@@ -40,7 +47,7 @@ log sucursal original exacto son evidencia reutilizable, no dato para otros pare
 690snapshots extra23CEDIS no resolvieron17/23; últimos movimientos posteriores.
 Producción y backups SQLOct2/Oct4 no tienen importación exacta branchPK3/productos23;
 Closing6/7 sólo46resúmenes sin secuencia íntegra. No repetir estas búsquedas.
-GetHistorial cliente sólo últimosN: iniciar10/20 para cierre y parar al cruzar corte;
+GetHistorial cliente sólo últimosN: elegir límite válido mínimo para cierre y parar al cruzar corte;
 no500 automático para apertura ni parámetrosfecha inventados. ConsultaPoint principal
 únicamente, subagentesHTTP0. Evidencia humana/física permanece separada.
 
@@ -85,9 +92,104 @@ rawUTC iguales a comerciales en2251=30,2451=36,3232=134,3371=169,3372=44,3432=31
 Sus aperturas/cierres raw difieren de algunos extremos legacy:2251 4→1 con ajuste−1;
 2451 0→2;3232 7→1 con merma1;3371 7→8 con merma1;3372 1→1;3432 1→2.
 No normalizar cantidades comerciales ni conservar extremos legacy por conveniencia.
-Imports144/417 tienen cobertura posterior al mes: no recapturarlos.76/508/509/530/531
-fueron descargados antes del fin local septiembre07:00Z y siguen INCOMPLETE hasta
-verificar cobertura por canónica sinforce, después de corregir lectura/extremos.
+Imports144/417 tienen cobertura posterior al mes: no recapturarlos. El estado
+anterior INCOMPLETE de76/508/509/531 fue sustituido por el lote documentado abajo;
+530 sigue INCOMPLETE. No tratar una frase histórica como autorización para repetir.
+
+## Capturas completadas4oct2026: histórico, no proyección ni cierre
+
+VPS/sesiones principales únicas protegidas/lote4 y luego dos lotes10. Antes de HTTP: canónica
+exacta, diferencia real, snapshots independientes jobs35042/77519 SUCCESS con
+identidad/dominio/ÚltimoMovimientoUTC/postcorte, ventas netas coherentes, unknown0,
+remanente0 y continuidad activa. Faltaba exclusivamente fetched_at postcorte.
+Capture sinforce, imports originales, FK_Movimiento deduplicado. Todos COMPLETE.
+
+|Caso/import|Point sucursal/producto|Ecuación histórica|Snapshots apertura/cierre|Filas retenidas|
+|---|---|---|---|---|
+|2251/76|5/118|4+28−30−1=1|28605464/28797569|506|
+|3371/508|1/445|7+171−169−1=8|28607214/28799418|521|
+|3372/509|1/917|1+44−44=1|28607215/28799419|506|
+|3432/531|4/818|1+32−31=2|28607482/28799695|505|
+|2443/138|2/169|73−58=15|28605103/28797190|502|
+|2835/259|3/169|46+200−131=115|28606447/28798606|510|
+|3033/339|6/170|84+260−152=192|28606784/28798961|514|
+|3218/402|1/169|101+300−331=70|28607119/28799314|540|
+|3220/404|1/1001|16+11conversión−23=4|28607124/28799319|173|
+|3413/522|1/1044|17+21entrada−65salida−29ventas+140ajuste=84|28607236/28799444|67|
+|3422/524|4/169|96+100−77=119|28607455/28799668|509|
+|3600/584|4/1044|3+30−10venta−10ajuste=13|28607572/28799798|21|
+|3608/585|7/169|111+100−35=176|28607791/28800022|509|
+|3799/649|13/170|162−28=134|28606112/28798253|192|
+|2238/67|5/169|114+100−86=128|28605439/28797544|510|
+|2296/92|5/403|0+10−1=9|28605558/28797677|51|
+|2464/147|2/1005|18−15=3|28605166/28797262|30|
+|2471/155|2/660|2+10−2=10|28605180/28797276|41|
+|2478/159|2/664|2+10−1=11|28605188/28797284|30|
+|2829/258|11/1044|3+12−1=14|28605892/28798028|6|
+|2836/260|3/170|120+160−177=103|28606448/28798607|528|
+|3271/442|1/267|100+12conversión−11=101|28607225/28799431|149|
+|3278/448|1/404|88−9=79|28607234/28799441|262|
+|3798/648|13/169|45−10=35|28606111/28798252|67|
+
+Cada segunda captura con HTTP prohibido:0HTTP/0filas nuevas/0imports/0duplicados/0avisos,
+misma observación. NO recapturar esos24; filas mayores500 incluyen originales
+conservados, no descarga mayor500. Sold_products compartido incluye estos productos:
+no excluir Pirotecnia/Tarjeta/Vela por nombre ni presentar venta como producción.
+3413 tiene29ventas y65transferidas; preflight abortó una transcripción65 como venta
+antes de HTTP y se corrigió sólo literal del diagnóstico, no ERP ni guard.
+3220 conversión11 y3413/3600 ajustes conservan origen/aprobación independientes.
+
+Control mensual fresco posterior al lote4 source_completeFalse por otras fronteras;
+no ejecutar materializador mientras false ni sobrescribir extremos guardados.
+Casos2251/3371/3372/3432 todavía reflejaban proyección legacy/diferencias−2/+1/−1/+1.
+COMPLETE acredita cobertura histórica, no actualización automática de UI/mes.
+Hallazgos JSON por identidad externa son evidencia fechada, no prueba viva;
+si falta la canónica actual, el goal debe seguir mostrando MISSING.
+
+## Límites históricos y documentos de conversión: no repetir fuentes agotadas
+
+Sólo opciones frontend5/10/15/50/100/300/500;101 no es un límite válido.
+Una consulta corta que no cruza el corte no prueba la frontera. 2172 CEDIS Point8
+ZanahoriaR103:100filas íntegras consultadas4oct17:19:56UTC empiezan2sept20:20:46.013Z
+1661288−2→−3; no prueban apertura1sept07Z. SHA
+38dfbdf5d4b4df3a2c7c087d144ee9573194d6e1ad7a7fdd292f732e208a156c.
+No repetir100 por rutina ni convertir primera existencia en apertura.23cierresCEDIS
+cruzaron corte con respuestas conservadas;3aperturas2122=2/2123=1/2235=19 cruzaron:
+no reutilizar FK1659466 global (existe en productos distintos).14aperturas siguen
+sin prueba. Reporte1081 Aug31CEDIS ya solicitado una vez, seguíaStatus0 a17:46UTC;
+no recrearlo ni afirmar descarga mientras no esté generado.
+
+Reporte1082 Matriz23sept tipo21 solicitado4oct16:36Z/generado16:36:37.780Z,
+template0b784f9e-4089-44be-bd6f-fa3c0900d2f2. XLS SHA
+f7c08d840141db5a21c0af6286c606591df99f525941e4f39fa8c6844684a833,
+11filas/12columnas: SnickersR10/ZanahoriaR22/3PecadosR10,total42/costo0,
+cabecera «Todos los tipos» pese filtro21. no es folio de ejecución: carece de fecha
+por evento/FKorigen/vínculo origen-destino/cancelación. No regenerar/redescargar ni
+usar costo o total42 para inventar pastel/rebanadas.23AGG179–204/job77629 en cuatro
+sucursales siguen requiriendo documento de ejecución exacto; reglas activas son
+configuración, no ejecución. Solicitud humana concreta emitida una vez, no duplicar.
+
+## Causas lectoras pendientes, no pérdidas ni permisos implícitos
+
+CEDIS Empanada productPK120/external135/import43:row5776/FK1680267 MERMA4→0
+qty4/CanceladoTrue yrow5775/FK1680271 CANCELACION DE MERMA tipo15 0→4/qty4/
+CanceladoFalse. Frontend Stock/tab_historial SHA8755e73… enumera case5/case15.
+No FK directa entre ambos ni identidad con otro producto de igual movimiento.
+_category rechaza tipo15 y candidatos excluyen merma cancelada. Incluir sólo
+crédito de la cancelación produciría crédito ficticio; cronología4→0→4 y efecto
+conjunto0 deben separarse de merma vigente, sin netear meses distintos. Contrato
+compartido nuevo requiere autorización/TDD; no merma/ajuste compensatorio ni
+reinterpretación de unknown por aproximación. Solicitud específica emitida una vez.
+
+Bamoa6COMPLETE imports721/778/785/197/816/817 conservan500filas/500FKúnicos y
+row_count500. resolve_stock_at_close rawUTC enmemoria0 enambos extremos, últimos
+movimientos1554407/1373282/1615936/1615941/1000245/1615924 respectivamente.
+Helper actual rechaza500sin fetchedIDs: no fabricar fetched_movement_ids ni
+recapturarCOMPLETE.197 creadoOct1/refrescadoOct2 exige probar lote vigente, no
+presumir que todas las filas retenidas son última descarga. Extensión propuesta
+sólo con lote íntegro/origenAPI/par/rango/IDsúnicos/postmes/huella demostrados;
+unión de capturas, falta de filas o timestamp posterior a descarga no acreditan.
+Solicitud lectora separada emitida una vez; no implementada ni permiso para cierre.
 
 3430 Payán/Zanahoria import530:39 ventas rawUTC guardadas +2 documentales=41
 comerciales. El30sept suma1+1+2, con headers explícitos NOTA-102345 (1686015),
@@ -180,7 +282,7 @@ Otros pendientes independientes:38571/539098 enviado0/recibido1 carga32733=0;391
 - CEDIS2170abre−7/cierra−19,2171−2/−15,2174−12/−6: saldo cuadra, negativos heredados no explicados físicamente. ÚltimosAug31movimientos1659407,1659579,1659393. Reutilizar cadena conservada; equivalencias con transferencias por hora/cantidad son candidatas, noFK.
 - 2920conversión191 y3344/3345/3346conversiones196/198/199/200 conservan origen pendiente; no inventar pastel/rebanadas.3345ajuste1677865cantidad+10pero20→10delta−10;historia ya corregida/capturada, no repetir.
 - 3240GalletaChispasMatrizcerró−1;39420/547853línea52441enviado0/recibido9finalizada sin cargaFK.3414/39420/547858línea52446enviado3/recibido0finalizada sin cargaFK. No acusar pérdida/retorno físico por defecto.
-- 2451comercial36 vsstock35;2251(30/31),3371(169/168),3372(44/45),3430(41/39),3432(31/30): sin identidadticket/PointSalesNormalizedSep30–Oct1; no equivalencia/offset ni captura para normalizar.
+- Antecedente anterior al contratoUTC/capturas4oct, NO divergencia actual de2251/3371/3372/3432:2451comercial36 vsstock35;2251(30/31),3371(169/168),3372(44/45),3430(41/39),3432(31/30). Leer loteactual arriba que sustituye estas cuatro comparaciones;3430 conserva cobertura pendiente. No normalizar ventas ni usar offset por aproximación.
 - Addon2565/2746/2368mismaSKU03SPFREBPoint836: relación119→base110aprobadaRecetaAgrupacionAddon1 activa desdeabril/mayo;no clasificarpornombre.2565ventas14conservadas,stock−1SOURCE_INCOMPLETE. OtrosSabor/Litrocrema/Vasos sin relación/config propia confirmada no se reclasifican por semejanza.
 
 ## Publicaciones ya completadas
