@@ -14,16 +14,16 @@ async function check(rendered) {
   let bindings = 0;
   let locked = false;
   const description = {value: ""};
-  const draft = {clave: "test-key", modo: "pendiente", valores: {descripcion: "Borrador conservado"}, intento: {descripcion: "Borrador conservado"}};
+  const draft = {clave: "test-key", modo: "pendiente", valores: {descripcion: "Borrador conservado", fecha_objetivo: "2026-10-04"}, intento: {descripcion: "Borrador conservado", fecha_objetivo: "2026-10-04"}};
   const context = {
-    state: {servicioDraft: draft, catalogos: {}, sucursales: [], activos: [], unidades: []},
+    state: {requestGeneration: {capture: 0}, servicioDraft: draft, catalogos: {}, sucursales: [], activos: [], unidades: []},
     ensureSucursales: async () => {}, ensureActivos: async () => {}, ensureVehiculoCatalogos: async () => {},
     ensureCatalogos: async () => {}, ensureProveedores: async () => {},
     esc: String, shell: (html) => html, providerOptions: () => "", actualizarAlcanceServicio() {},
     bloquearServicioCaptura(value) { locked = value; },
     render: () => new Promise(resolve => { finishRender = () => { installed = rendered; resolve(rendered); }; }),
     document: {
-      querySelector() { reads += 1; assert.ok(installed, "El borrador se restauró antes de instalar el DOM"); return description; },
+      querySelector(selector) { reads += 1; assert.ok(installed, "El borrador se restauró antes de instalar el DOM"); return selector.includes('descripcion') ? description : {value: ""}; },
       getElementById(id) {
         reads += 1;
         assert.ok(installed, "Se conectaron eventos antes de instalar el DOM");
