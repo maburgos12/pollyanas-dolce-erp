@@ -42,6 +42,7 @@
       </div>
     </div>
   </form>
+  <p class="text-muted">La completitud técnica revisa campos de la orden; no acredita factura, pago ni conciliación.</p>
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>
@@ -53,7 +54,7 @@
           <th>Programada</th>
           <th>Estatus</th>
           <th>Costo</th>
-          <th>Estado ERP</th>
+          <th>Completitud técnica</th>
           <th>Siguiente acción</th>
           <th>Acciones</th>
         </tr>
@@ -62,7 +63,7 @@
         {% for row in ordenes_rows %}
           {% with o=row.orden enterprise=row.enterprise %}
           <tr id="orden-{{ o.id }}">
-            <td>{{ o.folio }}</td>
+            <td><a href="{% url 'activos:orden_evidencias' o.id %}?origen=ordenes&amp;return_query={{ request.GET.urlencode|urlencode }}" aria-label="Consultar trabajo y soporte de {{ o.folio }}">{{ o.folio }}</a></td>
             <td>{{ o.activo_ref.nombre }}</td>
             <td>{{ o.get_tipo_display }}</td>
             <td>{{ o.get_prioridad_display }}</td>

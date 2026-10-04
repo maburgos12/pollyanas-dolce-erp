@@ -794,8 +794,8 @@ def _orden_enterprise_profile(orden: OrdenMantenimiento) -> dict:
         gaps.append(
             {
                 "key": "SIN_COSTO_CIERRE",
-                "label": "Cierre sin costo",
-                "detail": "Registrar costos del servicio cerrado.",
+                "label": "Confirmar costos de cierre",
+                "detail": "Confirmar importes y soporte del servicio cerrado.",
             }
         )
     if orden.tipo == OrdenMantenimiento.TIPO_PREVENTIVO and orden.plan_ref_id is None:
@@ -825,9 +825,9 @@ def _orden_enterprise_profile(orden: OrdenMantenimiento) -> dict:
         status_label = "Pendiente"
         status_tone = "warning"
     else:
-        status_label = "Listo ERP"
+        status_label = "Datos técnicos completos"
         status_tone = "success"
-    next_action = gaps[0]["detail"] if gaps else "Documento controlado"
+    next_action = gaps[0]["detail"] if gaps else "Sin pendientes técnicos detectados"
     return {"gaps": gaps, "status_label": status_label, "status_tone": status_tone, "next_action": next_action}
 
 
@@ -2686,7 +2686,7 @@ def ordenes(request):
     enterprise_cards = [
         {"key": "SIN_RESPONSABLE", "label": "Sin responsable", "count": all_ordenes_qs.filter(Q(responsable__isnull=True) | Q(responsable="")).count(), "tone": "warning"},
         {"key": "SIN_FECHA_INICIO", "label": "En proceso sin inicio", "count": all_ordenes_qs.filter(estatus=OrdenMantenimiento.ESTATUS_EN_PROCESO, fecha_inicio__isnull=True).count(), "tone": "warning"},
-        {"key": "SIN_COSTO_CIERRE", "label": "Cierre sin costo", "count": all_ordenes_qs.filter(estatus=OrdenMantenimiento.ESTATUS_CERRADA, costo_repuestos=Decimal("0"), costo_mano_obra=Decimal("0"), costo_otros=Decimal("0")).count(), "tone": "warning"},
+        {"key": "SIN_COSTO_CIERRE", "label": "Confirmar costos de cierre", "count": all_ordenes_qs.filter(estatus=OrdenMantenimiento.ESTATUS_CERRADA, costo_repuestos=Decimal("0"), costo_mano_obra=Decimal("0"), costo_otros=Decimal("0")).count(), "tone": "warning"},
         {"key": "SIN_PLAN_ORIGEN", "label": "Preventiva sin plan", "count": all_ordenes_qs.filter(tipo=OrdenMantenimiento.TIPO_PREVENTIVO, plan_ref__isnull=True).count(), "tone": "warning"},
         {"key": "ABIERTA_CRITICA", "label": "Críticas abiertas", "count": all_ordenes_qs.filter(prioridad__in=[OrdenMantenimiento.PRIORIDAD_CRITICA, OrdenMantenimiento.PRIORIDAD_ALTA], estatus__in=[OrdenMantenimiento.ESTATUS_PENDIENTE, OrdenMantenimiento.ESTATUS_EN_PROCESO]).count(), "tone": "danger"},
     ]
@@ -2710,12 +2710,12 @@ def ordenes(request):
             "key": "SIN_RESPONSABLE",
         },
         {
-            "label": "Cierre económico pendiente",
+            "label": "Confirmar costos de cierre",
             "count": enterprise_cards[2]["count"],
             "tone": "warning",
-            "detail": "Las órdenes cerradas sin costo distorsionan control y presupuesto.",
+            "detail": "Confirma importes y soporte en las órdenes cerradas con total cero.",
             "url": f"{reverse('activos:ordenes')}?estatus={estado}&enterprise_gap=SIN_COSTO_CIERRE",
-            "cta": "Completar costos",
+            "cta": "Revisar captura de costos",
             "key": "SIN_COSTO_CIERRE",
         },
     ]
@@ -2824,7 +2824,7 @@ def ordenes(request):
                 "label": "Cierre económico",
                 "open": enterprise_cards[2]["count"],
                 "closed": max(all_ordenes_qs.filter(estatus=OrdenMantenimiento.ESTATUS_CERRADA).count() - enterprise_cards[2]["count"], 0),
-                "detail": "Cierres sin costo frente a cierres con evidencia económica.",
+                "detail": "Cierres con total cero frente a cierres con importes registrados; no acredita pago ni conciliación.",
                 "url": reverse("activos:ordenes"),
             },
             {
@@ -3512,12 +3512,35 @@ def api_fallas_por_activo(request, activo_id):
 # Evidencias de órdenes
 # ---------------------------------------------------------------------------
 
+def _contexto_consulta_orden(request, orden_id):
+    """Return only to known lists, carrying their supported filters."""
+    datos = request.POST if request.method == "POST" else request.GET
+    origen = datos.get("origen", "ordenes")
+    if origen not in {"ordenes", "reportes"}:
+        origen = "ordenes"
+    permitidos = ("estatus", "enterprise_gap") if origen == "ordenes" else ("estatus", "semaforo", "q")
+    consulta = QueryDict(datos.get("return_query", ""))
+    consulta = urlencode({key: consulta[key] for key in permitidos if key in consulta})
+    contexto_query = urlencode({"origen": origen, "return_query": consulta})
+    lista_url = reverse("activos:" + origen)
+    if consulta:
+        lista_url += "?" + consulta
+    return {
+        "consulta_origen": origen,
+        "consulta_query": consulta,
+        "consulta_volver_url": lista_url + f"#orden-{orden_id}",
+        "consulta_volver_label": "Volver a reportes de servicio" if origen == "reportes" else "Volver a órdenes",
+        "consulta_detalle_url": reverse("activos:orden_evidencias", args=[orden_id]) + "?" + contexto_query,
+    }
+
+
 @login_required
 def subir_evidencia(request, orden_id):
     if not can_view_inventario(request.user):
         raise PermissionDenied
 
     orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
+    contexto = _contexto_consulta_orden(request, orden_id)
 
     if request.method == "POST":
         action = (request.POST.get("action") or "subir_evidencia").strip()
@@ -3535,7 +3558,7 @@ def subir_evidencia(request, orden_id):
             if factura_archivo:
                 if factura_archivo.size > 30 * 1024 * 1024:
                     messages.error(request, "El archivo supera el límite de 30 MB.")
-                    return redirect("activos:orden_evidencias", orden_id=orden_id)
+                    return redirect(contexto["consulta_detalle_url"])
                 if orden.factura_archivo:
                     orden.factura_archivo.delete(save=False)
                 orden.factura_archivo = factura_archivo
@@ -3547,7 +3570,7 @@ def subir_evidencia(request, orden_id):
                 usuario=request.user,
             )
             messages.success(request, "Factura y notas guardadas.")
-            return redirect("activos:orden_evidencias", orden_id=orden_id)
+            return redirect(contexto["consulta_detalle_url"])
 
         # Acción por defecto: subir evidencia
         archivo = request.FILES.get("archivo")
@@ -3556,12 +3579,12 @@ def subir_evidencia(request, orden_id):
 
         if not archivo:
             messages.error(request, "Selecciona un archivo.")
-            return redirect("activos:orden_evidencias", orden_id=orden_id)
+            return redirect(contexto["consulta_detalle_url"])
 
         # Límite 30 MB
         if archivo.size > 30 * 1024 * 1024:
             messages.error(request, "El archivo supera el límite de 30 MB.")
-            return redirect("activos:orden_evidencias", orden_id=orden_id)
+            return redirect(contexto["consulta_detalle_url"])
 
         ev = EvidenciaOrden.objects.create(
             orden=orden,
@@ -3578,10 +3601,11 @@ def subir_evidencia(request, orden_id):
         )
         log_event(request.user, "CREATE", "activos.EvidenciaOrden", ev.id, {"orden": orden.folio, "archivo": archivo.name})
         messages.success(request, "Evidencia subida correctamente.")
-        return redirect("activos:orden_evidencias", orden_id=orden_id)
+        return redirect(contexto["consulta_detalle_url"])
 
     evidencias = orden.evidencias.select_related("subido_por").all()
     return render(request, "activos/orden_evidencias.html", {
+        **contexto,
         "orden": orden,
         "evidencias": evidencias,
         "tipos": EvidenciaOrden.TIPO_CHOICES,
@@ -3599,7 +3623,7 @@ def eliminar_evidencia(request, evidencia_id):
     ev.archivo.delete(save=False)
     ev.delete()
     messages.success(request, "Evidencia eliminada.")
-    return redirect("activos:orden_evidencias", orden_id=orden_id)
+    return redirect(_contexto_consulta_orden(request, orden_id)["consulta_detalle_url"])
 
 
 # ---------------------------------------------------------------------------

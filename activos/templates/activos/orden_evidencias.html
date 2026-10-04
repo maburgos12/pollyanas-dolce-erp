@@ -8,12 +8,6 @@
 {% endblock %}
 
 {% block content %}
-<div class="module-tabs mant-tabs">
-  {% for tab in module_tabs %}
-    <a class="module-tab {% if tab.active %}active{% endif %}" href="{% url tab.url_name %}">{{ tab.label }}</a>
-  {% endfor %}
-</div>
-
 {% if messages %}
   {% for msg in messages %}
     <div class="alert alert-{{ msg.tags|default:'info' }} pd-u-3ef1fa1aa1">{{ msg }}</div>
@@ -38,7 +32,7 @@
       </div>
     </div>
     <div class="pd-u-690f054c4e">
-      <a href="{% url 'activos:ordenes' %}" class="btn btn-secondary btn-sm">← Volver a órdenes</a>
+      <a href="{{ consulta_volver_url }}" class="btn btn-secondary btn-sm">← {{ consulta_volver_label }}</a>
     </div>
   </div>
   {% if orden.descripcion %}
@@ -81,6 +75,8 @@
             <form method="post" action="{% url 'activos:eliminar_evidencia' ev.id %}" class="pd-u-0cd28ce9ba"
                   onsubmit="return confirm('¿Eliminar esta evidencia?')">
               {% csrf_token %}
+              <input type="hidden" name="origen" value="{{ consulta_origen }}">
+              <input type="hidden" name="return_query" value="{{ consulta_query }}">
               <button type="submit" class="btn btn-sm pd-u-1e66a03fec">Eliminar</button>
             </form>
           </div>
@@ -129,6 +125,8 @@
   <!-- Formulario para actualizar -->
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
+    <input type="hidden" name="origen" value="{{ consulta_origen }}">
+    <input type="hidden" name="return_query" value="{{ consulta_query }}">
     <input type="hidden" name="action" value="update_factura">
 
     <div class="mobile-form-group">
@@ -165,6 +163,8 @@
   <div class="card-header">Agregar evidencia fotográfica / video</div>
   <form method="post" enctype="multipart/form-data" id="form-upload">
     {% csrf_token %}
+    <input type="hidden" name="origen" value="{{ consulta_origen }}">
+    <input type="hidden" name="return_query" value="{{ consulta_query }}">
 
     <div class="upload-area" id="upload-area" onclick="document.getElementById('input-archivo').click()">
       <input type="file" name="archivo" id="input-archivo"

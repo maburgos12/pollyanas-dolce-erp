@@ -51,7 +51,7 @@ class ActivosFlowsTests(TestCase):
         self.assertContains(self.client.get(reverse("activos:planes")), reverse("activos:calendario"))
         self.assertContains(self.client.get(reverse("activos:ordenes")), reverse("activos:registro_rapido"))
         self.assertContains(self.client.get(reverse("activos:reportes")), reverse("activos:solicitudes_falla"))
-        self.assertContains(self.client.get(reverse("activos:reportes")), "Solicitudes históricas de falla")
+        self.assertContains(self.client.get(reverse("activos:reportes")), "Solicitudes de falla")
 
     def test_equipment_list_precedes_secondary_capture_and_keeps_actions(self):
         self.client.force_login(self.admin)
@@ -98,7 +98,7 @@ class ActivosFlowsTests(TestCase):
         self.assertLess(html.index("Reportes correctivos"), html.index('id="nuevo-reporte"'))
         self.assertContains(reportes, 'name="semaforo"')
         self.assertContains(reportes, "export=csv")
-        self.assertContains(reportes, "Levantar reporte")
+        self.assertContains(reportes, "Crear trabajo correctivo")
 
     def test_zero_plans_reports_missing_preventive_coverage(self):
         self.client.force_login(self.admin)
