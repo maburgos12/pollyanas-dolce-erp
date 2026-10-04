@@ -94,7 +94,7 @@ def build_sales_confidence(*, start_date, end_date):
         status="Sin datos" if not summary["rows"] else "Provisional" if missing_rows or prior_sales or identity_pending else "Estimado con costo del mes")
     labels = {"AUTHORITATIVE": "Venta histórica ERP", "V2_FACT": "Point v2", "LEGACY": "Point legacy"}
     summary["source_labels"] = [labels.get(source, source) for source in sorted(sources)]
-    summary["net_sales"] = summary["net_sales"] or ZERO
+    summary["net_sales"] = (summary["net_sales"] or ZERO) if summary["rows"] else None
     return summary
 
 

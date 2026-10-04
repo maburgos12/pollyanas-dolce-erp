@@ -7,10 +7,10 @@
   </div>
   <p>{{ sales_confidence.start_date|date:"d M Y" }} al {{ sales_confidence.end_date|date:"d M Y" }} · {{ sales_confidence.days_observed }} día{{ sales_confidence.days_observed|pluralize:"s" }} con registros · {{ sales_confidence.branches }} sucursales observadas.</p>
   <div class="sales-confidence-metrics">
-    <div><span>Venta neta observada</span><strong>${{ sales_confidence.net_sales|floatformat:2|intcomma }}</strong></div>
+    <div><span>Venta neta observada</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.net_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
     <div><span>Venta con costo respaldado</span><strong>{% if sales_confidence.cost_coverage_pct is not None %}{{ sales_confidence.cost_coverage_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong></div>
-    <div><span>Venta sin costo respaldado</span><strong>${{ sales_confidence.missing_cost_sales|floatformat:2|intcomma }}</strong></div>
-    <div><span>Venta con costo de meses anteriores</span><strong>${{ sales_confidence.prior_cost_sales|floatformat:2|intcomma }}</strong></div>
+    <div><span>Venta sin costo respaldado</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.missing_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
+    <div><span>Venta con costo de meses anteriores</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.prior_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
   </div>
   <details>
     <summary>Ver alcance y fechas de las fuentes</summary>

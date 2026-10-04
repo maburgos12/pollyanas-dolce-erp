@@ -57,6 +57,7 @@ class SalesConfidenceTests(TestCase):
         self.assertIsNone(result["cost_coverage_pct"])
         self.assertIsNone(result["margin"])
         self.assertEqual(result["days_observed"], 0)
+        self.assertIsNone(result["net_sales"])
 
 
 class ReconciliationTests(SimpleTestCase):
