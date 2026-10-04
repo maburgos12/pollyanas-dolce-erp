@@ -8,7 +8,7 @@
 {% endblock %}
 
 {% block content %}
-{% include "activos/_captura_contexto.html" %}
+{% include "activos/_captura_contexto.html" with captura_superficie="registro-rapido" %}
 <div class="quick-actions pd-mb-3"><a class="btn btn-secondary" href="{% url 'activos:ordenes' %}">Volver a órdenes de mantenimiento</a></div>
 
 {% if messages %}

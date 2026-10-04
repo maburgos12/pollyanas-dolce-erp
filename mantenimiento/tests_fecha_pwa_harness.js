@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const vm = require("node:vm");
-const template = fs.readFileSync("templates/mantenimiento/pwa.html", "utf8");
+const template = fs.readFileSync(process.env.PWA_TEMPLATE || "templates/mantenimiento/pwa.html", "utf8");
 function source(from, to) {
   const start = template.indexOf(from);
   const end = template.indexOf(to, start);
@@ -16,7 +16,7 @@ const actual = [
 ].join("\n");
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const ok = fecha => ({ok: true, json: async () => ({fecha})});
-function setup() {
+function setup(store = {getItem() {return null;}, setItem() {}, removeItem() {}}, actor = 7) {
   const controls = {};
   const names = {
     "servicio-modo": "modo_servicio", "servicio-alcance": "alcance",
@@ -32,13 +32,14 @@ function setup() {
   controls["servicio-error"] = {};
   const section = {addEventListener(type, callback) { this.input = callback; }, querySelectorAll() { return Object.values(controls).filter(c => c.name); }};
   const state = {
-    pantalla: "dashboard", requestGeneration: {capture: 0}, servicioDraft: null,
+    perfil: {id: actor}, pantalla: "dashboard", requestGeneration: {capture: 0}, servicioDraft: null,
     resumen: {fecha: "2020-01-01", agenda: ["NO MUTAR"]}, catalogos: {},
     sucursales: [], activos: [], unidades: [], tiposServicio: [], proveedores: [], bandeja: [1],
   };
   const output = {html: [], reads: [], posts: [], responder: () => ok("2026-10-04")};
   const context = {
     state, crypto: require("node:crypto"), FormData,
+    sessionStorage: store,
     Date: class { constructor() { throw new Error("La captura no debe leer el reloj del dispositivo"); } },
     esc: String, shell: html => html, progressDots: () => "", providerOptions: () => "",
     ensureSucursales: async () => {}, ensureActivos: async () => {}, ensureCatalogos: async () => {}, ensureProveedores: async () => {},
@@ -123,12 +124,14 @@ async function checkService() {
   assert.equal(draft.clave, clave);
   assert.equal(output.reads.length, 1);
   assert.equal(state.resumen.fecha, "2020-01-01");
-  // El flujo vigente limpia el borrador sólo después de éxito, y el nuevo toma fecha fresca.
+  // El éxito conserva el recibo hasta la acción explícita de otra captura.
   output.postResponder = () => ({ok: true, json: async () => ({id: 1})});
   await context.guardarServicioMovil();
-  assert.equal(state.servicioDraft, null);
+  assert.equal(state.servicioDraft.resultado.id, 1);
+  await context.guardarServicioMovil();
+  assert.equal(output.posts.length, 3, "La confirmación impide un segundo POST");
   output.responder = () => ok("2026-10-05");
-  await context.renderServicioPuntual();
+  await context.nuevaCapturaServicio();
   assert.equal(controls["servicio-fecha"].value, "2026-10-05");
   assert.notEqual(state.servicioDraft.clave, clave);
 }
@@ -314,7 +317,114 @@ async function checkOtherRenderCallers() {
   assert.equal(await focusRender, true);
   assert.ok(focused, "Conservar autofocus de los callers existentes");
 }
+function recoveryStorage() {
+  const map = new Map();
+  return {map, getItem: key => map.get(key) || null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key)};
+}
+async function checkRecovery() {
+  const store = recoveryStorage();
+  const first = setup(store);
+  await first.context.renderServicioPuntual("pendiente");
+  first.controls["servicio-fecha"].value = "2026-10-02";
+  first.controls["servicio-descripcion"].value = "Trabajo pendiente exacto";
+  first.section.input();
+  const editable = setup(store);
+  await editable.context.renderServicioPuntual();
+  assert.equal(editable.controls["servicio-fecha"].value, "2026-10-02");
+  assert.equal(editable.controls["servicio-descripcion"].value, "Trabajo pendiente exacto");
+  assert.equal(editable.output.reads.length, 0, "El borrador restaurado conserva la fecha original");
+  first.output.postResponder = () => {throw Error("Respuesta perdida después de commit");};
+  await first.context.guardarServicioMovil();
+  const original = first.output.posts[0].options.body;
+  const frozen = setup(store);
+  await frozen.context.renderServicioPuntual();
+  assert.equal(frozen.state.servicioDraft.pending, false);
+  assert.equal(JSON.stringify(frozen.state.servicioDraft.intento), original);
+  assert.ok(frozen.controls["servicio-fecha"].disabled);
+  frozen.controls["servicio-fecha"].value = "2099-01-01"; // Incluso una mutación externa no sustituye el payload.
+  frozen.output.postResponder = () => ({ok: true, status: 200, json: async()=>({id: 17, folio: "OM-17"})});
+  await frozen.context.guardarServicioMovil();
+  assert.equal(frozen.output.posts[0].options.body, original);
+  assert.equal(frozen.state.servicioDraft.resultado.id, 17);
+  const receipt = setup(store);
+  await receipt.context.renderServicioPuntual();
+  await receipt.context.guardarServicioMovil();
+  assert.equal(receipt.output.posts.length, 0);
+  assert.ok(receipt.output.html.at(-1).includes("openItemDetail('orden:17'"));
+  const old = receipt.state.servicioDraft.clave;
+  receipt.output.responder = () => ok("2026-10-05");
+  await receipt.context.nuevaCapturaServicio();
+  assert.notEqual(receipt.state.servicioDraft.clave, old);
+  assert.equal(receipt.controls["servicio-fecha"].value, "2026-10-05");
+  // Reload rejections editable, uncertain responses frozen; success navigation never touches another screen.
+  for (const status of [400,403,404,409,410,500,0]) {
+    const stored = recoveryStorage(), test = setup(stored);
+    await test.context.renderServicioPuntual();
+    test.output.postResponder = () => {if(!status) throw Error("offline");return {ok:false,status,json:async()=>({error:"Error"})};};
+    await test.context.guardarServicioMovil();
+    const after = setup(stored);await after.context.renderServicioPuntual();
+    assert.equal(!!after.state.servicioDraft.intento, ![400,403,404].includes(status));
+    assert.equal(after.state.servicioDraft.clave, test.state.servicioDraft.clave);
+  }
+  const foreign = setup(store, 8);await foreign.context.renderServicioPuntual();
+  assert.equal(foreign.state.servicioDraft.resultado, null);
+  assert.equal(foreign.state.servicioDraft.intento, null);
+  const corrupt = recoveryStorage();corrupt.setItem("mantenimiento:servicio-equipo:v1:7", "{broken");
+  const broken = setup(corrupt);await broken.context.renderServicioPuntual();await broken.context.guardarServicioMovil();
+  assert.ok(broken.state.servicioDraft.bloqueado);assert.equal(broken.output.posts.length,0);
+  const denied = {getItem(){throw Error("denied");},setItem(){throw Error("quota");},removeItem(){throw Error("denied");}};
+  const noStorage = setup(denied);await noStorage.context.renderServicioPuntual();
+  noStorage.output.postResponder = ()=>{throw Error("offline");};await noStorage.context.guardarServicioMovil();
+  assert.ok(noStorage.state.servicioDraft.bloqueado);assert.equal(noStorage.output.posts.length,0,"GET desconocido bloquea otro UUID automático");
+  await noStorage.context.nuevaCapturaServicio();await noStorage.context.guardarServicioMovil();
+  assert.equal(noStorage.output.posts.length,1,"Otra captura explícita permite continuar");
+  const quota={getItem(){return null;},setItem(){throw Error("quota");},removeItem(){}};
+  const firstUse=setup(quota);await firstUse.context.renderServicioPuntual();firstUse.output.postResponder=()=>{throw Error("offline");};await firstUse.context.guardarServicioMovil();
+  assert.equal(firstUse.output.posts.length,1);assert.ok(firstUse.controls["servicio-error"].textContent.includes("no puede conservar"));
+  // Build an actual complete uncertain receipt for negative schema cases.
+  const schemaStore=recoveryStorage(), schema=setup(schemaStore);await schema.context.renderServicioPuntual('pendiente');
+  schema.controls['servicio-sucursal'].value='3';schema.controls['servicio-activo'].value='1';schema.section.input();
+  schema.output.postResponder=()=>{throw Error('lost');};await schema.context.guardarServicioMovil();
+  const validRecord=JSON.parse(schemaStore.getItem('mantenimiento:servicio-equipo:v1:7'));
+  for(const mutate of [
+    r=>{delete r.intento;},r=>{r.intento=false;},r=>{r.intento=null;},r=>{delete r.fecha;},r=>{r.fecha=null;},r=>{r.resultado=false;},r=>{delete r.resultado;},r=>{delete r.status;},r=>{r.status='editable';r.intento=null;},
+    r=>{delete r.intento.modo_servicio;}, r=>{r.intento.modo_servicio='realizado';},
+    r=>{delete r.intento.sucursal_id;}, r=>{r.intento.activo_id=null;},
+    r=>{r.intento.csrfmiddlewaretoken='forbidden';}, r=>{r.intento.extra='unexpected';},
+    r=>{r.valores.fecha_objetivo='2026-10-03';},r=>{r.resultado={id:1,folio:null};},
+    r=>{r.resultado={id:1,folio:'OM-1',token:'forbidden'};},
+  ]) {
+    const tampered=recoveryStorage(), data=JSON.parse(JSON.stringify(validRecord));mutate(data);
+    tampered.setItem('mantenimiento:servicio-equipo:v1:7',JSON.stringify(data));
+    const negative=setup(tampered);await negative.context.renderServicioPuntual();await negative.context.guardarServicioMovil();
+    assert.ok(negative.state.servicioDraft.bloqueado,'Schema incompleto/cambiado debe pedir revisión');
+    assert.equal(negative.output.posts.length,0,'Nunca enviar intento corrupto');
+  }
+  for(const alcance of ["unidad","instalacion"]) {
+    const legacyStore = recoveryStorage(), legacy = setup(legacyStore);
+    await legacy.context.renderServicioPuntual();legacy.controls["servicio-alcance"].value=alcance;
+    legacy.output.postResponder = ()=>{throw Error("legacy offline");};await legacy.context.guardarServicioMovil();
+    assert.equal(legacy.state.servicioDraft.intento,null);assert.equal(legacyStore.map.size,0);
+    assert.ok(!JSON.parse(legacy.output.posts[0].options.body).clave_captura);
+    legacy.output.postResponder=()=>({ok:true,json:async()=>({id:33})});await legacy.context.guardarServicioMovil();
+    assert.equal(legacy.state.servicioDraft,null);assert.equal(legacy.state.pantalla,"pendientes");
+  }
+  for(const success of [false,true]) {
+    const raceStore=recoveryStorage(), race=setup(raceStore);
+    await race.context.renderServicioPuntual();
+    let finish;race.output.postResponder=()=>new Promise(resolve=>{finish=()=>resolve({ok:success,status:success?200:400,json:async()=>success?({id:18,folio:"OM-18"}):({error:"invalid"})});});
+    const pending = race.context.guardarServicioMovil();await tick();
+    race.context.showScreen("historial");const htmlCount=race.output.html.length;
+    race.context.document.getElementById=()=>{throw Error("No tocar DOM de otra pantalla");};
+    finish();await pending;assert.equal(race.output.html.length,htmlCount);
+    const recovered = setup(raceStore);await recovered.context.renderServicioPuntual();
+    assert.equal(!!recovered.state.servicioDraft.resultado,success);
+    assert.equal(recovered.state.servicioDraft.intento === null,!success);
+  }
+  console.log("PWA recovery: fresh DOM/storage, editable/frozen/confirmed, same payload/UUID/date, explicit new, errors, namespaces, legacy, stale DOM: PASS");
+}
 (async () => {
+  await checkRecovery();
   await checkOtherRenderCallers();
   for (const kind of ["servicio", "vehiculo"]) {
     for (const stage of ["loading", "form", "error"]) await checkDOMCommitRace(kind, stage);
