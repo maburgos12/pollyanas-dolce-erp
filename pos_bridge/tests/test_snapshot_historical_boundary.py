@@ -3,15 +3,15 @@ from decimal import Decimal
 from unittest.mock import patch
 
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from pos_bridge.models import (
     PointBranch, PointProduct, PointSyncJob, PointExtractionLog,
     PointInventorySnapshot, PointHistoricalInventoryClosing,
-    PointHistoricalInventoryClosingLine, PointProductHistoryImport,
+    PointHistoricalInventoryClosingLine, PointProductHistoryImport, PointProductHistoryRow,
 )
-from pos_bridge.services.audit_stock_history_service import PointHistoryReconciliation
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, PointHistoryReconciliation
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService, documentary_historical_boundary,
 )
@@ -58,6 +58,212 @@ class SnapshotHistoricalBoundaryTests(TestCase):
             closing or self.closing, lines or [self.line], month=self.month,
             boundary=boundary, cache={} if cache is None else cache,
         )
+
+    def _incomplete_history(self, *, stamp="2026-10-01T02:18:44.487", previous=2, new=1, product=None):
+        service = AuditStockHistoryService()
+        record = service._canonical_import(self.branch, product or self.product)
+        raw = {"FK_Movimiento": 910, "Movimiento": "VENTA", "Fecha": stamp,
+               "Cantidad": 1, "Existencia_anterior": previous, "Existencia_nueva": new,
+               "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False}
+        movement_id, defaults = service._parse_row(raw)
+        PointProductHistoryRow.objects.create(import_record=record, row_number=movement_id, **defaults)
+        record.row_count = 1
+        record.raw_metadata = {"source": "POINT_STOCK_HISTORY_API", "fetched_rows": 1,
+                               "history_limit": 500, "fetched_movement_ids": [910],
+                               "fetched_at": "2026-10-01T03:00:00+00:00"}
+        record.save()
+        return record
+
+    def test_independent_snapshot_with_incomplete_history_preserves_coverage_and_originals(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        before = list(record.rows.values())
+        metadata = dict(record.raw_metadata)
+        values, proofs, unproven = self._read()
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertEqual(unproven, ())
+        proof = proofs[self.line.pk]
+        self.assertTrue(proof["snapshot_boundary_verified"])
+        self.assertFalse(proof["canonical_history_verified"])
+        self.assertFalse(proof["physical_count_verified"])
+        self.assertEqual(proof["coverage_status"], "INCOMPLETE")
+        self.assertEqual(proof["snapshot_boundary_evidence"]["canonical_consistency"]["import_id"], record.pk)
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata, metadata)
+        self.assertEqual(list(record.rows.values()), before)
+
+    def test_saturated_partial_membership_does_not_block_independent_frontier(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        record.raw_metadata.update(fetched_rows=500)
+        record.raw_metadata.pop("fetched_movement_ids")
+        record.save()
+        values, proofs, _ = self._read()
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        proof = proofs[self.line.pk]["snapshot_boundary_evidence"]["canonical_consistency"]
+        self.assertFalse(proof["canonical_membership_verified"])
+        self.assertEqual(proofs[self.line.pk]["coverage_status"], "INCOMPLETE")
+
+    def test_retained_movement_outside_latest_batch_can_veto_snapshot(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        raw = {"FK_Movimiento": 911, "Movimiento": "VENTA", "Fecha": "2026-10-01T03:00:00",
+               "Cantidad": 1, "Existencia_anterior": 1, "Existencia_nueva": 0,
+               "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        PointProductHistoryRow.objects.create(import_record=record, row_number=911, **defaults)
+        record.row_count = 2
+        record.save()
+        self.assertEqual(self._read()[0], {})
+
+    def test_known_unknown_raw_or_store_contradictions_reject_snapshot(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        original = dict(row.raw_payload)
+        for field, value in [("FK_Movimiento", True), ("Fecha", "bad"),
+                             ("Cancelado", "garbage"), ("Cantidad", 2)]:
+            with self.subTest(field=field):
+                row.raw_payload = {**original, field: value}
+                row.save(update_fields=["raw_payload"])
+                self.assertEqual(self._read()[0], {})
+
+    def test_missing_original_fields_or_wrong_explicit_domain_reject(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        original = dict(row.raw_payload)
+        for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+            with self.subTest(field=field):
+                row.raw_payload = dict(original)
+                row.raw_payload.pop(field)
+                row.save(update_fields=["raw_payload"])
+                self.assertEqual(self._read()[0], {})
+        row.raw_payload = {**original, "isInsumo": True}
+        row.save(update_fields=["raw_payload"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_stored_cost_mutation_is_not_original_raw_consistency(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        row.raw_payload["Costo_Total"] = 4
+        row.save(update_fields=["raw_payload"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_original_cost_precision_follows_postgresql_storage_not_a_false_veto(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Costo_Total": "1.1234567", "Costo_Unitario": "0.9876545"}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        row.refresh_from_db()
+        self.assertEqual(row.total_cost, Decimal("1.123457"))
+        self.assertEqual(self._read()[0], {self.line.pk: Decimal("1")})
+
+    def test_original_stock_precision_uses_raw_delta_and_only_normalizes_db_comparison(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        for previous, quantity, new in [("2", "0.0045", "1.9955"),
+                                         ("-2", "0.0005", "-2.0005")]:
+            with self.subTest(new=new):
+                raw = {**row.raw_payload, "Fecha": "2026-10-01T01:00:00",
+                       "Existencia_anterior": previous, "Cantidad": quantity, "Existencia_nueva": new}
+                _, defaults = AuditStockHistoryService._parse_row(raw)
+                for field, value in defaults.items():
+                    setattr(row, field, value)
+                row.save()
+                self.assertEqual(self._read()[0], {self.line.pk: Decimal("1")})
+
+    def test_original_string_movement_identity_matches_exact_integer_row(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        row.raw_payload["FK_Movimiento"] = "910"
+        row.save(update_fields=["raw_payload"])
+        self.assertEqual(self._read()[0], {self.line.pk: Decimal("1")})
+        for value in (True, 910.0, "+910", "x", "٩١٠"):
+            with self.subTest(value=value):
+                row.raw_payload["FK_Movimiento"] = value
+                row.save(update_fields=["raw_payload"])
+                self.assertEqual(self._read()[0], {})
+
+    def test_raw_last_movement_stock_cannot_match_only_after_db_rounding(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Existencia_anterior": "2.0004", "Existencia_nueva": "1.0004"}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {})
+
+    def test_incomplete_membership_metadata_invalid_present_ids_reject(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        for ids in [[True], [910, 910], [999], "910", None]:
+            with self.subTest(ids=ids):
+                record.raw_metadata["fetched_movement_ids"] = ids
+                record.save()
+                self.assertEqual(self._read()[0], {})
+
+    def test_source_mutation_changes_independent_fingerprint_without_quantity_change(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        before = self._read()[1][self.line.pk]["snapshot_boundary_evidence"]["canonical_consistency"]["source_signature"]
+        record.raw_metadata["evidence_note"] = "original addition"
+        record.save()
+        after = self._read()[1][self.line.pk]["snapshot_boundary_evidence"]["canonical_consistency"]["source_signature"]
+        self.assertNotEqual(before, after)
+
+    def test_partial_retained_gap_does_not_claim_continuity(self):
+        self._snapshot()
+        record = self._incomplete_history(stamp="2026-10-01T01:00:00", previous=9, new=8)
+        record.raw_metadata.pop("fetched_movement_ids")
+        record.save()
+        values, proofs, _ = self._read()
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+
+    def test_cancelled_original_is_neutral_but_effective_reversal_can_veto(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Fecha": "2026-10-01T03:00:00", "Cancelado": True}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {self.line.pk: Decimal("1")})
+        raw.update(Cancelado=False, Movimiento="CANCELACION VENTA", Existencia_anterior=1, Existencia_nueva=2)
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {})
+
+    def test_matching_stock_does_not_override_conflicting_snapshot_last_movement(self):
+        self._snapshot()
+        other = self._snapshot(captured_at=self.cutoff + timedelta(hours=4))
+        other.raw_payload["row"][8] = "2026-10-01T02:18:45.487"
+        other.save(update_fields=["raw_payload"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_same_timestamp_invalid_adjustment_is_not_known_consistency(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Movimiento": "AJUSTE SALIDA", "Cantidad": 2}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {})
 
     def test_post_cut_snapshot_proves_documentary_quantity_without_canonical_or_physical_claim(self):
         snapshot = self._snapshot()
@@ -120,7 +326,7 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         self.line.evidence = {"method": "no_history_current_zero", "history_rows": 0, "history_limit": 500}
         self.assertEqual(self._read(boundary="opening")[0], {})
 
-    def test_existing_incomplete_canonical_is_never_hidden_by_snapshot(self):
+    def test_missing_coverage_metadata_does_not_certify_or_block_independent_snapshot(self):
         self._snapshot()
         PointProductHistoryImport.objects.create(
             file_hash="incomplete", source_filename="history", report_path="/Stock/GetHistorial",
@@ -128,9 +334,54 @@ class SnapshotHistoricalBoundaryTests(TestCase):
             raw_metadata={"source": "POINT_STOCK_HISTORY_API"},
         )
         values, proofs, unproven = self._read()
-        self.assertEqual(values, {})
-        self.assertEqual(unproven, (self.line,))
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertEqual(unproven, ())
         self.assertEqual(proofs[self.line.pk]["coverage_status"], "INCOMPLETE")
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+
+    def test_multiple_exact_pair_imports_cannot_overwrite_a_known_veto(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        other = PointProductHistoryImport.objects.create(
+            file_hash="retained-other-source", source_filename="history", report_path="/Stock/GetHistorial",
+            product_name=self.product.name, point_branch=self.branch, point_product=self.product,
+            raw_metadata=dict(record.raw_metadata), row_count=1)
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Movimiento": "UNKNOWN MOVEMENT"}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        PointProductHistoryRow.objects.create(import_record=other, row_number=910, **defaults)
+        self.assertEqual(self._read()[0], {})
+        # Invert the auto ordering: ambiguity cannot disappear with row order.
+        record.created_at, other.created_at = other.created_at, record.created_at
+        record.save(update_fields=["created_at"])
+        other.save(update_fields=["created_at"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_impossible_known_incoming_or_outgoing_delta_is_not_snapshot_consistency(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        original = dict(row.raw_payload)
+        for movement in ["PRODUCCION", "TRANSFERENCIA ENTRADA", "CONVERSION ENTRADA"]:
+            with self.subTest(movement=movement):
+                raw = {**original, "Movimiento": movement}
+                _, defaults = AuditStockHistoryService._parse_row(raw)
+                for field, value in defaults.items():
+                    setattr(row, field, value)
+                row.save()
+                self.assertEqual(self._read()[0], {})
+
+    def test_cancelled_raw_missing_movement_is_still_malformed(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Cancelado": True}
+        raw.pop("Movimiento")
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {})
 
     def test_complete_canonical_takes_precedence(self):
         self._snapshot()
@@ -245,10 +496,31 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         with CaptureQueriesContext(connection) as queries:
             values, _, _ = self._read(lines=lines, cache=cache)
         self.assertEqual(len(values), 13)
-        self.assertLessEqual(len(queries), 5)
+        # Only the source mutex is added to the original five-query budget.
+        self.assertLessEqual(len(queries), 6)
         with CaptureQueriesContext(connection) as cached:
             self._read(lines=lines, cache=cache)
-        self.assertEqual(len(cached), 0)
+        self.assertFalse([query for query in cached if ' FROM ' in query["sql"]])
+        self.assertEqual(len(cached), 1)
+
+    def test_incomplete_consistency_bulk_queries_remain_constant_for_thirteen_pairs(self):
+        self._snapshot()
+        self._incomplete_history()
+        lines = [self.line]
+        for index in range(12):
+            product = PointProduct.objects.create(external_id=f"partial-{index}", name=f"Partial {index}")
+            lines.append(PointHistoricalInventoryClosingLine.objects.create(
+                closing=self.closing, branch=self.branch, product=product, stock=3))
+            self._snapshot(product=product, raw={
+                "headers": ["Código", "Producto", "Cantidad", "Último Movimiento"],
+                "row": [product.external_id, "sku", product.name, "Pasteles", "1", "Pza",
+                        "10", "10", "2026-10-01T02:18:44.487", "False"]})
+            self._incomplete_history(product=product)
+        self.closing.expected_product_ids = [line.product_id for line in lines]
+        with CaptureQueriesContext(connection) as queries:
+            values, _, _ = self._read(lines=lines)
+        self.assertEqual(len(values), 13)
+        self.assertLessEqual(len(queries), 8)
 
     def _consumer_fixture(self):
         recipe = Receta.objects.create(
@@ -269,9 +541,9 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         self.closing.save(update_fields=["expected_product_ids"])
         return recipe, missing_recipe, missing_line, self._snapshot()
 
-    def _assert_consumer_snapshot_proof(self, proof, snapshot):
+    def _assert_consumer_snapshot_proof(self, proof, snapshot, coverage="MISSING"):
         self.assertEqual(Decimal(proof["effective_stock"]), snapshot.stock)
-        self.assertEqual(proof["coverage_status"], "MISSING")
+        self.assertEqual(proof["coverage_status"], coverage)
         self.assertFalse(proof["canonical_history_verified"])
         self.assertFalse(proof["physical_count_verified"])
         self.assertTrue(proof["snapshot_boundary_verified"])
@@ -318,3 +590,59 @@ class SnapshotHistoricalBoundaryTests(TestCase):
              for item in service._historical_boundary_issues],
             [("SOURCE_INCOMPLETE", missing_line.branch_id, missing_line.product_id, (missing_line.pk,))],
         )
+
+    def test_monthly_and_branch_consumers_preserve_incomplete_snapshot_authority(self):
+        recipe, _, _, snapshot = self._consumer_fixture()
+        self._incomplete_history()
+        values, metadata, _ = MonthlyPointProductBalanceService()._load_historical_closing(
+            snapshot_date=self.closing.operational_date, source="closing_snapshot")
+        self.assertEqual(values[recipe.pk], (Decimal("1"), 1))
+        proof = next(item for item in metadata["historical_boundary_evidence"] if item["line_id"] == self.line.pk)
+        self._assert_consumer_snapshot_proof(proof, snapshot, coverage="INCOMPLETE")
+        branch = BranchInventoryTraceabilityService()
+        self.assertEqual(branch._load_closing(self.closing, month=self.month)[
+            (self.branch.pk, self.product.pk)], (Decimal("1"), [self.line.pk]))
+        self._assert_consumer_snapshot_proof(branch._historical_boundary_evidence[
+            (self.branch.pk, self.product.pk)]["closing"], snapshot, coverage="INCOMPLETE")
+
+    def test_rejected_partial_proof_contains_exact_source_signature_and_reason(self):
+        self._snapshot()
+        record = self._incomplete_history()
+        record.raw_metadata["fetched_movement_ids"] = [999]
+        record.save()
+        values, proof, _ = self._read()
+        self.assertEqual(values, {})
+        rejected = proof[self.line.pk]["canonical_consistency_evidence"]
+        self.assertFalse(rejected["valid"])
+        self.assertEqual(rejected["reason"], "INVALID_BATCH_METADATA")
+        self.assertEqual(len(rejected["source_signature"]), 64)
+
+    def test_provenance_mutation_changes_qualified_snapshot_signature(self):
+        self._snapshot()
+        before = self._read()[1][self.line.pk]["snapshot_boundary_evidence"]["qualified_snapshot_signature"]
+        self.log.context["original_extra"] = "captured source detail"
+        self.log.save(update_fields=["context"])
+        after = self._read()[1][self.line.pk]["snapshot_boundary_evidence"]["qualified_snapshot_signature"]
+        self.assertNotEqual(before, after)
+
+    def test_empty_partial_capture_does_not_override_exact_snapshot(self):
+        self._snapshot()
+        record = AuditStockHistoryService()._canonical_import(self.branch, self.product)
+        record.raw_metadata.update(fetched_rows=0, history_limit=500, fetched_movement_ids=[],
+                                   fetched_at="2026-10-01T03:00:00+00:00")
+        record.save()
+        self.assertEqual(self._read()[0], {self.line.pk: Decimal("1")})
+
+
+class SnapshotBoundaryTransactionTests(TransactionTestCase):
+    def test_external_cache_cannot_reuse_source_proof_across_transactions(self):
+        fixture = SnapshotHistoricalBoundaryTests(methodName="test_opening_uses_its_own_cutoff")
+        fixture.setUp()
+        snapshot = fixture._snapshot()
+        fixture._incomplete_history()
+        cache = {}
+        first = fixture._read(cache=cache)[1][fixture.line.pk]["snapshot_boundary_evidence"]["raw_signature"]
+        snapshot.raw_payload["row"][8] = "2026-10-01T02:18:45.487"
+        snapshot.save(update_fields=["raw_payload"])
+        second = fixture._read(cache=cache)[1][fixture.line.pk]["snapshot_boundary_evidence"]["raw_signature"]
+        self.assertNotEqual(first, second)

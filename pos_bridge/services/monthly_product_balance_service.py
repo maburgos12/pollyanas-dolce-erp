@@ -7,12 +7,13 @@ import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
+from django.db import connection, transaction
 from django.db.models import Count, Q, Subquery
 from django.utils import timezone
 
@@ -28,8 +29,8 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
-from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, AuditStockHistoryError
+from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE, lock_product_month_sources
 from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
     point_stock_history_instant, resolve_stock_at_close,
@@ -190,13 +191,27 @@ def _snapshot_historical_boundaries(lines, *, cutoff, cache):
                 raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
             ).encode()).hexdigest(),
             "branch_provenance_log_ids": tuple(log.pk for log in logs),
+            "provenance_signature": hashlib.sha256(json.dumps({
+                "job": {"id": snapshot.sync_job_id, "status": snapshot.sync_job.status,
+                        "type": snapshot.sync_job.job_type, "parameters": snapshot.sync_job.parameters},
+                "logs": [{"id": log.pk, "message": log.message, "context": log.context} for log in logs],
+            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
             "branch_provenance": "POINT_INVENTORY_SELECTED_BRANCH_FK",
             "table": "tablaProductosPA", "field": "Ult_Mov",
             "frontend_sha256": SNAPSHOT_BOUNDARY_FRONTEND_SHA,
         }
         candidates[(snapshot.branch_id, snapshot.product_id)].append((snapshot.stock, proof))
     for key, qualified in candidates.items():
-        resolutions[key] = qualified[0] if qualified and len({stock for stock, _ in qualified}) == 1 else None
+        resolutions[key] = qualified[0] if qualified and len({
+            (stock, proof["last_movement_at"]) for stock, proof in qualified
+        }) == 1 else None
+        if resolutions[key]:
+            stock, proof = resolutions[key]
+            proof = {**proof, "qualified_snapshot_signature": hashlib.sha256(json.dumps(
+                [candidate[1] for candidate in qualified], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False,
+            ).encode()).hexdigest()}
+            resolutions[key] = stock, proof
     return resolutions
 
 
@@ -269,10 +284,177 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
     return resolutions
 
 
+def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache):
+    """Check retained original facts without promoting partial history coverage."""
+    results = cache.setdefault(("snapshot_canonical_consistency", cutoff), {})
+    keys = {(line.branch_id, line.product_id) for line in lines
+            if (history := reconciliations.get((line.branch_id, line.product_id)))
+            and history.coverage_status == "INCOMPLETE" and snapshots.get((line.branch_id, line.product_id))
+            and (line.branch_id, line.product_id) not in results}
+    if not keys:
+        return results
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys}, point_product_id__in={key[1] for key in keys},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ))
+    records = [record for record in records if (record.point_branch_id, record.point_product_id) in keys]
+    grouped = {record.pk: [] for record in records}
+    pair_records = {}
+    for record in records:
+        pair_records.setdefault((record.point_branch_id, record.point_product_id), []).append(record)
+    for row in PointProductHistoryRow.objects.filter(import_record_id__in=grouped).order_by("row_number"):
+        grouped[row.import_record_id].append(row)
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        if key not in keys:
+            continue
+        rows, metadata = grouped[record.pk], record.raw_metadata
+        signature = hashlib.sha256(json.dumps({
+            "import_id": record.pk, "updated_at": record.updated_at.isoformat(),
+            "metadata": metadata, "row_count": record.row_count,
+            "rows": [{"id": row.pk, "movement_id": row.row_number, "raw": row.raw_payload,
+                      "stored": [row.movement_at.isoformat(), row.movement_type,
+                                 str(row.previous_existence), str(row.quantity),
+                                 str(row.new_existence), row.cancelled,
+                                 str(row.total_cost), str(row.unit_cost)]}
+                     for row in rows],
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        results[key] = {"valid": False, "import_id": record.pk, "source_signature": signature,
+                        "canonical_membership_verified": False, "canonical_coverage_status": "INCOMPLETE",
+                        "reason": "UNKNOWN_MOVEMENT_OR_RETAINED_COUNT_MISMATCH"}
+        if len(pair_records[key]) != 1:
+            results[key].update(reason="AMBIGUOUS_CANONICAL_IMPORTS", import_ids=tuple(sorted(
+                candidate.pk for candidate in pair_records[key])), source_signature=hashlib.sha256(json.dumps([
+                    {"id": candidate.pk, "metadata": candidate.raw_metadata, "row_count": candidate.row_count,
+                     "updated_at": candidate.updated_at.isoformat(),
+                     "rows": [{"movement_id": row.row_number, "raw": row.raw_payload,
+                               "stored": [row.movement_at.isoformat(), row.movement_type,
+                                          str(row.quantity), str(row.previous_existence), str(row.new_existence),
+                                          row.cancelled, str(row.total_cost), str(row.unit_cost)]}
+                              for row in grouped[candidate.pk]]}
+                    for candidate in sorted(pair_records[key], key=lambda candidate: candidate.pk)
+                ], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+            continue
+        if reconciliations[key].unknown_movement_ids or len(rows) != record.row_count:
+            continue
+        results[key]["reason"] = "INVALID_BATCH_METADATA"
+        if not isinstance(metadata, dict):
+            continue
+        count, limit, ids = metadata.get("fetched_rows"), metadata.get("history_limit"), metadata.get("fetched_movement_ids")
+        if ("fetched_rows" in metadata and (type(count) is not int or count < 0)
+                or "history_limit" in metadata and (type(limit) is not int or limit <= 0)
+                or count is not None and limit is not None and count > limit):
+            continue
+        if "fetched_movement_ids" in metadata and (not isinstance(ids, list)
+                or any(type(value) is not int or value <= 0 for value in ids)
+                or count is not None and len(ids) != count or len(set(ids)) != len(ids)
+                or not set(ids) <= {row.row_number for row in rows}):
+            continue
+        try:
+            fetched_at = (datetime.fromisoformat(str(metadata["fetched_at"]).replace("Z", "+00:00"))
+                          if "fetched_at" in metadata else None)
+            if fetched_at is not None and timezone.is_naive(fetched_at):
+                continue
+            results[key]["reason"] = "RAW_OR_DOCUMENTARY_CONTRADICTION"
+            stock, snapshot = snapshots[key]
+            last_movement = datetime.fromisoformat(snapshot["last_movement_at"])
+            captured_at = datetime.fromisoformat(snapshot["captured_at"])
+            parsed = []
+            for row in rows:
+                raw = row.raw_payload
+                raw_id = raw.get("FK_Movimiento") if isinstance(raw, dict) else None
+                if not ((type(raw_id) is int and raw_id > 0)
+                        or isinstance(raw_id, str) and re.fullmatch(r"[0-9]+", raw_id) and int(raw_id) > 0):
+                    raise ValueError("Invalid original movement identity")
+                if not isinstance(raw.get("Movimiento"), str) or not raw["Movimiento"].strip():
+                    raise ValueError("Missing original movement type")
+                for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+                    value = raw.get(field)
+                    if value is None or value == "" or type(value) is bool or not Decimal(str(value)).is_finite():
+                        raise ValueError("Missing or invalid original quantity/stock")
+                if "isInsumo" in raw and not (raw["isInsumo"] is False
+                        or isinstance(raw["isInsumo"], str) and raw["isInsumo"].casefold() == "false"):
+                    raise ValueError("Original movement belongs to a different domain")
+                for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"):
+                    if field in raw and str(raw[field]) != snapshots[key][1]["product_external_id"]:
+                        raise ValueError("Original product identity contradicts selected product")
+                for field in ("FK_Sucursal", "PK_Sucursal"):
+                    if field in raw and str(raw[field]) != snapshots[key][1]["branch_external_id"]:
+                        raise ValueError("Original branch identity contradicts selected branch")
+                flag = raw.get("Cancelado")
+                if not (type(flag) is bool or isinstance(flag, str) and flag.casefold() in {"true", "false"}):
+                    raise ValueError("Invalid original cancellation flag")
+                movement_id, defaults = AuditStockHistoryService._parse_row(raw)
+                instant = point_stock_history_instant(raw)
+                raw_quantity = defaults["quantity"]
+                raw_new_existence = defaults["new_existence"]
+                raw_delta = defaults["new_existence"] - defaults["previous_existence"]
+                for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                    scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                    defaults[field] = defaults[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+                if movement_id != row.row_number or any(getattr(row, field) != defaults[field] for field in (
+                    "movement_at", "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
+                    "total_cost", "unit_cost",
+                )):
+                    raise ValueError("Canonical/raw contradiction")
+                if not all(value.is_finite() for value in (row.quantity, row.previous_existence, row.new_existence)):
+                    raise ValueError("Nonfinite stock")
+                if fetched_at is not None and instant > fetched_at:
+                    raise ValueError("Movement newer than original retrieval")
+                if instant <= captured_at and not row.cancelled:
+                    category = AuditStockHistoryService._category(row.movement_type, raw_quantity)
+                    if category is None:
+                        raise ValueError("Unresolved movement or reversal")
+                    words = " ".join("".join(char for char in unicodedata.normalize(
+                        "NFKD", row.movement_type) if not unicodedata.combining(char)).upper().split())
+                    delta = raw_delta
+                    if words == "CANCELACION VENTA" and delta != abs(raw_quantity):
+                        raise ValueError("Invalid effective sale reversal")
+                    if category in {"sales", "waste"} and words != "CANCELACION VENTA" and delta != -abs(raw_quantity):
+                        raise ValueError("Invalid effective sale/waste stock delta")
+                    if category in {"production", "transfer_in", "conversion_in"} and delta != abs(raw_quantity):
+                        raise ValueError("Invalid effective incoming stock delta")
+                    if category in {"transfer_out", "conversion_out"} and delta != -abs(raw_quantity):
+                        raise ValueError("Invalid effective outgoing stock delta")
+                    if category == "identified_adjustment" and (
+                        abs(delta) != abs(raw_quantity)
+                        or "SALIDA" in words.split() and delta > 0
+                        or "ENTRADA" in words.split() and delta < 0
+                    ):
+                        raise ValueError("Invalid effective stock adjustment")
+                    if instant > last_movement or (instant == last_movement and raw_new_existence != stock):
+                        raise ValueError("Original movement contradicts snapshot")
+                    parsed.append((instant, row.row_number, row))
+            ordered = sorted(parsed, key=lambda item: item[:2])
+            # A gap in an INCOMPLETE history is not a demonstrated contradiction.
+            # Retained facts can veto a snapshot, never lend coverage to it.
+            results[key] = {"valid": True, "reason": "NO_KNOWN_DOCUMENTARY_CONTRADICTION",
+                            "import_id": record.pk, "source_signature": signature,
+                            "canonical_membership_verified": False,
+                            "canonical_coverage_status": "INCOMPLETE",
+                            "checked_movement_ids": tuple(row.row_number for _, _, row in ordered),
+                            "latest_batch_movement_ids": tuple(sorted(ids)) if ids is not None else None,
+                            "coverage_promoted": False, "contradiction_detected": False}
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError) as exc:
+            results[key]["reason"] = "RAW_OR_DOCUMENTARY_CONTRADICTION"
+            results[key]["detail"] = str(exc)
+            continue
+    return results
+
+
+@transaction.atomic(savepoint=False)
 def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     """Read UTC Stock boundaries in bulk; never rewrite the stored closing."""
     if closing.source != PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
         return {line.id: Decimal(line.stock) for line in lines}, {}, ()
+    lock_product_month_sources([month])
+    # Atomic decorators reuse their Atomic instance. The callback queue instead
+    # is replaced at every outer commit/rollback, and remains shared in nested
+    # savepoints; do not keep source proofs across different transactions.
+    transaction_scope = connection.run_on_commit
+    if cache.get("source_transaction_scope") is not transaction_scope:
+        cache.clear()
+        cache["source_transaction_scope"] = transaction_scope
     monthly = cache.setdefault(month, {})
     missing_lines = [line for line in lines if (line.branch_id, line.product_id) not in monthly]
     if missing_lines:
@@ -341,9 +523,14 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         and line.created_at >= cutoff
     }
     snapshot_boundaries = _snapshot_historical_boundaries(
-        [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys],
+        [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys
+         or (monthly.get((line.branch_id, line.product_id))
+             and monthly[(line.branch_id, line.product_id)].coverage_status == "INCOMPLETE")],
         cutoff=cutoff, cache=cache,
     ) if boundary_manifest_valid else {}
+    snapshot_consistency = _snapshot_canonical_consistency(
+        lines, snapshots=snapshot_boundaries, reconciliations=monthly, cutoff=cutoff, cache=cache,
+    )
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)
@@ -364,6 +551,10 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             quantity = ZERO
         if quantity is None and key not in canonical_keys and snapshot_boundaries.get(key):
             quantity, snapshot_evidence = snapshot_boundaries[key]
+        elif (quantity is None and history and history.coverage_status == "INCOMPLETE"
+              and snapshot_boundaries.get(key) and snapshot_consistency.get(key, {}).get("valid")):
+            quantity, snapshot_evidence = snapshot_boundaries[key]
+            snapshot_evidence = {**snapshot_evidence, "canonical_consistency": snapshot_consistency[key]}
         evidence[line.id] = {
             "line_id": line.id, "original_stock": str(line.stock),
             "original_evidence": dict(line.evidence or {}),
@@ -371,6 +562,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "movement_ids": movement_ids,
             "captured_boundary_evidence": captured_evidence,
             "snapshot_boundary_evidence": dict(snapshot_evidence),
+            "canonical_consistency_evidence": dict(snapshot_consistency.get(key) or {}),
             "snapshot_boundary_verified": bool(snapshot_evidence),
             "physical_count_verified": False,
             "coverage_status": history.coverage_status if history else "MISSING",

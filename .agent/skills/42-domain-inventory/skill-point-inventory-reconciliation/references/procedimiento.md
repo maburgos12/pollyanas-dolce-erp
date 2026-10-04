@@ -95,9 +95,11 @@ Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con 
 ### Frontera documental con snapshot original, autorización4oct2026
 
 Usar el mismo lector `documentary_historical_boundary`, no otra captura/tabla.
-Si existe canónica API `POINT_STOCK_HISTORY_API` del par, completa o incompleta,
-NO ocultarla con un snapshot. XLS de costeo no se convierten en historia canónica.
-Cuando no existe, consultar bulk snapshots producto desde corte hasta corte+3d.
+Una canónica API `POINT_STOCK_HISTORY_API` COMPLETE conserva precedencia. Cuando
+no existe, consultar bulk snapshots producto desde corte hasta corte+3d. La
+autorización técnica posterior del4oct permite también frontera INDEPENDIENTE
+junto a canónica INCOMPLETE, sin ocultarla ni transformar su cobertura. XLS de
+costeo no se convierten en historia canónica. No aceptar candidatos por conteo.
 El manifiesto VERIFIED puede proceder de captura directa o de consolidación de
 intentos (`consolidated_point_stock_history_attempts`, apertura6 de agosto).
 Exigir fecha, pares esperados completos y retrieved_at postcorte en ambos; el
@@ -116,12 +118,43 @@ Row8 exige formato original timestamp completo naiveUTC; otro formato no se
 normaliza por aproximación y queda sin prueba bajo este contrato. Captura debe
 ser postcorte y lastMove estrictamente anterior al corte, no posterior a captura.
 Fecha vacía/incompleta, dominio/identidad ausente, FAILED, recuento contradictorio
-o stocks diferentes entre candidatos válidos dejan frontera sin prueba.
+o candidatos válidos con stock O ÚltimoMovimiento diferentes dejan frontera sin
+prueba; igual stock no basta para elegir entre certificados temporales distintos.
+
+Para canónica INCOMPLETE, inspeccionar bulk TODOS los raws retenidos del import
+exacto como vetos documentales. Exigir FK_Movimiento/row_number, fecha raw UTC,
+cantidades/existencias/cancelación y dominio coherentes con lo persistido; unknown
+o raw malformado impiden aceptación. Un movimiento efectivo posterior a Ult_Mov
+y anterior o igual a la captura contradice el snapshot, incluso si cancelación y
+reversión netean cero. En el instante Ult_Mov, un estado incompatible o ambiguo
+también bloquea. No inventar vínculo de cancelación/reversión ni compensar entre
+cortes. Cancelado explícito íntegro permanece anulado, no pérdida nueva.
+Comparar raw contra la representación persistida según la escala DecimalField
+del modelo y el redondeo PostgreSQL; conservar raw íntegro en la huella. Las
+ecuaciones, deltas y estado raw en Ult_Mov usan precisión original: nunca
+redondear fuentes para conseguir coincidencia. FK numérico textual sólo acredita
+la misma identidad si es un entero ASCII positivo exacto, no bool, float u offset.
+
+Ausencia legacy de metadata de lote (fetched IDs, recuento, límite o fecha de
+descarga), saturación o fetched_rows distinto a retained no
+prueban contradicción por sí mismos: tampoco prueban integridad de lote. Conservar
+`canonical_membership_verified=False` cuando no esté acreditada. IDs presentes
+inválidos, referencias ausentes o row_count distinto del total realmente retenido
+son inconsistencia, no ausencia de cobertura. Si la fecha de descarga está
+presente, un raw posterior a ella es contradictorio. Varios imports API para el
+mismo par no se seleccionan por orden: dejar sin prueba ante canónica ambigua,
+conservar las huellas y resolver su identidad por el flujo oficial.
+Huecos anteriores a Ult_Mov siguen
+INCOMPLETE; no imponer continuidad ficticia ni certificar historia mediante stock.
 
 Conservar evidencia PK snapshot/job/par/stock/captura/lastMove/contrato/huella.
 `snapshot_boundary_verified=True` no implica `canonical_history_verified`:
-mantener cobertura MISSING y físico no acreditado. No reescribir cierre original.
-Firma de refresh incluye raw/captura/status/tipo/log; verificar cambios sin signals,
+mantener cobertura MISSING sin canónica o INCOMPLETE junto a ella, y físico no
+acreditado. No reescribir cierre original. La prueba identifica snapshot y
+consistencia canónica por separado: lectura independiente no verifica el mes.
+Leer bajo mutex mensual compartido/atomic; cache sólo dentro de lectura protegida.
+Firma de refresh incluye TODOS los raws retenidos, metadata de import, candidatos
+snapshot y raw/captura/status/tipo/log; verificar cambios sin signals,
 consulta bulk y segunda lectura de cache sin HTTP. Registrar entrega real después
 de CI/deploy/aceptación autenticada, no por actualizar este procedimiento.
 
