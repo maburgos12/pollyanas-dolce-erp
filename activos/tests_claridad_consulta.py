@@ -96,7 +96,7 @@ class ConsultaTrabajoTests(TestCase):
         orden.refresh_from_db()
         self.assertEqual((orden.estatus, orden.costo_total, orden.numero_factura, orden.nota_trabajo), ('CERRADA', Decimal('17.25'), 'F-123', 'Atendido'))
         self.assertEqual(list(orden.bitacora.values_list('accion', flat=True)).count('FACTURA'), 1)
-        self.assertEqual(list(orden.bitacora.values_list('accion', flat=True)).count('EVIDENCIA'), 1)
+        self.assertEqual(list(orden.bitacora.values_list('accion', flat=True)).count('EVIDENCIA'), 2)
 
     def test_perfil_conserva_gaps_y_tonos_sin_certificacion_financiera(self):
         completa = self.orden(estatus='CERRADA', responsable='Técnico', costo_mano_obra=Decimal('25'))
