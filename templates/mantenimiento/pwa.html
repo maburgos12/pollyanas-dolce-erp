@@ -44,6 +44,9 @@
         proveedorImportables: [],
         planes: [],
         planChoices: {tipos: [], estatus: []},
+        planConfigDrafts: new Map(),
+        planConfigAssets: [],
+        planDeleteDrafts: new Map(),
         cancelaciones: {puede_resolver: false, items: []},
         resumen: null,
         catalogos: null,
@@ -388,16 +391,26 @@
         return state.proveedores;
       }
 
+      async function loadPlanPages(catalogo = "") {
+        const items = []; let page = 1; let choices;
+        do {
+          const res = await apiFetch(`/planes/?page=${page}&page_size=120${catalogo ? '&catalogo=activos' : ''}`);
+          if (!res.ok) throw new Error('No se pudieron consultar los planes y equipos autorizados. Reintenta con conexión.');
+          const data = await res.json();
+          if (!Array.isArray(data.items) || !data.pagination || data.pagination.page !== page || typeof data.pagination.has_next !== 'boolean') throw new Error('La consulta quedó incompleta. Reintenta.');
+          items.push(...data.items); choices = data.choices;
+          if (!data.pagination.has_next) return {items, choices};
+          page++;
+        } while (true);
+      }
+
       async function loadPlanes(force = false) {
         if (state.planes.length && !force) return state.planes;
-        const res = await apiFetch("/planes/");
-        if (res.ok) {
-          const data = await res.json();
-          state.planes = data.items || [];
-          state.planChoices = data.choices || {tipos: [], estatus: []};
-        } else {
-          state.planes = [];
-        }
+        const actor = state.perfil?.id;
+        const data = await loadPlanPages();
+        if (state.perfil?.id !== actor) throw new Error('La sesión cambió. Consulta los planes de nuevo.');
+        state.planes = data.items;
+        state.planChoices = data.choices || {tipos: [], estatus: []};
         return state.planes;
       }
 
@@ -574,6 +587,7 @@
             <p id="plan-next-work-label" class="section-kicker section-kicker-tight">Próximo trabajo</p>
             ${agendaCard(proximo, true)}
           ` : ""}
+          ${planCoverageNotice(resumen)}
           ${quickActions()}
           <div class="dash-grid">
             <button class="dash-btn" onclick="showScreen('pendientes')">${appGlyph("bandeja")}<span>Bandeja</span></button>
@@ -590,6 +604,11 @@
         `));
       }
 
+      function planCoverageNotice(resumen) {
+        const coverage = resumen.planes_coverage;
+        return coverage?.parcial ? `<p role="status">La agenda es un resumen: muestra ${coverage.mostrados} de ${coverage.total} planes activos autorizados. <button class="secondary-btn" onclick="showScreen('planes')">Revisar todos los planes</button></p>` : '';
+      }
+
       async function renderAgenda() {
         await loadResumen(true);
         const resumen = state.resumen || {};
@@ -601,6 +620,7 @@
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
           <h1 class="screen-title screen-title-spaced">Agenda móvil</h1>
+          ${planCoverageNotice(resumen)}
           <section class="ops-strip ops-strip-spaced">
             <div><strong data-agenda-count="vencidos">${counts.vencidos || 0}</strong><span>Vencidos</span></div>
             <div><strong data-agenda-count="urgentes">${counts.urgentes || 0}</strong><span>Urgentes</span></div>
@@ -736,14 +756,29 @@
             <div id="plan-execution-${plan.id}"></div><div class="card-actions">
               <button onclick="renderPlanForm(${plan.id})">Editar</button>
               <button onclick="ejecutarPlanAgenda(${plan.id})">Realizado</button>
-              <button onclick="eliminarPlanMovil(${plan.id})">Pausar</button>
+              <button data-plan-delete="${plan.id}" onclick="eliminarPlanMovil(${plan.id})">Retirar</button>
             </div>
+            <p id="plan-delete-feedback-${plan.id}" role="status" aria-live="polite"></p>
           </article>
         `;
       }
 
       async function renderPlanes() {
-        await loadPlanes(true);
+        state.pantalla = 'planes';
+        const generation = ++state.requestGeneration.capture;
+        const vigente = () => state.pantalla === 'planes' && state.requestGeneration.capture === generation;
+        try { await loadPlanes(true); }
+        catch (error) { if (vigente()) render(shell(`<p role="alert">${esc(error.message)}</p><button class="secondary-btn" onclick="renderPlanes()">Reintentar consulta</button>`), '', vigente); return; }
+        if (!vigente()) return;
+        const pendingDeletes = [];
+        for (let index=0; index<sessionStorage.length; index++) {
+          const key=sessionStorage.key(index);
+          if (!key?.startsWith(`pd_plan_delete_${state.perfil.id}_`)) continue;
+          try {
+            const draft=JSON.parse(sessionStorage.getItem(key)); const id=Number(key.split('_').at(-1));
+            if (draft.actor === String(state.perfil.id) && draft.id === id && /^[0-9a-f-]{36}$/i.test(draft.clave_captura) && !state.planes.some(plan=>plan.id===id)) pendingDeletes.push(id);
+          } catch(error) {}
+        }
         const activos = state.planes.filter((plan) => plan.estatus === "ACTIVO");
         const pausados = state.planes.filter((plan) => plan.estatus !== "ACTIVO");
         render(shell(`
@@ -753,26 +788,46 @@
             <button class="quick-action primary" onclick="renderPlanForm()">+ Nuevo plan</button>
             <button class="quick-action" onclick="showScreen('agenda')">Ver agenda</button>
           </div>
+          ${pendingDeletes.length ? `<section class="card"><p>Hay retiros pendientes de confirmar.</p>${pendingDeletes.map(id=>`<p><button data-plan-delete="${id}" onclick="eliminarPlanMovil(${id})">Confirmar retiro del plan ${id}</button><span id="plan-delete-feedback-${id}" role="status" aria-live="polite"></span></p>`).join('')}</section>` : ''}
           <p class="section-kicker">Activos</p>
           ${activos.map(planCard).join("") || `<div class="empty">Sin planes activos.</div>`}
           ${pausados.length ? `<p class="section-kicker">Pausados</p>${pausados.map(planCard).join("")}` : ""}
-        `));
+        `), '', vigente);
       }
 
       async function renderPlanForm(id = null, error = "") {
-        await Promise.all([loadPlanes(), ensureActivos()]);
-        const plan = id ? state.planes.find((item) => item.id === id) : {};
+        state.pantalla = 'plan-config';
+        const generation = ++state.requestGeneration.capture;
+        const vigente = () => state.pantalla === 'plan-config' && state.requestGeneration.capture === generation;
+        try {
+          await loadPlanes();
+          state.planConfigAssets = (await loadPlanPages('activos')).items;
+        } catch (error) { if (vigente()) render(shell(`<p role="alert">${esc(error.message)}</p><button onclick="renderPlanForm(${id || 'null'})">Reintentar</button>`), '', vigente); return; }
+        if (!vigente()) return;
+        if (id && !state.planes.some(plan=>plan.id===id)) { render(shell('<p role="alert">Este plan ya no está disponible en tus planes autorizados.</p>')); return; }
+        const draftKey = `pd_plan_config_${state.perfil.id}_${id || 'nuevo'}`;
+        let draft = state.planConfigDrafts.get(draftKey);
+        if (!id && draft?.id && !draft.pending) { state.planConfigDrafts.delete(draftKey); draft = null; }
+        if (!draft) {
+          try { draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); } catch (error) { render(shell('<p role="alert">No se pudo recuperar el envío pendiente. Revisa los planes guardados antes de iniciar otra captura.</p>')); return; }
+          if (draft && !draftPlanValido(draft, id, draftKey)) {
+            render(shell(`<p role="alert">No se pudo recuperar el envío pendiente. Revisa los planes guardados antes de iniciar otra captura.</p><button onclick="showScreen('planes')">Revisar planes</button>`)); return;
+          }
+          if (!draft) draft = {version:2, actor:String(state.perfil.id), id, revision_en:id ? state.planes.find(item => item.id === id).revision_en : null, base:id ? {...state.planes.find(item => item.id === id)} : {}, valores: id ? {...state.planes.find(item => item.id === id)} : {}, intento:null};
+          draft.pending = false; state.planConfigDrafts.set(draftKey, draft);
+        }
+        const plan = draft.valores;
         const tipos = state.planChoices.tipos || [];
         const estatus = state.planChoices.estatus || [];
-        render(shell(`
+        const installed = await render(shell(`
           <button class="secondary-btn" onclick="showScreen('planes')">Volver</button>
           <h1 class="screen-title screen-title-spaced">${id ? "Editar plan" : "Nuevo plan"}</h1>
-          <section class="card report-card">
+          <section id="plan-config-form" data-draft-key="${esc(draftKey)}" class="card report-card">
             <div class="field">
               <label for="plan-activo">Activo / equipo</label>
-              <select id="plan-activo" ${id ? "disabled" : ""}>
+              <select id="plan-activo" ${draft.id || draft.intento ? "disabled" : ""}>
                 <option value="">Selecciona</option>
-                ${state.activos.map((a) => `<option value="${a.id}" ${String(plan.activo_id || "") === String(a.id) ? "selected" : ""}>${esc(a.codigo)} · ${esc(a.nombre)}</option>`).join("")}
+                ${state.planConfigAssets.map((a) => `<option value="${a.id}" ${String(plan.activo_id || "") === String(a.id) ? "selected" : ""}>${esc(a.codigo)} · ${esc(a.nombre)}</option>`).join("")}
               </select>
             </div>
             <div class="field"><label for="plan-nombre">Nombre del plan</label><input id="plan-nombre" value="${esc(plan.nombre || "")}" placeholder="Ej. Limpieza profunda horno"></div>
@@ -794,44 +849,189 @@
             </div>
             <div class="field"><label for="plan-responsable">Responsable</label><input id="plan-responsable" value="${esc(plan.responsable || "")}"></div>
             <div class="field"><label for="plan-instrucciones">Instrucciones</label><textarea id="plan-instrucciones">${esc(plan.instrucciones || "")}</textarea></div>
-            ${error ? `<p class="error-msg">${esc(error)}</p>` : ""}
-            <button class="primary-btn" onclick="guardarPlanMovil(${id || "null"})">Guardar plan</button>
+            <p id="plan-config-feedback" role="status" aria-live="polite">${esc(error || (draft.intento ? 'Hay un envío pendiente de confirmar. Reintentar conserva sus datos originales.' : ''))}</p>
+            <button id="plan-config-save" ${draft.pending ? 'disabled' : ''} class="primary-btn" onclick="guardarPlanMovil(${id || "null"})">${draft.intento ? 'Reintentar envío original' : 'Guardar plan'}</button>
+            <button id="plan-config-review" ${draft.stale ? '' : 'hidden'} class="secondary-btn" onclick="revisarPlanActual(${id || 'null'})">Revisar cambios del plan</button>
+            <button id="plan-config-new-attempt" hidden class="secondary-btn" onclick="nuevoIntentoPlan(${id || 'null'})">Enviar los cambios como nuevo intento</button>
           </section>
-        `));
+        `), '', vigente);
+        if (installed === false || !vigente()) return;
+        const form = document.getElementById('plan-config-form');
+        form.querySelectorAll('input,select,textarea').forEach(field => {
+          if (!['INPUT','SELECT','TEXTAREA'].includes(field.tagName)) return;
+          field.addEventListener('input', () => { draft.valores = leerPlanForm(form); guardarDraftPlan(draftKey,draft); });
+        });
+
+      }
+
+      function leerPlanForm(form = document.getElementById("plan-config-form")) {
+        return {
+          activo_id: form.querySelector("#plan-activo")?.value,
+          nombre: form.querySelector("#plan-nombre")?.value,
+          tipo: form.querySelector("#plan-tipo")?.value,
+          estatus: form.querySelector("#plan-estatus")?.value,
+          frecuencia_dias: form.querySelector("#plan-frecuencia")?.value,
+          tolerancia_dias: form.querySelector("#plan-tolerancia")?.value,
+          ultima_ejecucion: form.querySelector("#plan-ultima")?.value,
+          proxima_ejecucion: form.querySelector("#plan-proxima")?.value,
+          responsable: form.querySelector("#plan-responsable")?.value,
+          instrucciones: form.querySelector("#plan-instrucciones")?.value,
+        };
+      }
+
+      function draftPlanValido(draft, expectedId, key) {
+        const validId = value => value === null || (Number.isSafeInteger(value) && value > 0);
+        const object = value => value && typeof value === 'object' && !Array.isArray(value);
+        const scalar = value => value === null || ['string','boolean'].includes(typeof value) || (typeof value === 'number' && Number.isFinite(value));
+        if (!object(draft) || draft.actor !== String(state.perfil.id) || draft.version !== 2 ||
+            !validId(expectedId) || draft.id !== expectedId || key !== `pd_plan_config_${state.perfil.id}_${expectedId || 'nuevo'}` ||
+            (expectedId !== null && (typeof draft.revision_en !== 'string' || !draft.revision_en)) || !object(draft.valores) || !Object.values(draft.valores).every(scalar)) return false;
+        if (draft.intento === null) return true;
+        const attempt = draft.intento;
+        const fields = ['revision_en','activo_id','nombre','tipo','estatus','frecuencia_dias','tolerancia_dias','ultima_ejecucion','proxima_ejecucion','responsable','instrucciones','clave_captura'];
+        return object(attempt) && attempt.payload?.revision_en === draft.revision_en && attempt.id === expectedId && validId(attempt.id) && object(attempt.payload) &&
+          Object.keys(attempt.payload).length === fields.length && fields.every(field => Object.hasOwn(attempt.payload,field) && (field==='revision_en' && expectedId===null && attempt.payload[field]===null || ['string','number'].includes(typeof attempt.payload[field])) && scalar(attempt.payload[field])) &&
+          Number.isSafeInteger(Number(attempt.payload.activo_id)) && Number(attempt.payload.activo_id) > 0 &&
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attempt.payload.clave_captura);
+      }
+
+      function guardarDraftPlan(key, draft) {
+        if (key.endsWith('_nuevo') && draft.id) key = `pd_plan_config_${draft.actor}_${draft.id}`;
+        try { sessionStorage.setItem(key, JSON.stringify(draft)); return true; } catch (error) { return false; }
+      }
+
+      async function revisarPlanActual(id) {
+        const key = `pd_plan_config_${state.perfil.id}_${id || 'nuevo'}`;
+        const draft = state.planConfigDrafts.get(key);
+        const form = document.getElementById('plan-config-form');
+        if (!draft?.stale || draft.pending || !draft.intento || !id || form?.dataset.draftKey !== key) return;
+        const feedback = form.querySelector('#plan-config-feedback');
+        try {
+          await loadPlanes(true);
+          if (document.getElementById('plan-config-form') !== form) return;
+          const fresh = state.planes.find(plan => plan.id === id);
+          if (!fresh) throw new Error('El plan ya no está disponible en tus planes autorizados.');
+          if (!window.confirm(`El plan actual: ${fresh.nombre}. Cada ${fresh.frecuencia_dias} días. Última ejecución: ${fresh.ultima_ejecucion || 'sin fecha'}. Próxima: ${fresh.proxima_ejecucion || 'sin fecha'}. ¿Revisaste estos cambios? Se conservarán tus campos modificados y se actualizarán los demás.`)) return;
+          const values = leerPlanForm(form);
+          Object.keys(values).forEach(field => { if (String(values[field] ?? '') === String(draft.base?.[field] ?? '')) values[field] = fresh[field]; });
+          draft.valores = values; draft.base = {...fresh}; draft.revision_en = fresh.revision_en;
+          draft.intento = null; draft.stale = false; guardarDraftPlan(key,draft);
+          await renderPlanForm(id, 'Cambios revisados. Revisa tus datos y vuelve a guardar.');
+        } catch (error) { feedback.textContent = error.message; }
+      }
+
+      function nuevoIntentoPlan(id) {
+        const key = `pd_plan_config_${state.perfil.id}_${id || 'nuevo'}`;
+        const draft = state.planConfigDrafts.get(key);
+        if (!draft || draft.pending || !draft.rechazado) return;
+        draft.intento = null; draft.rechazado = false; guardarDraftPlan(key, draft);
+        document.getElementById('plan-config-feedback').textContent = 'Revisa los datos antes de guardar.';
+        document.getElementById('plan-config-save').textContent = 'Guardar plan';
+        document.getElementById('plan-config-new-attempt').hidden = true;
       }
 
       async function guardarPlanMovil(id = null) {
-        const payload = {
-          activo_id: document.getElementById("plan-activo")?.value,
-          nombre: document.getElementById("plan-nombre")?.value,
-          tipo: document.getElementById("plan-tipo")?.value,
-          estatus: document.getElementById("plan-estatus")?.value,
-          frecuencia_dias: document.getElementById("plan-frecuencia")?.value,
-          tolerancia_dias: document.getElementById("plan-tolerancia")?.value,
-          ultima_ejecucion: document.getElementById("plan-ultima")?.value,
-          proxima_ejecucion: document.getElementById("plan-proxima")?.value,
-          responsable: document.getElementById("plan-responsable")?.value,
-          instrucciones: document.getElementById("plan-instrucciones")?.value,
-        };
-        const res = await apiFetch(id ? `/planes/${id}/` : "/planes/", {
-          method: id ? "PATCH" : "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) return renderPlanForm(id, "Revisa equipo, nombre y fechas del plan.");
-        state.planes = [];
-        state.resumen = null;
-        showScreen("planes");
+        const key = `pd_plan_config_${state.perfil.id}_${id || 'nuevo'}`;
+        const draft = state.planConfigDrafts.get(key);
+        if (!draft || draft.pending) return;
+        const form = document.getElementById('plan-config-form');
+        if (!form || form.dataset.draftKey !== key) return;
+        if (!draftPlanValido(draft, id, key)) { form.querySelector('#plan-config-feedback').textContent = 'No se pudo recuperar el envío pendiente. Revisa los planes guardados antes de iniciar otra captura.'; return; }
+        const button = form.querySelector('#plan-config-save');
+        const feedback = form.querySelector('#plan-config-feedback');
+        draft.valores = leerPlanForm(form);
+        if (!draft.intento && (!Number.isSafeInteger(Number(draft.valores.activo_id)) || Number(draft.valores.activo_id) <= 0)) {
+          feedback.textContent = 'Selecciona un equipo antes de guardar el plan.'; return;
+        }
+        if (!draft.intento) draft.intento = {payload:{...draft.valores, revision_en:draft.revision_en, clave_captura:crypto.randomUUID()}, id:draft.id};
+        const attempt = draft.intento;
+        form.querySelector('#plan-activo').value = attempt.payload.activo_id; form.querySelector('#plan-activo').disabled = true;
+        draft.pending = true;
+        if (!guardarDraftPlan(key, draft)) { draft.pending = false; feedback.textContent = 'No se pudo conservar este envío en el dispositivo. No se envió; habilita el almacenamiento y reintenta este mismo intento.'; return; }
+        let confirmed = false; let storageWarning = false;
+        button.disabled = true; button.textContent = 'Guardando…'; feedback.textContent = '';
+        try {
+          const res = await apiFetch(attempt.id ? `/planes/${attempt.id}/` : '/planes/', {
+            method:attempt.id ? 'PATCH' : 'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(attempt.payload)});
+          let data;
+          try { data = await res.json(); } catch (error) { throw new Error('No se confirmó el envío. Recupera la conexión y reintenta el mismo intento.'); }
+          if (!res.ok) {
+            draft.rechazado = res.status === 410;
+            draft.stale = data.error_code === 'plan_revision_conflict';
+            if (res.status === 400) draft.intento = null;
+            throw new Error(data.error || data.detail || 'No se pudo guardar el plan.');
+          }
+          if (!Number.isSafeInteger(data.id) || data.id <= 0 || (attempt.id !== null && data.id !== attempt.id) || !Number.isSafeInteger(data.activo_id) || data.activo_id !== Number(attempt.payload.activo_id) || typeof data.revision_en !== 'string' || !data.revision_en) throw new Error('No se confirmó el resultado. Reintenta el envío original.');
+          const currentValues = draft.valores;
+          currentValues.activo_id = data.activo_id;
+          Object.keys(currentValues).forEach(field => { if (String(currentValues[field] ?? '') === String(attempt.payload[field] ?? '') && Object.hasOwn(data,field)) currentValues[field] = data[field]; });
+          draft.base = {...data};
+          draft.id = data.id; draft.revision_en = data.revision_en; draft.intento = null; draft.rechazado = false; draft.stale = false;
+          confirmed = true;
+          if (key.endsWith('_nuevo')) { try { sessionStorage.removeItem(key); } catch(error) { storageWarning=true; } }
+          const confirmedKey = `pd_plan_config_${draft.actor}_${data.id}`;
+          const bindConfirmedForm = target => { target.dataset.draftKey = confirmedKey; target.querySelector('#plan-activo').disabled = true;
+            const fields={activo_id:'activo',nombre:'nombre',tipo:'tipo',estatus:'estatus',frecuencia_dias:'frecuencia',tolerancia_dias:'tolerancia',ultima_ejecucion:'ultima',proxima_ejecucion:'proxima',responsable:'responsable',instrucciones:'instrucciones'}; Object.entries(fields).forEach(([field,node])=>{target.querySelector('#plan-'+node).value = draft.valores[field] ?? '';});
+            target.querySelector('#plan-config-save').onclick = () => guardarPlanMovil(data.id);
+            target.querySelector('#plan-config-new-attempt').onclick = () => nuevoIntentoPlan(data.id); target.querySelector('#plan-config-review').onclick = () => revisarPlanActual(data.id); };
+          const displayed = document.getElementById('plan-config-form');
+          if (displayed && displayed !== form && displayed.dataset.draftKey === key) bindConfirmedForm(displayed);
+          bindConfirmedForm(form);
+          state.planConfigDrafts.set(`pd_plan_config_${draft.actor}_${data.id}`,draft);
+          state.planes = []; state.resumen = null;
+          feedback.textContent = 'Plan guardado. Puedes seguir ajustando estos datos o volver a Planes.';
+        } catch (error) {
+          feedback.textContent = `${error instanceof TypeError ? 'No se confirmó el envío. Recupera la conexión.' : error.message} ${draft.intento ? 'El reintento enviará los datos originales; tus cambios actuales permanecen aquí.' : 'Tus datos permanecen aquí para corregirlos.'}`;
+        } finally {
+          draft.pending = false;
+          if (!guardarDraftPlan(key, draft)) storageWarning = true;
+          if (storageWarning) feedback.textContent += confirmed ? ' El plan ya está guardado; no se pudo actualizar la recuperación local.' : ' No se pudo conservar la recuperación local. Mantén esta pantalla abierta y el intento original.';
+          form.querySelector('#plan-activo').disabled = Boolean(draft.id || draft.intento);
+          button.disabled = false; button.textContent = draft.intento ? 'Reintentar envío original' : 'Guardar plan';
+          form.querySelector('#plan-config-new-attempt').hidden = !draft.rechazado || !draft.intento;
+          form.querySelector('#plan-config-review').hidden = !draft.stale;
+          const visibleForm = document.getElementById('plan-config-form');
+          if (visibleForm && visibleForm !== form && (visibleForm.dataset.draftKey === key || (draft.id && visibleForm.dataset.draftKey === `pd_plan_config_${draft.actor}_${draft.id}` && state.planConfigDrafts.get(visibleForm.dataset.draftKey) === draft))) {
+            visibleForm.querySelector('#plan-config-save').disabled = false;
+            visibleForm.querySelector('#plan-config-save').textContent = button.textContent;
+            visibleForm.querySelector('#plan-config-feedback').textContent = feedback.textContent;
+            visibleForm.querySelector('#plan-config-new-attempt').hidden = !draft.rechazado || !draft.intento;
+            visibleForm.querySelector('#plan-config-review').hidden = !draft.stale;
+            if (draft.id) visibleForm.querySelector('#plan-activo').disabled = true;
+          }
+        }
       }
 
       async function eliminarPlanMovil(id) {
-        if (!window.confirm("Pausar este plan de mantenimiento?")) return;
-        const res = await apiFetch(`/planes/${id}/`, {method: "DELETE"});
-        if (res.ok) {
-          state.planes = [];
-          state.resumen = null;
-          renderPlanes();
+        const key = `pd_plan_delete_${state.perfil.id}_${id}`;
+        let draft = state.planDeleteDrafts.get(key);
+        if (!draft) {
+          try { draft = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (error) { const feedback=document.getElementById(`plan-delete-feedback-${id}`); if(feedback) feedback.textContent='No se pudo recuperar el retiro pendiente. Revisa la agenda antes de iniciar otro.'; return; }
+          if (draft && (draft.actor !== String(state.perfil.id) || draft.id !== id || typeof draft.revision_en !== 'string' || !draft.revision_en || !/^[0-9a-f-]{36}$/i.test(draft.clave_captura))) { const feedback=document.getElementById(`plan-delete-feedback-${id}`); if(feedback) feedback.textContent='El retiro pendiente no es válido. Revisa la agenda antes de iniciar otro.'; return; }
+          if (!draft) { if (!state.planes.find(plan=>plan.id===id)?.revision_en) { const feedback=document.getElementById(`plan-delete-feedback-${id}`); if(feedback) feedback.textContent='Consulta el plan actual antes de retirarlo.'; return; } if (!window.confirm('Retirar este plan de mantenimiento de la agenda?')) return; draft = {actor:String(state.perfil.id),id,revision_en:state.planes.find(plan=>plan.id===id)?.revision_en,clave_captura:crypto.randomUUID()}; }
+          draft.pending = false; state.planDeleteDrafts.set(key,draft);
         }
+        if (draft.pending) return;
+        draft.pending = true;
+        const generation = state.requestGeneration.capture;
+        const button = document.querySelector(`[data-plan-delete="${id}"]`);
+        const feedback = document.getElementById(`plan-delete-feedback-${id}`);
+        if (!guardarDraftPlan(key,draft)) { draft.pending=false; if(feedback) feedback.textContent='No se pudo conservar el retiro en este dispositivo. No se envió; habilita el almacenamiento y reintenta el mismo intento.'; return; }
+        if (button) { button.disabled = true; button.textContent = 'Retirando…'; }
+        try {
+        if (draft.stale) {
+          await loadPlanes(true); const fresh=state.planes.find(plan=>plan.id===id);
+          if (state.pantalla !== 'planes' || state.requestGeneration.capture !== generation) return;
+          if(!fresh || !window.confirm(`El plan cambió: ${fresh.nombre}, próxima ejecución ${fresh.proxima_ejecucion || 'sin fecha'}. ¿Retirar esta configuración actual?`)) return;
+          Object.assign(draft,{revision_en:fresh.revision_en,clave_captura:crypto.randomUUID(),stale:false}); if(!guardarDraftPlan(key,draft)) throw new Error('No se pudo conservar el retiro revisado. No se envió; habilita el almacenamiento y reintenta el mismo intento.');
+        }
+          const res = await apiFetch(`/planes/${id}/`, {method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({clave_captura:draft.clave_captura,revision_en:draft.revision_en})});
+          if (res.status !== 204) { let data; try { data=await res.json(); } catch(error) { throw new Error('No se confirmó el retiro. Recupera la conexión.'); } if(data.error_code==='plan_revision_conflict'){draft.stale=true;guardarDraftPlan(key,draft);} throw new Error(data.error || data.detail || 'No se confirmó que el plan fue retirado.'); }
+          try { sessionStorage.removeItem(key); } catch(error) { if(feedback) feedback.textContent='El plan ya fue retirado; no se pudo limpiar la recuperación local.'; } state.planDeleteDrafts.delete(key);
+          state.planes = []; state.resumen = null;
+          if (state.pantalla === 'planes' && state.requestGeneration.capture === generation) await renderPlanes();
+        } catch (error) { if (feedback) feedback.textContent = `${error.message} Reintenta para confirmar el mismo retiro.`; }
+        finally { draft.pending=false; if(state.planDeleteDrafts.get(key)===draft) guardarDraftPlan(key,draft); if(button){button.disabled=false;button.textContent='Retirar';} }
       }
 
       async function renderCancelaciones() {
@@ -2966,7 +3166,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261004-recuperacion-p7", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261004-configuracion-planes-p7", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {

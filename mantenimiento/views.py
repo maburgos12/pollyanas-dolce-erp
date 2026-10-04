@@ -43,6 +43,7 @@ from mantenimiento.services_access import (
     can_write_mantenimiento,
 )
 from mantenimiento.services_capturas_equipos import capturar_equipo, guardar_factura, CapturaEquipoError, validar_equipo
+from mantenimiento.services_configuracion_planes import configurar_plan, planes_autorizados, activos_autorizados
 from mantenimiento.services_history import continuidad_por_principal
 from mantenimiento.services_vinculos import PROTECTED_MESSAGE
 from core.access import can_manage_module, can_manage_submodule, can_view_module, can_view_submodule, is_admin_or_dg
@@ -879,48 +880,38 @@ def importar_proveedores_movil(request):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def planes_movil(request):
-    today = timezone.localdate()
+    actor = get_user_model().objects.get(pk=request.user.pk)  # rrhh-allow-inactive-history: fresh capability check below
+    if not can_access_mantenimiento(actor):
+        raise PermissionDenied('No tienes permisos para ver Mantenimiento.')
     if request.method == "POST":
-        activo_obj = get_object_or_404(Activo, pk=_safe_int(request.data.get("activo_id")), activo=True)
-        plan = PlanMantenimiento(activo_ref=activo_obj)
-        error = _guardar_plan_desde_data(plan, request.data)
-        if error:
-            return Response({"error": error}, status=400)
-        plan.save()
-        return Response(_plan_payload(plan, today), status=201)
-    planes = (
-        PlanMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal")
-        .filter(activo=True)
-        .order_by("proxima_ejecucion", "id")[:120]
-    )
-    return Response(
-        {
-            "choices": {
-                "tipos": [{"value": value, "label": label} for value, label in PlanMantenimiento.TIPO_CHOICES],
-                "estatus": [{"value": value, "label": label} for value, label in PlanMantenimiento.ESTATUS_CHOICES],
-            },
-            "items": [_plan_payload(plan, today) for plan in planes],
-        }
-    )
+        plan, replay = configurar_plan(usuario=actor, operacion='plan_create', data=request.data,
+            guardar=_guardar_plan_desde_data)
+        return Response(_plan_payload(plan), status=200 if replay else 201)
+    try:
+        page = max(1, int(request.query_params.get('page', 1)))
+        size = min(120, max(1, int(request.query_params.get('page_size', 120))))
+    except (ValueError, TypeError):
+        return Response({'error': 'La página debe ser un número válido.'}, status=400)
+    assets = request.query_params.get('catalogo') == 'activos'
+    qs = activos_autorizados(actor).order_by('codigo', 'pk') if assets else planes_autorizados(actor).filter(activo=True).order_by('proxima_ejecucion', 'id')
+    count = qs.count()
+    rows = qs[(page - 1) * size:page * size]
+    items = [{'id': obj.pk, 'codigo': obj.codigo, 'nombre': obj.nombre} for obj in rows] if assets else [_plan_payload(plan) for plan in rows]
+    return Response({'items': items, 'pagination': {'count': count, 'page': page, 'page_size': size,
+        'has_next': page * size < count}, 'choices': {
+        'tipos': [{'value': value, 'label': label} for value, label in PlanMantenimiento.TIPO_CHOICES],
+        'estatus': [{'value': value, 'label': label} for value, label in PlanMantenimiento.ESTATUS_CHOICES]}})
 
 
 @api_view(["PATCH", "DELETE"])
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def plan_movil_detalle(request, pk):
-    plan = get_object_or_404(
-        PlanMantenimiento.objects.select_related("activo_ref", "activo_ref__sucursal"),
-        pk=pk,
-    )
-    if request.method == "DELETE":
-        plan.activo = False
-        plan.save(update_fields=["activo", "actualizado_en"])
-        return Response(status=204)
-    error = _guardar_plan_desde_data(plan, request.data)
-    if error:
-        return Response({"error": error}, status=400)
-    plan.save()
-    return Response(_plan_payload(plan))
+    plan, replay = configurar_plan(usuario=request.user,
+        operacion='plan_delete' if request.method == 'DELETE' else 'plan_update',
+        data=request.data, guardar=_guardar_plan_desde_data, plan_id=pk)
+    return Response(status=204) if request.method == 'DELETE' else Response(_plan_payload(plan))
+
 
 
 @api_view(["GET"])
@@ -1028,6 +1019,7 @@ def _plan_payload(plan, today=None):
         "responsable": plan.responsable,
         "instrucciones": plan.instrucciones,
         "activo_plan": plan.activo,
+        "revision_en": plan.actualizado_en.isoformat(),
         **_fecha_plan_payload(plan.proxima_ejecucion, today),
     }
 
@@ -1107,15 +1099,14 @@ def _resolver_cancelacion_obj(solicitud, user, accion, notas=""):
 @authentication_classes(AUTH)
 @permission_classes([EsMantenimiento])
 def resumen_movil(request):
+    plan_actor = get_user_model().objects.filter(pk=request.user.pk, is_active=True).first()
     today = timezone.localdate()
     items = _unified_items("", request.user)
     summary = _dashboard_summary(items)
     planes = []
-    for plan in (
-        PlanMantenimiento.objects.filter(estatus=PlanMantenimiento.ESTATUS_ACTIVO, activo=True)
-        .select_related("activo_ref", "activo_ref__sucursal")
-        .order_by("proxima_ejecucion", "id")[:30]
-    ):
+    plan_qs = planes_autorizados(plan_actor).filter(estatus=PlanMantenimiento.ESTATUS_ACTIVO, activo=True)
+    plan_count = plan_qs.count()
+    for plan in plan_qs.order_by("proxima_ejecucion", "id")[:30]:
         planes.append(
             {
                 "id": plan.id,
@@ -1180,6 +1171,8 @@ def resumen_movil(request):
                 "costo_30d": str(summary["costo_30d"]),
             },
             "agenda": agenda[:40],
+            "planes_coverage": {"total": plan_count, "mostrados": sum(row['tipo'] == 'plan' for row in agenda[:40]),
+                "parcial": plan_count > sum(row['tipo'] == 'plan' for row in agenda[:40])},
             "agenda_counts": {
                 "vencidos": sum(1 for row in agenda if row["estado"] == "vencido"),
                 "urgentes": sum(1 for row in agenda if row["estado"] == "urgente"),
