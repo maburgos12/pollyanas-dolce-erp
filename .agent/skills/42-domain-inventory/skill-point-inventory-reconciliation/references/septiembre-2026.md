@@ -24,6 +24,32 @@ deploy oficial/check0/migrate0/readiness301 y aceptación autenticada. Revisione
 tarea/entorno5471 cerrados con respaldo verificado. No repetir entrega.
 Cierre mensual aún requiere servicio oficial y guards reales; no es un conteo.
 
+## Autorización técnica posterior y fronteras independientes
+
+Adjunto humano4oct autoriza expresamente: snapshot independiente junto a canónica
+INCOMPLETE sin unknown/contradicción; entrada oficial de evidencia histórica
+original completa conservando SHA/count/limit/retrieved original/identidad; lectores
+de reglas ya aprobadas/cancelaciones; conocimiento nativo. No volver a pedir esos
+permisos. No autoriza inferir compras CakeTopper ni ejecuciones AGG ni conteos.
+
+Tarea `auditor-fronteras-independientes` implementa sólo el primer contrato. Su
+aceptación requiere regresiones, CI y publicación oficial comprobadas con el SHA
+servido y el registro de la tarea, no con una etiqueta de este checkpoint. Las otras
+reparaciones son frentes posteriores, no capacidades nuevas del goal review/plan.
+Diagnóstico post174 encontró959 fronteras sin prueba;374 tienen candidato snapshot
+junto a INCOMPLETE, no374 aceptaciones. Los originales retenidos se inspeccionan
+como vetos, no como historia íntegra. Import454 conserva499/fetched500 sin IDs;
+eso no invalida por sí solo snapshot28799456 pero mantiene membresía/cobertura
+no verificadas. Unknown/raw inválido o movimiento posterior al Ult_Mov conocido
+sí impiden acreditar. No repetir esas capturas ni aceptar por conteo.
+
+174 canónicas ya capturadas COMPLETE, segunda ejecución sin HTTP/filas/imports/
+duplicados/avisos; los24 primeros están abajo y los150 posteriores se conservan
+en manifiesto externo de capturas aceptadas. Estado real posterior al lote:
+lock_readyFalse,95 issues de proyección; ni pérdidas ni totales definitivos.
+No repetir preview por rutina: hacerlo tras una integración material. PR1463
+lecciones publicada/aceptada (mergefa260722, runs4987–4992/context13) no cerró el mes.
+
 ## Autorización y siguiente contrato snapshot, 4oct2026
 
 Mauricio autorizó integrar snapshots originales para553pares ambos extremos y

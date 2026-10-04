@@ -236,8 +236,10 @@ class HistoricalInventoryClosingTests(TestCase):
             service._load_closing(opening, month=date(2026, 9, 1), boundary="opening")
         with CaptureQueriesContext(connection) as second:
             service._load_closing(closing, month=date(2026, 9, 1), boundary="closing")
-        self.assertEqual(len(first), 3)  # closing lines + two bulk canonical history reads
-        self.assertEqual(len(second), 1)  # no repeated history / per-line queries
+        for queries, data_count in ((first, 3), (second, 1)):
+            mutex_sql = "SELECT pg_advisory_xact_lock(1347901004, 202609)"
+            self.assertEqual(sum(query["sql"] == mutex_sql for query in queries), 1)
+            self.assertEqual(len([query for query in queries if query["sql"] != mutex_sql]), data_count)
         proof = service._historical_boundary_evidence[(self.branches[0].pk, self.product.pk)]
         self.assertEqual(proof["opening"]["original_stock"], "10.000")
         self.assertEqual(Decimal(proof["closing"]["effective_stock"]), Decimal("1"))
@@ -373,12 +375,16 @@ class HistoricalInventoryClosingTests(TestCase):
         record.save()
         service = BranchInventoryTraceabilityService()
         key = (self.branches[0].pk, self.product.pk)
-        with self.assertNumQueries(5):
+        with CaptureQueriesContext(connection) as first:
             self.assertEqual({key: value[0] for key, value in service._load_closing(
                 opening, month=date(2026, 9, 1), boundary="opening").items()}, {key: Decimal("4")})
-        with self.assertNumQueries(1):
+        with CaptureQueriesContext(connection) as second:
             self.assertEqual({key: value[0] for key, value in service._load_closing(
                 closing, month=date(2026, 9, 1)).items()}, {key: Decimal("4")})
+        for queries, data_count in ((first, 5), (second, 1)):
+            mutex_sql = "SELECT pg_advisory_xact_lock(1347901004, 202609)"
+            self.assertEqual(sum(query["sql"] == mutex_sql for query in queries), 1)
+            self.assertEqual(len([query for query in queries if query["sql"] != mutex_sql]), data_count)
         proof = service._historical_boundary_evidence[key]
         self.assertEqual(proof["closing"]["movement_ids"], (301,))
         self.assertEqual(proof["closing"]["original_stock"], "5.000")
