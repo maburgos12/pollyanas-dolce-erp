@@ -99,8 +99,14 @@
     {% if puede_ver_costos %}
       <section class="bloque bloque-costos" aria-labelledby="costos">
         <h2 id="costos">Costos y compra</h2>
-        <p class="dato"><span>Adquisición</span><b>{% if costos.adquisicion %}{{ costos.adquisicion|floatformat:2 }} MXN{% else %}Sin capturar{% endif %}</b></p>
-        <p class="dato"><span>Mantenimiento acumulado</span><b>{{ costos.mantenimiento_total|floatformat:2 }} MXN</b></p>
+        <p class="dato"><span>Adquisición</span><b>{% if costos.adquisicion != None %}{{ costos.adquisicion|floatformat:2 }} MXN{% else %}Sin capturar{% endif %}</b></p>
+        <p class="dato"><span>Costos registrados en órdenes</span><b>{{ costos.mantenimiento_total|floatformat:2 }} MXN</b></p>
+        <p class="muted">Suma repuestos, mano de obra y otros costos de todas las órdenes, incluidas pendientes y canceladas. No acredita gasto pagado ni conciliado.</p>
+        {% if not ordenes_recientes %}
+          <p class="muted">No hay costos de órdenes registrados.</p>
+        {% elif costos.mantenimiento_total == 0 %}
+          <p class="muted">Las órdenes registran un total cero. Confirma importes y soporte.</p>
+        {% endif %}
         <p class="dato"><span>Proveedor de compra</span><b>{% if proveedor_compra %}{{ proveedor_compra }}{% else %}Sin capturar{% endif %}</b></p>
         <p class="dato"><span>Garantía</span><b>{% if garantia_hasta %}{{ garantia_hasta|date:"d/m/Y" }}{% else %}Sin capturar{% endif %}</b></p>
         {% if facturas %}

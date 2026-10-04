@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load humanize %}
-{% block title %}Reportar Falla de Equipo{% endblock %}
-{% block page_title %}Activos · Reportar Falla{% endblock %}
+{% block title %}Solicitudes de falla{% endblock %}
+{% block page_title %}Activos · Solicitudes de falla{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/template_modules/activos-templates-activos-solicitudes-falla.css?v=20260614-ui100-v1">
@@ -16,10 +16,12 @@
   {% endfor %}
 {% endif %}
 
+<p class="text-muted">Registro legado de solicitudes de falla, con captura activa. Una solicitud describe el problema del equipo; el trabajo correctivo se registra en Reportes de servicio.</p>
+
 <!-- Formulario de reporte — mobile-first -->
 <section class="card card-form-narrow">
   <div class="card-header pd-u-81591015d4">
-    Atención Reportar falla de equipo
+    Nueva solicitud de falla
   </div>
   <form method="post" class="pd-u-f839358b29">
     {% csrf_token %}
@@ -54,7 +56,7 @@
     </div>
 
     <button type="submit" class="btn btn-primary btn-grande pd-u-5a2c26bdaf">
-      Enviar reporte de falla
+      Enviar solicitud de falla
     </button>
   </form>
 </section>
