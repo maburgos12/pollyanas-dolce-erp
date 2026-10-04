@@ -19,7 +19,7 @@
     {
       "month": "2026-09-01", "branch_external_id": "1", "product_external_id": "135",
       "case_reference": 3237, "observed_at": "2026-10-03T12:53:34Z",
-      "note": "1683114:5PZA EmpanadaManzana Matriz, fila1676 eliminada por supersede80579; raw78023/79066, backup original e historia419 acreditan43→38 no cancelado. Ausencia por límites del listado, no cancelación ni offset probado. Autoridad mensual bloqueada; autorización concreta importador/restauración aún pendiente. No reinsertar ni ejecutar sync ni validar proyección antigua por saldo0."
+      "note": "1683114:5PZA EmpanadaManzana Matriz, paroriginalPK1676/hash9f27f6de945bbc8b19cd eliminado por supersede80579; raw78023/79066, backup e historia419 acreditan43→38 no cancelado. Mauricio autorizó protección importador y recuperación exclusiva con IDs/timestamps/writer originales. Verificar deploy/recovery antes de afirmar reparación; review/plan siguen sin executor. Ausencia no cancelación/offset;266→267 no prueba autoridad mensual ni cierre. No editar manifiestos antiguos, stock o ventas."
     }
   ]
 }

@@ -81,8 +81,14 @@ sesión protegida, lote máximo diez, capture sin force y canónica única.
 
 Un missing documentado siempre conserva trazabilidad pendiente aunque una etiqueta
 anterior diga COMPLETE. Una merma ausente del listado no es cancelación ni pérdida.
-No restaurar 1683114 ni modificar importador: su autorización independiente sigue
-pendiente. No repetir solicitudes humanas ya enviadas. America/Mazatlan permanece.
+El 3 de octubre Mauricio autorizó proteger el importador y recuperar exclusivamente
+el par original1683114/PK1676/hash9f27f6de945bbc8b19cd, con pruebas, publicación y
+validación independiente. Esa autorización no es una capacidad del goal: review y
+plan siguen sin executor ni escrituras operativas. Ausencias de listado abortan la
+sustitución; recuperación por backup conserva identificadores/timestamps/escritor,
+colisiones abortan y segunda ejecución no agrega filas. No reconstruir inventario,
+crear merma Point ni dar por reparada autoridad mensual solo por266→267. No repetir
+solicitudes humanas ya enviadas. America/Mazatlan permanece.
 
 ## Verificación
 

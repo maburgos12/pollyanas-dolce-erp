@@ -40,3 +40,14 @@ Código actual: `_supersede_stale_waste_rows` elimina PointWasteLine y MermaPOS 
 Pantalla autenticada del expediente 3237: inicial 0 + entradas 518 - ventas 477 - merma 41 = cierre 0; saldo y trazabilidad etiquetados Conciliado, sin conteo manual. Al desplegar Merma / Ver evidencia (5), cuatro filas muestran 6, 16, 7 y 7 piezas; la quinta muestra «Evidencia ya no disponible en la fuente. Referencia conservada: Point #1676». Por tanto el total sigue siendo una proyección anterior, no una validación de la fuente actual. También enumera cinco transferencias con finalización pendiente. No se pulsó aprobar/resolver ni se alteró el caso; consola sin errores.
 
 Se requiere autorización concreta antes de corregir el importador compartido de mermas y reincorporar el registro original verificado, porque eso interviene fuentes operativas, no solamente la lectura del auditor. La recuperación propuesta queda limitada al folio 1683114, usando sus identificadores originales y deduplicación; no implica crear una merma comercial nueva, ajustar existencias ni modificar Point. Validar límites de extracción y sustitución con pruebas antes de elegir la implementación; no inventar un desplazamiento temporal o permitir borrar otras filas por mera ausencia del listado.
+
+## Actualización: autorización humana explícita
+
+Mauricio respondió «si» a esa reparación concreta. El respaldo identifica también
+MermaPOS1676: fecha27sept, receta16/ERP1/SKU0135, cantidad5, fuentePOINT_BRIDGE_WASTE.
+PointWasteLine1676 conserva aliasbranch24 y writer79066. VPS read-only comprobó
+ambas PK libres antes de intervenir. La recuperación publicada debe conservar
+ambos registros completos (incluidos timestamps/costos/raw), rechazar colisiones,
+ser dry-run por defecto y no producir HTTP ni stock/ventas/avisos. Una recuperación
+del contador267 no acredita por sí sola autoridad de los manifiestos posteriores.
+Registrar deploy/aplicación/UI e idempotencia antes de afirmar reparación ejecutada.

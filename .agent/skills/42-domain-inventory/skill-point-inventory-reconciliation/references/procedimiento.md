@@ -70,6 +70,13 @@ Para autoridad de producción/mermas revisar manifiesto/rango/filtros/status/fin
 
 Ante fila desaparecida: recuperar evidencia read-only de raw/backup/historia/detalle. Diferenciar cancelación acreditada de omisión de listado. No restaurar backup, reinsertar merma, editar resumen del job, ejecutar persist_waste_lines/run_waste_sync ni componer autoridad por conteos para pasar el auditor. Si reparación afecta pipeline/fuentes operativas fuera del alcance, pedir autorización concreta una vez y avanzar investigaciones independientes mientras espera.
 
+Con autorización explícita, reparar la causa y recuperar únicamente los originales
+confirmados, no reimportar el backup completo. La extracción completa que omite
+hashes previos debe fallar atómicamente con evidencia acotada, sin borrar fuentes.
+El margen calendario y filtro operativo protegen límites sin reinterpretar fechas
+ni probar exhaustividad. Validar por separado manifiestos/autoridad tras recuperar:
+un contador recuperado no corrige automáticamente un job que omitió un registro.
+
 ## 5. Verificación de resultado y cierre
 
 Antes/después: IDs canónicos, filas por importación, FK_Movimiento/row_number duplicados, saldos, source_trace/investigation, avisos y fingerprints pertinentes. Segunda ejecución debe hacer cero HTTP, no agregar filas/importaciones/duplicados ni avisos. Probar con cliente que rechaza HTTP o `requests.Session.request` prohibido en el ámbito de la prueba, sin afectar procesos ajenos.
