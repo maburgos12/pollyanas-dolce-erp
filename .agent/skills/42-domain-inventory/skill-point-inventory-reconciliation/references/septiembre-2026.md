@@ -32,10 +32,9 @@ original completa conservando SHA/count/limit/retrieved original/identidad; lect
 de reglas ya aprobadas/cancelaciones; conocimiento nativo. No volver a pedir esos
 permisos. No autoriza inferir compras CakeTopper ni ejecuciones AGG ni conteos.
 
-Tarea `auditor-fronteras-independientes` implementa sólo el primer contrato. Su
-aceptación requiere regresiones, CI y publicación oficial comprobadas con el SHA
-servido y el registro de la tarea, no con una etiqueta de este checkpoint. Las otras
-reparaciones son frentes posteriores, no capacidades nuevas del goal review/plan.
+Tarea `auditor-fronteras-independientes` entregada por PR1467 con publicación y
+aceptación verificadas en el seguimiento. Implementa el primer contrato; no amplía
+las capacidades del goal review/plan. La entrega del código no cierra septiembre.
 Diagnóstico post174 encontró959 fronteras sin prueba;374 tienen candidato snapshot
 junto a INCOMPLETE, no374 aceptaciones. Los originales retenidos se inspeccionan
 como vetos, no como historia íntegra. Import454 conserva499/fetched500 sin IDs;
@@ -50,11 +49,11 @@ lock_readyFalse,95 issues de proyección; ni pérdidas ni totales definitivos.
 No repetir preview por rutina: hacerlo tras una integración material. PR1463
 lecciones publicada/aceptada (mergefa260722, runs4987–4992/context13) no cerró el mes.
 
-### Originales completos existentes: corte de implementación, no entrega
+### Originales completos existentes: PR1469 entregado, no cierre mensual
 
 Tarea `auditor-history-originales`, 4oct2026: manifiesto de17aperturas contiene
 14 respuestas originales completas verificadas y3 resúmenes sin raw íntegro.
-Sólo las14 son candidatas a entrada controlada; las3 siguen excluidas, no se
+Las14 se incorporaron por entrada controlada; las3 siguen excluidas, no se
 completan con primera/última fila ni count de resumen. Conservar petición/par/
 dominio/SHA/límite/count/fecha original/localizador; ingreso actual no acredita
 consulta actual. Procedimiento arriba distingue procedencia, locks e idempotencia.
@@ -62,9 +61,31 @@ Las peticiones de esas14 respuestas no venían en el JSON: se acreditan mediante
 SPEC de4scripts de adquisición originales verificados y contrato del cliente,
 con SHA/procedencia separada. No presentarlas como requestliteral guardado.
 Estas fuentes no autorizan repetir HTTP de las174COMPLETE ni inventar apertura0.
-La habilidad documentada no implica service publicado ni originales incorporados:
-registrar CI/deploy/ingreso exacto/segunda ejecución/UI cuando realmente ocurran.
+PR1469 publicado/aceptado:14originales,4081 filas, imports829–842; segunda ejecución
+0imports/0filas de historia, HTTP0 y cambios operativos0. Trece observaciones
+unknown0;2169 conserva unknown1680271, no se convierte en historia resuelta.
+Parciales2122/2123/2235 no ingresados: no inventar respuesta completa para ellos.
+Review nativo2075 corridas5000/5001, contexto13archivos, UI autenticada/consola[];
+tarea1469 y sus recursos locales cerrados con respaldos propios verificados.
+No repetir ingreso, captura o entrega por rutina.
 Septiembre y los expedientes humanos siguen sujetos a sus guards y evidencias.
+
+### Bamoa: contrato autorizado en implementación, no desplegado
+
+Imports721/778/785/197/816/817, casos2459/2562/2574/2580/2610/2611:
+branchPK5/Point2,500filas/500FK, COMPLETE sin membresía del último lote acreditada.
+Snapshots apertura28605158/28605320/28605343/28605349/28605322/28605261 y
+cierre28797254/28797422/28797446/28797452/28797424/28797363 respectivamente;
+stock0, apertura job35042/log260894, cierre job77519/log299172.
+Estos IDs acreditan candidatos exactos, no seis aceptaciones antes de los guards.
+
+Tarea `auditor-bamoa-fronteras`: autorización vigente permite snapshot independiente
+junto a COMPLETEunknown0 sólo si falta la frontera concreta, con vetos raw y
+precedencia de frontera canónica presente. Mantener COMPLETE separado de
+canonical_history_verifiedFalse cuando sólo snapshot prueba el extremo. No crear
+fetchedIDs, HTTP ni prueba física; casos2574/2580 conservan sus roles excluidos.
+Pruebas/CI/deploy/lectura autenticada todavía requieren resultado real de esta
+tarea; no confundir autorización o actualización de habilidad con publicación.
 
 ## Autorización y siguiente contrato snapshot, 4oct2026
 
@@ -223,6 +244,7 @@ conjunto0 deben separarse de merma vigente, sin netear meses distintos. Contrato
 compartido nuevo requiere autorización/TDD; no merma/ajuste compensatorio ni
 reinterpretación de unknown por aproximación. Solicitud específica emitida una vez.
 
+Antecedente Bamoa anterior al contrato autorizado de esta tarea, descrito arriba:
 Bamoa6COMPLETE imports721/778/785/197/816/817 conservan500filas/500FKúnicos y
 row_count500. resolve_stock_at_close rawUTC enmemoria0 enambos extremos, últimos
 movimientos1554407/1373282/1615936/1615941/1000245/1615924 respectivamente.
@@ -231,7 +253,8 @@ recapturarCOMPLETE.197 creadoOct1/refrescadoOct2 exige probar lote vigente, no
 presumir que todas las filas retenidas son última descarga. Extensión propuesta
 sólo con lote íntegro/origenAPI/par/rango/IDsúnicos/postmes/huella demostrados;
 unión de capturas, falta de filas o timestamp posterior a descarga no acreditan.
-Solicitud lectora separada emitida una vez; no implementada ni permiso para cierre.
+La autorización actual permite fallback snapshot independiente, NO convertir esa
+unión en lote íntegro; no repetir la solicitud anterior ni dar cierre por este hecho.
 
 3430 Payán/Zanahoria import530:39 ventas rawUTC guardadas +2 documentales=41
 comerciales. El30sept suma1+1+2, con headers explícitos NOTA-102345 (1686015),

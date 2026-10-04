@@ -195,6 +195,14 @@ class AuditStockHistoryService:
             return False
         if fetched_rows < 0 or history_limit <= 0 or fetched_rows > history_limit:
             return False
+        fetched_ids = metadata.get("fetched_movement_ids")
+        if "fetched_movement_ids" in metadata and (
+            not isinstance(fetched_ids, list)
+            or any(type(value) is not int or value <= 0 for value in fetched_ids)
+            or len(fetched_ids) != fetched_rows
+            or len(set(fetched_ids)) != len(fetched_ids)
+        ):
+            return False
         if fetched_rows < history_limit:
             return True
         month_start, _ = _month_bounds(month)
@@ -203,7 +211,6 @@ class AuditStockHistoryService:
             return False
         if boundary_rows is None:
             boundary_rows = list(record.rows.filter(movement_at=earliest))
-        fetched_ids = metadata.get("fetched_movement_ids")
         matches = [row for row in boundary_rows if row.movement_at == earliest
                    and (not fetched_ids or row.row_number in fetched_ids)]
         if not matches:
