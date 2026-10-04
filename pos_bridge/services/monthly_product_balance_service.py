@@ -25,8 +25,10 @@ from pos_bridge.models import (
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE
 from pos_bridge.services.historical_inventory_capture import (
-    HistoricalInventoryCaptureError, point_stock_history_instant, resolve_stock_at_close,
+    HistoricalInventoryCaptureError,
+    point_stock_history_instant, resolve_stock_at_close,
 )
 from pos_bridge.models.product import inventory_consumption_filter
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
@@ -185,23 +187,53 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     captured_boundaries = _empty_month_captured_boundaries(
         lines, month=month, reconciliations=monthly, cache=cache,
     )
-    # Empty history is not a zero unless the original boundary explicitly
-    # documented a live zero and the canonical capture covers this month.
+    # Preserve the legacy capture's explicit empty-history/live-zero proof.
+    # It predates canonical imports and has no timestamp subject to UTC repair.
+    # A later canonical import, however, must pass its own coverage guards.
     zero_keys = {(line.branch_id, line.product_id) for line in lines
                  if Decimal(line.stock) == ZERO and (line.evidence or {}).get("method") == "no_history_current_zero"}
     zero_verified = set()
+    canonical_keys = set()
     if zero_keys:
         records = PointProductHistoryImport.objects.filter(
             point_branch_id__in={key[0] for key in zero_keys},
             point_product_id__in={key[1] for key in zero_keys},
-            raw_metadata__source="POINT_STOCK_HISTORY_API", raw_metadata__fetched_rows=0,
+            raw_metadata__source="POINT_STOCK_HISTORY_API",
         )
         for record in records:
             key = (record.point_branch_id, record.point_product_id)
+            canonical_keys.add(key)
             history = monthly.get(key)
-            if key in zero_keys and history and history.coverage_status == "COMPLETE" and not history.movement_ids:
+            if (record.raw_metadata.get("fetched_rows") == 0 and key in zero_keys
+                    and history and history.coverage_status == "COMPLETE" and not history.movement_ids):
                 if AuditStockHistoryService._covers_month(record, month):
                     zero_verified.add(key)
+    expected_date = (month - timedelta(days=1) if boundary == "opening"
+                     else date(month.year, month.month, monthrange(month.year, month.month)[1]))
+    cutoff = datetime.combine(expected_date + timedelta(days=1), time.min,
+                              tzinfo=POINT_BUSINESS_TIMEZONE)
+    expected_keys = {(int(branch_id), int(product_id))
+                     for branch_id in closing.expected_branch_ids
+                     for product_id in closing.expected_product_ids}
+    original_manifest_valid = (
+        closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+        and closing.operational_date == expected_date
+        and (closing.metadata or {}).get("method") == "point_stock_history_boundary"
+        and bool(expected_keys)
+        and {(line.branch_id, line.product_id) for line in lines} == expected_keys
+        and closing.retrieved_at is not None
+        and timezone.is_aware(closing.retrieved_at) and closing.retrieved_at >= cutoff
+    )
+    original_zero_keys = {
+        (line.branch_id, line.product_id) for line in lines
+        if original_manifest_valid and (line.branch_id, line.product_id) in zero_keys
+        and (line.branch_id, line.product_id) not in canonical_keys
+        and type((line.evidence or {}).get("history_rows")) is int
+        and line.evidence["history_rows"] == 0
+        and type(line.evidence.get("history_limit")) is int and line.evidence["history_limit"] == 500
+        and line.created_at is not None and timezone.is_aware(line.created_at)
+        and line.created_at >= cutoff
+    }
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)
@@ -217,6 +249,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
                 movement_ids = (int(resolved.evidence["movement_id"]),)
             if quantity is None and key in zero_verified:
                 quantity = ZERO
+        if quantity is None and key in original_zero_keys:
+            quantity = ZERO
         evidence[line.id] = {
             "line_id": line.id, "original_stock": str(line.stock),
             "original_evidence": dict(line.evidence or {}),
@@ -224,6 +258,10 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "movement_ids": movement_ids,
             "captured_boundary_evidence": captured_evidence,
             "coverage_status": history.coverage_status if history else "MISSING",
+            "canonical_history_verified": bool(quantity is not None and key not in original_zero_keys
+                                               and history and history.coverage_status == "COMPLETE"
+                                               and not history.unknown_movement_ids),
+            "original_boundary_verified": key in original_zero_keys,
             "contract": "POINT_STOCK_RAW_UTC",
         }
         if quantity is None:

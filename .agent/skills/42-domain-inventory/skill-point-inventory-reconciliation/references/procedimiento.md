@@ -78,6 +78,18 @@ upsert ni una resta universal sobre earliest_movement_at. Preservar INCOMPLETE s
 falta esa evidencia. Firma/refresco y protección de meses de borde deben usar el
 contrato probado; publicar con pruebas antes de atribuir resultados al nuevo lector.
 
+Un cierre Stock original anterior a los imports canónicos puede conservar prueba
+explícita `no_history_current_zero`, stock0, history_rows0 y history_limit500.
+Reutilizarla sólo con fuente/método/manifiesto exactos, fecha operativa correcta y
+retrieved_at más created_at individual posteriores al corte correspondiente. No
+tomar la fecha de una extensión como frescura de las líneas reutilizadas. Esa
+prueba documental no cambia con UTC porque no tiene movimientos; no crear otro
+import ni HTTP por rutina. Una canonical existente exige sus propios controles y
+no puede ser ocultada por este fallback. Conservar coverageMISSING y prueba
+original separada, nunca COMPLETE canónico ni conteo físico inventados. Un resumen
+`latest_movement_at_or_before_close` no recibe esta excepción: sigue faltando su
+historia/frontera si no están guardadas.
+
 Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con diferencia real, apertura y cierre comprobados, sin movimientos desconocidos y remanente histórico cero. Revisar venta comercial frente a stock antes de seleccionar. Un fetched_at anterior al fin de mes puede explicar cobertura INCOMPLETE aunque toda la suma cuadre.
 
 Si cobertura ya COMPLETE, no HTTP Point. Si falta exclusivamente cobertura posterior al cierre y el caso cumple las condiciones, documentar ese faltante y capturar únicamente el historial necesario: lote de hasta diez, una sola sesión protegida por `point_account_session_lock`, adquisición sin interferir con sesiones ajenas. Si ocupado, consultar titular en pg_locks/pg_stat_activity read-only cuando haga falta; no liberar candado ni reiniciar servicios. Cerrar sesión en finally.

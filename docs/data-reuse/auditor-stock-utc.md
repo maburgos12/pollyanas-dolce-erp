@@ -42,4 +42,14 @@ No reclamar frescura Point por una firma, ni cobertura por aritmética. Capturas
 
 ## Entorno temporal y propietario
 
+La revisión final encontró 275 pares vendidos con prueba original explícita
+no_history_current_zero/stock0/history_rows0/history_limit500, capturados después
+del corte septiembre por un productor que aún no guardaba canonical. Cinco
+regresiones RED→GREEN conservan esa evidencia sólo con par/manifiesto/fechas/fuente
+exactos y ausencia de canonical; una canonical existente pasa sus propios guards.
+Mantiene coverageMISSING y original_boundary_verified separado de la autoridad
+canónica. Los resúmenes con movimientos no reciben esta excepción. Suite compartida
+posterior:337 pruebas PASS (20.008s); sustituye conteo332 anterior. No HTTP ni nuevas
+importaciones para esta reparación lectora.
+
 Propietario codex; tarea auditor-stock-utc, worktree dedicado, Compose erp_auditor_stock_utc, PostgreSQL5471/Redis6471 y volúmenes exclusivos. No reutiliza otro entorno. Al terminar publicación y aceptación, detener recursos exactos y aplicar helper de retiro con registro terminal/plan/backup verificado; no limpiar producción ni Docker global.

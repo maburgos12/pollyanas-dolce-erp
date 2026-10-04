@@ -24,6 +24,14 @@ y guards reales. Conteos físicos y aprobaciones humanas no fueron fabricados.
 
 ## Lote rawUTC de fuentes existentes, sin materialización
 
+Lectura PostgreSQL4oct confirmó275pares vendidos Closing7sin canonical pero con
+prueba explícita original no_history_current_zero/stock0/rows0/limit500 ycreated_at
+Oct1 16:36–Oct2 16:13UTC, postcorteSep07UTC. El capturador original no persistía
+imports y sólo emitía método con historia[] yexistenciaactual0. Guardconservador
+reutiliza evidencia original porpar/manifiesto/fechas; no la transforma en canonical
+COMPLETE ni conteo físico. 576resúmenes con último movimiento no acreditan por sí
+solos la ventanaUTC adicional: buscarfuenteoriginal/frontera antesHTTPacotado.
+
 Chequeo4oct: apertura heredaba ledger de agosto8 LOCKED, construido con cierre6
 Stock y sin pruebaUTC. La lectura debe revalidar el límite exacto sin alterar ese
 ledger cerrado; la mera palabra LOCKED no demuestra el contrato de fechas nuevo.
