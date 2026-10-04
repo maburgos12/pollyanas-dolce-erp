@@ -92,6 +92,175 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         self.assertEqual(record.raw_metadata, metadata)
         self.assertEqual(list(record.rows.values()), before)
 
+    def _complete_without_batch_membership(self, *, product=None):
+        service = AuditStockHistoryService()
+        record = service._canonical_import(self.branch, product or self.product)
+        rows = []
+        for movement_id in range(1000, 1500):
+            raw = {"FK_Movimiento": movement_id, "Movimiento": "AJUSTE ENTRADA",
+                   "Fecha": "2026-05-06T02:07:05.833", "Cantidad": 0,
+                   "Existencia_anterior": 0, "Existencia_nueva": 0,
+                   "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False}
+            _, defaults = service._parse_row(raw)
+            rows.append(PointProductHistoryRow(import_record=record, row_number=movement_id, **defaults))
+        PointProductHistoryRow.objects.bulk_create(rows)
+        record.row_count = 500
+        record.raw_metadata = {"source": "POINT_STOCK_HISTORY_API", "fetched_rows": 500,
+                               "history_limit": 500, "fetched_at": "2026-10-02T12:00:00+00:00",
+                               "earliest_movement_at": rows[0].movement_at.isoformat(),
+                               "latest_movement_at": rows[-1].movement_at.isoformat()}
+        record.save()
+        return record
+
+    def test_complete_without_batch_membership_uses_independent_snapshot_not_canonical_proof(self):
+        self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        original = list(record.rows.values())
+        metadata = dict(record.raw_metadata)
+        with patch("requests.sessions.Session.request", side_effect=AssertionError("No HTTP")):
+            first = self._read()
+            second = self._read()
+        values, proofs, unproven = first
+        self.assertEqual(values, {self.line.pk: Decimal("0")})
+        self.assertEqual(unproven, ())
+        self.assertEqual(first, second)
+        proof = proofs[self.line.pk]
+        self.assertEqual(proof["coverage_status"], "COMPLETE")
+        self.assertTrue(proof["snapshot_boundary_verified"])
+        self.assertFalse(proof["canonical_history_verified"])
+        self.assertFalse(proof["physical_count_verified"])
+        consistency = proof["snapshot_boundary_evidence"]["canonical_consistency"]
+        self.assertEqual(consistency["canonical_coverage_status"], "COMPLETE")
+        self.assertFalse(consistency["canonical_membership_verified"])
+        self.assertFalse(consistency["coverage_promoted"])
+        self.assertIsNone(consistency["latest_batch_movement_ids"])
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata, metadata)
+        self.assertEqual(list(record.rows.values()), original)
+
+    def test_complete_missing_opening_uses_its_independent_precise_utc_cut(self):
+        self._complete_without_batch_membership()
+        self.cutoff = datetime(2026, 9, 1, 7, tzinfo=dt_timezone.utc)
+        self.closing.operational_date = date(2026, 8, 31)
+        self.closing.retrieved_at = self.cutoff + timedelta(hours=3)
+        snapshot = self._snapshot(stock="0")
+        snapshot.raw_payload["row"][8] = "2026-05-06T02:07:06"
+        snapshot.save(update_fields=["raw_payload"])
+        values, proofs, _ = self._read(boundary="opening")
+        self.assertEqual(values, {self.line.pk: Decimal("0")})
+        self.assertEqual(proofs[self.line.pk]["coverage_status"], "COMPLETE")
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+        self.assertTrue(proofs[self.line.pk]["snapshot_boundary_verified"])
+        self.assertEqual(proofs[self.line.pk]["snapshot_boundary_evidence"]["effective_at"],
+                         self.cutoff.isoformat())
+
+    def test_complete_missing_frontier_rejects_retained_raw_and_metadata_contradictions(self):
+        self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        row = record.rows.order_by("row_number").first()
+        original = dict(row.raw_payload)
+        mutations = [{"Fecha": "2026-10-01T03:00:00"}, {"isInsumo": True},
+                     {"FK_Producto": "another-product"}, {"FK_Sucursal": "another-branch"},
+                     {"Movimiento": "UNKNOWN"}, {"Cantidad": 1}, {"Fecha": "invalid"},
+                     {"Existencia_nueva": "NaN"}]
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                row.raw_payload = {**original, **mutation}
+                row.save(update_fields=["raw_payload"])
+                self.assertEqual(self._read()[0], {})
+        row.raw_payload = original
+        row.save(update_fields=["raw_payload"])
+        for ids in [None, [True], [9999], "invented"]:
+            with self.subTest(ids=ids):
+                record.raw_metadata["fetched_movement_ids"] = ids
+                record.save()
+                self.assertEqual(self._read()[0], {})
+
+    def test_complete_canonical_boundary_has_precedence_without_snapshot_queries(self):
+        self._snapshot(stock="7")
+        record = self._incomplete_history()
+        record.raw_metadata["fetched_at"] = "2026-10-02T12:00:00+00:00"
+        record.save()
+        with patch("pos_bridge.services.monthly_product_balance_service._snapshot_historical_boundaries") as snapshots:
+            values, proofs, _ = self._read()
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertTrue(proofs[self.line.pk]["canonical_history_verified"])
+        self.assertFalse(proofs[self.line.pk]["snapshot_boundary_verified"])
+        self.assertEqual(snapshots.call_args.args[0], [])
+
+    def test_complete_independent_frontier_uses_raw_utc_and_rejects_matching_instant_stock_conflict(self):
+        snapshot = self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        row = record.rows.order_by("row_number").first()
+        raw = {**row.raw_payload, "Fecha": "2026-09-01T02:18:44.487"}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        snapshot.raw_payload["row"][8] = raw["Fecha"]
+        snapshot.save(update_fields=["raw_payload"])
+        # The current batch lacks membership, so it is still snapshot-origin.
+        values, proofs, _ = self._read()
+        self.assertEqual(values, {self.line.pk: Decimal("0")})
+        self.assertTrue(proofs[self.line.pk]["snapshot_boundary_verified"])
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+        snapshot.stock = Decimal("1")
+        snapshot.raw_payload["row"][4] = "1"
+        snapshot.save(update_fields=["stock", "raw_payload"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_complete_missing_frontier_signature_tracks_retained_facts_without_promoting_membership(self):
+        self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        first = self._read()[1][self.line.pk]["canonical_consistency_evidence"]["source_signature"]
+        record.raw_metadata["retained_original_note"] = "new documentary fact"
+        record.save()
+        second = self._read()[1][self.line.pk]["canonical_consistency_evidence"]["source_signature"]
+        self.assertNotEqual(first, second)
+
+    def test_complete_missing_frontier_bulk_queries_and_cached_observation_are_constant(self):
+        self._snapshot(stock="0")
+        self._complete_without_batch_membership()
+        with CaptureQueriesContext(connection) as single:
+            self._read()
+        lines = [self.line]
+        for index in range(12):
+            product = PointProduct.objects.create(external_id=f"legacy-complete-{index}", name=f"Legacy {index}")
+            lines.append(PointHistoricalInventoryClosingLine.objects.create(
+                closing=self.closing, branch=self.branch, product=product, stock=3))
+            self._snapshot(product=product, stock="0", raw={
+                "headers": ["Código", "Producto", "Cantidad", "Último Movimiento"],
+                "row": [product.external_id, "sku", product.name, "Pasteles", "0", "Pza",
+                        "10", "10", "2026-05-06T02:07:06", "False"]})
+            self._complete_without_batch_membership(product=product)
+        self.closing.expected_product_ids = [line.product_id for line in lines]
+        cache = {}
+        with CaptureQueriesContext(connection) as bulk:
+            first = self._read(lines=lines, cache=cache)
+        self.assertEqual(len(first[0]), 13)
+        self.assertEqual(len(bulk), len(single))
+        with CaptureQueriesContext(connection) as cached:
+            second = self._read(lines=lines, cache=cache)
+        self.assertEqual(first, second)
+        self.assertEqual(len(cached), 1)  # Source mutex only; no per-pair SQL.
+
+    def test_monthly_and_branch_consumers_preserve_complete_snapshot_origin(self):
+        recipe, _, _, snapshot = self._consumer_fixture()
+        snapshot.stock = Decimal("0")
+        snapshot.raw_payload["row"][4] = "0"
+        snapshot.save(update_fields=["stock", "raw_payload"])
+        self._complete_without_batch_membership()
+        values, metadata, _ = MonthlyPointProductBalanceService()._load_historical_closing(
+            snapshot_date=self.closing.operational_date, source="closing_snapshot")
+        self.assertEqual(values[recipe.pk], (Decimal("0"), 1))
+        proof = next(item for item in metadata["historical_boundary_evidence"] if item["line_id"] == self.line.pk)
+        self._assert_consumer_snapshot_proof(proof, snapshot, coverage="COMPLETE")
+        branch = BranchInventoryTraceabilityService()
+        self.assertEqual(branch._load_closing(self.closing, month=self.month)[
+            (self.branch.pk, self.product.pk)], (Decimal("0"), [self.line.pk]))
+        self._assert_consumer_snapshot_proof(branch._historical_boundary_evidence[
+            (self.branch.pk, self.product.pk)]["closing"], snapshot, coverage="COMPLETE")
+
     def test_saturated_partial_membership_does_not_block_independent_frontier(self):
         self._snapshot()
         record = self._incomplete_history()
@@ -635,6 +804,21 @@ class SnapshotHistoricalBoundaryTests(TestCase):
 
 
 class SnapshotBoundaryTransactionTests(TransactionTestCase):
+    def test_complete_snapshot_consistency_cache_does_not_cross_transactions(self):
+        fixture = SnapshotHistoricalBoundaryTests(methodName="test_opening_uses_its_own_cutoff")
+        fixture.setUp()
+        fixture._snapshot(stock="0")
+        record = fixture._complete_without_batch_membership()
+        cache = {}
+        first = fixture._read(cache=cache)
+        self.assertEqual(first[0], {fixture.line.pk: Decimal("0")})
+        record.raw_metadata["fetched_movement_ids"] = [999999]
+        record.save()
+        second = fixture._read(cache=cache)
+        self.assertEqual(second[0], {})
+        self.assertNotEqual(first[1][fixture.line.pk]["canonical_consistency_evidence"]["source_signature"],
+                            second[1][fixture.line.pk]["canonical_consistency_evidence"]["source_signature"])
+
     def test_external_cache_cannot_reuse_source_proof_across_transactions(self):
         fixture = SnapshotHistoricalBoundaryTests(methodName="test_opening_uses_its_own_cutoff")
         fixture.setUp()

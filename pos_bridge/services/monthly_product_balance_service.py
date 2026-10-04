@@ -285,11 +285,12 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
 
 
 def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache):
-    """Check retained original facts without promoting partial history coverage."""
+    """Retained facts may veto an independent frontier, not prove batch membership."""
     results = cache.setdefault(("snapshot_canonical_consistency", cutoff), {})
     keys = {(line.branch_id, line.product_id) for line in lines
             if (history := reconciliations.get((line.branch_id, line.product_id)))
-            and history.coverage_status == "INCOMPLETE" and snapshots.get((line.branch_id, line.product_id))
+            and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
+            and snapshots.get((line.branch_id, line.product_id))
             and (line.branch_id, line.product_id) not in results}
     if not keys:
         return results
@@ -320,7 +321,8 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                      for row in rows],
         }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         results[key] = {"valid": False, "import_id": record.pk, "source_signature": signature,
-                        "canonical_membership_verified": False, "canonical_coverage_status": "INCOMPLETE",
+                        "canonical_membership_verified": False,
+                        "canonical_coverage_status": reconciliations[key].coverage_status,
                         "reason": "UNKNOWN_MOVEMENT_OR_RETAINED_COUNT_MISMATCH"}
         if len(pair_records[key]) != 1:
             results[key].update(reason="AMBIGUOUS_CANONICAL_IMPORTS", import_ids=tuple(sorted(
@@ -426,12 +428,12 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                         raise ValueError("Original movement contradicts snapshot")
                     parsed.append((instant, row.row_number, row))
             ordered = sorted(parsed, key=lambda item: item[:2])
-            # A gap in an INCOMPLETE history is not a demonstrated contradiction.
+            # A retained-history gap is not a demonstrated contradiction.
             # Retained facts can veto a snapshot, never lend coverage to it.
             results[key] = {"valid": True, "reason": "NO_KNOWN_DOCUMENTARY_CONTRADICTION",
                             "import_id": record.pk, "source_signature": signature,
                             "canonical_membership_verified": False,
-                            "canonical_coverage_status": "INCOMPLETE",
+                            "canonical_coverage_status": reconciliations[key].coverage_status,
                             "checked_movement_ids": tuple(row.row_number for _, _, row in ordered),
                             "latest_batch_movement_ids": tuple(sorted(ids)) if ids is not None else None,
                             "coverage_promoted": False, "contradiction_detected": False}
@@ -525,7 +527,12 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     snapshot_boundaries = _snapshot_historical_boundaries(
         [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys
          or (monthly.get((line.branch_id, line.product_id))
-             and monthly[(line.branch_id, line.product_id)].coverage_status == "INCOMPLETE")],
+             and (monthly[(line.branch_id, line.product_id)].coverage_status == "INCOMPLETE"
+                  or (monthly[(line.branch_id, line.product_id)].coverage_status == "COMPLETE"
+                      and not monthly[(line.branch_id, line.product_id)].unknown_movement_ids
+                      and getattr(monthly[(line.branch_id, line.product_id)], f"documentary_{boundary}", None) is None
+                      and not captured_boundaries.get((line.branch_id, line.product_id), {}).get(boundary)
+                      and (line.branch_id, line.product_id) not in zero_verified)))],
         cutoff=cutoff, cache=cache,
     ) if boundary_manifest_valid else {}
     snapshot_consistency = _snapshot_canonical_consistency(
@@ -551,7 +558,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             quantity = ZERO
         if quantity is None and key not in canonical_keys and snapshot_boundaries.get(key):
             quantity, snapshot_evidence = snapshot_boundaries[key]
-        elif (quantity is None and history and history.coverage_status == "INCOMPLETE"
+        elif (quantity is None and history and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
               and snapshot_boundaries.get(key) and snapshot_consistency.get(key, {}).get("valid")):
             quantity, snapshot_evidence = snapshot_boundaries[key]
             snapshot_evidence = {**snapshot_evidence, "canonical_consistency": snapshot_consistency[key]}
@@ -566,7 +573,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "snapshot_boundary_verified": bool(snapshot_evidence),
             "physical_count_verified": False,
             "coverage_status": history.coverage_status if history else "MISSING",
-            "canonical_history_verified": bool(quantity is not None and key not in original_zero_keys
+            "canonical_history_verified": bool(quantity is not None and not snapshot_evidence
+                                               and key not in original_zero_keys
                                                and history and history.coverage_status == "COMPLETE"
                                                and not history.unknown_movement_ids),
             "original_boundary_verified": key in original_zero_keys,

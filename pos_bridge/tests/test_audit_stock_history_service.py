@@ -449,7 +449,8 @@ class AuditStockHistoryServiceTests(TestCase):
         record = self._stored_history([
             _row(920, "VENTA", "2026-09-01T06:00:00", 1, 2, 1),
         ], metadata={
-            "fetched_rows": 500, "earliest_movement_at": "2026-09-01T13:00:00+00:00",
+            "fetched_rows": 1, "history_limit": 1,
+            "earliest_movement_at": "2026-09-01T13:00:00+00:00",
             "fetched_movement_ids": [920],
         })
         line = SimpleNamespace(branch=self.branch, product=self.product, difference=1)
@@ -521,7 +522,8 @@ class AuditStockHistoryServiceTests(TestCase):
             _row(926, "VENTA", "2026-08-01T01:00:00", 1, 2, 1),
             _row(927, "VENTA", "2026-09-10T01:00:00", 1, 2, 1),
         ], metadata={
-            "fetched_rows": 500, "earliest_movement_at": "2026-08-01T08:00:00+00:00",
+            "fetched_rows": 2, "history_limit": 2,
+            "earliest_movement_at": "2026-08-01T08:00:00+00:00",
             "fetched_movement_ids": [926, 927],
         })
         line = SimpleNamespace(branch=self.branch, product=self.product, difference=1)
@@ -663,6 +665,32 @@ class AuditStockHistoryServiceTests(TestCase):
                 })
                 self.assertFalse(AuditStockHistoryService._covers_month(
                     record, date(2026, 9, 1), boundary_rows=[]))
+
+    def test_present_batch_membership_is_strict_and_never_crashes_saturated_coverage(self):
+        metadata = {"fetched_rows": 2, "history_limit": 2,
+                    "fetched_at": "2026-10-02T07:00:00+00:00",
+                    "earliest_movement_at": "2026-08-01T08:00:00+00:00"}
+        record = SimpleNamespace(raw_metadata=metadata)
+        row = SimpleNamespace(row_number=910,
+            movement_at=timezone.datetime.fromisoformat(metadata["earliest_movement_at"]),
+            raw_payload=_row(910, "VENTA", "2026-08-01T08:00:00Z", 1, 1, 0))
+        for limit in (2, 500):
+            metadata["history_limit"] = limit
+            for ids in ("invented", None, True, [True, 911], [910, 910],
+                        [0, 911], [-1, 911], [910.0, 911], ["910", 911], [910], []):
+                with self.subTest(limit=limit, ids=ids):
+                    metadata["fetched_movement_ids"] = ids
+                    with self.assertNumQueries(0):
+                        self.assertFalse(AuditStockHistoryService._covers_month(
+                            record, date(2026, 9, 1), boundary_rows=[row]))
+            metadata["fetched_movement_ids"] = [910, 911]
+            with self.assertNumQueries(0):
+                self.assertTrue(AuditStockHistoryService._covers_month(
+                    record, date(2026, 9, 1), boundary_rows=[row]))
+            metadata.pop("fetched_movement_ids")
+            with self.assertNumQueries(0):
+                self.assertTrue(AuditStockHistoryService._covers_month(
+                    record, date(2026, 9, 1), boundary_rows=[row]))
 
     def test_adjustment_uses_verified_stock_effect_not_raw_quantity_sign(self):
         scenarios = (

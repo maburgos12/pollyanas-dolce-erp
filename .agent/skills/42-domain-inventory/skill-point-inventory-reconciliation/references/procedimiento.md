@@ -95,7 +95,7 @@ Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con 
 ### Frontera documental con snapshot original, autorización4oct2026
 
 Usar el mismo lector `documentary_historical_boundary`, no otra captura/tabla.
-Una canónica API `POINT_STOCK_HISTORY_API` COMPLETE conserva precedencia. Cuando
+Una frontera presente de la canónica API `POINT_STOCK_HISTORY_API` COMPLETE conserva precedencia. Cuando
 no existe, consultar bulk snapshots producto desde corte hasta corte+3d. La
 autorización técnica posterior del4oct permite también frontera INDEPENDIENTE
 junto a canónica INCOMPLETE, sin ocultarla ni transformar su cobertura. XLS de
@@ -121,7 +121,7 @@ Fecha vacía/incompleta, dominio/identidad ausente, FAILED, recuento contradicto
 o candidatos válidos con stock O ÚltimoMovimiento diferentes dejan frontera sin
 prueba; igual stock no basta para elegir entre certificados temporales distintos.
 
-Para canónica INCOMPLETE, inspeccionar bulk TODOS los raws retenidos del import
+Para frontera independiente junto a canónica, inspeccionar bulk TODOS los raws retenidos del import
 exacto como vetos documentales. Exigir FK_Movimiento/row_number, fecha raw UTC,
 cantidades/existencias/cancelación y dominio coherentes con lo persistido; unknown
 o raw malformado impiden aceptación. Un movimiento efectivo posterior a Ult_Mov
@@ -144,12 +144,14 @@ son inconsistencia, no ausencia de cobertura. Si la fecha de descarga está
 presente, un raw posterior a ella es contradictorio. Varios imports API para el
 mismo par no se seleccionan por orden: dejar sin prueba ante canónica ambigua,
 conservar las huellas y resolver su identidad por el flujo oficial.
-Huecos anteriores a Ult_Mov siguen
-INCOMPLETE; no imponer continuidad ficticia ni certificar historia mediante stock.
+Una canónica INCOMPLETE con huecos anteriores a Ult_Mov sigue INCOMPLETE;
+no imponer continuidad ficticia ni certificar historia mediante stock. Tampoco
+degradar una cobertura COMPLETE sólo porque su frontera se acredita por snapshot.
 
 Conservar evidencia PK snapshot/job/par/stock/captura/lastMove/contrato/huella.
 `snapshot_boundary_verified=True` no implica `canonical_history_verified`:
-mantener cobertura MISSING sin canónica o INCOMPLETE junto a ella, y físico no
+mantener cobertura MISSING sin canónica y la cobertura canónica registrada cuando
+existe (INCOMPLETE o COMPLETE según su prueba), y físico no
 acreditado. No reescribir cierre original. La prueba identifica snapshot y
 consistencia canónica por separado: lectura independiente no verifica el mes.
 Leer bajo mutex mensual compartido/atomic; cache sólo dentro de lectura protegida.
@@ -157,6 +159,31 @@ Firma de refresh incluye TODOS los raws retenidos, metadata de import, candidato
 snapshot y raw/captura/status/tipo/log; verificar cambios sin signals,
 consulta bulk y segunda lectura de cache sin HTTP. Registrar entrega real después
 de CI/deploy/aceptación autenticada, no por actualizar este procedimiento.
+
+### Bamoa: COMPLETE sin frontera concreta no obliga a recapturar
+
+Con el contrato autorizado de esta tarea, evaluar el mismo snapshot independiente
+cuando la canónica sea COMPLETE, unknown0 y la apertura O el cierre solicitado
+siga sin prueba canónica. Primero revisar esa frontera concreta: si la canónica
+la acredita, devolverla con precedencia, sin sustituirla por stock de snapshot.
+La etiqueta COMPLETE sola no acredita ambas fronteras ni membresía del último lote.
+
+Reutilizar todos los guards anteriores: par/dominio producto, manifiesto, job/log,
+captura postcorte, ÚltimoMovimientoUTC precorte, raw/stock coherentes, candidatos no
+divergentes y vetos de TODOS los raws retenidos. Unknown o contradicción impiden
+fallback; no elegir el snapshot que cuadra ni usar raw manipulado. Igualdad de
+500 filas/500FK no prueba una única respuesta: no fabricar fetched_movement_ids,
+cambiar metadata, rebajar cobertura a MISSING/INCOMPLETE o repetir HTTP COMPLETE.
+
+Si sólo el snapshot acredita el extremo, registrar `snapshot_boundary_verified=True`
+y `canonical_history_verified=False`; coverage_status permanece COMPLETE y
+`canonical_membership_verified=False` si no está acreditada. Apertura y cierre
+pueden tener pruebas diferentes; no transferir flags de un extremo al otro.
+Mantener mutex/atomic, lectura bulk, huella de todas las fuentes y cache únicamente
+en su transacción protegida. Segunda lectura exige HTTP0/escrituras0 y observación
+idéntica. No cambiar roles/sold_products ni convertir insumos en producto. La
+frontera no acredita conteo físico ni habilita el cierre por sí sola. No presentar este contrato como
+desplegado antes de CI/deploy/aceptación reales registrados en el checkpoint.
 
 Si falta frontera, documentar par/fecha exactos antes de Point. Usar historia
 acotada que cruza el corte; no una fila cercana, stock actual ni resumen legado.
