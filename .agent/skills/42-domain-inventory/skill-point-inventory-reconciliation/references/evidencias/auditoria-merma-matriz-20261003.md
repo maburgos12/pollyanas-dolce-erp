@@ -51,3 +51,23 @@ ambos registros completos (incluidos timestamps/costos/raw), rechazar colisiones
 ser dry-run por defecto y no producir HTTP ni stock/ventas/avisos. Una recuperación
 del contador267 no acredita por sí sola autoridad de los manifiestos posteriores.
 Registrar deploy/aplicación/UI e idempotencia antes de afirmar reparación ejecutada.
+
+## Aplicación comprobada en producción
+
+3oct17:16 Mazatlán: PR1455 fusionado75fb0de1 y desplegado por flujo oficial,
+CI37162776413 completo PASS, check0/migratecheck0/readiness exit0. Recuperación
+autorizada restauró únicamente los dos originales PK1676 de tablas distintas;
+backup montado read-only, dry-run0, primera2, segunda0, HTTP0. Se preservaron hash,
+movimiento1683114, cinco piezas, writer79066, branchalias24 y fechas UTC literales.
+Huella de las otras266 filas de cada fuente, ventas/casos/stock y jobs inalterada.
+No se creó merma Point ni ajuste de inventario.
+
+UI autenticada caso3237 muestra nuevamente referencia1683114, cantidad5 y
+responsable original Alondra Alvarado; conserva ventas477/merma41 y Sin conteo
+manual. Consola0; documento recargado HTTP200 desde network mediante serviceworker.
+Los cinco documentos de finalización pendientes no fueron aprobados ni omitidos.
+
+Autoridad fresca permanece falsa aunque hay267 waste rows: manifiesto78023,
+234 filas vinculadas, WASTE_SYNC_COUNT_MISMATCH/JOB_MIXED. No alterar counters viejos,
+componer cobertura por apariencia ni forzar materialización. Otra sincronización
+mensual requiere aprobación de alcance adicional; recuperación no equivale a cierre.

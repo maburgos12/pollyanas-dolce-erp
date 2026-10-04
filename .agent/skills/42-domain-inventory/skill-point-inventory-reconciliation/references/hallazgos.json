@@ -18,8 +18,8 @@
     },
     {
       "month": "2026-09-01", "branch_external_id": "1", "product_external_id": "135",
-      "case_reference": 3237, "observed_at": "2026-10-03T12:53:34Z",
-      "note": "1683114:5PZA EmpanadaManzana Matriz, paroriginalPK1676/hash9f27f6de945bbc8b19cd eliminado por supersede80579; raw78023/79066, backup e historia419 acreditan43→38 no cancelado. Mauricio autorizó protección importador y recuperación exclusiva con IDs/timestamps/writer originales. Verificar deploy/recovery antes de afirmar reparación; review/plan siguen sin executor. Ausencia no cancelación/offset;266→267 no prueba autoridad mensual ni cierre. No editar manifiestos antiguos, stock o ventas."
+      "case_reference": 3237, "observed_at": "2026-10-04T00:16:32Z",
+      "note": "1683114:5PZA EmpanadaManzana Matriz, paroriginalPK1676/hash9f27f6de945bbc8b19cd recuperado con autorización explícita tras PR1455/75fb0de1 publicado. Primera recuperación2filas/segunda0/HTTP0, IDs/timestamps/writer79066 originales; otrasmermas/waste/ventas/stock/casos intactos. UI autenticada muestra5/folio1683114/responsableoriginal, ventas477/merma41 conservadas; no repetir recovery. Fuente mensual aún bloqueada manifiesto78023/234bound/WASTE_SYNC_COUNT_MISMATCH/JOB_MIXED aunque267filas. Sincronización mensual adicional requiere autorización aparte; review/plan siguen sin executor. Ausencia no cancelación/offset. No editar manifiestos antiguos, stock o ventas; documentos/aprobación/conteo pendientes, mes no cerrado."
     }
   ]
 }
