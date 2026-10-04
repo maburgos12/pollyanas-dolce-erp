@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261002-rentabilidad-periodo-v8";
+const CACHE_NAME = "pollyanas-erp-shell-20261004-dashboard-apertura-v1";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

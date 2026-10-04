@@ -231,6 +231,8 @@
           <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Comparativo ventas</a>
         </div>
       </div>
+      <p class="home-exec-note">{{ yoy_panel.hero_note }}</p>
+      {% if yoy_panel.coverage_note %}<p class="home-exec-note">{{ yoy_panel.coverage_note }}</p>{% endif %}
       <div class="home-exec-chart-stage is-short">
         <canvas id="homeYoyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
       </div>
