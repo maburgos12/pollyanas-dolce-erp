@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
@@ -16,7 +16,7 @@ from pos_bridge.models import (
     PointHistoricalInventoryClosingLine,
     PointProduct,
 )
-from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, POINT_BUSINESS_TIMEZONE
 from recetas.models import ProductoMonthClosure
 
 
@@ -46,6 +46,20 @@ def _movement_datetime(row: dict) -> datetime:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise HistoricalInventoryCaptureError(f"Fecha inválida en historial Point: {value or '(vacía)'}") from exc
+
+
+def point_stock_history_instant(raw_payload: dict) -> datetime:
+    """Stock Fecha uses moment.utc in Point; legacy persisted dates stay intact.
+
+    This contract is exclusive to Stock history, not commercial note timestamps.
+    Invalid evidence must fail closed rather than fall back to a derived date.
+    """
+    if not isinstance(raw_payload, dict):
+        raise HistoricalInventoryCaptureError("Historial Stock sin payload documental.")
+    stamp = _movement_datetime(raw_payload)
+    if timezone.is_naive(stamp):
+        stamp = stamp.replace(tzinfo=datetime_timezone.utc)
+    return stamp.astimezone(datetime_timezone.utc)
 
 
 def _decimal(value, *, field: str) -> Decimal:
@@ -86,8 +100,9 @@ def resolve_stock_at_close(
             )
         raise HistoricalInventoryCaptureError("Producto sin historial suficiente para acreditar el saldo de cierre.")
 
-    dated_rows = [(_movement_datetime(row), row) for row in history]
-    at_or_before = [(stamp, row) for stamp, row in dated_rows if stamp.date() <= operational_date]
+    dated_rows = [(point_stock_history_instant(row), row) for row in history]
+    at_or_before = [(stamp, row) for stamp, row in dated_rows
+                    if stamp.astimezone(POINT_BUSINESS_TIMEZONE).date() <= operational_date]
     if at_or_before:
         _stamp, boundary = max(
             at_or_before,

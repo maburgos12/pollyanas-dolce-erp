@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
@@ -190,8 +190,12 @@ def _audit_history_finished(instance, **kwargs):
     span = instance.rows.aggregate(first=Min("movement_at"), last=Max("movement_at"))
     months = {month_start(instance.report_date)} if instance.report_date else set()
     if span["first"] and span["last"]:
+        # A legacy Stock timestamp can land in the following month while its
+        # documentary UTC instant belongs to the previous one. Invalidate both
+        # potential scopes; reconciliation itself filters the exact raw instant.
         months.update(ProductInventoryAuditRun.objects.filter(
-            month__gte=month_start(span["first"]), month__lte=month_start(span["last"])).values_list("month", flat=True))
+            month__gte=month_start(span["first"] - timedelta(hours=7)),
+            month__lte=month_start(span["last"])).values_list("month", flat=True))
     enqueue_inventory_audit_months(months)
 
 

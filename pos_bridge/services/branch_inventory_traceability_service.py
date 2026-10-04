@@ -27,6 +27,8 @@ from pos_bridge.models import (
 from pos_bridge.models.product import _normalize_name, inventory_consumption_filter
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
+    documentary_historical_boundary,
+    _freeze_mapping,
 )
 from pos_bridge.services.open_transfer_sync_service import (
     OPEN_TRANSFER_MANIFEST_KEY,
@@ -61,6 +63,7 @@ TRACE_SOURCE_NAMES = (
 TRACE_VIEW_METADATA_NAMES = (
     "conversion_in_impacts",
     "conversion_out_impacts",
+    "historical_boundary_evidence",
 )
 
 
@@ -124,6 +127,9 @@ def canonical_point_branch_identity() -> tuple[
 
 class BranchInventoryTraceabilityService:
     def build(self, month: date) -> BranchInventoryTraceability:
+        self._historical_boundary_cache = {}
+        self._historical_boundary_issues = []
+        self._historical_boundary_evidence = {}
         month_start = month.replace(day=1)
         opening_date = month_start - timedelta(days=1)
         closing_date = date(
@@ -160,8 +166,13 @@ class BranchInventoryTraceabilityService:
                 source_complete=False,
             )
 
-        opening = self._load_closing(opening_closing)
-        closing = self._load_closing(point_closing)
+        opening = self._load_closing(opening_closing, month=month_start, boundary="opening")
+        closing = self._load_closing(point_closing, month=month_start, boundary="closing")
+        if self._historical_boundary_issues:
+            return BranchInventoryTraceability(
+                month=month_start, lines=(), global_issues=tuple(self._historical_boundary_issues),
+                company_difference=ZERO, exception_count=0, source_complete=False,
+            )
         incomplete_manifests = [
             (required_date, selected, balances)
             for required_date, selected, balances in (
@@ -405,6 +416,9 @@ class BranchInventoryTraceabilityService:
                     (branch_id, product_id), {}
                 ),
             }
+            boundary_evidence = self._historical_boundary_evidence.get((branch_id, product_id))
+            if boundary_evidence:
+                trace_values["historical_boundary_evidence"] = boundary_evidence
             lines.append(
                 BranchProductBalance(
                     branch=branches[branch_id],
@@ -424,7 +438,7 @@ class BranchInventoryTraceabilityService:
                     source_trace=MappingProxyType(
                         {
                             source_name: (
-                                MappingProxyType(dict(trace_values[source_name]))
+                                _freeze_mapping(trace_values[source_name])
                                 if source_name in TRACE_VIEW_METADATA_NAMES
                                 else tuple(trace_values[source_name])
                             )
@@ -432,6 +446,7 @@ class BranchInventoryTraceabilityService:
                                 *TRACE_SOURCE_NAMES,
                                 *TRACE_VIEW_METADATA_NAMES,
                             )
+                            if source_name in trace_values
                         }
                     ),
                     issues=tuple(issues_by_key.get((branch_id, product_id), ())),
@@ -1777,17 +1792,40 @@ class BranchInventoryTraceabilityService:
             .first()
         )
 
-    @staticmethod
     def _load_closing(
+        self,
         closing: PointHistoricalInventoryClosing,
+        *, month: date | None = None, boundary: str = "closing",
     ) -> dict[tuple[int, int], tuple[Decimal, list[int]]]:
         balances: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
-        lines = PointHistoricalInventoryClosingLine.objects.filter(
+        lines = list(PointHistoricalInventoryClosingLine.objects.filter(
             closing=closing
-        ).values_list("id", "branch_id", "product_id", "stock")
-        for line_id, branch_id, product_id, line_stock in lines:
-            key = (branch_id, product_id)
+        ).select_related("branch", "product").order_by("id"))
+        cache = getattr(self, "_historical_boundary_cache", None)
+        if cache is None:
+            self._historical_boundary_cache = cache = {}
+        if not hasattr(self, "_historical_boundary_issues"):
+            self._historical_boundary_issues = []
+            self._historical_boundary_evidence = {}
+        quantities, evidence, unproven = documentary_historical_boundary(
+            closing, lines, month=month or closing.operational_date.replace(day=1),
+            boundary=boundary, cache=cache,
+        )
+        for line in unproven:
+            self._historical_boundary_issues.append(TraceSourceIssue(
+                code="SOURCE_INCOMPLETE", message=(
+                    f"Cierre histórico {closing.operational_date.isoformat()} sin límite Stock UTC "
+                    "documentado y cobertura canónica completa."
+                ), branch_id=line.branch_id, product_id=line.product_id, source_ids=(line.id,),
+            ))
+        for line in lines:
+            if line.id in evidence:
+                self._historical_boundary_evidence.setdefault((line.branch_id, line.product_id), {})[
+                    boundary] = evidence[line.id]
+            if line.id not in quantities:
+                continue
+            key = (line.branch_id, line.product_id)
             stock, source_ids = balances.get(key, (ZERO, []))
-            source_ids.append(line_id)
-            balances[key] = (stock + line_stock, source_ids)
+            source_ids.append(line.id)
+            balances[key] = (stock + quantities[line.id], source_ids)
         return balances

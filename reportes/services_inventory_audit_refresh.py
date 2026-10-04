@@ -38,7 +38,7 @@ def _source_signature(month):
         revision = cache.get(f"inventory-audit:dirty:{month}")
     except Exception:
         revision = None  # Cache is optional; a missing revision never proves freshness.
-    evidence = ["auditor-evidence-v1", revision]
+    evidence = ["auditor-evidence-v2-stock-raw-utc", revision]
     # Aggregate bounded source records, including deletes and quantity changes.
     for app, name, field, quantity in (
         ("pos_bridge", "PointProductionLine", "production_date", "produced_quantity"),
@@ -54,6 +54,11 @@ def _source_signature(month):
         stamp = next((f for f in ("updated_at", "imported_at", "created_at") if f in fields), "id")
         is_datetime = model._meta.get_field(field).get_internal_type() == "DateTimeField"
         lower, upper = (datetime.combine(value, time.min, POINT_BUSINESS_TIMEZONE) for value in (month, end)) if is_datetime else (month, end)
+        if name == "PointProductHistoryRow":
+            # Legacy Stock naive dates were persisted as local (+7h). Hash the
+            # bounded candidate window used by the UTC reader, not just old dates.
+            # Extra candidates may invalidate freshness; they never prove coverage.
+            upper += timedelta(hours=7)
         evidence.append(model.objects.filter(**{field + "__gte": lower, field + "__lt": upper}).aggregate(
             count=Count("id"), latest=Max(stamp), last_id=Max("id"), quantity=Sum(quantity)))
     # These catalogs/manifests also change authority, aliases and historical returns.

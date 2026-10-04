@@ -105,6 +105,35 @@ class InventoryAuditRefreshMaterializationTests(TraceabilityTestFixtures, TestCa
     def setUp(self):
         cache.clear()
 
+    def _legacy_october_history(self):
+        from datetime import datetime, timezone
+        from pos_bridge.models import PointProductHistoryRow
+        from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+        record = AuditStockHistoryService()._canonical_import(self.branch, self.product)
+        record.report_date = date(2026, 10, 1)
+        record.save()
+        row = PointProductHistoryRow.objects.create(import_record=record, row_number=1686312,
+            movement_at=datetime(2026, 10, 1, 9, tzinfo=timezone.utc),
+            quantity=2, raw_payload={"Fecha": "2026-10-01T02:00:00"})
+        return record, row
+
+    def test_signature_includes_legacy_rows_whose_raw_utc_belongs_to_previous_month(self):
+        from pos_bridge.models import PointProductHistoryRow
+        from reportes.services_inventory_audit_refresh import _source_signature
+        record, row = self._legacy_october_history()
+        before = _source_signature(date(2026, 9, 1))
+        PointProductHistoryRow.objects.filter(pk=row.pk).update(quantity=3)
+        self.assertNotEqual(before, _source_signature(date(2026, 9, 1)))
+
+    def test_history_signal_invalidates_effective_and_legacy_months(self):
+        from reportes.models import ProductInventoryAuditRun
+        from reportes.signals import _audit_history_finished
+        record, row = self._legacy_october_history()
+        ProductInventoryAuditRun.objects.create(month=date(2026, 9, 1))
+        with patch("reportes.signals.enqueue_inventory_audit_months") as send:
+            _audit_history_finished(record)
+        self.assertEqual(set(send.call_args.args[0]), {date(2026, 9, 1), date(2026, 10, 1)})
+
     def test_repeat_refresh_preserves_approved_quantities_and_does_not_create_point_jobs(self):
         from pos_bridge.models import PointSyncJob
         from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun

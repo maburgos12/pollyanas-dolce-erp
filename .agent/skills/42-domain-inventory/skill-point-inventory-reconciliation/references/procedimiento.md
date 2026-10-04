@@ -40,6 +40,38 @@ Las fechas fetched_at/updated_at/snapshot_at importan. Una proyección anterior 
 
 ## 2. Conciliación histórica sin repetir importaciones
 
+### Contrato temporal por dominio, comprobado el 3 de octubre de 2026
+
+La tabla y detalle actuales de Point `/Stock/tab_historial` convierten Fecha con
+`moment.utc(data).toDate()` y `moment.utc(detalle.Fecha).toDate()`. Fragmento SHA256
+`8755e73fc393236ec56f26354904ea5731022f6b4004c90f826e11c2f2e3e55c`.
+Para imports `raw_metadata.source=POINT_STOCK_HISTORY_API`, `raw_payload.Fecha`
+naive representa UTC; una fecha con Z/offset conserva su instante. Convertir ese
+instante a America/Mazatlan antes del corte operacional. Raw ausente/malformado no
+permite reemplazarlo silenciosamente por un timestamp derivado antiguo.
+
+Esto NO se aplica a XLS ni a `PointNoteDetailService.Fecha_Hora`: la fecha naive
+de notas es local Mazatlán. No cambiar TIME_ZONE, restar siete horas a todo dato,
+ni escoger una interpretación porque hace cuadrar cantidades.
+
+Ejemplo: Stock `2026-10-01T02:01:31.863` pertenece al 30sept 19:01 Mazatlán;
+`2026-10-01T07:00:00Z` pertenece al 1oct. Una nota30sept18:59 naive permanece
+30sept18:59 local, no se convierte como Stock. El mes septiembre usa el intervalo
+`[2026-09-01T07:00Z,2026-10-01T07:00Z)`.
+
+Releer raw autoritativo sin reescribir movimiento/import/metadata originales.
+La ventana candidata legacy puede incluir el borde del mes siguiente; filtrar y
+ordenar por instante efectivo, manteniendo consultas acotadas. Recalcular apertura
+del31agosto y cierre30sept con el mismo contrato: corregir ventas pero conservar
+extremos derivados antiguos crea diferencias falsas.
+
+La aritmética raw correcta NO renueva fetched_at. Cobertura requiere captura
+posterior al fin operacional del mes. Para lotes truncados de500, usar el límite
+raw del último lote efectivamente descargado, no filas más antiguas retenidas por
+upsert ni una resta universal sobre earliest_movement_at. Preservar INCOMPLETE si
+falta esa evidencia. Firma/refresco y protección de meses de borde deben usar el
+contrato probado; publicar con pruebas antes de atribuir resultados al nuevo lector.
+
 Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con diferencia real, apertura y cierre comprobados, sin movimientos desconocidos y remanente histórico cero. Revisar venta comercial frente a stock antes de seleccionar. Un fetched_at anterior al fin de mes puede explicar cobertura INCOMPLETE aunque toda la suma cuadre.
 
 Si cobertura ya COMPLETE, no HTTP Point. Si falta exclusivamente cobertura posterior al cierre y el caso cumple las condiciones, documentar ese faltante y capturar únicamente el historial necesario: lote de hasta diez, una sola sesión protegida por `point_account_session_lock`, adquisición sin interferir con sesiones ajenas. Si ocupado, consultar titular en pg_locks/pg_stat_activity read-only cuando haga falta; no liberar candado ni reiniciar servicios. Cerrar sesión en finally.
@@ -97,4 +129,12 @@ Pantalla autenticada: ecuación, cantidades comerciales conservadas, diferencia,
 
 Código autorizado: ficha de fuentes, worktree/branch registrados, PostgreSQL aislado, migraciones/checks, TDD de regresiones y revisión de consumidores, CI completo SHA actual, PR/merge, deploy_web_safe oficial sin pull manual previo, fresh VPS y UI autenticada, segunda ejecución idempotente y cierre exacto de la tarea. No copiar archivos al VPS. Pruebas locales no son publicación.
 
-Cierre mensual exige cobertura, saldos, documentación, aprobación y conteo físico aplicable comprobados; la ausencia de conteo debe declararse, no rellenarse. No detener automatización solo por haber publicado código o conciliado una suma.
+Cierre mensual se ejecuta por `ProductMonthClosureService` y sus guards reales:
+fuentes autoritativas/frescas, cobertura, apertura/cierre e identidades resueltas,
+validación lock_ready y actor autorizado. No omitir un issue para habilitarlo.
+El servicio permite cierre contable/documental sin declarar conteo físico cuando
+ese conteo no es requisito del flujo: registrar su ausencia y conservar expedientes
+humanos/documentos/aprobaciones independientes. `closure_allowed=False` de review
+solo significa que el goal no ejecuta cierre; no sustituye la evaluación del servicio.
+No convertir cierre documental en aprobación de cada expediente o existencia física.
+No detener automatización solo por publicar código o conciliar una suma.

@@ -1,6 +1,45 @@
-# Continuidad septiembre 2026 — corte 3 de octubre de 2026
+# Continuidad septiembre 2026 — corte 4 de octubre de 2026
 
 Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes con fuentes autorizadas y frescura necesaria; no volver a descargar hechos ya acreditados por rutina. Hilo/automatización: `01a0d98e-e017-7253-b4c9-9758f56c3827` / `conciliar-septiembre-hasta-cierre`. Septiembre NO cerrado. Regla humana vigente: no alterar inventario, mermas, ventas, RRHH o ajustes para forzar resultado.
+
+## Estado verificado que sustituye bloqueos históricos posteriores
+
+Producción VPS, verificación4oct2026: Mauricio autorizó además la sincronización
+mensual protegida y la reparación lectora Stock UTC sin reescribir originales.
+Job81612 fullSept1–30, sin filtro sucursal, SUCCESS: seen267/updated267/superseded0;
+267 PointWasteLine y267 MermaPOS hashes1:1, autoridad mensual wasteTrue, movimiento
+1683114 y parPK1676 intactos; stock/ventas originales preservados. No repetir sync
+por rutina ni editar manifiestos anteriores. La recuperación1455 ya estaba completa.
+
+PR1456 lector de identidad de transferencias publicado y aceptación autenticada
+completa: LotusPayán3432 muestra32 recibidas; LotusMatriz3232 muestra129; Ciruela3963
+reutiliza documento44672 con una pieza. Recupera documentos omitidos, no prueba
+cierre físico ni elimina diferencia comercial. Las notas históricas de bloqueo
+78023/266filas y entrega1456 pendiente describen su fecha, NO el estado de este corte.
+
+Contrato actual Stock naiveUTC confirmado por frontend, detallado en procedimiento.
+La reparación lectora UTC está autorizada/en preparación; este checkpoint NO afirma
+CI/deploy/aceptación de esa reparación. Cierre mensual aún requiere servicio oficial
+y guards reales. Conteos físicos y aprobaciones humanas no fueron fabricados.
+
+## Lote rawUTC de fuentes existentes, sin materialización
+
+Dos lecturas READ ONLY4oct con fuentes guardadas/HTTP prohibido dieron ventas netas
+rawUTC iguales a comerciales en2251=30,2451=36,3232=134,3371=169,3372=44,3432=31.
+Sus aperturas/cierres raw difieren de algunos extremos legacy:2251 4→1 con ajuste−1;
+2451 0→2;3232 7→1 con merma1;3371 7→8 con merma1;3372 1→1;3432 1→2.
+No normalizar cantidades comerciales ni conservar extremos legacy por conveniencia.
+Imports144/417 tienen cobertura posterior al mes: no recapturarlos.76/508/509/530/531
+fueron descargados antes del fin local septiembre07:00Z y siguen INCOMPLETE hasta
+verificar cobertura por canónica sinforce, después de corregir lectura/extremos.
+
+3430 Payán/Zanahoria import530:39 ventas rawUTC guardadas +2 documentales=41
+comerciales. El30sept suma1+1+2, con headers explícitos NOTA-102345 (1686015),
+NOTA-102352 (1686079) yNOTA-102362 (1686312). Nuevo1686312 rawOct1T02:01:31.863UTC
+es30sept19:01Maz, VENTA2/2→0/no cancelado. Header/detalle corroboran Payán/Bollo2;
+no inferir PK_Nota de FK_Movimiento ni equivalencia por minutos. Fue posterior al
+fetched_at01:52Z de530: aritmética correcta no acredita cobertura. No se persistió
+en esa investigación; no repetir HTTP específico a esos documentos sin dato nuevo.
 
 ## Evidencia detallada conservada
 
