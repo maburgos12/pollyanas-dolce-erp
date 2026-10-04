@@ -101,6 +101,25 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         snapshot.save(update_fields=["captured_at", "raw_payload"])
         self.assertEqual(self._read()[0], {})
 
+    def test_consolidated_opening_uses_independent_snapshot_not_original_quantity_or_zero_proof(self):
+        cutoff = datetime(2026, 9, 1, 7, tzinfo=dt_timezone.utc)
+        self.closing.operational_date = date(2026, 8, 31)
+        self.closing.retrieved_at = cutoff + timedelta(hours=3)
+        self.closing.metadata = {"method": "consolidated_point_stock_history_attempts", "source_closing_ids": [4, 5]}
+        snapshot = self._snapshot(captured_at=cutoff + timedelta(hours=2))
+        snapshot.raw_payload["row"][8] = "2026-08-31T23:10:17.903"
+        snapshot.save(update_fields=["raw_payload"])
+        values, proofs, unproven = self._read(boundary="opening")
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertEqual(unproven, ())
+        self.assertTrue(proofs[self.line.pk]["snapshot_boundary_verified"])
+        self.assertFalse(proofs[self.line.pk]["original_boundary_verified"])
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+        snapshot.delete()
+        self.line.stock = Decimal("0")
+        self.line.evidence = {"method": "no_history_current_zero", "history_rows": 0, "history_limit": 500}
+        self.assertEqual(self._read(boundary="opening")[0], {})
+
     def test_existing_incomplete_canonical_is_never_hidden_by_snapshot(self):
         self._snapshot()
         PointProductHistoryImport.objects.create(
@@ -189,7 +208,8 @@ class SnapshotHistoricalBoundaryTests(TestCase):
     def test_invalid_original_manifest_does_not_enable_snapshot_fallback(self):
         self._snapshot()
         for field, invalid in [("status", "DRAFT"), ("operational_date", date(2026, 9, 29)),
-                               ("metadata", {}), ("expected_product_ids", []),
+                               ("metadata", {}), ("metadata", {"method": []}),
+                               ("metadata", {"method": {}}), ("expected_product_ids", []),
                                ("retrieved_at", self.cutoff - timedelta(seconds=1))]:
             with self.subTest(field=field):
                 original = getattr(self.closing, field)

@@ -314,15 +314,22 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     expected_keys = {(int(branch_id), int(product_id))
                      for branch_id in closing.expected_branch_ids
                      for product_id in closing.expected_product_ids}
-    original_manifest_valid = (
+    manifest_method = (closing.metadata or {}).get("method")
+    boundary_manifest_valid = (
         closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
         and closing.operational_date == expected_date
-        and (closing.metadata or {}).get("method") == "point_stock_history_boundary"
+        and isinstance(manifest_method, str)
+        and manifest_method in {"point_stock_history_boundary", "consolidated_point_stock_history_attempts"}
         and bool(expected_keys)
         and {(line.branch_id, line.product_id) for line in lines} == expected_keys
         and closing.retrieved_at is not None
         and timezone.is_aware(closing.retrieved_at) and closing.retrieved_at >= cutoff
     )
+    # A snapshot is independent documentary evidence. Consolidating historical
+    # attempts changes the manifest method, not the original snapshot's job/FKs.
+    # Keep the legacy empty-history/live-zero proof's stricter method contract.
+    original_manifest_valid = (boundary_manifest_valid
+        and manifest_method == "point_stock_history_boundary")
     original_zero_keys = {
         (line.branch_id, line.product_id) for line in lines
         if original_manifest_valid and (line.branch_id, line.product_id) in zero_keys
@@ -336,7 +343,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     snapshot_boundaries = _snapshot_historical_boundaries(
         [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys],
         cutoff=cutoff, cache=cache,
-    ) if original_manifest_valid else {}
+    ) if boundary_manifest_valid else {}
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)

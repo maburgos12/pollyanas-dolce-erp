@@ -98,6 +98,12 @@ Usar el mismo lector `documentary_historical_boundary`, no otra captura/tabla.
 Si existe canónica API `POINT_STOCK_HISTORY_API` del par, completa o incompleta,
 NO ocultarla con un snapshot. XLS de costeo no se convierten en historia canónica.
 Cuando no existe, consultar bulk snapshots producto desde corte hasta corte+3d.
+El manifiesto VERIFIED puede proceder de captura directa o de consolidación de
+intentos (`consolidated_point_stock_history_attempts`, apertura6 de agosto).
+Exigir fecha, pares esperados completos y retrieved_at postcorte en ambos; el
+snapshot aporta su propia prueba, no adopta stock/evidence de la consolidación.
+El método consolidado NO habilita la prueba legacy de vacío/cero: esa conserva
+su contrato directo estricto. No relajar canónicas ni atribuir cobertura completa.
 Exigir FK branch/product y externalID exactos, row0 producto, row4 stock coherente
 con persistido, row9 dominio producto explícito, job inventory SUCCESS y log
 original de sucursal con branch_id/branch_external_id correctos. No identificar
