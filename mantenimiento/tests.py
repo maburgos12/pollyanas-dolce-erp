@@ -83,13 +83,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-filtros-cedis", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-planes-captura", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v30-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v31-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -1674,7 +1674,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261003-filtros-cedis", sw)
+        self.assertIn("20261003-planes-captura", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):
