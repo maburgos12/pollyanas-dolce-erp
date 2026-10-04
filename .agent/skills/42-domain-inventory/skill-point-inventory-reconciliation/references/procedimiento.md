@@ -176,6 +176,82 @@ Si cobertura ya COMPLETE, no HTTP Point. Si falta exclusivamente cobertura poste
 
 Usar `AuditStockHistoryService.capture` **sin force**, sobre la importación canónica existente. Verificar que no crea otra importación y deduplica por FK_Movimiento. Inspeccionar firmas/callers actuales antes de preparar un comando; no proporcionar un importador genérico que eluda estos controles.
 
+### Respuesta original completa guardada: ingreso controlado, no recaptura
+
+Con autorización de ingreso de originales, reutilizar la entrada explícita de
+`AuditStockHistoryService` y su persistencia compartida con capture; no otro
+importador, tabla o cliente falso. Review/plan no ejecutan este ingreso. Leer la
+firma real publicada antes de invocarla, sin sustituir parámetros por suposición.
+
+API del contrato de esta tarea: `ingest_original_response(branch, product,
+month, rows, *, evidence)` devuelve `PointHistoryReconciliation`. `branch` y
+`product` son las entidades Point exactas; month es date del primer día del mes.
+Con esas entidades y rows/evidence verificados desde el original, la ejecución es:
+
+```python
+result = AuditStockHistoryService().ingest_original_response(
+    branch, product, month, rows, evidence=evidence,
+)
+```
+
+Envelope obligatorio: `source="POINT_STOCK_HISTORY_API"`, `domain="PRODUCT"`,
+`response_complete=True`, `branch_id`/`product_id` PK internas enteras;
+`request.path="/Stock/GetHistorial"` y params exactamente `tipo="false"`,
+`almacen=branch.external_id`, `pkproducto=product.external_id`,
+`movimientos=str(history_limit)`, `tipoMovimiento=""` (todos strings).
+Además `retrieved_at` ISO con zona, `history_limit` literal acreditado de
+5/10/15/50/100/300/500, `fetched_rows=len(rows)<=history_limit`, `original_locator`
+real y `raw_sha256=hashlib.sha256(json.dumps(rows, sort_keys=True,
+default=str).encode()).hexdigest()`. No añadir parámetros de fecha/paginación.
+Cuando el JSON original no guardó la petición, no afirmar que la guardó: acreditar
+su reconstrucción desde el script original de adquisición y contrato del cliente.
+`request_provenance` es obligatorio: `kind="DERIVED_FROM_ACQUISITION_SCRIPT"`,
+`source_file` real, `source_code` íntegro del script guardado,
+`source_sha256` SHA256 de ese texto verificado y
+`client_contract="PointHttpSessionClient.get_stock_history"`. Comprobar sus SPEC,
+par y límite contra esa respuesta, no reconstruir desde un cliente modificado hoy.
+El servicio valida el envelope, no lee ni autentica por sí solo un archivo del Mac
+desde el VPS. No agregar claves libres para generar otro fingerprint de la misma
+respuesta; conservar exactamente el esquema validado.
+No usar el ejemplo hasta confirmar que el SHA servido contiene esta API.
+
+Antes de escribir, acreditar respuesta completa de `/Stock/GetHistorial` para un
+par exacto: `source=POINT_STOCK_HISTORY_API`, dominio PRODUCT, PK internas y
+petición acreditada con sucursal/producto externos y tipo producto. Conservar path,
+parámetros y procedencia de su reconstrucción, límite solicitado, cantidad recibida, SHA de la
+respuesta y localizador original verificable (`original_locator.source_file` y
+`source_line` entero positivo). No inventar ruta o línea para satisfacer el guard.
+La lista íntegra conserva cada raw: no seleccionar sólo movimientos que cruzan el
+corte, ensamblar dos muestras, rellenar filas ausentes ni usar count de un resumen.
+SHA del archivo/manifiesto y file_hash de la canónica no sustituyen SHA de respuesta;
+calcularla con la serialización exacta que valida el servicio, manteniendo el
+original como evidencia. Rechazar dominio/identidad/petición/recuento/fecha/raw
+inválidos antes de cualquier escritura.
+
+`retrieved_at` es el instante original de descarga, con zona explícita, nunca now
+ni mtime del archivo. `ingested_at` registra incorporación separada. Un movimiento
+raw posterior a su descarga es inconsistente. Ingresar hoy una respuesta antigua
+no renueva fetched_at ni cobertura; lote saturado usa membresía/límite/fecha del
+lote original, no la unión de filas retenidas. Una frontera probada y una historia
+COMPLETE siguen siendo pruebas distintas.
+
+Serializar primero la canónica única del par, incluida su creación, después los
+mutex mensuales afectados y escrituras. Deduplicar FK_Movimiento dentro del import,
+nunca globalmente entre productos. Conservar procedencia por respuesta y fila;
+un original antiguo puede aportar fila ausente sin sustituir metadata de una
+respuesta posterior. Conflicto con fila más reciente o de procedencia desconocida
+debe abortar atómicamente, no sobreescribirla porque el ingreso ocurre hoy.
+`response_provenance` conserva cada respuesta y `movement_fetched_at` su fecha por
+FK; `original_responses` archiva el raw íntegro con SHA. Conservarlos, no fabricar
+provenance para resolver una colisión. Replay idéntico también valida el archivo
+integrado: idempotencia no significa aceptar metadata o raw corruptos.
+
+Antes/después verificar PK canónica, raws, metadata y procedencia; segunda entrada
+idéntica con HTTP prohibido no cambia filas/imports/metadata. No añadir avisos,
+propuestas ni aprobación. Reconcile decide cobertura real; materialización/cierre
+requieren sus guards independientes. Ante originales parciales, conservar el
+faltante exacto: no marcarlos completos para acelerar el cierre.
+
 Registrar una evidencia reciente por par y no derivar cantidades de la posición
 de una tupla: separar sales/transfer_in/transfer_out/ajuste/conversión. Un preflight
 que encuentra ventas distintas aborta antes de sesión; diagnosticar contra fuente,

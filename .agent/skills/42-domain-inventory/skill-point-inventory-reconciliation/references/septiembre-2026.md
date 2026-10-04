@@ -50,6 +50,22 @@ lock_readyFalse,95 issues de proyección; ni pérdidas ni totales definitivos.
 No repetir preview por rutina: hacerlo tras una integración material. PR1463
 lecciones publicada/aceptada (mergefa260722, runs4987–4992/context13) no cerró el mes.
 
+### Originales completos existentes: corte de implementación, no entrega
+
+Tarea `auditor-history-originales`, 4oct2026: manifiesto de17aperturas contiene
+14 respuestas originales completas verificadas y3 resúmenes sin raw íntegro.
+Sólo las14 son candidatas a entrada controlada; las3 siguen excluidas, no se
+completan con primera/última fila ni count de resumen. Conservar petición/par/
+dominio/SHA/límite/count/fecha original/localizador; ingreso actual no acredita
+consulta actual. Procedimiento arriba distingue procedencia, locks e idempotencia.
+Las peticiones de esas14 respuestas no venían en el JSON: se acreditan mediante
+SPEC de4scripts de adquisición originales verificados y contrato del cliente,
+con SHA/procedencia separada. No presentarlas como requestliteral guardado.
+Estas fuentes no autorizan repetir HTTP de las174COMPLETE ni inventar apertura0.
+La habilidad documentada no implica service publicado ni originales incorporados:
+registrar CI/deploy/ingreso exacto/segunda ejecución/UI cuando realmente ocurran.
+Septiembre y los expedientes humanos siguen sujetos a sus guards y evidencias.
+
 ## Autorización y siguiente contrato snapshot, 4oct2026
 
 Mauricio autorizó integrar snapshots originales para553pares ambos extremos y

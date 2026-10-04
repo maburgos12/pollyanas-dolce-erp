@@ -54,6 +54,13 @@ acreditada ni exigir historia completa como condición de un snapshot independie
 La autorización humana del 4 de octubre para este contrato está registrada en el checkpoint;
 no repetir su solicitud ni presumir publicada una implementación todavía pendiente.
 
+Si existe una respuesta histórica original íntegra ya guardada, usar la entrada
+controlada del mismo servicio descrita en el procedimiento, dentro de la ejecución
+autorizada: no simular un cliente HTTP para hacerla pasar por captura actual. El
+goal review/plan sigue sin importar. Fecha de ingreso no es fecha de consulta;
+conservar petición, dominio, SHA, membresía y procedencia por fila. Un resumen o
+una muestra no se convierte en respuesta completa ni en cobertura COMPLETE.
+
 Los hallazgos fechados son evidencia histórica, no actualización de fuentes canónicas.
 Se seleccionan por período y claves externas de producto/sucursal, nunca solo por
 nombre, SKU ambiguo o PK del expediente. No reemplazan FK documental ni prueban conteo
