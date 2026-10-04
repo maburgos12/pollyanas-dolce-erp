@@ -50,6 +50,13 @@ persistido, row externalID=FK producto externalID, dominio explícito producto,
 job inventory SUCCESS y procedencia original de sucursal. Stock contradictorio
 entre candidatos válidos deja frontera sin prueba; no escoger el conveniente.
 
+Aceptación de producción PR1458 detectó apertura0 porque Closing6 VERIFIED usa
+`consolidated_point_stock_history_attempts`; el helper sí acredita sus snapshots
+originales Sep1 dentro3d. Corrección acotada: separar gate de snapshot independiente
+del gate legacyzero. Ambos exigen manifiesto reconocido, VERIFIED, fecha y pares
+completos, retrievedpostcorte. Consolidación NO autoriza stock/cero de sus líneas.
+No ampliar ventana: el universo vigente supera553, validar por FK/prueba, no cifra.
+
 Canónica API `POINT_STOCK_HISTORY_API` completa/incompleta/desconocida tiene precedencia; snapshot
 no la oculta. Documento admite `snapshot_boundary_verified`, pero conserva
 `canonical_history_verified=False`, cobertura MISSING y físico no acreditado.
