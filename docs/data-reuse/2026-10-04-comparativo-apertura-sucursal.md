@@ -11,9 +11,9 @@ Validar cobertura por sucursal/día del acumulado mensual hasta el último cierr
 | Concepto | Modelo / tabla | Fuente que crea y actualiza | Identificador y ámbito | Evidencia de registros | Consumidores |
 | --- | --- | --- | --- | --- | --- |
 | Apertura operativa | core.Sucursal / core_sucursal | Catálogo existente de sucursales | id; codigo único; fecha_apertura | ERP 18, SINALOA_LEYVA, activa, apertura 2026-10-03 | core.branch_catalog, reportes, ventas, Dashboard |
-| Correspondencia Point | pos_bridge.PointBranch / pos_bridge_branch | Integración existente Point–ERP | external_id y erp_branch_id | Point 28, external_id 14, ERP 18, ACTIVE | Integración y lector de ventas |
+| Correspondencia Point | pos_bridge.PointBranch / pos_bridge_branches | Integración existente Point–ERP | external_id y erp_branch_id | Point 28, external_id 14, ERP 18, ACTIVE | Integración y lector de ventas |
 | Venta diaria canónica | reportes.FactVentaDiaria y fuentes seleccionadas por get_daily_sales_bulk | Importación existente Point y materialización analítica | fecha, sucursal_id, producto y fuente | 2026-10-01: 102209.00; día 2: 117260.68; día 3: 145019.01 | Dashboard, Ventas, BI |
-| Cierre de venta | pos_bridge.PointDailyBranchIndicator / pos_bridge_daily_branch_indicator | Sincronización Point posterior al cierre | indicator_date, branch_id, sync_job | ERP 18 solo tiene indicador de 2026-10-03: 8257.00; job 82118 SUCCESS el 2026-10-04 | latest_closed_sales_date y cobertura mensual |
+| Cierre de venta | pos_bridge.PointDailyBranchIndicator / pos_bridge_daily_branch_indicators | Sincronización Point posterior al cierre | indicator_date, branch_id, sync_job | ERP 18 solo tiene indicador de 2026-10-03: 8257.00; job 82118 SUCCESS el 2026-10-04 | latest_closed_sales_date y cobertura mensual |
 | Histórico equivalente | Venta canónica histórica y caché oficial mensual/rangos | Integración y lector existentes | red histórica, 2025-10-01 a 2025-10-03 | 119666.00 + 105714.00 + 111563.00 = 336943.00 | build_closed_yoy_panel |
 
 ## Alias y equivalencias
