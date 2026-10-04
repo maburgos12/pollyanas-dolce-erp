@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import unicodedata
+import zlib
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
@@ -13,9 +17,11 @@ from django.db.models import Prefetch, Q, prefetch_related_objects
 from django.utils import timezone
 
 from pos_bridge.models import (
+    PointBranch,
     PointHistoricalInventoryClosingLine,
     PointProductHistoryImport,
     PointProductHistoryRow,
+    PointProduct,
 )
 from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
@@ -26,6 +32,7 @@ from pos_bridge.services.product_month_source_mutex import lock_product_month_so
 
 
 HISTORY_LIMIT = 500
+ORIGINAL_HISTORY_LIMITS = frozenset({5, 10, 15, 50, 100, 300, 500})
 SOURCE_NAME = "POINT_STOCK_HISTORY_API"
 
 
@@ -255,17 +262,174 @@ class AuditStockHistoryService:
             branch.external_id,
             movements=HISTORY_LIMIT,
         )
+        fetched_at = timezone.now().isoformat()
+        self._persist_response(
+            branch, product, month, rows, fetched_at=fetched_at,
+            history_limit=HISTORY_LIMIT,
+        )
+        return self.reconcile(branch, product, month)
+
+    @staticmethod
+    def _aware_receipt(value):
+        try:
+            stamp = datetime.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise AuditStockHistoryError("Fecha original de consulta inválida.") from exc
+        if timezone.is_naive(stamp):
+            raise AuditStockHistoryError("La consulta original requiere zona horaria.")
+        return stamp
+
+    def ingest_original_response(self, branch, product, month: date, rows, *, evidence):
+        """Ingest a complete preserved Point response, without contacting Point.
+
+        The caller supplies the original request and locator, not a reconstructed
+        boundary pair. Receipt time remains distinct from this database write.
+        """
+        rows, evidence = deepcopy(rows), deepcopy(evidence)
+        if not isinstance(branch, PointBranch) or not isinstance(product, PointProduct):
+            raise AuditStockHistoryError("La identidad requiere sucursal y producto Point canónicos.")
+        if not isinstance(rows, list) or not isinstance(evidence, dict):
+            raise AuditStockHistoryError("Se requiere respuesta original íntegra y evidencia.")
+        expected_keys = {"source", "domain", "response_complete", "branch_id", "product_id", "request",
+                         "retrieved_at", "history_limit", "fetched_rows", "raw_sha256", "original_locator", "request_provenance"}
+        if set(evidence) != expected_keys:
+            raise AuditStockHistoryError("El contrato de evidencia original tiene campos faltantes o ajenos.")
+        limit, count = evidence.get("history_limit"), evidence.get("fetched_rows")
+        if (type(limit) is not int or type(count) is not int or
+                limit not in ORIGINAL_HISTORY_LIMITS or count != len(rows) or count > limit):
+            raise AuditStockHistoryError("Conteo/límite no acredita la respuesta original completa.")
+        request = {"path": "/Stock/GetHistorial", "params": {
+            "tipo": "false", "almacen": str(branch.external_id),
+            "pkproducto": str(product.external_id), "movimientos": str(limit), "tipoMovimiento": "",
+        }}
+        if (evidence.get("source") != SOURCE_NAME or evidence.get("domain") != "PRODUCT" or
+                evidence.get("response_complete") is not True or
+                type(evidence.get("branch_id")) is not int or evidence["branch_id"] != branch.pk or
+                type(evidence.get("product_id")) is not int or evidence["product_id"] != product.pk or
+                evidence.get("request") != request or not branch.external_id or not product.external_id):
+            raise AuditStockHistoryError("Identidad, dominio o petición original Point no coincide.")
+        locator = evidence.get("original_locator")
+        if (not isinstance(locator, dict) or set(locator) != {"source_file", "source_line"} or not isinstance(locator.get("source_file"), str) or
+                not locator["source_file"].strip() or type(locator.get("source_line")) is not int or
+                locator["source_line"] <= 0):
+            raise AuditStockHistoryError("Falta localizador de la evidencia original.")
+        request_proof = evidence["request_provenance"]
+        if (not isinstance(request_proof, dict) or set(request_proof) != {
+                "kind", "source_file", "source_code", "source_sha256", "client_contract"} or
+                request_proof.get("kind") != "DERIVED_FROM_ACQUISITION_SCRIPT" or
+                request_proof.get("client_contract") != "PointHttpSessionClient.get_stock_history" or
+                not isinstance(request_proof.get("source_file"), str) or not request_proof["source_file"].strip() or
+                not isinstance(request_proof.get("source_code"), str) or not request_proof["source_code"].strip() or
+                hashlib.sha256(request_proof["source_code"].encode()).hexdigest() != request_proof.get("source_sha256")):
+            raise AuditStockHistoryError("Procedencia del script de adquisición original inválida.")
+        receipt = self._aware_receipt(evidence.get("retrieved_at"))
+        if receipt > timezone.now():
+            raise AuditStockHistoryError("La fecha original de consulta está en el futuro.")
+        try:
+            raw_json = json.dumps(rows, sort_keys=True, default=str).encode()
+        except (TypeError, ValueError) as exc:
+            raise AuditStockHistoryError("Respuesta original no serializable.") from exc
+        if hashlib.sha256(raw_json).hexdigest() != evidence.get("raw_sha256"):
+            raise AuditStockHistoryError("SHA de respuesta original no coincide.")
+        ids = set()
+        for raw in rows:
+            if not isinstance(raw, dict):
+                raise AuditStockHistoryError("Movimiento original inválido.")
+            movement_id = raw.get("FK_Movimiento")
+            if type(movement_id) is not int or movement_id <= 0 or movement_id in ids:
+                raise AuditStockHistoryError("FK_Movimiento inválido o duplicado dentro de la respuesta.")
+            ids.add(movement_id)
+            for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+                if raw.get(field) in (None, "") or not _decimal(raw[field]).is_finite():
+                    raise AuditStockHistoryError("Cantidad o existencia original incompleta.")
+            cancelled = raw.get("Cancelado")
+            if not (type(cancelled) is bool or (type(cancelled) is str and cancelled in {"true", "false", "True", "False"})):
+                raise AuditStockHistoryError("Estado de cancelación original inválido.")
+            try:
+                instant = point_stock_history_instant(raw)
+            except HistoricalInventoryCaptureError as exc:
+                raise AuditStockHistoryError("Fecha original de movimiento inválida.") from exc
+            if instant > receipt:
+                raise AuditStockHistoryError("Movimiento posterior a su consulta original.")
+        self._persist_response(
+            branch, product, month, rows, fetched_at=evidence["retrieved_at"],
+            history_limit=limit, evidence=evidence, raw_json=raw_json,
+        )
+        return self.reconcile(branch, product, month)
+
+    def _persist_response(self, branch, product, month, rows, *, fetched_at, history_limit,
+                          evidence=None, raw_json=None):
+        receipt = self._aware_receipt(fetched_at)
+        rows = deepcopy(rows)
         parsed_rows = [self._parse_row(row) for row in rows]
         with transaction.atomic():
-            # Serialize writers of the same canonical import before determining
-            # all old/new affected months; monthly readers use the same mutex.
-            if record is not None:
-                record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
-                # Coverage metadata belongs to the entire retained import, not
-                # only the identities returned by this latest limited capture.
-                previous_rows = list(record.rows.all())
-            else:
-                previous_rows = []
+            # Unique canonical identity serializes creation too. A losing creator
+            # rereads the committed import before discovering all affected months.
+            record = self._canonical_import(branch, product)
+            record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
+            if (record.point_branch_id != branch.pk or record.point_product_id != product.pk or
+                    (record.raw_metadata or {}).get("source") != SOURCE_NAME):
+                raise AuditStockHistoryError("Identidad canónica ocupada por otra fuente o claves incompatibles.")
+            metadata = deepcopy(record.raw_metadata or {})
+            legacy_membership = "response_provenance" not in metadata
+            proof = deepcopy(evidence) if evidence is not None else {
+                "source": SOURCE_NAME, "domain": "PRODUCT", "response_complete": True,
+                "retrieved_at": fetched_at, "history_limit": history_limit, "fetched_rows": len(rows),
+                "raw_sha256": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+                "request": {"path": "/Stock/GetHistorial", "params": {
+                    "tipo": "false", "almacen": str(branch.external_id), "pkproducto": str(product.external_id),
+                    "movimientos": str(history_limit), "tipoMovimiento": "",
+                }},
+                "request_provenance": {"kind": "LIVE_HTTP", "client_contract": "PointHttpSessionClient.get_stock_history"},
+            }
+            fingerprint = hashlib.sha256(json.dumps(proof, sort_keys=True, default=str).encode()).hexdigest()
+            proofs = metadata.setdefault("response_provenance", [])
+            if any(item.get("fingerprint") == fingerprint for item in proofs):
+                if evidence is not None:
+                    archive = metadata.get("original_responses", {}).get(fingerprint, {})
+                    try:
+                        archived_json = zlib.decompress(base64.b64decode(archive["raw_zlib_base64"], validate=True))
+                    except (KeyError, TypeError, ValueError, zlib.error) as exc:
+                        raise AuditStockHistoryError("Archivo original canónico ausente o corrupto.") from exc
+                    if (archived_json != raw_json or archive.get("fingerprint") != fingerprint or
+                            archive.get("encoding") != "zlib-base64-json" or
+                            any(archive.get(key) != value for key, value in evidence.items())):
+                        raise AuditStockHistoryError("Procedencia del archivo original canónico no coincide.")
+                return
+            previous_rows = list(record.rows.all())
+            previous_by_id = {row.row_number: row for row in previous_rows}
+            versions = metadata.setdefault("movement_fetched_at", {})
+            try:
+                latest_receipt = self._aware_receipt(metadata.get("fetched_at"))
+            except AuditStockHistoryError:
+                latest_receipt = None
+            legacy_ids = metadata.get("fetched_movement_ids")
+            if (legacy_membership and latest_receipt is not None and isinstance(legacy_ids, list) and
+                    type(metadata.get("fetched_rows")) is int and len(legacy_ids) == metadata["fetched_rows"] and
+                    all(type(value) is int and value > 0 and value in previous_by_id for value in legacy_ids) and
+                    len(set(legacy_ids)) == len(legacy_ids)):
+                # Only the exact last-capture membership has a known legacy age.
+                # Unselected retained rows must never inherit that receipt time.
+                for movement_id in legacy_ids:
+                    versions.setdefault(str(movement_id), metadata["fetched_at"])
+            writes = []
+            for movement_id, defaults in parsed_rows:
+                old = previous_by_id.get(movement_id)
+                same = old is not None and old.raw_payload == defaults["raw_payload"]
+                known = versions.get(str(movement_id))
+                try:
+                    row_receipt = self._aware_receipt(known)
+                except AuditStockHistoryError:
+                    row_receipt = None
+                if old is not None and not same:
+                    if evidence is not None and (row_receipt is None or receipt <= row_receipt):
+                        raise AuditStockHistoryError("Conflicto de movimiento sin procedencia anterior verificable.")
+                    if row_receipt is not None and receipt <= row_receipt:
+                        raise AuditStockHistoryError("La respuesta no puede sobrescribir un movimiento más reciente.")
+                if not same:
+                    writes.append((movement_id, defaults))
+                if (old is None or evidence is None or row_receipt is not None) and (row_receipt is None or receipt > row_receipt):
+                    versions[str(movement_id)] = fetched_at
             local_tz = ZoneInfo(settings.TIME_ZONE)
             months = {month.replace(day=1), timezone.localdate().replace(day=1)}
             for _, values in parsed_rows:
@@ -295,8 +459,7 @@ class AuditStockHistoryService:
             # A historical closing is the next month's documentary opening.
             months.add(cursor)
             lock_product_month_sources(sorted(months))
-            record = record or self._canonical_import(branch, product)
-            for movement_id, defaults in parsed_rows:
+            for movement_id, defaults in writes:
                 PointProductHistoryRow.objects.update_or_create(
                     import_record=record,
                     row_number=movement_id,
@@ -309,25 +472,35 @@ class AuditStockHistoryService:
             record.report_title = "Historial transaccional Point"
             record.product_name = product.name
             record.branch_name = branch.name
-            record.report_date = timezone.localdate()
+            promote = latest_receipt is None or receipt > latest_receipt
+            if promote:
+                record.report_date = timezone.localdate(receipt)
             record.point_branch = branch
             record.point_product = product
             record.row_count = all_rows.count()
             record.latest_movement_at = last.movement_at if last else None
             record.latest_unit_cost = last.unit_cost if last else Decimal("0")
-            record.raw_metadata = {
+            if promote:
+                metadata.update({
                 "source": SOURCE_NAME,
-                "history_limit": HISTORY_LIMIT,
+                "history_limit": history_limit,
                 "fetched_rows": len(rows),
                 "earliest_movement_at": min(
                     (values["movement_at"] for _, values in parsed_rows), default=None,
                 ).isoformat() if parsed_rows else "",
                 "fetched_movement_ids": [movement_id for movement_id, _ in parsed_rows],
                 "latest_movement_at": last.movement_at.isoformat() if last else "",
-                "fetched_at": timezone.now().isoformat(),
-            }
+                "fetched_at": fetched_at,
+                })
+            proof.update({"fingerprint": fingerprint, "ingested_at": timezone.now().isoformat()})
+            proofs.append(proof)
+            if evidence is not None:
+                metadata.setdefault("original_responses", {})[fingerprint] = {
+                    **proof, "encoding": "zlib-base64-json",
+                    "raw_zlib_base64": base64.b64encode(zlib.compress(raw_json)).decode("ascii"),
+                }
+            record.raw_metadata = metadata
             record.save()
-        return self.reconcile(branch, product, month)
 
     @staticmethod
     def _parse_row(row: dict) -> tuple[int, dict[str, object]]:

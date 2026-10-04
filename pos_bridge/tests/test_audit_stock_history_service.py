@@ -1,10 +1,17 @@
+import hashlib
+import json
+import base64
+import zlib
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.test import TestCase
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 
 from pos_bridge.models import (
     PointBranch,
@@ -12,7 +19,7 @@ from pos_bridge.models import (
     PointProductHistoryImport,
     PointProductHistoryRow,
 )
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryError, AuditStockHistoryService
 
 
 def _row(
@@ -54,6 +61,356 @@ class _FakePointClient:
 
 
 class AuditStockHistoryServiceTests(TestCase):
+    def _original_evidence(self, rows, *, limit=300, retrieved="2026-10-04T18:26:15.406476+00:00"):
+        return {
+            "source": "POINT_STOCK_HISTORY_API", "domain": "PRODUCT", "response_complete": True,
+            "branch_id": self.branch.pk, "product_id": self.product.pk,
+            "request": {"path": "/Stock/GetHistorial", "params": {
+                "tipo": "false", "almacen": str(self.branch.external_id),
+                "pkproducto": str(self.product.external_id), "movimientos": str(limit), "tipoMovimiento": "",
+            }},
+            "retrieved_at": retrieved, "history_limit": limit, "fetched_rows": len(rows),
+            "raw_sha256": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+            "original_locator": {"source_file": "/evidence/original.jsonl", "source_line": 1},
+            "request_provenance": {"kind": "DERIVED_FROM_ACQUISITION_SCRIPT", "source_file": "/evidence/read-original.py",
+                "source_code": "# original acquisition reader\n",
+                "source_sha256": hashlib.sha256(b"# original acquisition reader\n").hexdigest(),
+                "client_contract": "PointHttpSessionClient.get_stock_history"},
+        }
+
+    def _original_rows(self):
+        return [
+            _row(990, "ENTRADA POR PRODUCCIÓN", "2026-08-31T22:44:50.28", 2, 0, 2),
+            _row(991, "VENTA", "2026-09-10T18:00:00", 1, 2, 1),
+            _row(992, "VENTA", "2026-10-02T18:00:00", 1, 1, 0),
+        ]
+
+    def test_original_response_preserves_receipt_provenance_and_is_no_http_idempotent(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows, limit=5)
+        service = AuditStockHistoryService()
+        with patch("requests.Session.request", side_effect=AssertionError("HTTP prohibited")):
+            result = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(result.coverage_status, "COMPLETE")
+        self.assertEqual(result.documentary_opening, Decimal("2"))
+        self.assertEqual(result.documentary_closing, Decimal("1"))
+        record = service._existing_import(self.branch, self.product)
+        self.assertEqual(record.raw_metadata["fetched_at"], evidence["retrieved_at"])
+        self.assertEqual(record.raw_metadata["history_limit"], 5)
+        proof = record.raw_metadata["response_provenance"][0]
+        self.assertEqual(proof["raw_sha256"], evidence["raw_sha256"])
+        self.assertEqual(proof["original_locator"], evidence["original_locator"])
+        self.assertNotEqual(proof["ingested_at"], proof["retrieved_at"])
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, rows[0])
+        before_record = PointProductHistoryImport.objects.values().get(pk=record.pk)
+        before_rows = list(record.rows.order_by("pk").values())
+        with patch("requests.Session.request", side_effect=AssertionError("HTTP prohibited")):
+            again = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(again, result)
+        self.assertEqual(PointProductHistoryImport.objects.count(), 1)
+        self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before_record)
+        self.assertEqual(list(record.rows.order_by("pk").values()), before_rows)
+
+    def test_original_response_rejects_invalid_envelope_without_writing(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows)
+        mutations = (
+            {"raw_sha256": "0" * 64}, {"fetched_rows": 100}, {"history_limit": 0},
+            {"history_limit": True}, {"history_limit": 101}, {"response_complete": False}, {"domain": "INSUMO"},
+            {"branch_id": self.branch.pk + 1}, {"product_id": self.product.pk + 1},
+            {"retrieved_at": "2026-10-04T18:26:15"}, {"retrieved_at": "2099-01-01T00:00:00Z"},
+            {"original_locator": {}}, {"source": "OTHER"},
+            {"extra": "cannot change replay fingerprint"},
+            {"original_locator": {**evidence["original_locator"], "extra": 1}},
+            {"request_provenance": {}},
+            {"request_provenance": {**evidence["request_provenance"], "source_sha256": "invalid"}},
+            {"request_provenance": {**evidence["request_provenance"], "source_code": "tampered"}},
+            {"request_provenance": {**evidence["request_provenance"], "kind": "LIVE_HTTP"}},
+            {"request": {"path": "/Stock/GetHistorial", "params": {**evidence["request"]["params"], "fecha": "2026-09-01"}}},
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation):
+                with self.assertRaises(AuditStockHistoryError):
+                    AuditStockHistoryService().ingest_original_response(
+                        self.branch, self.product, date(2026, 9, 1), rows, evidence={**evidence, **mutation})
+                self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+                self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+
+    def test_original_response_rejects_duplicate_or_malformed_rows(self):
+        rows = self._original_rows()
+        malformed = [
+            [rows[0], rows[0]], [{**rows[0], "Fecha": "invalid"}],
+            [{**rows[0], "FK_Movimiento": 0}], [{**rows[0], "Cantidad": None}],
+            [{**rows[0], "Cantidad": "NaN"}], [{**rows[0], "Cantidad": True}],
+            [{**rows[0], "Cancelado": None}], [{**rows[0], "Cancelado": 0}], [{**rows[0], "Cancelado": 1}],
+            [{key: val for key, val in rows[0].items() if key != "Existencia_nueva"}],
+            [{**rows[0], "Fecha": "2026-10-05T00:00:00Z"}],
+        ]
+        for raw in malformed:
+            with self.subTest(raw=raw):
+                with self.assertRaises(AuditStockHistoryError):
+                    AuditStockHistoryService().ingest_original_response(
+                        self.branch, self.product, date(2026, 9, 1), raw, evidence=self._original_evidence(raw))
+                self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+
+    def test_original_partial_pair_cannot_use_original_summary_count_as_full_response(self):
+        pair = self._original_rows()[:2]
+        evidence = self._original_evidence(pair, limit=100)
+        evidence["fetched_rows"] = 100
+        with self.assertRaises(AuditStockHistoryError):
+            AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), pair, evidence=evidence)
+        self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+
+    def test_original_pre_month_receipt_does_not_claim_later_month_coverage(self):
+        rows = self._original_rows()[:2]
+        evidence = self._original_evidence(rows, retrieved="2026-09-11T00:00:00Z")
+        result = AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(result.coverage_status, "INCOMPLETE")
+        self.assertIsNone(result.documentary_opening)
+        record = AuditStockHistoryService()._existing_import(self.branch, self.product)
+        self.assertEqual(record.report_date, date(2026, 9, 10))
+
+    def test_older_original_adds_absent_rows_without_downgrading_latest_metadata(self):
+        service = AuditStockHistoryService()
+        rows = self._original_rows()
+        current = self._original_evidence(rows[1:], limit=5, retrieved="2026-10-04T20:00:00Z")
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows[1:], evidence=current)
+        record = service._existing_import(self.branch, self.product)
+        authority_before = {key: deepcopy(record.raw_metadata[key]) for key in (
+            "fetched_at", "history_limit", "fetched_rows", "earliest_movement_at", "fetched_movement_ids")}
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        record.refresh_from_db()
+        self.assertEqual({key: record.raw_metadata[key] for key in authority_before}, authority_before)
+        self.assertEqual(record.rows.count(), 3)
+        self.assertEqual(len(record.raw_metadata["response_provenance"]), 2)
+
+    def test_older_original_conflict_rolls_back_and_does_not_overwrite_newer_row(self):
+        service = AuditStockHistoryService()
+        rows = self._original_rows()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        record = service._existing_import(self.branch, self.product)
+        before = PointProductHistoryImport.objects.values().get(pk=record.pk)
+        old_rows = list(record.rows.values())
+        conflicting = [{**rows[0], "Cantidad": 99}, _row(993, "VENTA", "2026-09-15T18:00:00Z", 1, 1, 0)]
+        with self.assertRaises(AuditStockHistoryError):
+            service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), conflicting,
+                evidence=self._original_evidence(conflicting, retrieved="2026-10-03T00:00:00Z"))
+        self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before)
+        self.assertEqual(list(record.rows.values()), old_rows)
+
+    def test_original_conflict_without_per_row_freshness_is_fail_closed(self):
+        rows = self._original_rows()
+        record = self._stored_history(rows)
+        changed = [{**rows[0], "Cantidad": 3}]
+        with self.assertRaises(AuditStockHistoryError):
+            AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed, evidence=self._original_evidence(changed))
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, rows[0])
+
+    def test_equal_old_original_cannot_assign_unknown_retained_row_a_false_age(self):
+        rows = self._original_rows()[:1]
+        record = self._stored_history(rows, metadata={"fetched_at": "2026-10-03T18:00:00Z"})
+        service = AuditStockHistoryService()
+        same = self._original_evidence(rows, retrieved="2026-09-02T18:00:00Z")
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=same)
+        changed = [{**rows[0], "Cantidad": 3}]
+        intermediate = self._original_evidence(changed, retrieved="2026-09-03T18:00:00Z")
+        with self.assertRaises(AuditStockHistoryError):
+            service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed, evidence=intermediate)
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, rows[0])
+
+    def test_promoted_same_original_does_not_forge_membership_age_of_unknown_retained_row(self):
+        rows = self._original_rows()[:1]
+        record = self._stored_history(rows)
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        changed = [{**rows[0], "Cantidad": 3}]
+        with self.assertRaises(AuditStockHistoryError):
+            service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed,
+                evidence=self._original_evidence(changed, retrieved="2026-10-04T20:00:00Z"))
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, rows[0])
+
+    def test_first_original_preserves_known_legacy_members_not_selected_by_response(self):
+        rows = self._original_rows()
+        record = self._stored_history(rows, metadata={"fetched_rows": 2, "fetched_movement_ids": [990, 992]})
+        service = AuditStockHistoryService()
+        unrelated = [_row(995, "VENTA", "2026-09-03T18:00:00", 1, 2, 1)]
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), unrelated,
+            evidence=self._original_evidence(unrelated, retrieved="2026-09-04T18:00:00Z"))
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata["movement_fetched_at"]["990"], "2026-10-02T07:00:00+00:00")
+        self.assertNotIn("991", record.raw_metadata["movement_fetched_at"])
+        changed = [{**rows[0], "Cantidad": 3}]
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed, evidence=self._original_evidence(changed))
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, changed[0])
+
+    def test_newer_original_updates_only_rows_with_known_original_freshness(self):
+        service = AuditStockHistoryService()
+        rows = self._original_rows()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        changed = [{**rows[1], "Cancelado": True}]
+        newer = self._original_evidence(changed, retrieved="2026-10-04T20:00:00Z")
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed, evidence=newer)
+        record = service._existing_import(self.branch, self.product)
+        self.assertEqual(record.rows.get(row_number=991).raw_payload, changed[0])
+        self.assertEqual(record.rows.get(row_number=990).raw_payload, rows[0])
+
+    def test_original_ids_are_scoped_to_import_and_not_globally_deduplicated(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        evidence = self._original_evidence(rows)
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        other = PointProduct.objects.create(external_id="118", sku="0118", name="Bollo")
+        evidence = deepcopy(evidence)
+        evidence["product_id"] = other.pk
+        evidence["request"]["params"]["pkproducto"] = other.external_id
+        service.ingest_original_response(self.branch, other, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(PointProductHistoryImport.objects.count(), 2)
+        self.assertEqual(PointProductHistoryRow.objects.count(), 6)
+
+    def test_original_and_capture_lock_canonical_import_before_months_and_row_writes(self):
+        rows = self._original_rows()
+        with CaptureQueriesContext(connection) as queries:
+            AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        sql = [entry["sql"] for entry in queries.captured_queries]
+        import_lock = next(i for i, statement in enumerate(sql) if "FOR UPDATE" in statement and PointProductHistoryImport._meta.db_table in statement)
+        month_lock = next(i for i, statement in enumerate(sql) if "pg_advisory_xact_lock" in statement)
+        row_write = next(i for i, statement in enumerate(sql) if statement.startswith(f'INSERT INTO "{PointProductHistoryRow._meta.db_table}"'))
+        self.assertLess(import_lock, month_lock)
+        self.assertLess(month_lock, row_write)
+
+    def test_original_request_requires_every_exact_native_filter(self):
+        rows = self._original_rows()
+        for key, value in (("tipo", "true"), ("almacen", "99"), ("pkproducto", "999"),
+                           ("movimientos", "500"), ("tipoMovimiento", "3")):
+            with self.subTest(key=key):
+                evidence = self._original_evidence(rows)
+                evidence["request"]["params"][key] = value
+                with self.assertRaises(AuditStockHistoryError):
+                    AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+                self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+        evidence = self._original_evidence(rows, limit=3)
+        with self.assertRaises(AuditStockHistoryError):
+            AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+
+    def test_original_rejects_non_product_object_even_with_matching_keys(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows)
+        impostor = SimpleNamespace(pk=self.product.pk, external_id=self.product.external_id, name=self.product.name)
+        with self.assertRaises(AuditStockHistoryError):
+            AuditStockHistoryService().ingest_original_response(self.branch, impostor, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+
+    def test_original_locks_retained_audit_and_empty_closure_months_before_writes(self):
+        from recetas.models import ProductoMonthClosure
+        from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
+        old = _row(1200, "VENTA", "2026-07-01T01:00:00", 1, 2, 1)
+        self._stored_history([old])
+        ProductoMonthClosure.objects.create(month_start=date(2026, 5, 1), month_end=date(2026, 5, 31))
+        run = ProductInventoryAuditRun.objects.create(month=date(2026, 4, 1))
+        ProductInventoryAuditCase.objects.create(run=run, month=run.month, branch=self.branch, product=self.product, rebuilt_at=timezone.now(),
+            **{field: Decimal("0") for field in ("opening_point", "production", "sales", "waste", "transfer_in", "transfer_out",
+                "conversion_in", "conversion_out", "identified_adjustment", "expected_closing", "point_closing", "difference")})
+        rows = self._original_rows()
+        with CaptureQueriesContext(connection) as queries:
+            AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+        sql = [entry["sql"] for entry in queries.captured_queries]
+        locks = [(i, statement) for i, statement in enumerate(sql) if "pg_advisory_xact_lock" in statement]
+        for month in ("202604", "202605", "202606", "202607", "202608", "202609", "202610", "202611"):
+            self.assertTrue(any(month in statement for _, statement in locks), month)
+        first_write = next(i for i, statement in enumerate(sql) if statement.startswith(f'INSERT INTO "{PointProductHistoryRow._meta.db_table}"'))
+        self.assertTrue(all(i < first_write for i, _ in locks))
+
+    def test_canonical_identity_collision_is_rejected_without_hijacking_import(self):
+        service = AuditStockHistoryService()
+        rows = self._original_rows()
+        record = service._canonical_import(self.branch, self.product)
+        for corruption in ({"raw_metadata": {"source": "OTHER"}}, {"point_product": None}, {"point_branch": None}):
+            with self.subTest(corruption=corruption):
+                PointProductHistoryImport.objects.filter(pk=record.pk).update(**corruption)
+                before = PointProductHistoryImport.objects.values().get(pk=record.pk)
+                with self.assertRaises(AuditStockHistoryError):
+                    service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows))
+                self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before)
+                self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+                PointProductHistoryImport.objects.filter(pk=record.pk).update(raw_metadata={"source": "POINT_STOCK_HISTORY_API"}, point_product=self.product, point_branch=self.branch)
+
+    def test_full_original_archive_survives_later_real_capture_writer_update(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        evidence = self._original_evidence(rows)
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        record = service._existing_import(self.branch, self.product)
+        archive_before = deepcopy(record.raw_metadata["original_responses"])
+        changed = [{**rows[1], "Cancelado": True}]
+        AuditStockHistoryService(client=_FakePointClient(changed)).capture(self.branch, self.product, date(2026, 9, 1), force=True)
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata["original_responses"], archive_before)
+        archived = next(iter(archive_before.values()))
+        raw = zlib.decompress(base64.b64decode(archived["raw_zlib_base64"]))
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), evidence["raw_sha256"])
+        self.assertEqual(json.loads(raw), rows)
+        self.assertTrue(record.rows.get(row_number=991).cancelled)
+
+    def test_original_replay_rejects_tampered_archive_without_writing(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows)
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        record = service._existing_import(self.branch, self.product)
+        next(iter(record.raw_metadata["original_responses"].values()))["raw_zlib_base64"] = "broken"
+        record.save()
+        before = PointProductHistoryImport.objects.values().get(pk=record.pk)
+        with self.assertRaises(AuditStockHistoryError):
+            service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before)
+
+    def test_original_replay_rejects_extra_proof_fields_instead_of_duplicating_archive(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows)
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        record = service._existing_import(self.branch, self.product)
+        before = PointProductHistoryImport.objects.values().get(pk=record.pk)
+        extra = {**evidence, "harmless": "unvalidated label"}
+        with self.assertRaises(AuditStockHistoryError):
+            service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=extra)
+        self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before)
+
+    def test_original_replay_checks_archived_acquisition_code_and_identity(self):
+        rows = self._original_rows()
+        evidence = self._original_evidence(rows)
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        record = service._existing_import(self.branch, self.product)
+        original = deepcopy(record.raw_metadata)
+        for field, value in (("domain", "INSUMO"), ("fetched_rows", 100),
+                ("request_provenance", {**evidence["request_provenance"], "source_code": "corrupt code"})):
+            with self.subTest(field=field):
+                record.raw_metadata = deepcopy(original)
+                next(iter(record.raw_metadata["original_responses"].values()))[field] = value
+                record.save()
+                before = PointProductHistoryImport.objects.values().get(pk=record.pk)
+                with self.assertRaises(AuditStockHistoryError):
+                    service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+                self.assertEqual(PointProductHistoryImport.objects.values().get(pk=record.pk), before)
+
+    def test_capture_provenance_marks_live_http_and_receipt_precedes_persistence(self):
+        rows = self._original_rows()
+        receipt = timezone.datetime(2026, 10, 4, 18, tzinfo=timezone.get_fixed_timezone(0))
+        later = timezone.datetime(2026, 10, 4, 20, tzinfo=timezone.get_fixed_timezone(0))
+        first_receipt = iter([receipt])
+        with patch("pos_bridge.services.audit_stock_history_service.timezone.now", side_effect=lambda: next(first_receipt, later)):
+            AuditStockHistoryService(client=_FakePointClient(rows)).capture(self.branch, self.product, date(2026, 9, 1), force=True)
+        record = AuditStockHistoryService()._existing_import(self.branch, self.product)
+        self.assertEqual(record.raw_metadata["fetched_at"], receipt.isoformat())
+        self.assertEqual(record.raw_metadata["response_provenance"][0]["request_provenance"]["kind"], "LIVE_HTTP")
+
+    def test_saturated_original_after_start_is_incomplete_even_with_zero_difference(self):
+        rows = [_row(1100 + i, "VENTA", f"2026-09-{i + 2:02d}T18:00:00", 1, 5 - i, 4 - i) for i in range(5)]
+        result = AuditStockHistoryService().ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=self._original_evidence(rows, limit=5))
+        self.assertEqual(result.coverage_status, "INCOMPLETE")
+        self.assertIsNone(result.documentary_opening)
+
     def _stored_history(self, rows, *, metadata=None):
         service = AuditStockHistoryService()
         record = service._canonical_import(self.branch, self.product)
