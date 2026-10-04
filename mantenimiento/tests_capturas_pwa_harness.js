@@ -4,7 +4,7 @@ const fs = require("fs");
 const vm = require("vm");
 
 const template = fs.readFileSync("templates/mantenimiento/pwa.html", "utf8");
-const start = template.indexOf("      async function renderServicioPuntual(");
+const start = template.indexOf("      function servicioDraftKey(");
 const source = template.slice(start, template.indexOf("      function bloquearServicioCaptura(", start));
 
 async function check(rendered) {
@@ -40,7 +40,7 @@ async function check(rendered) {
   await pending;
   if (rendered) {
     assert.strictEqual(description.value, "Borrador conservado");
-    assert.strictEqual(bindings, 1);
+    assert.strictEqual(bindings, 2);
     assert.ok(locked);
   } else {
     assert.strictEqual(reads, 0);

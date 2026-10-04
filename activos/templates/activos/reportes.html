@@ -5,7 +5,7 @@
 {% block body_class %}page-activos-reportes{% endblock %}
 
 {% block content %}
-{% include "activos/_captura_contexto.html" %}
+{% include "activos/_captura_contexto.html" with captura_superficie="reportes" %}
 <div class="quick-actions pd-mb-3">
   <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
   <a class="btn btn-primary" href="#nuevo-reporte" onclick="document.getElementById('nuevo-reporte').open = true">Crear trabajo correctivo</a>

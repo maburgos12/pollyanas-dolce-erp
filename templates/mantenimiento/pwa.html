@@ -1173,11 +1173,103 @@
         `);
       }
 
+      function servicioDraftKey() {
+        return state.perfil?.id ? `mantenimiento:servicio-equipo:v1:${state.perfil.id}` : null;
+      }
+
+      function conservarServicioDraft(draft) {
+        const key = servicioDraftKey();
+        if (!key || draft.actor !== String(state.perfil.id)) {
+          draft.aviso = "Este navegador no puede conservar la captura al recargar. Mantén esta pantalla abierta.";
+          return;
+        }
+        const equipo = (draft.intento?.alcance || draft.valores.alcance || "activo") === "activo";
+        try {
+          if (!equipo) { sessionStorage.removeItem(key); return; }
+          const valores = {...draft.valores};
+          const status = draft.resultado ? "confirmado" : draft.intento ? "incierto" : "editable";
+          if (status === "editable") delete valores.clave_captura;
+          sessionStorage.setItem(key, JSON.stringify({version: 1, actor: draft.actor, clave: draft.clave, status,
+            intento: draft.intento, valores, modo: draft.modo, fecha: draft.fecha,
+            resultado: draft.resultado || null}));
+          draft.aviso = "";
+        } catch (_) {
+          draft.aviso = "Este navegador no puede conservar la captura al recargar. Mantén esta pantalla abierta para recuperar el intento.";
+        }
+      }
+
+      function recuperarServicioDraft(modo) {
+        const draft = {actor: String(state.perfil?.id || ""), clave: crypto.randomUUID(), intento: null,
+          pending: false, valores: {}, modo, fecha: "", resultado: null};
+        const key = servicioDraftKey();
+        if (!key) { draft.aviso = "No podemos conservar esta captura al recargar sin confirmar tu usuario."; return draft; }
+        let saved;
+        try { saved = sessionStorage.getItem(key); } catch (_) {
+          draft.bloqueado = true;
+          draft.aviso = "No pudimos consultar la captura conservada. Revisa las órdenes antes de iniciar otra captura."; return draft;
+        }
+        if (!saved) return draft;
+        try {
+          const value = JSON.parse(saved);
+          const topFields = ["version", "actor", "clave", "status", "intento", "valores", "modo", "fecha", "resultado"];
+          if (!value || typeof value !== "object" || Array.isArray(value) || topFields.some(name => !Object.prototype.hasOwnProperty.call(value, name)) || Object.keys(value).some(name => !topFields.includes(name))) throw Error("invalid");
+          const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          const fields = ["modo_servicio", "alcance", "sucursal_id", "activo_id", "unidad_id", "instalacion_categoria", "fecha_objetivo", "proveedor_servicio", "descripcion", "costo_total", "nota_trabajo", "clave_captura"];
+          const datosValidos = datos => datos && typeof datos === "object" && !Array.isArray(datos) &&
+            Object.entries(datos).every(([name, val]) => fields.includes(name) && (val === null || typeof val === "string"));
+          const intentoCompleto = intento => datosValidos(intento) && fields.every(name => Object.prototype.hasOwnProperty.call(intento, name)) &&
+            fields.every(name => ["unidad_id", "instalacion_categoria"].includes(name) ? intento[name] === null : typeof intento[name] === "string") &&
+            intento.alcance === "activo" && intento.clave_captura === value.clave && intento.modo_servicio === value.modo &&
+            fechaCalendarioValida(intento.fecha_objetivo) && intento.fecha_objetivo === value.valores.fecha_objetivo &&
+            intento.modo_servicio === value.valores.modo_servicio && fields.every(name => intento[name] === value.valores[name]);
+          const statusValido = value.status === "editable" ? value.intento === null && value.resultado === null && !Object.prototype.hasOwnProperty.call(value.valores || {}, "clave_captura") :
+            value.status === "incierto" ? value.intento !== null && value.resultado === null : value.status === "confirmado" ? value.intento !== null && value.resultado !== null : false;
+          if (!statusValido || value.version !== 1 || value.actor !== String(state.perfil.id) || !uuid.test(value.clave) ||
+              !datosValidos(value.valores) || typeof value.fecha !== "string" || (value.intento !== null && (typeof value.intento !== "object" || Array.isArray(value.intento))) ||
+              (value.resultado !== null && (typeof value.resultado !== "object" || Array.isArray(value.resultado))) || !["realizado", "pendiente"].includes(value.modo) ||
+              (value.fecha && !fechaCalendarioValida(value.fecha)) ||
+              (value.intento && !intentoCompleto(value.intento)) ||
+              (value.valores.alcance && value.valores.alcance !== "activo") ||
+              (value.resultado && (!value.intento || Object.keys(value.resultado).some(name => !["id", "folio"].includes(name)) || !Number.isSafeInteger(value.resultado.id) || value.resultado.id <= 0 || typeof value.resultado.folio !== "string"))) throw Error("invalid");
+          return {...draft, clave: value.clave, intento: value.intento, valores: value.valores,
+            modo: value.modo, fecha: value.fecha, resultado: value.resultado, pending: false};
+        } catch (_) {
+          draft.bloqueado = true;
+          draft.aviso = "No pudimos leer la captura conservada. Revisa las órdenes antes de iniciar otra captura.";
+          return draft;
+        }
+      }
+
+      async function nuevaCapturaServicio(modo = "realizado") {
+        const key = servicioDraftKey();
+        try { if (key) sessionStorage.removeItem(key); } catch (_) {}
+        state.servicioDraft = {actor: String(state.perfil?.id || ""), clave: crypto.randomUUID(), intento: null,
+          pending: false, valores: {}, modo, fecha: "", resultado: null};
+        conservarServicioDraft(state.servicioDraft);
+        return renderServicioPuntual(modo);
+      }
+
+      async function mostrarServicioConfirmado(draft, vigente) {
+        const resultado = draft.resultado;
+        const id = Number(resultado.id);
+        return render(shell(`
+          <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
+          <h1 class="screen-title">Mantenimiento registrado</h1>
+          <p role="status">${esc(resultado.folio || "Orden registrada")}. Conservamos la confirmación de este intento.</p>
+          ${Number.isSafeInteger(id) && id > 0 ? `<button class="secondary-btn" onclick="openItemDetail('orden:${id}', this)">Abrir orden y evidencias</button>` : ""}
+          <button class="primary-btn" onclick="nuevaCapturaServicio('${draft.modo === "pendiente" ? "pendiente" : "realizado"}')">Registrar otro mantenimiento</button>
+          ${draft.aviso ? `<p role="alert">${esc(draft.aviso)}</p>` : ""}
+        `), "", vigente);
+      }
+
       async function renderServicioPuntual(modo = "realizado", error = "") {
-        const draft = state.servicioDraft || (state.servicioDraft = { clave: crypto.randomUUID(), intento: null, pending: false, valores: {}, modo, fecha: "" });
+        if (state.servicioDraft?.actor && state.servicioDraft.actor !== String(state.perfil?.id || "")) state.servicioDraft = null;
+        const draft = state.servicioDraft || (state.servicioDraft = recuperarServicioDraft(modo));
         state.pantalla = "servicio-puntual";
         const generation = ++state.requestGeneration.capture;
         const vigente = () => state.pantalla === "servicio-puntual" && state.servicioDraft === draft && state.requestGeneration.capture === generation;
+        if (draft.resultado) return mostrarServicioConfirmado(draft, vigente);
+        if (draft.bloqueado) return render(shell(`<p role="alert">${esc(draft.aviso)}</p><button class="secondary-btn" onclick="showScreen('pendientes')">Revisar órdenes</button><button class="primary-btn" onclick="nuevaCapturaServicio()">Registrar otro mantenimiento</button>`), "", vigente);
         // El intento y los valores editados tienen prioridad sobre la fecha inicial.
         const fechaExistente = draft.intento?.fecha_objetivo || draft.valores.fecha_objetivo || draft.fecha;
         if (!fechaExistente) {
@@ -1187,6 +1279,7 @@
             const fecha = await leerFechaCapturaERP();
             if (!vigente()) return;
             draft.fecha = fecha;
+            conservarServicioDraft(draft);
           } catch (dateError) {
             if (vigente()) render(mensajeFechaCaptura(`renderServicioPuntual('${draft.modo}')`, dateError.message), "", vigente);
             return;
@@ -1256,6 +1349,9 @@
               <textarea id="servicio-nota" name="nota_trabajo" placeholder="Resultado, condiciones o seguimiento acordado"></textarea>
             </div>
             ${error ? `<p class="error-msg" role="alert">${esc(error)}</p>` : ""}
+            <p role="status">La recuperación tras recarga aplica a Equipo / activo. Flota e instalaciones conservan su flujo habitual.</p>
+            ${draft.intento ? `<p role="status">Intento sin confirmación. Reintenta Guardar con los mismos datos.</p>` : ""}
+            ${draft.aviso ? `<p role="alert">${esc(draft.aviso)}</p>` : ""}
             <p id="servicio-error" class="error-msg" role="alert" hidden></p>
             <button id="servicio-guardar" class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
           </section>
@@ -1267,10 +1363,14 @@
         });
         actualizarAlcanceServicio(document.getElementById("servicio-alcance")?.value || "activo");
         const section = document.getElementById("servicio-captura");
-        section.addEventListener("input", () => {
-          if (draft.intento) return;
+        const conservarValores = () => {
+          if (draft.intento || !vigente()) return;
           section.querySelectorAll("[name]").forEach(control => draft.valores[control.name] = control.value);
-        });
+          conservarServicioDraft(draft);
+          if (draft.aviso) { const region = document.getElementById("servicio-error"); region.hidden = false; region.textContent = draft.aviso; }
+        };
+        section.addEventListener("input", conservarValores);
+        section.addEventListener("change", conservarValores);
         if (draft.intento) bloquearServicioCaptura(true);
       }
 
@@ -1281,8 +1381,11 @@
 
       async function guardarServicioMovil() {
         const draft = state.servicioDraft;
-        if (draft.pending) return;
-        const alcance = document.getElementById("servicio-alcance")?.value || "activo";
+        if (!draft || draft.pending || draft.resultado || draft.bloqueado) return;
+        if (draft.actor && draft.actor !== String(state.perfil?.id || "")) return;
+        const generation = state.requestGeneration.capture;
+        const vigente = () => state.pantalla === "servicio-puntual" && state.servicioDraft === draft && state.requestGeneration.capture === generation;
+        const alcance = draft.intento?.alcance || document.getElementById("servicio-alcance")?.value || "activo";
         const esFlota = alcance === "unidad";
         const payload = {
           modo_servicio: document.getElementById("servicio-modo")?.value,
@@ -1302,6 +1405,7 @@
         draft.valores = draft.intento || payload;
         if (equipo && !draft.intento) draft.intento = payload;
         draft.pending = true;
+        conservarServicioDraft(draft);
         const button = document.getElementById("servicio-guardar");
         button.disabled = true;
         button.textContent = "Guardando…";
@@ -1315,22 +1419,33 @@
           if (!res.ok) {
             if ([400, 403, 404].includes(res.status)) {
               draft.intento = null;
-              bloquearServicioCaptura(false);
+              if (equipo) conservarServicioDraft(draft);
+              if (vigente()) bloquearServicioCaptura(false);
             }
             throw Object.assign(new Error(data.error || data.detail || "Revisa los datos del servicio."), {statusCode: res.status});
           }
-          state.servicioDraft = null;
+          if (equipo) {
+            draft.resultado = {id: data.id, folio: data.folio};
+            conservarServicioDraft(draft);
+          }
           state.bandeja = [];
           state.resumen = null;
-          showScreen("pendientes");
+          if (vigente()) {
+            if (equipo) await mostrarServicioConfirmado(draft, vigente);
+            else showScreen("pendientes");
+          }
+          if (!equipo && state.servicioDraft === draft) state.servicioDraft = null;
         } catch (error) {
+          if (!vigente()) return;
           const region = document.getElementById("servicio-error");
           region.hidden = false;
-          region.textContent = `${error.statusCode ? error.message : "No recibimos confirmación."} ${[409, 410].includes(error.statusCode) ? "Conservamos la captura para revisar el conflicto." : draft.intento ? "Reintenta Guardar sin cambiar los datos: conservamos el envío original." : "Revisa los datos y vuelve a guardar."}`;
+          region.textContent = `${error.statusCode ? error.message : "No recibimos confirmación."} ${[409, 410].includes(error.statusCode) ? "Conservamos la captura para revisar el conflicto." : draft.intento ? "Reintenta Guardar sin cambiar los datos: conservamos el envío original." : "Revisa los datos y vuelve a guardar."} ${draft.aviso || ""}`;
         } finally {
           draft.pending = false;
-          button.disabled = false;
-          button.textContent = "Guardar servicio";
+          if (vigente() && !draft.resultado) {
+            button.disabled = false;
+            button.textContent = "Guardar servicio";
+          }
         }
       }
 
@@ -2851,7 +2966,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261004-fecha-erp", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261004-recuperacion-p7", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {
