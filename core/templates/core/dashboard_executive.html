@@ -6,6 +6,7 @@
 {% block body_class %}page-dashboard-executive{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
 <link rel="stylesheet" href="/static/css/template_modules/core-templates-core-dashboard-executive.css?v=20260703-hero-mobile-center-v2">
 {% endblock %}
@@ -36,6 +37,8 @@
       </div>
     </div>
   </section>
+
+  {% include "reportes/partials/sales_confidence.html" %}
 
   {% if seguimiento_pendientes %}
   <section class="home-exec-card is-warning">
@@ -346,7 +349,8 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <h2 class="home-exec-title">Top margen</h2>
+          <h2 class="home-exec-title">Top margen estimado</h2>
+          <p class="home-exec-copy">{{ profitability_panel.basis_note }}</p>
         </div>
         <div class="home-exec-panel-actions">
           <span class="home-exec-pill">{{ profitability_panel.lookback_days }} días</span>
