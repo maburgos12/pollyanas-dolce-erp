@@ -57,7 +57,7 @@
         reportOrderDrafts: new Map(),
         detailCache: new Map(),
         detailReturn: {screen: "pendientes", uid: null},
-        requestGeneration: {inbox: 0, history: 0, detail: 0},
+        requestGeneration: {inbox: 0, history: 0, detail: 0, capture: 0},
         historyLoading: false,
         evidenceObjectUrls: new Set(),
         evidenceBlobCache: new Map(),
@@ -105,6 +105,7 @@
 
       function emptyVehiculoDraft() {
         return {
+          fecha: "",
           step: 1,
           unidad: null,
           unidadLabel: "",
@@ -192,22 +193,24 @@
       let pendingRenderTimer = null;
       let pendingRenderResolve = null;
 
-      function render(html, autofocusId = "") {
+      function render(html, autofocusId = "", vigente = null) {
         app.classList.add("is-changing");
         if (pendingRenderTimer !== null) window.clearTimeout(pendingRenderTimer);
         if (pendingRenderResolve) pendingRenderResolve(false);
         return new Promise(resolve => {
           pendingRenderResolve = resolve;
           pendingRenderTimer = window.setTimeout(() => {
-            app.innerHTML = html;
+            // Las capturas pueden dejar de estar vigentes durante la transición.
+            const installed = !vigente || vigente();
+            if (installed) app.innerHTML = html;
             app.classList.remove("is-changing");
-            if (autofocusId) {
+            if (installed && autofocusId) {
               const el = document.getElementById(autofocusId);
               if (el) { el.focus(); el.select && el.select(); }
             }
             pendingRenderTimer = null;
             pendingRenderResolve = null;
-            resolve(true);
+            resolve(installed);
           }, 140);
         });
       }
@@ -268,6 +271,7 @@
           revokeEvidenceUrls();
           state.requestGeneration.detail += 1;
           state.requestGeneration.history += 1;
+          state.requestGeneration.capture += 1;
           state.historyLoading = false;
         }
         state.pantalla = name;
@@ -1143,12 +1147,56 @@
         select.innerHTML = `<option value="">Sin activo ligado</option>${opcionesActivosFalla(sucursalId)}`;
       }
 
+      function fechaCalendarioValida(fecha) {
+        if (typeof fecha !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return false;
+        const [anio, mes, dia] = fecha.split("-").map(Number);
+        const bisiesto = anio % 4 === 0 && (anio % 100 !== 0 || anio % 400 === 0);
+        const dias = [31, bisiesto ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+        return anio >= 1 && mes >= 1 && mes <= 12 && dia >= 1 && dia <= dias[mes - 1];
+      }
+
+      async function leerFechaCapturaERP() {
+        // Esta lectura sólo inicia el borrador; no reemplaza el resumen de Agenda/Inicio.
+        const res = await apiFetch("/resumen/", {cache: "no-store"});
+        if (!res.ok) throw new Error("No pudimos consultar la fecha del ERP.");
+        const data = await res.json();
+        if (!fechaCalendarioValida(data?.fecha)) throw new Error("La fecha del ERP no es válida.");
+        return data.fecha;
+      }
+
+      function mensajeFechaCaptura(reintento, error = "") {
+        return shell(`
+          <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
+          <h1 class="screen-title">${error ? "No pudimos iniciar la captura" : "Consultando fecha del ERP…"}</h1>
+          ${error ? `<p class="error-msg" role="alert">No pudimos confirmar la fecha del ERP. Revisa tu conexión y reintenta.</p>
+          <button class="primary-btn" onclick="${reintento}">Reintentar</button>` : `<p class="muted" role="status">Espera un momento para comenzar.</p>`}
+        `);
+      }
+
       async function renderServicioPuntual(modo = "realizado", error = "") {
+        const draft = state.servicioDraft || (state.servicioDraft = { clave: crypto.randomUUID(), intento: null, pending: false, valores: {}, modo, fecha: "" });
+        state.pantalla = "servicio-puntual";
+        const generation = ++state.requestGeneration.capture;
+        const vigente = () => state.pantalla === "servicio-puntual" && state.servicioDraft === draft && state.requestGeneration.capture === generation;
+        // El intento y los valores editados tienen prioridad sobre la fecha inicial.
+        const fechaExistente = draft.intento?.fecha_objetivo || draft.valores.fecha_objetivo || draft.fecha;
+        if (!fechaExistente) {
+          const installed = await render(mensajeFechaCaptura(`renderServicioPuntual('${draft.modo}')`), "", vigente);
+          if (!installed || !vigente()) return;
+          try {
+            const fecha = await leerFechaCapturaERP();
+            if (!vigente()) return;
+            draft.fecha = fecha;
+          } catch (dateError) {
+            if (vigente()) render(mensajeFechaCaptura(`renderServicioPuntual('${draft.modo}')`, dateError.message), "", vigente);
+            return;
+          }
+        }
         await Promise.all([ensureSucursales(), ensureActivos(), ensureVehiculoCatalogos(), ensureCatalogos(), ensureProveedores()]);
-        const draft = state.servicioDraft || (state.servicioDraft = { clave: crypto.randomUUID(), intento: null, pending: false, valores: {}, modo });
+        if (!vigente()) return;
         const c = state.catalogos || {};
         modo = draft.valores.modo_servicio || draft.modo;
-        const today = new Date().toISOString().slice(0, 10);
+        const today = draft.intento?.fecha_objetivo ?? draft.valores.fecha_objetivo ?? draft.fecha;
         const rendered = await render(shell(`
           <button class="secondary-btn" onclick="showScreen('pendientes')">Volver</button>
           <h1 class="screen-title screen-title-spaced">${modo === "pendiente" ? "Programar servicio" : "Servicio sin orden"}</h1>
@@ -1189,7 +1237,7 @@
             </div>
             <div class="field">
               <label for="servicio-fecha">Fecha</label>
-              <input id="servicio-fecha" name="fecha_objetivo" type="date" value="${today}">
+              <input id="servicio-fecha" name="fecha_objetivo" type="date" value="${esc(today)}">
             </div>
             <div class="field">
               <label for="servicio-proveedor">Proveedor / taller</label>
@@ -1211,9 +1259,9 @@
             <p id="servicio-error" class="error-msg" role="alert" hidden></p>
             <button id="servicio-guardar" class="primary-btn" onclick="guardarServicioMovil()">Guardar servicio</button>
           </section>
-        `));
-        if (!rendered) return;
-        Object.entries(draft.valores).forEach(([name, value]) => {
+        `), "", vigente);
+        if (!rendered || !vigente()) return;
+        Object.entries(draft.intento || draft.valores).forEach(([name, value]) => {
           const control = document.querySelector(`#servicio-captura [name="${name}"]`);
           if (control) control.value = value ?? "";
         });
@@ -2115,9 +2163,24 @@
 
       async function renderVehiculoDraft(error = "") {
         const d = state.vehiculoDraft;
+        const generation = ++state.requestGeneration.capture;
+        const vigente = () => state.pantalla === "vehiculo" && state.vehiculoDraft === d && state.requestGeneration.capture === generation;
+        if (!d.fecha) {
+          const installed = await render(mensajeFechaCaptura("renderVehiculoDraft()"), "", vigente);
+          if (!installed || !vigente()) return;
+          try {
+            const fecha = await leerFechaCapturaERP();
+            if (!vigente()) return;
+            d.fecha = fecha;
+          } catch (dateError) {
+            if (vigente()) render(mensajeFechaCaptura("renderVehiculoDraft()", dateError.message), "", vigente);
+            return;
+          }
+        }
         let body = "";
         if (d.step === 1) {
           await ensureVehiculoCatalogos();
+          if (!vigente()) return;
           const lista = state.unidades.map(unidadCard).join("") || `<div class="empty">No hay unidades registradas.</div>`;
           body = `
             <button class="secondary-btn" onclick="showScreen('dashboard')">Volver</button>
@@ -2131,6 +2194,7 @@
           `;
         } else if (d.step === 2) {
           await ensureProveedores();
+          if (!vigente()) return;
           const tipoServicioSelect = d.modo === "servicio" ? `
             <div class="field">
               <label>Tipo de servicio</label>
@@ -2208,6 +2272,7 @@
             <section class="card report-card">
               <div class="kv"><b>Vehículo</b><span>${esc(d.unidadLabel)}</span></div>
               <div class="kv"><b>Tipo</b><span>${esServicio ? "Servicio preventivo" : "Reparación correctiva"}</span></div>
+              <div class="kv"><b>${esServicio ? "Fecha del servicio" : "Fecha de ingreso"}</b><span>${esc(d.fecha)}</span></div>
               ${esServicio ? `<div class="kv"><b>Servicio</b><span>${esc(d.tipoServicioLabel)}</span></div>` : ""}
               ${!esServicio ? `<div class="kv"><b>Falla</b><span>${esc(d.descripcionFalla)}</span></div>` : ""}
               <div class="kv"><b>Proveedor</b><span>${esc(d.proveedor || "-")}</span></div>
@@ -2222,7 +2287,7 @@
             </div>
           `;
         }
-        render(shell(body));
+        render(shell(body), "", vigente);
       }
 
       function seleccionarUnidad(id) {
@@ -2280,12 +2345,13 @@
 
       async function enviarVehiculo() {
         const d = state.vehiculoDraft;
+        if (!fechaCalendarioValida(d.fecha)) return renderVehiculoDraft("No hay una fecha del ERP válida para guardar.");
         let res;
         if (d.modo === "servicio") {
           const fd = new FormData();
           fd.append("unidad", d.unidad);
           fd.append("tipo_servicio", d.tipoServicio);
-          fd.append("fecha", new Date().toISOString().slice(0, 10));
+          fd.append("fecha", d.fecha);
           if (d.km) fd.append("km_servicio", d.km);
           if (d.proveedor) fd.append("proveedor", d.proveedor);
           if (d.costo) fd.append("costo", d.costo);
@@ -2296,7 +2362,7 @@
         } else {
           const fd = new FormData();
           fd.append("unidad", d.unidad);
-          fd.append("fecha_ingreso", new Date().toISOString().slice(0, 10));
+          fd.append("fecha_ingreso", d.fecha);
           fd.append("descripcion_falla", d.descripcionFalla);
           if (d.descripcionReparacion) fd.append("descripcion_reparacion", d.descripcionReparacion);
           if (d.proveedor) fd.append("proveedor", d.proveedor);
@@ -2785,7 +2851,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-planes-captura", { scope: "/mantenimiento/" }).catch(() => {});
+          navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261004-fecha-erp", { scope: "/mantenimiento/" }).catch(() => {});
         }
 
         try {
