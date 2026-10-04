@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from calendar import monthrange
+import hashlib
+import json
+import re
+import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal
+from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
+from decimal import Decimal, InvalidOperation
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
@@ -99,6 +103,101 @@ ISSUE_CONVERSION_SOURCE_MISSING = "CONVERSION_SOURCE_MISSING"
 OFFICIAL_CATEGORY_REPORT_SOURCE = "POINT_OFFICIAL_MONTHLY_CATEGORY_REPORT"
 OFFICIAL_POINT_DAILY_SOURCE = "/Report/PrintReportes?idreporte=3"
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
+SNAPSHOT_BOUNDARY_WINDOW = timedelta(days=3)
+SNAPSHOT_BOUNDARY_CONTRACT = "POINT_PRODUCT_SNAPSHOT_LAST_MOVEMENT_UTC_V1"
+SNAPSHOT_BOUNDARY_FRONTEND_SHA = "8a0516c8bd2b2d3735ec8f65d92ca5305ebab8fb902fc9b7270bd218bfb829a4"
+
+
+def _snapshot_historical_boundaries(lines, *, cutoff, cache):
+    """Read existing product snapshots with no movement after the UTC frontier.
+
+    Ult_Mov is a timestamp, never a movement identifier. The selected inventory
+    branch is preserved by the snapshot FK and its original successful job log.
+    Contradictory eligible quantities leave the frontier unproven.
+    """
+    cutoff = cutoff.astimezone(datetime_timezone.utc)
+    resolutions = cache.setdefault(("snapshot_boundaries", cutoff), {})
+    keys = {(line.branch_id, line.product_id) for line in lines} - resolutions.keys()
+    if not keys:
+        return resolutions
+    by_branch = {}
+    for branch_id, product_id in keys:
+        by_branch.setdefault(branch_id, set()).add(product_id)
+    pair_filter = Q(pk__in=[])
+    for branch_id, product_ids in by_branch.items():
+        pair_filter |= Q(branch_id=branch_id, product_id__in=product_ids)
+    snapshots = list(PointInventorySnapshot.objects.filter(
+        pair_filter, captured_at__gt=cutoff,
+        captured_at__lte=cutoff + SNAPSHOT_BOUNDARY_WINDOW,
+        sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    provenance = {}
+    for log in PointExtractionLog.objects.filter(
+        sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
+        level=PointExtractionLog.LEVEL_INFO, message__startswith="Sucursal procesada ",
+    ).order_by("id"):
+        context = log.context
+        if isinstance(context, dict) and type(context.get("branch_id")) is int:
+            provenance.setdefault((log.sync_job_id, context["branch_id"]), []).append(log)
+    candidates = {key: [] for key in keys}
+    for snapshot in snapshots:
+        logs = provenance.get((snapshot.sync_job_id, snapshot.branch_id), [])
+        if not logs or any(
+            log.context.get("branch_external_id") != snapshot.branch.external_id
+            or log.message != f"Sucursal procesada {snapshot.branch.external_id}."
+            for log in logs
+        ):
+            continue
+        raw = snapshot.raw_payload
+        if not isinstance(raw, dict):
+            continue
+        row, headers = raw.get("row"), raw.get("headers")
+        if not isinstance(row, list) or len(row) != 10 or not isinstance(headers, list):
+            continue
+        normalized_headers = [" ".join("".join(
+            char for char in unicodedata.normalize("NFKD", str(header))
+            if not unicodedata.combining(char)
+        ).casefold().split()) for header in headers]
+        if (normalized_headers[:3] != ["codigo", "producto", "cantidad"]
+                or "ultimo movimiento" not in normalized_headers
+                or row[0] != snapshot.product.external_id
+                or not (row[9] is False or isinstance(row[9], str) and row[9].casefold() == "false")
+                or not isinstance(row[8], str) or not re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?", row[8])):
+            continue
+        try:
+            raw_stock = Decimal(str(row[4]))
+            stamp = datetime.fromisoformat(row[8])
+            if (not raw_stock.is_finite() or raw_stock != snapshot.stock
+                    or timezone.is_aware(stamp)):
+                continue
+            last_movement = stamp.replace(tzinfo=datetime_timezone.utc)
+            if last_movement >= cutoff or last_movement > snapshot.captured_at:
+                continue
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        proof = {
+            "contract": SNAPSHOT_BOUNDARY_CONTRACT,
+            "snapshot_id": snapshot.pk, "sync_job_id": snapshot.sync_job_id,
+            "branch_id": snapshot.branch_id, "product_id": snapshot.product_id,
+            "branch_external_id": snapshot.branch.external_id,
+            "product_external_id": snapshot.product.external_id,
+            "captured_at": snapshot.captured_at.isoformat(),
+            "last_movement_at": last_movement.isoformat(),
+            "effective_at": cutoff.isoformat(), "stock": str(snapshot.stock),
+            "raw_signature": hashlib.sha256(json.dumps(
+                raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode()).hexdigest(),
+            "branch_provenance_log_ids": tuple(log.pk for log in logs),
+            "branch_provenance": "POINT_INVENTORY_SELECTED_BRANCH_FK",
+            "table": "tablaProductosPA", "field": "Ult_Mov",
+            "frontend_sha256": SNAPSHOT_BOUNDARY_FRONTEND_SHA,
+        }
+        candidates[(snapshot.branch_id, snapshot.product_id)].append((snapshot.stock, proof))
+    for key, qualified in candidates.items():
+        resolutions[key] = qualified[0] if qualified and len({stock for stock, _ in qualified}) == 1 else None
+    return resolutions
 
 
 def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
@@ -193,7 +292,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     zero_keys = {(line.branch_id, line.product_id) for line in lines
                  if Decimal(line.stock) == ZERO and (line.evidence or {}).get("method") == "no_history_current_zero"}
     zero_verified = set()
-    canonical_keys = set()
+    canonical_keys = {key for key, history in monthly.items() if history is not None}
     if zero_keys:
         records = PointProductHistoryImport.objects.filter(
             point_branch_id__in={key[0] for key in zero_keys},
@@ -234,6 +333,10 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         and line.created_at is not None and timezone.is_aware(line.created_at)
         and line.created_at >= cutoff
     }
+    snapshot_boundaries = _snapshot_historical_boundaries(
+        [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys],
+        cutoff=cutoff, cache=cache,
+    ) if original_manifest_valid else {}
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)
@@ -241,6 +344,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         quantity = None
         movement_ids = tuple(history.documentary_boundary_movement_ids) if history else ()
         captured_evidence = {}
+        snapshot_evidence = {}
         if history and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids:
             quantity = getattr(history, f"documentary_{boundary}", None)
             if quantity is None and (resolved := captured_boundaries.get(key, {}).get(boundary)):
@@ -251,18 +355,23 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
                 quantity = ZERO
         if quantity is None and key in original_zero_keys:
             quantity = ZERO
+        if quantity is None and key not in canonical_keys and snapshot_boundaries.get(key):
+            quantity, snapshot_evidence = snapshot_boundaries[key]
         evidence[line.id] = {
             "line_id": line.id, "original_stock": str(line.stock),
             "original_evidence": dict(line.evidence or {}),
             "effective_stock": str(quantity) if quantity is not None else None,
             "movement_ids": movement_ids,
             "captured_boundary_evidence": captured_evidence,
+            "snapshot_boundary_evidence": dict(snapshot_evidence),
+            "snapshot_boundary_verified": bool(snapshot_evidence),
+            "physical_count_verified": False,
             "coverage_status": history.coverage_status if history else "MISSING",
             "canonical_history_verified": bool(quantity is not None and key not in original_zero_keys
                                                and history and history.coverage_status == "COMPLETE"
                                                and not history.unknown_movement_ids),
             "original_boundary_verified": key in original_zero_keys,
-            "contract": "POINT_STOCK_RAW_UTC",
+            "contract": SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else "POINT_STOCK_RAW_UTC",
         }
         if quantity is None:
             unproven.append(line)

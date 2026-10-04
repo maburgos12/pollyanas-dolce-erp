@@ -18,9 +18,36 @@ cierre físico ni elimina diferencia comercial. Las notas históricas de bloqueo
 78023/266filas y entrega1456 pendiente describen su fecha, NO el estado de este corte.
 
 Contrato actual Stock naiveUTC confirmado por frontend, detallado en procedimiento.
-La reparación lectora UTC está autorizada/en preparación; este checkpoint NO afirma
-CI/deploy/aceptación de esa reparación. Cierre mensual aún requiere servicio oficial
-y guards reales. Conteos físicos y aprobaciones humanas no fueron fabricados.
+PR1457 StockUTC publicado: CI37175301193 PASS/head e9785af7, merge4900b18d,
+deploy oficial/check0/migrate0/readiness301 y aceptación autenticada. Revisiones
+4963/4964 HTTP0/ops0/avisos0/context13archivos/consola vacía; originales intactos,
+tarea/entorno5471 cerrados con respaldo verificado. No repetir entrega.
+Cierre mensual aún requiere servicio oficial y guards reales; no es un conteo.
+
+## Autorización y siguiente contrato snapshot, 4oct2026
+
+Mauricio autorizó integrar snapshots originales para553pares ambos extremos y
+resolver17aperturas/23cierres restantes con fuentes existentes luego Point
+acotado que cruce el corte, sin descargar septiembre completo. La autorización
+sustituye permiso pendiente anterior; NO vuelve a preguntarse. Implementación
+tarea `auditor-snapshots-corte` base4900b18d en preparación: esta nota no acredita
+su publicación. Ver procedimiento/ficha fuentes para guards e identidad exacta.
+
+Frontend Ult_Mov UTC confirmado por `/Stock/tab_almacen` SHA8a0516c8bd2b2d3735ec8f65d92ca5305ebab8fb902fc9b7270bd218bfb829a4.
+576pares sin canónica:559aperturas553cierres,553intersección. Snapshot28797567
+job77519 SUCCESS branch4/external5 product106/external116 stock1 postcorte y
+log sucursal original exacto son evidencia reutilizable, no dato para otros pares.
+690snapshots extra23CEDIS no resolvieron17/23; últimos movimientos posteriores.
+Producción y backups SQLOct2/Oct4 no tienen importación exacta branchPK3/productos23;
+Closing6/7 sólo46resúmenes sin secuencia íntegra. No repetir estas búsquedas.
+GetHistorial cliente sólo últimosN: iniciar10/20 para cierre y parar al cruzar corte;
+no500 automático para apertura ni parámetrosfecha inventados. ConsultaPoint principal
+únicamente, subagentesHTTP0. Evidencia humana/física permanece separada.
+
+3811 import655 ya COMPLETE313rows/unknown0/rem0, ecuación2+31-27-1=5;
+segunda ejecuciónHTTP0/filas0/imports0/duplicados0. No recapturar.
+Antes snapshots, preview mensual lock_readyFalse/95catalogissues y fuentes de
+frontera sin prueba; cifras no representan pérdida ni totales inventariables.
 
 ## Lote rawUTC de fuentes existentes, sin materialización
 

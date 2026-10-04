@@ -38,7 +38,7 @@ def _source_signature(month):
         revision = cache.get(f"inventory-audit:dirty:{month}")
     except Exception:
         revision = None  # Cache is optional; a missing revision never proves freshness.
-    evidence = ["auditor-evidence-v2-stock-raw-utc", revision]
+    evidence = ["auditor-evidence-v3-snapshot-boundary-utc", revision]
     # Aggregate bounded source records, including deletes and quantity changes.
     for app, name, field, quantity in (
         ("pos_bridge", "PointProductionLine", "production_date", "produced_quantity"),
@@ -82,13 +82,25 @@ def _source_signature(month):
     ):
         evidence.append(list(apps.get_model(app, name).objects.order_by("id").values_list(*fields)))
     snapshot_scope = Q()
-    window = max(0, int(getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", 3))) + 1
+    # The documentary fallback has a fixed three-day post-cut window. The extra
+    # day retains its inclusive upper edge even if a presentation tolerance is0.
+    window = max(3, int(getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", 3))) + 1
     for boundary in (month, end):
         lower = datetime.combine(boundary - timedelta(days=window), time.min, POINT_BUSINESS_TIMEZONE)
         upper = datetime.combine(boundary + timedelta(days=window), time.min, POINT_BUSINESS_TIMEZONE)
         snapshot_scope |= Q(captured_at__gte=lower, captured_at__lt=upper)
     snapshots = apps.get_model("pos_bridge", "PointInventorySnapshot")
-    evidence.append(list(snapshots.objects.filter(snapshot_scope).order_by("id").values_list("id", "branch_id", "product_id", "stock", "sync_job_id")))
+    scoped_snapshots = snapshots.objects.filter(snapshot_scope)
+    evidence.append(list(scoped_snapshots.order_by("id").values_list(
+        "id", "branch_id", "product_id", "stock", "sync_job_id", "captured_at",
+        "raw_payload", "product__external_id", "sync_job__status", "sync_job__job_type")))
+    # Snapshot boundary proof depends on the original branch extraction log.
+    # Bulk hash its provenance too: raw/queryset edits must not remain fresh just
+    # because they bypass save signals or do not change a job's updated_at.
+    logs = apps.get_model("pos_bridge", "PointExtractionLog")
+    evidence.append(list(logs.objects.filter(
+        sync_job_id__in=scoped_snapshots.values("sync_job_id")
+    ).order_by("id").values_list("id", "sync_job_id", "message", "level", "context")))
     closings = apps.get_model("pos_bridge", "PointHistoricalInventoryClosingLine")
     evidence.append(list(closings.objects.filter(closing__operational_date__in=[month - timedelta(days=1), end - timedelta(days=1)]).order_by("id").values_list("id", "branch_id", "product_id", "stock")))
     return hashlib.sha256(json.dumps(evidence, default=str, sort_keys=True).encode()).hexdigest()

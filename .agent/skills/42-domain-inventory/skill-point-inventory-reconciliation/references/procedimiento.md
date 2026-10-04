@@ -92,6 +92,40 @@ historia/frontera si no están guardadas.
 
 Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con diferencia real, apertura y cierre comprobados, sin movimientos desconocidos y remanente histórico cero. Revisar venta comercial frente a stock antes de seleccionar. Un fetched_at anterior al fin de mes puede explicar cobertura INCOMPLETE aunque toda la suma cuadre.
 
+### Frontera documental con snapshot original, autorización4oct2026
+
+Usar el mismo lector `documentary_historical_boundary`, no otra captura/tabla.
+Si existe canónica API `POINT_STOCK_HISTORY_API` del par, completa o incompleta,
+NO ocultarla con un snapshot. XLS de costeo no se convierten en historia canónica.
+Cuando no existe, consultar bulk snapshots producto desde corte hasta corte+3d.
+Exigir FK branch/product y externalID exactos, row0 producto, row4 stock coherente
+con persistido, row9 dominio producto explícito, job inventory SUCCESS y log
+original de sucursal con branch_id/branch_external_id correctos. No identificar
+por nombre/SKU ni utilizar snapshot insumo como producto.
+
+Frontend `/Stock/tab_almacen` SHA256
+`8a0516c8bd2b2d3735ec8f65d92ca5305ebab8fb902fc9b7270bd218bfb829a4`
+convierte ÚltimoMovimiento/UIt_Mov con `moment.utc(data,"YYYY-MM-DD HH:mm:ss")`.
+Row8 exige formato original timestamp completo naiveUTC; otro formato no se
+normaliza por aproximación y queda sin prueba bajo este contrato. Captura debe
+ser postcorte y lastMove estrictamente anterior al corte, no posterior a captura.
+Fecha vacía/incompleta, dominio/identidad ausente, FAILED, recuento contradictorio
+o stocks diferentes entre candidatos válidos dejan frontera sin prueba.
+
+Conservar evidencia PK snapshot/job/par/stock/captura/lastMove/contrato/huella.
+`snapshot_boundary_verified=True` no implica `canonical_history_verified`:
+mantener cobertura MISSING y físico no acreditado. No reescribir cierre original.
+Firma de refresh incluye raw/captura/status/tipo/log; verificar cambios sin signals,
+consulta bulk y segunda lectura de cache sin HTTP. Registrar entrega real después
+de CI/deploy/aceptación autenticada, no por actualizar este procedimiento.
+
+Si falta frontera, documentar par/fecha exactos antes de Point. Usar historia
+acotada que cruza el corte; no una fila cercana, stock actual ni resumen legado.
+El cliente GetHistorial sólo tiene últimosN, no fecha/paginación acreditadas: no
+inventar parámetros ni subir automáticamente a500/descargar el mes completo.
+Agotar fuentes existentes y probar contrato literal de filtro antes de ampliación.
+Subagentes investigan fuentes guardadas; solo principal abre una sesión protegida.
+
 Si cobertura ya COMPLETE, no HTTP Point. Si falta exclusivamente cobertura posterior al cierre y el caso cumple las condiciones, documentar ese faltante y capturar únicamente el historial necesario: lote de hasta diez, una sola sesión protegida por `point_account_session_lock`, adquisición sin interferir con sesiones ajenas. Si ocupado, consultar titular en pg_locks/pg_stat_activity read-only cuando haga falta; no liberar candado ni reiniciar servicios. Cerrar sesión en finally.
 
 Usar `AuditStockHistoryService.capture` **sin force**, sobre la importación canónica existente. Verificar que no crea otra importación y deduplica por FK_Movimiento. Inspeccionar firmas/callers actuales antes de preparar un comando; no proporcionar un importador genérico que eluda estos controles.
