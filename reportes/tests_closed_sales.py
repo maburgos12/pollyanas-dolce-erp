@@ -292,6 +292,75 @@ class ClosedSalesTests(TestCase):
         self.assertEqual(panel['rows'][-1]['prev_amount'], Decimal('100'))
         self.assertFalse(panel['coverage_note'])
 
+    def october_sales_with_new_branch(self):
+        from reportes.models import FactVentaDiaria
+        branch = Sucursal.objects.create(
+            codigo='SINALOA_LEYVA', nombre='Sucursal Sinaloa de Leyva',
+            activa=True, fecha_apertura=date(2026, 10, 3),
+        )
+        new_point = PointBranch.objects.create(
+            external_id='14', name=branch.nombre, erp_branch=branch,
+            status=PointBranch.STATUS_ACTIVE,
+        )
+        for year, amount in [(2025, 100), (2026, 90)]:
+            for day in (1, 2, 3):
+                for point_branch in self.branches:
+                    FactVentaDiaria.objects.create(
+                        fecha=date(year, 10, day), sucursal=point_branch.erp_branch,
+                        producto_clave='OPENING', cantidad=1, venta_total=amount,
+                        source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+                    )
+        FactVentaDiaria.objects.create(
+            fecha=date(2026, 10, 3), sucursal=branch,
+            producto_clave='OPENING', cantidad=1, venta_total=20,
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
+        )
+        return new_point
+
+    def test_month_comparison_counts_new_branch_only_from_its_opening_day(self):
+        from reportes.executive_panels import build_closed_yoy_panel
+        new_point = self.october_sales_with_new_branch()
+        self.close_day(date(2026, 10, 1))
+        self.close_day(date(2026, 10, 2))
+        self.close_day(date(2026, 10, 3), self.branches + [new_point])
+        from reportes.closed_sales import latest_closed_sales_date
+        cutoff = latest_closed_sales_date(today=date(2026, 10, 4))
+        self.assertEqual(cutoff, date(2026, 10, 3))
+        panel = build_closed_yoy_panel(cutoff=cutoff, months=1)
+        row = panel['hero_row']
+        self.assertEqual(row['amount'], Decimal('560'))
+        self.assertEqual(row['prev_amount'], Decimal('600'))
+        self.assertEqual(row['quantity'], Decimal('7'))
+        self.assertEqual(row['prev_quantity'], Decimal('6'))
+        self.assertEqual(row['amount_delta'], Decimal('-40'))
+        self.assertEqual(row['period_end'], date(2026, 10, 3))
+        self.assertEqual(row['prev_period_end'], date(2025, 10, 3))
+        self.assertEqual(panel['rows'][-1], row)
+        self.assertFalse(panel['coverage_note'])
+
+    def test_missing_sale_on_opening_day_still_blocks_month_comparison(self):
+        from reportes.closed_sales import closed_month_comparison
+        from reportes.models import FactVentaDiaria
+        new_point = self.october_sales_with_new_branch()
+        FactVentaDiaria.objects.filter(sucursal=new_point.erp_branch).delete()
+        row = closed_month_comparison(
+            cutoff=date(2026, 10, 3),
+            previous_totals={'amount': Decimal('600'), 'quantity': Decimal('6')},
+        )
+        self.assertIsNone(row['amount'])
+        self.assertIsNone(row['amount_delta_pct'])
+        self.assertIn('Sinaloa de Leyva (2026-10-03)', row['coverage_note'])
+        self.assertNotIn('2026-10-01', row['coverage_note'])
+        self.assertNotIn('2026-10-02', row['coverage_note'])
+
+    def test_daily_history_fallback_respects_branch_opening_date(self):
+        from reportes.closed_sales import closed_month_comparison
+        self.october_sales_with_new_branch()
+        row = closed_month_comparison(cutoff=date(2026, 10, 3))
+        self.assertEqual(row['amount'], Decimal('560'))
+        self.assertEqual(row['prev_amount'], Decimal('600'))
+        self.assertFalse(row['coverage_note'])
+
 
     def test_unavailable_network_history_is_not_reported_as_zero(self):
         from reportes.closed_sales import closed_month_comparison
