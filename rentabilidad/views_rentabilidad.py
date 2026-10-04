@@ -439,7 +439,10 @@ def dashboard_rentabilidad(request):
     fuente_estado["discrepancias"] = conciliacion["discrepancies"]
 
     sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
-    totales["margen_disponible"] = bool(fuente_estado["cuadra"] and sales_confidence["margin"] is not None)
+    totales["margen_disponible"] = bool(
+        fuente_estado["cuadra"] and sales_confidence["margin"] is not None
+        and all(item["obj"].costo_variable_total > 0 or item["obj"].ventas_netas <= 0 for item in sucursales_data)
+    )
     if not totales["margen_disponible"]:
         totales["pct_margen_bruto"] = None
         totales["pct_utilidad"] = None

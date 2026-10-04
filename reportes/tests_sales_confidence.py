@@ -109,6 +109,25 @@ class RentabilidadSummaryConfidenceTests(TestCase):
         self.assertEqual(response.context['diagnostico']['ranking_margen'], [])
         self.assertContains(response, 'N/D')
 
+
+    def test_sales_cost_evidence_does_not_certify_a_snapshot_with_zero_variable_cost(self):
+        from django.contrib.auth.models import User
+        from django.urls import reverse
+        from pos_bridge.models import PointBranch, PointDailySale, PointProduct
+        from rentabilidad.models_rentabilidad import SucursalRentabilidad
+        user = User.objects.create_superuser('confidence_zero', '', 'local-test')
+        branch = Sucursal.objects.create(codigo='CONF-ZERO', nombre='Cálculo sin costo')
+        point_branch = PointBranch.objects.create(external_id='CONF-ZERO', name=branch.nombre, erp_branch=branch)
+        product = PointProduct.objects.create(external_id='CONF-ZERO', name='Producto costeado')
+        PointDailySale.objects.create(branch=point_branch, product=product, sale_date=date(2026,9,10), quantity=1, gross_amount=100, total_amount=100, net_amount=100)
+        FactVentaDiaria.objects.create(fecha=date(2026,9,10), sucursal=branch, producto_clave='ZERO', source_kind='AUTHORITATIVE', cantidad=1, venta_neta=100, costo_estimado=40, metadata={'costing':{'source':'producto_costo_operativo_mensual','period':'2026-09-01','unit_cost':'40'}})
+        SucursalRentabilidad.objects.create(sucursal=branch, periodo=date(2026,9,1), ventas_brutas=Decimal('100'))
+        self.client.force_login(user)
+        response = self.client.get(reverse('rentabilidad_dashboard'), {'periodo':'2026-09'})
+        self.assertTrue(response.context['fuente_estado']['cuadra'])
+        self.assertIsNone(response.context['totales']['pct_margen_bruto'])
+
+
 class CostEvidenceTests(TestCase):
     def test_partial_recipe_cost_is_unavailable_even_with_a_positive_amount(self):
         from recetas.models import Receta
