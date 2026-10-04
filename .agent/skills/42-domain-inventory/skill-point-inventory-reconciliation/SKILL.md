@@ -43,6 +43,13 @@ Leer [procedimiento](references/procedimiento.md) y
 archivos y [hallazgos fechados](references/hallazgos.json), además de este archivo,
 antes de observar. Falta o formato inválido impide crear una ejecución.
 
+El lector compartido puede acreditar una frontera con snapshot original Point
+únicamente bajo el contrato del procedimiento: identidad exacta, procedencia
+documental, captura posterior y ÚltimoMovimiento UTC anterior al corte. Esto no
+certifica historia COMPLETE ni conteo físico, ni da nuevas capacidades al goal.
+La autorización humana4oct para este contrato está registrada en el checkpoint;
+no repetir su solicitud ni presumir publicada una implementación todavía pendiente.
+
 Los hallazgos fechados son evidencia histórica, no actualización de fuentes canónicas.
 Se seleccionan por período y claves externas de producto/sucursal, nunca solo por
 nombre, SKU ambiguo o PK del expediente. No reemplazan FK documental ni prueban conteo

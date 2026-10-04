@@ -3,7 +3,7 @@ from importlib import import_module, util
 from unittest.mock import patch
 
 from django.core.cache import cache
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.db import transaction
 
 from recetas.models import ProductoMonthClosure
@@ -104,6 +104,59 @@ class InventoryAuditRefreshTests(TestCase):
 class InventoryAuditRefreshMaterializationTests(TraceabilityTestFixtures, TestCase):
     def setUp(self):
         cache.clear()
+
+    def test_signature_tracks_snapshot_document_and_capture_without_save_signals(self):
+        from datetime import datetime, timedelta, timezone
+        from pos_bridge.models import PointInventorySnapshot, PointSyncJob
+        from reportes.services_inventory_audit_refresh import _source_signature
+        job = PointSyncJob.objects.create(job_type="inventory", status="SUCCESS")
+        snapshot = PointInventorySnapshot.objects.create(
+            branch=self.branch, product=self.product, stock=1, sync_job=job,
+            captured_at=datetime(2026, 10, 1, 9, tzinfo=timezone.utc),
+            raw_payload={"row": ["116", "0116", "Bollo", "Bollo", "1", "PZA",
+                                 "10", "10", "2026-10-01T02:18:44", "false"]})
+        before = _source_signature(date(2026, 9, 1))
+        payload = dict(snapshot.raw_payload)
+        payload["row"] = list(payload["row"])
+        payload["row"][8] = "2026-10-01T08:18:44"
+        PointInventorySnapshot.objects.filter(pk=snapshot.pk).update(raw_payload=payload)
+        changed_document = _source_signature(date(2026, 9, 1))
+        self.assertNotEqual(before, changed_document)
+        PointInventorySnapshot.objects.filter(pk=snapshot.pk).update(
+            captured_at=snapshot.captured_at + timedelta(minutes=1))
+        changed_capture = _source_signature(date(2026, 9, 1))
+        self.assertNotEqual(changed_document, changed_capture)
+        type(self.product).objects.filter(pk=self.product.pk).update(external_id="other-exact")
+        self.assertNotEqual(changed_capture, _source_signature(date(2026, 9, 1)))
+
+    def test_signature_tracks_snapshot_job_and_branch_provenance_without_save_signals(self):
+        from datetime import datetime, timezone
+        from pos_bridge.models import PointInventorySnapshot, PointExtractionLog, PointSyncJob
+        from reportes.services_inventory_audit_refresh import _source_signature
+        job = PointSyncJob.objects.create(job_type="inventory", status="SUCCESS")
+        PointInventorySnapshot.objects.create(branch=self.branch, product=self.product,
+            stock=1, sync_job=job, captured_at=datetime(2026, 10, 1, 9, tzinfo=timezone.utc))
+        log = PointExtractionLog.objects.create(sync_job=job, message="Sucursal procesada 5.",
+            context={"branch_id": self.branch.pk, "branch_external_id": self.branch.external_id})
+        before = _source_signature(date(2026, 9, 1))
+        PointSyncJob.objects.filter(pk=job.pk).update(status="FAILED")
+        changed_job = _source_signature(date(2026, 9, 1))
+        self.assertNotEqual(before, changed_job)
+        PointExtractionLog.objects.filter(pk=log.pk).update(context={"branch_id": -1})
+        self.assertNotEqual(changed_job, _source_signature(date(2026, 9, 1)))
+
+    @override_settings(PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS=0)
+    def test_signature_always_covers_documentary_snapshot_three_day_window(self):
+        from datetime import datetime, timezone
+        from pos_bridge.models import PointInventorySnapshot, PointSyncJob
+        from reportes.services_inventory_audit_refresh import _source_signature
+        job = PointSyncJob.objects.create(job_type="inventory", status="SUCCESS")
+        snapshot = PointInventorySnapshot.objects.create(branch=self.branch, product=self.product,
+            stock=1, sync_job=job, captured_at=datetime(2026, 10, 3, 9, tzinfo=timezone.utc),
+            raw_payload={"row": ["original"]})
+        before = _source_signature(date(2026, 9, 1))
+        PointInventorySnapshot.objects.filter(pk=snapshot.pk).update(raw_payload={"row": ["changed"]})
+        self.assertNotEqual(before, _source_signature(date(2026, 9, 1)))
 
     def _legacy_october_history(self):
         from datetime import datetime, timezone
