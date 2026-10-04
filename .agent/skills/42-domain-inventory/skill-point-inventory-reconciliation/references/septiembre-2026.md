@@ -24,6 +24,27 @@ y guards reales. Conteos físicos y aprobaciones humanas no fueron fabricados.
 
 ## Lote rawUTC de fuentes existentes, sin materialización
 
+Chequeo4oct: apertura heredaba ledger de agosto8 LOCKED, construido con cierre6
+Stock y sin pruebaUTC. La lectura debe revalidar el límite exacto sin alterar ese
+ledger cerrado; la mera palabra LOCKED no demuestra el contrato de fechas nuevo.
+
+Investigación de aperturas4oct: 32/50 combinaciones tienen fuentes existentes
+acreditables bajo contrato conservador; faltan primeros previos de DotChocolate
+Point1048/DotVainilla1047 en otras9 sucursales (18 combinaciones). Bamoa tiene
+imports827/828 completos y primer1662931 desde0, sin cero universal por alta.
+PanMuerto Point855 conserva1 Colosio PK4/Point5 y4 Matriz PK10/Point1; no confundir
+PK4 con Point4 ni extender a ElTúnel. Los límites1058042 PanFresa y1452495 Rosca
+pertenecen Matriz PK10/Point1, no CEDIS. Esto documenta fuentes, no escribe aperturas.
+
+Conversión Snickers4oct: GetHeader/GetDetalle1679701 y1679702 consultados una sesión
+protegida: detalles acreditan Rebanada10 y Mediano1, cabecera sólofecha/responsable,
+sinfolio/FKorigen-destino. No repetir ni unir por mismahora/SHAcabecera/IDsadyacentes.
+Frontend actual `/Stock/tab_art` SHA
+bd628265f387c6dea4ea73d3e0510cf970a20ecb2b4fcf5f8fba99a69c747e55
+captura origen `{PK_Producto,Cantidad,isInsumo:false}` y destinos; POST`/Stock/convertir`
+retorna `True` en interfaz sinfolio de ejecución visible. No ejecutarlo para probar
+un hecho histórico ni inventar un endpoint de listado: falta relación documental.
+
 Dos lecturas READ ONLY4oct con fuentes guardadas/HTTP prohibido dieron ventas netas
 rawUTC iguales a comerciales en2251=30,2451=36,3232=134,3371=169,3372=44,3432=31.
 Sus aperturas/cierres raw difieren de algunos extremos legacy:2251 4→1 con ajuste−1;

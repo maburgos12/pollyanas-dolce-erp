@@ -717,7 +717,14 @@ class MonthlyPointProductBalanceService:
             metadata = previous.metadata or {}
             closing = metadata.get("closing_inventory_meta") or {}
             contract = (metadata.get("balance") or {}).get("contract")
-            if contract == "POINT_PRODUCT_BALANCE_V1" and str(closing.get("effective_date")) == snapshot_date.isoformat():
+            legacy_stock_boundary = (
+                closing.get("historical_closing_source") == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY
+                and closing.get("historical_boundary_contract") != "POINT_STOCK_RAW_UTC"
+            )
+            # A locked ledger can predate the raw-UTC Stock contract. Re-read
+            # the exact historical source; never rewrite that original ledger.
+            if (not legacy_stock_boundary and contract == "POINT_PRODUCT_BALANCE_V1"
+                    and str(closing.get("effective_date")) == snapshot_date.isoformat()):
                 values = {}
                 # Closure lines are parent-equivalent projections, even in V1.
                 # Only the original recipe ledger can feed the exact-product report.
@@ -743,6 +750,9 @@ class MonthlyPointProductBalanceService:
                         "snapshot_rows": sum(count for _, count in values.values()),
                         "matched_recipe_count": len(values),
                     })
+                    for key in ("historical_closing_source", "historical_closing_id", "historical_boundary_contract"):
+                        if key in closing:
+                            meta[key] = closing[key]
                     # Compacted metadata can contain a hash/sample instead of
                     # full coverage arrays. Never compare those as actual keys.
                     coverage = (metadata.get("balance") or {}).get("closing_coverage") or closing
@@ -878,6 +888,8 @@ class MonthlyPointProductBalanceService:
             "unresolved_rows": len(unresolved),
             "historical_boundary_evidence": tuple(boundary_evidence.values()),
         })
+        if authoritative and closing.source == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
+            meta["historical_boundary_contract"] = "POINT_STOCK_RAW_UTC"
         return values, meta, unresolved
 
     def _load_snapshot(self, *, snapshot_date: date, source: str):

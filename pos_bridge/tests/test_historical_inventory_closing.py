@@ -19,7 +19,7 @@ from pos_bridge.models import (
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
-from recetas.models import Receta
+from recetas.models import ProductoMonthClosure, Receta
 
 
 class HistoricalInventoryClosingTests(TestCase):
@@ -144,6 +144,69 @@ class HistoricalInventoryClosingTests(TestCase):
         self.assertEqual(list(closing.lines.values_list("stock", flat=True)), [Decimal("5")])
         self.assertEqual(opening.lines.get().evidence["original"], "preserve")
 
+    def previous_ledger(self, *, source, marker=None):
+        closing_meta = {
+            "effective_date": "2026-08-31", "authoritative": True,
+            "historical_closing_source": source, "historical_closing_id": 6,
+        }
+        if marker is not None:
+            closing_meta["historical_boundary_contract"] = marker
+        return ProductoMonthClosure.objects.create(
+            month_start=date(2026, 8, 1), month_end=date(2026, 8, 31),
+            status=ProductoMonthClosure.STATUS_LOCKED, is_locked=True,
+            metadata={"closing_inventory_meta": closing_meta, "balance": {
+                "contract": "POINT_PRODUCT_BALANCE_V1", "closing_by_recipe": {
+                    str(self.recipe.pk): {"quantity": "999", "snapshot_rows": 1},
+                },
+            }},
+        )
+
+    def test_opening_does_not_carry_legacy_locked_stock_ledger_without_utc_proof(self):
+        opening, _ = self.stock_boundaries()
+        previous = self.previous_ledger(source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY)
+        original_metadata = previous.metadata
+        values, meta, missing = MonthlyPointProductBalanceService()._load_opening(
+            snapshot_date=date(2026, 8, 31))
+        self.assertEqual(values, {self.recipe.pk: (Decimal("7"), 1)})
+        self.assertEqual(meta["source"], "PointHistoricalInventoryClosing")
+        self.assertEqual(meta["historical_boundary_contract"], "POINT_STOCK_RAW_UTC")
+        self.assertEqual(missing, [])
+        previous.refresh_from_db()
+        self.assertEqual(previous.metadata, original_metadata)
+        self.assertEqual(previous.status, ProductoMonthClosure.STATUS_LOCKED)
+        self.assertTrue(previous.is_locked)
+        self.assertEqual(opening.lines.get().stock, Decimal("10"))
+
+    def test_verified_utc_stock_ledger_keeps_boundary_contract_on_carryforward(self):
+        self.previous_ledger(source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+            marker="POINT_STOCK_RAW_UTC")
+        values, meta, missing = MonthlyPointProductBalanceService()._load_opening(
+            snapshot_date=date(2026, 8, 31))
+        self.assertEqual(values, {self.recipe.pk: (Decimal("999"), 1)})
+        self.assertEqual(meta["source"], "ProductoMonthClosure")
+        self.assertEqual(meta["historical_closing_source"], PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY)
+        self.assertEqual(meta["historical_boundary_contract"], "POINT_STOCK_RAW_UTC")
+        self.assertEqual(missing, [])
+
+    def test_official_report_ledger_does_not_require_stock_utc_contract(self):
+        self.previous_ledger(source=PointHistoricalInventoryClosing.SOURCE_OFFICIAL_REPORT)
+        values, meta, missing = MonthlyPointProductBalanceService()._load_opening(
+            snapshot_date=date(2026, 8, 31))
+        self.assertEqual(values, {self.recipe.pk: (Decimal("999"), 1)})
+        self.assertEqual(meta["source"], "ProductoMonthClosure")
+        self.assertTrue(meta["authoritative"])
+        self.assertEqual(missing, [])
+
+    def test_legacy_stock_ledger_does_not_hide_unproven_historical_coverage(self):
+        self.stock_boundaries(fetched_at="2026-10-01T01:52:00+00:00")
+        self.previous_ledger(source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY)
+        values, meta, missing = MonthlyPointProductBalanceService()._load_opening(
+            snapshot_date=date(2026, 8, 31))
+        self.assertEqual(values, {})
+        self.assertFalse(meta["authoritative"])
+        self.assertEqual(missing[0].issue, "SOURCE_INCOMPLETE")
+        self.assertNotIn("historical_boundary_contract", meta)
+
     def test_stock_unproven_coverage_never_uses_legacy_quantity_or_snapshot_fallback(self):
         opening, _ = self.stock_boundaries(fetched_at="2026-10-01T01:52:00+00:00")
         PointInventorySnapshot.objects.create(branch=self.branches[0], product=self.product,
@@ -154,6 +217,7 @@ class HistoricalInventoryClosingTests(TestCase):
         self.assertEqual(values, {})
         self.assertFalse(meta["authoritative"])
         self.assertEqual(missing[0].issue, "SOURCE_INCOMPLETE")
+        self.assertNotIn("historical_boundary_contract", meta)
         service = BranchInventoryTraceabilityService()
         self.assertEqual(service._load_closing(opening, month=date(2026, 9, 1), boundary="opening"), {})
 

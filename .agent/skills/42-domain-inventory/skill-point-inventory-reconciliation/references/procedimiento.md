@@ -65,6 +65,12 @@ ordenar por instante efectivo, manteniendo consultas acotadas. Recalcular apertu
 del31agosto y cierre30sept con el mismo contrato: corregir ventas pero conservar
 extremos derivados antiguos crea diferencias falsas.
 
+Un `ProductoMonthClosure` anterior LOCKED tampoco prueba el contrato temporal
+correcto por sí solo. Si deriva de Stock, el carry-forward debe conservar prueba
+`historical_boundary_contract=POINT_STOCK_RAW_UTC`; un ledger anterior sin esa
+prueba se relee contra su fuente histórica exacta. No modificar ni desbloquear el
+cierre anterior para obtener un saldo nuevo, ni emitir el marcador si falta cobertura.
+
 La aritmética raw correcta NO renueva fetched_at. Cobertura requiere captura
 posterior al fin operacional del mes. Para lotes truncados de500, usar el límite
 raw del último lote efectivamente descargado, no filas más antiguas retenidas por

@@ -36,6 +36,8 @@ Captura conserva dedup original y protege también la cobertura global de la imp
 
 ## Riesgos y pendientes de aceptación
 
+Revisión productiva adicional encontró `ProductoMonthClosure`8 agosto LOCKED con cierreStock6 legacy. El lector de apertura prefería ese ledger y habría evitado la relecturaUTC. Regresión roja obtuvo999 en lugar de7 documental; guard nuevo no hereda cortes Stock sin prueba `historical_boundary_contract=POINT_STOCK_RAW_UTC`, relee la fuente exacta y conserva intacto el LOCKED. Marcador sólo con autoridad comprobada, propagado junto con ID/source al carry-forward; oficiales noStock mantienen comportamiento. Cuatro regresiones nuevas PASS, revisión independiente sin bloqueantes. Suite final posterior:332 pruebas PASS (19.958s); sustituye conteo328 anterior. La habilidad conserva esa lección y el ámbito corregido de aperturas, más el contrato frontend original de conversión investigado sin ejecutar acciones.
+
 No reclamar frescura Point por una firma, ni cobertura por aritmética. Capturas previas al fin mensual siguen INCOMPLETE. No recapturar COMPLETE ni inventar conteo físico. Publicación exige pruebas compartidas, CI completo, despliegue oficial, revisión de datos/UI e idempotencia sin HTTP antes de cierre por servicio oficial y guards reales. Este documento no declara septiembre cerrado.
 
 ## Entorno temporal y propietario
