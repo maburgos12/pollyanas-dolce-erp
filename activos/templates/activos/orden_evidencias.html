@@ -40,160 +40,9 @@
   {% endif %}
 </section>
 
-<!-- Galería de evidencias existentes -->
-<section class="card">
-  <div class="card-header">
-    Evidencias ({{ evidencias|length }})
-  </div>
-  {% if evidencias %}
-    <div class="ev-grid">
-      {% for ev in evidencias %}
-        <div class="ev-card">
-          {% if ev.es_imagen %}
-            <img src="{{ ev.archivo.url }}" alt="{{ ev.descripcion }}"
-                 onclick="openLightbox('{{ ev.archivo.url }}')" title="Ver imagen">
-          {% elif ev.tipo == 'VIDEO' %}
-            <a href="{{ ev.archivo.url }}" target="_blank" class="pd-u-4edeb9e71d">
-              <div class="ev-icon">Video</div>
-            </a>
-          {% else %}
-            <a href="{{ ev.archivo.url }}" target="_blank" class="pd-u-4edeb9e71d">
-              <div class="ev-icon">DOC</div>
-            </a>
-          {% endif %}
-          <div class="ev-body">
-            <div class="ev-tipo">{{ ev.get_tipo_display }}</div>
-            {% if ev.descripcion %}<div class="ev-desc">{{ ev.descripcion }}</div>{% endif %}
-            <div class="ev-meta">
-              {{ ev.creado_en|date:"d/m/Y H:i" }}
-              {% if ev.subido_por %} · {{ ev.subido_por.get_full_name|default:ev.subido_por.username }}{% endif %}
-            </div>
-          </div>
-          {% if can_manage_activos %}
-          <div class="ev-actions">
-            <a href="{{ ev.archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">Ver</a>
-            <form method="post" action="{% url 'activos:eliminar_evidencia' ev.id %}" class="pd-u-0cd28ce9ba"
-                  onsubmit="return confirm('¿Eliminar esta evidencia?')">
-              {% csrf_token %}
-              <input type="hidden" name="origen" value="{{ consulta_origen }}">
-              <input type="hidden" name="return_query" value="{{ consulta_query }}">
-              <button type="submit" class="btn btn-sm pd-u-1e66a03fec">Eliminar</button>
-            </form>
-          </div>
-          {% endif %}
-        </div>
-      {% endfor %}
-    </div>
-  {% else %}
-    <p class="muted pd-u-9cd3bacd87">No hay evidencias subidas todavía.</p>
-  {% endif %}
-</section>
-
-<!-- Sección de Factura / Nota de trabajo -->
-{% if can_manage_activos %}
-<section class="card card-form-narrow">
-  <div class="card-header pd-u-19d635b4f2">
-    Recibo Factura / Nota de remisión y trabajo
-  </div>
-
-  <!-- Vista de lo registrado -->
-  {% if orden.numero_factura or orden.factura_archivo or orden.nota_trabajo %}
-  <div class="pd-u-233d65776f">
-    {% if orden.numero_factura %}
-      <div class="pd-u-e4ad4a163b">
-        <strong>Número de factura:</strong>
-        <span class="pd-u-c3615382ca">{{ orden.numero_factura }}</span>
-      </div>
-    {% endif %}
-    {% if orden.factura_archivo %}
-      <div class="pd-u-d6e693f2b8">
-        <span class="pd-u-8e2b91d031">Recibo</span>
-        <a href="{{ orden.factura_archivo.url }}" target="_blank" class="btn btn-secondary btn-sm">
-          Ver / descargar factura
-        </a>
-      </div>
-    {% endif %}
-    {% if orden.nota_trabajo %}
-      <div>
-        <strong>Nota del trabajo:</strong>
-        <p class="pd-u-d02be0c15b">{{ orden.nota_trabajo }}</p>
-      </div>
-    {% endif %}
-  </div>
-  {% endif %}
-
-  <!-- Formulario para actualizar -->
-  <form method="post" enctype="multipart/form-data">
-    {% csrf_token %}
-    <input type="hidden" name="origen" value="{{ consulta_origen }}">
-    <input type="hidden" name="return_query" value="{{ consulta_query }}">
-    <input type="hidden" name="action" value="update_factura">
-
-    <div class="mobile-form-group">
-      <label>Número de factura o remisión</label>
-      <input type="text" name="numero_factura" value="{{ orden.numero_factura }}" placeholder="Ej: FAC-2024-00123">
-    </div>
-
-    <div class="mobile-form-group">
-      <label>Archivo de factura{% if orden.factura_archivo %} <span class="pd-u-575956b33b">(ya hay uno, subir reemplaza)</span>{% endif %}</label>
-      <div class="upload-area pd-u-67ae1400bb" onclick="document.getElementById('input-factura-ev').click()">
-        <input type="file" name="factura_archivo" id="input-factura-ev" accept=".pdf,image/*" capture="environment">
-        <div class="pd-u-11969f5d7a">Recibo</div>
-        <p><strong>Toca para adjuntar factura</strong></p>
-        <p>PDF o foto · Máx. 30 MB</p>
-      </div>
-      <div id="preview-factura-ev" class="pd-u-b1ecc496e0"></div>
-    </div>
-
-    <div class="mobile-form-group">
-      <label>Nota del trabajo realizado</label>
-      <textarea name="nota_trabajo" rows="4" placeholder="Describe qué se hizo, piezas cambiadas, resultado de la prueba…">{{ orden.nota_trabajo }}</textarea>
-    </div>
-
-    <button type="submit" class="btn btn-primary btn-grande pd-u-ff8d7979fd">
-      Guardar factura y notas
-    </button>
-  </form>
-</section>
-{% endif %}
-
-<!-- Subir nueva evidencia -->
-{% if can_manage_activos %}
-<section class="card card-form-narrow">
-  <div class="card-header">Agregar evidencia fotográfica / video</div>
-  <form method="post" enctype="multipart/form-data" id="form-upload">
-    {% csrf_token %}
-    <input type="hidden" name="origen" value="{{ consulta_origen }}">
-    <input type="hidden" name="return_query" value="{{ consulta_query }}">
-
-    <div class="upload-area" id="upload-area" onclick="document.getElementById('input-archivo').click()">
-      <input type="file" name="archivo" id="input-archivo"
-             accept="image/*,video/*,.pdf,.doc,.docx,.xls,.xlsx"
-             capture="environment">
-      <div class="upload-icon">Foto</div>
-      <p><strong>Toca para agregar foto, video o documento</strong></p>
-      <p>JPG, PNG, MP4, PDF · Máx. 30 MB</p>
-    </div>
-    <div class="preview-grid" id="preview-grid"></div>
-
-    <div class="mobile-form-group pd-u-88b9d5c614">
-      <label>Tipo</label>
-      <select name="tipo">
-        {% for val, label in tipos %}
-          <option value="{{ val }}">{{ label }}</option>
-        {% endfor %}
-      </select>
-    </div>
-
-    <div class="mobile-form-group">
-      <label>Descripción (opcional)</label>
-      <input type="text" name="descripcion" placeholder="Ej: Foto antes de intervención, Factura proveedor…">
-    </div>
-
-    <button type="submit" class="btn btn-primary btn-grande">Subir evidencia</button>
-  </form>
-</section>
-{% endif %}
+{% include "activos/_orden_soportes.html" with soporte_fragmento="galeria" %}
+{% include "activos/_orden_soportes.html" with soporte_fragmento="factura" %}
+{% include "activos/_orden_soportes.html" with soporte_fragmento="subir" %}
 
 <!-- Lightbox -->
 <div class="lightbox-overlay" id="lightbox" onclick="closeLightbox()">
@@ -215,13 +64,47 @@ function closeLightbox() {
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 
+// Limpiar sólo el envío confirmado, conservando una edición hecha durante el POST.
+function uploadDraft(form) {
+  return Array.from(new FormData(form).entries()).map(function(entry) {
+    const value = entry[1];
+    return [entry[0], value instanceof File ? [value.name, value.size, value.lastModified, value.type] : value];
+  });
+}
+const uploadForm = document.getElementById('form-upload');
+if (uploadForm) {
+function markUploadDraft() { uploadForm._draftRevision = (uploadForm._draftRevision || 0) + 1; }
+uploadForm.addEventListener('input', markUploadDraft);
+uploadForm.addEventListener('change', markUploadDraft);
+uploadForm.addEventListener('erp:action-start', function(event) {
+  if (event.target.id !== 'form-upload') return;
+  event.target._sentDraft = JSON.stringify(uploadDraft(event.target));
+  event.target._sentDraftRevision = event.target._draftRevision || 0;
+});
+uploadForm.addEventListener('erp:action-success', function(event) {
+  const form = event.target;
+  if (form.id !== 'form-upload') return;
+  if (form._sentDraftRevision === (form._draftRevision || 0) && form._sentDraft === JSON.stringify(uploadDraft(form))) {
+    form.reset();
+    document.getElementById('preview-grid').replaceChildren();
+  }
+  delete form._captureSnapshot;
+  delete form._sentDraft;
+});
+uploadForm.addEventListener('erp:action-error', function(event) {
+  if (event.target.id !== 'form-upload') return;
+  delete event.target._captureSnapshot;
+  delete event.target._sentDraft;
+});
+
+}
+
 // Preview de factura
-const inputFacturaEv = document.getElementById('input-factura-ev');
-const previewFacturaEv = document.getElementById('preview-factura-ev');
-if (inputFacturaEv) {
-  inputFacturaEv.addEventListener('change', function() {
+document.addEventListener('change', function(event) {
+  if (event.target.id === 'input-factura-ev') {
+    const previewFacturaEv = document.getElementById('preview-factura-ev');
     previewFacturaEv.innerHTML = '';
-    const file = this.files[0];
+    const file = event.target.files[0];
     if (!file) return;
     const ext = file.name.split('.').pop().toLowerCase();
     const isImg = ['jpg','jpeg','png','gif','webp','heic'].includes(ext);
@@ -229,16 +112,11 @@ if (inputFacturaEv) {
     div.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;background:#f0fff4;border-radius:8px;border:1.5px solid var(--verde);margin-top:4px;';
     div.innerHTML = `<span class="pd-u-34d8711a27">${isImg ? 'Imagen' : 'Recibo'}</span><div><strong>${file.name}</strong><br><span class="pd-u-6e4b91a759">${(file.size/1024/1024).toFixed(2)} MB</span></div>`;
     previewFacturaEv.appendChild(div);
-  });
-}
-
-// Preview de archivo seleccionado
-const inputArchivo = document.getElementById('input-archivo');
-const previewGrid  = document.getElementById('preview-grid');
-if (inputArchivo) {
-  inputArchivo.addEventListener('change', function() {
+  }
+  if (event.target.id === 'input-archivo') {
+    const previewGrid = document.getElementById('preview-grid');
     previewGrid.innerHTML = '';
-    Array.from(this.files).forEach(file => {
+    Array.from(event.target.files).forEach(file => {
       const div = document.createElement('div');
       div.className = 'preview-item';
       const ext = file.name.split('.').pop().toLowerCase();
@@ -254,7 +132,7 @@ if (inputArchivo) {
       }
       previewGrid.appendChild(div);
     });
-  });
-}
+  }
+});
 </script>
 {% endblock %}

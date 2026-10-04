@@ -1,4 +1,5 @@
 import csv
+import logging
 from copy import copy
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -37,6 +38,7 @@ from mantenimiento.services_access import can_access_mantenimiento
 from .services_capturas import crear_captura_activos
 from mantenimiento.services_capturas_equipos import CapturaEquipoError
 
+from .services_soportes import mutar_soporte
 from .services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from .services_pasaporte import activos_autorizados, svg_qr_activo
 
@@ -2611,37 +2613,30 @@ def ordenes(request):
             return redirect("activos:ordenes")
 
         if action == "update_factura":
+            destino = reverse("activos:ordenes")
+            filtros = urlencode({key: request.GET[key] for key in ("estatus", "enterprise_gap") if key in request.GET})
+            if filtros:
+                destino += "?" + filtros
             orden_id = _safe_int(request.POST.get("orden_id"))
             if not orden_id:
                 messages.error(request, "Selecciona una orden válida.")
-                return redirect("activos:ordenes")
+                return redirect(destino)
             orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
-            numero_factura = (request.POST.get("numero_factura") or "").strip()
-            nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
-            factura_archivo = request.FILES.get("factura_archivo")
-            update_fields = ["numero_factura", "nota_trabajo", "actualizado_en"]
-            orden.numero_factura = numero_factura
-            orden.nota_trabajo = nota_trabajo
-            if factura_archivo:
-                if factura_archivo.size > 30 * 1024 * 1024:
-                    messages.error(request, "El archivo supera el límite de 30 MB.")
-                    return redirect("activos:ordenes")
-                if orden.factura_archivo:
-                    orden.factura_archivo.delete(save=False)
-                orden.factura_archivo = factura_archivo
-                update_fields.append("factura_archivo")
-            orden.save(update_fields=update_fields)
-            BitacoraMantenimiento.objects.create(
-                orden=orden,
-                accion="FACTURA",
-                comentario=f"Factura/nota registrada: {numero_factura or '—'}",
-                usuario=request.user,
-            )
-            log_event(request.user, "UPDATE", "activos.OrdenMantenimiento", orden.id, {
-                "folio": orden.folio, "numero_factura": numero_factura,
-            })
-            messages.success(request, f"Factura de {orden.folio} actualizada.")
-            return redirect("activos:ordenes")
+            archivo = request.FILES.get("factura_archivo")
+            if archivo and archivo.size > 30 * 1024 * 1024:
+                messages.error(request, "El archivo supera el límite de 30 MB.")
+                return redirect(destino)
+            try:
+                avisos = mutar_soporte(orden_id=orden_id, usuario=request.user, accion="update_factura", datos=request.POST, archivo=archivo)
+            except Exception:
+                logging.getLogger(__name__).exception("No se pudo guardar la factura de la orden %s", orden_id)
+                messages.error(request, "No se pudo guardar el soporte. Los datos anteriores se conservaron; revisa y reintenta.")
+                return redirect(destino)
+            if avisos:
+                messages.warning(request, " ".join(avisos))
+            else:
+                messages.success(request, f"Factura de {orden.folio} actualizada.")
+            return redirect(destino)
 
         messages.error(request, "Acción no reconocida.")
         return redirect("activos:ordenes")
@@ -3534,96 +3529,71 @@ def _contexto_consulta_orden(request, orden_id):
     }
 
 
-@login_required
-def subir_evidencia(request, orden_id):
-    if not can_view_inventario(request.user):
-        raise PermissionDenied
-
+def _soportes_contexto(request, orden_id):
     orden = get_object_or_404(OrdenMantenimiento, pk=orden_id)
-    contexto = _contexto_consulta_orden(request, orden_id)
-
-    if request.method == "POST":
-        action = (request.POST.get("action") or "subir_evidencia").strip()
-
-        # Acción: actualizar factura / nota de trabajo
-        if action == "update_factura":
-            if not can_manage_inventario(request.user):
-                raise PermissionDenied
-            numero_factura = (request.POST.get("numero_factura") or "").strip()
-            nota_trabajo = (request.POST.get("nota_trabajo") or "").strip()
-            factura_archivo = request.FILES.get("factura_archivo")
-            update_fields = ["numero_factura", "nota_trabajo", "actualizado_en"]
-            orden.numero_factura = numero_factura
-            orden.nota_trabajo = nota_trabajo
-            if factura_archivo:
-                if factura_archivo.size > 30 * 1024 * 1024:
-                    messages.error(request, "El archivo supera el límite de 30 MB.")
-                    return redirect(contexto["consulta_detalle_url"])
-                if orden.factura_archivo:
-                    orden.factura_archivo.delete(save=False)
-                orden.factura_archivo = factura_archivo
-                update_fields.append("factura_archivo")
-            orden.save(update_fields=update_fields)
-            BitacoraMantenimiento.objects.create(
-                orden=orden, accion="FACTURA",
-                comentario=f"Factura/nota actualizada: {numero_factura or '—'}",
-                usuario=request.user,
-            )
-            messages.success(request, "Factura y notas guardadas.")
-            return redirect(contexto["consulta_detalle_url"])
-
-        # Acción por defecto: subir evidencia
-        archivo = request.FILES.get("archivo")
-        descripcion = (request.POST.get("descripcion") or "").strip()
-        tipo = (request.POST.get("tipo") or EvidenciaOrden.TIPO_FOTO).strip().upper()
-
-        if not archivo:
-            messages.error(request, "Selecciona un archivo.")
-            return redirect(contexto["consulta_detalle_url"])
-
-        # Límite 30 MB
-        if archivo.size > 30 * 1024 * 1024:
-            messages.error(request, "El archivo supera el límite de 30 MB.")
-            return redirect(contexto["consulta_detalle_url"])
-
-        ev = EvidenciaOrden.objects.create(
-            orden=orden,
-            archivo=archivo,
-            tipo=tipo if tipo in {x[0] for x in EvidenciaOrden.TIPO_CHOICES} else EvidenciaOrden.TIPO_FOTO,
-            descripcion=descripcion,
-            subido_por=request.user,
-        )
-        BitacoraMantenimiento.objects.create(
-            orden=orden,
-            accion="EVIDENCIA",
-            comentario=f"Evidencia subida: {archivo.name} ({ev.tipo})",
-            usuario=request.user,
-        )
-        log_event(request.user, "CREATE", "activos.EvidenciaOrden", ev.id, {"orden": orden.folio, "archivo": archivo.name})
-        messages.success(request, "Evidencia subida correctamente.")
-        return redirect(contexto["consulta_detalle_url"])
-
-    evidencias = orden.evidencias.select_related("subido_por").all()
-    return render(request, "activos/orden_evidencias.html", {
-        **contexto,
+    return {
+        **_contexto_consulta_orden(request, orden_id),
         "orden": orden,
-        "evidencias": evidencias,
+        "evidencias": orden.evidencias.select_related("subido_por").all(),
         "tipos": EvidenciaOrden.TIPO_CHOICES,
         "module_tabs": _module_tabs("activos:ordenes"),
         "can_manage_activos": can_manage_inventario(request.user),
-    })
+    }
+
+
+def _respuesta_soportes(request, orden_id, mensaje, *, ok=True, status=200, advertencia=False, fragmento="galeria"):
+    nivel = "warning" if advertencia else "success" if ok else "error"
+    if "application/json" in request.headers.get("Accept", ""):
+        payload = {"ok": ok, "toast": {"type": nivel, "message": mensaje, "persistent": not ok or advertencia}}
+        if ok:
+            payload.update(target="#orden-factura" if fragmento == "factura" else "#orden-evidencias", html=render_to_string(
+                "activos/_orden_soportes.html", {**_soportes_contexto(request, orden_id), "soporte_fragmento": fragmento}, request=request))
+        return JsonResponse(payload, status=status)
+    getattr(messages, nivel)(request, mensaje)
+    return redirect(_contexto_consulta_orden(request, orden_id)["consulta_detalle_url"])
 
 
 @login_required
+def subir_evidencia(request, orden_id):
+    if request.method == "POST":
+        if not can_manage_inventario(request.user):
+            raise PermissionDenied
+        get_object_or_404(OrdenMantenimiento, pk=orden_id)
+        accion = (request.POST.get("action") or "subir_evidencia").strip()
+        if accion not in {"update_factura", "subir_evidencia"}:
+            return _respuesta_soportes(request, orden_id, "Acción inválida.", ok=False, status=400)
+        archivo = request.FILES.get("factura_archivo" if accion == "update_factura" else "archivo")
+        if accion == "subir_evidencia" and not archivo:
+            return _respuesta_soportes(request, orden_id, "Selecciona un archivo.", ok=False, status=400)
+        if archivo and archivo.size > 30 * 1024 * 1024:
+            return _respuesta_soportes(request, orden_id, "El archivo supera el límite de 30 MB.", ok=False, status=400)
+        try:
+            avisos = mutar_soporte(orden_id=orden_id, usuario=request.user, accion=accion, datos=request.POST, archivo=archivo)
+        except Exception:
+            logging.getLogger(__name__).exception("No se pudo guardar el soporte de la orden %s", orden_id)
+            return _respuesta_soportes(request, orden_id, "No se pudo guardar el soporte. Los datos anteriores se conservaron; revisa y reintenta.", ok=False, status=500)
+        mensaje = "Factura y notas guardadas." if accion == "update_factura" else "Evidencia subida correctamente."
+        return _respuesta_soportes(request, orden_id, " ".join(avisos) if avisos else mensaje, advertencia=bool(avisos), fragmento="factura" if accion == "update_factura" else "galeria")
+    if not can_view_inventario(request.user):
+        raise PermissionDenied
+    return render(request, "activos/orden_evidencias.html", _soportes_contexto(request, orden_id))
+
+
+@login_required
+@require_POST
 def eliminar_evidencia(request, evidencia_id):
     if not can_manage_inventario(request.user):
         raise PermissionDenied
     ev = get_object_or_404(EvidenciaOrden, pk=evidencia_id)
     orden_id = ev.orden_id
-    ev.archivo.delete(save=False)
-    ev.delete()
-    messages.success(request, "Evidencia eliminada.")
-    return redirect(_contexto_consulta_orden(request, orden_id)["consulta_detalle_url"])
+    try:
+        avisos = mutar_soporte(orden_id=orden_id, usuario=request.user, accion="eliminar", datos=request.POST, evidencia_id=evidencia_id)
+    except EvidenciaOrden.DoesNotExist:
+        raise Http404
+    except Exception:
+        logging.getLogger(__name__).exception("No se pudo eliminar la evidencia %s", evidencia_id)
+        return _respuesta_soportes(request, orden_id, "No se pudo eliminar la evidencia. Se conservó el soporte anterior.", ok=False, status=500)
+    return _respuesta_soportes(request, orden_id, " ".join(avisos) if avisos else "Evidencia eliminada.", advertencia=bool(avisos))
 
 
 # ---------------------------------------------------------------------------
