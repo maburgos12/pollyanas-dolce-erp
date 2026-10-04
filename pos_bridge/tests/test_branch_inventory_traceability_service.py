@@ -312,7 +312,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         closing = PointHistoricalInventoryClosing.objects.create(
             operational_date=operational_date,
             status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
-            source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+            source=PointHistoricalInventoryClosing.SOURCE_OFFICIAL_REPORT,
             source_fingerprint=f"closing-{operational_date.isoformat()}{fingerprint_suffix}",
             expected_branch_ids=(
                 sorted({branch.id for branch, _product in stocks})

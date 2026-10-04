@@ -9,7 +9,7 @@
     {
       "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "112",
       "case_reference": 3963, "observed_at": "2026-10-03T13:54:00Z",
-      "note": "Documento44672 38598/539340 rawFK_articulo112/isInsumoFalse identifica Ciruela aunque SKU0112 sea ambiguo. No fusionar maestros ni usar ID de producto para insumo. Evento1662087 y transferencia separados3ms son candidatos sin FK, no identidad probada. Fuente transfer vacía por resolver compartido; no captura genérica humana. Import707 COMPLETE."
+      "note": "Documento44672 38598/539340 rawFK_articulo112/isInsumoFalse identifica Ciruela aunque SKU0112 sea ambiguo. No fusionar maestros ni usar ID de producto para insumo. Evento1662087 y transferencia separados3ms son candidatos sin FK, no identidad probada. Fuente transfer estaba vacía por resolver compartido; PR1456 publicado y aceptación autenticada verificada4oct recuperó documento44672/1pieza. No captura genérica humana ni prueba física. Import707 COMPLETE, no recapturar."
     },
     {
       "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "63",
@@ -19,7 +19,12 @@
     {
       "month": "2026-09-01", "branch_external_id": "1", "product_external_id": "135",
       "case_reference": 3237, "observed_at": "2026-10-04T00:16:32Z",
-      "note": "1683114:5PZA EmpanadaManzana Matriz, paroriginalPK1676/hash9f27f6de945bbc8b19cd recuperado con autorización explícita tras PR1455/75fb0de1 publicado. Primera recuperación2filas/segunda0/HTTP0, IDs/timestamps/writer79066 originales; otrasmermas/waste/ventas/stock/casos intactos. UI autenticada muestra5/folio1683114/responsableoriginal, ventas477/merma41 conservadas; no repetir recovery. Fuente mensual aún bloqueada manifiesto78023/234bound/WASTE_SYNC_COUNT_MISMATCH/JOB_MIXED aunque267filas. Sincronización mensual adicional requiere autorización aparte; review/plan siguen sin executor. Ausencia no cancelación/offset. No editar manifiestos antiguos, stock o ventas; documentos/aprobación/conteo pendientes, mes no cerrado."
+      "note": "1683114:5PZA EmpanadaManzana Matriz, paroriginalPK1676/hash9f27f6de945bbc8b19cd recuperado con autorización explícita tras PR1455/75fb0de1 publicado. Primera recuperación2filas/segunda0/HTTP0, IDs/timestamps originales; UI autenticada muestra5/folio1683114. Actualización producción verificada4oct2026: autorización mensual adicional recibida y job81612 fullSept1-30 sinbranch SUCCESS seen267/updated267/superseded0;267waste/267MermaPOS hashes1:1 y autoridad mensualTrue. Stock/ventas originales intactos. Sustituye bloqueo histórico78023; no repetir recovery/sync por rutina ni editar manifiestos viejos. Review/plan siguen sin executor. Ausencia no cancelación/offset; documentos/aprobación/conteo independientes, mes no cerrado."
+    },
+    {
+      "month": "2026-09-01", "branch_external_id": "4", "product_external_id": "118",
+      "case_reference": 3430, "observed_at": "2026-10-04",
+      "note": "Payán BolloZanahoria: Stock rawFecha naiveUTC confirmado por tabla/detalle frontend moment.utc, no notasFecha_Hora naive local. Import530 guarda39VENTAPZA septiembre rawUTC; documento nuevo1686312 qty2/2→0/no cancelado/rawOct1T02:01:31.863UTC pertenece30sept19:01Maz. HeaderNOTA-102362/Payán y detalleBollo2 acreditan esas2, con1686015/NOTA-102345 y1686079/NOTA-102352 día30=4 y mes=41comerciales. No inferir PK_Nota de movimiento ni unir por hora. No se persistió en investigación; no repetir HTTP específico. Fetched53001:52Z precede movimiento y fin de mes07:00Z: cobertura INCOMPLETE aunque ecuación0+41-41=0. LectorUTC autorizado/en preparación, no publicado por este hallazgo. Conteo/aprobación/cierre siguen separados."
     }
   ]
 }

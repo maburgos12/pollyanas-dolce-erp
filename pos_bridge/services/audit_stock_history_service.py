@@ -2,21 +2,27 @@ from __future__ import annotations
 
 import hashlib
 import unicodedata
-from dataclasses import dataclass
-from datetime import date, datetime, time
+from dataclasses import dataclass, replace
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q, prefetch_related_objects
 from django.utils import timezone
 
 from pos_bridge.models import (
+    PointHistoricalInventoryClosingLine,
     PointProductHistoryImport,
     PointProductHistoryRow,
 )
-from pos_bridge.services.historical_inventory_capture import _movement_datetime
+from pos_bridge.services.historical_inventory_capture import (
+    HistoricalInventoryCaptureError,
+    _movement_datetime,
+    point_stock_history_instant,
+)
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 
 
 HISTORY_LIMIT = 500
@@ -41,6 +47,9 @@ class PointHistoryReconciliation:
     movement_ids: tuple[int, ...] = ()
     movement_ids_by_category: dict[str, tuple[int, ...]] | None = None
     unknown_movement_ids: tuple[int, ...] = ()
+    documentary_opening: Decimal | None = None
+    documentary_closing: Decimal | None = None
+    documentary_boundary_movement_ids: tuple[int, ...] = ()
 
     def expected_closing(self, opening: Decimal) -> Decimal:
         return (
@@ -83,6 +92,9 @@ class PointHistoryReconciliation:
                 for key, value in (self.movement_ids_by_category or {}).items()
             },
             "unknown_movement_ids": list(self.unknown_movement_ids),
+            "documentary_opening": str(self.documentary_opening) if self.documentary_opening is not None else None,
+            "documentary_closing": str(self.documentary_closing) if self.documentary_closing is not None else None,
+            "documentary_boundary_movement_ids": list(self.documentary_boundary_movement_ids),
         }
 
 
@@ -156,7 +168,7 @@ class AuditStockHistoryService:
         ).first()
 
     @staticmethod
-    def _covers_month(record, month: date) -> bool:
+    def _covers_month(record, month: date, *, boundary_rows=None) -> bool:
         if record is None:
             return False
         metadata = record.raw_metadata or {}
@@ -169,18 +181,67 @@ class AuditStockHistoryService:
             return False
         if timezone.is_naive(fetched_at) or fetched_at < month_end:
             return False
-        fetched_rows = int(metadata.get("fetched_rows") or 0)
-        history_limit = int(metadata.get("history_limit") or HISTORY_LIMIT)
+        try:
+            fetched_rows = int(metadata.get("fetched_rows") or 0)
+            history_limit = int(metadata.get("history_limit", HISTORY_LIMIT))
+        except (TypeError, ValueError):
+            return False
+        if fetched_rows < 0 or history_limit <= 0 or fetched_rows > history_limit:
+            return False
         if fetched_rows < history_limit:
             return True
         month_start, _ = _month_bounds(month)
-        earliest = str(metadata.get("earliest_movement_at") or "")
-        if not earliest:
+        earliest = AuditStockHistoryService._boundary_stamp(record)
+        if earliest is None:
+            return False
+        if boundary_rows is None:
+            boundary_rows = list(record.rows.filter(movement_at=earliest))
+        fetched_ids = metadata.get("fetched_movement_ids")
+        matches = [row for row in boundary_rows if row.movement_at == earliest
+                   and (not fetched_ids or row.row_number in fetched_ids)]
+        if not matches:
             return False
         try:
-            return datetime.fromisoformat(earliest) <= month_start
-        except ValueError:
+            # The boundary belongs to the latest capture, not older retained rows.
+            return all(point_stock_history_instant(row.raw_payload) <= month_start for row in matches)
+        except HistoricalInventoryCaptureError:
             return False
+
+    @staticmethod
+    def _boundary_stamp(record):
+        try:
+            stamp = datetime.fromisoformat(str((record.raw_metadata or {}).get("earliest_movement_at") or ""))
+        except (TypeError, ValueError):
+            return None
+        return stamp if timezone.is_aware(stamp) else None
+
+    @staticmethod
+    def _candidate_filter(records, month):
+        month_start, month_end = _month_bounds(month)
+        # Legacy naive dates were persisted seven hours late. Explicit-zone rows
+        # remain correct; the raw reader performs the exact cut for both kinds.
+        query = Q(movement_at__gte=month_start, movement_at__lt=month_end + timedelta(hours=7), cancelled=False)
+        for record in records:
+            boundary = AuditStockHistoryService._boundary_stamp(record)
+            if boundary is not None:
+                query |= Q(import_record_id=record.pk, movement_at=boundary)
+        return query
+
+    def _reconcile_candidates(self, record, month, candidates):
+        month_start, month_end = _month_bounds(month)
+        selected, invalid = [], []
+        for row in candidates:
+            if row.cancelled:
+                continue
+            try:
+                instant = point_stock_history_instant(row.raw_payload)
+            except HistoricalInventoryCaptureError:
+                invalid.append(row.row_number)
+                continue
+            if month_start <= instant < month_end:
+                selected.append((instant, row.row_number, row))
+        rows = [entry[2] for entry in sorted(selected, key=lambda entry: entry[:2])]
+        return self._reconcile_record(record, month, rows, boundary_rows=candidates, invalid_ids=invalid)
 
     def capture(self, branch, product, month: date, *, force: bool = False):
         record = self._existing_import(branch, product)
@@ -194,9 +255,47 @@ class AuditStockHistoryService:
             branch.external_id,
             movements=HISTORY_LIMIT,
         )
-        record = self._canonical_import(branch, product)
         parsed_rows = [self._parse_row(row) for row in rows]
         with transaction.atomic():
+            # Serialize writers of the same canonical import before determining
+            # all old/new affected months; monthly readers use the same mutex.
+            if record is not None:
+                record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
+                # Coverage metadata belongs to the entire retained import, not
+                # only the identities returned by this latest limited capture.
+                previous_rows = list(record.rows.all())
+            else:
+                previous_rows = []
+            local_tz = ZoneInfo(settings.TIME_ZONE)
+            months = {month.replace(day=1), timezone.localdate().replace(day=1)}
+            for _, values in parsed_rows:
+                months.add(timezone.localtime(values["movement_at"], local_tz).date().replace(day=1))
+                months.add(timezone.localtime(point_stock_history_instant(values["raw_payload"]), local_tz).date().replace(day=1))
+            for old in previous_rows:
+                months.add(timezone.localtime(old.movement_at, local_tz).date().replace(day=1))
+                months.add(timezone.localtime(point_stock_history_instant(old.raw_payload), local_tz).date().replace(day=1))
+            # A metadata replacement also changes coverage of months with no
+            # movements. Existing audits and closures may read those months;
+            # closures are company-wide and have no branch/product key.
+            from recetas.models import ProductoMonthClosure
+            from reportes.models import ProductInventoryAuditCase
+            months.update(ProductoMonthClosure.objects.values_list("month_start", flat=True))
+            months.update(ProductInventoryAuditCase.objects.filter(
+                branch=branch, product=product,
+            ).values_list("month", flat=True))
+            months.update(day.replace(day=1) for day in
+                          PointHistoricalInventoryClosingLine.objects.filter(
+                              branch=branch, product=product,
+                          ).values_list("closing__operational_date", flat=True))
+            oldest, newest = min(months), max(months)
+            cursor = oldest
+            while cursor <= newest:
+                months.add(cursor)
+                cursor = date(cursor.year + (cursor.month == 12), cursor.month % 12 + 1, 1)
+            # A historical closing is the next month's documentary opening.
+            months.add(cursor)
+            lock_product_month_sources(sorted(months))
+            record = record or self._canonical_import(branch, product)
             for movement_id, defaults in parsed_rows:
                 PointProductHistoryRow.objects.update_or_create(
                     import_record=record,
@@ -256,15 +355,10 @@ class AuditStockHistoryService:
         if record is None:
             return PointHistoryReconciliation(coverage_status="MISSING")
 
-        month_start, month_end = _month_bounds(month)
         rows = list(
-            record.rows.filter(
-                movement_at__gte=month_start,
-                movement_at__lt=month_end,
-                cancelled=False,
-            ).order_by("movement_at", "row_number")
+            record.rows.filter(self._candidate_filter([record], month)).order_by("movement_at", "row_number")
         )
-        return self._reconcile_record(record, month, rows)
+        return self._reconcile_candidates(record, month, rows)
 
     def reconcile_many(self, lines, month: date, *, include_zero_difference=False) -> dict[tuple[int, int], PointHistoryReconciliation]:
         keys = {
@@ -274,21 +368,19 @@ class AuditStockHistoryService:
         }
         if not keys:
             return {}
-        month_start, month_end = _month_bounds(month)
-        month_rows = PointProductHistoryRow.objects.filter(
-            movement_at__gte=month_start,
-            movement_at__lt=month_end,
-            cancelled=False,
-        ).order_by("movement_at", "row_number")
-        records = PointProductHistoryImport.objects.filter(
+        records = list(PointProductHistoryImport.objects.filter(
             point_branch_id__in={key[0] for key in keys},
             point_product_id__in={key[1] for key in keys},
             raw_metadata__source=SOURCE_NAME,
-        ).prefetch_related(
+        ))
+        month_rows = PointProductHistoryRow.objects.filter(
+            self._candidate_filter(records, month),
+        ).order_by("movement_at", "row_number")
+        prefetch_related_objects(records,
             Prefetch("rows", queryset=month_rows, to_attr="audit_month_rows")
         )
         return {
-            (record.point_branch_id, record.point_product_id): self._reconcile_record(
+            (record.point_branch_id, record.point_product_id): self._reconcile_candidates(
                 record,
                 month,
                 record.audit_month_rows,
@@ -302,8 +394,11 @@ class AuditStockHistoryService:
         record,
         month: date,
         rows,
+        *,
+        boundary_rows=None,
+        invalid_ids=(),
     ) -> PointHistoryReconciliation:
-        coverage_status = "COMPLETE" if self._covers_month(record, month) else "INCOMPLETE"
+        coverage_status = "COMPLETE" if not invalid_ids and self._covers_month(record, month, boundary_rows=boundary_rows) else "INCOMPLETE"
         totals = {
             "production": Decimal("0"),
             "sales": Decimal("0"),
@@ -315,7 +410,7 @@ class AuditStockHistoryService:
             "identified_adjustment": Decimal("0"),
         }
         ids_by_category = {key: [] for key in totals}
-        unknown_ids = []
+        unknown_ids = list(invalid_ids)
         movement_ids = []
         for row in rows:
             movement_ids.append(row.row_number)
@@ -345,7 +440,7 @@ class AuditStockHistoryService:
             totals[category] += amount
             ids_by_category[category].append(row.row_number)
 
-        return PointHistoryReconciliation(
+        result = PointHistoryReconciliation(
             coverage_status=coverage_status,
             **totals,
             movement_ids=tuple(movement_ids),
@@ -354,6 +449,20 @@ class AuditStockHistoryService:
             },
             unknown_movement_ids=tuple(unknown_ids),
         )
+        if coverage_status == "COMPLETE" and rows and not unknown_ids:
+            opening, closing = rows[0].previous_existence, rows[-1].new_existence
+            continuous = all(
+                current.previous_existence == previous.new_existence
+                for previous, current in zip(rows, rows[1:])
+            )
+            if continuous and result.expected_closing(opening) == closing:
+                return replace(
+                    result,
+                    documentary_opening=opening,
+                    documentary_closing=closing,
+                    documentary_boundary_movement_ids=(rows[0].row_number, rows[-1].row_number),
+                )
+        return result
 
     @staticmethod
     def _category(movement_type: str, quantity: Decimal) -> str | None:

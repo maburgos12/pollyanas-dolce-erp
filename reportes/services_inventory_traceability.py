@@ -87,6 +87,16 @@ def _sorted_issue_payloads(issues) -> list[dict[str, object]]:
     )
 
 
+def _plain_documentary_evidence(value):
+    if isinstance(value, Mapping):
+        return {str(key): _plain_documentary_evidence(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_plain_documentary_evidence(item) for item in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
 def _source_trace_payload(source_trace) -> dict[str, object]:
     payload: dict[str, object] = {}
     for source_name, source_value in sorted(source_trace.items()):
@@ -96,6 +106,9 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
             continue
         if name == "point_history":
             payload[name] = source_value if isinstance(source_value, Mapping) else {}
+            continue
+        if name == "historical_boundary_evidence":
+            payload[name] = _plain_documentary_evidence(source_value) if isinstance(source_value, Mapping) else {}
             continue
         if name in _TRACE_IMPACT_KEYS:
             if not isinstance(source_value, Mapping):
@@ -112,12 +125,16 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
     return payload
 
 
-def _fingerprint_source_trace(source_trace: dict[str, object]) -> dict[str, list[int]]:
+def _fingerprint_source_trace(source_trace: dict[str, object]) -> dict[str, object]:
     """Keep the deployed fingerprint contract independent of UI projections."""
-    return {
+    payload = {
         source_name: list(source_trace.get(source_name, []))
         for source_name in _LEGACY_FINGERPRINT_TRACE_KEYS
     }
+    # Boundary proof changes are source changes, not merely UI decoration.
+    if "historical_boundary_evidence" in source_trace:
+        payload["historical_boundary_evidence"] = source_trace["historical_boundary_evidence"]
+    return payload
 
 
 def _sha256(payload: object) -> str:

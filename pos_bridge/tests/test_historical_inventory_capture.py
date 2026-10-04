@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -40,9 +40,29 @@ class HistoricalStockResolutionTests(SimpleTestCase):
 
         result = resolve_stock_at_close(history, operational_date=date(2026, 7, 31))
 
-        self.assertEqual(result.stock, Decimal("3"))
+        # Stock's frontend reads naive Fecha with moment.utc, not local time.
+        self.assertEqual(result.stock, Decimal("2"))
         self.assertEqual(result.evidence["method"], "latest_movement_at_or_before_close")
-        self.assertEqual(result.evidence["movement_id"], 20)
+        self.assertEqual(result.evidence["movement_id"], 30)
+
+    def test_utc_midnight_is_previous_operational_day_without_rewriting_raw(self):
+        history = [{"Fecha": "2026-10-01T02:01:31.863", "FK_Movimiento": 1686312,
+                    "Existencia_anterior": 2, "Existencia_nueva": 0, "Cancelado": False},
+                   {"Fecha": "2026-10-01T07:00:00Z", "FK_Movimiento": 1687000,
+                    "Existencia_anterior": 0, "Existencia_nueva": 1, "Cancelado": False}]
+        result = resolve_stock_at_close(history, operational_date=date(2026, 9, 30))
+        self.assertEqual(result.stock, Decimal("0"))
+        self.assertEqual(result.evidence["movement_id"], 1686312)
+        self.assertEqual(history[0]["Fecha"], "2026-10-01T02:01:31.863")
+
+    def test_stock_instant_preserves_explicit_offset_and_rejects_invalid_raw(self):
+        from pos_bridge.services.historical_inventory_capture import point_stock_history_instant
+        expected = datetime(2026, 10, 1, 2, tzinfo=datetime_timezone.utc)
+        self.assertEqual(point_stock_history_instant({"Fecha": "2026-10-01T02:00:00"}), expected)
+        self.assertEqual(point_stock_history_instant({"Fecha": "2026-09-30T19:00:00-07:00"}), expected)
+        for raw in ({}, {"Fecha": "not-a-date"}):
+            with self.assertRaises(HistoricalInventoryCaptureError):
+                point_stock_history_instant(raw)
 
     def test_uses_opening_of_first_later_movement_when_full_history_is_available(self):
         history = [

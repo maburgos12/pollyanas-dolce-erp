@@ -4,7 +4,7 @@ from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
 from django.apps import apps
@@ -18,10 +18,18 @@ from pos_bridge.models import (
     PointHistoricalInventoryClosing,
     PointInventorySnapshot,
     PointProductionLine,
+    PointProductHistoryImport,
+    PointProductHistoryRow,
     PointSyncJob,
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE
+from pos_bridge.services.historical_inventory_capture import (
+    HistoricalInventoryCaptureError,
+    point_stock_history_instant, resolve_stock_at_close,
+)
 from pos_bridge.models.product import inventory_consumption_filter
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
@@ -91,6 +99,176 @@ ISSUE_CONVERSION_SOURCE_MISSING = "CONVERSION_SOURCE_MISSING"
 OFFICIAL_CATEGORY_REPORT_SOURCE = "POINT_OFFICIAL_MONTHLY_CATEGORY_REPORT"
 OFFICIAL_POINT_DAILY_SOURCE = "/Report/PrintReportes?idreporte=3"
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
+
+
+def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
+    """Resolve no-month-movement products using only the last documented batch."""
+    resolutions = cache.setdefault(("captured_boundaries", month), {})
+    eligible = {(line.branch_id, line.product_id) for line in lines
+                if (history := reconciliations.get((line.branch_id, line.product_id)))
+                and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids
+                and not history.movement_ids and history.documentary_opening is None
+                and (line.branch_id, line.product_id) not in resolutions}
+    if not eligible:
+        return resolutions
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in eligible},
+        point_product_id__in={key[1] for key in eligible},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ))
+    batches = {}
+    row_filter = Q(pk__in=[])
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        if key not in eligible:
+            continue
+        resolutions[key] = {}
+        metadata = record.raw_metadata or {}
+        try:
+            count = int(metadata["fetched_rows"])
+            limit = int(metadata.get("history_limit", 500))
+            ids = metadata.get("fetched_movement_ids")
+            if ids is not None:
+                if not isinstance(ids, list) or any(isinstance(value, bool) for value in ids):
+                    continue
+                ids = {int(value) for value in ids}
+                if len(ids) != count:
+                    continue
+            elif count >= limit or record.row_count != count:
+                continue
+            if count <= 0 or limit <= 0 or count > limit:
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        batches[record.pk] = (record, key, count, ids, limit)
+        selected = Q(import_record_id=record.pk)
+        if ids is not None:
+            selected &= Q(row_number__in=ids)
+        row_filter |= selected
+    grouped = {record_id: [] for record_id in batches}
+    for row in PointProductHistoryRow.objects.filter(row_filter).only(
+        "import_record_id", "row_number", "raw_payload", "movement_at",
+    ):
+        grouped[row.import_record_id].append(row)
+    for record_id, (record, key, count, ids, limit) in batches.items():
+        rows = grouped[record_id]
+        if len(rows) != count or (ids is not None and {row.row_number for row in rows} != ids):
+            continue
+        if not AuditStockHistoryService._covers_month(record, month, boundary_rows=rows):
+            continue
+        try:
+            raw = [row.raw_payload for row in rows]
+            fetched_at = datetime.fromisoformat(str(record.raw_metadata["fetched_at"]).replace("Z", "+00:00"))
+            if any(point_stock_history_instant(payload) > fetched_at for payload in raw):
+                continue
+            opening = resolve_stock_at_close(raw, operational_date=month - timedelta(days=1), history_limit=limit)
+            closing = resolve_stock_at_close(raw, operational_date=date(
+                month.year, month.month, monthrange(month.year, month.month)[1]), history_limit=limit)
+            resolutions[key] = {"opening": opening, "closing": closing}
+        except (HistoricalInventoryCaptureError, TypeError, ValueError):
+            continue
+    return resolutions
+
+
+def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
+    """Read UTC Stock boundaries in bulk; never rewrite the stored closing."""
+    if closing.source != PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
+        return {line.id: Decimal(line.stock) for line in lines}, {}, ()
+    monthly = cache.setdefault(month, {})
+    missing_lines = [line for line in lines if (line.branch_id, line.product_id) not in monthly]
+    if missing_lines:
+        requested = [SimpleNamespace(branch=line.branch, product=line.product, difference=ZERO)
+                     for line in missing_lines]
+        reconciled = AuditStockHistoryService().reconcile_many(
+            requested, month, include_zero_difference=True,
+        )
+        monthly.update({(line.branch_id, line.product_id): reconciled.get(
+            (line.branch_id, line.product_id)) for line in missing_lines})
+    captured_boundaries = _empty_month_captured_boundaries(
+        lines, month=month, reconciliations=monthly, cache=cache,
+    )
+    # Preserve the legacy capture's explicit empty-history/live-zero proof.
+    # It predates canonical imports and has no timestamp subject to UTC repair.
+    # A later canonical import, however, must pass its own coverage guards.
+    zero_keys = {(line.branch_id, line.product_id) for line in lines
+                 if Decimal(line.stock) == ZERO and (line.evidence or {}).get("method") == "no_history_current_zero"}
+    zero_verified = set()
+    canonical_keys = set()
+    if zero_keys:
+        records = PointProductHistoryImport.objects.filter(
+            point_branch_id__in={key[0] for key in zero_keys},
+            point_product_id__in={key[1] for key in zero_keys},
+            raw_metadata__source="POINT_STOCK_HISTORY_API",
+        )
+        for record in records:
+            key = (record.point_branch_id, record.point_product_id)
+            canonical_keys.add(key)
+            history = monthly.get(key)
+            if (record.raw_metadata.get("fetched_rows") == 0 and key in zero_keys
+                    and history and history.coverage_status == "COMPLETE" and not history.movement_ids):
+                if AuditStockHistoryService._covers_month(record, month):
+                    zero_verified.add(key)
+    expected_date = (month - timedelta(days=1) if boundary == "opening"
+                     else date(month.year, month.month, monthrange(month.year, month.month)[1]))
+    cutoff = datetime.combine(expected_date + timedelta(days=1), time.min,
+                              tzinfo=POINT_BUSINESS_TIMEZONE)
+    expected_keys = {(int(branch_id), int(product_id))
+                     for branch_id in closing.expected_branch_ids
+                     for product_id in closing.expected_product_ids}
+    original_manifest_valid = (
+        closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+        and closing.operational_date == expected_date
+        and (closing.metadata or {}).get("method") == "point_stock_history_boundary"
+        and bool(expected_keys)
+        and {(line.branch_id, line.product_id) for line in lines} == expected_keys
+        and closing.retrieved_at is not None
+        and timezone.is_aware(closing.retrieved_at) and closing.retrieved_at >= cutoff
+    )
+    original_zero_keys = {
+        (line.branch_id, line.product_id) for line in lines
+        if original_manifest_valid and (line.branch_id, line.product_id) in zero_keys
+        and (line.branch_id, line.product_id) not in canonical_keys
+        and type((line.evidence or {}).get("history_rows")) is int
+        and line.evidence["history_rows"] == 0
+        and type(line.evidence.get("history_limit")) is int and line.evidence["history_limit"] == 500
+        and line.created_at is not None and timezone.is_aware(line.created_at)
+        and line.created_at >= cutoff
+    }
+    values, evidence, unproven = {}, {}, []
+    for line in lines:
+        key = (line.branch_id, line.product_id)
+        history = monthly.get(key)
+        quantity = None
+        movement_ids = tuple(history.documentary_boundary_movement_ids) if history else ()
+        captured_evidence = {}
+        if history and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids:
+            quantity = getattr(history, f"documentary_{boundary}", None)
+            if quantity is None and (resolved := captured_boundaries.get(key, {}).get(boundary)):
+                quantity = resolved.stock
+                captured_evidence = dict(resolved.evidence)
+                movement_ids = (int(resolved.evidence["movement_id"]),)
+            if quantity is None and key in zero_verified:
+                quantity = ZERO
+        if quantity is None and key in original_zero_keys:
+            quantity = ZERO
+        evidence[line.id] = {
+            "line_id": line.id, "original_stock": str(line.stock),
+            "original_evidence": dict(line.evidence or {}),
+            "effective_stock": str(quantity) if quantity is not None else None,
+            "movement_ids": movement_ids,
+            "captured_boundary_evidence": captured_evidence,
+            "coverage_status": history.coverage_status if history else "MISSING",
+            "canonical_history_verified": bool(quantity is not None and key not in original_zero_keys
+                                               and history and history.coverage_status == "COMPLETE"
+                                               and not history.unknown_movement_ids),
+            "original_boundary_verified": key in original_zero_keys,
+            "contract": "POINT_STOCK_RAW_UTC",
+        }
+        if quantity is None:
+            unproven.append(line)
+        else:
+            values[line.id] = Decimal(quantity)
+    return values, evidence, tuple(unproven)
 
 
 def _empty_counts() -> Mapping[str, int]:
@@ -307,6 +485,7 @@ class MonthlyPointProductBalanceService:
         self.refresh_official_sales = bool(refresh_official_sales)
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        self._historical_boundary_cache = {}
 
     def build(
         self,
@@ -316,6 +495,7 @@ class MonthlyPointProductBalanceService:
     ) -> MonthlyPointBalance:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        self._historical_boundary_cache = {}
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         today = timezone.localdate()
@@ -575,7 +755,14 @@ class MonthlyPointProductBalanceService:
             metadata = previous.metadata or {}
             closing = metadata.get("closing_inventory_meta") or {}
             contract = (metadata.get("balance") or {}).get("contract")
-            if contract == "POINT_PRODUCT_BALANCE_V1" and str(closing.get("effective_date")) == snapshot_date.isoformat():
+            legacy_stock_boundary = (
+                closing.get("historical_closing_source") == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY
+                and closing.get("historical_boundary_contract") != "POINT_STOCK_RAW_UTC"
+            )
+            # A locked ledger can predate the raw-UTC Stock contract. Re-read
+            # the exact historical source; never rewrite that original ledger.
+            if (not legacy_stock_boundary and contract == "POINT_PRODUCT_BALANCE_V1"
+                    and str(closing.get("effective_date")) == snapshot_date.isoformat()):
                 values = {}
                 # Closure lines are parent-equivalent projections, even in V1.
                 # Only the original recipe ledger can feed the exact-product report.
@@ -601,6 +788,9 @@ class MonthlyPointProductBalanceService:
                         "snapshot_rows": sum(count for _, count in values.values()),
                         "matched_recipe_count": len(values),
                     })
+                    for key in ("historical_closing_source", "historical_closing_id", "historical_boundary_contract"):
+                        if key in closing:
+                            meta[key] = closing[key]
                     # Compacted metadata can contain a hash/sample instead of
                     # full coverage arrays. Never compare those as actual keys.
                     coverage = (metadata.get("balance") or {}).get("closing_coverage") or closing
@@ -653,9 +843,25 @@ class MonthlyPointProductBalanceService:
         applied_mapped_recipe_keys: set[tuple[int, int, int]] = set()
         recipe_scope_totals: dict[int, dict[str, Decimal]] = {}
 
+        boundary = "opening" if source == "opening_snapshot" else "closing"
+        month = ((snapshot_date + timedelta(days=1)).replace(day=1)
+                 if boundary == "opening" else snapshot_date.replace(day=1))
+        boundary_values, boundary_evidence, unproven = documentary_historical_boundary(
+            closing, lines, month=month, boundary=boundary, cache=self._historical_boundary_cache,
+        )
+        unproven_ids = {line.id for line in unproven}
+
         for line in lines:
             receta = self._match_recipe(code=line.product.sku, name=line.product.name)
-            quantity = Decimal(line.stock)
+            if line.id in unproven_ids:
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source=source, movement_id=str(line.id), item_code=line.product.sku,
+                    item_name=line.product.name, quantity=Decimal(line.stock),
+                    issue="SOURCE_INCOMPLETE", branch_external_id=line.branch.external_id,
+                    branch_name=line.branch.name, movement_date=snapshot_date,
+                ))
+                continue
+            quantity = boundary_values[line.id]
             if receta is None:
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
@@ -718,7 +924,10 @@ class MonthlyPointProductBalanceService:
             "recipe_scope_totals": recipe_scope_totals,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
+            "historical_boundary_evidence": tuple(boundary_evidence.values()),
         })
+        if authoritative and closing.source == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
+            meta["historical_boundary_contract"] = "POINT_STOCK_RAW_UTC"
         return values, meta, unresolved
 
     def _load_snapshot(self, *, snapshot_date: date, source: str):

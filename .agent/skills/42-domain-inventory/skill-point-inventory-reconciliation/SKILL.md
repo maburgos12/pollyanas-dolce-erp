@@ -48,6 +48,12 @@ Se seleccionan por período y claves externas de producto/sucursal, nunca solo p
 nombre, SKU ambiguo o PK del expediente. No reemplazan FK documental ni prueban conteo
 físico. No consultar otra vez un folio verificado sin evidencia nueva.
 
+El procedimiento contiene el contrato temporal comprobado por dominio: Stock
+`raw_payload.Fecha` naive es UTC; notas `Fecha_Hora` naive es hora local. Aplicarlo
+también a apertura, cierre y cobertura, no solo a ventas. La actualización de este
+conocimiento no certifica que el lector haya sido publicado ni autoriza reescribir
+originales. El checkpoint fechado distingue evidencia, reparación y entrega.
+
 ## Límites y siguiente paso
 
 ### Plan mensual antes de revisar uno por uno
@@ -89,6 +95,9 @@ sustitución; recuperación por backup conserva identificadores/timestamps/escri
 colisiones abortan y segunda ejecución no agrega filas. No reconstruir inventario,
 crear merma Point ni dar por reparada autoridad mensual solo por266→267. No repetir
 solicitudes humanas ya enviadas. America/Mazatlan permanece.
+Esa autorización inicial fue seguida de una autorización mensual específica;
+el checkpoint4oct registra job81612 y autoridad comprobada. No tratar el bloqueo
+histórico anterior como vigente sin consultar ese corte y las fuentes actuales.
 
 ## Verificación
 

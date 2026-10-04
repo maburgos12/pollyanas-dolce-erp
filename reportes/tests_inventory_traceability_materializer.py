@@ -144,6 +144,20 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_documentary_utc_boundary_evidence_survives_materialization_and_fingerprint(self):
+        from types import MappingProxyType
+        proof = MappingProxyType({"opening": MappingProxyType({
+            "original_stock": "10", "effective_stock": "7",
+            "movement_ids": (101, 102), "contract": "POINT_STOCK_RAW_UTC",
+        })})
+        line = self._line(source_trace={"opening": (11,), "historical_boundary_evidence": proof})
+        first = InventoryAuditMaterializer()._prepare_line(line)
+        self.assertEqual(first["source_trace"]["historical_boundary_evidence"]["opening"]["movement_ids"], [101, 102])
+        changed = self._line(source_trace={"opening": (11,), "historical_boundary_evidence": {
+            "opening": {**dict(proof["opening"]), "movement_ids": (201, 202)},
+        }})
+        self.assertNotEqual(first["fingerprint"], InventoryAuditMaterializer()._prepare_line(changed)["fingerprint"])
+
     def test_history_does_not_replace_commercial_sales_with_unverified_stock_effect(self):
         line = replace(self._line(closing=ZERO), production=ZERO,
                        sales=Decimal("5"), expected_closing=Decimal("5"),
