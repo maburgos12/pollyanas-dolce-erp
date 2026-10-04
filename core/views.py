@@ -171,6 +171,9 @@ def _dashboard_materialized_executive_context(months_window: object) -> dict[str
     payload["sales_refresh_status"] = _sales_refresh_status(visible_cut_date=visible_cut_date)
     payload["months_window"] = normalized_months
     payload["dashboard_exec_ready"] = True
+    from reportes.sales_confidence import build_sales_confidence
+    cutoff = visible_cut_date or timezone.localdate()
+    payload["sales_confidence"] = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
     return payload
 
 
@@ -3432,6 +3435,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "forecast_panel": executive_panels["forecast_panel"],
                     "yoy_panel": executive_panels["yoy_panel"],
                     "profitability_panel": executive_panels["profitability_panel"],
+                    "sales_confidence": executive_panels["sales_confidence"],
                     "production_sales_panel": executive_panels["production_sales_panel"],
                     "inventory_ledger_panel": executive_panels["inventory_ledger_panel"],
                     "months_window": months_window,

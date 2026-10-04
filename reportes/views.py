@@ -6297,7 +6297,7 @@ def bi(request: HttpRequest) -> HttpResponse:
     )
     executive_panels = _bi_cached_value(
         runtime_cache=bi_runtime_cache,
-        section="executive-panels",
+        section="executive-panels-confidence-v1",
         builder=lambda: build_executive_bi_panels(
             months=months_window,
             branch_id=branch_id,
@@ -6313,6 +6313,9 @@ def bi(request: HttpRequest) -> HttpResponse:
         ),
     )
 
+    from reportes.sales_confidence import build_sales_confidence
+    cutoff = executive_panels.get("latest_cutoff_date") or timezone.localdate()
+    executive_panels["sales_confidence"] = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
     export_format = (request.GET.get("export") or "").lower()
     if branch_id and export_format == "csv":
         return _export_branch_bi_csv(executive_panels["branch_pricing_panel"], executive_panels["branch_contribution_panel"])
@@ -6334,6 +6337,7 @@ def bi(request: HttpRequest) -> HttpResponse:
     context = {
         "snapshot": snapshot,
         "executive_panels": executive_panels,
+        "sales_confidence": executive_panels["sales_confidence"],
         "forecast_panel": executive_panels["forecast_panel"],
         "yoy_panel": executive_panels["yoy_panel"],
         "profitability_panel": executive_panels["profitability_panel"],

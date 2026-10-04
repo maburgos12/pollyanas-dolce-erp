@@ -74,11 +74,13 @@ def _hydrate_dashboard_full_payload(payload: dict[str, object] | None) -> dict[s
     months = normalize_dashboard_months_window(hydrated.get("months_window"))
     sales = get_dashboard_sales_dataset(months=months)
     yoy = build_closed_yoy_panel(cutoff=sales.get("latest_date"), months=months)
+    from reportes.executive_panels import build_profitability_panel
+    hydrated["profitability_panel"] = build_profitability_panel(latest_date=sales.get("latest_date"))
     hydrated["dataset_sales"] = sales
     hydrated["daily_sales_snapshot"] = dict(sales["daily_sales_snapshot"])
     hydrated["yoy_panel"] = yoy
     hydrated["executive_panels"] = {**(hydrated.get("executive_panels") or {}),
-        "yoy_panel": yoy, "sales_closed_cutoff_date": sales.get("latest_date")}
+        "yoy_panel": yoy, "profitability_panel": hydrated["profitability_panel"], "sales_closed_cutoff_date": sales.get("latest_date")}
     hydrated["kpi_summary"] = {**(hydrated.get("kpi_summary") or {}),
         "sales_amount": sales["daily_sales_snapshot"].get("total_amount"),
         "sales_tickets": sales["daily_sales_snapshot"].get("total_tickets"),

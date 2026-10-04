@@ -1197,7 +1197,7 @@ def build_profitability_panel(
     window_start = latest_date - timedelta(days=max(lookback_days - 1, 0))
     prev_start = window_start - timedelta(days=lookback_days)
     prev_end = window_start - timedelta(days=1)
-    latest_week = RecetaCostoSemanal.objects.aggregate(v=Max("week_start")).get("v")
+    latest_week = RecetaCostoSemanal.objects.filter(week_start__lte=latest_date).aggregate(v=Max("week_start")).get("v")
     q = (q or "").strip()
 
     cost_map = _recipe_cost_map_for_sales_lens(
@@ -1244,7 +1244,7 @@ def build_profitability_panel(
     for row in current_rows:
         receta_id = int(row["receta_id"])
         unit_cost = cost_map.get(receta_id)
-        if unit_cost is None:
+        if unit_cost is None or unit_cost <= ZERO:
             continue
         qty = _to_decimal(row["quantity"])
         revenue = _to_decimal(row["revenue"])
@@ -1337,8 +1337,10 @@ def build_profitability_panel(
         "avg_cost_pct": avg_cost_pct,
         "cost_signal_counts": signal_counts,
         "basis_note": (
-            "Margen calculado solo con materia prima costada en la última semana disponible. "
-            "Mano de obra e indirectos siguen fuera del modelo."
+            "Margen estimado con costo total unitario de la semana disponible al corte "
+            f"({latest_week.isoformat() if latest_week else 'sin costo'}). "
+            "Se aplica ese costo a toda la ventana; no es el costo real de cada venta. "
+            "Productos sin costo positivo respaldado quedan fuera del ranking."
         ),
     }
 
@@ -2779,11 +2781,13 @@ def build_executive_bi_panels(
     action_filter: str | None = None,
     budget_month: int | None = None,
 ) -> dict[str, object]:
+    from reportes.sales_confidence import build_sales_confidence
     trusted_sales_latest = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
     closed_cutoff = get_dashboard_sales_dataset(months=months).get("latest_date")
     common_flow_date = _common_flow_cutoff_date() or trusted_sales_latest
     return {
         "latest_cutoff_date": trusted_sales_latest,
+        "sales_confidence": build_sales_confidence(start_date=trusted_sales_latest.replace(day=1), end_date=trusted_sales_latest),
         "forecast_panel": build_sales_forecast_panel(latest_date=trusted_sales_latest),
         "yoy_panel": build_closed_yoy_panel(cutoff=closed_cutoff, months=months),
         "sales_closed_cutoff_date": closed_cutoff,

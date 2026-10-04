@@ -1,0 +1,9 @@
+.sales-confidence { margin-block: 1.25rem; padding: 1.25rem; border: 1px solid var(--dorado, #C9A84C); border-radius: .75rem; background: var(--blanco, #FFFAF5); color: var(--texto, #3D2B2B); }
+.sales-confidence-heading { display: flex; align-items: baseline; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
+.sales-confidence h2 { margin: 0; font-size: 1.125rem; }
+.sales-confidence p { margin-block: .75rem; max-width: 75ch; }
+.sales-confidence-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-block: 1rem; }
+.sales-confidence-metrics span, .sales-confidence-metrics strong { display: block; }
+.sales-confidence-metrics span { font-size: .875rem; margin-bottom: .25rem; }
+.sales-confidence summary { cursor: pointer; padding-block: .5rem; text-decoration: underline; text-underline-offset: .2em; }
+.sales-confidence summary:focus-visible { outline: 2px solid var(--vino, #8B2252); outline-offset: 4px; }

@@ -279,6 +279,10 @@ def get_point_sales_period_summary(*, start_date: date, end_date: date) -> dict[
         "max_sale_date": queryset.aggregate(max_date=Max("sale_date"))["max_date"],
         "rows": queryset.count(),
         "total": queryset.aggregate(total=Sum("gross_amount"))["total"] or ZERO,
+        "by_branch": [
+            {"branch_id": row["branch__erp_branch_id"], "name": row["branch__erp_branch__nombre"] or "Sin identidad ERP", "total": row["total"] or ZERO}
+            for row in queryset.order_by().values("branch__erp_branch_id", "branch__erp_branch__nombre").annotate(total=Sum("gross_amount"))
+        ],
     }
 
 
