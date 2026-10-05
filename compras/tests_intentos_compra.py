@@ -42,9 +42,6 @@ from reportes.models import AreaPresupuestoResponsable
 from maestros.models import Proveedor
 
 
-COMPRAS_CURRENT_MIGRATION = ("compras", "0017_intento_reembolso_cargos_adicionales")
-
-
 class OperacionesIntentoCompraTests(_CompraDepartamentalBase, TestCase):
     def test_reemplazo_conserva_exposicion_pendiente_sin_duplicar_su_reserva(self):
         intento = self._intento(pagado=True)
@@ -1142,7 +1139,6 @@ class IntentoCompraModelTests(_CompraDepartamentalBase, TestCase):
 class MigracionCargosReembolsoTests(TransactionTestCase):
     migrate_from = ("compras", "0016_intentos_compra_reembolsos")
     migrate_to = ("compras", "0017_intento_reembolso_cargos_adicionales")
-    restore_to = COMPRAS_CURRENT_MIGRATION
 
     def setUp(self):
         super().setUp()
@@ -1151,7 +1147,8 @@ class MigracionCargosReembolsoTests(TransactionTestCase):
         self.apps_0016 = self.executor.loader.project_state([self.migrate_from]).apps
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate([self.restore_to])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 
     def test_migracion_asigna_cero_a_intento_historico(self):
@@ -1193,7 +1190,6 @@ class MigracionCargosReembolsoTests(TransactionTestCase):
 class MigracionIntentosCompraTests(TransactionTestCase):
     migrate_from = ("compras", "0015_comprarealizadadepartamental_version_and_more")
     migrate_to = ("compras", "0016_intentos_compra_reembolsos")
-    restore_to = COMPRAS_CURRENT_MIGRATION
 
     def setUp(self):
         super().setUp()
@@ -1202,7 +1198,8 @@ class MigracionIntentosCompraTests(TransactionTestCase):
         self.apps_0015 = self.executor.loader.project_state([self.migrate_from]).apps
 
     def tearDown(self):
-        MigrationExecutor(connection).migrate([self.restore_to])
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
         super().tearDown()
 
     def _datos_base(self):
@@ -1399,13 +1396,11 @@ class MigracionIntentosCompraTests(TransactionTestCase):
 
 
 class RestauracionEsquemaMigracionesTests(TransactionTestCase):
-    current_leaf = COMPRAS_CURRENT_MIGRATION
-
     def test_clases_de_migracion_restauran_el_leaf_actual(self):
-        self.assertIn(
-            self.current_leaf,
-            MigrationRecorder(connection).applied_migrations(),
-        )
+        applied = MigrationRecorder(connection).applied_migrations()
+        for leaf in MigrationExecutor(connection).loader.graph.leaf_nodes():
+            with self.subTest(leaf=leaf):
+                self.assertIn(leaf, applied)
 
 
 class AccionesIntentoCompraViewTests(_CompraDepartamentalBase, TestCase):

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Documentos del trabajo{% endblock %}
+{% block page_title %}Documentos del trabajo{% endblock %}
+{% block content %}
+<div class="module-shell">
+  <p><a href="{% url 'mantenimiento:dashboard' %}#tab-bandeja">Bandeja de Mantenimiento</a></p>
+  <h1>Documentos del trabajo</h1>
+  <p>{% if tipo == 'orden' %}Orden {{ trabajo.folio }}{% else %}Incidencia {{ trabajo.titulo }}{% endif %} · ID {{ trabajo_id }}</p>
+  <p>Consulta soporte existente y confirma su relación con este trabajo. Los importes pertenecen a sus fuentes y no se suman aquí. Vincular no aprueba, reconoce ni paga un gasto.</p>
+  {% include "mantenimiento/_documentos_financieros.html" %}
+</div>
+{% endblock %}
