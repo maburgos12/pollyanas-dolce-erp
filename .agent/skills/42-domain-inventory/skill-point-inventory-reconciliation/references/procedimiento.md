@@ -389,7 +389,7 @@ La historia mensual `INCOMPLETE` puede contener una respuesta original íntegra 
 la respuesta ya archivada con `_original_batch`: validar SHA, petición, recibo
 posterior al corte, producto/sucursal de dominio PRODUCT, ocurrencias, membresía,
 raw y fila canónica. Ubicar el último movimiento efectivo anterior al corte UTC
-Stock y el primero posterior. Deben ser vecinos inmediatos en el archivo y en
+Stock y el primero posterior. Deben ser vecinos efectivos en el archivo y en
 los hechos retenidos; `Existencia_nueva` del anterior debe coincidir exactamente
 con `Existencia_anterior` del siguiente. Un hueco de cadena dentro del intervalo
 relevante, movimiento retenido intercalado, campo canónico alterado, archivo o
