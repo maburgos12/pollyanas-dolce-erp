@@ -400,6 +400,23 @@ class DestinosDocumentalesTests(TestCase):
         self.assertNotContains(self.client.get(qr_url),url)
 
 
+    def test_tags_sin_actor_autenticado_ocultan_enlaces_sin_consultas(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template import Context, Template
+        from django.test import RequestFactory
+        tag=Template("{% load destinos_documentales %}{% consulta_compras_destino request.user 'ACTIVO' pk as url %}{% puede_consultar_destinos request.user as permitido %}{{ url }}|{{ permitido|yesno:'yes,no' }}")
+        for user in ('missing',None,'',AnonymousUser()):
+            request=RequestFactory().get('/app/activos/')
+            if user!='missing':
+                request.user=user
+            with self.subTest(user=user),self.assertNumQueries(0):
+                try:
+                    html=tag.render(Context({'request':request,'pk':self.activo.pk}))
+                except (AttributeError,PermissionDenied) as exc:
+                    self.fail(f'El contexto sin actor debe ocultar el enlace: {exc}')
+                self.assertEqual(html,'|no')
+
+
 class DestinosConcurrentesTests(TransactionTestCase):
     def test_mismo_par_concurrente_entre_actores(self):
         from concurrent.futures import ThreadPoolExecutor

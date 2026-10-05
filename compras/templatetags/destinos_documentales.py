@@ -7,6 +7,8 @@ register = template.Library()
 
 def _estado_peticion(context, user):
     """Una instantánea por petición y actor; no sobrevive cambios de sesión."""
+    if not getattr(user, 'is_authenticated', False) or not getattr(user, 'pk', None):
+        return None
     request = context.get('request')
     if request is not None:
         if not hasattr(request, '_destinos_documentales_por_usuario'):
@@ -23,6 +25,8 @@ def _estado_peticion(context, user):
 @register.simple_tag(takes_context=True)
 def consulta_compras_destino(context, user, tipo, destino_id):
     estado = _estado_peticion(context, user)
+    if estado is None:
+        return ''
     if 'visibles' not in estado:
         # ponytail: O(n) vínculos autorizados por request; si crece el histórico,
         # consultar sólo los IDs de destino presentes en la pantalla.
@@ -37,6 +41,8 @@ def consulta_compras_destino(context, user, tipo, destino_id):
 @register.simple_tag(takes_context=True)
 def puede_consultar_destinos(context, user):
     estado = _estado_peticion(context, user)
+    if estado is None:
+        return False
     if 'puede_consultar' not in estado:
         actor = estado['actor']
         estado['puede_consultar'] = (
