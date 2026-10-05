@@ -387,7 +387,8 @@ def _original_cut_boundaries(lines, *, month, cutoff, reconciliations, cache):
                      "original_batch_evidence": batch["evidence"],
                      "coverage_promoted": False, "physical_count_verified": False}
             proof["source_signature"] = hashlib.sha256(json.dumps({
-                "proof": proof, "canonical": [(row.row_number, row.raw_payload) for row in stored[record.pk]],
+                "proof": proof, "canonical": [(row.row_number, row.raw_payload)
+                                               for row in sorted(stored[record.pk], key=lambda row: row.row_number)],
             }, sort_keys=True, default=str).encode()).hexdigest()
             proofs[key] = stock, proof
         except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError, KeyError):
