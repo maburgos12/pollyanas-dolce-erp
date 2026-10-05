@@ -70,6 +70,11 @@ autorizada: no simular un cliente HTTP para hacerla pasar por captura actual. El
 goal review/plan sigue sin importar. Fecha de ingreso no es fecha de consulta;
 conservar petición, dominio, SHA, membresía y procedencia por fila. Un resumen o
 una muestra no se convierte en respuesta completa ni en cobertura COMPLETE.
+Ante una respuesta íntegra con FK repetida, consultar el contrato de membresía del
+procedimiento: conservar todas las ocurrencias y su límite original; sólo raws con
+contenido y tipos idénticos comparten una fila canónica. Nunca reducir500 a499 para
+aparentar lote no saturado. Discontinuidades fuera del mes permanecen en evidencia;
+cadena mensual y ambos cortes requieren prueba propia y firma del archivo usado.
 
 Los hallazgos fechados son evidencia histórica, no actualización de fuentes canónicas.
 Se seleccionan por período y claves externas de producto/sucursal, nunca solo por

@@ -4,6 +4,29 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Corte5oct2026: vacío/cero publicado y membresía original en reparación
+
+PR1482 merge721f5c84, CI37352912991/validate37352913282 PASS. Deploy oficial agotó
+readiness inicial durante arranque; comprobación posterior HEAD/check0/migrate0 y
+readiness301 acreditó publicación. Dos lecturas iguales HTTP0/ops0 con huellas
+intactas:11aperturas/18cierres todavía sin prueba, no551 pendientes. Native3341
+runs5041/5042/context13 iguales y Orquestación autenticada/consola[]. Recursos
+temporales propios retirados con respaldo verificado. No repetir entrega1482.
+
+Seis consultas de integridad autorizadas conservaron respuestas íntegras originales:
+2133/52,2135/53,2250/75,2451/144,2521/755 tienen500ocurrencias/499FK;
+3877/672 tiene285/284. Duplicados exactos de contenido y tipos, no dos movimientos
+contables. SHA/request/fecha/raw preservados; cadena septiembre y ambos cortes
+continuos, discontinuidades anteriores permanecen visibles. Sustituye la ausencia
+de respuesta íntegra del antecedente de abajo, no autoriza editar metadata vieja.
+Implementación `auditor-membresia-original` usa el contrato del procedimiento;
+pruebas y documentación NO acreditan publicación, ingreso ni cierre mensual.
+
+Preview oficial post1482 READONLY/HTTP0/refreshFalse mantiene lock_readyFalse:
+29fronteras,23orígenesAGG,2destinosExtra10 y7ventasCakeTopper. Son pendientes de
+prueba/clasificación, no pérdidas. Investigación residual Point debe conservar
+la sesión única; ocupado significa0HTTP y liberación natural, nunca desbloqueo.
+
 ### Autorización5oct2026: originales vacío/cero e integridad acotada
 
 Mauricio entregó orden expresa de ejecutar: autoriza el contrato estricto de
