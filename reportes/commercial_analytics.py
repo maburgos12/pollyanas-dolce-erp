@@ -50,14 +50,16 @@ def decompose_products(rows):
     Unmatched products/returns stay visible as a separate exact contribution.
     """
     price = volume = unmatched = ZERO
+    matched = 0
     for r in rows:
         if r['previous_price'] is not None and r['current_price'] is not None:
+            matched += 1
             price += r['current_quantity'] * (r['current_price']-r['previous_price'])
             volume += r['previous_price'] * (r['current_quantity']-r['previous_quantity'])
         else:
             unmatched += r['delta']
-    return [dict(label='Precio medio realizado', amount=price), dict(label='Cantidad por producto', amount=volume),
-            dict(label='Productos sin comparación / ajustes', amount=unmatched)]
+    effects = [dict(label='Precio medio realizado', amount=price), dict(label='Cantidad por producto', amount=volume)] if matched else []
+    return effects + [dict(label='Productos sin comparación / ajustes', amount=unmatched)]
 
 
 def _product_groups(facts):

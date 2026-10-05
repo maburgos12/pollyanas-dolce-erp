@@ -141,3 +141,13 @@ class CommercialAnalyticsTests(TestCase):
         self.assertEqual(panel['monthly'][3]['control_difference'],D('-0.10'))
         filtered=_build_panel(2026,4,self.closed.id)
         self.assertFalse(filtered['has_controls'])
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_without_any_matched_sku_price_and_volume_are_not_reported_as_zero_effects(self,today):
+        self.fact(2024,key='old-code',source='LEGACY',amount=100)
+        self.fact(2025,key='new-code',source='AUTHORITATIVE',amount=150)
+        panel=_build_panel(2025,0,None)
+        self.assertEqual(panel['delta'],D(50))
+        self.assertNotIn('Precio medio realizado',[r['label'] for r in panel['components']])
+        self.assertNotIn('Cantidad por producto',[r['label'] for r in panel['components']])
+        self.assertEqual(sum(r['amount'] for r in panel['components']),D(50))
