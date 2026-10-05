@@ -473,3 +473,29 @@ class BitacoraMantenimiento(models.Model):
 
     def __str__(self):
         return f"{self.orden.folio} · {self.accion}"
+
+
+class OrigenImportacionBitacora(models.Model):
+    """Identidad global de archivo/servicio; conserva el resultado eliminado."""
+    archivo_sha256 = models.CharField(max_length=64)
+    hoja = models.CharField(max_length=31)
+    fila = models.PositiveIntegerField()
+    slot = models.PositiveSmallIntegerField()
+    huella_revision = models.CharField(max_length=64)
+    fuente = models.JSONField()
+    decision = models.JSONField()
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+                              related_name='origenes_bitacora')
+    autor_original_id = models.PositiveBigIntegerField()
+    activo_original_id = models.PositiveBigIntegerField()
+    orden = models.ForeignKey(OrdenMantenimiento, null=True, on_delete=models.SET_NULL,
+                             related_name='origenes_importacion')
+    orden_original_id = models.PositiveBigIntegerField(null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        default_permissions = ()
+        constraints = [
+            models.UniqueConstraint(fields=['archivo_sha256','hoja','fila','slot'], name='origen_bitacora_global_unique'),
+            models.CheckConstraint(check=models.Q(slot__in=[1,2]), name='origen_bitacora_slot_valido'),
+        ]
