@@ -382,6 +382,26 @@ los metadatos antiguos para aparentar que fueron válidos. Review/plan sólo obs
 no gana importación, HTTP, aprobación, conteo físico ni cierre mensual. Confirmar
 publicación y aceptación en checkpoint antes de ejecutar el contrato nuevo.
 
+### Corte independiente de una respuesta original parcial
+
+La historia mensual `INCOMPLETE` puede contener una respuesta original íntegra de
+5/10/15/50/100/300/500 movimientos que cruce exactamente apertura o cierre. Leer
+la respuesta ya archivada con `_original_batch`: validar SHA, petición, recibo
+posterior al corte, producto/sucursal de dominio PRODUCT, ocurrencias, membresía,
+raw y fila canónica. Ubicar el último movimiento efectivo anterior al corte UTC
+Stock y el primero posterior. Deben ser vecinos inmediatos en el archivo y en
+los hechos retenidos; `Existencia_nueva` del anterior debe coincidir exactamente
+con `Existencia_anterior` del siguiente. Un hueco de cadena dentro del intervalo
+relevante, movimiento retenido intercalado, campo canónico alterado, archivo o
+procedencia inválida vetan la prueba. No derivar saldo de un solo lado del corte.
+
+Registrar IDs de ambos vecinos, corte, stock y firma de fuentes como evidencia
+`POINT_ORIGINAL_CUT_BOUNDARY_V1`. Este contrato acredita **sólo el corte**:
+`coverage_status` permanece `INCOMPLETE`, `canonical_history_verified=False`,
+`physical_count_verified=False`. No reingresar ni consultar de nuevo Point para
+usar la evidencia; no llamar `resolve_stock_at_close` sin la prueba de membresía
+original. Una respuesta sin vecinos conserva `effective_stock=None` y el bloqueo.
+
 Registrar una evidencia reciente por par y no derivar cantidades de la posición
 de una tupla: separar sales/transfer_in/transfer_out/ajuste/conversión. Un preflight
 que encuentra ventas distintas aborta antes de sesión; diagnosticar contra fuente,
