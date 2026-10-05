@@ -352,6 +352,7 @@
       <div>
         <div class="bi-kicker">Catálogo</div>
         <h2 class="bi-panel-title">Proveedores de servicio</h2>
+        {% if puede_ver_vinculos %}<p><a href="{% url 'mantenimiento:vinculos-proveedores' %}">Vínculos documentales con el maestro comercial</a></p>{% endif %}
         <p class="bi-copy">Talleres, técnicos y empresas de mantenimiento. Agrégalos aquí para asignarlos rápidamente a cualquier reporte u orden.</p>
         {% if proveedores_sin_contacto %}
           <p class="bi-copy"><strong>{{ proveedores_sin_contacto }}</strong> de {{ proveedores_todos|length }} no tienen teléfono ni WhatsApp. Complétalos cuando los uses: sin número no hay a quién llamar en una urgencia.</p>

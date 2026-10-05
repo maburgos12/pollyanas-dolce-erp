@@ -1,5 +1,6 @@
 from django.urls import path
 
+from .views_vinculos_proveedores import vinculos_proveedores
 from . import views
 from .views_reporte_orden import orden_desde_reporte
 from .views_consolidacion_higiene import consolidacion_higiene
@@ -7,6 +8,7 @@ from .views_consolidacion_higiene import consolidacion_higiene
 app_name = "mantenimiento"
 
 urlpatterns = [
+    path("proveedores/vinculos-documentales/", vinculos_proveedores, name="vinculos-proveedores"),
     path("reportes/<int:pk>/orden/", orden_desde_reporte, name="orden-desde-reporte"),
     path("", views.dashboard, name="dashboard"),
     path(

@@ -1269,6 +1269,8 @@ class ProveedorListView(LoginRequiredMixin, ListView):
     
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        from mantenimiento.services_vinculos_proveedores import actor_actual, puede_leer_vinculos
+        context["puede_ver_vinculos"] = puede_leer_vinculos(actor_actual(self.request.user))
         qs = self.get_queryset()
         total_proveedores = qs.count()
         total_activos = qs.filter(activo=True).count()

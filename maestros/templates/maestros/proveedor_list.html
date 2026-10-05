@@ -36,6 +36,7 @@
       </div>
     </div>
     <div class="bi-hero-side">
+      {% if puede_ver_vinculos %}<a class="btn btn-secondary" href="{% url 'mantenimiento:vinculos-proveedores' %}">Vínculos documentales con perfiles técnicos</a>{% endif %}
       <a class="btn btn-primary" href="{% url 'maestros:proveedor_create' %}">+ Nuevo proveedor</a>
     </div>
   </section>

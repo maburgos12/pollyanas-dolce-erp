@@ -2011,6 +2011,8 @@ def dashboard(request):
                 open_item_uid = requested_item["uid"]
     provider_options = list(ProveedorServicio.objects.filter(activo=True).order_by("nombre")[:180])
     puede_crear_proveedor = _can_write_mantenimiento(request.user)
+    from .services_vinculos_proveedores import actor_actual, puede_leer_vinculos
+    puede_ver_vinculos = puede_leer_vinculos(actor_actual(request.user))
     proveedores_todos = list(ProveedorServicio.objects.order_by("nombre"))
     asset_options = Activo.objects.select_related("sucursal").filter(activo=True).order_by(
         "sucursal__nombre", "nombre", "codigo"
@@ -2109,6 +2111,7 @@ def dashboard(request):
             "unidades_para_servicio": list(Unidad.objects.filter(activa=True).select_related("sucursal").order_by("descripcion", "codigo")),
             "instalacion_categorias": INSTALACION_CATEGORIAS,
             "proveedores_todos": proveedores_todos,
+            "puede_ver_vinculos": puede_ver_vinculos,
             "proveedores_sin_contacto": sum(
                 1 for p in proveedores_todos if not p.telefono and not p.whatsapp
             ),
