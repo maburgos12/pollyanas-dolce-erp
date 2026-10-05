@@ -295,6 +295,134 @@ class HistoricalInventoryClosingTests(TestCase):
         self.assertFalse(proof["canonical_history_verified"])
         self.assertEqual(missing, [])
 
+    def test_original_zero_accepts_independent_proof_with_empty_incomplete_canonical(self):
+        closing = self.original_zero_closing()
+        record = AuditStockHistoryService()._canonical_import(self.branches[0], self.product)
+        record.raw_metadata = {"source": "POINT_STOCK_HISTORY_API", "fetched_rows": 0,
+            "history_limit": 500, "fetched_movement_ids": [],
+            "fetched_at": "2026-10-01T01:52:00+00:00"}
+        record.save()
+        original = dict(record.raw_metadata)
+        values, meta, _ = MonthlyPointProductBalanceService()._load_historical_closing(
+            snapshot_date=date(2026, 9, 30), source="closing_snapshot")
+        self.assertEqual(values, {self.recipe.pk: (Decimal("0"), 1)})
+        proof = meta["historical_boundary_evidence"][0]
+        self.assertTrue(proof["original_boundary_verified"])
+        self.assertFalse(proof["canonical_history_verified"])
+        self.assertEqual(proof["coverage_status"], "INCOMPLETE")
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata, original)
+
+    def test_consolidated_zero_requires_exact_original_source_line_and_own_timestamp(self):
+        source = self.original_zero_closing()
+        source.status = "DRAFT"  # Other pairs failed, this original pair did not.
+        source.save()
+        consolidated = PointHistoricalInventoryClosing.objects.create(
+            operational_date=source.operational_date, status="VERIFIED", source=source.source,
+            source_fingerprint="consolidated-zero", expected_branch_ids=source.expected_branch_ids,
+            expected_product_ids=source.expected_product_ids, retrieved_at=source.retrieved_at,
+            metadata={"method": "consolidated_point_stock_history_attempts", "source_closing_ids": [source.pk]},
+        )
+        line = PointHistoricalInventoryClosingLine.objects.create(
+            closing=consolidated, branch=self.branches[0], product=self.product, stock=0,
+            evidence=dict(source.lines.get().evidence))
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+        def read():
+            return documentary_historical_boundary(consolidated, [line], month=date(2026, 9, 1),
+                boundary="closing", cache={})
+        first = read()
+        self.assertEqual(first[0], {line.pk: Decimal("0")})
+        self.assertEqual(first, read())
+        self.assertTrue(first[1][line.pk]["original_boundary_verified"])
+        source.lines.update(created_at=datetime(2026, 10, 1, 6, 59, tzinfo=timezone.utc))
+        self.assertEqual(read()[0], {})
+        source.lines.update(created_at=source.retrieved_at, stock=1)
+        self.assertEqual(read()[0], {})
+
+    def test_original_zero_rejects_known_history_and_invalid_membership(self):
+        closing = self.original_zero_closing()
+        record = AuditStockHistoryService()._canonical_import(self.branches[0], self.product)
+        raw = {"FK_Movimiento": 991, "Movimiento": "ENTRADA", "Fecha": "2026-09-20T08:00:00",
+            "Cantidad": 1, "Existencia_anterior": 0, "Existencia_nueva": 1, "Cancelado": False}
+        row_id, defaults = AuditStockHistoryService._parse_row(raw)
+        PointProductHistoryRow.objects.create(import_record=record, row_number=row_id, **defaults)
+        record.row_count = 1
+        record.raw_metadata = {"source": "POINT_STOCK_HISTORY_API", "fetched_rows": 1,
+            "history_limit": 500, "fetched_movement_ids": [991], "fetched_at": "2026-10-01T01:52:00+00:00"}
+        record.save()
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+        lines = list(closing.lines.select_related("branch", "product"))
+        def read():
+            return documentary_historical_boundary(closing, lines, month=date(2026, 9, 1),
+                boundary="closing", cache={})
+        self.assertEqual(read()[0], {})
+        record.rows.all().delete()
+        record.row_count = 0
+        record.raw_metadata.update(fetched_rows=0, fetched_movement_ids=[991, 991])
+        record.save()
+        self.assertEqual(read()[0], {})
+
+    def test_original_zero_rejects_cancelled_retained_row_but_allows_later_row(self):
+        closing = self.original_zero_closing()
+        record = AuditStockHistoryService()._canonical_import(self.branches[0], self.product)
+        raw = {"FK_Movimiento": 992, "Movimiento": "VENTA", "Fecha": "2026-09-20T08:00:00",
+            "Cantidad": 1, "Existencia_anterior": 1, "Existencia_nueva": 0, "Cancelado": True}
+        row_id, defaults = AuditStockHistoryService._parse_row(raw)
+        row = PointProductHistoryRow.objects.create(import_record=record, row_number=row_id, **defaults)
+        record.row_count = 1
+        record.raw_metadata = {"source": "POINT_STOCK_HISTORY_API", "fetched_rows": 1,
+            "history_limit": 500, "fetched_movement_ids": [992], "fetched_at": "2026-10-03T20:00:00+00:00"}
+        record.save()
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+        lines = list(closing.lines.select_related("branch", "product"))
+        def read():
+            return documentary_historical_boundary(closing, lines, month=date(2026, 9, 1),
+                boundary="closing", cache={})
+        self.assertEqual(read()[0], {})
+        raw["Fecha"] = "2026-10-02T18:00:00"
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        values, proof, _ = read()
+        self.assertEqual(values, {lines[0].pk: Decimal("0")})
+        self.assertTrue(proof[lines[0].pk]["original_boundary_verified"])
+        self.assertFalse(proof[lines[0].pk]["canonical_history_verified"])
+
+    def test_consolidated_zero_rejects_missing_rejected_or_changed_original(self):
+        source = self.original_zero_closing()
+        consolidated = PointHistoricalInventoryClosing.objects.create(
+            operational_date=source.operational_date, status="VERIFIED", source=source.source,
+            source_fingerprint="consolidated-zero", expected_branch_ids=source.expected_branch_ids,
+            expected_product_ids=source.expected_product_ids, retrieved_at=source.retrieved_at,
+            metadata={"method": "consolidated_point_stock_history_attempts", "source_closing_ids": [source.pk]})
+        line = PointHistoricalInventoryClosingLine.objects.create(
+            closing=consolidated, branch=self.branches[0], product=self.product, stock=0,
+            evidence=dict(source.lines.get().evidence))
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+        def read():
+            return documentary_historical_boundary(consolidated, [line], month=date(2026, 9, 1),
+                boundary="closing", cache={})
+        first = read()
+        self.assertTrue(first[0])
+        for patch in ({"history_rows": False}, {"history_limit": 500.0}):
+            line.evidence = {**source.lines.get().evidence, **patch}
+            self.assertEqual(read()[0], {})
+        line.evidence = dict(source.lines.get().evidence)
+        original = source.lines.get()
+        original.created_at = datetime(2026, 10, 1, 17, tzinfo=timezone.utc)
+        original.save()
+        self.assertNotEqual(first[1][line.pk]["original_zero_boundary_evidence"]["source_signature"],
+            read()[1][line.pk]["original_zero_boundary_evidence"]["source_signature"])
+        for source_ids in ([source.pk, source.pk], [consolidated.pk], [999999], [True], []):
+            with self.subTest(source_ids=source_ids):
+                consolidated.metadata["source_closing_ids"] = source_ids
+                self.assertEqual(read()[0], {})
+        consolidated.metadata["source_closing_ids"] = [source.pk]
+        source.status = "REJECTED"
+        source.save()
+        self.assertEqual(read()[0], {})
+
     def test_original_zero_boundary_rejects_incomplete_or_wrong_original_evidence(self):
         closing = self.original_zero_closing()
         line = closing.lines.get()
@@ -337,8 +465,9 @@ class HistoricalInventoryClosingTests(TestCase):
         record.save()
         values, meta, _ = MonthlyPointProductBalanceService()._load_historical_closing(
             snapshot_date=date(2026, 9, 30), source="closing_snapshot")
-        self.assertEqual(values, {})
-        self.assertFalse(meta["authoritative"])
+        self.assertEqual(values, {self.recipe.pk: (Decimal("0"), 1)})
+        self.assertTrue(meta["authoritative"])
+        self.assertEqual(meta["historical_boundary_evidence"][0]["coverage_status"], "INCOMPLETE")
         raw = {"FK_Movimiento": 991, "Movimiento": "DESCONOCIDO", "Fecha": "2026-09-20T08:00:00",
             "Cantidad": 1, "Existencia_anterior": 0, "Existencia_nueva": 1, "Cancelado": False}
         row_id, defaults = AuditStockHistoryService._parse_row(raw)

@@ -84,11 +84,45 @@ Reutilizarla sólo con fuente/método/manifiesto exactos, fecha operativa correc
 retrieved_at más created_at individual posteriores al corte correspondiente. No
 tomar la fecha de una extensión como frescura de las líneas reutilizadas. Esa
 prueba documental no cambia con UTC porque no tiene movimientos; no crear otro
-import ni HTTP por rutina. Una canonical existente exige sus propios controles y
-no puede ser ocultada por este fallback. Conservar coverageMISSING y prueba
-original separada, nunca COMPLETE canónico ni conteo físico inventados. Un resumen
+import ni HTTP por rutina. La autorización5oct2026 permite también consolidación
+con procedencia original por par y canónica INCOMPLETE no contradictoria, mediante
+el mismo lector compartido y los controles siguientes. Conservar coverageMISSING
+o INCOMPLETE y prueba original separada, nunca COMPLETE canónico ni conteo físico. Un resumen
 `latest_movement_at_or_before_close` no recibe esta excepción: sigue faltando su
 historia/frontera si no están guardadas.
+
+#### Vacío/cero independiente: contrato autorizado5oct2026
+
+`documentary_historical_boundary` exige manifiesto STOCK/VERIFIED, fecha exacta,
+pares esperados completos y retrieved_at aware postcorte. La línea debe declarar
+stock0, método `no_history_current_zero`, history_rows int0 y history_limit int500.
+No interpretar un listado vacío sin ese stock explícito como cero.
+
+Para consolidado, resolver `source_closing_ids` enteros exactos únicos positivos
+(no bool/string), sin autorreferencia
+ni IDs ausentes. Leer en bulk las líneas originales, mismo par FK producto/sucursal,
+fecha, dominio STOCK y método directo. DRAFT en la fuente original puede significar
+que fallaron otros pares: aceptar sólo esta línea acreditada, no todo el intento.
+Fuentes REJECTED, pares fuera de su manifiesto o cualquier línea original discrepante
+vetan el cero. Exigir evidence idéntica, stock0 y created_at propio aware postcorte,
+no posterior a la línea consolidada; retrieved_at original también postcorte.
+No prestar fechas de extensiones ni crear historia o cambiar saldos almacenados.
+
+Si existe canónica INCOMPLETE, comprobar import único, unknown0, conteo retenido,
+tipos de metadata, IDs de lote cuando existen y todos los raws conocidos mediante
+el guard compartido. IDs ausentes en un lote legado vacío con count0/retained0 no
+se fabrican. Cualquier movimiento retenido anterior o igual a la consulta vacía
+la contradice, incluso cancelado o qty0. Hechos posteriores no demuestran
+contradicción ni prestan cobertura; deben conservar identidad, raw y fecha válidos.
+Una frontera canónica COMPLETE presente mantiene su precedencia y controles.
+
+Salida: `original_boundary_verified=True`, `original_zero_boundary_evidence`
+con fuentes/líneas originales, fechas y firma; `original_zero_consistency_evidence`
+con veto o validación canónica. Mantener `canonical_history_verified=False`,
+coverage original y `physical_count_verified=False` cuando sólo acredita este cero.
+Releer con cache transaccional; cambios de procedencia alteran la firma del balance
+y cierre. Pruebas reproducibles en `test_historical_inventory_closing` y
+`test_snapshot_historical_boundary`; review/plan sólo observa, no ingresa ni captura.
 
 Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con diferencia real, apertura y cierre comprobados, sin movimientos desconocidos y remanente histórico cero. Revisar venta comercial frente a stock antes de seleccionar. Un fetched_at anterior al fin de mes puede explicar cobertura INCOMPLETE aunque toda la suma cuadre.
 
@@ -104,8 +138,8 @@ El manifiesto VERIFIED puede proceder de captura directa o de consolidación de
 intentos (`consolidated_point_stock_history_attempts`, apertura6 de agosto).
 Exigir fecha, pares esperados completos y retrieved_at postcorte en ambos; el
 snapshot aporta su propia prueba, no adopta stock/evidence de la consolidación.
-El método consolidado NO habilita la prueba legacy de vacío/cero: esa conserva
-su contrato directo estricto. No relajar canónicas ni atribuir cobertura completa.
+El método consolidado no prueba vacío/cero por sí solo: aplicar exclusivamente
+el contrato de originales por par de arriba. No relajar canónicas ni cobertura.
 Exigir FK branch/product y externalID exactos, row0 producto, row4 stock coherente
 con persistido, row9 dominio producto explícito, job inventory SUCCESS y log
 original de sucursal con branch_id/branch_external_id correctos. No identificar

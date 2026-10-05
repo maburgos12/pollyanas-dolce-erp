@@ -54,6 +54,11 @@ snapshot si la canónica es COMPLETE, unknown0 y falta la frontera concreta: una
 frontera canónica presente manda. No alterar coverageCOMPLETE ni fabricar membresía
 de500 filas; frontera exclusivamente snapshot conserva canonical_history_verifiedFalse.
 Ver procedimiento y checkpoint para distinguir contrato autorizado de publicación.
+Para vacío/cero original, la autorización5oct permite prueba independiente junto
+a INCOMPLETE y consolidación con fuentes directas por par: consultar el contrato
+específico del procedimiento. No extrapolar ÚltimoMovimiento a listado vacío,
+inventar membresía o promover coverage. Los flags originales y físicos permanecen
+separados; review/plan no adquiere HTTP, captura ni permiso de cierre.
 No recapturar para reemplazar evidencia ya
 acreditada ni exigir historia completa como condición de un snapshot independiente.
 La autorización humana del 4 de octubre para este contrato está registrada en el checkpoint;
