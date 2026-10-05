@@ -102,6 +102,7 @@ def _falla_publica(falla: ReporteFalla) -> dict:
 
 def _orden_publica(orden: OrdenMantenimiento, *, con_costos: bool) -> dict:
     fila = {
+        "id": orden.pk,
         "folio": orden.folio,
         "tipo": orden.get_tipo_display(),
         "estatus": orden.estatus,

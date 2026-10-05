@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static humanize %}
+{% load static humanize documentos_financieros %}
 
 {% block title %}Mantenimiento{% endblock %}
 {% block page_title %}Mantenimiento{% endblock %}
@@ -11,6 +11,7 @@
 {% endblock %}
 
 {% block content %}
+<p><a class="btn btn-secondary" href="{% url 'mantenimiento:conciliacion_documental' %}">Conciliación documental de trabajos</a></p>
 <div class="module-shell bi-shell">
   <div class="module-tabs">
     <a href="#tab-dashboard" class="module-tab active" data-tab="tab-dashboard">Dashboard</a>
@@ -165,6 +166,7 @@
                     <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
                   {% endif %}
                   <div class="mant-ticket-actions">
+                    {% consulta_documentos_trabajo request.user item.tipo item.id as documentos_url %}{% if documentos_url %}<a class="btn btn-secondary btn-sm" href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
                     <button class="btn btn-secondary btn-sm" type="button" data-open-follow
                       data-maintenance-uid="{{ item.uid }}"
                       data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"

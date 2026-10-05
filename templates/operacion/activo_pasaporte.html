@@ -1,4 +1,4 @@
-{% load static destinos_documentales %}
+{% load static destinos_documentales documentos_financieros %}
 <!doctype html>
 <html lang="es" class="operacion-app-html">
 <head>
@@ -58,6 +58,7 @@
                 <b>{{ falla.titulo }}</b>
                 <small>{{ falla.estatus_label }} · Prioridad {{ falla.prioridad_label }} · {{ falla.fecha_reporte|date:"d/m/Y" }}</small>
               </a>
+              {% consulta_documentos_trabajo request.user "falla" falla.id as documentos_url %}{% if documentos_url %}<a href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
             </li>
           {% endfor %}
         </ul>
@@ -89,6 +90,7 @@
           {% for orden in ordenes_recientes %}
             <li>
               <b>{{ orden.folio }}</b>
+              {% consulta_documentos_trabajo request.user "orden" orden.id as documentos_url %}{% if documentos_url %}<a href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
               <small>{{ orden.tipo }} · {{ orden.estatus_label }} · {{ orden.fecha|date:"d/m/Y" }}</small>
               {% if orden.descripcion %}<p>{{ orden.descripcion }}</p>{% endif %}
               {% if puede_ver_costos %}
