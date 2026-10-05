@@ -17,7 +17,9 @@ from django.apps import apps
 from django.conf import settings
 from django.db import connection, transaction
 from django.db.models import Count, Q, Subquery
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from pos_bridge.models import (
     PointConversionLine,
@@ -27,6 +29,7 @@ from pos_bridge.models import (
     PointProductionLine,
     PointProductHistoryImport,
     PointProductHistoryRow,
+    PointRecipeNode,
     PointSyncJob,
     PointWasteLine,
 )
@@ -52,6 +55,7 @@ from recetas.models import (
 )
 from recetas.utils.normalizacion import normalizar_nombre
 from ventas.models import VentaAutoritativaPoint
+from reportes.models import ProductBusinessRule
 from ventas.services.sales_canonical_source import (
     legacy_point_sales_row_count_for_range,
     official_point_sales_rows_for_range,
@@ -842,6 +846,7 @@ class MonthlyPointProductBalanceService:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
         self._historical_boundary_cache = {}
+        self._documentary_commercial_cache = None
 
     def build(
         self,
@@ -852,6 +857,7 @@ class MonthlyPointProductBalanceService:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
         self._historical_boundary_cache = {}
+        self._documentary_commercial_cache = None
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         today = timezone.localdate()
@@ -1960,6 +1966,147 @@ class MonthlyPointProductBalanceService:
             **{key: value for key, value in authority.items() if key != "authoritative"},
         }, fact_unresolved
 
+    def _documentary_commercial_context(self):
+        if self._documentary_commercial_cache is None:
+            names = ("COCA-COLA 450 ML", "VELA INDIVIDUAL")
+            rules = {rule.normalized_name: rule for rule in
+                ProductBusinessRule.objects.filter(normalized_name__in=names).order_by("pk")}
+            nodes = list(PointRecipeNode.objects.annotate(
+                documentary_name=Upper(Trim("point_name")),
+            ).filter(Q(point_code__in=("COCA450", "875")) |
+                     Q(documentary_name__in=names)).order_by("pk"))
+            self._documentary_commercial_cache = rules, nodes
+        return self._documentary_commercial_cache
+
+    @staticmethod
+    def _documentary_number_matches(value, expected):
+        if isinstance(value, bool) or value is None:
+            return False
+        try:
+            value = Decimal(str(value))
+            return value.is_finite() and value == Decimal(expected)
+        except (InvalidOperation, ValueError, TypeError):
+            return False
+
+    @staticmethod
+    def _documentary_digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                         separators=(",", ":")).encode()).hexdigest()
+
+    def _documentary_commercial_exclusion(self, row, *, source):
+        """Classify approved commercial documents, never infer a transaction FK."""
+        normalize = lambda value: ProductBusinessRule.normalize_product_name(value) if isinstance(value, str) else ""
+        name = normalize(row.item_name)
+        if row.receta_id is not None or getattr(row, "insumo_id", None) is not None:
+            return None
+        if name not in ("COCA-COLA 450 ML", "VELA INDIVIDUAL"):
+            return None
+        if row.unit != "PZA" or not row.quantity.is_finite() or row.quantity <= ZERO:
+            return None
+        if row.erp_branch_id is not None and row.erp_branch_id != row.branch.erp_branch_id:
+            return None
+        raw = row.raw_payload
+        if not isinstance(raw, dict) or not row.source_hash:
+            return None
+        rules, nodes = self._documentary_commercial_context()
+        rule = rules.get(name)
+        if name == "COCA-COLA 450 ML":
+            if source != "waste" or row.source_endpoint != "/Mermas/get_mermas" or row.item_code:
+                return None
+            if (rule is None or not rule.is_fixed or rule.classification != "REVENTA"
+                    or normalize(rule.product_name) != name):
+                return None
+            movement, details = raw.get("movement"), raw.get("details")
+            if not isinstance(movement, dict) or not isinstance(details, list):
+                return None
+            movement_pk = movement.get("PK_Movimiento")
+            if not ((type(movement_pk) is int and movement_pk > 0) or
+                    (type(movement_pk) is str and re.fullmatch(r"[0-9]+", movement_pk)
+                     and int(movement_pk) > 0)):
+                return None
+            try:
+                # The separately verified Mermas frontend also reads Fecha as UTC.
+                stamp = parse_datetime(movement.get("Fecha"))
+                if stamp is None:
+                    return None
+                if timezone.is_naive(stamp):
+                    stamp = stamp.replace(tzinfo=datetime_timezone.utc)
+                date_matches = stamp.astimezone(datetime_timezone.utc) == row.movement_at.astimezone(datetime_timezone.utc)
+            except (ValueError, TypeError):
+                return None
+            if (str(movement_pk) != row.movement_external_id or not date_matches
+                    or normalize(movement.get("Sucursal")) != normalize(row.branch.name)):
+                return None
+            matches = [detail for detail in details if isinstance(detail, dict)
+                       and normalize(detail.get("Articulo")) == name]
+            if len(matches) != 1:
+                return None
+            detail = matches[0]
+            if (detail.get("Unidad") != row.unit or
+                    not self._documentary_number_matches(detail.get("Cantidad"), row.quantity) or
+                    not self._documentary_number_matches(detail.get("Costo_unitario"), row.unit_cost) or
+                    not self._documentary_number_matches(detail.get("Costo_total"), row.total_cost)):
+                return None
+            code, family, category, classification = "COCA450", "BEBIDAS", "COCA-COLA", "REVENTA"
+            criterion = "FIXED_REVENTA_EXACT_COMMERCIAL_DOCUMENT_V1"
+        else:
+            if (source != "conversions" or row.source_endpoint != "/Report/crea_Reporte_Largo"
+                    or row.item_code != "875" or not row.movement_external_id.startswith("AGG-")
+                    or row.source_item_code or row.source_item_name):
+                return None
+            if rule is not None and (not rule.is_fixed or rule.classification != "ACCESORIO"):
+                return None
+            if (raw.get("CÓDIGO") != row.item_code or normalize(raw.get("PRODUCTO")) != name
+                    or raw.get("UNIDAD") != row.unit or normalize(raw.get("CATEGORÍA")) != "ALEGRÍA"
+                    or normalize(raw.get("SUCURSAL")) != normalize(row.branch.name)
+                    or not self._documentary_number_matches(raw.get("CANTIDAD"), row.quantity)
+                    or not self._documentary_number_matches(raw.get("COSTO"), row.total_cost)):
+                return None
+            code, family, category, classification = "875", "VELAS", "ALEGRÍA", "ACCESORIO"
+            criterion = "APPROVED_VELAS_ALEGRIA_EXACT_COMMERCIAL_DOCUMENT_V1"
+        candidates = [node for node in nodes if node.point_code == code or normalize(node.point_name) == name]
+        if not candidates:
+            return None
+        corroborations, identities = [], set()
+        for node in candidates:
+            detail = node.raw_detail
+            if not isinstance(detail, dict):
+                return None
+            pk = detail.get("PK_Producto")
+            if (type(pk) is not int or pk <= 0 or node.point_pk != str(pk)
+                    or node.source_type != "PRODUCT" or node.node_kind != "FINAL_PRODUCT"
+                    or node.identity_key != f"PRODUCT:{code}"
+                    or node.point_code != code or normalize(node.point_name) != name
+                    or detail.get("Codigo") != code or normalize(detail.get("Nombre")) != name
+                    or normalize(node.family) != family or normalize(node.category) != category
+                    or node.erp_recipe_id is not None or node.erp_insumo_id is not None
+                    or node.has_recipe_flag or node.raw_bom != []
+                    or detail.get("Produccion") is not False or detail.get("Rastreable") is not False
+                    or detail.get("Activo") is not True or type(detail.get("FK_Unidad")) is not int
+                    or detail["FK_Unidad"] != 5):
+                return None
+            identities.add((node.point_pk, node.point_code, name, node.source_type))
+            corroborations.append({"id": node.pk, "run_id": node.run_id,
+                "corroborating_point_pk": node.point_pk, "source_type": node.source_type,
+                "identity_key": node.identity_key, "point_code": node.point_code,
+                "point_name": node.point_name, "family": node.family, "category": node.category,
+                "updated_at": node.updated_at.isoformat(),
+                "raw_detail_sha256": self._documentary_digest(detail)})
+        if len(identities) != 1:
+            return None
+        return {"source": source, "id": row.pk, "movement_external_id": row.movement_external_id,
+            "source_hash": row.source_hash, "raw_payload_sha256": self._documentary_digest(raw),
+            "source_endpoint": row.source_endpoint, "sync_job_id": row.sync_job_id,
+            "branch_id": row.branch_id, "branch_external_id": row.branch.external_id,
+            "branch_name": row.branch.name, "erp_branch_id": row.erp_branch_id,
+            "movement_at": row.movement_at.isoformat(), "item_code": row.item_code,
+            "item_name": row.item_name, "unit": row.unit, "quantity": str(row.quantity),
+            "classification": classification, "criterion": criterion, "nodes": corroborations,
+            "rule": ({"id": rule.pk, "product_name": rule.product_name,
+                      "normalized_name": rule.normalized_name, "classification": rule.classification,
+                      "is_fixed": rule.is_fixed, "updated_at": rule.updated_at.isoformat()} if rule else None),
+            "transactional_product_identity_verified": False, "execution_origin_verified": False}
+
     def _load_waste(
         self,
         *,
@@ -1986,8 +2133,11 @@ class MonthlyPointProductBalanceService:
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
+                "branch__erp_branch_id",
+                "erp_branch_id",
                 "sync_job_id",
                 "insumo_id",
+                "raw_payload", "unit", "unit_cost", "total_cost", "source_endpoint",
             )
             .order_by("id")
         )
@@ -1998,6 +2148,9 @@ class MonthlyPointProductBalanceService:
             row_job_ids=[row.sync_job_id for row in point_rows],
         )
         if point_rows or authority["authoritative"]:
+            excluded = [decision for row in point_rows
+                        if (decision := self._documentary_commercial_exclusion(row, source="waste"))]
+            excluded_ids = {decision["id"] for decision in excluded}
             finished_product_recipe_ids = finished_product_recipe_ids or set()
             matched = [
                 row
@@ -2025,7 +2178,7 @@ class MonthlyPointProductBalanceService:
                     movement_date=timezone.localtime(row.movement_at).date(),
                 )
                 for row in point_rows
-                if row.receta_id is None and row.insumo_id is None
+                if row.receta_id is None and row.insumo_id is None and row.pk not in excluded_ids
             ]
             return self._aggregate_rows(matched, "quantity"), {
                 "source": "PointWasteLine",
@@ -2034,6 +2187,9 @@ class MonthlyPointProductBalanceService:
                 "rows_read": len(point_rows),
                 "unresolved_rows": len(unresolved),
                 "internal_input_rows_excluded": internal_input_rows_excluded,
+                "excluded_documentary_rows": excluded,
+                "excluded_documentary_quantity_by_unit": {"PZA": str(sum(
+                    (Decimal(item["quantity"]) for item in excluded), ZERO))} if excluded else {},
                 **authority,
             }, unresolved
 
@@ -2937,6 +3093,7 @@ class MonthlyPointProductBalanceService:
             lower_bound, upper_bound = self._date_datetime_bounds(month_start, month_end)
         all_conversions = list(
             PointConversionLine.objects.filter(movement_at__gte=lower_bound, movement_at__lt=upper_bound)
+            .select_related("branch")
             .only(
                 "id",
                 "receta_id",
@@ -2949,6 +3106,8 @@ class MonthlyPointProductBalanceService:
                 "source_item_code",
                 "source_item_name",
                 "sync_job_id",
+                "branch_id", "branch__name", "branch__external_id", "branch__erp_branch_id",
+                "erp_branch_id", "raw_payload", "unit", "total_cost", "source_endpoint",
             )
             .order_by("movement_at", "id")
         )
@@ -2992,9 +3151,14 @@ class MonthlyPointProductBalanceService:
             "conversion_destination_rows_applied": 0,
             "conversion_rows_ignored_non_derived": 0,
         }
+        excluded = []
         for conversion in conversions:
             quantity = Decimal(conversion.quantity)
             if conversion.receta_id is None:
+                decision = self._documentary_commercial_exclusion(conversion, source="conversions")
+                if decision:
+                    excluded.append(decision)
+                    continue
                 unresolved_conversions.append(
                     MonthlyPointUnresolvedConversion(
                         movement_external_id=conversion.movement_external_id,
@@ -3054,6 +3218,9 @@ class MonthlyPointProductBalanceService:
             "rows_read": len(conversions),
             "raw_rows_read": len(all_conversions),
             "unresolved_rows": len(unresolved_movements) + len(unresolved_conversions),
+            "excluded_documentary_rows": excluded,
+            "excluded_documentary_quantity_by_unit": {"PZA": str(sum(
+                (Decimal(item["quantity"]) for item in excluded), ZERO))} if excluded else {},
             **authority,
         }
         return result, unresolved_conversions, unresolved_movements, source_counts, metadata
