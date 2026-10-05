@@ -758,6 +758,86 @@ class AuditStockHistoryServiceTests(TestCase):
         self.assertEqual(result.movement_ids_by_category["sales"], (301, 302))
         self.assertEqual(result.unknown_movement_ids, ())
 
+    def _waste_reversal_rows(self, *, quantity=4, previous=4):
+        debit = _row(1680267, "MERMA", "2026-09-10T18:00:00Z", quantity,
+                     previous, previous - quantity, cancelled=True)
+        undo = _row(1680271, "CANCELACION DE MERMA", "2026-09-10T19:00:00Z", quantity,
+                    previous - quantity, previous)
+        debit.update(FK_Tipo_Movimiento=5, isCargo=True)
+        undo.update(FK_Tipo_Movimiento=15, isCargo=False)
+        return [debit, undo]
+
+    def test_historical_waste_reversal_preserves_both_scoped_events_and_originals(self):
+        service = AuditStockHistoryService()
+        month = date(2026, 9, 1)
+        for quantity, previous in ((4, 4), (1, 10)):
+            product = PointProduct.objects.create(external_id=f"waste-{quantity}", name="Scoped waste")
+            rows = self._waste_reversal_rows(quantity=quantity, previous=previous)
+            for raw in rows:
+                raw.update(FK_Producto=product.external_id, FK_Sucursal=self.branch.external_id, isInsumo=False)
+            evidence = self._original_evidence(rows, limit=5)
+            evidence["product_id"] = product.pk
+            evidence["request"]["params"]["pkproducto"] = product.external_id
+            service.ingest_original_response(self.branch, product, month, rows, evidence=evidence)
+            record = service._existing_import(self.branch, product)
+            originals, metadata = list(record.rows.values()), deepcopy(record.raw_metadata)
+            with patch("requests.Session.request", side_effect=AssertionError("HTTP prohibited")):
+                result = service.reconcile(self.branch, product, month)
+                with self.assertNumQueries(2):
+                    again = service.reconcile_many([SimpleNamespace(branch=self.branch, product=product, difference=1)], month)
+            self.assertEqual(result.waste, Decimal("0"))
+            self.assertEqual(result.movement_ids_by_category.get("waste"), (1680267, 1680271))
+            self.assertEqual(result.unknown_movement_ids, ())
+            self.assertEqual(result.documentary_opening, Decimal(previous))
+            self.assertEqual(result.documentary_closing, Decimal(previous))
+            self.assertEqual(again[(self.branch.pk, product.pk)], result)
+            record.refresh_from_db()
+            self.assertEqual(record.raw_metadata, metadata)
+            self.assertEqual(list(record.rows.values()), originals)
+
+    def test_waste_reversal_effects_use_each_original_month_without_pairing(self):
+        rows = self._waste_reversal_rows(quantity=1, previous=10)
+        rows[0]["Fecha"] = "2026-09-01T06:59:59Z"
+        rows[1]["Fecha"] = "2026-09-01T07:00:00Z"
+        service = AuditStockHistoryService()
+        evidence = self._original_evidence(rows, limit=5)
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows, evidence=evidence)
+        august = service.reconcile(self.branch, self.product, date(2026, 8, 1))
+        september = service.reconcile(self.branch, self.product, date(2026, 9, 1))
+        self.assertEqual(august.waste, Decimal("1"))
+        self.assertEqual(september.waste, Decimal("-1"))
+        self.assertEqual(august.documentary_closing, Decimal("9"))
+        self.assertEqual(september.documentary_opening, Decimal("9"))
+
+    def test_malformed_cancelled_waste_is_unknown_not_silently_dropped(self):
+        rows = self._waste_reversal_rows()
+        rows[0]["isCargo"] = False
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows,
+                                         evidence=self._original_evidence(rows, limit=5))
+        result = service.reconcile(self.branch, self.product, date(2026, 9, 1))
+        self.assertIn(1680267, result.unknown_movement_ids)
+        self.assertIsNone(result.documentary_closing)
+
+    def test_raw_mutation_cannot_hide_canonical_historical_waste_debit(self):
+        rows = self._waste_reversal_rows()
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), rows,
+                                         evidence=self._original_evidence(rows, limit=5))
+        row = service._existing_import(self.branch, self.product).rows.get(row_number=1680267)
+        original = deepcopy(row.raw_payload)
+        for raw in ({**original, "Cancelado": False}, None, {},
+                    {**original, "FK_Producto": "wrong"}, {**original, "FK_Sucursal": "wrong"},
+                    {**original, "Costo_Unitario": 1}, {**original, "FK_Movimiento": 123},
+                    {**original, "FK_Movimiento": 1680267.9}, {**original, "FK_Movimiento": "１６８０２６７"}):
+            with self.subTest(raw=raw):
+                # JSONField disallows SQL NULL; a missing payload is represented
+                # here by an empty documentary object, not a second import.
+                row.raw_payload = raw if raw is not None else {}
+                row.save(update_fields=["raw_payload"])
+                result = service.reconcile(self.branch, self.product, date(2026, 9, 1))
+                self.assertIn(1680267, result.unknown_movement_ids)
+
     def test_unproven_cancellation_remains_unknown(self):
         for movement, previous, new in (("CANCELACION VENTA", 1, 0), ("CANCELACION VENTA", 1, 3), ("CANCELACION TRANSFERENCIA", 1, 2)):
             with self.subTest(movement=movement, previous=previous, new=new):

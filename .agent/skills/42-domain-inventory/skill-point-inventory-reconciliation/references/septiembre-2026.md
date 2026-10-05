@@ -112,7 +112,7 @@ Segunda ejecución0HTTP/0filas/0imports/0duplicados/0ops; materialización0.
 No repetir HTTP/ingreso: la evidencia nueva no vuelve íntegros los3resúmenes
 antiguos ni prueba entrega física/aprobación/mes cerrado.
 
-### Representación original: reparación nueva en implementación, no publicada
+### Representación original: PR1473 publicado y aceptado, no cierre mensual
 
 Tarea `auditor-representacion-original`: import785 raw/persistido representan el
 mismo instante DST pero el veto comparaba representación; import816 tiene diez
@@ -121,8 +121,19 @@ Decimal4e−17. Son fuentes existentes, no diez piezas perdidas ni ajuste nuevo.
 Procedimiento define comparación UTC exacta y rama binaria de tres floats finitos,
 con precedencia Decimal y barrera de magnitud. No tolerancia a strings/mixtos,
 cantidad2/delta1, discrepancia0.0004, raw/stock/ÚltimoMovimiento/identidad.
-Pruebas/CI/deploy/aceptación de esta reparación todavía requieren resultado real;
-no afirmar las cuatro fronteras antes vetadas aceptadas por actualizar habilidad.
+PR1473: CI37248346013 y validate37248346065 PASS, mergece4674d4;
+deploy oficial sesión90537 exit0 y checks frescos comprobados. Aceptación41987
+exit0: seis pares/doce fronteras acreditados, HTTP0/ops0 y dos observaciones
+iguales, SHA85aeb92bc5686138043b0c03a4d02a405996437d6f4150121687a96fc7d4bc0a.
+El output comprimido quedó truncado: se conserva resumen honesto en el artefacto,
+no se afirma conservar íntegra aquella salida. Este resultado posterior sustituye
+los cuatro vetos de representación de1471, sin falsear su aceptación histórica.
+Reviews nativas2610 corridas5007/5008 SUCCESS/context13, SHA observación
+f7aa2258794acf82170071c7f9783cc4cbaa3eed038b827007d7cf1c2f422175,
+iguales/HTTP0/ops0/avisos0; UI autenticada runkeysd76c6c5de3/1604ba6f23,
+consola[]. Tarea cerrada oficialmente y recursos LOCAL5477/6477 retirados por
+helper con respaldo verificado. No repetir entrega/captura/diagnóstico por rutina;
+doce fronteras documentales no prueban físico ni septiembre cerrado.
 
 ## Autorización y siguiente contrato snapshot, 4oct2026
 
@@ -278,11 +289,22 @@ CEDIS Empanada productPK120/external135/import43:row5776/FK1680267 MERMA4→0
 qty4/CanceladoTrue yrow5775/FK1680271 CANCELACION DE MERMA tipo15 0→4/qty4/
 CanceladoFalse. Frontend Stock/tab_historial SHA8755e73… enumera case5/case15.
 No FK directa entre ambos ni identidad con otro producto de igual movimiento.
-_category rechaza tipo15 y candidatos excluyen merma cancelada. Incluir sólo
-crédito de la cancelación produciría crédito ficticio; cronología4→0→4 y efecto
-conjunto0 deben separarse de merma vigente, sin netear meses distintos. Contrato
-compartido nuevo requiere autorización/TDD; no merma/ajuste compensatorio ni
-reinterpretación de unknown por aproximación. Solicitud específica emitida una vez.
+El lector anterior rechaza tipo15 y excluye merma cancelada. Incluir sólo crédito
+produciría crédito ficticio. Reparación autorizada `auditor-merma-reversion-historica`
+EN IMPLEMENTACIÓN, todavía no publicada: helper compartido conserva cada efecto
+documental estricto5/true débito+qty y15/false reverso−qty; expected_closing resta
+waste firmado. Qty/delta/tipo/nombre/flags/dominio contradictorios quedan unknown;
+ordinaryMERMAfalse sin cambio. No editar MermaPOS, cobertura ni merma/ajuste
+compensatorio. Cronología4→0→4 netea0 sólo en el mismo intervalo; una frontera
+entre eventos o31agosto→1septiembre conserva el efecto individual correspondiente.
+
+El original recuperado para2169/import del rango829–842, CEDISbranchPK3/product263,
+contiene los mismosFK1680267/1680271 pero qty1,10→9→10,24sept16:20:16.27UTC y
+16:26:48.103UTC; no usar qty4 del producto120 ni inventar pareja por FK global.
+Ese antecedente unknown1680271 sigue siendo el resultado publicado anterior:
+actualizar procedimiento no prueba que ahora esté resuelto. Pruebas/CI/deploy/
+aceptación del nuevo lector siguen pendientes; review/plan no ejecutan HTTP,
+importación, sincronización, materialización o cierre. Físico/aprobación aparte.
 
 Antecedente Bamoa anterior al contrato autorizado de esta tarea, descrito arriba:
 Bamoa6COMPLETE imports721/778/785/197/816/817 conservan500filas/500FKúnicos y

@@ -1,5 +1,6 @@
 from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.db import connection
@@ -21,6 +22,7 @@ from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
     HistoricalPointInventoryClosingCapture,
     resolve_stock_at_close,
+    historical_waste_effect,
 )
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
@@ -28,6 +30,56 @@ from recetas.models import Receta
 
 
 class HistoricalStockResolutionTests(SimpleTestCase):
+    def test_malformed_special_original_cost_returns_unknown_instead_of_aborting_batch(self):
+        raw = {"FK_Movimiento": 1680267, "FK_Tipo_Movimiento": 5, "Movimiento": "MERMA",
+               "Fecha": "2026-10-01T06:59:59Z", "Cantidad": 4, "Existencia_anterior": 4,
+               "Existencia_nueva": 0, "Cancelado": True, "isCargo": True, "Costo_Unitario": "garbage"}
+        row = SimpleNamespace(raw_payload=raw, movement_type="MERMA", cancelled=True)
+        self.assertEqual(AuditStockHistoryService._validated_waste_effect(row, None).status, "INVALID")
+
+    def test_historical_waste_contract_rejects_unproven_specials_and_preserves_ordinary(self):
+        debit = {"FK_Movimiento": 1680267, "FK_Tipo_Movimiento": 5, "Movimiento": "MERMA", "Cantidad": 4,
+                 "Existencia_anterior": 4, "Existencia_nueva": 0, "Cancelado": True, "isCargo": True}
+        undo = {**debit, "FK_Tipo_Movimiento": 15, "Movimiento": "CANCELACION DE MERMA",
+                "Existencia_anterior": 0, "Existencia_nueva": 4, "Cancelado": False, "isCargo": False}
+        self.assertEqual(historical_waste_effect({**debit, "Cancelado": False}).status, "NO_SPECIAL")
+        self.assertEqual(historical_waste_effect({**undo, "Movimiento": "MERMA"}).status, "INVALID")
+        for mutation in ({"FK_Tipo_Movimiento": True}, {"FK_Tipo_Movimiento": "5"},
+                         {"FK_Tipo_Movimiento": 5.0}, {"isCargo": False}, {"isCargo": 1},
+                         {"Cantidad": 0}, {"Cantidad": -4}, {"Cantidad": True},
+                         {"Cantidad": "NaN"}, {"Existencia_nueva": 1}, {"isInsumo": True},
+                         {"isInsumo": "true"}, {"isInsumo": 0}):
+            with self.subTest(mutation=mutation):
+                self.assertEqual(historical_waste_effect({**debit, **mutation}).status, "INVALID")
+        for mutation in ({"FK_Tipo_Movimiento": 5}, {"Movimiento": "CANCELACION MERMA"},
+                         {"Cancelado": True}, {"isCargo": True}, {"Existencia_nueva": 3}):
+            with self.subTest(mutation=mutation):
+                self.assertEqual(historical_waste_effect({**undo, **mutation}).status, "INVALID")
+        self.assertEqual(historical_waste_effect({**debit, "Cancelado": "true", "isCargo": "true"}).status, "VALID")
+        self.assertEqual(historical_waste_effect({key: value for key, value in debit.items() if key != "isCargo"}).status, "VALID")
+
+    def test_special_waste_boundary_requires_exact_original_movement_identity(self):
+        debit = {"FK_Movimiento": 1680267, "FK_Tipo_Movimiento": 5, "Movimiento": "MERMA",
+                 "Fecha": "2026-10-01T06:59:59Z", "Cantidad": 4,
+                 "Existencia_anterior": 4, "Existencia_nueva": 0, "Cancelado": True, "isCargo": True}
+        for identity in (1680267.9, True, "１６８０２６７", None, 0, -1):
+            with self.subTest(identity=identity):
+                raw = {**debit, "FK_Movimiento": identity}
+                self.assertEqual(historical_waste_effect(raw).status, "INVALID")
+                with self.assertRaises(HistoricalInventoryCaptureError):
+                    resolve_stock_at_close([raw], operational_date=date(2026, 9, 30))
+        self.assertEqual(historical_waste_effect({**debit, "FK_Movimiento": "1680267"}).status, "VALID")
+
+    def test_cancelled_waste_boundary_preserves_historical_debit(self):
+        debit = {"FK_Movimiento": 1680267, "FK_Tipo_Movimiento": 5, "Movimiento": "MERMA",
+                 "Fecha": "2026-10-01T06:59:59Z", "Cantidad": 4,
+                 "Existencia_anterior": 4, "Existencia_nueva": 0, "Cancelado": True, "isCargo": True}
+        result = resolve_stock_at_close([debit], operational_date=date(2026, 9, 30))
+        self.assertEqual(result.stock, Decimal("0"))
+        later = {**debit, "Fecha": "2026-10-01T07:00:00Z"}
+        result = resolve_stock_at_close([later], operational_date=date(2026, 9, 30))
+        self.assertEqual(result.stock, Decimal("4"))
+
     def test_uses_latest_movement_inside_operational_close_date(self):
         history = [
             {"Fecha": "2026-08-01T01:00:00", "FK_Movimiento": 30, "Existencia_anterior": 3,

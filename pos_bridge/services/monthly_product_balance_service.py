@@ -331,7 +331,7 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
     records = list(PointProductHistoryImport.objects.filter(
         point_branch_id__in={key[0] for key in keys}, point_product_id__in={key[1] for key in keys},
         raw_metadata__source="POINT_STOCK_HISTORY_API",
-    ))
+    ).select_related("point_branch", "point_product"))
     records = [record for record in records if (record.point_branch_id, record.point_product_id) in keys]
     grouped = {record.pk: [] for record in records}
     pair_records = {}
@@ -440,8 +440,11 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                     raise ValueError("Nonfinite stock")
                 if fetched_at is not None and instant > fetched_at:
                     raise ValueError("Movement newer than original retrieval")
-                if instant <= captured_at and not row.cancelled:
-                    category = AuditStockHistoryService._category(row.movement_type, raw_quantity)
+                effect = AuditStockHistoryService._validated_waste_effect(row, record)
+                if effect.status == "INVALID":
+                    raise ValueError("Invalid original historical waste effect")
+                if instant <= captured_at and (not row.cancelled or effect.status == "VALID"):
+                    category = "waste" if effect.status == "VALID" else AuditStockHistoryService._category(row.movement_type, raw_quantity)
                     if category is None:
                         raise ValueError("Unresolved movement or reversal")
                     words = " ".join("".join(char for char in unicodedata.normalize(
@@ -449,7 +452,7 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                     delta = raw_delta
                     if words == "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=1):
                         raise ValueError("Invalid effective sale reversal")
-                    if category in {"sales", "waste"} and words != "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=-1):
+                    if category in {"sales", "waste"} and effect.status != "VALID" and words != "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=-1):
                         raise ValueError("Invalid effective sale/waste stock delta")
                     if category in {"production", "transfer_in", "conversion_in"} and not _original_stock_delta_matches(raw, direction=1):
                         raise ValueError("Invalid effective incoming stock delta")
