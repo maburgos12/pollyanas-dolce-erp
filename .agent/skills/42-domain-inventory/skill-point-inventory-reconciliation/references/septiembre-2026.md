@@ -4,6 +4,23 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Autorización5oct2026: originales vacío/cero e integridad acotada
+
+Mauricio entregó orden expresa de ejecutar: autoriza el contrato estricto de
+vacío/cero original, frontera independiente junto a INCOMPLETE, ingreso oficial
+de originales y consultas Point de integridad para defectos documentales probados
+incluso con etiqueta COMPLETE. Esta orden sustituye los permisos pendientes de
+esos contratos; no autoriza cambios operativos, clasificaciones por nombre,
+equivalencias, explicación humana inventada ni rebajar controles del cierre.
+
+Implementación `auditor-fronteras-cero-original`: lector compartido valida sourceIDs
+y líneas originales directas de consolidado por par, fechas propias y firma;
+canónica vacía precorte puede coexistir con prueba de cero postcorte, preservando
+INCOMPLETE. Movimientos conocidos previos, incluso cancelados, vetan la consulta
+vacía; metadata inválida/duplicada y desconocidos siguen fail-closed. Review/plan
+mantiene sus límites. Publicación y aceptación deben acreditarse por ciclo oficial;
+este texto y tests no declaran septiembre cerrado ni522 fronteras aceptadas.
+
 ### Corte 5oct2026UTC: PR1477 aceptado y fuentes todavía pendientes
 
 PR1477 head8616cac6, CI37256483016 intento2 y validate37256483054 completos PASS;
@@ -36,13 +53,15 @@ reaparecidas por fail-closed. Los522 son439aperturas del manifiesto consolidado6
 con procedencia por línea en intentos originales4/5 (413en ambos/26en uno), y
 83cierres del manifiesto directo7 preemptados por canónicaINCOMPLETE. Stock0,
 history_rows0/history_limit500/createdpostcut NO bastan bajo el contrato actual:
-no aceptar ni convertir en COMPLETE. Extensión específica consultada una vez,
-pendiente de aprobación; estos bloqueos son técnicos, no evidencia humana ausente.
+no convertir en COMPLETE. La aprobación5oct de arriba sustituye el pendiente
+anterior; son bloqueos técnicos, no evidencia humana ausente. Aceptación efectiva
+requiere lector publicado y comprobación nueva, no resta sobre551.
 
 Las12 nuevas son ambos cortes de2133/2135/2250/2451/2521/3877. Imports52/53/75/
 144/755 tienen500IDs/499únicos;672 tiene285/284. Hardening4c4699b9 los veta:
-no operación nueva ni permiso para deduplicar metadata, ignorar membership o
-recapturar COMPLETE. No existe respuesta original íntegra guardada que pruebe
+no permiso para deduplicar metadata ni ignorar membership. La orden5oct permite
+consulta Point acotada de integridad por estos defectos exactos, conservando
+capturas anteriores; no recaptura rutinaria de COMPLETE. No existe respuesta íntegra guardada que pruebe
 esas seis membresías. Conservar resultados anteriores como antecedentes fechados.
 
 Los17 residuos: ocho fronteras de2076/2084/2131/2149; siete cierres sin import

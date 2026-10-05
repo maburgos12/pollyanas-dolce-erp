@@ -322,14 +322,16 @@ def _original_stock_delta_matches(raw, *, direction):
     return abs(new - previous - direction * abs(quantity)) <= radius
 
 
-def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache):
+def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache, empty_history=False):
     """Retained facts may veto an independent frontier, not prove batch membership."""
-    results = cache.setdefault(("snapshot_canonical_consistency", cutoff), {})
+    results = cache.setdefault(("snapshot_canonical_consistency", cutoff, empty_history), {})
     keys = {(line.branch_id, line.product_id) for line in lines
             if (history := reconciliations.get((line.branch_id, line.product_id)))
             and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
             and snapshots.get((line.branch_id, line.product_id))
-            and (line.branch_id, line.product_id) not in results}
+            and ((line.branch_id, line.product_id) not in results
+                 or empty_history and results[(line.branch_id, line.product_id)].get("independent_source_signature")
+                 != snapshots[(line.branch_id, line.product_id)][1]["source_signature"])}
     if not keys:
         return results
     records = list(PointProductHistoryImport.objects.filter(
@@ -359,6 +361,7 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                      for row in rows],
         }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
         results[key] = {"valid": False, "import_id": record.pk, "source_signature": signature,
+                        "independent_source_signature": snapshots[key][1].get("source_signature"),
                         "canonical_membership_verified": False,
                         "canonical_coverage_status": reconciliations[key].coverage_status,
                         "reason": "UNKNOWN_MOVEMENT_OR_RETAINED_COUNT_MISMATCH"}
@@ -397,7 +400,7 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                 continue
             results[key]["reason"] = "RAW_OR_DOCUMENTARY_CONTRADICTION"
             stock, snapshot = snapshots[key]
-            last_movement = datetime.fromisoformat(snapshot["last_movement_at"])
+            last_movement = None if empty_history else datetime.fromisoformat(snapshot["last_movement_at"])
             captured_at = datetime.fromisoformat(snapshot["captured_at"])
             parsed = []
             for row in rows:
@@ -444,6 +447,8 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                     raise ValueError("Nonfinite stock")
                 if fetched_at is not None and instant > fetched_at:
                     raise ValueError("Movement newer than original retrieval")
+                if empty_history and instant <= captured_at:
+                    raise ValueError("Retained movement contradicts original empty history")
                 effect = AuditStockHistoryService._validated_waste_effect(row, record)
                 if effect.status == "INVALID":
                     raise ValueError("Invalid original historical waste effect")
@@ -475,6 +480,7 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
             # A retained-history gap is not a demonstrated contradiction.
             # Retained facts can veto a snapshot, never lend coverage to it.
             results[key] = {"valid": True, "reason": "NO_KNOWN_DOCUMENTARY_CONTRADICTION",
+                            "independent_source_signature": snapshots[key][1].get("source_signature"),
                             "import_id": record.pk, "source_signature": signature,
                             "canonical_membership_verified": False,
                             "canonical_coverage_status": reconciliations[key].coverage_status,
@@ -486,6 +492,79 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
             results[key]["detail"] = str(exc)
             continue
     return results
+
+
+def _original_zero_boundaries(closing, lines, *, cutoff):
+    """An original empty-history/live-zero result proves a frontier, not coverage."""
+    method = (closing.metadata or {}).get("method")
+    sources = [closing]
+    if method == "consolidated_point_stock_history_attempts":
+        ids = (closing.metadata or {}).get("source_closing_ids")
+        if (not isinstance(ids, list) or not ids
+                or any(type(pk) is not int or pk <= 0 or pk == closing.pk for pk in ids)
+                or len(ids) != len(set(ids))):
+            return {}
+        sources = list(PointHistoricalInventoryClosing.objects.filter(pk__in=ids).prefetch_related("lines"))
+        if len(sources) != len(ids):
+            return {}
+    elif method != "point_stock_history_boundary":
+        return {}
+    original_lines, source_signatures = {}, {}
+    for source in sources:
+        if (source.source != PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY
+                or source.status not in {"DRAFT", "VERIFIED"}
+                or source.operational_date != closing.operational_date
+                or (source.metadata or {}).get("method") != "point_stock_history_boundary"
+                or source.retrieved_at is None or not timezone.is_aware(source.retrieved_at)
+                or source.retrieved_at < cutoff):
+            return {}
+        source_signatures[source.pk] = hashlib.sha256(json.dumps({
+            "id": source.pk, "source": source.source, "status": source.status,
+            "operational_date": source.operational_date.isoformat(),
+            "retrieved_at": source.retrieved_at.isoformat(), "source_fingerprint": source.source_fingerprint,
+            "expected_branch_ids": source.expected_branch_ids, "expected_product_ids": source.expected_product_ids,
+            "metadata": source.metadata,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        for original in (lines if source.pk == closing.pk else source.lines.all()):
+            original_lines.setdefault((original.branch_id, original.product_id), []).append((source, original))
+    proofs = {}
+    for line in lines:
+        key = (line.branch_id, line.product_id)
+        originals = original_lines.get(key, [])
+        line_evidence = line.evidence or {}
+        if (not originals or line.stock != ZERO
+                or line_evidence.get("method") != "no_history_current_zero"
+                or type(line_evidence.get("history_rows")) is not int or line_evidence["history_rows"] != 0
+                or type(line_evidence.get("history_limit")) is not int or line_evidence["history_limit"] != 500):
+            continue
+        provenance = []
+        for source, original in originals:
+            evidence = original.evidence or {}
+            if (original.branch_id not in source.expected_branch_ids
+                    or original.product_id not in source.expected_product_ids
+                    or original.stock != ZERO or evidence != line_evidence
+                    or evidence.get("method") != "no_history_current_zero"
+                    or type(evidence.get("history_rows")) is not int or evidence["history_rows"] != 0
+                    or type(evidence.get("history_limit")) is not int or evidence["history_limit"] != 500
+                    or original.created_at is None or not timezone.is_aware(original.created_at)
+                    or original.created_at < cutoff or line.created_at is None
+                    or not timezone.is_aware(line.created_at) or original.created_at > line.created_at):
+                break
+            provenance.append({"closing_id": source.pk, "line_id": original.pk,
+                "source_fingerprint": source.source_fingerprint, "status": source.status,
+                "operational_date": source.operational_date.isoformat(),
+                "retrieved_at": source.retrieved_at.isoformat(), "created_at": original.created_at.isoformat(),
+                "stock": str(original.stock), "evidence": dict(evidence),
+                "source_manifest_signature": source_signatures[source.pk]})
+        else:
+            proofs[key] = (ZERO, {"branch_external_id": str(line.branch.external_id),
+                "product_external_id": str(line.product.external_id),
+                "captured_at": max(original.created_at for _, original in originals).isoformat(),
+                "original_sources": provenance,
+                "source_signature": hashlib.sha256(json.dumps(provenance, sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                "coverage_promoted": False, "physical_count_verified": False})
+    return proofs
 
 
 @transaction.atomic(savepoint=False)
@@ -553,21 +632,14 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         and closing.retrieved_at is not None
         and timezone.is_aware(closing.retrieved_at) and closing.retrieved_at >= cutoff
     )
-    # A snapshot is independent documentary evidence. Consolidating historical
-    # attempts changes the manifest method, not the original snapshot's job/FKs.
-    # Keep the legacy empty-history/live-zero proof's stricter method contract.
-    original_manifest_valid = (boundary_manifest_valid
-        and manifest_method == "point_stock_history_boundary")
-    original_zero_keys = {
-        (line.branch_id, line.product_id) for line in lines
-        if original_manifest_valid and (line.branch_id, line.product_id) in zero_keys
-        and (line.branch_id, line.product_id) not in canonical_keys
-        and type((line.evidence or {}).get("history_rows")) is int
-        and line.evidence["history_rows"] == 0
-        and type(line.evidence.get("history_limit")) is int and line.evidence["history_limit"] == 500
-        and line.created_at is not None and timezone.is_aware(line.created_at)
-        and line.created_at >= cutoff
-    }
+    original_zeros = (_original_zero_boundaries(closing, lines, cutoff=cutoff)
+                      if boundary_manifest_valid and zero_keys else {})
+    zero_consistency = _snapshot_canonical_consistency(
+        lines, snapshots=original_zeros, reconciliations=monthly, cutoff=cutoff, cache=cache,
+        empty_history=True,
+    )
+    original_zero_keys = {key for key in original_zeros if key not in canonical_keys
+                          or zero_consistency.get(key, {}).get("valid")}
     snapshot_boundaries = _snapshot_historical_boundaries(
         [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys
          or (monthly.get((line.branch_id, line.product_id))
@@ -622,6 +694,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
                                                and history and history.coverage_status == "COMPLETE"
                                                and not history.unknown_movement_ids),
             "original_boundary_verified": key in original_zero_keys,
+            "original_zero_boundary_evidence": dict(original_zeros.get(key, (ZERO, {}))[1]),
+            "original_zero_consistency_evidence": dict(zero_consistency.get(key) or {}),
             "contract": SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else "POINT_STOCK_RAW_UTC",
         }
         if quantity is None:
