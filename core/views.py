@@ -2896,6 +2896,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             materialized_ctx = _dashboard_materialized_executive_context(request.GET.get("months"))
             if materialized_ctx:
                 ctx.update(materialized_ctx)
+                from reportes.commercial_analytics import commercial_panel_from_request
+                ctx["commercial_analytics"] = commercial_panel_from_request(request)
                 return render(request, "core/dashboard_executive.html", ctx)
         except Exception:
             logger.exception("Dashboard full materialized read failed")
@@ -4122,6 +4124,9 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     except Exception:
         logger.exception("Dashboard cockpit summary failed")
 
+    if ctx.get("can_view_reportes"):
+        from reportes.commercial_analytics import commercial_panel_from_request
+        ctx["commercial_analytics"] = commercial_panel_from_request(request)
     template_name = "core/dashboard_executive.html" if ctx.get("dashboard_exec_ready") else "core/dashboard.html"
     return render(request, template_name, ctx)
 
