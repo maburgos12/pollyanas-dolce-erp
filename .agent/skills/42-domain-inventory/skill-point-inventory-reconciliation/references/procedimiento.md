@@ -411,7 +411,7 @@ Si enviado≠recibido, Point finalizado puede registrar retorno administrativo; 
 
 ### Clasificación comercial documental, no identidad transaccional
 
-Reparación autorizada `auditor-clasificacion-documental` en implementación. Usar
+Reparación `auditor-clasificacion-documental` publicada y aceptada por PR1477. Usar
 los lectores mensuales compartidos; no modificar el matcher financiero/global,
 maestros, ventas, MermaPOS ni filas de origen. Regla por nombre es clasificación,
 no FK: las filas originales Coca450/Vela875 no aportan FK de producto. Nodo
@@ -452,6 +452,19 @@ cerrado, no afirmar orden global universal ni tomar Point durante el sellado.
 Publicación exige autoridad sin cambios, exclusiones exactas y segunda lectura
 idéntica/HTTP0/ops0, tests de ambigüedad/mutación/firma/concurrencia y aceptación
 nativa/UI. Documentación de contrato no certifica despliegue ni cierre mensual.
+
+### Compra por descripción: no convertir FK derivada en identidad original
+
+Revisar el raw de compra y el writer antes de afirmar identidad: un coste con
+FK PointProduct puede venir de un resolver nombre/SKU/alias, no del documento.
+Conservar folio/ID de compra, proveedor, fecha, descripción, unidad, cantidad y
+costes como evidencia documental; no reasignar ventas ni curar una regla desde
+esa FK. Dos representaciones de la misma compra no prueban dos recepciones:
+identificar el folio/ID común y conservar ambas fuentes antes de evaluar un coste
+ponderado. No reparar costes como parte de una conciliación sin autorización.
+El checkpoint contiene el ejemplo CakeTopper PLATA/ROSA A16242. Un resultado
+vacío de dos tablas para NEGRO no prueba ausencia de compras en todo el ERP.
+La clasificación DG y su alcance histórico requieren decisión real, sin retrofecha.
 
 Complementos aprobados se identifican por `RecetaAgrupacionAddon` activa/APPROVED y código no vacío, no por nombre Sabor/precio cero. Reutilizar filtro compartido de consumo y relación existente. Conservar venta original del addon, receta/base y consumo de insumos; no inventar descuento 1:1 de la base sin vínculo documental de ticket. Otros sabores requieren su propia relación confirmada.
 

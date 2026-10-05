@@ -1,8 +1,90 @@
-# Continuidad septiembre 2026 — corte 4 de octubre de 2026
+# Continuidad septiembre 2026 — corte 5 de octubre de 2026 UTC
 
 Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes con fuentes autorizadas y frescura necesaria; no volver a descargar hechos ya acreditados por rutina. Hilo/automatización: `01a0d98e-e017-7253-b4c9-9758f56c3827` / `conciliar-septiembre-hasta-cierre`. Septiembre NO cerrado. Regla humana vigente: no alterar inventario, mermas, ventas, RRHH o ajustes para forzar resultado.
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
+
+### Corte 5oct2026UTC: PR1477 aceptado y fuentes todavía pendientes
+
+PR1477 head8616cac6, CI37256483016 intento2 y validate37256483054 completos PASS;
+merge b2b9372d41d637ae364a12f656fd36e4b97a46ee, deploy oficial exit0/web-ready,
+HEAD/check0/migrate0/readiness301 frescos. Lector dos observaciones READONLY
+iguales: autoridad267mermas/26conversiones, exclusiones únicamente1492 REVENTA
+1PZA y193 ACCESORIO11PZA, sin FK transaccional ni origen de ejecución inventados.
+HTTP0/ops0/materialización0/huellas12tablas intactas, aceptación SHAarchivo
+adb6641ae3757ca733ceb2a224853aefb63bfcccc7b463ffebdbe3735047cd38.
+Native3220 runs5015/5016 SUCCESS/context13/igual/HTTP0/capture0/ops0/avisos0;
+Orquestación autenticada dos mensajes Exitoso/consola[]. Stdout inicial truncado:
+dos result_summary_json originales recuperados sin repetir el agente, payload
+íntegro SHA31cebbdccc739ab53507874f1ca4f9a6a7803798327f461a36db66d431ead64e.
+Tarea cerrada y entorno5480/6480 propio retirado con respaldo verificado.
+Este corte sustituye «Coca/Vela en implementación» del antecedente de abajo.
+
+Un preview posterior íntegro READONLY/HTTP0/writes0/refreshFalse conserva
+lock_readyFalse:551fronteras (450apertura/101cierre),23orígenesAGG,2destinos
+Extra10 y7ventasCakeTopper. Payload comprimidoSHA
+8e25d3f6415052d43e0baec7d3557ae99afbbc7a328e05a2a7d4fb311d4a35ac.
+959/374 del diagnóstico post174 son antecedentes, NO pendientes actuales ni
+aceptaciones por resta. No repetir preview/capturas por rutina. Fuente completa
+requiere pruebas incluso de productos no elegibles para proyección: exclusión
+de rol no acredita ausencia de stock ni autoriza omitir el guard global.
+El corte no acredita agotadas las alternativas técnicas ni cierre mensual.
+
+Diagnóstico posterior READONLY sobre b2b9372d, sin otro preview/HTTP/ops:
+551 se separan en522ceros documentales,17residuos anteriores y12fronteras
+reaparecidas por fail-closed. Los522 son439aperturas del manifiesto consolidado6
+con procedencia por línea en intentos originales4/5 (413en ambos/26en uno), y
+83cierres del manifiesto directo7 preemptados por canónicaINCOMPLETE. Stock0,
+history_rows0/history_limit500/createdpostcut NO bastan bajo el contrato actual:
+no aceptar ni convertir en COMPLETE. Extensión específica consultada una vez,
+pendiente de aprobación; estos bloqueos son técnicos, no evidencia humana ausente.
+
+Las12 nuevas son ambos cortes de2133/2135/2250/2451/2521/3877. Imports52/53/75/
+144/755 tienen500IDs/499únicos;672 tiene285/284. Hardening4c4699b9 los veta:
+no operación nueva ni permiso para deduplicar metadata, ignorar membership o
+recapturar COMPLETE. No existe respuesta original íntegra guardada que pruebe
+esas seis membresías. Conservar resultados anteriores como antecedentes fechados.
+
+Los17 residuos: ocho fronteras de2076/2084/2131/2149; siete cierres sin import
+2081/2082/2117/2118/2119/2120/2237; cierre2083 sin frontera admisible; apertura2354
+two_independent_no_history_current_zero. Tres respuestas íntegras existentes de
+2082/2119/2120 pasan validación offline de entrada:10filas/límite10, fecha original,
+SHA y script de adquisición. Ingreso autorizado no equivale a cobertura mensual
+ni frontera aceptada: respuesta saturada y sin comienzo de septiembre conserva
+INCOMPLETE. No repetir Point ni confundir este contrato con el de522ceros.
+Ingreso oficial posterior ya completado: imports846/847/848,10filas cada uno,
+unknown[], INCOMPLETE y ambas fronteras null. Fechas originales conservadas;
+dos ingresos iguales/segunda0imports/0filas/0cambioshuella/HTTP0/ops0/avisos0.
+Casos/ventas/waste/cierres/MermaPOS/propuestas intactos. No reingresar por rutina.
+Corrección de procedencia2083: unknown1680271 corresponde al diagnóstico post174
+antiguo, NO al lector vigente. PR1476 acredita débito/reverso válidos de import43,
+unknown[] y merma neta0. Apertura7356 ya resuelta; permanece cierre7/línea9244,
+CEDIS branchPK3/Point8 productoPK120/Point135/SKU0135, canónicaINCOMPLETE sin
+snapshot de cierre calificable. No repetir reparación, HTTP ni afirmar caché fallida.
+
+### CakeTopper: compra existente por descripción, no regla DG automática
+
+Consulta ERP READONLY5oct03:27:36.907UTC, cuatro costes/dos históricos,
+HTTP0/writes0. Raw POINT_PRODUCT_HISTORY/GetComprabyId acredita compra1668859,
+folioA16242/11sept/IMPRENTA MARCO POLO/Almacen. Cost5797 ERP990/Point1052:
+CAKE TOPPER FELIZ CUMPLE ESTRELLA PLATA,100PZA,3944MXN/39.44unitario;
+Cost5799 ERP993/Point1055: CAKE TOPPER MAKE A WISH ROSA,100PZA,
+4524MXN/45.24unitario. Original íntegro SHAarchivo
+0bfb4785656eaf30c323ec92295c6140dfcb1b165bc7b82b9ea0a03354419be0,
+fuente-compras-caketopper-original-20261005.json; rollout subagente
+01a1079c-2766-73a0-a8f6-89e2ecd07417 línea1988.
+
+Raw Articulo no contiene PK/FK producto. Writer
+PointPurchaseResaleCostSyncService.sync_purchase_payloads→_resolve_product
+resuelve nombre/SKU/alias: FK coste derivada, no identidad transaccional.
+Versiones5351/5797 y5353/5799 conservan misma compra/folio/cantidad/costes
+con descripciones distintas. Hist391/393 MONTHLY_WEIGHTED sample2/qty200
+suman dos representaciones: NO dos compras/recepción200PZA. No reparar costes,
+reasignar ventas ni curar maestros dentro de esta conciliación.
+NEGRO ERP994/Point1059 sin filas en las dos tablas consultadas, no ausencia
+universal de compra. Siete ventas7PZA/630MXN preservadas; permanece decisión
+DG exacta de clasificación y alcance septiembre, sin retrofechar. Configuración
+no reemplaza esa decisión; esta compra no explica23AGG ni acredita conteo físico.
 
 ### PR1476 merma/reverso publicado, aceptación5oct2026UTC
 
@@ -21,7 +103,7 @@ c80fc3dcb1/51d9f9f0d2,4oct19:18Mazatlán/consola[]. Tarea merged y recursos
 propios5478/6478 retirados con respaldo verificado. No repetir entrega/diagnóstico.
 Este corte sustituye sólo estado unknown1680271/lector pendiente anterior abajo.
 
-### Coca/Vela: fuentes exactas, reparación todavía en implementación
+### Antecedente anterior a PR1477: Coca/Vela en implementación (superado)
 
 READONLY5oct waste1492/mov1666364/Colosio/8sept/1PZA/rawnombre
 COCA-COLA 450 ML/regla3 fijaREVENTA desdeabril/nodo2431 run79 Point850;
