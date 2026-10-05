@@ -64,28 +64,65 @@ Estas fuentes no autorizan repetir HTTP de las174COMPLETE ni inventar apertura0.
 PR1469 publicado/aceptado:14originales,4081 filas, imports829–842; segunda ejecución
 0imports/0filas de historia, HTTP0 y cambios operativos0. Trece observaciones
 unknown0;2169 conserva unknown1680271, no se convierte en historia resuelta.
-Parciales2122/2123/2235 no ingresados: no inventar respuesta completa para ellos.
+Parciales originales2122/2123/2235 no ingresados: no inventar respuesta completa
+para ellos. Capturas nuevas completas posteriores se registran por separado abajo.
 Review nativo2075 corridas5000/5001, contexto13archivos, UI autenticada/consola[];
 tarea1469 y sus recursos locales cerrados con respaldos propios verificados.
 No repetir ingreso, captura o entrega por rutina.
 Septiembre y los expedientes humanos siguen sujetos a sus guards y evidencias.
 
-### Bamoa: contrato autorizado en implementación, no desplegado
+### Bamoa: PR1471 publicado, ocho fronteras aceptadas y cuatro vetadas
 
 Imports721/778/785/197/816/817, casos2459/2562/2574/2580/2610/2611:
 branchPK5/Point2,500filas/500FK, COMPLETE sin membresía del último lote acreditada.
 Snapshots apertura28605158/28605320/28605343/28605349/28605322/28605261 y
 cierre28797254/28797422/28797446/28797452/28797424/28797363 respectivamente;
 stock0, apertura job35042/log260894, cierre job77519/log299172.
-Estos IDs acreditan candidatos exactos, no seis aceptaciones antes de los guards.
+Estos IDs acreditan candidatos exactos; aceptación1471 dio4pares/8fronteras y
+vetó2pares/4fronteras por representación, no seis aceptaciones. Imports785/816
+conservaron esos vetos; no editar raws/metadata ni recapturar COMPLETE.
 
 Tarea `auditor-bamoa-fronteras`: autorización vigente permite snapshot independiente
 junto a COMPLETEunknown0 sólo si falta la frontera concreta, con vetos raw y
 precedencia de frontera canónica presente. Mantener COMPLETE separado de
 canonical_history_verifiedFalse cuando sólo snapshot prueba el extremo. No crear
 fetchedIDs, HTTP ni prueba física; casos2574/2580 conservan sus roles excluidos.
-Pruebas/CI/deploy/lectura autenticada todavía requieren resultado real de esta
-tarea; no confundir autorización o actualización de habilidad con publicación.
+PR1471: CI37244309158 PASS/head4c4699b9186d0a7ade4ef68b8945eb19508ad817,
+merge b3317f74; deploy oficial con HEAD/check0/migrate0/readiness301.
+Reviews nativas2459 corridas5004/5005 SUCCESS/context13, SHA observación
+8b3a798c0dc821e6a0798e20665db7d50d2b73d11747bcf1bf7e194b1e42f7d9,
+observaciones iguales/HTTP0/capture0/ops0/avisos0; UI autenticada dos mensajes,
+consola[]. Entorno LOCAL5476/6476 retirado con helper/respaldo verificado
+evidencia1791159769475055000 y red exacta retirada; tarea cerrada oficialmente.
+No repetir entrega. Aceptación de fronteras no es materialización de proyección
+ni cierre de septiembre, tampoco conteo físico.
+
+### Tres respuestas nuevas completas: originales parciales no rehabilitados
+
+Consulta nueva4oct2026 23:48UTC, ingreso oficial separado:100filas cadauna,
+COMPLETE/unknown0. No recrear su fecha de descarga desde los resúmenes antiguos.
+
+|Caso/import|Apertura→cierre|retrieved_at original UTC|SHA respuesta|
+|---|---|---|---|
+|2122/843|2→2|2026-10-04T23:48:28.772142Z|00db284c26fb1fc19a494046ca89982d5bba8d2773522d3de759c3701f7c0543|
+|2123/844|1→4|2026-10-04T23:48:29.479177Z|e1a3aa8d1b71ffa005609b5342bbbc4c6295c31436b12abafbab0de3a42cc86d|
+|2235/845|19→18|2026-10-04T23:48:30.115986Z|84355946f2da5db04a8a4784716350db5d590a1f7f3a0ec96971ef7f75892e7f|
+
+Segunda ejecución0HTTP/0filas/0imports/0duplicados/0ops; materialización0.
+No repetir HTTP/ingreso: la evidencia nueva no vuelve íntegros los3resúmenes
+antiguos ni prueba entrega física/aprobación/mes cerrado.
+
+### Representación original: reparación nueva en implementación, no publicada
+
+Tarea `auditor-representacion-original`: import785 raw/persistido representan el
+mismo instante DST pero el veto comparaba representación; import816 tiene diez
+VENTA con qty1.0, anterior1.300000011920929/nueva0.30000001192092896 y residuo
+Decimal4e−17. Son fuentes existentes, no diez piezas perdidas ni ajuste nuevo.
+Procedimiento define comparación UTC exacta y rama binaria de tres floats finitos,
+con precedencia Decimal y barrera de magnitud. No tolerancia a strings/mixtos,
+cantidad2/delta1, discrepancia0.0004, raw/stock/ÚltimoMovimiento/identidad.
+Pruebas/CI/deploy/aceptación de esta reparación todavía requieren resultado real;
+no afirmar las cuatro fronteras antes vetadas aceptadas por actualizar habilidad.
 
 ## Autorización y siguiente contrato snapshot, 4oct2026
 
@@ -216,10 +253,13 @@ Una consulta corta que no cruza el corte no prueba la frontera. 2172 CEDIS Point
 ZanahoriaR103:100filas íntegras consultadas4oct17:19:56UTC empiezan2sept20:20:46.013Z
 1661288−2→−3; no prueban apertura1sept07Z. SHA
 38dfbdf5d4b4df3a2c7c087d144ee9573194d6e1ad7a7fdd292f732e208a156c.
-No repetir100 por rutina ni convertir primera existencia en apertura.23cierresCEDIS
+Antecedente anterior al ingreso1469 y tres capturas completas nuevas de arriba:
+no repetir100 por rutina ni convertir primera existencia en apertura.23cierresCEDIS
 cruzaron corte con respuestas conservadas;3aperturas2122=2/2123=1/2235=19 cruzaron:
 no reutilizar FK1659466 global (existe en productos distintos).14aperturas siguen
-sin prueba. Reporte1081 Aug31CEDIS ya solicitado una vez, seguíaStatus0 a17:46UTC;
+sin prueba en ese corte anterior. No convertir esta cifra fechada en faltantes
+actuales sin consultar los originales ya incorporados. Reporte1081 Aug31CEDIS ya
+solicitado una vez, seguíaStatus0 a17:46UTC;
 no recrearlo ni afirmar descarga mientras no esté generado.
 
 Reporte1082 Matriz23sept tipo21 solicitado4oct16:36Z/generado16:36:37.780Z,

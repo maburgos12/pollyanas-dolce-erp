@@ -14,6 +14,7 @@ from pos_bridge.models import (
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, PointHistoryReconciliation
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService, documentary_historical_boundary,
+    _original_stock_delta_matches,
 )
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from recetas.models import Receta
@@ -111,6 +112,140 @@ class SnapshotHistoricalBoundaryTests(TestCase):
                                "latest_movement_at": rows[-1].movement_at.isoformat()}
         record.save()
         return record
+
+    def _retained_representation_history(self, *, previous, new, quantity=1.0,
+                                         stamp="2022-10-30T01:18:31.093", movement="VENTA"):
+        self._snapshot(stock="0")
+        record = self._incomplete_history(stamp=stamp)
+        row = record.rows.get()
+        raw = {**row.raw_payload, "Existencia_anterior": previous,
+               "Existencia_nueva": new, "Cantidad": quantity, "Movimiento": movement}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        row.refresh_from_db()
+        return record, row
+
+    def test_retained_fold_same_utc_instant_does_not_veto_snapshot(self):
+        record, row = self._retained_representation_history(previous=2, new=1, quantity=1)
+        self.assertEqual(row.movement_at,
+                         datetime(2022, 10, 30, 7, 18, 31, 93000, tzinfo=dt_timezone.utc))
+        original = list(record.rows.values())
+        metadata = dict(record.raw_metadata)
+        with patch("requests.sessions.Session.request", side_effect=AssertionError("No HTTP")):
+            first, second = self._read(), self._read()
+        self.assertEqual(first[0], {self.line.pk: Decimal("0")})
+        self.assertEqual(first, second)
+        self.assertFalse(first[1][self.line.pk]["canonical_history_verified"])
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata, metadata)
+        self.assertEqual(list(record.rows.values()), original)
+
+    def test_retained_fold_one_microsecond_difference_still_vetoes(self):
+        _, row = self._retained_representation_history(previous=2, new=1, quantity=1)
+        row.movement_at += timedelta(microseconds=1)
+        row.save(update_fields=["movement_at"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_original_float_sale_equations_preserve_snapshot_and_original_hashes(self):
+        record, row = self._retained_representation_history(
+            previous=1.300000011920929, new=0.30000001192092896,
+            stamp="2022-10-29T07:18:31.093Z")
+        for previous, new in ((1.300000011920929, 0.30000001192092896),
+                              (0.30000001192092896, -0.699999988079071)):
+            with self.subTest(previous=previous, new=new):
+                raw = {**row.raw_payload, "Existencia_anterior": previous, "Existencia_nueva": new}
+                _, defaults = AuditStockHistoryService._parse_row(raw)
+                for field, value in defaults.items():
+                    setattr(row, field, value)
+                row.save()
+                original, metadata = list(record.rows.values()), dict(record.raw_metadata)
+                with patch("requests.sessions.Session.request", side_effect=AssertionError("No HTTP")):
+                    first, second = self._read(), self._read()
+                self.assertEqual(first[0], {self.line.pk: Decimal("0")})
+                self.assertEqual(first, second)
+                self.assertFalse(first[1][self.line.pk]["canonical_history_verified"])
+                self.assertFalse(first[1][self.line.pk]["canonical_consistency_evidence"]["coverage_promoted"])
+                record.refresh_from_db()
+                self.assertEqual(record.raw_metadata, metadata)
+                self.assertEqual(list(record.rows.values()), original)
+
+    def test_original_float_nonrepresentational_and_mixed_equations_veto(self):
+        record, row = self._retained_representation_history(
+            previous=1.300000011920929, new=0.30000001192092896,
+            stamp="2022-10-29T07:18:31.093Z")
+        cases = ((1.300000011920929, 0.30040001192092896, 1.0),
+                 ("1.300000011920929", "0.30000001192092896", "1.0"),
+                 (1.300000011920929, 0.30000001192092896, 1),
+                 (1.300000011920929, 0.30000001192092896, 2.0),
+                 (1e12 + 1.0, 1e12, 1.0001),
+                 (0.9999999999999999, 1.0, 1e-18),
+                 (1.0, 1.0, 1e-18))
+        for previous, new, quantity in cases:
+            with self.subTest(previous=previous, new=new, quantity=quantity):
+                raw = {**row.raw_payload, "Existencia_anterior": previous,
+                       "Existencia_nueva": new, "Cantidad": quantity}
+                _, defaults = AuditStockHistoryService._parse_row(raw)
+                for field, value in defaults.items():
+                    setattr(row, field, value)
+                row.save()
+                self.assertEqual(self._read()[0], {})
+
+    def test_original_zero_quantity_requires_exact_zero_delta(self):
+        raw = {"Existencia_anterior": 1.0, "Existencia_nueva": 1.0, "Cantidad": 0.0}
+        self.assertTrue(_original_stock_delta_matches(raw, direction=1))
+        self.assertFalse(_original_stock_delta_matches(
+            {**raw, "Existencia_nueva": 1.0000000000000002}, direction=1))
+
+    def test_original_float_cost_and_raw_invalid_values_remain_strict(self):
+        _, row = self._retained_representation_history(
+            previous=1.300000011920929, new=0.30000001192092896,
+            stamp="2022-10-29T07:18:31.093Z")
+        original = dict(row.raw_payload)
+        # PostgreSQL JSON rejects nonfinite numbers before the reader; exercise
+        # those native float inputs directly and their valid JSON strings here.
+        for value in (True, float("nan"), float("inf"), Decimal("1.0")):
+            with self.subTest(helper_value=value):
+                self.assertFalse(_original_stock_delta_matches({**original, "Cantidad": value}, direction=-1))
+        for value in (True, "NaN", "Infinity"):
+            with self.subTest(value=value):
+                row.raw_payload = {**original, "Cantidad": value}
+                row.save(update_fields=["raw_payload"])
+                self.assertEqual(self._read()[0], {})
+        row.raw_payload = original
+        row.unit_cost = Decimal("0.000001")
+        row.save(update_fields=["raw_payload", "unit_cost"])
+        self.assertEqual(self._read()[0], {})
+
+    def test_original_float_incoming_reversal_and_adjustment_equations(self):
+        record, row = self._retained_representation_history(
+            previous=0.30000001192092896, new=1.300000011920929,
+            stamp="2022-10-29T07:18:31.093Z", movement="PRODUCCION")
+        cases = (("PRODUCCION", 0.30000001192092896, 1.300000011920929),
+                 ("TRANSFERENCIA ENTRADA", 0.30000001192092896, 1.300000011920929),
+                 ("CONVERSION ENTRADA", 0.30000001192092896, 1.300000011920929),
+                 ("CANCELACION VENTA", 0.30000001192092896, 1.300000011920929),
+                 ("AJUSTE ENTRADA", 0.30000001192092896, 1.300000011920929),
+                 ("AJUSTE SALIDA", 1.300000011920929, 0.30000001192092896),
+                 ("TRANSFERENCIA SALIDA", 1.300000011920929, 0.30000001192092896),
+                 ("CONVERSION SALIDA", 1.300000011920929, 0.30000001192092896),
+                 ("MERMA", 1.300000011920929, 0.30000001192092896))
+        for movement, previous, new in cases:
+            with self.subTest(movement=movement):
+                raw = {**row.raw_payload, "Movimiento": movement,
+                       "Existencia_anterior": previous, "Existencia_nueva": new}
+                _, defaults = AuditStockHistoryService._parse_row(raw)
+                for field, value in defaults.items():
+                    setattr(row, field, value)
+                row.save()
+                self.assertEqual(self._read()[0], {self.line.pk: Decimal("0")})
+        raw = {**row.raw_payload, "Movimiento": "AJUSTE ENTRADA"}
+        _, defaults = AuditStockHistoryService._parse_row(raw)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        self.assertEqual(self._read()[0], {})  # magnitude never relaxes direction
 
     def test_complete_without_batch_membership_uses_independent_snapshot_not_canonical_proof(self):
         self._snapshot(stock="0")

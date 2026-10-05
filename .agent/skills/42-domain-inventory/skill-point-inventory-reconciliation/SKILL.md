@@ -77,6 +77,13 @@ también a apertura, cierre y cobertura, no solo a ventas. La actualización de 
 conocimiento no certifica que el lector haya sido publicado ni autoriza reescribir
 originales. El checkpoint fechado distingue evidencia, reparación y entrega.
 
+Para vetos por representación original, leer el contrato específico del
+procedimiento: comparar timestamps aware en UTC exacto y distinguir ecuación
+Decimal exacta de representación binaria IEEE de tres floats originales finitos.
+No aplicar epsilon general, redondeo a3 decimales ni tolerancia a stock/cortes/
+identidades. Un residuo de representación no es pérdida ni permiso de cierre;
+la actualización documental no significa que el nuevo lector esté desplegado.
+
 ## Límites y siguiente paso
 
 ### Plan mensual antes de revisar uno por uno
