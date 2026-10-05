@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load destinos_documentales %}
 
 {% block title %}Equipos{% endblock %}
 {% block page_title %}Equipos{% endblock %}
@@ -116,7 +117,7 @@
         {% for row in activos_rows %}
           {% with a=row.activo enterprise=row.enterprise %}
           <tr id="activo-{{ a.id }}">
-            <td>{{ a.codigo }}</td>
+            <td>{{ a.codigo }}<br>{% consulta_compras_destino request.user 'ACTIVO' a.pk as compras_destino_url %}{% if compras_destino_url %}<a href="{{ compras_destino_url }}">Compras relacionadas</a>{% endif %}</td>
             {% include "activos/_datos_equipo.html" with datos=row.datos errores=row.errores editar_abierto=row.editar_abierto version_enviada=row.version_enviada %}
             <td>{{ a.sucursal.nombre|default:'Sin sucursal asignada' }}</td>
             <td>{{ a.ubicacion|default:'-' }}</td>

@@ -1,4 +1,4 @@
-{% load static %}
+{% load static destinos_documentales %}
 <!doctype html>
 <html lang="es" class="operacion-app-html">
 <head>
@@ -43,6 +43,9 @@
         <p class="pendiente">Datos técnicos pendientes de capturar.</p>
       {% endif %}
     </section>
+
+    {% consulta_compras_destino request.user 'ACTIVO' activo.pk as compras_destino_url %}
+    {% if compras_destino_url %}<p><a class="volver" href="{{ compras_destino_url }}">Compras relacionadas con este equipo</a></p>{% endif %}
 
     {% if fallas_abiertas %}
       <section class="bloque bloque-alerta" aria-labelledby="fallas-abiertas">
