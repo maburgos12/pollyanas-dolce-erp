@@ -9,7 +9,7 @@ import json
 
 from django.apps import apps
 from django.conf import settings
-from django.db import connection, models, transaction
+from django.db import DatabaseError, connection, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -22,6 +22,7 @@ from pos_bridge.models import (
     PointInventorySnapshot,
     PointProduct,
     PointProductionLine,
+    PointRecipeNode,
     PointSyncJob,
     PointWasteLine,
 )
@@ -44,7 +45,7 @@ from recetas.models import (
 )
 from recetas.utils.cierre_equivalencias import resolve_closure_recipe_quantity
 from recetas.utils.normalizacion import normalizar_nombre
-from reportes.models import FactProduccionDiaria
+from reportes.models import FactProduccionDiaria, ProductBusinessRule
 
 ZERO = Decimal("0")
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
@@ -1137,6 +1138,18 @@ class ProductMonthClosureService:
         note: str = "",
         channel: str = "service",
     ) -> ProductoMonthClosure:
+        # ponytail: global catalogue write pause through preview/seal; coordinate
+        # decision-scoped writers if measured catalogue contention warrants it.
+        tables = ", ".join(connection.ops.quote_name(model._meta.db_table)
+            for model in (ProductBusinessRule, PointRecipeNode))
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"LOCK TABLE {tables} IN SHARE MODE NOWAIT")
+        except DatabaseError as exc:
+            cause = exc.__cause__
+            if (getattr(cause, "sqlstate", None) or getattr(cause, "pgcode", None)) != "55P03":
+                raise
+            raise ProductMonthClosureError("El catálogo está en uso; reintenta el cierre cuando termine su actualización.") from exc
         source_month = ProductoMonthClosure.objects.values_list("month_start", flat=True).get(pk=closure.pk)
         self._lock_canonical_source_month(source_month)
         closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)

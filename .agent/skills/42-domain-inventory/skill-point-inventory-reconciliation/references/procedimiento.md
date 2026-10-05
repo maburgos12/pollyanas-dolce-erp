@@ -334,8 +334,8 @@ Comprobar ajustes por delta existencia_nueva−existencia_anterior y consistenci
 
 ### Merma cancelada y reverso: efecto histórico individual, no merma vigente
 
-Reparación autorizada `auditor-merma-reversion-historica` en implementación, no
-publicada todavía. El RED documental no tenía ruta ejecutable para tipo5 cancelado
+Reparación `auditor-merma-reversion-historica` publicada mediante PR1476 y aceptada
+con evidencia en el checkpoint. El RED documental no tenía ruta ejecutable para tipo5 cancelado
 y tipo15; excluir el primero y sumar sólo el reverso inventaría un crédito. No
 eliminar cancelados de la secuencia antes de comprobar esta excepción estricta.
 
@@ -408,6 +408,50 @@ Una revisión de carga cerrada sigue siendo evidencia: reutilizar FK y resoluci�
 Si enviado≠recibido, Point finalizado puede registrar retorno administrativo; verificar si se cargó y custodia física real cuando corresponda. No imputar pérdida, otro retorno o destino de rebanadas. Si falta evidencia humana, usar expediente existente, responsable autorizado y solicitud con folio, fecha, producto, sucursal, cantidad y acción comprobable. Avisar/asignar material/recurrente/alto riesgo; agrupar menores. No duplicar solicitudes ni modificar RRHH para encontrar responsable.
 
 ## 4. Fuentes comerciales y cobertura de mermas
+
+### Clasificación comercial documental, no identidad transaccional
+
+Reparación autorizada `auditor-clasificacion-documental` en implementación. Usar
+los lectores mensuales compartidos; no modificar el matcher financiero/global,
+maestros, ventas, MermaPOS ni filas de origen. Regla por nombre es clasificación,
+no FK: las filas originales Coca450/Vela875 no aportan FK de producto. Nodo
+corroborante no se asigna como PointProduct al movimiento ni prueba ejecución.
+
+Autoridad se evalúa sobre TODAS las filas mensuales antes de separar dominio
+fabricado. Nombre exacto usa `ProductBusinessRule.normalize_product_name`
+(`strip().upper()`), no alias por tokens ni normalización sin acentos. Exigir
+coherencia del raw con nombre/código/cantidad/unidad/sucursal originales, ausencia
+de receta/insumo contradictorios y corroboración de catálogo de dominio producto.
+Nodos candidatos inconsistentes o múltiples identidades conservan unresolved;
+no elegir primero por SKU. No hardcodear PK de filas o nodos como prueba.
+
+Coca450: regla fija existente REVENTA con nombre completo COCA-COLA 450 ML;
+catálogo original código COCA450, familia Bebidas/categoría Coca-cola. No enlazar
+al producto external235 ni inferir compra/precio/conteo. Vela875: documento
+original código875/nombre VELA INDIVIDUAL, catálogo coherente familia Velas y
+categoría Alegría bajo criterio comercial autorizado. Categoría o ProduccionFalse
+solos no convierten otros artículos en accesorios. Extra10 queda pendiente.
+
+Preservar filas y contadores de origen; exclusión es sólo del balance fabricado.
+`excluded_documentary_rows` registra fuente/ID/hash, cantidad/unidad/sucursal,
+criterio versionado, rawSHA, nodos/runs/raw corroborantes y regla/classification/
+is_fixed/updated_at efectivamente usados. Orden determinista, sin now por lectura.
+Vela AGG conserva `execution_origin_verified=False`;23AGG fabricados no reciben
+origen por receta/configuración/factor ni por esta exclusión.
+
+Firmar sólo decisiones usadas en metadata canónica waste/conversions, no un digest
+global de catálogos ajenos. Un cambio relevante debe invalidar proyección antigua.
+Al sellar, dentro de transacción oficial, proteger ambas tablas de catálogo con
+SHARE NOWAIT en orden fijo antes de la lectura fresca y comparación de huellas.
+Si ocupado, fallo cerrado/rollback: no esperar, reintentar en bucle ni rebajar guard.
+SHARE permite lectura y bloquea INSERT/UPDATE/DELETE incluidos phantoms. Pausa
+global de escritores mientras preview/sellado; no prometer techo no medido. En
+build(lock_after_build=True) pueden existir mutex previos: NOWAIT conserva fallo
+cerrado, no afirmar orden global universal ni tomar Point durante el sellado.
+
+Publicación exige autoridad sin cambios, exclusiones exactas y segunda lectura
+idéntica/HTTP0/ops0, tests de ambigüedad/mutación/firma/concurrencia y aceptación
+nativa/UI. Documentación de contrato no certifica despliegue ni cierre mensual.
 
 Complementos aprobados se identifican por `RecetaAgrupacionAddon` activa/APPROVED y código no vacío, no por nombre Sabor/precio cero. Reutilizar filtro compartido de consumo y relación existente. Conservar venta original del addon, receta/base y consumo de insumos; no inventar descuento 1:1 de la base sin vínculo documental de ticket. Otros sabores requieren su propia relación confirmada.
 

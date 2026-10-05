@@ -88,8 +88,14 @@ Ante MERMA cancelada o CANCELACION DE MERMA en historia Stock, leer la excepció
 documental estricta del procedimiento: cada original puede conservar débito o
 reverso firmado por su propia ecuación, fecha y ámbito. No excluir el débito por
 Cancelado ni acreditar crédito sólo por etiqueta, inventar FK de pareja o modificar
-MermaPOS. La reparación lectora descrita en el checkpoint está en implementación;
+MermaPOS. PR1476 fue publicado y aceptado; consultar su evidencia en el checkpoint;
 review/plan no ganan HTTP, importación, materialización ni permiso de cierre.
+
+Para Coca450 y Vela875, consultar clasificación comercial documental en el
+procedimiento: regla curada/catálogo corroborante no son FK de la transacción.
+Preservar fuente, cantidad y unidad fuera del balance fabricado cuando el lector
+estricto lo acredita; no transformar AGG en ejecución ni ampliar tokens globales.
+Esta extensión está en implementación hasta registrar publicación y aceptación.
 
 ## Límites y siguiente paso
 

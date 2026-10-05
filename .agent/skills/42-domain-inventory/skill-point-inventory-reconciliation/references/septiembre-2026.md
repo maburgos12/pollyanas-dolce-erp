@@ -4,6 +4,36 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### PR1476 merma/reverso publicado, aceptación5oct2026UTC
+
+CI37252263255/validate37252263268 PASS head0505970f, mergecb87ef09,
+deploy oficial exit0/web-ready; HEAD/check0/migrate0/readiness301 frescos.
+Dos lecturas READONLY idénticas HTTP0/ops0/materialización0/originales intactos,
+SHAc00a4311a5b9a7ab6d40bf78c9f99b2c6c0398dee19814af075010effafd9254.
+Import43 conserva débito4/reverso4 unknown0/cobertura calculadaINCOMPLETE.
+Import839/CEDIS/product263 conserva300filas y débito1/reverso1, unknown0,
+ecuación documental−18+232conversión+1entrada−226salida−4merma=−15,
+extremos−18/−15. No se persistieron cobertura ni saldos ni se explicó origen físico.
+Review2169 corridas5010/5011 SUCCESS/context13, observaciones iguales,
+SHAf4a44c50824703b5d24b31d77db4a535cfadfdf2c8ec36e33621d143d9caba38,
+HTTP0/capture0/ops0/avisos0. Orquestación autenticada runkeys
+c80fc3dcb1/51d9f9f0d2,4oct19:18Mazatlán/consola[]. Tarea merged y recursos
+propios5478/6478 retirados con respaldo verificado. No repetir entrega/diagnóstico.
+Este corte sustituye sólo estado unknown1680271/lector pendiente anterior abajo.
+
+### Coca/Vela: fuentes exactas, reparación todavía en implementación
+
+READONLY5oct waste1492/mov1666364/Colosio/8sept/1PZA/rawnombre
+COCA-COLA 450 ML/regla3 fijaREVENTA desdeabril/nodo2431 run79 Point850;
+conversion193/job77629/AGG/Matriz/código875/VELA INDIVIDUAL/11PZA,
+nodo2332 run72 Point1001/familiaVelas/categoríaAlegría.
+Las filas no tienen FK producto: nodos corroboran clasificación comercial,
+NO identidad transaccional. No inferir compra/existencia/ejecución de esos PK.
+Vela tiene fecha default del reporte, no fecha individual;23AGG fabricados
+y Extra10 conservan faltantes. Fuentes/raw actuales verificados en expediente,
+sin HTTP ni escrituras. Ver procedimiento/ficha de fuentes; no afirmar publicada
+la reparación hasta CI/deploy/aceptación. Septiembre todavía requiere guard real.
+
 Producción VPS, verificación4oct2026: Mauricio autorizó además la sincronización
 mensual protegida y la reparación lectora Stock UTC sin reescribir originales.
 Job81612 fullSept1–30, sin filtro sucursal, SUCCESS: seen267/updated267/superseded0;
