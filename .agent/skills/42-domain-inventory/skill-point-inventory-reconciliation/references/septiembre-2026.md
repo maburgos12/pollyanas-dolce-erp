@@ -46,7 +46,7 @@ recapturar COMPLETE. No existe respuesta original íntegra guardada que pruebe
 esas seis membresías. Conservar resultados anteriores como antecedentes fechados.
 
 Los17 residuos: ocho fronteras de2076/2084/2131/2149; siete cierres sin import
-2081/2082/2117/2118/2119/2120/2237; cierre2083 unknown1680271; apertura2354
+2081/2082/2117/2118/2119/2120/2237; cierre2083 sin frontera admisible; apertura2354
 two_independent_no_history_current_zero. Tres respuestas íntegras existentes de
 2082/2119/2120 pasan validación offline de entrada:10filas/límite10, fecha original,
 SHA y script de adquisición. Ingreso autorizado no equivale a cobertura mensual
@@ -56,6 +56,11 @@ Ingreso oficial posterior ya completado: imports846/847/848,10filas cada uno,
 unknown[], INCOMPLETE y ambas fronteras null. Fechas originales conservadas;
 dos ingresos iguales/segunda0imports/0filas/0cambioshuella/HTTP0/ops0/avisos0.
 Casos/ventas/waste/cierres/MermaPOS/propuestas intactos. No reingresar por rutina.
+Corrección de procedencia2083: unknown1680271 corresponde al diagnóstico post174
+antiguo, NO al lector vigente. PR1476 acredita débito/reverso válidos de import43,
+unknown[] y merma neta0. Apertura7356 ya resuelta; permanece cierre7/línea9244,
+CEDIS branchPK3/Point8 productoPK120/Point135/SKU0135, canónicaINCOMPLETE sin
+snapshot de cierre calificable. No repetir reparación, HTTP ni afirmar caché fallida.
 
 ### CakeTopper: compra existente por descripción, no regla DG automática
 
