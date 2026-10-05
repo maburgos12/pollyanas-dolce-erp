@@ -1,0 +1,12 @@
+<section class="card"><h2>Procedencias documentales confirmadas</h2>
+{% for vinculo in vinculos %}<article class="mb-3">
+  <h3>{{ vinculo.activo.codigo }} · {{ vinculo.activo.nombre }} · {{ vinculo.referencia_unidad }}</h3>
+  <p>{% if vinculo.item %}<a href="{% url 'compras:departamental_detalle' vinculo.item.solicitud_id %}#item-{{ vinculo.item_id }}">{{ vinculo.item.solicitud.folio }} · {{ vinculo.item.descripcion }}</a>{% endif %}</p>
+  <p>Recepción original {{ vinculo.recepcion_original_id }} · Línea {{ vinculo.linea_original_id }} · Intento {{ vinculo.intento_original_id }} · Artículo {{ vinculo.item_original_id }} · Equipo {{ vinculo.activo_original_id }}</p>
+  <p>Versión confirmada {{ vinculo.version_confirmada }}. {% if vinculo.intento %}Versión actual {{ vinculo.intento.version }} · {{ vinculo.intento.get_estado_display }}.{% else %}Intento original eliminado.{% endif %}
+  {% if vinculo.recepcion %}Recepción actual: {{ vinculo.recepcion.cantidad_recibida }} {{ vinculo.item.unidad }}.{% else %}Recepción original eliminada.{% endif %}
+  {% if vinculo.revision_pendiente %}<strong>Revisión pendiente: el origen cambió o falta una fuente. Esta confirmación conserva su versión original.</strong>{% endif %}</p>
+  <p>{{ vinculo.motivo|linebreaksbr }}<br><strong>Evidencia:</strong> {{ vinculo.evidencia|linebreaksbr }}</p>
+  <p>{{ vinculo.creado_en|date:'d/m/Y H:i' }} · {% if vinculo.autor %}{{ vinculo.autor.get_username }}{% else %}Cuenta eliminada{% endif %} · Autor original {{ vinculo.autor_original_id }}</p>
+</article>{% empty %}<p>No hay procedencias documentales confirmadas consultables.</p>{% endfor %}
+</section>

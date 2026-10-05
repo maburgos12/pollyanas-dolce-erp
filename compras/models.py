@@ -1120,3 +1120,134 @@ class DestinoCompraDocumental(models.Model):
             raise ValidationError('Los identificadores originales deben corresponder a las fuentes.')
         if not str(self.motivo or '').strip() or not str(self.evidencia or '').strip():
             raise ValidationError('Indica motivo y evidencia documental.')
+
+
+class ProcedenciaAdquisicion(models.Model):
+    """Confirmación documental de una unidad física, sin efectos operativos."""
+
+    recepcion = models.ForeignKey(
+        RecepcionItemDepartamental,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion",
+    )
+    linea = models.ForeignKey(
+        LineaOrdenCompraDepartamental,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion",
+    )
+    intento = models.ForeignKey(
+        IntentoCompraDepartamental,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion",
+    )
+    item = models.ForeignKey(
+        ItemCompraDepartamental,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion",
+    )
+    activo = models.ForeignKey(
+        "activos.Activo",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion",
+    )
+    recepcion_original_id = models.PositiveBigIntegerField(editable=False)
+    linea_original_id = models.PositiveBigIntegerField(editable=False)
+    intento_original_id = models.PositiveBigIntegerField(editable=False)
+    item_original_id = models.PositiveBigIntegerField(editable=False)
+    activo_original_id = models.PositiveBigIntegerField(editable=False)
+    version_confirmada = models.PositiveIntegerField(editable=False)
+    referencia_unidad = models.CharField(max_length=200)
+    unidad_normalizada = models.CharField(max_length=200, editable=False)
+    autor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="procedencias_adquisicion_confirmadas",
+    )
+    autor_original_id = models.PositiveBigIntegerField(editable=False)
+    motivo = models.TextField()
+    evidencia = models.TextField()
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["recepcion_original_id", "unidad_normalizada"],
+                name="comp_proc_unidad_origen_unico",
+            ),
+            models.UniqueConstraint(
+                fields=["recepcion_original_id", "activo_original_id"],
+                name="comp_proc_equipo_origen_unico",
+            ),
+            models.CheckConstraint(
+                check=models.Q(version_confirmada__gt=0),
+                name="comp_proc_version_positiva",
+            ),
+            models.CheckConstraint(
+                check=~models.Q(unidad_normalizada="")
+                & ~models.Q(referencia_unidad="")
+                & ~models.Q(motivo="")
+                & ~models.Q(evidencia=""),
+                name="comp_proc_documentada",
+            ),
+            *[
+                models.CheckConstraint(
+                    check=models.Q(**{f"{fuente}__isnull": True})
+                    | models.Q(**{f"{fuente}_id": models.F(f"{fuente}_original_id")}),
+                    name=f"comp_proc_{fuente}_original",
+                )
+                for fuente in (
+                    "recepcion",
+                    "linea",
+                    "intento",
+                    "item",
+                    "activo",
+                    "autor",
+                )
+            ],
+        ]
+
+    def save(self, *args, **kwargs):
+        db = kwargs.get("using") or self._state.db or "default"
+        if not self._state.adding or (
+            self.pk is not None
+            and type(self).objects.using(db).filter(pk=self.pk).exists()
+        ):
+            raise ValidationError("La confirmación documental es inmutable.")
+        # INSERT siempre: un objeto nuevo con PK explícita no sustituye una confirmación.
+        if args:
+            args = (True, *args[1:])
+        else:
+            kwargs["force_insert"] = True
+        return super().save(*args, **kwargs)
+
+    @property
+    def revision_pendiente(self):
+        return (
+            not all(
+                (
+                    self.recepcion_id,
+                    self.linea_id,
+                    self.intento_id,
+                    self.item_id,
+                    self.activo_id,
+                )
+            )
+            or self.intento.version != self.version_confirmada
+            or self.recepcion.linea_orden_id != self.linea_id
+            or self.linea.intento_id != self.intento_id
+            or self.linea.item_id != self.item_id
+            or self.intento.item_id != self.item_id
+        )

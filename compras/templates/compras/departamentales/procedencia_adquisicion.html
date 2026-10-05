@@ -1,0 +1,4 @@
+{% extends 'base.html' %}
+{% block title %}Procedencia de adquisición{% endblock %}
+{% block page_title %}Procedencia documental{% endblock %}
+{% block content %}<div class="module-shell"><p><a href="{% url 'compras:departamental_detalle' item.solicitud_id %}#item-{{ item.pk }}">Volver a {{ item.solicitud.folio }}</a></p><h1>Procedencia de {{ item.descripcion }}</h1><p>Relaciona una unidad recibida con un equipo ya registrado. La confirmación conserva el origen y la evidencia originales, sin crear equipos ni modificar recepción, conformidad, inventario, pagos o costos.</p>{% include 'compras/departamentales/_procedencia_adquisicion.html' %}</div>{% endblock %}

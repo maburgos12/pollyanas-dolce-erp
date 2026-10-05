@@ -50,3 +50,42 @@ def puede_consultar_destinos(context, user):
             or destinos_autorizados(actor, 'ORDEN').exists()
         )
     return estado['puede_consultar']
+
+
+@register.simple_tag(takes_context=True)
+def consulta_procedencia_activo(context, user, activo_id):
+    estado = _estado_peticion(context, user)
+    if estado is None:
+        return ''
+    if 'procedencias' not in estado:
+        from compras.services_procedencia_adquisicion import procedencias_visibles
+        estado['procedencias'] = {v.activo_id for v in procedencias_visibles(estado['actor'])}
+    if activo_id in estado['procedencias']:
+        return reverse('compras:procedencia_del_activo', args=[activo_id])
+    return ''
+
+
+@register.simple_tag(takes_context=True)
+def recepciones_procedencia_item(context, user, item_id):
+    estado = _estado_peticion(context, user)
+    if estado is None:
+        return []
+    if 'recepciones_procedencia' not in estado:
+        from collections import defaultdict
+        from core.access import can_view_inventario
+        from compras.access_departamentales import _areas_lectura_solicitudes
+        from compras.models import RecepcionItemDepartamental
+        estado['recepciones_procedencia'] = defaultdict(list)
+        actor = estado['actor']
+        if can_view_inventario(actor):
+            # Sólo artículos de la pantalla; una consulta para todas sus recepciones.
+            solicitud = context.get('solicitud')
+            items = solicitud.items.all() if solicitud is not None else context.get('items', [])
+            ids = [item.pk for item in items] or [item_id]
+            recepciones = RecepcionItemDepartamental.objects.select_related('linea_orden__intento').filter(linea_orden__item_id__in=ids)
+            areas = _areas_lectura_solicitudes(actor)
+            if areas is not None:
+                recepciones = recepciones.filter(linea_orden__item__solicitud__area_id__in=areas)
+            for recepcion in recepciones:
+                estado['recepciones_procedencia'][recepcion.linea_orden.item_id].append(recepcion)
+    return estado['recepciones_procedencia'].get(item_id, [])

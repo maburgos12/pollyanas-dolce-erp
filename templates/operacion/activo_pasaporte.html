@@ -46,6 +46,7 @@
 
     {% consulta_compras_destino request.user 'ACTIVO' activo.pk as compras_destino_url %}
     {% if compras_destino_url %}<p><a class="volver" href="{{ compras_destino_url }}">Compras relacionadas con este equipo</a></p>{% endif %}
+    {% consulta_procedencia_activo request.user activo.pk as procedencia_url %}{% if procedencia_url %}<p><a class="volver" href="{{ procedencia_url }}">Procedencia de adquisición de este equipo</a></p>{% endif %}
 
     {% if fallas_abiertas %}
       <section class="bloque bloque-alerta" aria-labelledby="fallas-abiertas">

@@ -1,0 +1,4 @@
+{% extends 'base.html' %}
+{% block title %}Procedencia del equipo{% endblock %}
+{% block page_title %}Procedencia documental{% endblock %}
+{% block content %}<div class="module-shell"><p><a href="{% url 'activos:activos' %}">Volver al catálogo de equipos</a></p><h1>{{ activo.codigo }} · {{ activo.nombre }}</h1><p>Las relaciones conservan la evidencia de unidades físicas recibidas y su versión confirmada. Los estados actuales de la fuente no recalculan propiedad, pagos ni costos.</p>{% include 'compras/departamentales/_procedencias_confirmadas.html' %}</div>{% endblock %}
