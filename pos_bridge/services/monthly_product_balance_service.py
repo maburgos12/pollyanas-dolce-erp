@@ -235,7 +235,7 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
         point_branch_id__in={key[0] for key in eligible},
         point_product_id__in={key[1] for key in eligible},
         raw_metadata__source="POINT_STOCK_HISTORY_API",
-    ))
+    ).select_related("point_branch", "point_product"))
     batches = {}
     row_filter = Q(pk__in=[])
     for record in records:
@@ -245,6 +245,7 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
         resolutions[key] = {}
         metadata = record.raw_metadata or {}
         try:
+            original_batch = AuditStockHistoryService._original_batch(record)
             count = int(metadata["fetched_rows"])
             limit = int(metadata.get("history_limit", 500))
             ids = metadata.get("fetched_movement_ids")
@@ -252,15 +253,15 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
                 if not isinstance(ids, list) or any(isinstance(value, bool) for value in ids):
                     continue
                 ids = {int(value) for value in ids}
-                if len(ids) != count:
+                if len(ids) != (len(original_batch["unique_ids"]) if original_batch is not None else count):
                     continue
             elif count >= limit or record.row_count != count:
                 continue
             if count <= 0 or limit <= 0 or count > limit:
                 continue
-        except (KeyError, TypeError, ValueError):
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, KeyError, TypeError, ValueError):
             continue
-        batches[record.pk] = (record, key, count, ids, limit)
+        batches[record.pk] = (record, key, count, ids, limit, original_batch)
         selected = Q(import_record_id=record.pk)
         if ids is not None:
             selected &= Q(row_number__in=ids)
@@ -270,14 +271,28 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
         "import_record_id", "row_number", "raw_payload", "movement_at",
     ):
         grouped[row.import_record_id].append(row)
-    for record_id, (record, key, count, ids, limit) in batches.items():
+    for record_id, (record, key, count, ids, limit, original_batch) in batches.items():
         rows = grouped[record_id]
-        if len(rows) != count or (ids is not None and {row.row_number for row in rows} != ids):
+        if len(rows) != (len(ids) if ids is not None else count) or (ids is not None and {row.row_number for row in rows} != ids):
             continue
         if not AuditStockHistoryService._covers_month(record, month, boundary_rows=rows):
             continue
         try:
             raw = [row.raw_payload for row in rows]
+            if original_batch is not None:
+                expected = {payload["FK_Movimiento"]: payload for payload in original_batch["unique_rows"]}
+                if any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
+                       for row in rows):
+                    continue
+                opening_cut = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+                closing_cut = datetime.combine(date(month.year, month.month,
+                    monthrange(month.year, month.month)[1]) + timedelta(days=1), time.min,
+                    tzinfo=POINT_BUSINESS_TIMEZONE)
+                if any(datetime.fromisoformat(gap["previous_movement_at"]) < cut
+                        <= datetime.fromisoformat(gap["movement_at"])
+                        for gap in original_batch["stock_chain_gaps"] for cut in (opening_cut, closing_cut)):
+                    continue
+                raw = original_batch["rows"]
             fetched_at = datetime.fromisoformat(str(record.raw_metadata["fetched_at"]).replace("Z", "+00:00"))
             if any(point_stock_history_instant(payload) > fetched_at for payload in raw):
                 continue
@@ -322,9 +337,9 @@ def _original_stock_delta_matches(raw, *, direction):
     return abs(new - previous - direction * abs(quantity)) <= radius
 
 
-def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache, empty_history=False):
+def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache, empty_history=False, month=None):
     """Retained facts may veto an independent frontier, not prove batch membership."""
-    results = cache.setdefault(("snapshot_canonical_consistency", cutoff, empty_history), {})
+    results = cache.setdefault(("snapshot_canonical_consistency", cutoff, empty_history, month), {})
     keys = {(line.branch_id, line.product_id) for line in lines
             if (history := reconciliations.get((line.branch_id, line.product_id)))
             and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
@@ -383,6 +398,23 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
         results[key]["reason"] = "INVALID_BATCH_METADATA"
         if not isinstance(metadata, dict):
             continue
+        try:
+            original_batch = AuditStockHistoryService._original_batch(record)
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError):
+            continue
+        if original_batch is not None:
+            expected = {raw["FK_Movimiento"]: raw for raw in original_batch["unique_rows"]}
+            if (not set(expected) <= {row.row_number for row in rows}
+                    or any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
+                           for row in rows if row.row_number in expected)):
+                continue
+            month_start = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE) if month else cutoff
+            if any((datetime.fromisoformat(gap["previous_movement_at"]) < cutoff
+                    <= datetime.fromisoformat(gap["movement_at"]))
+                    or month_start <= datetime.fromisoformat(gap["movement_at"]) < cutoff
+                    for gap in original_batch["stock_chain_gaps"]):
+                results[key]["reason"] = "ORIGINAL_BATCH_STOCK_CHAIN_CONTRADICTION"
+                continue
         count, limit, ids = metadata.get("fetched_rows"), metadata.get("history_limit"), metadata.get("fetched_movement_ids")
         if ("fetched_rows" in metadata and (type(count) is not int or count < 0)
                 or "history_limit" in metadata and (type(limit) is not int or limit <= 0)
@@ -390,7 +422,8 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
             continue
         if "fetched_movement_ids" in metadata and (not isinstance(ids, list)
                 or any(type(value) is not int or value <= 0 for value in ids)
-                or count is not None and len(ids) != count or len(set(ids)) != len(ids)
+                or count is not None and len(ids) != count
+                or original_batch is None and len(set(ids)) != len(ids)
                 or not set(ids) <= {row.row_number for row in rows}):
             continue
         try:
@@ -637,6 +670,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     zero_consistency = _snapshot_canonical_consistency(
         lines, snapshots=original_zeros, reconciliations=monthly, cutoff=cutoff, cache=cache,
         empty_history=True,
+        month=month,
     )
     original_zero_keys = {key for key in original_zeros if key not in canonical_keys
                           or zero_consistency.get(key, {}).get("valid")}
@@ -652,7 +686,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         cutoff=cutoff, cache=cache,
     ) if boundary_manifest_valid else {}
     snapshot_consistency = _snapshot_canonical_consistency(
-        lines, snapshots=snapshot_boundaries, reconciliations=monthly, cutoff=cutoff, cache=cache,
+        lines, snapshots=snapshot_boundaries, reconciliations=monthly, cutoff=cutoff, cache=cache, month=month,
     )
     values, evidence, unproven = {}, {}, []
     for line in lines:
@@ -689,6 +723,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "snapshot_boundary_verified": bool(snapshot_evidence),
             "physical_count_verified": False,
             "coverage_status": history.coverage_status if history else "MISSING",
+            "original_batch_evidence": dict(getattr(history, "original_batch_evidence", None) or {}),
             "canonical_history_verified": bool(quantity is not None and not snapshot_evidence
                                                and key not in original_zero_keys
                                                and history and history.coverage_status == "COMPLETE"

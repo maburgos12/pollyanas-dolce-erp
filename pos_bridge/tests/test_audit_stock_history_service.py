@@ -18,6 +18,8 @@ from pos_bridge.models import (
     PointProduct,
     PointProductHistoryImport,
     PointProductHistoryRow,
+    PointHistoricalInventoryClosing,
+    PointHistoricalInventoryClosingLine,
 )
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryError, AuditStockHistoryService
 
@@ -139,7 +141,7 @@ class AuditStockHistoryServiceTests(TestCase):
     def test_original_response_rejects_duplicate_or_malformed_rows(self):
         rows = self._original_rows()
         malformed = [
-            [rows[0], rows[0]], [{**rows[0], "Fecha": "invalid"}],
+            [rows[0], {**rows[0], "Cantidad": 3}], [{**rows[0], "Fecha": "invalid"}],
             [{**rows[0], "FK_Movimiento": 0}], [{**rows[0], "Cantidad": None}],
             [{**rows[0], "Cantidad": "NaN"}], [{**rows[0], "Cantidad": True}],
             [{**rows[0], "Cancelado": None}], [{**rows[0], "Cancelado": 0}], [{**rows[0], "Cancelado": 1}],
@@ -152,6 +154,272 @@ class AuditStockHistoryServiceTests(TestCase):
                     AuditStockHistoryService().ingest_original_response(
                         self.branch, self.product, date(2026, 9, 1), raw, evidence=self._original_evidence(raw))
                 self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+
+    def test_original_exact_duplicate_keeps_original_count_archive_and_saturation(self):
+        rows = [_row(10000, "VENTA", "2026-08-31T22:00:00", 1, 600, 599)]
+        rows.extend(_row(10000 + index, "VENTA", "2026-09-10T18:00:00", 1,
+            600 - index, 599 - index) for index in range(1, 499))
+        original = [rows[0], deepcopy(rows[0]), *rows[1:]]
+        evidence = self._original_evidence(original, limit=500)
+        service = AuditStockHistoryService()
+        result = service.ingest_original_response(self.branch, self.product,
+            date(2026, 9, 1), original, evidence=evidence)
+        record = service._existing_import(self.branch, self.product)
+        self.assertEqual(record.row_count, 499)
+        self.assertEqual(record.raw_metadata["fetched_rows"], 500)
+        self.assertEqual(len(record.raw_metadata["fetched_movement_ids"]), 500)
+        archive = record.raw_metadata["original_responses"][record.raw_metadata["latest_response_fingerprint"]]
+        self.assertEqual(json.loads(zlib.decompress(base64.b64decode(archive["raw_zlib_base64"]))), original)
+        self.assertEqual(result.coverage_status, "COMPLETE")
+        self.assertEqual(result.sales, Decimal("498"))
+        self.assertEqual(result.documentary_opening, Decimal("599"))
+        self.assertEqual(result.documentary_closing, Decimal("101"))
+        self.assertFalse(service._covers_month(record, date(2026, 8, 1)))
+        before = list(record.rows.order_by("pk").values())
+        again = service.ingest_original_response(self.branch, self.product,
+            date(2026, 9, 1), original, evidence=evidence)
+        self.assertEqual(again, result)
+        self.assertEqual(list(record.rows.order_by("pk").values()), before)
+
+    def test_original_duplicate_type_conflicts_reject_without_writes(self):
+        row = self._original_rows()[0]
+        for patch in ({"Cancelado": 0}, {"Cantidad": 2.0}, {"Costo_Total": False}):
+            original = [row, {**row, **patch}]
+            with self.subTest(patch=patch), self.assertRaises(AuditStockHistoryError):
+                AuditStockHistoryService().ingest_original_response(self.branch, self.product,
+                    date(2026, 9, 1), original, evidence=self._original_evidence(original))
+            self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+            self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+
+    def test_original_rows_reject_present_domain_or_pair_contradictions_before_writes(self):
+        raw = self._original_rows()[0]
+        mutations = [{"isInsumo": True}, {"isInsumo": "true"}]
+        mutations.extend({field: "different-product"} for field in
+            ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"))
+        mutations.extend({field: "different-branch"} for field in ("FK_Sucursal", "PK_Sucursal"))
+        for mutation in mutations:
+            original = [{**raw, **mutation}]
+            with self.subTest(mutation=mutation), self.assertRaises(AuditStockHistoryError):
+                AuditStockHistoryService().ingest_original_response(self.branch, self.product,
+                    date(2026, 9, 1), original, evidence=self._original_evidence(original))
+            self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+            self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+
+    def test_original_duplicate_membership_requires_intact_latest_archive(self):
+        rows = self._original_rows()
+        original = [rows[0], deepcopy(rows[0]), *rows[1:]]
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            original, evidence=self._original_evidence(original))
+        record = service._existing_import(self.branch, self.product)
+        pristine = deepcopy(record.raw_metadata)
+        fingerprint = pristine["latest_response_fingerprint"]
+        mutations = (
+            lambda metadata: metadata["original_responses"][fingerprint].update(raw_zlib_base64="broken"),
+            lambda metadata: metadata["original_responses"][fingerprint].update(raw_sha256="0" * 64),
+            lambda metadata: metadata.update(fetched_movement_ids=[990, 991, 992, 992]),
+            lambda metadata: metadata["original_responses"][fingerprint]["request"]["params"].update(tipo="true"),
+        )
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                record.raw_metadata = deepcopy(pristine)
+                mutate(record.raw_metadata)
+                self.assertFalse(service._covers_month(record, date(2026, 9, 1)))
+
+    def test_original_duplicate_outside_month_gap_is_visible_without_false_unknown(self):
+        first = _row(990, "VENTA", "2026-08-20T18:00:00", 1, 5, 4)
+        duplicate = _row(991, "VENTA", "2026-08-21T18:00:00", 1, 3, 2)
+        september = _row(992, "VENTA", "2026-09-10T18:00:00", 1, 2, 1)
+        rows = [first, duplicate, deepcopy(duplicate), september]
+        service = AuditStockHistoryService()
+        result = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            rows, evidence=self._original_evidence(rows))
+        self.assertEqual(result.documentary_opening, Decimal("2"))
+        self.assertEqual(result.documentary_closing, Decimal("1"))
+        self.assertEqual(result.unknown_movement_ids, ())
+        record = service._existing_import(self.branch, self.product)
+        batch = service._original_batch(record)
+        self.assertEqual(batch["duplicate_movement_ids"], (991,))
+        self.assertEqual(batch["stock_chain_gaps"][0]["movement_id"], 991)
+        self.assertEqual(batch["stock_chain_gaps"][0]["previous_movement_id"], 990)
+        self.assertEqual(batch["stock_chain_gaps"][0]["movement_at"], "2026-08-21T18:00:00+00:00")
+        changed = deepcopy(rows)
+        changed[-1]["Existencia_anterior"] = 4
+        changed[-1]["Existencia_nueva"] = 3
+        latest = self._original_evidence(changed, retrieved="2026-10-04T20:00:00Z")
+        result = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), changed, evidence=latest)
+        self.assertIsNone(result.documentary_opening)
+        self.assertIsNone(result.documentary_closing)
+        self.assertEqual(result.unknown_movement_ids, ())
+
+    def test_original_duplicate_monthly_boundary_carries_archive_signature_and_historical_gap(self):
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+        rows = [_row(990, "VENTA", "2026-08-20T18:00:00", 1, 5, 4),
+                _row(991, "VENTA", "2026-08-21T18:00:00", 1, 3, 2),
+                _row(992, "VENTA", "2026-09-10T18:00:00", 1, 2, 1)]
+        original = [rows[0], rows[1], deepcopy(rows[1]), rows[2]]
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            original, evidence=self._original_evidence(original))
+        closing = PointHistoricalInventoryClosing.objects.create(operational_date=date(2026, 9, 30),
+            source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY, status="VERIFIED",
+            expected_branch_ids=[self.branch.pk], expected_product_ids=[self.product.pk],
+            source_fingerprint="unchanged-manifest", retrieved_at=timezone.now(),
+            metadata={"method": "point_stock_history_boundary"})
+        line = PointHistoricalInventoryClosingLine.objects.create(closing=closing,
+            branch=self.branch, product=self.product, stock=9, evidence={})
+        def read():
+            return documentary_historical_boundary(closing, [line], month=date(2026, 9, 1),
+                boundary="closing", cache={})
+        values, evidence, missing = read()
+        self.assertEqual(values, {line.pk: Decimal("1")})
+        self.assertEqual(missing, ())
+        proof = evidence[line.pk]["original_batch_evidence"]
+        self.assertEqual(proof["stock_chain_gaps"][0]["movement_id"], 991)
+        self.assertEqual(proof["original_count"], 4)
+        self.assertEqual(proof["unique_count"], 3)
+        newer = self._original_evidence(original, retrieved="2026-10-04T20:00:00Z")
+        newer["original_locator"]["source_line"] = 2
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), original, evidence=newer)
+        again = read()
+        self.assertEqual(again[0], values)
+        self.assertNotEqual(again[1][line.pk]["original_batch_evidence"]["source_signature"], proof["source_signature"])
+
+    def test_original_duplicate_empty_month_resolves_full_archived_occurrences(self):
+        from pos_bridge.services.monthly_product_balance_service import _empty_month_captured_boundaries
+        rows = self._original_rows()
+        rows[2]["Existencia_anterior"], rows[2]["Existencia_nueva"] = 2, 1
+        original = [rows[0], deepcopy(rows[0]), rows[2]]
+        service = AuditStockHistoryService()
+        history = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            original, evidence=self._original_evidence(original))
+        self.assertEqual(history.movement_ids, ())
+        line = SimpleNamespace(branch_id=self.branch.pk, product_id=self.product.pk)
+        resolutions = _empty_month_captured_boundaries([line], month=date(2026, 9, 1),
+            reconciliations={(line.branch_id, line.product_id): history}, cache={})
+        resolved = resolutions[(line.branch_id, line.product_id)]
+        self.assertEqual(resolved["opening"].stock, Decimal("2"))
+        self.assertEqual(resolved["closing"].stock, Decimal("2"))
+        self.assertEqual(resolved["closing"].evidence["history_rows"], 3)
+        crossing = deepcopy(original)
+        crossing[-1]["Existencia_anterior"] = 4
+        crossing[-1]["Existencia_nueva"] = 3
+        history = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1), crossing,
+            evidence=self._original_evidence(crossing, retrieved="2026-10-04T20:00:00Z"))
+        blocked = _empty_month_captured_boundaries([line], month=date(2026, 9, 1),
+            reconciliations={(line.branch_id, line.product_id): history}, cache={})
+        self.assertFalse(blocked[(line.branch_id, line.product_id)])
+
+    def test_original_batch_rejects_malformed_archive_flag_even_with_consistent_hashes(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            rows, evidence=self._original_evidence(rows))
+        record = service._existing_import(self.branch, self.product)
+        proof = deepcopy(record.raw_metadata["response_provenance"][0])
+        damaged = deepcopy(rows)
+        damaged[0]["Cancelado"] = 0
+        raw_json = json.dumps(damaged, sort_keys=True, default=str).encode()
+        proof["raw_sha256"] = hashlib.sha256(raw_json).hexdigest()
+        evidence = {key: value for key, value in proof.items() if key not in {"fingerprint", "ingested_at"}}
+        fingerprint = hashlib.sha256(json.dumps(evidence, sort_keys=True, default=str).encode()).hexdigest()
+        proof["fingerprint"] = fingerprint
+        record.raw_metadata["latest_response_fingerprint"] = fingerprint
+        record.raw_metadata["response_provenance"] = [proof]
+        record.raw_metadata["original_responses"] = {fingerprint: {**proof,
+            "encoding": "zlib-base64-json", "raw_zlib_base64": base64.b64encode(zlib.compress(raw_json)).decode()}}
+        self.assertFalse(service._covers_month(record, date(2026, 9, 1)))
+
+    def test_original_batch_corrupt_structures_fail_closed_without_crashing(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            rows, evidence=self._original_evidence(rows))
+        record = service._existing_import(self.branch, self.product)
+        pristine = deepcopy(record.raw_metadata)
+        selected = list(record.rows.filter(row_number=991))
+        fingerprint = pristine["latest_response_fingerprint"]
+        corrupted = [deepcopy(pristine) for _ in range(3)]
+        corrupted[0]["original_responses"][fingerprint] = None
+        corrupted[1]["response_provenance"] = [None]
+        corrupted[2]["latest_response_fingerprint"] = None
+        for metadata in [*corrupted, [1]]:
+            with self.subTest(metadata_type=type(metadata).__name__):
+                record.raw_metadata = metadata
+                self.assertFalse(service._covers_month(record, date(2026, 9, 1)))
+                history = service._reconcile_record(record, date(2026, 9, 1), selected)
+                self.assertEqual(history.coverage_status, "INCOMPLETE")
+                self.assertIsNone(history.documentary_closing)
+
+    def test_original_batch_revalidates_archived_locator_and_script_provenance(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            rows, evidence=self._original_evidence(rows))
+        record = service._existing_import(self.branch, self.product)
+        pristine = deepcopy(record.raw_metadata)
+        for field in ("original_locator", "request_provenance"):
+            record.raw_metadata = deepcopy(pristine)
+            old_fingerprint = pristine["latest_response_fingerprint"]
+            proof = record.raw_metadata["response_provenance"][0]
+            if field == "original_locator":
+                proof[field] = None
+            else:
+                proof[field]["source_sha256"] = "0" * 64
+            evidence = {key: value for key, value in proof.items() if key not in {"fingerprint", "ingested_at"}}
+            fingerprint = hashlib.sha256(json.dumps(evidence, sort_keys=True, default=str).encode()).hexdigest()
+            proof["fingerprint"] = fingerprint
+            archive = record.raw_metadata["original_responses"].pop(old_fingerprint)
+            archive.update(proof)
+            record.raw_metadata["original_responses"][fingerprint] = archive
+            record.raw_metadata["latest_response_fingerprint"] = fingerprint
+            with self.subTest(field=field):
+                self.assertFalse(service._covers_month(record, date(2026, 9, 1)))
+
+    def test_original_duplicate_snapshot_rejects_missing_selected_canonical_row(self):
+        from datetime import datetime, timezone as utc_timezone
+        from pos_bridge.services.monthly_product_balance_service import _snapshot_canonical_consistency
+        original = self._original_rows()
+        original.insert(0, deepcopy(original[0]))
+        service = AuditStockHistoryService()
+        history = service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            original, evidence=self._original_evidence(original))
+        record = service._existing_import(self.branch, self.product)
+        record.rows.filter(row_number=990).delete()
+        record.row_count = 2
+        record.save()
+        line = SimpleNamespace(branch_id=self.branch.pk, product_id=self.product.pk)
+        key = (line.branch_id, line.product_id)
+        snapshot = {"source_signature": "independent", "captured_at": "2026-10-04T10:00:00+00:00",
+            "last_movement_at": "2026-10-02T18:00:00+00:00", "branch_external_id": str(self.branch.external_id),
+            "product_external_id": str(self.product.external_id)}
+        proofs = _snapshot_canonical_consistency([line], snapshots={key: (Decimal("0"), snapshot)},
+            reconciliations={key: history}, cutoff=datetime(2026, 10, 1, 7, tzinfo=utc_timezone.utc),
+            month=date(2026, 9, 1), cache={})
+        self.assertFalse(proofs[key]["valid"])
+
+    def test_live_membership_preserves_existing_parsed_integer_ids(self):
+        rows = self._original_rows()
+        rows[0]["FK_Movimiento"] = str(rows[0]["FK_Movimiento"])
+        service = AuditStockHistoryService()
+        service._persist_response(self.branch, self.product, date(2026, 9, 1), rows,
+            fetched_at="2026-10-04T20:00:00Z", history_limit=500)
+        record = service._existing_import(self.branch, self.product)
+        self.assertTrue(all(type(value) is int for value in record.raw_metadata["fetched_movement_ids"]))
+        self.assertTrue(service._covers_month(record, date(2026, 9, 1)))
+
+    def test_live_promotion_removes_old_original_response_pointer(self):
+        rows = self._original_rows()
+        service = AuditStockHistoryService()
+        service.ingest_original_response(self.branch, self.product, date(2026, 9, 1),
+            rows, evidence=self._original_evidence(rows))
+        record = service._existing_import(self.branch, self.product)
+        archives = deepcopy(record.raw_metadata["original_responses"])
+        service._persist_response(self.branch, self.product, date(2026, 9, 1), rows,
+            fetched_at="2026-10-04T20:00:00Z", history_limit=500)
+        record.refresh_from_db()
+        self.assertNotIn("latest_response_fingerprint", record.raw_metadata)
+        self.assertEqual(record.raw_metadata["original_responses"], archives)
 
     def test_original_partial_pair_cannot_use_original_summary_count_as_full_response(self):
         pair = self._original_rows()[:2]

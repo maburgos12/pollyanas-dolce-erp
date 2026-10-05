@@ -354,6 +354,34 @@ propuestas ni aprobación. Reconcile decide cobertura real; materialización/cie
 requieren sus guards independientes. Ante originales parciales, conservar el
 faltante exacto: no marcarlos completos para acelerar el cierre.
 
+### Membresía original: ocurrencias distintas de identidades contables
+
+Una respuesta íntegra puede repetir exactamente una FK. Usar la misma entrada
+`ingest_original_response`, con todas las ocurrencias en su orden original y el
+envelope anterior. Aceptar el duplicado sólo si todos los campos y tipos JSON son
+idénticos; cualquier diferencia aborta atómicamente. No sumar dos veces cantidad,
+deduplicar el archivo ni fabricar una petición menor.500 ocurrencias/499 FK conserva
+`fetched_rows=500`, límite500, lista de500 IDs, SHA de500 y499 filas canónicas.
+
+`original_responses` conserva el archivo íntegro; `latest_response_fingerprint`
+identifica la respuesta promovida. Archivo, procedencia, SHA, petición, fecha y
+membresía deben concordar antes de aceptar cobertura. Metadata legacy sin archivo
+verificable conserva rechazo estricto de duplicados. Una captura LIVE posterior
+no hereda el puntero de una respuesta original anterior.
+
+Reconcile registra `original_batch_evidence`: firma de archivo/membresía, conteos,
+posiciones duplicadas y discontinuidades de saldo. La evidencia acompaña apertura
+y cierre documental para invalidar huellas si cambia su fuente. No descartar un
+gap anterior al mes: conservarlo visible, sin convertirlo en pérdida ni ignorar
+un gap dentro del mes o en el enlace de sus cortes. COMPLETE mensual exige descarga
+posterior al fin, alcance original suficiente, identidades/raws coherentes, cadena
+mensual continua y ecuación exacta; no certifica toda la historia anterior.
+
+Segunda entrada idéntica:0HTTP/0imports/0filas/0cambios de huella/0avisos. No cambiar
+los metadatos antiguos para aparentar que fueron válidos. Review/plan sólo observa;
+no gana importación, HTTP, aprobación, conteo físico ni cierre mensual. Confirmar
+publicación y aceptación en checkpoint antes de ejecutar el contrato nuevo.
+
 Registrar una evidencia reciente por par y no derivar cantidades de la posición
 de una tupla: separar sales/transfer_in/transfer_out/ajuste/conversión. Un preflight
 que encuentra ventas distintas aborta antes de sesión; diagnosticar contra fuente,
