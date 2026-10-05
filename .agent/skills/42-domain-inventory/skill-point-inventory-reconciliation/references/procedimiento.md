@@ -131,7 +131,7 @@ también bloquea. No inventar vínculo de cancelación/reversión ni compensar e
 cortes. Cancelado explícito íntegro permanece anulado, no pérdida nueva.
 Comparar raw contra la representación persistida según la escala DecimalField
 del modelo y el redondeo PostgreSQL; conservar raw íntegro en la huella. Las
-ecuaciones, deltas y estado raw en Ult_Mov usan precisión original: nunca
+ecuaciones, deltas y estado raw en Ult_Mov usan representación original: nunca
 redondear fuentes para conseguir coincidencia. FK numérico textual sólo acredita
 la misma identidad si es un entero ASCII positivo exacto, no bool, float u offset.
 
@@ -184,6 +184,46 @@ en su transacción protegida. Segunda lectura exige HTTP0/escrituras0 y observac
 idéntica. No cambiar roles/sold_products ni convertir insumos en producto. La
 frontera no acredita conteo físico ni habilita el cierre por sí sola. No presentar este contrato como
 desplegado antes de CI/deploy/aceptación reales registrados en el checkpoint.
+
+### Representación original: dos falsos vetos, no tolerancia general
+
+Contrato autorizado en implementación `auditor-representacion-original`. Para
+comparar movimiento raw y persistido ya interpretados como timestamps aware,
+convertir ambos a UTC y comparar el instante exacto. En un fold DST, el mismo
+instante puede tener representación local distinta: no veto por formato/zona.
+Una diferencia de1µs conserva el veto. No cambiar parser, interpretación naive
+por dominio, TIME_ZONE, fechas raw ni cortes operativos para obtener igualdad.
+
+En ecuaciones de cantidades, probar primero igualdad Decimal exacta; conserva
+precedencia mediante `Fraction(Decimal(str(value)))`, sin resta dependiente del
+contexto Decimal predeterminado. Si falla, sólo es candidata la terna original de cantidad,
+existencia anterior y nueva de tipo float exacto, finitos. No convertir strings,
+int, Decimal, bool o mezcla de tipos a float para habilitar esta rama. Qty1.0 es
+float original; qty1 entero no recibe tolerancia. La igualdad de lo persistido
+con raw sigue su guard independiente: una diferencia canónica no se perdona.
+
+Evaluar centros originales con `Fraction.from_float(x)` y radio por operando
+`Fraction.from_float(math.ulp(x))/2`; sumar los tres radios y comprobar el residuo
+de la ecuación binaria exacta contra esa cota. No calcular residuo/radio con
+Decimal de precisión predeterminada, float aritmético ni epsilon fijo. Rechazar
+la rama si el signo del delta no corresponde a la acción o la cantidad es cero;
+una ecuación exactamente cero conserva la precedencia exacta anterior. Rechazar
+la relajación si el radio alcanza el quantum decimal más fino de los campos del
+modelo dividido entre10. Con escala3 esa barrera es0.0001; NO es una tolerancia
+de aceptación. No redondear a3 decimales ni aceptar todo residuo menor0.0001.
+
+Pruebas de aplicación obligatorias: residuo Decimal real de4e−17 con tres floats;
+equivalente textual/Decimal o tipos mezclados que no obtiene tolerancia; cantidad2
+con delta1, perturbación0.0004, NaN/Inf/bool, magnitud que alcanza la barrera y
+raw incompatible con fila persistida conservan veto. Timestamps aware de mismo
+instante en fold pasan; variación1µs falla. Mantener raw íntegro/huella y stocks
+del snapshot, identidad y ÚltimoMovimiento sin tolerancia. No generalizar a
+ventas comerciales, reglas, cancelaciones ni redondear una fuente para cuadrarla.
+
+El guard sólo evita un falso veto de representación del documento existente.
+No acredita membresía, renueva cobertura, aprueba expediente, cambia rol ni
+prueba conteo físico. Segunda lectura HTTP0/escrituras0/observaciones iguales;
+publicación exige tests, CI, deploy oficial y aceptación autenticada posteriores.
 
 Si falta frontera, documentar par/fecha exactos antes de Point. Usar historia
 acotada que cruza el corte; no una fila cercana, stock actual ni resumen legado.

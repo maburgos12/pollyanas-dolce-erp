@@ -3,11 +3,13 @@ from __future__ import annotations
 from calendar import monthrange
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from fractions import Fraction
 from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
@@ -284,6 +286,38 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
     return resolutions
 
 
+def _original_stock_delta_matches(raw, *, direction):
+    """Validate the original equation; float-only uncertainty is representational.
+
+    Binary centers and ULP radii are exact fractions, not decimal rounding or an
+    epsilon. A radius significant at the persisted model scale fails closed.
+    """
+    fields = ("Existencia_anterior", "Existencia_nueva", "Cantidad")
+    values = tuple(raw.get(field) for field in fields)
+    if any(value is None or value == "" or type(value) is bool for value in values):
+        return False
+    try:
+        decimals = tuple(Decimal(str(value)) for value in values)
+        if not all(value.is_finite() for value in decimals):
+            return False
+        previous, new, quantity = map(Fraction, decimals)
+        if new - previous == direction * abs(quantity):
+            return True
+        if quantity == 0 or direction * (new - previous) <= 0:
+            return False
+    except (InvalidOperation, ValueError, TypeError):
+        return False
+    if not all(type(value) is float and math.isfinite(value) for value in values):
+        return False
+    previous, new, quantity = map(Fraction.from_float, values)
+    radius = sum((Fraction.from_float(math.ulp(value)) / 2 for value in values), Fraction())
+    finest_scale = max(PointProductHistoryRow._meta.get_field(field).decimal_places
+                       for field in ("previous_existence", "new_existence", "quantity"))
+    if radius >= Fraction(1, 10 ** finest_scale) / 10:
+        return False
+    return abs(new - previous - direction * abs(quantity)) <= radius
+
+
 def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache):
     """Retained facts may veto an independent frontier, not prove batch membership."""
     results = cache.setdefault(("snapshot_canonical_consistency", cutoff), {})
@@ -394,10 +428,13 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                 for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
                     scale = PointProductHistoryRow._meta.get_field(field).decimal_places
                     defaults[field] = defaults[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
-                if movement_id != row.row_number or any(getattr(row, field) != defaults[field] for field in (
-                    "movement_at", "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
+                stored_stamp, parsed_stamp = row.movement_at, defaults["movement_at"]
+                if (not timezone.is_aware(stored_stamp) or not timezone.is_aware(parsed_stamp)
+                        or stored_stamp.astimezone(datetime_timezone.utc) != parsed_stamp.astimezone(datetime_timezone.utc)
+                        or movement_id != row.row_number or any(getattr(row, field) != defaults[field] for field in (
+                    "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
                     "total_cost", "unit_cost",
-                )):
+                ))):
                     raise ValueError("Canonical/raw contradiction")
                 if not all(value.is_finite() for value in (row.quantity, row.previous_existence, row.new_existence)):
                     raise ValueError("Nonfinite stock")
@@ -410,16 +447,16 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                     words = " ".join("".join(char for char in unicodedata.normalize(
                         "NFKD", row.movement_type) if not unicodedata.combining(char)).upper().split())
                     delta = raw_delta
-                    if words == "CANCELACION VENTA" and delta != abs(raw_quantity):
+                    if words == "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=1):
                         raise ValueError("Invalid effective sale reversal")
-                    if category in {"sales", "waste"} and words != "CANCELACION VENTA" and delta != -abs(raw_quantity):
+                    if category in {"sales", "waste"} and words != "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=-1):
                         raise ValueError("Invalid effective sale/waste stock delta")
-                    if category in {"production", "transfer_in", "conversion_in"} and delta != abs(raw_quantity):
+                    if category in {"production", "transfer_in", "conversion_in"} and not _original_stock_delta_matches(raw, direction=1):
                         raise ValueError("Invalid effective incoming stock delta")
-                    if category in {"transfer_out", "conversion_out"} and delta != -abs(raw_quantity):
+                    if category in {"transfer_out", "conversion_out"} and not _original_stock_delta_matches(raw, direction=-1):
                         raise ValueError("Invalid effective outgoing stock delta")
                     if category == "identified_adjustment" and (
-                        abs(delta) != abs(raw_quantity)
+                        not _original_stock_delta_matches(raw, direction=1 if delta >= 0 else -1)
                         or "SALIDA" in words.split() and delta > 0
                         or "ENTRADA" in words.split() and delta < 0
                     ):
