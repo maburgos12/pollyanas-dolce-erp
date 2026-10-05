@@ -84,6 +84,13 @@ No aplicar epsilon general, redondeo a3 decimales ni tolerancia a stock/cortes/
 identidades. Un residuo de representación no es pérdida ni permiso de cierre;
 la actualización documental no significa que el nuevo lector esté desplegado.
 
+Ante MERMA cancelada o CANCELACION DE MERMA en historia Stock, leer la excepción
+documental estricta del procedimiento: cada original puede conservar débito o
+reverso firmado por su propia ecuación, fecha y ámbito. No excluir el débito por
+Cancelado ni acreditar crédito sólo por etiqueta, inventar FK de pareja o modificar
+MermaPOS. La reparación lectora descrita en el checkpoint está en implementación;
+review/plan no ganan HTTP, importación, materialización ni permiso de cierre.
+
 ## Límites y siguiente paso
 
 ### Plan mensual antes de revisar uno por uno

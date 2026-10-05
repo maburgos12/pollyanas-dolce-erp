@@ -8,7 +8,7 @@ import zlib
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -27,6 +27,8 @@ from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
     _movement_datetime,
     point_stock_history_instant,
+    historical_waste_effect,
+    HistoricalWasteEffect,
 )
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 
@@ -172,7 +174,7 @@ class AuditStockHistoryService:
         return PointProductHistoryImport.objects.filter(
             file_hash=self._file_hash(branch, product),
             raw_metadata__source=SOURCE_NAME,
-        ).first()
+        ).select_related("point_branch", "point_product").first()
 
     @staticmethod
     def _covers_month(record, month: date, *, boundary_rows=None) -> bool:
@@ -234,7 +236,7 @@ class AuditStockHistoryService:
         month_start, month_end = _month_bounds(month)
         # Legacy naive dates were persisted seven hours late. Explicit-zone rows
         # remain correct; the raw reader performs the exact cut for both kinds.
-        query = Q(movement_at__gte=month_start, movement_at__lt=month_end + timedelta(hours=7), cancelled=False)
+        query = Q(movement_at__gte=month_start, movement_at__lt=month_end + timedelta(hours=7))
         for record in records:
             boundary = AuditStockHistoryService._boundary_stamp(record)
             if boundary is not None:
@@ -245,7 +247,7 @@ class AuditStockHistoryService:
         month_start, month_end = _month_bounds(month)
         selected, invalid = [], []
         for row in candidates:
-            if row.cancelled:
+            if row.cancelled and self._validated_waste_effect(row, record).status == "NO_SPECIAL":
                 continue
             try:
                 instant = point_stock_history_instant(row.raw_payload)
@@ -256,6 +258,43 @@ class AuditStockHistoryService:
                 selected.append((instant, row.row_number, row))
         rows = [entry[2] for entry in sorted(selected, key=lambda entry: entry[:2])]
         return self._reconcile_record(record, month, rows, boundary_rows=candidates, invalid_ids=invalid)
+
+    @staticmethod
+    def _validated_waste_effect(row, record):
+        effect = historical_waste_effect(getattr(row, "raw_payload", None))
+        canonical_name = _normalized(row.movement_type)
+        if effect.status == "NO_SPECIAL" and (canonical_name == "CANCELACION DE MERMA"
+                or getattr(row, "cancelled", False) and canonical_name == "MERMA"):
+            return HistoricalWasteEffect("INVALID")
+        if effect.status != "VALID":
+            return effect
+        invalid = HistoricalWasteEffect("INVALID")
+        raw = row.raw_payload
+        try:
+            movement_id, defaults = AuditStockHistoryService._parse_row(raw)
+            if movement_id != row.row_number or movement_id <= 0 or type(raw.get("FK_Movimiento")) is bool:
+                return invalid
+            for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                defaults[field] = defaults[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+            if any(getattr(row, field) != defaults[field] for field in (
+                    "movement_type", "previous_existence", "quantity", "new_existence", "cancelled", "total_cost", "unit_cost")):
+                return invalid
+            if (not timezone.is_aware(row.movement_at) or not timezone.is_aware(defaults["movement_at"])
+                    or row.movement_at.astimezone(ZoneInfo("UTC")) != defaults["movement_at"].astimezone(ZoneInfo("UTC"))):
+                return invalid
+            if "isInsumo" in raw and not (raw["isInsumo"] is False
+                    or type(raw["isInsumo"]) is str and raw["isInsumo"].casefold() == "false"):
+                return invalid
+            for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"):
+                if field in raw and str(raw[field]) != str(record.point_product.external_id):
+                    return invalid
+            for field in ("FK_Sucursal", "PK_Sucursal"):
+                if field in raw and str(raw[field]) != str(record.point_branch.external_id):
+                    return invalid
+        except (AuditStockHistoryError, InvalidOperation, TypeError, ValueError, AttributeError):
+            return invalid
+        return effect
 
     def capture(self, branch, product, month: date, *, force: bool = False):
         record = self._existing_import(branch, product)
@@ -552,7 +591,7 @@ class AuditStockHistoryService:
             point_branch_id__in={key[0] for key in keys},
             point_product_id__in={key[1] for key in keys},
             raw_metadata__source=SOURCE_NAME,
-        ))
+        ).select_related("point_branch", "point_product"))
         month_rows = PointProductHistoryRow.objects.filter(
             self._candidate_filter(records, month),
         ).order_by("movement_at", "row_number")
@@ -594,6 +633,14 @@ class AuditStockHistoryService:
         movement_ids = []
         for row in rows:
             movement_ids.append(row.row_number)
+            effect = self._validated_waste_effect(row, record)
+            if effect.status == "INVALID":
+                unknown_ids.append(row.row_number)
+                continue
+            if effect.status == "VALID":
+                totals["waste"] += -effect.direction * abs(row.quantity)
+                ids_by_category["waste"].append(row.row_number)
+                continue
             category = self._category(row.movement_type, row.quantity)
             if category is None:
                 if row.quantity:

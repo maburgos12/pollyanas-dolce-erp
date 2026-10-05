@@ -128,7 +128,8 @@ o raw malformado impiden aceptación. Un movimiento efectivo posterior a Ult_Mov
 y anterior o igual a la captura contradice el snapshot, incluso si cancelación y
 reversión netean cero. En el instante Ult_Mov, un estado incompatible o ambiguo
 también bloquea. No inventar vínculo de cancelación/reversión ni compensar entre
-cortes. Cancelado explícito íntegro permanece anulado, no pérdida nueva.
+cortes. Otros cancelados conservan su tratamiento previo; la excepción histórica
+MERMA/CANCELACION DE MERMA exige el contrato específico abajo, no pérdida nueva.
 Comparar raw contra la representación persistida según la escala DecimalField
 del modelo y el redondeo PostgreSQL; conservar raw íntegro en la huella. Las
 ecuaciones, deltas y estado raw en Ult_Mov usan representación original: nunca
@@ -187,7 +188,7 @@ desplegado antes de CI/deploy/aceptación reales registrados en el checkpoint.
 
 ### Representación original: dos falsos vetos, no tolerancia general
 
-Contrato autorizado en implementación `auditor-representacion-original`. Para
+Contrato publicado por PR1473, con aceptación registrada en el checkpoint. Para
 comparar movimiento raw y persistido ya interpretados como timestamps aware,
 convertir ambos a UTC y comparar el instante exacto. En un fold DST, el mismo
 instante puede tener representación local distinta: no veto por formato/zona.
@@ -330,6 +331,57 @@ ni helper independiente de frontera ni captura individual autorizan materializar
 Un hallazgo fechado COMPLETE no sustituye reconcile actual ni transforma MISSING.
 
 Comprobar ajustes por delta existencia_nueva−existencia_anterior y consistencia de magnitud/dirección; quantity positiva puede ser SALIDA. No invertir dos veces cantidades firmadas ni resolver contradicciones como cero. Preservar unknown cuando la evidencia contradiga el movimiento.
+
+### Merma cancelada y reverso: efecto histórico individual, no merma vigente
+
+Reparación autorizada `auditor-merma-reversion-historica` en implementación, no
+publicada todavía. El RED documental no tenía ruta ejecutable para tipo5 cancelado
+y tipo15; excluir el primero y sumar sólo el reverso inventaría un crédito. No
+eliminar cancelados de la secuencia antes de comprobar esta excepción estricta.
+
+Delimitar siempre import canónico, sucursal, producto y dominio PRODUCT. Leer cada
+raw original con su FK_Movimiento y fecha StockUTC efectiva; un mismo movimiento
+puede existir en otros productos/imports con distinta cantidad. IDs raw presentes
+deben ser coherentes con ese ámbito; no buscar la pareja por FK global, hora,
+nombre o cantidad. La clasificación no inventa vínculo entre documentos.
+
+|Documento original especial|Efecto documental exigido|Waste firmado|
+|---|---|---|
+|FK_Tipo_Movimiento entero exacto5, nombre normalizado MERMA, CanceladoTrue|existencia nueva−anterior exactamente−qty; isCargoTrue si presente|+qty débito|
+|FK_Tipo_Movimiento entero exacto15, nombre normalizado CANCELACION DE MERMA, CanceladoFalse|existencia nueva−anterior exactamente+qty; isCargoFalse si presente|−qty reverso|
+
+Tipo bool/string/float no es entero exacto; no inferir tipo por similitud del
+nombre ni aceptar alias sin «DE». Flags sólo bool o strings true/false acreditadas;
+ausencia de isCargo no autoriza inventarlo, presencia contradictoria veta. Cantidad
+debe ser positiva finita y existencias finitas, sin bool; delta debe cumplir
+magnitud/dirección exactas. No epsilon, redondeo ni nueva tolerancia binaria para
+rescatar un especial contradictorio. Tipo15 cancelado, raw malformado, dominio/
+identidad incoherente o qty2 con delta1 quedan unknown/veto, no neto0 aproximado.
+MERMA ordinaria tipo5/CanceladoFalse conserva su tratamiento previo, sin imponerle
+las restricciones nuevas de estos especiales; otros cancelados no reciben crédito.
+
+Acumular cada efecto sólo si su instante pertenece al intervalo operativo del mes;
+expected_closing resta el waste firmado. Dos documentos4→0 y0→4 en septiembre
+aportan+4 y−4, neto0; si el débito es31agosto y el reverso1septiembre, septiembre
+contiene−4, no0. Una frontera entre ambos conserva0 como estado después del débito,
+no resta el reverso futuro. La secuencia acredita efectos, no pérdida física,
+merma vigente ni FK de cancelación pareada. No exigir pareja para reconocer un
+evento íntegro ni compensar importaciones/productos/períodos distintos.
+
+Reutilizar el helper puro compartido en reconciliación, resolución del cierre y
+vetos snapshot; no tres clasificaciones divergentes. La excepción no omite raw
+cancelado en los vetos temporales: un efecto posterior a Ult_Mov puede contradecir
+snapshot aunque más tarde se revierta. Conservar raw/huella, cobertura, membresía,
+unknowns/gaps y autoridad mensual independiente. No editar PointWasteLine/MermaPOS,
+imports, filas, timestamps o flags para hacer cuadrar la proyección.
+
+Pruebas exigidas antes de publicar: débito+reverso, reverso aislado documentado,
+corte entre eventos y cruce agosto/septiembre; producto263 qty1 distinto de120qty4
+con mismosFK; ordinaryMERMAfalse sin regresión; tipo/nombre/flags/isCargo/delta/
+dominio contradictorios desconocidos; snapshot temporal vetado aunque neto0.
+Segunda lectura HTTP0/escrituras0/observaciones iguales. Review/plan sólo observan;
+tests/CI/deploy y aceptación nativa/UI reales preceden a declarar entregado el
+lector, y no sustituyen físico, documentos humanos o guards del cierre mensual.
 
 Aplicar proyección mediante `InventoryAuditMaterializer` solo si fuentes son autoritativas y está en alcance. Registrar si worker ya aplicó y selected=0: no adjudicarle al materializador un cambio que no hizo. Actualizar investigación por `InventoryAuditAgent` sin inventar aprobación.
 

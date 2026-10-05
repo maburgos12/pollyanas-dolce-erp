@@ -93,6 +93,31 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         self.assertEqual(record.raw_metadata, metadata)
         self.assertEqual(list(record.rows.values()), before)
 
+    def test_snapshot_accepts_exact_waste_reversal_without_promoting_coverage(self):
+        self._snapshot(stock="4")
+        record = self._incomplete_history(previous=4, new=0)
+        row = record.rows.get()
+        debit = {**row.raw_payload, "FK_Movimiento": 910, "FK_Tipo_Movimiento": 5,
+                 "Movimiento": "MERMA", "Cantidad": 4, "Cancelado": True, "isCargo": True,
+                 "Fecha": "2026-10-01T01:00:00Z"}
+        _, defaults = AuditStockHistoryService._parse_row(debit)
+        for field, value in defaults.items():
+            setattr(row, field, value)
+        row.save()
+        undo = {**debit, "FK_Movimiento": 911, "FK_Tipo_Movimiento": 15,
+                "Movimiento": "CANCELACION DE MERMA", "Cancelado": False, "isCargo": False,
+                "Existencia_anterior": 0, "Existencia_nueva": 4, "Fecha": "2026-10-01T02:18:44.487Z"}
+        _, defaults = AuditStockHistoryService._parse_row(undo)
+        PointProductHistoryRow.objects.create(import_record=record, row_number=911, **defaults)
+        record.row_count = 2
+        record.save(update_fields=["row_count"])
+        original = list(record.rows.values())
+        cache = {}
+        values, proofs, _ = self._read(cache=cache)
+        self.assertEqual(values, {self.line.pk: Decimal("4")}, cache)
+        self.assertFalse(proofs[self.line.pk]["canonical_history_verified"])
+        self.assertEqual(list(record.rows.values()), original)
+
     def _complete_without_batch_membership(self, *, product=None):
         service = AuditStockHistoryService()
         record = service._canonical_import(self.branch, product or self.product)
