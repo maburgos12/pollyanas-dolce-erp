@@ -101,3 +101,18 @@ class ComprobanteCapturaEquipo(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_captura_usuario_op_clave_uniq')]
+
+
+class ComprobanteConfiguracionPlan(models.Model):
+    """Recibo técnico; el resultado pertenece a Plan, incluso tras su eliminación."""
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    operacion = models.CharField(max_length=32)
+    clave = models.UUIDField()
+    huella = models.CharField(max_length=64)
+    plan = models.ForeignKey('activos.PlanMantenimiento', on_delete=models.SET_NULL, null=True)
+    activo_ref = models.ForeignKey('activos.Activo', on_delete=models.SET_NULL, null=True)
+    objeto_id = models.PositiveIntegerField(null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_plan_usuario_op_clave_uniq')]
