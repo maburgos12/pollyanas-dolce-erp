@@ -6548,6 +6548,8 @@ def bi(request: HttpRequest) -> HttpResponse:
         maturity_summary=context["maturity_summary"],
         default_owner="Dirección General",
     )
+    from reportes.commercial_analytics import commercial_panel_from_request
+    context["commercial_analytics"] = commercial_panel_from_request(request)
     return render(request, "reportes/bi.html", context)
 
 

@@ -6,6 +6,7 @@
 {% block body_class %}page-reportes-bi{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/commercial_analytics.css' %}?v=20261004-v2">
 <link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
 <link rel="stylesheet" href="{% static 'css/pollyana_dashboards.css' %}?v=20260525-dashboard-v2">
@@ -24,6 +25,8 @@
     <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
   </nav>
 
+  {% include "reportes/partials/commercial_analytics.html" %}
+  {% if commercial_analytics %}<details class="ca-legacy"><summary>Operación, pronósticos y detalle de costos</summary>{% endif %}
   {% include "reportes/partials/sales_confidence.html" %}
 
   <section class="bi-hero">
@@ -1589,6 +1592,7 @@
       </div>
     </article>
   </section>
+{% if commercial_analytics %}</details>{% endif %}
 </div>
 {% endblock %}
 
@@ -1600,6 +1604,8 @@
 {{ production_sales_panel.category_rows|json_script:"production-category-data" }}
 {{ central_flow_panel.rows|json_script:"central-flow-data" }}
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{{ commercial_analytics|json_script:"commercial-analytics-data" }}
+<script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>
 <script>
   (() => {
     const parse = (id) => {

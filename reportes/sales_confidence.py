@@ -8,6 +8,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, TruncMonth
 
 from reportes.models import FactVentaDiaria
+from django.db.models.expressions import RawSQL
 
 ZERO = Decimal("0")
 Q2 = Decimal("0.01")
@@ -21,6 +22,39 @@ def _source_priority():
     )
 
 
+def selected_sales_facts(*, start_date, end_date):
+    """Same branch/day precedence as analytics_service; retain closed branches."""
+    candidates = FactVentaDiaria.objects.filter(fecha__range=(start_date, end_date)).order_by().annotate(
+        priority=_source_priority(), identity=Coalesce("sucursal_id", Value(-1)),
+    )
+    preferred = candidates.filter(fecha=OuterRef("fecha"), identity=OuterRef("identity"), priority__lt=OuterRef("priority"))
+    facts = candidates.annotate(has_preferred=Exists(preferred)).filter(has_preferred=False)
+    # A derived import of the SAME export is not a second sale. This is lineage
+    # selection, not a SKU/name equivalence or an edit to historical records.
+    mirror_ids = RawSQL(
+        """
+        WITH original_exports AS MATERIALIZED (
+            SELECT DISTINCT branch_id, sale_date, source_file
+            FROM ventas_autoritativas_point
+            WHERE source_sheet = 'category_report' AND source_file <> ''
+              AND sale_date BETWEEN %s AND %s
+        ), mirrored_keys AS MATERIALIZED (
+            SELECT d.branch_id, d.sale_date, d.product_code
+            FROM ventas_autoritativas_point d
+            JOIN original_exports o ON o.branch_id = d.branch_id
+                AND o.sale_date = d.sale_date AND o.source_file = d.source_file
+            WHERE d.source_sheet = 'PointSalesDailyProductFact'
+        )
+        SELECT f.id FROM reportes_factventadiaria f
+        JOIN mirrored_keys k ON k.branch_id = f.sucursal_id
+            AND k.sale_date = f.fecha AND k.product_code = f.producto_clave
+        WHERE f.source_kind = 'AUTHORITATIVE'
+        """, (start_date, end_date),
+    )
+    return facts.exclude(pk__in=mirror_ids)
+
+
+
 def build_sales_confidence(*, start_date, end_date):
     """Coverage refers to observed facts, not certified operational completeness.
 
@@ -28,17 +62,8 @@ def build_sales_confidence(*, start_date, end_date):
     branch/day (not per product) so alternate catalogs cannot duplicate revenue.
     A positive stored margin alone is never evidence of backed costing.
     """
-    candidates = FactVentaDiaria.objects.filter(
-        fecha__range=(start_date, end_date),
-    ).order_by().annotate(
-        priority=_source_priority(), identity=Coalesce("sucursal_id", Value(-1)),
-    )
-    preferred = candidates.filter(
-        fecha=OuterRef("fecha"), identity=OuterRef("identity"),
-        priority__lt=OuterRef("priority"),
-    )
     # Unassigned rows have no reliable branch identity; retain them as pending.
-    facts = candidates.annotate(has_preferred=Exists(preferred)).filter(has_preferred=False)
+    facts = selected_sales_facts(start_date=start_date, end_date=end_date)
     summary = facts.aggregate(
         rows=Count("id"), branches=Count("sucursal_id", distinct=True),
         days_observed=Count("fecha", distinct=True), latest_sale=Max("fecha"),

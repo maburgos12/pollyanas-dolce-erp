@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261004-dashboard-confianza-v2";
+const CACHE_NAME = "pollyanas-erp-shell-20261004-dashboard-analitica-iva-v1";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
