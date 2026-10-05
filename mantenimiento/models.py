@@ -116,3 +116,24 @@ class ComprobanteConfiguracionPlan(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_plan_usuario_op_clave_uniq')]
+
+
+class VinculoProveedorDocumental(models.Model):
+    """M:N confirmado por IDs, con procedencia conservada tras borrar fuentes."""
+    perfil = models.ForeignKey(ProveedorServicio, null=True, on_delete=models.SET_NULL,
+                               related_name="vinculos_documentales")
+    proveedor = models.ForeignKey("maestros.Proveedor", null=True, on_delete=models.SET_NULL,
+                                  related_name="vinculos_tecnicos_documentales")
+    perfil_original_id = models.PositiveBigIntegerField(editable=False)
+    proveedor_original_id = models.PositiveBigIntegerField(editable=False)
+    motivo = models.TextField()
+    evidencia = models.TextField()
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+                              related_name="vinculos_proveedores_confirmados")
+    autor_original_id = models.PositiveBigIntegerField(editable=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["perfil_original_id", "proveedor_original_id"],
+                                               name="mant_vinculo_proveedor_par_unico")]

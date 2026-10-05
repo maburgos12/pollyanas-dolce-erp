@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Vínculos documentales de proveedores{% endblock %}
+{% block page_title %}Vínculos documentales de proveedores{% endblock %}
+{% block content %}
+<div class="module-shell">
+  <p><a href="{% url 'mantenimiento:dashboard' %}#tab-proveedores">Proveedores de servicio</a> · <a href="{% url 'maestros:proveedor_list' %}">Maestro comercial</a></p>
+  <h1>Vínculos documentales</h1>
+  <p>Confirma una correspondencia entre un perfil técnico y un proveedor comercial con evidencia. Cada catálogo conserva sus datos. Un nombre parecido no confirma identidad.</p>
+  {% include "mantenimiento/_vinculos_proveedores.html" %}
+</div>
+{% endblock %}

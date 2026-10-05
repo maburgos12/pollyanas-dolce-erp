@@ -1,0 +1,33 @@
+<div id="vinculos-documentales">
+  {% if mensaje %}<p role="status" class="alert {% if ok %}alert-success{% else %}alert-danger{% endif %}">{{ mensaje }}</p>{% endif %}
+  {% if puede_crear %}
+  <section class="card mb-4">
+    <h2>Confirmar correspondencia</h2>
+    <form method="post" action="{% url 'mantenimiento:vinculos-proveedores' %}" data-async-action>
+      {% csrf_token %}
+      <div class="row g-3">
+        <div class="col-md-6"><label class="form-label" for="perfil_id">Perfil técnico · Mantenimiento</label>
+          <select class="form-select" id="perfil_id" name="perfil_id" required><option value="">Seleccionar registro existente</option>
+          {% for perfil in perfiles %}<option value="{{ perfil.pk }}" {% if perfil.pk|stringformat:'s' == perfil_elegido %}selected{% endif %}>{{ perfil.nombre }} · ID {{ perfil.pk }}{% if perfil.especialidad %} · {{ perfil.especialidad }}{% endif %}</option>{% endfor %}</select></div>
+        <div class="col-md-6"><label class="form-label" for="proveedor_id">Proveedor comercial · Maestros</label>
+          <select class="form-select" id="proveedor_id" name="proveedor_id" required><option value="">Seleccionar registro existente</option>
+          {% for proveedor in proveedores %}<option value="{{ proveedor.pk }}" {% if proveedor.pk|stringformat:'s' == proveedor_elegido %}selected{% endif %}>{{ proveedor.nombre }} · ID {{ proveedor.pk }}</option>{% endfor %}</select></div>
+        <div class="col-md-6"><label class="form-label" for="motivo">Motivo de la correspondencia</label><textarea class="form-control" id="motivo" name="motivo" rows="3" required>{{ motivo }}</textarea></div>
+        <div class="col-md-6"><label class="form-label" for="evidencia">Evidencia documental</label><textarea class="form-control" id="evidencia" name="evidencia" rows="3" aria-describedby="evidencia-ayuda" required>{{ evidencia }}</textarea><p id="evidencia-ayuda">Indica documento, folio o referencia verificable.</p></div>
+      </div>
+      <p class="mt-3"><label><input type="checkbox" name="confirmado" required {% if confirmado %}checked{% endif %}> Revisé los dos registros y confirmo esta correspondencia con la evidencia indicada.</label></p>
+      <button class="btn btn-primary" type="submit">Confirmar vínculo</button>
+    </form>
+  </section>
+  {% else %}<p>Tienes acceso de lectura. La confirmación requiere gestión en ambos catálogos.</p>{% endif %}
+  <section class="card"><h2>Correspondencias confirmadas</h2>
+    <div class="table-responsive"><table class="table"><thead><tr><th>Perfil técnico</th><th>Proveedor comercial</th><th>Motivo y evidencia</th><th>Confirmación</th></tr></thead><tbody>
+      {% for vinculo in vinculos %}<tr>
+        <td>{% if vinculo.perfil %}{{ vinculo.perfil.nombre }}{% if not vinculo.perfil.activo %} (inactivo){% endif %}{% else %}Registro eliminado{% endif %}<br>ID original {{ vinculo.perfil_original_id }}</td>
+        <td>{% if vinculo.proveedor %}{{ vinculo.proveedor.nombre }}{% if not vinculo.proveedor.activo %} (inactivo){% endif %}{% else %}Registro eliminado{% endif %}<br>ID original {{ vinculo.proveedor_original_id }}</td>
+        <td>{{ vinculo.motivo|linebreaksbr }}<br><strong>Evidencia:</strong> {{ vinculo.evidencia|linebreaksbr }}</td>
+        <td>{{ vinculo.creado_en|date:"d/m/Y H:i" }}<br>{% if vinculo.autor %}{{ vinculo.autor.get_username }}{% else %}Cuenta eliminada{% endif %} · ID {{ vinculo.autor_original_id }}</td>
+      </tr>{% empty %}<tr><td colspan="4">Aún no hay correspondencias confirmadas. Selecciona dos registros existentes y documenta la evidencia para registrar la primera.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </section>
+</div>
