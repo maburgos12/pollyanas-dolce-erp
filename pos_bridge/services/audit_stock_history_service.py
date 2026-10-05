@@ -179,7 +179,7 @@ class AuditStockHistoryService:
         ).select_related("point_branch", "point_product").first()
 
     @staticmethod
-    def _original_batch(record=None, *, rows=None, branch=None, product=None):
+    def _original_batch(record=None, *, rows=None, branch=None, product=None, fingerprint=None):
         """Separate preserved response occurrences from canonical identities.
 
         Legacy metadata is not an archive: duplicate membership only becomes
@@ -190,9 +190,11 @@ class AuditStockHistoryService:
             metadata = record.raw_metadata or {}
             if not isinstance(metadata, dict):
                 raise AuditStockHistoryError("Metadatos originales inválidos.")
-            fingerprint = metadata.get("latest_response_fingerprint")
-            if "latest_response_fingerprint" not in metadata:
+            latest_fingerprint = metadata.get("latest_response_fingerprint")
+            if fingerprint is None and "latest_response_fingerprint" not in metadata:
                 return None
+            fingerprint = latest_fingerprint if fingerprint is None else fingerprint
+            is_latest = fingerprint == latest_fingerprint
             try:
                 branch, product = record.point_branch, record.point_product
                 if not isinstance(fingerprint, str) or len(fingerprint) != 64:
@@ -246,9 +248,9 @@ class AuditStockHistoryService:
                         or proof.get("request") != request
                         or type(count) is not int or type(limit) is not int
                         or limit not in ORIGINAL_HISTORY_LIMITS or count != len(rows) or count > limit
-                        or type(metadata.get("fetched_rows")) is not int or metadata["fetched_rows"] != count
-                        or type(metadata.get("history_limit")) is not int or metadata["history_limit"] != limit
-                        or metadata.get("fetched_at") != proof.get("retrieved_at")):
+                        or is_latest and (type(metadata.get("fetched_rows")) is not int or metadata["fetched_rows"] != count
+                            or type(metadata.get("history_limit")) is not int or metadata["history_limit"] != limit
+                            or metadata.get("fetched_at") != proof.get("retrieved_at"))):
                     raise AuditStockHistoryError("Identidad o conteo del lote original inválido.")
                 receipt = AuditStockHistoryService._aware_receipt(proof["retrieved_at"])
             except (KeyError, TypeError, ValueError, StopIteration, zlib.error) as exc:
@@ -289,7 +291,7 @@ class AuditStockHistoryService:
             signatures[movement_id] = signature
             occurrences.setdefault(movement_id, []).append(position)
         ids = [raw["FK_Movimiento"] for raw in rows]
-        if record is not None:
+        if record is not None and is_latest:
             stored_ids = metadata.get("fetched_movement_ids")
             if (not isinstance(stored_ids, list) or any(type(value) is not int for value in stored_ids)
                     or stored_ids != ids):

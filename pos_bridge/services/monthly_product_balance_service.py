@@ -38,7 +38,7 @@ from pos_bridge.services.audit_stock_history_service import AuditStockHistorySer
 from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE, lock_product_month_sources
 from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
-    point_stock_history_instant, resolve_stock_at_close,
+    historical_waste_effect, point_stock_history_instant, resolve_stock_at_close,
 )
 from pos_bridge.models.product import inventory_consumption_filter
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
@@ -303,6 +303,102 @@ def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
         except (HistoricalInventoryCaptureError, TypeError, ValueError):
             continue
     return resolutions
+
+
+def _original_cut_boundaries(lines, *, month, cutoff, reconciliations, cache):
+    """Prove one cut from adjacent movements of an intact original response."""
+    proofs = cache.setdefault(("original_cut_boundaries", month, cutoff), {})
+    keys = {(line.branch_id, line.product_id) for line in lines
+            if (history := reconciliations.get((line.branch_id, line.product_id)))
+            and history.coverage_status == "INCOMPLETE" and not history.unknown_movement_ids
+            and (line.branch_id, line.product_id) not in proofs}
+    if not keys:
+        return proofs
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys},
+        point_product_id__in={key[1] for key in keys},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ).select_related("point_branch", "point_product"))
+    if not any((record.point_branch_id, record.point_product_id) in keys
+               and isinstance((record.raw_metadata or {}).get("original_responses"), dict)
+               and len(record.raw_metadata["original_responses"]) == 1 for record in records):
+        proofs.update(dict.fromkeys(keys))
+        return proofs
+    by_key = {}
+    for record in records:
+        by_key.setdefault((record.point_branch_id, record.point_product_id), []).append(record)
+    stored = {record.pk: [] for record in records}
+    for row in PointProductHistoryRow.objects.filter(import_record_id__in=stored):
+        stored[row.import_record_id].append(row)
+    month_start = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+    for key in keys:
+        proofs[key] = None
+        if len(by_key.get(key, ())) != 1:
+            continue
+        record = by_key[key][0]
+        try:
+            archives = (record.raw_metadata or {}).get("original_responses")
+            if not isinstance(archives, dict) or len(archives) != 1:
+                continue
+            batch = AuditStockHistoryService._original_batch(record, fingerprint=next(iter(archives)))
+            if batch is None or record.row_count != len(stored[record.pk]):
+                continue
+            receipt = datetime.fromisoformat(batch["evidence"]["retrieved_at"])
+            if receipt < cutoff:
+                continue
+            canonical = {row.row_number: row.raw_payload for row in stored[record.pk]}
+            original = {raw["FK_Movimiento"]: raw for raw in batch["unique_rows"]}
+            canonical_rows = {row.row_number: row for row in stored[record.pk]}
+            if (not original.keys() <= canonical.keys()
+                    or any(json.dumps(canonical[movement_id], sort_keys=True) != json.dumps(raw, sort_keys=True)
+                           for movement_id, raw in original.items())
+                    or any(month_start <= datetime.fromisoformat(gap["movement_at"]) < cutoff
+                           or datetime.fromisoformat(gap["previous_movement_at"]) < cutoff
+                           <= datetime.fromisoformat(gap["movement_at"])
+                           for gap in batch["stock_chain_gaps"])):
+                continue
+            for movement_id, raw in original.items():
+                parsed_id, parsed = AuditStockHistoryService._parse_row(raw)
+                row = canonical_rows[movement_id]
+                for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                    scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                    parsed[field] = parsed[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+                if (parsed_id != row.row_number or row.movement_at != parsed["movement_at"]
+                        or any(getattr(row, field) != parsed[field] for field in (
+                            "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
+                            "total_cost", "unit_cost"))):
+                    raise ValueError("Canonical movement contradicts archived original")
+            effective = sorted((raw for raw in batch["unique_rows"]
+                                if raw.get("Cancelado") in (False, "false", "False")
+                                or historical_waste_effect(raw).status == "VALID"),
+                               key=lambda raw: (point_stock_history_instant(raw), raw["FK_Movimiento"]))
+            earlier = [raw for raw in effective if point_stock_history_instant(raw) < cutoff]
+            later = [raw for raw in effective if point_stock_history_instant(raw) >= cutoff]
+            if not earlier or not later:
+                continue
+            before, after = earlier[-1], later[0]
+            before_key = point_stock_history_instant(before), before["FK_Movimiento"]
+            after_key = point_stock_history_instant(after), after["FK_Movimiento"]
+            if any(before_key < (point_stock_history_instant(row.raw_payload), row.row_number) < after_key
+                   for row in stored[record.pk] if row.row_number not in original
+                   and (not row.cancelled or historical_waste_effect(row.raw_payload).status == "VALID")):
+                continue
+            stock = Decimal(str(before["Existencia_nueva"]))
+            if stock != Decimal(str(after["Existencia_anterior"])):
+                continue
+            proof = {"contract": "POINT_ORIGINAL_CUT_BOUNDARY_V1", "cutoff": cutoff.isoformat(),
+                     "stock": str(stock), "before_movement_id": before["FK_Movimiento"],
+                     "after_movement_id": after["FK_Movimiento"],
+                     "original_batch_evidence": batch["evidence"],
+                     "coverage_promoted": False, "physical_count_verified": False}
+            proof["source_signature"] = hashlib.sha256(json.dumps({
+                "proof": proof, "canonical": [(row.row_number, row.raw_payload)
+                                               for row in sorted(stored[record.pk], key=lambda row: row.row_number)],
+            }, sort_keys=True, default=str).encode()).hexdigest()
+            proofs[key] = stock, proof
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError, KeyError):
+            continue
+    return proofs
 
 
 def _original_stock_delta_matches(raw, *, direction):
@@ -688,6 +784,9 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     snapshot_consistency = _snapshot_canonical_consistency(
         lines, snapshots=snapshot_boundaries, reconciliations=monthly, cutoff=cutoff, cache=cache, month=month,
     )
+    original_cut_boundaries = (_original_cut_boundaries(
+        lines, month=month, cutoff=cutoff, reconciliations=monthly, cache=cache,
+    ) if boundary_manifest_valid else {})
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)
@@ -696,6 +795,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         movement_ids = tuple(history.documentary_boundary_movement_ids) if history else ()
         captured_evidence = {}
         snapshot_evidence = {}
+        original_cut_evidence = {}
         if history and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids:
             quantity = getattr(history, f"documentary_{boundary}", None)
             if quantity is None and (resolved := captured_boundaries.get(key, {}).get(boundary)):
@@ -712,6 +812,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
               and snapshot_boundaries.get(key) and snapshot_consistency.get(key, {}).get("valid")):
             quantity, snapshot_evidence = snapshot_boundaries[key]
             snapshot_evidence = {**snapshot_evidence, "canonical_consistency": snapshot_consistency[key]}
+        if quantity is None and original_cut_boundaries.get(key):
+            quantity, original_cut_evidence = original_cut_boundaries[key]
         evidence[line.id] = {
             "line_id": line.id, "original_stock": str(line.stock),
             "original_evidence": dict(line.evidence or {}),
@@ -719,19 +821,22 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "movement_ids": movement_ids,
             "captured_boundary_evidence": captured_evidence,
             "snapshot_boundary_evidence": dict(snapshot_evidence),
+            "original_cut_boundary_evidence": dict(original_cut_evidence),
+            "original_cut_boundary_verified": bool(original_cut_evidence),
             "canonical_consistency_evidence": dict(snapshot_consistency.get(key) or {}),
             "snapshot_boundary_verified": bool(snapshot_evidence),
             "physical_count_verified": False,
             "coverage_status": history.coverage_status if history else "MISSING",
             "original_batch_evidence": dict(getattr(history, "original_batch_evidence", None) or {}),
-            "canonical_history_verified": bool(quantity is not None and not snapshot_evidence
+            "canonical_history_verified": bool(quantity is not None and not snapshot_evidence and not original_cut_evidence
                                                and key not in original_zero_keys
                                                and history and history.coverage_status == "COMPLETE"
                                                and not history.unknown_movement_ids),
             "original_boundary_verified": key in original_zero_keys,
             "original_zero_boundary_evidence": dict(original_zeros.get(key, (ZERO, {}))[1]),
             "original_zero_consistency_evidence": dict(zero_consistency.get(key) or {}),
-            "contract": SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else "POINT_STOCK_RAW_UTC",
+            "contract": (SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else
+                         "POINT_ORIGINAL_CUT_BOUNDARY_V1" if original_cut_evidence else "POINT_STOCK_RAW_UTC"),
         }
         if quantity is None:
             unproven.append(line)

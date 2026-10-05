@@ -310,6 +310,75 @@ class AuditStockHistoryServiceTests(TestCase):
             reconciliations={(line.branch_id, line.product_id): history}, cache={})
         self.assertFalse(blocked[(line.branch_id, line.product_id)])
 
+    def test_partial_original_crossing_cut_proves_only_documentary_closing(self):
+        from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
+
+        rows = [
+            _row(991 + index, "VENTA", f"2026-09-30T18:{index:02d}:00" if index < 5
+                 else f"2026-10-01T08:{index:02d}:00", 1, 10 - index, 9 - index)
+            for index in range(10)
+        ]
+        service = AuditStockHistoryService()
+        history = service.ingest_original_response(
+            self.branch, self.product, date(2026, 9, 1), rows,
+            evidence=self._original_evidence(rows, limit=10),
+        )
+        self.assertEqual(history.coverage_status, "INCOMPLETE")
+        self.assertIsNone(history.documentary_closing)
+        closing = PointHistoricalInventoryClosing.objects.create(
+            operational_date=date(2026, 9, 30),
+            source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+            status="VERIFIED", expected_branch_ids=[self.branch.pk],
+            expected_product_ids=[self.product.pk], source_fingerprint="unchanged-manifest",
+            retrieved_at=timezone.now(), metadata={"method": "point_stock_history_boundary"},
+        )
+        line = PointHistoricalInventoryClosingLine.objects.create(
+            closing=closing, branch=self.branch, product=self.product, stock=9, evidence={},
+        )
+        with patch("requests.Session.request", side_effect=AssertionError("HTTP prohibited")):
+            values, evidence, missing = documentary_historical_boundary(
+                closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
+            )
+        self.assertEqual(values, {line.pk: Decimal("5")})
+        self.assertEqual(missing, ())
+        self.assertEqual(evidence[line.pk]["coverage_status"], "INCOMPLETE")
+        self.assertTrue(evidence[line.pk]["original_cut_boundary_verified"])
+        self.assertFalse(evidence[line.pk]["canonical_history_verified"])
+        self.assertFalse(evidence[line.pk]["physical_count_verified"])
+        service._persist_response(
+            self.branch, self.product, date(2026, 9, 1), rows,
+            fetched_at="2026-10-05T18:26:15+00:00", history_limit=10,
+        )
+        record = service._existing_import(self.branch, self.product)
+        self.assertNotIn("latest_response_fingerprint", record.raw_metadata)
+        self.assertEqual(len(record.raw_metadata["original_responses"]), 1)
+        values, evidence, missing = documentary_historical_boundary(
+            closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
+        )
+        self.assertEqual(values, {line.pk: Decimal("5")})
+        self.assertEqual(missing, ())
+        self.assertEqual(evidence[line.pk]["coverage_status"], "INCOMPLETE")
+        PointProductHistoryRow.objects.filter(row_number=995).update(new_existence=Decimal("99"))
+        values, evidence, missing = documentary_historical_boundary(
+            closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
+        )
+        self.assertEqual(values, {})
+        self.assertEqual(missing, (line,))
+        PointProductHistoryRow.objects.filter(row_number=995).update(new_existence=Decimal("5"))
+        record = service._existing_import(self.branch, self.product)
+        extra = _row(1001, "VENTA", "2026-09-30T18:07:00", 1, 5, 4)
+        _, parsed = service._parse_row(extra)
+        PointProductHistoryRow.objects.create(
+            import_record=record, row_number=1001, **parsed,
+        )
+        record.row_count += 1
+        record.save(update_fields=["row_count"])
+        values, evidence, missing = documentary_historical_boundary(
+            closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
+        )
+        self.assertEqual(values, {})
+        self.assertEqual(missing, (line,))
+
     def test_original_batch_rejects_malformed_archive_flag_even_with_consistent_hashes(self):
         rows = self._original_rows()
         service = AuditStockHistoryService()
