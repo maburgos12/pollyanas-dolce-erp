@@ -43,7 +43,7 @@ from .services_ordenes import cambiar_estatus_orden, TransicionOrdenInvalida
 from .services_pasaporte import activos_autorizados, svg_qr_activo
 
 from .models import Activo, BitacoraMantenimiento, EvidenciaOrden, OrdenMantenimiento, PlanMantenimiento, SolicitudFalla
-from .utils.bitacora_import import import_bitacora
+from .views_importacion import procesar_importacion
 
 
 AUTH_CLASSES = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
@@ -1707,9 +1707,13 @@ def dashboard(request):
 
 @login_required
 def activos_catalog(request):
+    if (request.method == "POST" and request.POST.get("action") == "import_bitacora"
+            and request.headers.get("X-Requested-With") == "XMLHttpRequest"):
+        return procesar_importacion(request)
     if not can_view_inventario(request.user):
         raise PermissionDenied("No tienes permisos para ver Activos.")
 
+    importacion_contexto, importacion_status = {}, 200
     form_errors = {}
     edit_id = None
     edit_data = {}
@@ -1871,70 +1875,23 @@ def activos_catalog(request):
             return redirect("activos:activos")
 
         if action == "import_bitacora":
-            archivo = request.FILES.get("archivo_bitacora")
-            if not archivo:
-                messages.error(request, "Selecciona un archivo XLSX o CSV para importar.")
-                return redirect("activos:activos")
-            is_dry_run = (request.POST.get("dry_run") or "").strip().lower() in {"1", "on", "true", "yes"}
-            skip_servicios = (request.POST.get("skip_servicios") or "").strip().lower() in {"1", "on", "true", "yes"}
-            try:
-                stats = import_bitacora(
-                    archivo,
-                    sheet_name=(request.POST.get("sheet_name") or "").strip(),
-                    dry_run=is_dry_run,
-                    skip_servicios=skip_servicios,
-                )
-            except ValueError as exc:
-                messages.error(request, str(exc))
-                return redirect("activos:activos")
-            except Exception:
-                messages.error(
-                    request,
-                    "No se pudo procesar el archivo. Verifica formato de hoja/columnas (nombre, marca, modelo, serie, fechas y costos).",
-                )
-                return redirect("activos:activos")
+            resultado = procesar_importacion(request)
+            if isinstance(resultado, JsonResponse):
+                return resultado
+            importacion_contexto, importacion_status = resultado
 
-            mode_label = "simulación (sin guardar)" if is_dry_run else "importación aplicada"
-            log_event(
-                request.user,
-                "IMPORT",
-                "activos.BitacoraImport",
-                timezone.localtime().strftime("%Y%m%d%H%M%S"),
-                {
-                    "filename": getattr(archivo, "name", "bitacora"),
-                    "dry_run": is_dry_run,
-                    "skip_servicios": skip_servicios,
-                    "sheet_name": stats.get("sheet_name", ""),
-                    "source_format": stats.get("source_format", ""),
-                    "filas_leidas": stats.get("filas_leidas", 0),
-                    "filas_validas": stats.get("filas_validas", 0),
-                    "activos_creados": stats.get("activos_creados", 0),
-                    "activos_actualizados": stats.get("activos_actualizados", 0),
-                    "servicios_creados": stats.get("servicios_creados", 0),
-                    "servicios_omitidos": stats.get("servicios_omitidos", 0),
-                },
-            )
-            messages.success(
-                request,
-                (
-                    f"Bitácora procesada ({mode_label}): filas válidas {stats['filas_validas']}, "
-                    f"activos creados {stats['activos_creados']}, actualizados {stats['activos_actualizados']}, "
-                    f"servicios creados {stats['servicios_creados']}, omitidos {stats['servicios_omitidos']}."
-                ),
-            )
-            return redirect("activos:activos")
-
-        if not form_errors:
-            messages.error(request, "Acción no reconocida.")
-            return redirect("activos:activos")
-        labels = {"nombre": "Nombre", "categoria": "Categoría", "criticidad": "Criticidad",
-                  "notas": "Notas", "sucursal_id": "Sucursal", "ubicacion": "Área/ubicación interna",
-                  "actualizado_en": "Edición simultánea", "ficha_tecnica": "Ficha técnica"}
-        mensaje = " ".join(f"{labels.get(campo, campo)}: {error}" for campo, error in form_errors.items())
-        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-            return JsonResponse({"ok": False, "field_errors": form_errors,
-                                 "toast": {"type": "error", "message": mensaje, "persistent": True}}, status=error_status)
-        messages.error(request, mensaje)
+        if action != "import_bitacora":
+            if not form_errors:
+                messages.error(request, "Acción no reconocida.")
+                return redirect("activos:activos")
+            labels = {"nombre": "Nombre", "categoria": "Categoría", "criticidad": "Criticidad",
+                      "notas": "Notas", "sucursal_id": "Sucursal", "ubicacion": "Área/ubicación interna",
+                      "actualizado_en": "Edición simultánea", "ficha_tecnica": "Ficha técnica"}
+            mensaje = " ".join(f"{labels.get(campo, campo)}: {error}" for campo, error in form_errors.items())
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"ok": False, "field_errors": form_errors,
+                                     "toast": {"type": "error", "message": mensaje, "persistent": True}}, status=error_status)
+            messages.error(request, mensaje)
 
     q = (request.GET.get("q") or "").strip()
     estado = (request.GET.get("estado") or "").strip().upper()
@@ -2193,7 +2150,8 @@ def activos_catalog(request):
         context["document_stage_rows"],
         context["enterprise_chain"],
     )
-    return render(request, "activos/activos.html", context, status=error_status if form_errors else 200)
+    context.update(importacion_contexto)
+    return render(request, "activos/activos.html", context, status=error_status if form_errors else importacion_status)
 
 
 @login_required

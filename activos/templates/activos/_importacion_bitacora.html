@@ -1,0 +1,82 @@
+<details class="card" id="importacion-bitacora" {% if importacion_abierta %}open{% endif %}>
+  <summary class="card-header">Importar historial de equipos y servicios</summary>
+  <div class="quick-actions pd-mb-3">
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_csv">Descargar plantilla CSV</a>
+    <a class="btn btn-secondary" href="{% url 'activos:activos' %}?export=template_bitacora_xlsx">Descargar plantilla XLSX</a>
+  </div>
+  {% if importacion_error %}<p class="form-help" role="alert">{{ importacion_error }}</p>{% endif %}
+  {% if importacion_resultados %}
+    <p role="status">Revisión confirmada. Los servicios ya registrados conservan su trabajo y autor originales.</p>
+    <ul>{% for resultado in importacion_resultados %}<li>Servicio {{ forloop.counter }} · <a href="{% url 'activos:orden_evidencias' resultado.orden_id %}" target="_blank" rel="noopener" aria-label="Abrir trabajo registrado del servicio {{ forloop.counter }} en otra pestaña">Abrir trabajo registrado</a>{% if resultado.reintento %} · ya registrado{% endif %}</li>{% endfor %}</ul>
+  {% elif importacion_revisadas %}
+    <p><strong>2. Revisa antes de confirmar</strong> · {{ importacion_preview.filename }} · hoja {{ importacion_preview.sheet_name }}</p>
+    <ul>{% for row in importacion_revisadas %}
+      <li>Fila {{ row.servicio.fila }}, servicio {{ row.servicio.slot }}: {{ row.activo.codigo }} · {{ row.activo.nombre }}.
+        {% if row.decision.accion == 'crear' %}Crear trabajo del {{ row.servicio.fecha }}{% if importacion_costos %} por ${{ row.servicio.costo }}{% endif %}.
+        {% else %}Vincular {{ row.orden.folio }}; conserva su importe.{% endif %}
+        Motivo: {{ row.decision.motivo }}. Evidencia: {{ row.decision.evidencia }}.
+      </li>{% endfor %}</ul>
+    <form method="post" enctype="multipart/form-data" data-async-action data-capture-snapshot="true">
+      {% csrf_token %}<input type="hidden" name="action" value="import_bitacora"><input type="hidden" name="fase" value="confirm">
+      <input type="hidden" name="revision_token" value="{{ revision_token }}">
+      <label class="pd-inline-check"><input type="checkbox" name="confirmado" value="1" required>Revisé los equipos, trabajos, motivo y evidencia de cada selección.</label>
+      <button class="btn btn-primary" type="submit" data-pending-label="Confirmando…">Confirmar importación</button>
+    </form>
+    <form method="post" data-async-action data-capture-snapshot="true" class="pd-mt-2">
+      {% csrf_token %}<input type="hidden" name="action" value="import_bitacora"><input type="hidden" name="fase" value="edit">
+      <input type="hidden" name="archivo_token" value="{{ revision_token }}">
+      <button class="btn btn-secondary" type="submit">Volver a las decisiones</button>
+    </form>
+  {% elif importacion_preview %}
+    <p><strong>1. Selecciona qué registrar</strong> · {{ importacion_preview.filename }} · hoja {{ importacion_preview.sheet_name }}.
+      Elige un equipo existente por referencia. Los servicios pendientes o descartados no se guardan.</p>
+    <datalist id="importacion-equipos">{% for equipo in importacion_equipos %}<option value="{{ equipo.pk }}">{{ equipo.codigo }} · {{ equipo.nombre }} · {{ equipo.sucursal.nombre }}</option>{% endfor %}</datalist>
+    <datalist id="importacion-ordenes">{% for orden in importacion_ordenes %}<option value="{{ orden.pk }}">{{ orden.folio }} · {{ orden.activo_ref.codigo }} · {{ orden.fecha_programada|date:'Y-m-d' }}</option>{% endfor %}</datalist>
+    <form method="post" enctype="multipart/form-data" data-async-action data-capture-snapshot="true">
+      {% csrf_token %}<input type="hidden" name="action" value="import_bitacora"><input type="hidden" name="fase" value="review">
+      <input type="hidden" name="pagina" value="{{ pagina_importacion }}">
+      <input type="hidden" name="archivo_token" value="{{ archivo_token }}">
+      {% for row in importacion_filas %}
+      <fieldset class="pd-mb-3">
+        <legend>Fila {{ row.fila }} · servicio {{ row.slot }} · {{ row.nombre }}</legend>
+        <p class="form-help">{{ row.marca }} · {{ row.modelo }} · {{ row.serie }} · {{ row.ubicacion }}.
+          Fecha: {{ row.fecha|default:'Desconocida' }}.{% if importacion_costos %} Costo: {% if row.costo != None %}${{ row.costo }}{% else %}Desconocido{% endif %}.{% endif %}
+          {% if not row.fecha or row.costo == None %}Falta fecha o costo válido para crear; puedes vincular una orden existente.{% endif %}</p>
+        <div class="row pd-grid-form-3">
+          <div><label for="decision-{{ row.fila }}-{{ row.slot }}">Decisión</label>
+            <select id="decision-{{ row.fila }}-{{ row.slot }}" name="accion_{{ row.fila }}_{{ row.slot }}">
+              <option value="">Pendiente</option>
+              <option value="descartar" {% if row.seleccion.accion == 'descartar' %}selected{% endif %}>Descartar</option>
+              <option value="vincular" {% if row.seleccion.accion == 'vincular' %}selected{% endif %}>Vincular trabajo existente</option>
+              <option value="crear" {% if row.seleccion.accion == 'crear' %}selected{% endif %} {% if not row.fecha or row.costo == None %}disabled{% endif %}>Crear trabajo revisado</option>
+            </select></div>
+          <div><label for="equipo-{{ row.fila }}-{{ row.slot }}">Referencia del equipo existente</label>
+            <input id="equipo-{{ row.fila }}-{{ row.slot }}" name="activo_id_{{ row.fila }}_{{ row.slot }}" list="importacion-equipos" inputmode="numeric" maxlength="19" value="{{ row.seleccion.activo_id|default:'' }}" placeholder="Busca código o nombre en la lista"></div>
+          <div><label for="orden-{{ row.fila }}-{{ row.slot }}">Referencia del trabajo (para vincular)</label>
+            <input id="orden-{{ row.fila }}-{{ row.slot }}" name="orden_id_{{ row.fila }}_{{ row.slot }}" list="importacion-ordenes" inputmode="numeric" maxlength="19" value="{{ row.seleccion.orden_id|default:'' }}"></div>
+          <div><label for="motivo-{{ row.fila }}-{{ row.slot }}">Motivo de la selección</label>
+            <textarea id="motivo-{{ row.fila }}-{{ row.slot }}" name="motivo_{{ row.fila }}_{{ row.slot }}" maxlength="2000">{{ row.seleccion.motivo }}</textarea></div>
+          <div><label for="evidencia-{{ row.fila }}-{{ row.slot }}">Evidencia documental</label>
+            <textarea id="evidencia-{{ row.fila }}-{{ row.slot }}" name="evidencia_{{ row.fila }}_{{ row.slot }}" maxlength="2000">{{ row.seleccion.evidencia }}</textarea></div>
+        </div>
+      </fieldset>{% empty %}<p>No hay servicios aplicables. Revisa las fechas, columnas y exclusiones del archivo.</p>{% endfor %}
+      <div class="quick-actions pd-mb-3">
+        {% if pagina_anterior != None %}<button class="btn btn-secondary" type="submit" name="mover_pagina" value="{{ pagina_anterior }}" formnovalidate>Servicios anteriores</button>{% endif %}
+        {% if pagina_siguiente != None %}<button class="btn btn-secondary" type="submit" name="mover_pagina" value="{{ pagina_siguiente }}" formnovalidate>Siguientes servicios</button>{% endif %}
+      </div>
+      {% if importacion_filas %}<button class="btn btn-primary" type="submit" data-pending-label="Revisando…">Revisar decisiones</button>{% endif %}
+    </form>
+  {% endif %}
+  {% if not importacion_revisadas %}
+  <form method="post" enctype="multipart/form-data" data-async-action data-capture-snapshot="true" class="pd-mt-3">
+    {% csrf_token %}<input type="hidden" name="action" value="import_bitacora"><input type="hidden" name="fase" value="preview">
+    <div class="row pd-grid-form-3">
+      <div><label for="archivo-bitacora">Archivo histórico (XLSX o CSV, hasta 2 MB)</label>
+        <input id="archivo-bitacora" type="file" name="archivo_bitacora" accept=".xlsx,.csv,.tsv" required></div>
+      <div><label for="hoja-bitacora">Hoja (opcional)</label><input id="hoja-bitacora" type="text" name="sheet_name" maxlength="31" value="{{ importacion_post.sheet_name }}" placeholder="Primera hoja"></div>
+    </div>
+    <button class="btn btn-primary" type="submit" data-pending-label="Leyendo…">Obtener vista previa</button>
+    <p class="form-help pd-mt-2">Máximo 1000 filas; la revisión completa debe caber en 1 MB. Para archivos mayores, divide por hoja. Motivo y evidencia: máximo 2000 caracteres por campo. La vista previa y la revisión no guardan equipos, trabajos ni auditoría. Un archivo corregido requiere otra revisión.</p>
+  </form>
+  {% endif %}
+</details>
