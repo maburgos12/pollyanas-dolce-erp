@@ -319,6 +319,11 @@ def _original_cut_boundaries(lines, *, month, cutoff, reconciliations, cache):
         point_product_id__in={key[1] for key in keys},
         raw_metadata__source="POINT_STOCK_HISTORY_API",
     ).select_related("point_branch", "point_product"))
+    if not any((record.point_branch_id, record.point_product_id) in keys
+               and isinstance((record.raw_metadata or {}).get("original_responses"), dict)
+               and len(record.raw_metadata["original_responses"]) == 1 for record in records):
+        proofs.update(dict.fromkeys(keys))
+        return proofs
     by_key = {}
     for record in records:
         by_key.setdefault((record.point_branch_id, record.point_product_id), []).append(record)
