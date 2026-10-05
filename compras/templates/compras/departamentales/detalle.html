@@ -120,6 +120,7 @@
         {% endif %}
         {% puede_consultar_destinos request.user as consultar_destinos %}
         {% if consultar_destinos %}<p><a class="cd-button ghost" href="{% url 'compras:destinos_documentales' item.pk %}">Consultar o confirmar destino documental</a></p>{% endif %}
+        {% recepciones_procedencia_item request.user item.pk as recepciones_procedencia %}{% for recepcion in recepciones_procedencia %}<p><a class="cd-button ghost" href="{% url 'compras:procedencia_adquisicion' recepcion.pk %}">Procedencia de recepción {{ recepcion.pk }} · {{ recepcion.cantidad_recibida }} {{ item.unidad }} · versión {{ recepcion.linea_orden.intento.version }}</a></p>{% endfor %}
         {% if es_compras %}
           {% if item.puede_cotizar %}{% include "compras/departamentales/cotizacion_form.html" %}{% endif %}
           {% if item.puede_registrar_compra %}<p><a class="cd-button primary" href="{% url 'compras:departamental_compra_registrar' item.pk %}">Registrar compra realizada</a></p>{% endif %}

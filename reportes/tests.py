@@ -2766,7 +2766,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, 'option value="Mediano" selected')
 
     def test_costo_receta_filters_by_bucket(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta_baja = Receta.objects.create(
             nombre="Pastel Promo",
             hash_contenido="hash-cost-bucket-1",
@@ -2812,7 +2813,7 @@ class ReportesCanonicosTests(TestCase):
             PointDailySale.objects.create(
                 branch=point_branch,
                 product=point_product,
-                sale_date=timezone.localdate() - timedelta(days=1),
+                sale_date=sale_date,
                 receta=receta,
                 quantity=qty,
                 total_amount=amount,
@@ -2828,7 +2829,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, 'option value="Promocionar" selected')
 
     def test_costo_receta_usa_margen_real_contra_venta_y_semaforo_costo(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta = Receta.objects.create(
             nombre="Pastel Semaforo Financiero",
             hash_contenido="hash-cost-signal-1",
@@ -2862,7 +2864,7 @@ class ReportesCanonicosTests(TestCase):
         PointDailySale.objects.create(
             branch=point_branch,
             product=point_product,
-            sale_date=timezone.localdate() - timedelta(days=1),
+            sale_date=sale_date,
             receta=receta,
             quantity=Decimal("10"),
             total_amount=Decimal("2500"),
@@ -2900,7 +2902,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, "Average Selling Price")
 
     def test_costo_receta_prefiere_costo_agrupado_si_hay_un_addon_aprobado(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta = Receta.objects.create(
             nombre="Pastel Fresa QA",
             codigo_point="PFQA",
@@ -2966,7 +2969,7 @@ class ReportesCanonicosTests(TestCase):
         PointDailySale.objects.create(
             branch=point_branch,
             product=point_product,
-            sale_date=timezone.localdate() - timedelta(days=1),
+            sale_date=sale_date,
             receta=receta,
             quantity=Decimal("10"),
             total_amount=Decimal("2000"),
@@ -2981,7 +2984,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.context["price_gap_rows"][0]["suggested_price"], Decimal("92.31"))
 
     def test_costo_receta_filters_by_coverage(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         unidad = UnidadMedida.objects.create(codigo="kg-rpt-cov", nombre="Kg Rpt Cov", tipo=UnidadMedida.TIPO_MASA)
         insumo_ok = Insumo.objects.create(nombre="Insumo Cobertura OK", unidad_base=unidad, activo=True)
         insumo_partial = Insumo.objects.create(nombre="Insumo Cobertura Parcial", unidad_base=unidad, activo=True)
@@ -3077,7 +3081,7 @@ class ReportesCanonicosTests(TestCase):
             PointDailySale.objects.create(
                 branch=point_branch,
                 product=point_product,
-                sale_date=timezone.localdate() - timedelta(days=1),
+                sale_date=sale_date,
                 receta=receta,
                 quantity=Decimal("5"),
                 total_amount=Decimal("1500"),

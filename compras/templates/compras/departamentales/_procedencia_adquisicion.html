@@ -1,0 +1,18 @@
+<div id="procedencia-adquisicion">
+{% if mensaje and mostrar_mensaje %}<p role="status" class="alert {% if ok %}alert-success{% else %}alert-danger{% endif %}">{{ mensaje }}</p>{% endif %}
+<p>Recepción {{ recepcion.pk }}: {{ recepcion.cantidad_recibida }} {{ item.unidad }} · Versión actual {{ recepcion.linea_orden.intento.version }} · {{ recepcion.linea_orden.intento.get_estado_display }}</p>
+<p><a href="{% url 'compras:procedencia_adquisicion' recepcion.pk %}">Abrir recepción actual para revisar versión</a></p>
+<p>Una recepción parcial o un paquete requiere verificar cada unidad física. La cantidad comercial no determina cuántos equipos contiene. La cancelación o el reembolso no acredita propiedad ni costo.</p>
+{% if puede_crear %}<section class="card mb-4"><h2>Confirmar una unidad física</h2>
+<form method="post" action="{% url 'compras:procedencia_adquisicion' recepcion.pk %}#procedencia-adquisicion" data-async-action>
+{% csrf_token %}<input type="hidden" name="version" value="{{ version }}">
+<label class="form-label" for="activo-procedencia">Equipo existente</label><select class="form-select" id="activo-procedencia" name="activo_id" required><option value="">Seleccionar equipo</option>{% for equipo in equipos %}<option value="{{ equipo.pk }}" {% if id_elegido == equipo.pk|stringformat:'s' %}selected{% endif %}>{{ equipo.codigo }} · {{ equipo.nombre }}</option>{% endfor %}</select>
+<label class="form-label" for="unidad-procedencia">Referencia de la unidad física</label><input class="form-control" id="unidad-procedencia" name="referencia_unidad" maxlength="200" value="{{ referencia_unidad }}" required aria-describedby="unidad-ayuda"><p id="unidad-ayuda">Usa una referencia documental explícita. Se normalizan espacios y mayúsculas para detectar duplicados.</p>
+<label class="form-label" for="motivo-procedencia">Motivo</label><textarea class="form-control" id="motivo-procedencia" name="motivo" required>{{ motivo }}</textarea>
+<label class="form-label" for="evidencia-procedencia">Evidencia documental</label><textarea class="form-control" id="evidencia-procedencia" name="evidencia" required>{{ evidencia }}</textarea>
+<p><label><input type="checkbox" name="confirmado" required {% if confirmado %}checked{% endif %}> Revisé la recepción, sus estados actuales, la versión {{ version }}, la unidad física y el equipo existente, y confirmo la procedencia con esta evidencia.</label></p>
+{% if version|stringformat:'s' != recepcion.linea_orden.intento.version|stringformat:'s' %}<p role="alert">El formulario corresponde a una versión anterior. <a href="{% url 'compras:procedencia_adquisicion' recepcion.pk %}">Abrir el origen actual para revisarlo</a>.</p>{% endif %}
+<button class="btn btn-primary" type="submit">Confirmar procedencia</button>
+</form></section>{% else %}<p>Tienes acceso de lectura. La confirmación requiere gestionar recepciones de Compras y equipos.</p>{% endif %}
+{% include 'compras/departamentales/_procedencias_confirmadas.html' %}
+</div>
