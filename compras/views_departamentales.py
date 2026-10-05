@@ -13,7 +13,6 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
-from core.access import ROLE_DG, has_any_role
 from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable, RubroPresupuesto
 
@@ -32,7 +31,8 @@ from .models import (
     SolicitudCompraDepartamental,
 )
 from .resumen_departamentales import construir_resumen_departamental, exportar_resumen_departamental
-from .access_departamentales import puede_gestionar_compras_departamentales
+from .access_departamentales import (puede_gestionar_compras_departamentales, _areas_usuario,
+                                      _es_direccion, _puede_ver_solicitud, _puede_enviar_solicitud)
 from .services_departamentales import (
     compromiso_actual_para_evaluar,
     confirmar_recepcion_departamental,
@@ -42,40 +42,6 @@ from .services_departamentales import (
     intento_operativo_prefetched,
     seleccionar_cotizacion,
 )
-
-
-def _areas_usuario(user):
-    return AreaPresupuesto.objects.filter(
-        activa=True,
-        responsables__usuario=user,
-        responsables__puede_capturar=True,
-    ).distinct()
-
-
-def _es_direccion(user):
-    return (
-        user.is_superuser
-        or has_any_role(user, ROLE_DG)
-        or user.has_perm("compras.decidir_exceso_compra_departamental")
-    )
-
-
-def _puede_ver_solicitud(user, solicitud):
-    return (
-        puede_gestionar_compras_departamentales(user)
-        or _es_direccion(user)
-        or AreaPresupuestoResponsable.objects.filter(
-            area=solicitud.area, usuario=user, puede_capturar=True
-        ).exists()
-    )
-
-
-def _puede_enviar_solicitud(user, solicitud):
-    # Mismo alcance que la captura: responsables activos del área y Compras.
-    return (
-        puede_gestionar_compras_departamentales(user)
-        or _areas_usuario(user).filter(pk=solicitud.area_id).exists()
-    )
 
 
 def _respuesta_accion(request, *, message, redirect_url, status=200, reload=False):

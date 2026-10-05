@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load destinos_documentales %}
 {% load static humanize %}
 {% block title %}{{ solicitud.folio }} · Compra departamental{% endblock %}
 {% block page_title %}Seguimiento {{ solicitud.folio }}{% endblock %}
@@ -117,6 +118,8 @@
         {% elif item.estado == 'RECIBIDO_CONFORME' %}
         <div class="cd-delivery-state cd-delivery-state--complete" role="status"><strong>Entrega completada y confirmada</strong><p>El área {{ solicitud.area.nombre }} confirmó la recepción conforme.</p></div>
         {% endif %}
+        {% puede_consultar_destinos request.user as consultar_destinos %}
+        {% if consultar_destinos %}<p><a class="cd-button ghost" href="{% url 'compras:destinos_documentales' item.pk %}">Consultar o confirmar destino documental</a></p>{% endif %}
         {% if es_compras %}
           {% if item.puede_cotizar %}{% include "compras/departamentales/cotizacion_form.html" %}{% endif %}
           {% if item.puede_registrar_compra %}<p><a class="cd-button primary" href="{% url 'compras:departamental_compra_registrar' item.pk %}">Registrar compra realizada</a></p>{% endif %}

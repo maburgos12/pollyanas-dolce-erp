@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load humanize %}
+{% load humanize destinos_documentales %}
 {% block title %}Evidencias · {{ orden.folio }}{% endblock %}
 {% block page_title %}Activos · Evidencias{% endblock %}
 
@@ -15,6 +15,8 @@
 {% endif %}
 
 <!-- Encabezado de la orden -->
+{% consulta_compras_destino request.user 'ORDEN' orden.pk as compras_destino_url %}
+{% if compras_destino_url %}<p><a href="{{ compras_destino_url }}">Consultar compras relacionadas con este trabajo</a></p>{% endif %}
 <section class="card">
   <div class="orden-header">
     <div>

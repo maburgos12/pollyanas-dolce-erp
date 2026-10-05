@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Compras relacionadas{% endblock %}
+{% block page_title %}Compras relacionadas{% endblock %}
+{% block content %}
+<div class="module-shell">
+  {% if tipo == 'ACTIVO' %}<p><a href="{% url 'activos:activos' %}#activo-{{ destino.pk }}">Volver al catálogo de equipos</a></p><h1>Compras destinadas a {{ destino.nombre }}</h1>
+  {% else %}<p><a href="{% url 'activos:orden_evidencias' destino.pk %}">Volver al trabajo {{ destino.folio }}</a></p><h1>Compras destinadas al trabajo {{ destino.folio }}</h1>{% endif %}
+  <p>Estas relaciones documentales conservan la compra original. No acreditan recepción ni adquisición física y no reparten cantidades o importes.</p>
+  <div class="table-responsive"><table class="table"><thead><tr><th>Artículo de origen</th><th>Motivo y evidencia</th><th>Confirmación</th></tr></thead><tbody>
+    {% for vinculo in vinculos %}<tr><td><a href="{% url 'compras:destinos_documentales' vinculo.item_id %}">{{ vinculo.item.descripcion }}</a><br><a href="{% url 'compras:departamental_detalle' vinculo.item.solicitud_id %}#item-{{ vinculo.item_id }}">{{ vinculo.item.solicitud.folio }}</a> · ID original {{ vinculo.item_original_id }}</td>
+      <td>{{ vinculo.motivo|linebreaksbr }}<br><strong>Evidencia:</strong> {{ vinculo.evidencia|linebreaksbr }}</td><td>{{ vinculo.creado_en|date:"d/m/Y H:i" }}<br>{% if vinculo.autor %}{{ vinculo.autor.get_username }}{% else %}Cuenta eliminada{% endif %} · ID {{ vinculo.autor_original_id }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endblock %}

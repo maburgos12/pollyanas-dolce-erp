@@ -1,3 +1,4 @@
+{% load destinos_documentales %}
 {% load humanize %}
 <section class="card" id="ordenes-registradas">
   <div class="card-header" id="ordenes-encabezado" tabindex="-1" role="heading" aria-level="2">Órdenes registradas</div>
@@ -64,7 +65,7 @@
           {% with o=row.orden enterprise=row.enterprise %}
           <tr id="orden-{{ o.id }}">
             <td><a href="{% url 'activos:orden_evidencias' o.id %}?origen=ordenes&amp;return_query={{ request.GET.urlencode|urlencode }}" aria-label="Consultar trabajo y soporte de {{ o.folio }}">{{ o.folio }}</a></td>
-            <td>{{ o.activo_ref.nombre }}</td>
+            <td>{{ o.activo_ref.nombre }}<br>{% consulta_compras_destino request.user 'ORDEN' o.pk as compras_destino_url %}{% if compras_destino_url %}<a href="{{ compras_destino_url }}">Compras relacionadas</a>{% endif %}</td>
             <td>{{ o.get_tipo_display }}</td>
             <td>{{ o.get_prioridad_display }}</td>
             <td>{{ o.fecha_programada|date:"Y-m-d" }}</td>

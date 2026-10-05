@@ -1084,3 +1084,39 @@ class AvisoCompraDepartamental(models.Model):
         """Un envío aceptado nunca se reenvía; el incierto exige reconciliar primero."""
         return self.estado in {self.ESTADO_PENDIENTE, self.ESTADO_FALLIDO, self.ESTADO_SIN_CONTACTO,
                                self.ESTADO_SIN_CANAL, self.ESTADO_INCIERTO}
+
+
+class DestinoCompraDocumental(models.Model):
+    """Relación tipada múltiple; no acredita recepción ni adquisición física."""
+    tipo = models.CharField(max_length=6, choices=[('ACTIVO','Equipo'),('ORDEN','Trabajo')])
+    item = models.ForeignKey(ItemCompraDepartamental, null=True, blank=True, on_delete=models.SET_NULL, related_name='destinos_documentales')
+    activo = models.ForeignKey('activos.Activo', null=True, blank=True, on_delete=models.SET_NULL, related_name='compras_documentales')
+    orden = models.ForeignKey('activos.OrdenMantenimiento', null=True, blank=True, on_delete=models.SET_NULL, related_name='compras_documentales')
+    item_original_id = models.PositiveBigIntegerField(editable=False)
+    destino_original_id = models.PositiveBigIntegerField(editable=False)
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='destinos_compra_confirmados')
+    autor_original_id = models.PositiveBigIntegerField(editable=False)
+    motivo = models.TextField()
+    evidencia = models.TextField()
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-creado_en','-pk']
+        constraints = [
+            models.UniqueConstraint(fields=['item_original_id','tipo','destino_original_id'],name='comp_destino_par_original_unico'),
+            models.CheckConstraint(check=(models.Q(tipo='ACTIVO',orden__isnull=True) | models.Q(tipo='ORDEN',activo__isnull=True)),name='comp_destino_tipo_valido'),
+            models.CheckConstraint(check=~models.Q(motivo='') & ~models.Q(evidencia=''),name='comp_destino_documentado'),
+            models.CheckConstraint(check=models.Q(item__isnull=True) | models.Q(item_id=models.F('item_original_id')),name='comp_destino_item_original'),
+            models.CheckConstraint(check=models.Q(autor__isnull=True) | models.Q(autor_id=models.F('autor_original_id')),name='comp_destino_autor_original'),
+            models.CheckConstraint(check=(models.Q(activo__isnull=True) | models.Q(activo_id=models.F('destino_original_id'))) & (models.Q(orden__isnull=True) | models.Q(orden_id=models.F('destino_original_id'))),name='comp_destino_fuente_original'),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.tipo not in ('ACTIVO','ORDEN') or (self.tipo=='ACTIVO' and self.orden_id) or (self.tipo=='ORDEN' and self.activo_id):
+            raise ValidationError('El destino debe corresponder al tipo seleccionado.')
+        destino_id = self.activo_id if self.tipo=='ACTIVO' else self.orden_id
+        if (self.item_id and self.item_id != self.item_original_id) or (destino_id and destino_id != self.destino_original_id) or (self.autor_id and self.autor_id != self.autor_original_id):
+            raise ValidationError('Los identificadores originales deben corresponder a las fuentes.')
+        if not str(self.motivo or '').strip() or not str(self.evidencia or '').strip():
+            raise ValidationError('Indica motivo y evidencia documental.')

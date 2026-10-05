@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Destino del artículo{% endblock %}
+{% block page_title %}Destino documental{% endblock %}
+{% block content %}
+<div class="module-shell">
+  <p><a href="{% url 'compras:departamental_detalle' item.solicitud_id %}#item-{{ item.pk }}">Volver a {{ item.solicitud.folio }}</a></p>
+  <h1>Destino de {{ item.descripcion }}</h1>
+  <p>Documenta el equipo o trabajo al que se destina este artículo. La relación conserva la compra y su evidencia; no acredita recepción ni adquisición física y no distribuye cantidades ni importes.</p>
+  {% include "compras/departamentales/_destinos_documentales.html" %}
+</div>
+{% endblock %}
