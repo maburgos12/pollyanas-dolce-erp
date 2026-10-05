@@ -95,7 +95,9 @@ Para Coca450 y Vela875, consultar clasificación comercial documental en el
 procedimiento: regla curada/catálogo corroborante no son FK de la transacción.
 Preservar fuente, cantidad y unidad fuera del balance fabricado cuando el lector
 estricto lo acredita; no transformar AGG en ejecución ni ampliar tokens globales.
-Esta extensión está en implementación hasta registrar publicación y aceptación.
+PR1477 fue publicado y aceptado; el checkpoint registra evidencia de lectura,
+runtime y pantalla. Consultar también los límites de compras CakeTopper: una FK
+derivada por nombre no es identidad transaccional ni decisión comercial curada.
 
 ## Límites y siguiente paso
 
