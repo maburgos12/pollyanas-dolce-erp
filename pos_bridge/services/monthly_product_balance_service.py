@@ -332,7 +332,10 @@ def _original_cut_boundaries(lines, *, month, cutoff, reconciliations, cache):
             continue
         record = by_key[key][0]
         try:
-            batch = AuditStockHistoryService._original_batch(record)
+            archives = (record.raw_metadata or {}).get("original_responses")
+            if not isinstance(archives, dict) or len(archives) != 1:
+                continue
+            batch = AuditStockHistoryService._original_batch(record, fingerprint=next(iter(archives)))
             if batch is None or record.row_count != len(stored[record.pk]):
                 continue
             receipt = datetime.fromisoformat(batch["evidence"]["retrieved_at"])

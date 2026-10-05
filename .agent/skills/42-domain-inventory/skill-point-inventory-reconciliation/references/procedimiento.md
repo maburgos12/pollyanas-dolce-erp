@@ -401,6 +401,10 @@ Registrar IDs de ambos vecinos, corte, stock y firma de fuentes como evidencia
 `physical_count_verified=False`. No reingresar ni consultar de nuevo Point para
 usar la evidencia; no llamar `resolve_stock_at_close` sin la prueba de membresía
 original. Una respuesta sin vecinos conserva `effective_stock=None` y el bloqueo.
+Si una captura LIVE posterior dejó de marcar ese original como «último», leerlo
+por su fingerprint archivado sin alterar `fetched_at` ni la cobertura canónica;
+varios archivos originales candidatos permanecen ambiguos y no se elige uno
+por orden de entrada, fecha aproximada o conveniencia del saldo.
 
 Registrar una evidencia reciente por par y no derivar cantidades de la posición
 de una tupla: separar sales/transfer_in/transfer_out/ajuste/conversión. Un preflight

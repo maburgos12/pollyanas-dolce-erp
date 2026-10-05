@@ -342,8 +342,22 @@ class AuditStockHistoryServiceTests(TestCase):
         self.assertEqual(values, {line.pk: Decimal("5")})
         self.assertEqual(missing, ())
         self.assertEqual(evidence[line.pk]["coverage_status"], "INCOMPLETE")
+        self.assertTrue(evidence[line.pk]["original_cut_boundary_verified"])
         self.assertFalse(evidence[line.pk]["canonical_history_verified"])
         self.assertFalse(evidence[line.pk]["physical_count_verified"])
+        service._persist_response(
+            self.branch, self.product, date(2026, 9, 1), rows,
+            fetched_at="2026-10-05T18:26:15+00:00", history_limit=10,
+        )
+        record = service._existing_import(self.branch, self.product)
+        self.assertNotIn("latest_response_fingerprint", record.raw_metadata)
+        self.assertEqual(len(record.raw_metadata["original_responses"]), 1)
+        values, evidence, missing = documentary_historical_boundary(
+            closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
+        )
+        self.assertEqual(values, {line.pk: Decimal("5")})
+        self.assertEqual(missing, ())
+        self.assertEqual(evidence[line.pk]["coverage_status"], "INCOMPLETE")
         PointProductHistoryRow.objects.filter(row_number=995).update(new_existence=Decimal("99"))
         values, evidence, missing = documentary_historical_boundary(
             closing, [line], month=date(2026, 9, 1), boundary="closing", cache={},
