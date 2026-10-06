@@ -23,10 +23,11 @@ Separar en el balance mensual de productos producidos: (a) artículo comercial c
 | `0227` = Extra10 | distinta por sí sola | también Extra Fresa Chico y Love You Rojo; exigir nombre y nodo Point 267 | ninguna equivalencia nueva |
 | `010204`/`010207` = una variante CakeTopper | no resuelta por SKU | PLATA/NEGRO o ROSA/PLATA comparten código; raw nombre+categoría delimitan etiqueta comercial, no PK ticket | no reescribir FK |
 | `AGG` destino ↔ salida Stock | no hay FK transaccional | movimientos tipo 21/22 independientes, factores varían y puede haber reverso | no inventar pareja |
+| Sucursal `AGG` ↔ sucursal Stock | identidad ERP compartida, no PK Point | `CEDIS` PK20 ↔ Point `8` PK3 = ERP10; `Las Glorias` PK21 ↔ Point `3` PK8 = ERP7; `Matriz` PK24 ↔ Point `1` PK10 = ERP1; `Guamuchil` PK25 ↔ Point `13` PK23 = ERP6. Comprobar además nombre normalizado y FK ERP de cada fila. | no enlazar movimientos individuales |
 
 ## Decisión de diseño
 
-Extender sólo el lector del balance producido, reutilizando fuentes actuales. Conservar ventas, cantidades, raw, importaciones, costo y categorías de otros consumidores. La exclusión comercial requiere original y corroboración exactos; no se declara ausencia de inventario físico. Salidas se registran desde movimientos originales verificados sin dividir el agregado por factor ni crear relación artificial. Fuente parcial/contradictoria falla cerrada.
+Extender sólo el lector del balance producido, reutilizando fuentes actuales. Conservar ventas, cantidades, raw, importaciones, costo y categorías de otros consumidores. La exclusión comercial requiere original y corroboración exactos; no se declara ausencia de inventario físico. Salidas se registran desde movimientos originales verificados sin dividir el agregado por factor ni crear relación artificial. El agregado y Stock usan filas `PointBranch` diferentes para la misma sucursal: comparar el FK ERP corroborado y el nombre, no sus PK Point. Si los FK/nombres discrepan, conservar origen sin resolver. Fuente parcial/contradictoria falla cerrada.
 
 Procedimiento: `inventario_fuentes_datos` en PostgreSQL16 aislado; revisar expedientes `decision-caketopper-regla-curada-20261004.md`, `auditoria-conversiones-fk-exacto-20261004.md` y `conciliacion-conversiones-origen-destino-20261006.md`. No ejecutar HTTP Point ni reimportar.
 

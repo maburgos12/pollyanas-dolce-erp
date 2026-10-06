@@ -514,6 +514,11 @@ Comparar sumas mensuales sólo después de comprobar cobertura y membresía; una
 suma igual no enlaza por sí sola origen y destino de una ejecución. El vínculo
 entrada↔salida no existe necesariamente en Point: cada tipo 22 acredita su
 propia salida por producto/sucursal/FK, no es hijo del renglón `AGG`.
+Para reconocer cobertura por sucursal entre dominios, exigir FK ERP coincidente
+y nombre de sucursal normalizado en `PointBranch` Stock y `PointBranch` AGG;
+sus PK y claves externas Point difieren. Si falta o discrepa cualquiera de
+esas pruebas, conservar origen sin resolver. Esa coincidencia de sucursal no
+identifica una pareja entrada↔salida ni convierte historia parcial en COMPLETE.
 
 El rendimiento de rebanadas depende de la presentación y del producto: un
 pastel chico puede rendir menos que uno mediano y un pie mediano menos que uno

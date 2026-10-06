@@ -106,8 +106,12 @@ class MonthlyProductBalanceConversionTests(TestCase):
                 "client_contract": "PointHttpSessionClient.get_stock_history"}}
         AuditStockHistoryService().ingest_original_response(
             self.branch, source_product, date(2026, 9, 1), original, evidence=evidence)
+        report_branch = PointBranch.objects.create(
+            external_id="Sucursal Conversiones", name=self.branch.name,
+            erp_branch=self.sucursal,
+        )
         self._conversion(quantity="6", when=datetime(2026, 9, 15, 12, 0),
-            source_item_code="", source_item_name="")
+            branch=report_branch, source_item_code="", source_item_name="")
 
         values, _, unresolved, counts, metadata = self._service()._load_conversions(
             month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
@@ -117,6 +121,19 @@ class MonthlyProductBalanceConversionTests(TestCase):
         self.assertFalse(any(row.issue == "CONVERSION_ORIGIN_UNRESOLVED" for row in unresolved))
         self.assertEqual(counts["independent_stock_exit_rows"], 1)
         self.assertEqual(metadata["independent_stock_exits"][0]["movement_ids"], (102,))
+
+        other_branch = PointBranch.objects.create(
+            external_id="OTHER", name=self.branch.name,
+            erp_branch=Sucursal.objects.create(codigo="OTHR", nombre="Otra sucursal"),
+        )
+        aggregate = PointConversionLine.objects.get()
+        aggregate.branch = other_branch
+        aggregate.save(update_fields=["branch"])
+        _, _, unresolved, _, _ = self._service()._load_conversions(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertTrue(any(row.issue == "CONVERSION_ORIGIN_UNRESOLVED" for row in unresolved))
+        aggregate.branch = report_branch
+        aggregate.save(update_fields=["branch"])
 
         RecetaEquivalencia.objects.create(receta_padre=self.parent, receta_porcion=self.slice,
             factor_conversion=10, tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION, activo=True)

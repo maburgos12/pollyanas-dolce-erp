@@ -116,6 +116,9 @@ stock Point, costos y demás controles. Para conversiones, los Stock tipo 21 y 2
 son movimientos independientes: no exigir FK entrada↔salida inexistente ni
 derivar salidas con un factor fijo del agregado `AGG`. Auditar salida tipo 22 por
 producto/sucursal/FK original y preservar cobertura incompleta como incidencia.
+El reporte `AGG` y Stock pueden tener distintos PK de `PointBranch` para la misma
+sucursal: cotejar FK ERP y nombre originales de ambos dominios; nunca sus PK
+Point entre sí ni una pareja de movimientos que no existe.
 
 ## Límites y siguiente paso
 
