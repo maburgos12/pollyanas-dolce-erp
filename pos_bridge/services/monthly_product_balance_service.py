@@ -34,7 +34,9 @@ from pos_bridge.models import (
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, AuditStockHistoryError
+from pos_bridge.services.audit_stock_history_service import (
+    AuditStockHistoryService, AuditStockHistoryError, BOUNDARY_ONLY_SOURCE_NAME,
+)
 from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE, lock_product_month_sources
 from pos_bridge.services.historical_inventory_capture import (
     HistoricalInventoryCaptureError,
@@ -696,6 +698,119 @@ def _original_zero_boundaries(closing, lines, *, cutoff):
     return proofs
 
 
+def _bracketed_original_empty_boundaries(lines, *, cutoff):
+    """Prove a zero cut without treating an empty response as canonical history."""
+    candidates = [line for line in lines if Decimal(line.stock) == ZERO
+                  and (line.evidence or {}).get("method") == "two_independent_no_history_current_zero"
+                  and (line.evidence or {}).get("history_rows") == 0
+                  and line.created_at is not None and timezone.is_aware(line.created_at)
+                  and line.created_at >= cutoff
+                  and type((line.evidence or {}).get("independent_attempts")) is int
+                  and line.evidence["independent_attempts"] >= 2
+                  and str(line.evidence.get("observed_current_stock")) in {"0", "0.0", "0.000", "0.0000"}]
+    if not candidates:
+        return {}
+    cutoff = cutoff.astimezone(datetime_timezone.utc)
+    bounds = (cutoff - timedelta(hours=3), cutoff + timedelta(hours=3))
+    keys = {(line.branch_id, line.product_id) for line in candidates}
+    pair_filter = Q(pk__in=[])
+    for branch_id, product_id in keys:
+        pair_filter |= Q(branch_id=branch_id, product_id=product_id)
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys},
+        point_product_id__in={key[1] for key in keys},
+        raw_metadata__source=BOUNDARY_ONLY_SOURCE_NAME,
+        raw_metadata__cutoff=cutoff.isoformat(),
+    ).select_related("point_branch", "point_product"))
+    originals = {}
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        expected_hash = hashlib.sha256(
+            f"point-boundary-only:{key[0]}:{key[1]}:{cutoff.isoformat()}".encode()
+        ).hexdigest()
+        try:
+            batch = AuditStockHistoryService._original_batch(record)
+            receipt = datetime.fromisoformat(batch["evidence"]["retrieved_at"])
+            if (record.file_hash != expected_hash or record.row_count != 0 or record.rows.exists()
+                    or batch["rows"] or batch["original_count"] != 0
+                    or batch["evidence"]["history_limit"] != 500
+                    or receipt <= cutoff or not timezone.is_aware(receipt)):
+                continue
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, KeyError, TypeError, ValueError):
+            continue
+        originals[key] = batch["evidence"]
+    snapshots = list(PointInventorySnapshot.objects.filter(
+        pair_filter, captured_at__gte=bounds[0], captured_at__lte=bounds[1],
+        sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    provenance = {}
+    for log in PointExtractionLog.objects.filter(
+        sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
+        level=PointExtractionLog.LEVEL_INFO, message__startswith="Sucursal procesada ",
+    ).order_by("id"):
+        context = log.context
+        if isinstance(context, dict) and type(context.get("branch_id")) is int:
+            provenance.setdefault((log.sync_job_id, context["branch_id"]), []).append(log)
+    grouped = {key: [] for key in originals}
+    invalid = set()
+    for snapshot in snapshots:
+        key = (snapshot.branch_id, snapshot.product_id)
+        if key not in originals:
+            continue
+        logs = provenance.get((snapshot.sync_job_id, snapshot.branch_id), [])
+        raw = snapshot.raw_payload
+        row = raw.get("row") if isinstance(raw, dict) else None
+        headers = raw.get("headers") if isinstance(raw, dict) else None
+        try:
+            normalized = [" ".join("".join(char for char in unicodedata.normalize(
+                "NFKD", str(header)) if not unicodedata.combining(char)).casefold().split())
+                for header in headers]
+            valid = (logs and all(log.context.get("branch_external_id") == snapshot.branch.external_id
+                                  and log.message == f"Sucursal procesada {snapshot.branch.external_id}."
+                                  for log in logs)
+                     and normalized[:3] == ["codigo", "producto", "cantidad"]
+                     and "ultimo movimiento" in normalized
+                     and isinstance(row, list) and len(row) == 10
+                     and row[0] == snapshot.product.external_id
+                     and row[8] == ""
+                     and (row[9] is False or type(row[9]) is str and row[9].casefold() == "false")
+                     and Decimal(str(row[4])).is_finite()
+                     and Decimal(str(row[4])) == snapshot.stock == ZERO)
+        except (InvalidOperation, TypeError, ValueError):
+            valid = False
+        if not valid:
+            invalid.add(key)
+            continue
+        grouped[key].append({"snapshot_id": snapshot.pk, "job_id": snapshot.sync_job_id,
+                             "captured_at": snapshot.captured_at.isoformat(), "stock": str(snapshot.stock),
+                             "raw_signature": hashlib.sha256(json.dumps(
+                                 raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                             ).encode()).hexdigest(),
+                             "provenance_log_ids": tuple(log.pk for log in logs),
+                             "provenance_signature": hashlib.sha256(json.dumps({
+                                 "job": {"id": snapshot.sync_job_id, "status": snapshot.sync_job.status,
+                                         "type": snapshot.sync_job.job_type, "parameters": snapshot.sync_job.parameters},
+                                 "logs": [{"id": log.pk, "message": log.message, "context": log.context}
+                                          for log in logs],
+                             }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()})
+    proofs = {}
+    for key, rows in grouped.items():
+        if key in invalid or not rows or not any(
+            datetime.fromisoformat(row["captured_at"]) < cutoff for row in rows
+        ) or not any(datetime.fromisoformat(row["captured_at"]) >= cutoff for row in rows):
+            continue
+        proof = {"contract": "POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1",
+                 "effective_at": cutoff.isoformat(), "original_batch_evidence": originals[key],
+                 "bracketing_snapshots": rows, "coverage_promoted": False,
+                 "physical_count_verified": False}
+        proof["source_signature"] = hashlib.sha256(json.dumps(
+            proof, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        proofs[key] = ZERO, proof
+    return proofs
+
+
 @transaction.atomic(savepoint=False)
 def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     """Read UTC Stock boundaries in bulk; never rewrite the stored closing."""
@@ -787,6 +902,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     original_cut_boundaries = (_original_cut_boundaries(
         lines, month=month, cutoff=cutoff, reconciliations=monthly, cache=cache,
     ) if boundary_manifest_valid else {})
+    bracketed_empty = (_bracketed_original_empty_boundaries(lines, cutoff=cutoff)
+                       if boundary_manifest_valid and boundary == "opening" else {})
     values, evidence, unproven = {}, {}, []
     for line in lines:
         key = (line.branch_id, line.product_id)
@@ -796,6 +913,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
         captured_evidence = {}
         snapshot_evidence = {}
         original_cut_evidence = {}
+        bracketed_empty_evidence = {}
         if history and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids:
             quantity = getattr(history, f"documentary_{boundary}", None)
             if quantity is None and (resolved := captured_boundaries.get(key, {}).get(boundary)):
@@ -814,6 +932,8 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             snapshot_evidence = {**snapshot_evidence, "canonical_consistency": snapshot_consistency[key]}
         if quantity is None and original_cut_boundaries.get(key):
             quantity, original_cut_evidence = original_cut_boundaries[key]
+        if quantity is None and key not in canonical_keys and bracketed_empty.get(key):
+            quantity, bracketed_empty_evidence = bracketed_empty[key]
         evidence[line.id] = {
             "line_id": line.id, "original_stock": str(line.stock),
             "original_evidence": dict(line.evidence or {}),
@@ -823,6 +943,7 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
             "snapshot_boundary_evidence": dict(snapshot_evidence),
             "original_cut_boundary_evidence": dict(original_cut_evidence),
             "original_cut_boundary_verified": bool(original_cut_evidence),
+            "bracketed_empty_boundary_evidence": dict(bracketed_empty_evidence),
             "canonical_consistency_evidence": dict(snapshot_consistency.get(key) or {}),
             "snapshot_boundary_verified": bool(snapshot_evidence),
             "physical_count_verified": False,
@@ -832,10 +953,11 @@ def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
                                                and key not in original_zero_keys
                                                and history and history.coverage_status == "COMPLETE"
                                                and not history.unknown_movement_ids),
-            "original_boundary_verified": key in original_zero_keys,
+            "original_boundary_verified": key in original_zero_keys or bool(bracketed_empty_evidence),
             "original_zero_boundary_evidence": dict(original_zeros.get(key, (ZERO, {}))[1]),
             "original_zero_consistency_evidence": dict(zero_consistency.get(key) or {}),
-            "contract": (SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else
+            "contract": ("POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1" if bracketed_empty_evidence else
+                         SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else
                          "POINT_ORIGINAL_CUT_BOUNDARY_V1" if original_cut_evidence else "POINT_STOCK_RAW_UTC"),
         }
         if quantity is None:

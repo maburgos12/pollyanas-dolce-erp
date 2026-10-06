@@ -4,6 +4,30 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Corte5oct2026: frontera2354 y causas todavía separadas
+
+PR1485 merge b6711b2 publicó seis cierres de originales parciales (2082,2117,2118,
+2119,2120,2237) sin elevar cobertura INCOMPLETE. Aceptación dos lecturas iguales
+HTTP0/ops0, native2082 dos revisiones iguales y UI Orquestación autenticada.
+Preview íntegro posterior `lock_ready=False`: quedan **3 fronteras** (2131 apertura y
+cierre;2354 apertura),23 orígenes AGG,2 destinos Extra10 y7 ventas CakeTopper.
+No repetir preview por rutina ni tratar los95 issues proyectados/155 crudos como
+pérdidas. Expediente `publicacion-corte-original-parcial-pr1485-20261005.md`.
+
+Caso2354 Sabor Galleta Cajeta Mediano, Colosio: Point externo producto832/sucursal5,
+ERP producto235/sucursal4. Línea8867 apertura31ago stock0 tenía sólo dos intentos
+vacíos/stock actual0. GET original protegido100 y luego500 devolvió `[]` HTTP200;
+el500 fue recibido5oct23:58:03 UTC, SHA wire
+`4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945`.
+Snapshots28602633/28605628, jobs34842/35042 SUCCESS, stock0 y raw ÚltimoMovimiento
+vacío rodean el corte1sep07:00UTC. La respuesta debe archivarse como evidencia de
+corte independiente, **no** como importación canónica COMPLETE. No repetir Point.
+El reporte comercial conserva venta923543,1PZA el1sep, y la relación de addon3
+activa/APPROVED enlaza receta107 con base70; no hay FK del ticket que permita
+descontar la base 1:1. La ecuación guardada0−1=−1 contra Point0 deja diferencia
++1 sin atribución humana. Aun probando apertura documental, se mantiene esta
+explicación comercial/operativa pendiente y el conteo físico no existe.
+
 ### Corte5oct2026: vacío/cero publicado y membresía original en reparación
 
 PR1482 merge721f5c84, CI37352912991/validate37352913282 PASS. Deploy oficial agotó

@@ -1,5 +1,7 @@
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+import hashlib
+from copy import deepcopy
 from unittest.mock import patch
 
 from django.db import connection
@@ -11,7 +13,9 @@ from pos_bridge.models import (
     PointInventorySnapshot, PointHistoricalInventoryClosing,
     PointHistoricalInventoryClosingLine, PointProductHistoryImport, PointProductHistoryRow,
 )
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, PointHistoryReconciliation
+from pos_bridge.services.audit_stock_history_service import (
+    AuditStockHistoryError, AuditStockHistoryService, PointHistoryReconciliation,
+)
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService, documentary_historical_boundary,
     _original_stock_delta_matches,
@@ -59,6 +63,132 @@ class SnapshotHistoricalBoundaryTests(TestCase):
             closing or self.closing, lines or [self.line], month=self.month,
             boundary=boundary, cache={} if cache is None else cache,
         )
+
+    def _bracketed_empty_opening(self):
+        cutoff = datetime(2026, 9, 1, 7, tzinfo=dt_timezone.utc)
+        closing = PointHistoricalInventoryClosing.objects.create(
+            operational_date=date(2026, 8, 31), status="VERIFIED", source="POINT_STOCK_HISTORY",
+            source_fingerprint="empty-opening", expected_branch_ids=[self.branch.pk],
+            expected_product_ids=[self.product.pk], metadata={"method": "consolidated_point_stock_history_attempts"},
+            retrieved_at=cutoff + timedelta(days=1),
+        )
+        line = PointHistoricalInventoryClosingLine.objects.create(
+            closing=closing, branch=self.branch, product=self.product, stock=Decimal("0"),
+            evidence={"method": "two_independent_no_history_current_zero", "history_rows": 0,
+                      "independent_attempts": 2, "observed_current_stock": "0"},
+        )
+        raw = {"headers": ["Código", "Producto", "Cantidad", "Unidad", "Costo unitario",
+                           "Costo total", "Último Movimiento"],
+               "row": [self.product.external_id, "sku", "Producto", "Pasteles", "0",
+                       "Pza", "10", "10", "", False]}
+        before = self._snapshot(stock="0", raw=raw, captured_at=cutoff - timedelta(hours=1))
+        after = self._snapshot(stock="0", raw=raw, captured_at=cutoff + timedelta(hours=2))
+        script = "client.get_stock_history('product-exact', 'branch-exact', movements=500)"
+        receipt = (cutoff + timedelta(days=30)).isoformat()
+        evidence = {"source": "POINT_STOCK_HISTORY_API", "domain": "PRODUCT", "response_complete": True,
+                    "branch_id": self.branch.pk, "product_id": self.product.pk,
+                    "request": {"path": "/Stock/GetHistorial", "params": {
+                        "tipo": "false", "almacen": self.branch.external_id,
+                        "pkproducto": self.product.external_id, "movimientos": "500", "tipoMovimiento": ""}},
+                    "retrieved_at": receipt, "history_limit": 500, "fetched_rows": 0,
+                    "raw_sha256": hashlib.sha256(b"[]").hexdigest(),
+                    "original_locator": {"source_file": "original-response.jsonl", "source_line": 1},
+                    "request_provenance": {"kind": "DERIVED_FROM_ACQUISITION_SCRIPT",
+                        "source_file": "acquire.py", "source_code": script,
+                        "source_sha256": hashlib.sha256(script.encode()).hexdigest(),
+                        "client_contract": "PointHttpSessionClient.get_stock_history"}}
+        return closing, line, before, after, cutoff, evidence
+
+    def test_original_empty_500_and_bracketed_zero_prove_opening_without_canonical_import(self):
+        closing, line, before, after, cutoff, original = self._bracketed_empty_opening()
+        service = AuditStockHistoryService()
+        with patch("requests.sessions.Session.request", side_effect=AssertionError("No HTTP")):
+            record = service.archive_empty_boundary_response(
+                self.branch, self.product, cutoff, evidence=original)
+            first = self._read(lines=[line], closing=closing, boundary="opening")
+            second = self._read(lines=[line], closing=closing, boundary="opening")
+            same_record = service.archive_empty_boundary_response(
+                self.branch, self.product, cutoff, evidence=original)
+        self.assertEqual(record.pk, same_record.pk)
+        self.assertEqual(first, second)
+        self.assertEqual(first[0], {line.pk: Decimal("0")})
+        proof = first[1][line.pk]
+        self.assertFalse(proof["canonical_history_verified"])
+        self.assertFalse(proof["physical_count_verified"])
+        self.assertEqual(proof["coverage_status"], "MISSING")
+        self.assertEqual(proof["contract"], "POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1")
+        self.assertEqual({item["snapshot_id"] for item in proof["bracketed_empty_boundary_evidence"]["bracketing_snapshots"]},
+                         {before.pk, after.pk})
+        self.assertEqual(PointProductHistoryImport.objects.count(), 1)
+        self.assertEqual(record.row_count, 0)
+        self.assertFalse(record.rows.exists())
+        other_provenance = deepcopy(original)
+        other_provenance["original_locator"]["source_line"] = 2
+        with self.assertRaises(AuditStockHistoryError):
+            service.archive_empty_boundary_response(
+                self.branch, self.product, cutoff, evidence=other_provenance)
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata["response_provenance"][0]["original_locator"]["source_line"], 1)
+
+    def test_bracketed_zero_fails_closed_on_snapshot_or_original_contradictions(self):
+        closing, line, before, after, cutoff, original = self._bracketed_empty_opening()
+        service = AuditStockHistoryService()
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        record = service.archive_empty_boundary_response(self.branch, self.product, cutoff, evidence=original)
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {line.pk: Decimal("0")})
+        after.stock = Decimal("1")
+        after.save(update_fields=["stock"])
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        after.stock = Decimal("0")
+        after.save(update_fields=["stock"])
+        record.raw_metadata["original_responses"][record.raw_metadata["latest_response_fingerprint"]]["raw_zlib_base64"] = "bad"
+        record.save(update_fields=["raw_metadata"])
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+
+    def test_original_empty_boundary_rejects_wrong_identity_limit_and_receipt_before_write(self):
+        _, _, _, _, cutoff, original = self._bracketed_empty_opening()
+        service = AuditStockHistoryService()
+        cases = (
+            {"branch_id": self.branch.pk + 1},
+            {"domain": "INGREDIENT"},
+            {"history_limit": 100},
+            {"retrieved_at": (cutoff - timedelta(seconds=1)).isoformat()},
+            {"raw_sha256": "0" * 64},
+        )
+        for changed in cases:
+            with self.subTest(changed=changed):
+                bad = deepcopy(original)
+                bad.update(changed)
+                with self.assertRaises(AuditStockHistoryError):
+                    service.archive_empty_boundary_response(
+                        self.branch, self.product, cutoff, evidence=bad)
+                self.assertFalse(PointProductHistoryImport.objects.exists())
+
+    def test_original_empty_boundary_requires_both_valid_snapshots_and_no_canonical_import(self):
+        closing, line, before, after, cutoff, original = self._bracketed_empty_opening()
+        AuditStockHistoryService().archive_empty_boundary_response(
+            self.branch, self.product, cutoff, evidence=original)
+        before.delete()
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        before = self._snapshot(stock="0", raw=after.raw_payload,
+                                captured_at=cutoff - timedelta(hours=1))
+        self.log.context = {**self.log.context, "branch_external_id": "wrong"}
+        self.log.save(update_fields=["context"])
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        self.log.context = {**self.log.context, "branch_external_id": self.branch.external_id}
+        self.log.save(update_fields=["context"])
+        after.captured_at = cutoff + timedelta(hours=4)
+        after.save(update_fields=["captured_at"])
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        after.captured_at = cutoff + timedelta(hours=2)
+        after.save(update_fields=["captured_at"])
+        line.created_at = cutoff - timedelta(seconds=1)
+        line.save(update_fields=["created_at"])
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
+        line.created_at = cutoff + timedelta(days=1)
+        line.save(update_fields=["created_at"])
+        self._incomplete_history(previous=1, new=0)
+        self.assertEqual(self._read(lines=[line], closing=closing, boundary="opening")[0], {})
 
     def _incomplete_history(self, *, stamp="2026-10-01T02:18:44.487", previous=2, new=1, product=None):
         service = AuditStockHistoryService()

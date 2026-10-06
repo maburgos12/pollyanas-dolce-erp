@@ -7,7 +7,7 @@ import unicodedata
 import zlib
 from copy import deepcopy
 from dataclasses import dataclass, replace
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
@@ -36,6 +36,7 @@ from pos_bridge.services.product_month_source_mutex import lock_product_month_so
 HISTORY_LIMIT = 500
 ORIGINAL_HISTORY_LIMITS = frozenset({5, 10, 15, 50, 100, 300, 500})
 SOURCE_NAME = "POINT_STOCK_HISTORY_API"
+BOUNDARY_ONLY_SOURCE_NAME = "POINT_STOCK_HISTORY_BOUNDARY_ONLY"
 
 
 class AuditStockHistoryError(RuntimeError):
@@ -484,6 +485,15 @@ class AuditStockHistoryService:
         boundary pair. Receipt time remains distinct from this database write.
         """
         rows, evidence = deepcopy(rows), deepcopy(evidence)
+        raw_json = self._validate_original_response(branch, product, rows, evidence)
+        self._persist_response(
+            branch, product, month, rows, fetched_at=evidence["retrieved_at"],
+            history_limit=evidence["history_limit"], evidence=evidence, raw_json=raw_json,
+        )
+        return self.reconcile(branch, product, month)
+
+    @staticmethod
+    def _validate_original_response(branch, product, rows, evidence):
         if not isinstance(branch, PointBranch) or not isinstance(product, PointProduct):
             raise AuditStockHistoryError("La identidad requiere sucursal y producto Point canónicos.")
         if not isinstance(rows, list) or not isinstance(evidence, dict):
@@ -520,7 +530,7 @@ class AuditStockHistoryService:
                 not isinstance(request_proof.get("source_code"), str) or not request_proof["source_code"].strip() or
                 hashlib.sha256(request_proof["source_code"].encode()).hexdigest() != request_proof.get("source_sha256")):
             raise AuditStockHistoryError("Procedencia del script de adquisición original inválida.")
-        receipt = self._aware_receipt(evidence.get("retrieved_at"))
+        receipt = AuditStockHistoryService._aware_receipt(evidence.get("retrieved_at"))
         if receipt > timezone.now():
             raise AuditStockHistoryError("La fecha original de consulta está en el futuro.")
         try:
@@ -547,12 +557,55 @@ class AuditStockHistoryService:
                 raise AuditStockHistoryError("Fecha original de movimiento inválida.") from exc
             if instant > receipt:
                 raise AuditStockHistoryError("Movimiento posterior a su consulta original.")
-        self._original_batch(rows=rows, branch=branch, product=product)
-        self._persist_response(
-            branch, product, month, rows, fetched_at=evidence["retrieved_at"],
-            history_limit=limit, evidence=evidence, raw_json=raw_json,
-        )
-        return self.reconcile(branch, product, month)
+        AuditStockHistoryService._original_batch(rows=rows, branch=branch, product=product)
+        return raw_json
+
+    def archive_empty_boundary_response(self, branch, product, cutoff, *, evidence):
+        """Keep an original empty response independent of canonical coverage."""
+        evidence = deepcopy(evidence)
+        raw_json = self._validate_original_response(branch, product, [], evidence)
+        if (evidence["history_limit"] != 500 or not timezone.is_aware(cutoff)
+                or self._aware_receipt(evidence["retrieved_at"]) <= cutoff):
+            raise AuditStockHistoryError("El cero original no acredita el corte solicitado.")
+        cutoff = cutoff.astimezone(datetime_timezone.utc)
+        fingerprint = hashlib.sha256(json.dumps(
+            evidence, sort_keys=True, default=str,
+        ).encode()).hexdigest()
+        # ponytail: one response per pair/cut; version this key only if a second
+        # independently documented response must be retained for the same cut.
+        file_hash = hashlib.sha256(
+            f"point-boundary-only:{branch.pk}:{product.pk}:{cutoff.isoformat()}".encode()
+        ).hexdigest()
+        proof = {**evidence, "fingerprint": fingerprint, "ingested_at": timezone.now().isoformat()}
+        archive = {**proof, "encoding": "zlib-base64-json",
+                   "raw_zlib_base64": base64.b64encode(zlib.compress(raw_json)).decode("ascii")}
+        metadata = {"source": BOUNDARY_ONLY_SOURCE_NAME, "cutoff": cutoff.isoformat(),
+                    "history_limit": 500, "fetched_rows": 0, "fetched_movement_ids": [],
+                    "fetched_at": evidence["retrieved_at"], "latest_response_fingerprint": fingerprint,
+                    "response_provenance": [proof], "original_responses": {fingerprint: archive}}
+        with transaction.atomic():
+            lock_product_month_sources([cutoff.date().replace(day=1)])
+            record, created = PointProductHistoryImport.objects.get_or_create(
+                file_hash=file_hash,
+                defaults={"source_filename": "point-original-boundary-only", "report_path": "/Stock/GetHistorial",
+                          "report_title": "Evidencia original de corte, no canónica", "product_name": product.name,
+                          "branch_name": branch.name, "point_branch": branch, "point_product": product,
+                          "row_count": 0, "raw_metadata": metadata},
+            )
+            record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
+            if (record.point_branch_id != branch.pk or record.point_product_id != product.pk
+                    or record.row_count != 0 or record.raw_metadata.get("source") != metadata["source"]
+                    or record.raw_metadata.get("cutoff") != metadata["cutoff"]
+                    or record.rows.exists()):
+                raise AuditStockHistoryError("La evidencia de corte existente tiene identidad incompatible.")
+            if not created:
+                existing = self._original_batch(record)
+                prior = record.raw_metadata["response_provenance"][0]
+                if (existing is None or existing["rows"] != []
+                        or {key: value for key, value in prior.items()
+                            if key not in {"fingerprint", "ingested_at"}} != evidence):
+                    raise AuditStockHistoryError("La respuesta original de corte existente no coincide.")
+            return record
 
     def _persist_response(self, branch, product, month, rows, *, fetched_at, history_limit,
                           evidence=None, raw_json=None):
