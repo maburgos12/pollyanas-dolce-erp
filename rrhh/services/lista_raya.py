@@ -217,9 +217,9 @@ def importar_lista_raya_nomina(
             empleado.curp = row.curp
             empleado.nss = row.nss
             empleado.area = row.area
-            empleado.fecha_ingreso = row.fecha_ingreso or timezone.localdate()
+            if empleado._state.adding or empleado.activo:
+                empleado.fecha_ingreso = row.fecha_ingreso or timezone.localdate()
             empleado.salario_diario = row.salario_diario
-            empleado.activo = True
 
         if empleados_to_create:
             Empleado.objects.bulk_create(empleados_to_create)
@@ -235,7 +235,6 @@ def importar_lista_raya_nomina(
                     "area",
                     "fecha_ingreso",
                     "salario_diario",
-                    "activo",
                 ],
             )
 

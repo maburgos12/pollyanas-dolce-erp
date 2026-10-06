@@ -253,6 +253,15 @@ class Empleado(models.Model):
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
+        update_fields = kwargs.get("update_fields")
+        if self.pk and self.activo and (update_fields is None or "activo" in update_fields):
+            anterior = type(self).objects.filter(pk=self.pk).values("activo", "fecha_ingreso").first()
+            if anterior and not anterior["activo"]:
+                ingreso = self.fecha_ingreso if update_fields is None or "fecha_ingreso" in update_fields else anterior["fecha_ingreso"]
+                if EmpleadoBaja.objects.filter(empleado_id=self.pk, fecha_baja__gte=ingreso).exists():
+                    raise ValidationError({
+                        "activo": "Esta persona tiene una baja; para reingresarla captura una fecha de ingreso posterior a la baja."
+                    })
         # El área y el nivel se comparan contra catálogos cerrados (ver
         # CatalogoFuncionOperativa, que ya normaliza los suyos). Capturar
         # «Preparación» desde la pantalla dejaba un valor que no empata con

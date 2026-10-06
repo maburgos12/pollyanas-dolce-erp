@@ -5538,6 +5538,13 @@ class ListaRayaIdentidadTests(TestCase):
             departamento=Empleado.DEP_PRODUCCION,
             sucursal_ref=sucursal,
         )
+        EmpleadoBaja.objects.create(
+            empleado=empleado, nombre=empleado.nombre,
+            fecha_ingreso=empleado.fecha_ingreso, fecha_baja=date(2026, 5, 31),
+        )
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.activo)
+        fecha_ingreso = empleado.fecha_ingreso
         row = EmpleadoListaRaya(
             codigo="346",
             nombre="REY IVAN VALDEZ FELIX",
@@ -5588,6 +5595,8 @@ class ListaRayaIdentidadTests(TestCase):
         self.assertEqual(pendiente.empleado_sugerido, empleado)
         empleado.refresh_from_db()
         self.assertEqual(empleado.codigo, "EMP-2606-001")
+        self.assertFalse(empleado.activo)
+        self.assertEqual(empleado.fecha_ingreso, fecha_ingreso)
 
 
 class NominaLineaSnapshotTests(TestCase):
