@@ -49,6 +49,8 @@ else:
 MIDDLEWARE = [m for m in MIDDLEWARE if m != "whitenoise.middleware.WhiteNoiseMiddleware"]
 if "STATICFILES_STORAGE" in globals():
     del STATICFILES_STORAGE
+if "DEFAULT_FILE_STORAGE" in globals():
+    del DEFAULT_FILE_STORAGE
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
