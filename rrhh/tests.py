@@ -3594,9 +3594,6 @@ class RRHHViewsTests(TestCase):
         self.assertEqual(EmpleadoBaja.objects.filter(empleado=empleado).count(), 1)
         empleado.refresh_from_db()
         self.assertFalse(empleado.activo)
-        empleado.activo = True
-        with self.assertRaises(ValidationError):
-            empleado.save(update_fields=["activo"])
 
     def test_bajas_heredadas_repetidas_cuentan_una_salida(self):
         empleado = Empleado.objects.create(nombre="JORGE ISAAC", codigo="270")

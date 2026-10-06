@@ -253,12 +253,6 @@ class Empleado(models.Model):
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
-        if (
-            self.pk and self.activo
-            and type(self).objects.filter(pk=self.pk, activo=False).exists()
-            and EmpleadoBaja.objects.filter(empleado_id=self.pk).exists()
-        ):
-            raise ValidationError({"activo": "La persona tiene una baja registrada; revisa su reingreso antes de reactivarla."})
         # El área y el nivel se comparan contra catálogos cerrados (ver
         # CatalogoFuncionOperativa, que ya normaliza los suyos). Capturar
         # «Preparación» desde la pantalla dejaba un valor que no empata con
