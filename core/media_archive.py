@@ -111,14 +111,22 @@ def _valid_entry(entry, name):
     )
 
 
-def load_archive_entry(name):
+def load_archive_entry(name, *, include_disabled=False):
+    """Read the local index; privacy checks may opt in when NAS reads are disabled."""
     if not _canonical_name(name):
         return None
     roots = _roots()
     if roots is None:
-        return None
+        index = getattr(settings, "MEDIA_ARCHIVE_INDEX_ROOT", "")
+        if not include_disabled or not index:
+            return None
+        index, media = [Path(os.path.abspath(value)) for value in (index, settings.MEDIA_ROOT)]
+        if _overlap(index, media):
+            raise ArchiveUnavailable("Archivo histórico no disponible.")
+    else:
+        index = roots[1]
     try:
-        with _open_read(roots[1] / _index_filename(name)) as source:
+        with _open_read(index / _index_filename(name)) as source:
             content = source.read(MAX_INDEX_BYTES + 1)
         if len(content) > MAX_INDEX_BYTES:
             raise ValueError

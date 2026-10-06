@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -122,20 +123,147 @@ class HistoricalBitacoraArchiveTests(TestCase):
 
     def test_archive_requires_current_resource_authorization(self):
         self.verified()
-        self.source.unlink()
-        for user, expected in ((None, 404), (self.other, 404), (self.driver, 200), (self.reviewer, 200)):
+        for original_present in (True, False):
+            if not original_present:
+                self.source.unlink()
+            for query in ("", "?archive=1"):
+                for user, expected in ((None, 404), (self.other, 404), (self.driver, 200), (self.reviewer, 200)):
+                    with self.subTest(original_present=original_present, query=query, user=user):
+                        self.client.logout()
+                        if user:
+                            self.client.force_login(user)
+                        response = self.client.get(f"/media/{self.name}{query}")
+                        self.assertEqual(response.status_code, expected)
+                        self.assertEqual(response["Cache-Control"], "private, no-store")
+                        self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+                        if getattr(response, "streaming", False):
+                            self.assertEqual(b"".join(response.streaming_content), self.payload)
+                        else:
+                            self.assertNotIn(self.payload, response.content)
+        self.driver.is_active = False
+        self.driver.save(update_fields=["is_active"])
+        self.client.force_login(self.driver)
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+        self.source.write_bytes(self.payload)
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+
+    def test_indexed_original_rechecks_current_record_module_and_staff_permissions(self):
+        self.verified()
+        self.client.force_login(self.reviewer)
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 200)
+        UserModuleAccess.objects.filter(user=self.reviewer).delete()
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+        self.other.is_staff = True
+        self.other.save(update_fields=["is_staff"])
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+        self.other.user_permissions.add(Permission.objects.get(
+            content_type__app_label="logistica", codename="view_bitacorasalidallegada",
+        ))
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 200)
+        BitacoraSalidaLlegada.objects.filter(pk=self.record.pk).update(foto_tablero_salida="")
+        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+
+    def test_indexed_original_canonical_aliases_require_the_same_permission(self):
+        self.verified()
+        for alias in ("bitacora/./mayo.jpg", "public/../bitacora/mayo.jpg", "bitacora%252Fmayo.jpg", "bitacora%5Cmayo.jpg"):
+            for user, expected in ((None, 404), (self.other, 404), (self.reviewer, 200)):
+                with self.subTest(alias=alias, user=user):
+                    self.client.logout()
+                    if user:
+                        self.client.force_login(user)
+                    response = self.client.get(f"/media/{alias}")
+                    self.assertEqual(response.status_code, expected)
+                    self.assertEqual(response["Cache-Control"], "private, no-store")
+                    if getattr(response, "streaming", False):
+                        self.assertEqual(b"".join(response.streaming_content), self.payload)
+
+    def test_corrupt_index_fails_closed_even_while_original_is_present(self):
+        self.verified()
+        index_file = next(self.index.glob("*.json"))
+        index_file.write_text("{corrupt")
+        for user in (None, self.other, self.reviewer):
             with self.subTest(user=user):
                 self.client.logout()
                 if user:
                     self.client.force_login(user)
                 response = self.client.get(f"/media/{self.name}")
-                self.assertEqual(response.status_code, expected)
-                if getattr(response, "streaming", False):
-                    self.assertEqual(b"".join(response.streaming_content), self.payload)
-        self.driver.is_active = False
-        self.driver.save(update_fields=["is_active"])
-        self.client.force_login(self.driver)
-        self.assertEqual(self.client.get(f"/media/{self.name}").status_code, 404)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response["Retry-After"], "30")
+                self.assertEqual(response["Cache-Control"], "private, no-store")
+                self.assertEqual(response["X-Content-Type-Options"], "nosniff")
+                self.assertNotIn(self.payload, response.content)
+        self.assertEqual(self.source.read_bytes(), self.payload)
+
+    def test_indexed_local_original_is_available_without_opening_offline_nas(self):
+        self.verified()
+        self.remote.unlink()
+        self.client.force_login(self.reviewer)
+        with patch("core.media_archive.open_archive", side_effect=AssertionError("NAS must not be opened")):
+            response = self.client.get(f"/media/{self.name}")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(b"".join(response.streaming_content), self.payload)
+            self.assertEqual(response["Cache-Control"], "private, no-store")
+        response = self.client.get(f"/media/{self.name}?archive=1")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response["Retry-After"], "30")
+
+    def test_unindexed_and_disabled_archive_original_keep_existing_public_behavior(self):
+        response = self.client.get(f"/media/{self.name}")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), self.payload)
+        with override_settings(MEDIA_ARCHIVE_ROOT=""):
+            response = self.client.get(f"/media/{self.name}")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(b"".join(response.streaming_content), self.payload)
+        public = self.media / "public.jpg"
+        public.write_bytes(self.payload)
+        response = self.client.get("/media/public.jpg")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b"".join(response.streaming_content), self.payload)
+        response = self.client.get("/media/missing-public.jpg")
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn("private", response.get("Cache-Control", ""))
+
+    def test_disabling_nas_reads_does_not_make_an_indexed_original_public(self):
+        from core.media_archive import load_archive_entry
+
+        self.verified()
+        with override_settings(MEDIA_ARCHIVE_ROOT=""):
+            # Default storage/command callers retain their disabled behavior.
+            self.assertIsNone(load_archive_entry(self.name))
+            for user, expected in ((None, 404), (self.other, 404), (self.reviewer, 200)):
+                with self.subTest(user=user):
+                    self.client.logout()
+                    if user:
+                        self.client.force_login(user)
+                    response = self.client.get(f"/media/{self.name}")
+                    self.assertEqual(response.status_code, expected)
+                    self.assertEqual(response["Cache-Control"], "private, no-store")
+                    if getattr(response, "streaming", False):
+                        self.assertEqual(b"".join(response.streaming_content), self.payload)
+            next(self.index.glob("*.json")).write_text("{corrupt")
+            response = self.client.get(f"/media/{self.name}")
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response["Retry-After"], "30")
+            self.assertEqual(response["Cache-Control"], "private, no-store")
+            self.assertNotIn(self.payload, response.content)
+
+    def test_disabled_nas_privacy_lookup_still_rejects_overlap_and_index_symlinks(self):
+        from core.media_archive import ArchiveUnavailable, load_archive_entry
+
+        self.verified()
+        with override_settings(MEDIA_ARCHIVE_ROOT="", MEDIA_ARCHIVE_INDEX_ROOT=str(self.media)):
+            with self.assertRaises(ArchiveUnavailable):
+                load_archive_entry(self.name, include_disabled=True)
+        index_file = next(self.index.glob("*.json"))
+        target = self.index.parent / "index-copy.json"
+        target.write_bytes(index_file.read_bytes())
+        index_file.unlink()
+        index_file.symlink_to(target)
+        with override_settings(MEDIA_ARCHIVE_ROOT=""):
+            with self.assertRaises(ArchiveUnavailable):
+                load_archive_entry(self.name, include_disabled=True)
 
     def test_offline_and_corrupt_archive_return_retryable_error_without_leaking_bytes(self):
         self.verified()
