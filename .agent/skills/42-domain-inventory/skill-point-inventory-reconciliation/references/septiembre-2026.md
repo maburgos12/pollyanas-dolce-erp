@@ -46,6 +46,18 @@ ingreso por sí solo no rematerializó casos; sólo el paso acotado posterior
 actualizó 2958, sin declarar resuelto su origen.
 Extra10 y Vela se tratan aparte.
 
+El reporte Point original **1089**, «Salida por conversión» tipo22,
+1–30sep2026/todas las sucursales, quedó descargado una sola vez tras estar
+listo (`Status=2`): XLS de 57×12, SHA256
+`eb5e77eee0f7cb9c21434e7cedf225ddeaae28db7df1f834c6255602518f267e`.
+Suma 367 piezas de salida, agrupadas por sucursal/categoría/producto; incluye
+CEDIS Zanahoria Chico6 y Mediano16, y Matriz Zanahoria Chico2 y Mediano4.
+No contiene fecha ni folio por ejecución ni FK común con el reporte de entrada
+tipo21. Sirve para verificar cantidades/tamaños agregados, **no** para asignar
+origen individual a los 23 destinos ni para convertir rendimientos en regla
+universal. Archivo original en `reporte-point-salida-conversion-1089-20261006.xls`
+del expediente; no volver a generarlo o descargarlo por rutina.
+
 ### Corte 6oct2026: conversiones por presentación, sin cerrar origen
 
 Mauricio revisará con los programadores de Point el salto 23→22 piezas entre
