@@ -24,11 +24,14 @@ rutina.
 El mismo original de AGG192 muestra salida tipo22 FK1674489, 6 PZA de
 Fresas con Crema Rebanada Las Glorias, el 17sep23:32:19.760UTC,
 `12→6`. La entrada FK1674315 de 6 ocurrió el mismo día a
-21:30:41.770UTC, `6→12`. El caso ERP2958 guardado presenta entrada por
-conversión6, salida por conversión0 y diferencia−6. En el historial original
-la salida6 explica exactamente esa diferencia documental; no inferir por la
-separación horaria que fue una reversión, ni persistir la nueva proyección
-sin controles de fuente y materialización válidos.
+21:30:41.770UTC, `6→12`. Antes de reconstruir, el caso ERP2958 tenía entrada
+por conversión6, salida0 y diferencia−6. El preflight oficial acreditó
+`COMPLETE`, desconocidos0, remanente0 y ventas41/41. La reconciliación acotada
+por servicio oficial incorporó la salida6 y dejó diferencia0; segunda ejecución
+seleccionó0 casos, HTTP/captura0. El caso conserva `NEEDS_EXPLANATION` y
+`MISSING_CONVERSION_ORIGIN`: no inferir por la separación horaria que fue una
+reversión ni atribuirla a una persona. La primera ejecución agrupó dos avisos
+de atención alta; la segunda no emitió duplicados.
 
 **23/23 destinos de producto** del agregado coinciden ya en suma mensual de
 entrada tipo21:18 por historiales importados previos y cinco por originales
@@ -38,8 +41,9 @@ el servicio oficial, sin HTTP. Cada una tiene 500 filas originales/canónicas,
 cambios y 13 tablas operativas protegidas intactas. Es prueba de cantidades de destino, NO
 de origen/ejecución individual, cobertura canónica COMPLETE, conteo físico
 para otros productos ni cierre. El ingreso se condicionó a cadena, apertura,
-cierre, remanente, desconocidos y ventas coherentes, no a la sola suma. Los
-casos guardados no se rematerializaron: 2958 aún muestra salida0/diferencia−6.
+cierre, remanente, desconocidos y ventas coherentes, no a la sola suma. El
+ingreso por sí solo no rematerializó casos; sólo el paso acotado posterior
+actualizó 2958, sin declarar resuelto su origen.
 Extra10 y Vela se tratan aparte.
 
 ### Corte 6oct2026: conversiones por presentación, sin cerrar origen
