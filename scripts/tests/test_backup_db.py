@@ -27,6 +27,8 @@ class BackupTests(unittest.TestCase):
         self.evidence.mkdir(parents=True)
         self.audit_evidence = self.root / 'private' / 'inventory_audit_evidence'
         self.audit_evidence.mkdir(parents=True)
+        self.media = self.root / 'storage' / 'media'
+        self.media.mkdir()
         self.log = self.root / 'backup.log'
         self.bin = self.root / 'bin'
         self.bin.mkdir()
@@ -39,6 +41,7 @@ class BackupTests(unittest.TestCase):
                     'BACKUP_DIR': str(self.backups), 'LOG_FILE': str(self.log),
                     'CONTEOS_EVIDENCE_DIR': str(self.evidence), 'CONTAINER': 'isolated-test-db'}
         self.env['INVENTORY_AUDIT_PRIVATE_ROOT'] = str(self.audit_evidence)
+        self.env['MEDIA_ROOT'] = str(self.media)
         self.stub('docker', 'printf "CREATE TABLE evidence (id int);\\n"\nexit "${FAIL_DUMP:-0}"\n')
         self.stub('tar', 'if [ "${FAIL_TAR:-0}" = 1 ]; then exit 19; fi\nexec ' + shutil.which('tar') + ' "$@"\n')
         self.stub('date', 'if [ "$1" = "+%Y%m%d_%H%M%S" ]; then echo ' + STAMP + '; else exec ' + shutil.which('date') + ' "$@"; fi\n')
@@ -59,14 +62,82 @@ class BackupTests(unittest.TestCase):
         legacy.write_bytes(gzip.compress(b'legacy SQL'))
         return set(p.name for p in self.backups.iterdir())
 
-    def seed_pair(self, prefix):
+    def seed_pair(self, prefix, suffixes=('.sql.gz', '.conteos.tar.gz')):
         entries = []
-        for suffix in ('.sql.gz', '.conteos.tar.gz'):
+        for suffix in suffixes:
             name = prefix + suffix
             data = gzip.compress(b'historical fixture')
             (self.backups / name).write_bytes(data)
             entries.append(hashlib.sha256(data).hexdigest() + '  ' + name)
         (self.backups / (prefix + '.manifest')).write_text('\n'.join(entries) + '\n')
+
+    def test_media_archive_restores_nested_files_with_spaces(self):
+        originals = {
+            'fallas/evidencias/foto equipo.jpg': b'\xff\xd8\xffsynthetic equipment photo',
+            'activos/facturas/factura.pdf': b'%PDF-1.4 synthetic invoice',
+        }
+        for name, content in originals.items():
+            path = self.media / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        archive_path = self.backups / f'backup_{STAMP}.media.tar.gz'
+        self.assertTrue(archive_path.is_file(), 'MEDIA_ROOT must accompany the SQL backup')
+        restored = self.root / 'restored-media'
+        restored.mkdir()
+        with tarfile.open(archive_path) as archive:
+            archive.extractall(restored, filter='data')
+        for name, content in originals.items():
+            self.assertEqual((restored / name).read_bytes(), content)
+
+    def test_missing_or_invalid_media_source_does_not_publish_or_rotate(self):
+        original = self.seed()
+        invalid_file = self.root / 'not-a-directory'
+        invalid_file.write_bytes(b'invalid media root')
+        for root in (self.root / 'missing-media', invalid_file):
+            with self.subTest(root=root):
+                result = self.run_backup(MEDIA_ROOT=str(root))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('MEDIA_ROOT', result.stderr)
+                self.assertEqual(set(p.name for p in self.backups.iterdir()), original)
+
+    def test_media_archive_failure_keeps_previous_restore_points(self):
+        original = self.seed()
+        self.stub('tar', 'case "$*" in *.media.tar.gz*) exit 19;; esac\nexec ' + shutil.which('tar') + ' "$@"\n')
+        result = self.run_backup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(set(p.name for p in self.backups.iterdir()), original)
+
+    def test_orphan_media_payload_is_not_a_legacy_sql_backup(self):
+        self.seed(number=6)
+        prefix = 'backup_20000101_010101'
+        sql = self.backups / (prefix + '.sql.gz')
+        media = self.backups / (prefix + '.media.tar.gz')
+        sql.write_bytes(gzip.compress(b'incomplete SQL'))
+        media.write_bytes(gzip.compress(b'incomplete media'))
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(sql.exists())
+        self.assertTrue(media.exists())
+        self.assertFalse((self.backups / 'backup_20100101_010101.sql.gz').exists())
+
+    def test_missing_or_corrupt_manifest_media_never_counts_or_rotates(self):
+        self.seed(number=6)
+        preserved = {}
+        for day, missing in ((1, True), (2, False)):
+            prefix = f'backup_200001{day:02d}_010101'
+            self.seed_pair(prefix, ('.sql.gz', '.conteos.tar.gz', '.inventory-audit.tar.gz', '.media.tar.gz'))
+            media = self.backups / (prefix + '.media.tar.gz')
+            if missing:
+                media.unlink()
+            else:
+                media.write_bytes(b'corrupt media archive')
+            preserved.update({p.name: p.read_bytes() for p in self.backups.glob(prefix + '.*')})
+        result = self.run_backup()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for name, content in preserved.items():
+            self.assertEqual((self.backups / name).read_bytes(), content)
 
     def test_restorable_pair_and_checksums(self):
         (self.evidence / 'proof.pdf').write_bytes(b'%PDF-1.4 evidence')
@@ -76,7 +147,7 @@ class BackupTests(unittest.TestCase):
         manifest = self.backups / f'backup_{STAMP}.manifest'
         self.assertTrue(manifest.exists(), 'SQL alone is not a complete backup')
         entries = manifest.read_text().splitlines()
-        self.assertEqual(len(entries), 3)
+        self.assertEqual(len(entries), 4)
         for entry in entries:
             digest, name = entry.split('  ', 1)
             self.assertEqual(digest, hashlib.sha256((self.backups / name).read_bytes()).hexdigest())
@@ -118,18 +189,34 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(len(list(self.backups.glob('*.manifest'))), 7)
         self.assertEqual(len(list(self.backups.glob('*.conteos.tar.gz'))), 7)
         self.assertEqual(len(list(self.backups.glob('*.inventory-audit.tar.gz'))), 1)
+        self.assertEqual(len(list(self.backups.glob('*.media.tar.gz'))), 1)
         self.assertEqual(len(list(self.backups.glob('*.sql.gz'))), 7)
         self.assertFalse((self.backups / 'backup_20100101_010101.sql.gz').exists())
         self.assertFalse((self.backups / 'backup_20200101_010101.sql.gz').exists())
 
+    def test_previous_three_payload_sets_remain_valid_during_rotation(self):
+        suffixes = ('.sql.gz', '.conteos.tar.gz', '.inventory-audit.tar.gz')
+        for day in range(1, 5):
+            self.seed_pair(f'backup_202001{day:02d}_010101', suffixes)
+        preserved = {p.name: p.read_bytes() for p in self.backups.glob('backup_20200104_010101.*')}
+        result = self.run_backup(BACKUP_KEEP_LAST='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(self.backups.glob('*.manifest'))), 3)
+        for name, content in preserved.items():
+            self.assertEqual((self.backups / name).read_bytes(), content)
+        self.assertFalse((self.backups / 'backup_20200101_010101.inventory-audit.tar.gz').exists())
+
     def test_restricted_export_links_complete_sets_and_removes_rotated_links(self):
         self.seed(number=4)
+        for day in range(1, 5):
+            self.seed_pair(f'backup_202001{day:02d}_010101',
+                           ('.sql.gz', '.conteos.tar.gz', '.inventory-audit.tar.gz', '.media.tar.gz'))
         export = self.root / 'hbs-export'
         group = grp.getgrgid(os.getgid()).gr_name
         for manifest in self.backups.glob('backup_*.manifest'):
             base = manifest.stem
             export.mkdir(exist_ok=True)
-            for suffix in ('sql.gz', 'conteos.tar.gz', 'manifest'):
+            for suffix in ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'media.tar.gz', 'manifest'):
                 source = self.backups / f'{base}.{suffix}'
                 os.link(source, export / source.name)
         result = self.run_backup(BACKUP_KEEP_LAST='3', BACKUP_EXPORT_DIR=str(export),
@@ -137,11 +224,12 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(len(list(self.backups.glob('backup_*.manifest'))), 3)
         self.assertEqual(len(list(export.glob('backup_*.manifest'))), 3)
-        for suffix in ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'manifest'):
+        for suffix in ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'media.tar.gz', 'manifest'):
             name = f'backup_{STAMP}.{suffix}'
             self.assertEqual((self.backups / name).stat().st_ino, (export / name).stat().st_ino)
             self.assertEqual((export / name).stat().st_mode & 0o777, 0o640)
         self.assertFalse((export / 'backup_20200101_010101.manifest').exists())
+        self.assertFalse((export / 'backup_20200101_010101.media.tar.gz').exists())
 
     def test_export_requires_both_path_and_group(self):
         result = self.run_backup(BACKUP_EXPORT_DIR=str(self.root / 'hbs-export'))
