@@ -1,11 +1,13 @@
 """Authenticated access to operational evidence stored under ``MEDIA_ROOT``."""
 
 import posixpath
+import logging
+import mimetypes
 from urllib.parse import unquote
 
 from django.conf import settings
 from django.db.models import Q
-from django.http import Http404
+from django.http import FileResponse, Http404, HttpResponse
 from django.views.static import serve as static_serve
 
 from activos.models import EvidenciaOrden, OrdenMantenimiento
@@ -20,6 +22,51 @@ from mantenimiento.services_access import (
     authorized_unit_services,
     can_access_mantenimiento,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _can_access_archived_bitacora_media(user, path, *, own_only=False):
+    """Reuse the readers of logistics evidence; never authorize by filename alone."""
+    if not user or not user.is_authenticated or not user.is_active:
+        return False
+    from logistica.models import BitacoraSalidaLlegada
+
+    records = BitacoraSalidaLlegada.objects.filter(
+        Q(foto_tablero_salida=path)
+        | Q(foto_tablero_llegada=path)
+        | Q(foto_ticket_combustible=path)
+    )
+    if own_only:
+        return records.filter(repartidor__user=user).exists()
+    if any(can_view_submodule(user, "logistica", area) for area in ("bitacoras", "capturas", "unidades")):
+        return records.exists()
+    if user.is_staff and (user.has_perm("logistica.view_bitacorasalidallegada") or user.has_perm("logistica.change_bitacorasalidallegada")):
+        return records.exists()
+    return records.filter(repartidor__user=user).exists()
+
+
+def _serve_archived_bitacora(request, path):
+    from core.media_archive import ArchiveUnavailable, open_archive
+
+    if not path.startswith("bitacora/") or not _can_access_archived_bitacora_media(request.user, path):
+        raise Http404
+    content_type = mimetypes.guess_type(path)[0]
+    if content_type not in {"image/jpeg", "image/png", "image/webp", "image/avif", "image/heic", "image/heif"}:
+        raise Http404
+    try:
+        archive = open_archive(path)
+    except FileNotFoundError:
+        raise Http404
+    except ArchiveUnavailable:
+        logger.warning("media_archive_unavailable")
+        response = HttpResponse("La evidencia archivada está temporalmente indisponible.", status=503)
+        response["Retry-After"] = "30"
+    else:
+        response = FileResponse(archive, content_type=content_type, filename=posixpath.basename(path))
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 _PRIVATE_OPERATIONAL_PREFIXES = (
@@ -153,7 +200,13 @@ def serve_operational_media(request, path):
     is_private = _is_private_operational_media_path(canonical_path)
     if is_private and not _can_access_operational_media(request.user, canonical_path):
         raise Http404
-    response = static_serve(request, canonical_path, document_root=settings.MEDIA_ROOT)
+    # Explicit read verifies NAS delivery while the original remains recoverable.
+    if request.GET.get("archive") == "1":
+        return _serve_archived_bitacora(request, canonical_path)
+    try:
+        response = static_serve(request, canonical_path, document_root=settings.MEDIA_ROOT)
+    except Http404:
+        return _serve_archived_bitacora(request, canonical_path)
     if is_private:
         response["Cache-Control"] = "private, no-store"
         response["X-Content-Type-Options"] = "nosniff"

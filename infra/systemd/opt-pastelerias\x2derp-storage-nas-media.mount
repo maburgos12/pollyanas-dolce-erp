@@ -1,0 +1,12 @@
+[Unit]
+Description=ERP media archive read-only NAS mount
+Wants=network-online.target
+Requires=wg-quick@wg-erp-qnap.service
+After=network-online.target wg-quick@wg-erp-qnap.service
+
+[Mount]
+What=//10.77.216.2/ERP_MEDIA_ARCHIVE
+Where=/opt/pastelerias-erp/storage/nas/media
+Type=cifs
+Options=credentials=/root/.config/erp-media-archive/reader.credentials,vers=3.1.1,seal,ro,nosuid,nodev,noexec,soft,echo_interval=5,nofail,uid=1000,gid=1000,dir_mode=0550,file_mode=0440
+TimeoutSec=30s

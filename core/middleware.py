@@ -242,6 +242,17 @@ class RepartidorOnlyMiddleware:
             and is_repartidor_only(user)
             and not any(path.startswith(prefix) for prefix in self.ALLOWED_PREFIXES)
         ):
+            if path.startswith("/media/bitacora/"):
+                from core.media_archive import ArchiveUnavailable, load_archive_entry
+                from core.private_operational_media import _can_access_archived_bitacora_media
+
+                name = path.removeprefix("/media/")
+                try:
+                    archived = load_archive_entry(name) is not None
+                except ArchiveUnavailable:
+                    archived = False
+                if archived and _can_access_archived_bitacora_media(user, name, own_only=True):
+                    return self.get_response(request)
             return redirect("/logistica/app/")
 
         return self.get_response(request)

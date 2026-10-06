@@ -1,0 +1,12 @@
+# Keep disabled until NAS receipt, private HTTP and metadata recovery are verified.
+[Unit]
+Description=Retry ERP May 2026 media archive pilot hourly
+
+[Timer]
+OnBootSec=5min
+OnCalendar=hourly
+Persistent=true
+Unit=erp-media-archive.service
+
+[Install]
+WantedBy=timers.target

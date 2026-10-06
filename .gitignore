@@ -13,6 +13,10 @@ venv/
 *.sqlite3-*
 staticfiles/
 media/
+storage/media_archive_index/
+storage/media_archive_jobs/
+storage/media_archive_export/
+storage/nas/
 
 # Env files
 .env
