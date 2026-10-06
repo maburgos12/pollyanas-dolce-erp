@@ -227,6 +227,10 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertIsNotNone(self.linea_actual())
         self.assertFalse(RecepcionItemDepartamental.objects.exists())
         self.assertEqual(self.compromiso_actual().monto,Decimal('200'))
+        detalle = self.client.get(reverse('compras:departamental_detalle', args=[self.solicitud.pk]))
+        self.assertEqual(detalle.context['total_pagado'], Decimal('200'))
+        self.assertContains(detalle, 'Pagado registrado')
+        self.assertContains(detalle, 'Gasto contable pendiente de integración.')
 
     def test_compra_duplicada_no_crea_segundo_registro(self):
         self.assertEqual(self.comprar().status_code,200)
