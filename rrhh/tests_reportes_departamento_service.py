@@ -94,10 +94,13 @@ class ReporteDepartamentoServiceTests(TestCase):
         self.assertTrue(report['filas'][1]['observaciones'])
         self.assertEqual(report['filas'][2]['estado_laboral_label'],'No aplica')
         self.employee.activo=True
-        self.employee.save(update_fields=['activo'])
+        with self.assertRaises(ValidationError):
+            self.employee.save(update_fields=['activo'])
+        self.employee.fecha_ingreso=date(2026,9,3)
+        self.employee.save(update_fields=['activo','fecha_ingreso'])
         report=self.build()['reportes'][0]
         self.assertEqual(report['filas'][2]['estado_laboral_label'],'Activo')
-        self.assertFalse(report['filas'][1]['observaciones'])
+        self.assertTrue(report['filas'][1]['observaciones'])
 
     def test_hour_missing_end_one_day_unknown_and_cross_midnight_clipped(self):
         self.permiso(dt(self.start,8))

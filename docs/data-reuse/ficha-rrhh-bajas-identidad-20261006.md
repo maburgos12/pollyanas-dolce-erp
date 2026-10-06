@@ -29,3 +29,9 @@ La captura de la baja desactiva la ficha y su identidad operativa. El flujo exis
 Consultas o procedimiento reproducible: `inventario_fuentes_datos --term baja` y `--term empleado`; consultas SQL de solo lectura por código 355, 270 y grupos `(empleado_id, fecha_baja)`.
 
 Riesgos y pendientes: los motivos divergentes de bajas antiguas requieren conciliación documental. `activo=True` con una baja histórica puede corresponder a un reingreso o a un error; requiere revisión individual.
+
+## Importación de lista de raya y estado laboral (2026-10-06)
+
+`rrhh.NominaLinea` conserva el movimiento y su snapshot de nómina; `rrhh.Empleado` sigue siendo la fuente del estado laboral y `rrhh.EmpleadoBaja` el evento de salida. La unión es por código de empleado o por una identidad sugerida que queda pendiente de conciliación. En producción, el código 298 tiene la baja 19 del 19 de septiembre y seguía activo, sin un nuevo ingreso registrado. La importación `rrhh.services.lista_raya.importar_lista_raya_nomina` escribía `activo=True` para cada fila mediante `bulk_update`, aun cuando la ficha tenía baja, y omitía las validaciones de `save`.
+
+Decisión: importar las líneas y conceptos de nómina sin modificar `activo` en fichas existentes. Para una ficha inactiva, conservar también la fecha maestra de ingreso; el archivo histórico no prueba un reingreso. La reactivación manual requiere una fecha de ingreso posterior a la última baja. No se crea otra tabla ni se equiparan automáticamente personas por nombre.
