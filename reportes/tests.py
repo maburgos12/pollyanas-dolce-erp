@@ -3575,6 +3575,34 @@ class ReportesCanonicosTests(TestCase):
         self.assertNotIn("final teórico", body)
         self.assertNotIn("cierre teórico", body.lower())
 
+        pending = Receta.objects.create(
+            nombre="Pastel HTML sin frontera",
+            codigo_point="HTMLPEND001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-html-pendiente-001",
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=pending,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": ["OPENING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_MISSING"],
+                "sales_source_available": True,
+                "opening_source_authoritative": False,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": False,
+            },
+        )
+        incomplete = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        self.assertEqual(incomplete.context["documented_opening_lines"], 1)
+        self.assertEqual(incomplete.context["documented_calculated_lines"], 1)
+        self.assertEqual(incomplete.context["documented_closing_lines"], 1)
+        self.assertContains(incomplete, "Avance documental: 1/2 líneas con apertura")
+        self.assertContains(incomplete, "Sin total mensual")
+
     def test_historical_non_point_opening_uses_honest_labels_in_html_csv_and_xlsx(self):
         receta = Receta.objects.create(
             nombre="Pastel Apertura Historica",
