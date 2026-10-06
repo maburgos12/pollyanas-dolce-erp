@@ -285,7 +285,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
     total_solicitado = Decimal("0")
     total_cotizado = Decimal("0")
     total_comprometido = Decimal("0")
-    total_gastado = Decimal("0")
+    total_pagado = Decimal("0")
     es_compras = puede_gestionar_compras_departamentales(request.user)
     es_area_responsable = AreaPresupuestoResponsable.objects.filter(
         area=solicitud.area, usuario=request.user, puede_capturar=True,
@@ -295,6 +295,8 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         hay_saldo_reembolso = False
         for historico in item.intentos_compra_prefetched:
             historico.compra_visible = getattr(historico, "compra", None)
+            if historico.compra_visible:
+                total_pagado += historico.compra_visible.importe_final
             historico.reembolsos_visibles = historico.reembolsos_prefetched
             historico.total_reembolsado_visible = sum((r.importe for r in historico.reembolsos_visibles), Decimal("0"))
             historico.reembolso_producto_visible = max(
@@ -391,7 +393,6 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         if (intento and intento.estado == IntentoCompraDepartamental.ESTADO_VIGENTE
                 and compromiso and compromiso.activo and compromiso.formalizado_en):
             total_comprometido += compromiso.monto
-        total_gastado += item.monto_gastado
     return render(
         request,
         "compras/departamentales/detalle.html",
@@ -407,7 +408,7 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "total_solicitado": total_solicitado,
             "total_cotizado": total_cotizado,
             "total_comprometido": total_comprometido,
-            "total_gastado": total_gastado,
+            "total_pagado": total_pagado,
         },
         status=status,
     )
