@@ -20,6 +20,15 @@ Matriz/Ciruela Rebanada10 = 1661108(10). SHA payload y wire, parámetros,
 filas y orden verificados independientemente. No reconsultar estos cinco por
 rutina.
 
+El mismo original de AGG192 muestra salida tipo22 FK1674489, 6 PZA de
+Fresas con Crema Rebanada Las Glorias, el 17sep23:32:19.760UTC,
+`12→6`. La entrada FK1674315 de 6 ocurrió el mismo día a
+21:30:41.770UTC, `6→12`. El caso ERP2958 guardado presenta entrada por
+conversión6, salida por conversión0 y diferencia−6. En el historial original
+la salida6 explica exactamente esa diferencia documental; no inferir por la
+separación horaria que fue una reversión, ni persistir la nueva proyección
+sin controles de fuente y materialización válidos.
+
 **23/23 destinos de producto** del agregado coinciden ya en suma mensual de
 entrada tipo21:18 por historiales importados previos y cinco por originales
 preservados, todavía sin importación. Es prueba de cantidades de destino, NO
