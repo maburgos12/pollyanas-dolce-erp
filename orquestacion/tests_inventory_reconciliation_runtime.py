@@ -317,6 +317,9 @@ class InventoryReconciliationRuntimeTests(TestCase):
         self.assertIn('38598/539340', result.context.context_markdown)
         self.assertIn('El rendimiento de rebanadas depende de la presentación', result.context.context_markdown)
         self.assertIn('1677688 entrada Rebanada12', result.context.context_markdown)
+        self.assertIn('23/23 destinos de producto', result.context.context_markdown)
+        self.assertIn('FK1674489', result.context.context_markdown)
+        self.assertIn('856–860', result.context.context_markdown)
 
     def test_existing_management_command_can_review_inventory_entity(self):
         from django.core.management import call_command

@@ -4,6 +4,60 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Corte 6oct2026 posterior: cinco destinos con originales íntegros
+
+Una consulta Point protegida, inicialmente sin persistencia, obtuvo cinco
+historiales Stock exactos de producto/sucursal que no tenían importación ERP.
+Cada GET tuvo
+límite500, 500 FK únicos en orden descendente y llegó a fecha anterior al
+1sep07:00UTC. Wire, petición, recepción y SHA íntegros están en
+`consulta-cinco-destinos-conversion-resultado-20261006.jsonl` del expediente.
+Entradas tipo21 no canceladas de septiembre: AGG192 Las Glorias/Fresas con
+Crema Rebanada6 = FK1674315(6); AGG197 Matriz/Pay Plátano Rebanada4 =
+1664857(4); AGG201 Matriz/Fresas con Crema Rebanada66 =
+1661105(10),1663777(10),1666159(10),1674492(6),1674858(10),1677754(10),
+1680582(10); AGG202 Matriz/3 Leches Rebanada6 = 1662640(6); AGG204
+Matriz/Ciruela Rebanada10 = 1661108(10). SHA payload y wire, parámetros,
+filas y orden verificados independientemente. No reconsultar estos cinco por
+rutina.
+
+El mismo original de AGG192 muestra salida tipo22 FK1674489, 6 PZA de
+Fresas con Crema Rebanada Las Glorias, el 17sep23:32:19.760UTC,
+`12→6`. La entrada FK1674315 de 6 ocurrió el mismo día a
+21:30:41.770UTC, `6→12`. Antes de reconstruir, el caso ERP2958 tenía entrada
+por conversión6, salida0 y diferencia−6. El preflight oficial acreditó
+`COMPLETE`, desconocidos0, remanente0 y ventas41/41. La reconciliación acotada
+por servicio oficial incorporó la salida6 y dejó diferencia0; segunda ejecución
+seleccionó0 casos, HTTP/captura0. El caso conserva `NEEDS_EXPLANATION` y
+`MISSING_CONVERSION_ORIGIN`: no inferir por la separación horaria que fue una
+reversión ni atribuirla a una persona. La primera ejecución agrupó dos avisos
+de atención alta; la segunda no emitió duplicados.
+
+**23/23 destinos de producto** del agregado coinciden ya en suma mensual de
+entrada tipo21:18 por historiales importados previos y cinco por originales
+preservados que se ingresaron después como importaciones **856–860** mediante
+el servicio oficial, sin HTTP. Cada una tiene 500 filas originales/canónicas,
+`COMPLETE`, desconocidos0 y extremos documentales; segunda ingesta cero
+cambios y 13 tablas operativas protegidas intactas. Es prueba de cantidades de destino, NO
+de origen/ejecución individual, cobertura canónica COMPLETE, conteo físico
+para otros productos ni cierre. El ingreso se condicionó a cadena, apertura,
+cierre, remanente, desconocidos y ventas coherentes, no a la sola suma. El
+ingreso por sí solo no rematerializó casos; sólo el paso acotado posterior
+actualizó 2958, sin declarar resuelto su origen.
+Extra10 y Vela se tratan aparte.
+
+El reporte Point original **1089**, «Salida por conversión» tipo22,
+1–30sep2026/todas las sucursales, quedó conservado como archivo original
+tras estar listo (`Status=2`): XLS de 57×12, SHA256
+`eb5e77eee0f7cb9c21434e7cedf225ddeaae28db7df1f834c6255602518f267e`.
+Suma 367 piezas de salida, agrupadas por sucursal/categoría/producto; incluye
+CEDIS Zanahoria Chico6 y Mediano16, y Matriz Zanahoria Chico2 y Mediano4.
+No contiene fecha ni folio por ejecución ni FK común con el reporte de entrada
+tipo21. Sirve para verificar cantidades/tamaños agregados, **no** para asignar
+origen individual a los 23 destinos ni para convertir rendimientos en regla
+universal. Archivo original en `reporte-point-salida-conversion-1089-20261006.xls`
+del expediente; no volver a generarlo o descargarlo por rutina.
+
 ### Corte 6oct2026: conversiones por presentación, sin cerrar origen
 
 Mauricio revisará con los programadores de Point el salto 23→22 piezas entre
