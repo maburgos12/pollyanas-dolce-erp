@@ -47,7 +47,7 @@ services:
       --access-logfile -
       --error-logfile -"
     volumes:
-      - .:/app
+      - .:/app:${ERP_BIND_PROPAGATION:-rprivate}
     ports:
       - "${WEB_HOST_PORT:-8011}:8000"
     restart: unless-stopped
@@ -74,7 +74,7 @@ services:
       REDIS_URL: redis://redis:6379/0
     command: /opt/venv/bin/python -m celery -A config worker -l info --pool=solo --concurrency=1 -Q celery
     volumes:
-      - .:/app
+      - .:/app:${ERP_BIND_PROPAGATION:-rprivate}
     depends_on:
       db:
         condition: service_healthy
