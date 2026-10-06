@@ -22,7 +22,7 @@
     <article><span>Solicitado</span><strong>${{ total_solicitado|floatformat:2|intcomma }}</strong><small>Estimación opcional del área</small></article>
     <article><span>Cotizado</span><strong>${{ total_cotizado|floatformat:2|intcomma }}</strong><small>Propuestas definitivas seleccionadas</small></article>
     <article><span>Comprometido vigente</span><strong>${{ total_comprometido|floatformat:2|intcomma }}</strong><small>Órdenes activas aún vigentes</small></article>
-    <article><span>Gastado</span><strong>${{ total_gastado|floatformat:2|intcomma }}</strong><small>Solo cuando lo reconoce la fuente financiera</small></article>
+    <article><span>Pagado registrado</span><strong>${{ total_pagado|floatformat:2|intcomma }}</strong><small>Compras confirmadas; reembolsos por separado. Gasto contable pendiente de integración.</small></article>
   </section>
   {% if es_compras and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
   <section class="cd-items-detail">
