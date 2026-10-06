@@ -47,8 +47,8 @@ actualizó 2958, sin declarar resuelto su origen.
 Extra10 y Vela se tratan aparte.
 
 El reporte Point original **1089**, «Salida por conversión» tipo22,
-1–30sep2026/todas las sucursales, quedó descargado una sola vez tras estar
-listo (`Status=2`): XLS de 57×12, SHA256
+1–30sep2026/todas las sucursales, quedó conservado como archivo original
+tras estar listo (`Status=2`): XLS de 57×12, SHA256
 `eb5e77eee0f7cb9c21434e7cedf225ddeaae28db7df1f834c6255602518f267e`.
 Suma 367 piezas de salida, agrupadas por sucursal/categoría/producto; incluye
 CEDIS Zanahoria Chico6 y Mediano16, y Matriz Zanahoria Chico2 y Mediano4.
