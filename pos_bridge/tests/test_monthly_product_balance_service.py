@@ -135,6 +135,11 @@ class MonthlyProductBalanceConversionTests(TestCase):
             month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
         self.assertTrue(any(row.issue == "CONVERSION_STOCK_HISTORY_INCOMPLETE" for row in unresolved))
 
+        with patch.object(AuditStockHistoryService, "reconcile_many", return_value={}):
+            _, _, unresolved, _, _ = self._service()._load_conversions(
+                month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertTrue(any(row.issue == "CONVERSION_STOCK_HISTORY_INCOMPLETE" for row in unresolved))
+
     def test_blank_point_origin_keeps_destination_without_inferring_parent(self):
         RecetaEquivalencia.objects.create(
             receta_porcion=self.slice,

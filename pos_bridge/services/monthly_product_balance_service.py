@@ -3495,11 +3495,18 @@ class MonthlyPointProductBalanceService:
         branches = set()
         for record in records.values():
             product, branch = record.point_product, record.point_branch
-            if not product or not branch:
-                continue
             selected = grouped[record.pk]
-            reconciliation = reconciliations.get((branch.pk, product.pk))
+            reconciliation = reconciliations.get((branch.pk, product.pk)) if product and branch else None
             if reconciliation is None:
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source="conversion_source_stock", movement_id=str(record.pk),
+                    source_hash=record.file_hash, item_code=product.sku if product else "",
+                    item_name=product.name if product else "",
+                    quantity=sum((abs(row.quantity) for row in selected), ZERO),
+                    issue=ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE,
+                    branch_external_id=branch.external_id if branch else "",
+                    branch_name=branch.name if branch else "", movement_date=month_start,
+                ))
                 continue
             recipe = self.identity_service.resolve_recipe(point_code=product.sku, point_name=product.name)
             if recipe is not None and normalizar_nombre(recipe.nombre) != normalizar_nombre(product.name):
