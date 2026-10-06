@@ -713,9 +713,6 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
     cutoff = cutoff.astimezone(datetime_timezone.utc)
     bounds = (cutoff - timedelta(hours=3), cutoff + timedelta(hours=3))
     keys = {(line.branch_id, line.product_id) for line in candidates}
-    pair_filter = Q(pk__in=[])
-    for branch_id, product_id in keys:
-        pair_filter |= Q(branch_id=branch_id, product_id=product_id)
     records = list(PointProductHistoryImport.objects.filter(
         point_branch_id__in={key[0] for key in keys},
         point_product_id__in={key[1] for key in keys},
@@ -725,6 +722,8 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
     originals = {}
     for record in records:
         key = (record.point_branch_id, record.point_product_id)
+        if key not in keys:
+            continue
         expected_hash = hashlib.sha256(
             f"point-boundary-only:{key[0]}:{key[1]}:{cutoff.isoformat()}".encode()
         ).hexdigest()
@@ -739,6 +738,11 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
         except (AuditStockHistoryError, HistoricalInventoryCaptureError, KeyError, TypeError, ValueError):
             continue
         originals[key] = batch["evidence"]
+    if not originals:
+        return {}
+    pair_filter = Q(pk__in=[])
+    for branch_id, product_id in originals:
+        pair_filter |= Q(branch_id=branch_id, product_id=product_id)
     snapshots = list(PointInventorySnapshot.objects.filter(
         pair_filter, captured_at__gte=bounds[0], captured_at__lte=bounds[1],
         sync_job__status=PointSyncJob.STATUS_SUCCESS,
