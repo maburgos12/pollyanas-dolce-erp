@@ -3552,8 +3552,8 @@ class MonthlyPointProductBalanceService:
             if recipe is None:
                 outside_recipe.append(fact)
                 continue
-            if raw_valid:
-                branches.add(branch.pk)
+            if raw_valid and branch.erp_branch_id:
+                branches.add((branch.erp_branch_id, normalizar_nombre(branch.name)))
                 balance = result.setdefault(recipe.pk, _MutableBalanceRow())
                 balance.add("conversion_out", quantity,
                             count_name="conversion_out_rows")
@@ -3681,7 +3681,13 @@ class MonthlyPointProductBalanceService:
             source_counts["conversion_destination_rows_applied"] += 1
             destination = result.setdefault(conversion.receta_id, _MutableBalanceRow())
             destination.add("conversion_in", quantity, count_name="conversion_in_rows")
-            independent_branch = issue == ISSUE_CONVERSION_ORIGIN_UNRESOLVED and conversion.branch_id in source_branches
+            independent_branch = (
+                issue == ISSUE_CONVERSION_ORIGIN_UNRESOLVED
+                and conversion.erp_branch_id is not None
+                and conversion.branch_id is not None
+                and conversion.branch.erp_branch_id == conversion.erp_branch_id
+                and (conversion.erp_branch_id, normalizar_nombre(conversion.branch.name)) in source_branches
+            )
             destination.record_origin(ORIGIN_INDEPENDENT_POINT_STOCK if independent_branch else origin)
             if issue:
                 # Point's aggregate has no per-operation source FK. Independent
