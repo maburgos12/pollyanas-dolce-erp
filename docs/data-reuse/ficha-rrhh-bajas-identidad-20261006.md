@@ -24,8 +24,8 @@ Una persona es `rrhh.Empleado`; una baja es el evento de salida de esa persona e
 ## Decisión de diseño
 
 Reutilizar `Empleado` y `EmpleadoBaja`. Validar la correspondencia de nombre con la ficha y rechazar una segunda baja de la misma ficha y fecha. Presentar y contar un evento por persona y fecha sin borrar las anotaciones históricas.
-Una ficha con baja no puede reactivarse desde la edición ordinaria; un reingreso requiere revisión de Capital Humano.
+La captura de la baja desactiva la ficha y su identidad operativa. El flujo existente de reingreso puede reactivar una ficha, por lo que Capital Humano debe verificar la fecha y el respaldo del nuevo ingreso.
 
 Consultas o procedimiento reproducible: `inventario_fuentes_datos --term baja` y `--term empleado`; consultas SQL de solo lectura por código 355, 270 y grupos `(empleado_id, fecha_baja)`.
 
-Riesgos y pendientes: los motivos divergentes de bajas antiguas requieren conciliación documental. No se infiere reingreso desde `activo=True` cuando existe una baja.
+Riesgos y pendientes: los motivos divergentes de bajas antiguas requieren conciliación documental. `activo=True` con una baja histórica puede corresponder a un reingreso o a un error; requiere revisión individual.
