@@ -4,6 +4,29 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Corte 6oct2026 posterior: cinco destinos con originales íntegros
+
+Una consulta Point protegida, sin persistencia, obtuvo cinco historiales Stock
+exactos de producto/sucursal que no tenían importación ERP. Cada GET tuvo
+límite500, 500 FK únicos en orden descendente y llegó a fecha anterior al
+1sep07:00UTC. Wire, petición, recepción y SHA íntegros están en
+`consulta-cinco-destinos-conversion-resultado-20261006.jsonl` del expediente.
+Entradas tipo21 no canceladas de septiembre: AGG192 Las Glorias/Fresas con
+Crema Rebanada6 = FK1674315(6); AGG197 Matriz/Pay Plátano Rebanada4 =
+1664857(4); AGG201 Matriz/Fresas con Crema Rebanada66 =
+1661105(10),1663777(10),1666159(10),1674492(6),1674858(10),1677754(10),
+1680582(10); AGG202 Matriz/3 Leches Rebanada6 = 1662640(6); AGG204
+Matriz/Ciruela Rebanada10 = 1661108(10). SHA payload y wire, parámetros,
+filas y orden verificados independientemente. No reconsultar estos cinco por
+rutina.
+
+**23/23 destinos de producto** del agregado coinciden ya en suma mensual de
+entrada tipo21:18 por historiales importados previos y cinco por originales
+preservados, todavía sin importación. Es prueba de cantidades de destino, NO
+de origen/ejecución individual, cobertura canónica COMPLETE, conteo físico
+ni cierre. No ingresar los cinco por la sola suma; aplicar guard de apertura,
+cierre, remanente, desconocidos y ventas. Extra10 y Vela se tratan aparte.
+
 ### Corte 6oct2026: conversiones por presentación, sin cerrar origen
 
 Mauricio revisará con los programadores de Point el salto 23→22 piezas entre
