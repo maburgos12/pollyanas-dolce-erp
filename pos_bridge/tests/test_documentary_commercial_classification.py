@@ -7,7 +7,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from core.models import Sucursal
-from pos_bridge.models import PointBranch, PointConversionLine, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob, PointWasteLine
+from pos_bridge.models import PointBranch, PointConversionLine, PointDailySale, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob, PointWasteLine
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
 from reportes.models import ProductBusinessRule
@@ -27,7 +27,7 @@ class DocumentaryCommercialClassificationTests(TestCase):
         self.conversion = PointConversionLine.objects.create(branch=self.branch, erp_branch=self.sucursal, sync_job=self.conversion_job, movement_external_id="AGG-vela", source_hash="conversion-documentary", movement_at=datetime(2026, 9, 1, 7, tzinfo=dt_timezone.utc), item_code="875", item_name="VELA INDIVIDUAL ", quantity=11, unit="PZA", source_endpoint="/Report/crea_Reporte_Largo", raw_payload={"CÓDIGO": "875", "PRODUCTO": "VELA INDIVIDUAL ", "CATEGORÍA": "Alegría", "UNIDAD": "PZA", "SUCURSAL": "Matriz", "CANTIDAD": 11, "COSTO": 0})
 
     def _node(self, code, name, pk, family, category):
-        return PointRecipeNode.objects.create(run=self.run, identity_key=f"PRODUCT:{code}", source_type="PRODUCT", node_kind="FINAL_PRODUCT", point_pk=str(pk), point_code=code, point_name=name, family=family, category=category, raw_detail={"PK_Producto": pk, "Codigo": code, "Nombre": name, "Produccion": False, "Rastreable": False, "Activo": True, "FK_Unidad": 5})
+        return PointRecipeNode.objects.create(run=self.run, identity_key=f"PRODUCT:{code}", source_type="PRODUCT", node_kind="FINAL_PRODUCT", point_pk=str(pk), point_code=code, point_name=name, family=family, category=category, raw_detail={"PK_Producto": pk, "Codigo": code, "Nombre": name, "Produccion": False, "Rastreable": False, "Servicio": False, "Complemento": False, "Activo": True, "FK_Unidad": 5})
 
     def _read(self, family):
         service = MonthlyPointProductBalanceService()
@@ -133,13 +133,72 @@ class DocumentaryCommercialClassificationTests(TestCase):
                 self.vela_node.save()
                 self.assertTrue(self._read("conversions")[2])
 
-    def test_extra_and_manufactured_aggregates_remain_unresolved(self):
-        for code, name in (("0227", "Extra10"), ("0058", "Snickers Rebanada")):
-            with self.subTest(code=code):
-                self.conversion.item_code = code
-                self.conversion.item_name = name
-                self.conversion.save()
-                self.assertTrue(self._read("conversions")[2])
+    def test_exact_extra_charge_is_not_a_produced_conversion(self):
+        self._node("0227", "Extra 10", 267, "Otros Postres", "Otros Postres")
+        self.conversion.item_code = "0227"
+        self.conversion.item_name = "Extra 10"
+        self.conversion.quantity = 4
+        self.conversion.raw_payload = {"CÓDIGO": "0227", "PRODUCTO": "Extra 10",
+            "CATEGORÍA": "Otros Postres", "UNIDAD": "PZA", "SUCURSAL": "Matriz",
+            "CANTIDAD": 4, "COSTO": 0}
+        self.conversion.save()
+
+        values, meta, unresolved = self._read("conversions")
+
+        self.assertEqual(values, {})
+        self.assertEqual(unresolved, [])
+        decision = meta["excluded_documentary_rows"][0]
+        self.assertEqual(decision["classification"], "CARGO_ADICIONAL")
+        self.assertFalse(decision["transactional_product_identity_verified"])
+        self.assertFalse(decision["execution_origin_verified"])
+
+    def test_extra_sku_collision_and_unverified_raw_remain_unresolved(self):
+        self._node("0227", "Extra 10", 267, "Otros Postres", "Otros Postres")
+        self.run = PointRecipeExtractionRun.objects.create()
+        self._node("0227", "Love You Rojo", 227, "Pasteles", "Pasteles")
+        self.conversion.item_code = "0227"
+        self.conversion.item_name = "Extra 10"
+        self.conversion.quantity = 4
+        self.conversion.raw_payload = {"CÓDIGO": "0227", "PRODUCTO": "Extra 10",
+            "CATEGORÍA": "Otros Postres", "UNIDAD": "PZA", "SUCURSAL": "Matriz",
+            "CANTIDAD": 4, "COSTO": 0}
+        self.conversion.save()
+        self.assertEqual(self._read("conversions")[2], [])
+        self.conversion.raw_payload["PRODUCTO"] = "Love You Rojo"
+        self.conversion.save()
+        self.assertTrue(self._read("conversions")[2])
+
+    def test_manufactured_aggregate_remains_in_scope(self):
+        self.conversion.item_code = "0058"
+        self.conversion.item_name = "Snickers Rebanada"
+        self.conversion.save()
+        self.assertTrue(self._read("conversions")[2])
+
+    def test_cake_topper_sales_remain_commercial_but_not_produced_sales(self):
+        product = PointProduct.objects.create(external_id="1059", sku="010204",
+            name="CAKE TOPPER FELIZ CUMPLE ESTRELLA NEGRO", category="Cake Topper")
+        sale = PointDailySale.objects.create(branch=self.branch, product=product,
+            sale_date=date(2026, 9, 26), quantity=1, tickets=1,
+            total_amount=90, net_amount=90, source_endpoint="/Report/PrintReportes?idreporte=3",
+            raw_payload={"source": "POINT_OFFICIAL_REPORT", "sku": "010204",
+                "name": "CAKE TOPPER FELIZ CUMPLE ESTRELLA NEGRO", "category": "Cake Topper"})
+
+        values, unresolved, count, rows, excluded = MonthlyPointProductBalanceService()._load_daily_sales(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+
+        self.assertEqual(values, {})
+        self.assertEqual(unresolved, [])
+        self.assertEqual(count, 1)
+        self.assertEqual(rows[0].pk, sale.pk)
+        self.assertEqual(excluded[0]["classification"], "ACCESORIO_COMPRADO")
+        self.assertEqual(excluded[0]["net_amount"], "90.00")
+        sale.refresh_from_db()
+        self.assertEqual(sale.net_amount, Decimal("90.00"))
+
+        sale.raw_payload["name"] = "Otro producto"
+        sale.save()
+        self.assertEqual(len(MonthlyPointProductBalanceService()._load_daily_sales(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))[1]), 1)
 
     def test_bulk_classification_queries_do_not_grow_with_rows(self):
         with CaptureQueriesContext(connection) as one:
