@@ -747,7 +747,7 @@ class EmpleadoBaja(models.Model):
         if self.empleado_id:
             if creating:
                 Empleado.objects.select_for_update().get(pk=self.empleado_id)
-            if self.nombre and normalizar_nombre(self.nombre) != normalizar_nombre(self.empleado.nombre):
+            if creating and self.nombre and normalizar_nombre(self.nombre) != normalizar_nombre(self.empleado.nombre):
                 raise ValidationError({"empleado": "La ficha seleccionada no corresponde al nombre de la baja."})
             self.nombre = self.nombre or self.empleado.nombre
             self.area = self.area or self.empleado.area
