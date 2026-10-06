@@ -2,6 +2,26 @@
 
 Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes con fuentes autorizadas y frescura necesaria; no volver a descargar hechos ya acreditados por rutina. Hilo/automatización: `01a0d98e-e017-7253-b4c9-9758f56c3827` / `conciliar-septiembre-hasta-cierre`. Septiembre NO cerrado. Regla humana vigente: no alterar inventario, mermas, ventas, RRHH o ajustes para forzar resultado.
 
+## Decisión de alcance del DG, 6oct2026 (no acredita cierre)
+
+Esta auditoría mensual concilia productos producidos contra vendidos; no es un
+conteo físico universal. Extra 10 es un cargo adicional y Cake Topper una línea
+comprada sin receta de fabricación. Excluirlos sólo de ese balance cuando el
+documento Point original y su catálogo exacto concuerden; conservar las ventas
+comerciales, importes, inventario Point y controles propios. Siete ventas Cake
+Topper (7 PZA/630 MXN) tienen categoría original `Cake Topper`, no `CakeTopper`.
+Las dos filas Extra 10 son 4 PZA Guamúchil y 12 PZA Matriz, código compartido
+`0227`; no clasificar otros productos por SKU.
+
+Las entradas Stock tipo21 y salidas tipo22 son hechos independientes por
+producto/sucursal/FK. El AGG de destino no lleva FK de salida común; no exigirlo,
+pero tampoco asignar un padre por cociente, horario o receta configurada. Las
+salidas tipo22 verificadas se suman por su identidad propia; una historia parcial
+o contradictoria continúa pendiente. El salto Point CEDIS 0065 de 23→22 queda
+reservado a la consulta de Mauricio con Point, sin imputar pieza ni operador.
+Antes de afirmar publicación/aceptación de esta regla, verificar CI, despliegue,
+lectura autenticada y preview oficial; el código local no cierra septiembre.
+
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
 ### Corte 6oct2026 posterior: cinco destinos con originales íntegros

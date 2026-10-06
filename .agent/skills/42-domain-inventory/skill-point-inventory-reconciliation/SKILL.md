@@ -109,6 +109,14 @@ PR1477 fue publicado y aceptado; el checkpoint registra evidencia de lectura,
 runtime y pantalla. Consultar también los límites de compras CakeTopper: una FK
 derivada por nombre no es identidad transaccional ni decisión comercial curada.
 
+Decisión DG de 6 octubre: `Extra 10` es cargo adicional, y CakeTopper es una
+línea de accesorios comprados, no producción. Excluir únicamente del balance
+producido-vendido cuando el raw exacto corrobore clasificación; conservar ventas,
+stock Point, costos y demás controles. Para conversiones, los Stock tipo 21 y 22
+son movimientos independientes: no exigir FK entrada↔salida inexistente ni
+derivar salidas con un factor fijo del agregado `AGG`. Auditar salida tipo 22 por
+producto/sucursal/FK original y preservar cobertura incompleta como incidencia.
+
 ## Límites y siguiente paso
 
 ### Plan mensual antes de revisar uno por uno

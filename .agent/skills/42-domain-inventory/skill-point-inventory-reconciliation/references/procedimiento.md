@@ -511,7 +511,9 @@ ENTRADA POR CONVERSIÓN (tipo 21) y SALIDA POR CONVERSIÓN (tipo 22), con sucurs
 producto/insumo, dominio, fecha efectiva y FK documental exactos. Deduplicar
 por sucursal, producto y FK del movimiento, preservando cancelaciones y raw UTC.
 Comparar sumas mensuales sólo después de comprobar cobertura y membresía; una
-suma igual no enlaza por sí sola origen y destino de una ejecución.
+suma igual no enlaza por sí sola origen y destino de una ejecución. El vínculo
+entrada↔salida no existe necesariamente en Point: cada tipo 22 acredita su
+propia salida por producto/sucursal/FK, no es hijo del renglón `AGG`.
 
 El rendimiento de rebanadas depende de la presentación y del producto: un
 pastel chico puede rendir menos que uno mediano y un pie mediano menos que uno
@@ -521,10 +523,13 @@ secuencia. No inferir pares por nombre, horario o cociente de cantidades, ni
 asignar faltantes a merma o a una persona sin documento.
 
 Para el mes siguiente, reutilizar primero originales y capturas COMPLETE; agrupar
-por identidad y causa en el plan del agente, sin repetir HTTP. Registrar destino,
-origen acreditado o faltante exacto, cobertura, reversos y siguiente paso. Si no
-hay vínculo transaccional o la fuente está incompleta, mantener el guard cerrado;
-la explicación operativa humana y el conteo físico se documentan por separado.
+por identidad y causa en el plan del agente, sin repetir HTTP. Registrar entradas
+tipo 21 y salidas tipo 22 por separado, saldo de cada producto, cobertura, reversos
+y siguiente paso. No exigir folio común inexistente. El lector sólo acredita la
+salida original cuando raw/canónica, cantidad, delta, dominio producto e identidad
+de receta coinciden. Una canónica INCOMPLETE o cadena contradictoria mantiene el
+guard cerrado aunque el movimiento individual sea visible. Explicación humana
+y conteo físico permanecen separados.
 
 ### Clasificación comercial documental, no identidad transaccional
 
@@ -547,14 +552,27 @@ catálogo original código COCA450, familia Bebidas/categoría Coca-cola. No enl
 al producto external235 ni inferir compra/precio/conteo. Vela875: documento
 original código875/nombre VELA INDIVIDUAL, catálogo coherente familia Velas y
 categoría Alegría bajo criterio comercial autorizado. Categoría o ProduccionFalse
-solos no convierten otros artículos en accesorios. Extra10 queda pendiente.
+solos no convierten otros artículos en accesorios. Decisión DG posterior: `Extra
+10` es cargo adicional; el lector exige reporte raw código0227/nombre Extra 10,
+categoría Otros postres, sucursal, cantidad/costo y nodo PRODUCT Point267 exactos.
+No aplicar alias SKU0227 de Love You Rojo ni atribuir costo de insumo267.
+
+CakeTopper es línea comprada sin receta de fabricación. En ventas oficiales,
+exigir raw `POINT_OFFICIAL_REPORT`, categoría `CakeTopper`, nombre completo de
+accesorio, SKU/nombre coherentes y receta explícita ausente. Excluir sólo del
+balance fabricado, registrar ID/rawSHA/importe y conservar las siete ventas de
+septiembre (7 PZA/630 MXN). FK de producto derivada no prueba PK del ticket; no
+fusionar variantes `010204`/`010207`, cambiar maestros ni afirmar conteo físico.
 
 Preservar filas y contadores de origen; exclusión es sólo del balance fabricado.
 `excluded_documentary_rows` registra fuente/ID/hash, cantidad/unidad/sucursal,
 criterio versionado, rawSHA, nodos/runs/raw corroborantes y regla/classification/
 is_fixed/updated_at efectivamente usados. Orden determinista, sin now por lectura.
-Vela AGG conserva `execution_origin_verified=False`;23AGG fabricados no reciben
-origen por receta/configuración/factor ni por esta exclusión.
+Vela/Extra AGG conservan `execution_origin_verified=False`; los 23 destinos
+fabricados no reciben origen por receta/configuración/factor. Los originales
+Stock tipo 22 acreditan salidas independientes cuando pasan el lector estricto;
+no se asigna un pastel padre por cada agregado ni rendimiento universal de
+rebanadas. Fuente incompleta se informa por historial concreto.
 
 Firmar sólo decisiones usadas en metadata canónica waste/conversions, no un digest
 global de catálogos ajenos. Un cambio relevante debe invalidar proyección antigua.

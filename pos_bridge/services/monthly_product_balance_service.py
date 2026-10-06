@@ -51,6 +51,7 @@ from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import (
     ProductoMonthClosure,
     Receta,
+    RecetaCodigoPointAlias,
     RecetaEquivalencia,
     RecetaPresentacionDerivada,
     VentaHistorica,
@@ -67,10 +68,12 @@ ZERO = Decimal("0")
 DIFFERENCE_TOLERANCE = Decimal("0.01")
 
 ORIGIN_POINT = "POINT"
+ORIGIN_INDEPENDENT_POINT_STOCK = "POINT_STOCK_INDEPENDENT"
 ORIGIN_CONFIGURED_EQUIVALENCE = "EQUIVALENCIA_CONFIGURADA"
 ORIGIN_UNRESOLVED = "UNRESOLVED"
 ORIGIN_MIXED = "MIXED"
 ISSUE_CONVERSION_ORIGIN_UNRESOLVED = "CONVERSION_ORIGIN_UNRESOLVED"
+ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE = "CONVERSION_STOCK_HISTORY_INCOMPLETE"
 ISSUE_POINT_SOURCE_UNRESOLVED = "POINT_CONVERSION_SOURCE_UNRESOLVED"
 ISSUE_SOURCE_FACTOR_MISMATCH = "CONVERSION_SOURCE_FACTOR_MISMATCH"
 ISSUE_FACTOR_MISSING = "CONVERSION_FACTOR_MISSING"
@@ -2308,12 +2311,12 @@ class MonthlyPointProductBalanceService:
 
     def _documentary_commercial_context(self):
         if self._documentary_commercial_cache is None:
-            names = ("COCA-COLA 450 ML", "VELA INDIVIDUAL")
+            names = ("COCA-COLA 450 ML", "VELA INDIVIDUAL", "EXTRA 10")
             rules = {rule.normalized_name: rule for rule in
                 ProductBusinessRule.objects.filter(normalized_name__in=names).order_by("pk")}
             nodes = list(PointRecipeNode.objects.annotate(
                 documentary_name=Upper(Trim("point_name")),
-            ).filter(Q(point_code__in=("COCA450", "875")) |
+            ).filter(Q(point_code__in=("COCA450", "875", "0227")) |
                      Q(documentary_name__in=names)).order_by("pk"))
             self._documentary_commercial_cache = rules, nodes
         return self._documentary_commercial_cache
@@ -2339,7 +2342,7 @@ class MonthlyPointProductBalanceService:
         name = normalize(row.item_name)
         if row.receta_id is not None or getattr(row, "insumo_id", None) is not None:
             return None
-        if name not in ("COCA-COLA 450 ML", "VELA INDIVIDUAL"):
+        if name not in ("COCA-COLA 450 ML", "VELA INDIVIDUAL", "EXTRA 10"):
             return None
         if row.unit != "PZA" or not row.quantity.is_finite() or row.quantity <= ZERO:
             return None
@@ -2390,21 +2393,29 @@ class MonthlyPointProductBalanceService:
             code, family, category, classification = "COCA450", "BEBIDAS", "COCA-COLA", "REVENTA"
             criterion = "FIXED_REVENTA_EXACT_COMMERCIAL_DOCUMENT_V1"
         else:
+            extra = name == "EXTRA 10"
             if (source != "conversions" or row.source_endpoint != "/Report/crea_Reporte_Largo"
-                    or row.item_code != "875" or not row.movement_external_id.startswith("AGG-")
+                    or row.item_code != ("0227" if extra else "875")
+                    or not row.movement_external_id.startswith("AGG-")
                     or row.source_item_code or row.source_item_name):
                 return None
-            if rule is not None and (not rule.is_fixed or rule.classification != "ACCESORIO"):
+            if rule is not None and (not rule.is_fixed or rule.classification != ("SERVICIO" if extra else "ACCESORIO")):
                 return None
             if (raw.get("CÓDIGO") != row.item_code or normalize(raw.get("PRODUCTO")) != name
-                    or raw.get("UNIDAD") != row.unit or normalize(raw.get("CATEGORÍA")) != "ALEGRÍA"
+                    or raw.get("UNIDAD") != row.unit
+                    or normalize(raw.get("CATEGORÍA")) != ("OTROS POSTRES" if extra else "ALEGRÍA")
                     or normalize(raw.get("SUCURSAL")) != normalize(row.branch.name)
                     or not self._documentary_number_matches(raw.get("CANTIDAD"), row.quantity)
                     or not self._documentary_number_matches(raw.get("COSTO"), row.total_cost)):
                 return None
-            code, family, category, classification = "875", "VELAS", "ALEGRÍA", "ACCESORIO"
-            criterion = "APPROVED_VELAS_ALEGRIA_EXACT_COMMERCIAL_DOCUMENT_V1"
-        candidates = [node for node in nodes if node.point_code == code or normalize(node.point_name) == name]
+            if extra:
+                code, family, category, classification = "0227", "OTROS POSTRES", "OTROS POSTRES", "CARGO_ADICIONAL"
+                criterion = "APPROVED_EXTRA10_EXACT_NON_PRODUCED_CHARGE_V1"
+            else:
+                code, family, category, classification = "875", "VELAS", "ALEGRÍA", "ACCESORIO"
+                criterion = "APPROVED_VELAS_ALEGRIA_EXACT_COMMERCIAL_DOCUMENT_V1"
+        candidates = [node for node in nodes if (node.point_code == code or normalize(node.point_name) == name)
+                      and (name != "EXTRA 10" or normalize(node.point_name) == name)]
         if not candidates:
             return None
         corroborations, identities = [], set()
@@ -2423,7 +2434,9 @@ class MonthlyPointProductBalanceService:
                     or node.has_recipe_flag or node.raw_bom != []
                     or detail.get("Produccion") is not False or detail.get("Rastreable") is not False
                     or detail.get("Activo") is not True or type(detail.get("FK_Unidad")) is not int
-                    or detail["FK_Unidad"] != 5):
+                    or detail["FK_Unidad"] != 5
+                    or name == "EXTRA 10" and (detail.get("Servicio") is not False
+                                                 or detail.get("Complemento") is not False)):
                 return None
             identities.add((node.point_pk, node.point_code, name, node.source_type))
             corroborations.append({"id": node.pk, "run_id": node.run_id,
@@ -2749,7 +2762,7 @@ class MonthlyPointProductBalanceService:
     ):
         daily_authority_unresolved: list[MonthlyPointUnresolvedMovement] = []
         if include_daily:
-            daily, daily_unresolved, daily_rows_read, daily_rows = self._load_daily_sales(
+            daily, daily_unresolved, daily_rows_read, daily_rows, non_produced_sales = self._load_daily_sales(
                 month_start=month_start,
                 month_end=month_end,
             )
@@ -2777,6 +2790,7 @@ class MonthlyPointProductBalanceService:
                         "source_present": True,
                         "row_count": daily_rows_read,
                         "unresolved_rows": len(daily_unresolved),
+                        "excluded_non_produced_sales": non_produced_sales,
                         **daily_evidence,
                     },
                     configured_source_mode=configured_source_mode,
@@ -3389,13 +3403,34 @@ class MonthlyPointProductBalanceService:
                 "branch__name",
                 "branch__erp_branch_id",
                 "sync_job_id",
+                "source_endpoint", "raw_payload", "net_amount",
             )
             .order_by("id")
         )
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
+        non_produced_sales = []
         for row in rows:
             receta_id = row.receta_id
+            raw = row.raw_payload
+            if (receta_id is None and row.source_endpoint == "/Report/PrintReportes?idreporte=3"
+                    and isinstance(raw, dict) and raw.get("source") == "POINT_OFFICIAL_REPORT"
+                    and isinstance(raw.get("sku"), str) and raw["sku"]
+                    and raw["sku"] == row.product.sku
+                    and isinstance(raw.get("name"), str)
+                    and raw["name"] == row.product.name
+                    and raw["name"].startswith("CAKE TOPPER ")
+                    and raw.get("category") == row.product.category == "Cake Topper"
+                    and row.quantity > ZERO):
+                non_produced_sales.append({"id": row.pk, "classification": "ACCESORIO_COMPRADO",
+                    "criterion": "APPROVED_CAKE_TOPPER_EXACT_COMMERCIAL_SALE_V1",
+                    "source": row.source_endpoint, "raw_sha256": self._documentary_digest(raw),
+                    "branch_id": row.branch_id, "product_id": row.product_id,
+                    "sale_date": row.sale_date.isoformat(), "sku": raw["sku"], "name": raw["name"],
+                    "quantity": str(row.quantity), "net_amount": str(row.net_amount),
+                    "transactional_product_identity_verified": False,
+                    "physical_inventory_verified": False})
+                continue
             if receta_id is None:
                 receta = self._match_recipe(code=row.product.sku, name=row.product.name)
                 receta_id = receta.id if receta is not None else None
@@ -3423,7 +3458,118 @@ class MonthlyPointProductBalanceService:
                     movement_date=row.sale_date,
                 )
             )
-        return values, unresolved, len(rows), rows
+        return values, unresolved, len(rows), rows, non_produced_sales
+
+    def _load_stock_conversion_exits(self, *, month_start: date, month_end: date):
+        """Read actual Point type-22 exits; AGG destinations have no paired source FK."""
+        lower, upper = self._date_datetime_bounds(month_start, month_end)
+        complete_month = month_end.day == monthrange(month_start.year, month_start.month)[1]
+        candidates = PointProductHistoryRow.objects.filter(
+            movement_at__gte=lower, movement_at__lt=upper + timedelta(hours=7),
+            movement_type__icontains="CONVERS",
+            import_record__raw_metadata__source="POINT_STOCK_HISTORY_API",
+        ).select_related("import_record__point_branch", "import_record__point_product").order_by(
+            "import_record_id", "row_number")
+        grouped, valid_instants = {}, set()
+        for row in candidates:
+            if row.cancelled or AuditStockHistoryService._category(row.movement_type, row.quantity) != "conversion_out":
+                continue
+            try:
+                if not lower <= point_stock_history_instant(row.raw_payload) < upper:
+                    continue
+                valid_instants.add(row.pk)
+            except (HistoricalInventoryCaptureError, TypeError, ValueError):
+                pass  # The reconciliation below must fail closed on this original.
+            grouped.setdefault(row.import_record_id, []).append(row)
+        records = {rows[0].import_record.pk: rows[0].import_record for rows in grouped.values()}
+        pair_imports = {}
+        for record in records.values():
+            pair = (record.point_branch_id, record.point_product_id)
+            pair_imports[pair] = pair_imports.get(pair, 0) + 1
+        eligible = [record for record in records.values() if record.point_branch_id and record.point_product_id]
+        reconciliations = AuditStockHistoryService().reconcile_many(
+            [SimpleNamespace(branch=record.point_branch, product=record.point_product) for record in eligible],
+            month_start, include_zero_difference=True,
+        )
+        result, unresolved, evidence, outside_recipe = {}, [], [], []
+        branches = set()
+        for record in records.values():
+            product, branch = record.point_product, record.point_branch
+            selected = grouped[record.pk]
+            reconciliation = reconciliations.get((branch.pk, product.pk)) if product and branch else None
+            if reconciliation is None:
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source="conversion_source_stock", movement_id=str(record.pk),
+                    source_hash=record.file_hash, item_code=product.sku if product else "",
+                    item_name=product.name if product else "",
+                    quantity=sum((abs(row.quantity) for row in selected), ZERO),
+                    issue=ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE,
+                    branch_external_id=branch.external_id if branch else "",
+                    branch_name=branch.name if branch else "", movement_date=month_start,
+                ))
+                continue
+            recipe = self.identity_service.resolve_recipe(point_code=product.sku, point_name=product.name)
+            if recipe is not None and normalizar_nombre(recipe.nombre) != normalizar_nombre(product.name):
+                if not RecetaCodigoPointAlias.objects.filter(
+                    receta=recipe, activo=True, codigo_point__iexact=product.sku,
+                    nombre_point__iexact=product.name,
+                ).exists():
+                    recipe = None
+            movement_ids = tuple(sorted(row.row_number for row in selected))
+            accepted_ids = tuple(sorted((reconciliation.movement_ids_by_category or {}).get("conversion_out", ())))
+            quantity = sum((abs(row.quantity) for row in selected), ZERO)
+            raw_valid = (pair_imports[(branch.pk, product.pk)] == 1
+                and all(row.pk in valid_instants for row in selected)
+                and set(movement_ids) <= set(accepted_ids)
+                and (not complete_month or movement_ids == accepted_ids)
+                and (not complete_month or quantity == reconciliation.conversion_out)
+                and not reconciliation.unknown_movement_ids
+                and all(not row.cancelled and isinstance(row.raw_payload, dict)
+                        and str(row.raw_payload.get("FK_Movimiento")) == str(row.row_number)
+                        and ("isInsumo" not in row.raw_payload or row.raw_payload["isInsumo"] is False
+                             or isinstance(row.raw_payload["isInsumo"], str)
+                             and row.raw_payload["isInsumo"].casefold() == "false")
+                        and all(str(row.raw_payload[field]) == product.external_id
+                                for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo")
+                                if field in row.raw_payload)
+                        and all(str(row.raw_payload[field]) == branch.external_id
+                                for field in ("FK_Sucursal", "PK_Sucursal") if field in row.raw_payload)
+                        and _original_stock_delta_matches(row.raw_payload, direction=-1)
+                        for row in selected))
+            fact = {"import_id": record.pk, "branch_id": branch.pk,
+                "branch_external_id": branch.external_id, "product_id": product.pk,
+                "product_external_id": product.external_id, "recipe_id": recipe.pk if recipe else None,
+                "movement_ids": movement_ids, "quantity": str(quantity),
+                "canonical_raw_sha256": self._documentary_digest(
+                    [(row.row_number, row.raw_payload) for row in sorted(selected, key=lambda item: item.row_number)]),
+                "import_metadata_sha256": self._documentary_digest(record.raw_metadata),
+                "coverage_status": reconciliation.coverage_status,
+                "documentary_chain_verified": (reconciliation.documentary_opening is not None
+                                                 and reconciliation.documentary_closing is not None),
+                "original_batch_verified": reconciliation.original_batch_evidence is not None,
+                "raw_valid": raw_valid}
+            evidence.append(fact)
+            if recipe is None:
+                outside_recipe.append(fact)
+                continue
+            if raw_valid:
+                branches.add(branch.pk)
+                balance = result.setdefault(recipe.pk, _MutableBalanceRow())
+                balance.add("conversion_out", quantity,
+                            count_name="conversion_out_rows")
+                balance.counts["conversion_out_rows"] += len(selected) - 1
+                balance.record_origin(ORIGIN_POINT)
+            if not raw_valid or complete_month and (reconciliation.coverage_status != "COMPLETE"
+                    or reconciliation.documentary_opening is None or reconciliation.documentary_closing is None):
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source="conversion_source_stock", movement_id=str(record.pk),
+                    source_hash=record.file_hash, item_code=product.sku,
+                    item_name=product.name, quantity=quantity,
+                    issue=ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE,
+                    branch_external_id=branch.external_id, branch_name=branch.name,
+                    movement_date=month_start,
+                ))
+        return result, unresolved, branches, evidence, outside_recipe
 
     def _load_conversions(self, *, month_start: date, month_end: date | None = None):
         if month_end is None:
@@ -3483,13 +3629,16 @@ class MonthlyPointProductBalanceService:
                 ),
             )
 
-        result: dict[int, _MutableBalanceRow] = {}
+        result, source_unresolved, source_branches, source_evidence, outside_recipe = self._load_stock_conversion_exits(
+            month_start=month_start, month_end=month_end)
+        independent_source_recipe_ids = set(result)
         unresolved_conversions: list[MonthlyPointUnresolvedConversion] = []
-        unresolved_movements: list[MonthlyPointUnresolvedMovement] = []
+        unresolved_movements: list[MonthlyPointUnresolvedMovement] = list(source_unresolved)
         source_counts = {
             "conversion_rows_read": len(conversions),
             "conversion_destination_rows_applied": 0,
             "conversion_rows_ignored_non_derived": 0,
+            "independent_stock_exit_rows": sum(len(item["movement_ids"]) for item in source_evidence),
         }
         excluded = []
         for conversion in conversions:
@@ -3532,22 +3681,28 @@ class MonthlyPointProductBalanceService:
             source_counts["conversion_destination_rows_applied"] += 1
             destination = result.setdefault(conversion.receta_id, _MutableBalanceRow())
             destination.add("conversion_in", quantity, count_name="conversion_in_rows")
-            destination.record_origin(origin)
+            independent_branch = issue == ISSUE_CONVERSION_ORIGIN_UNRESOLVED and conversion.branch_id in source_branches
+            destination.record_origin(ORIGIN_INDEPENDENT_POINT_STOCK if independent_branch else origin)
             if issue:
-                destination.issues.add(issue)
-                unresolved_movements.append(
-                    MonthlyPointUnresolvedMovement(
-                        source="conversion_source",
-                        movement_id=conversion.movement_external_id,
-                        source_hash=conversion.source_hash,
-                        item_code=conversion.source_item_code,
-                        item_name=conversion.source_item_name,
-                        quantity=quantity,
-                        issue=issue,
+                # Point's aggregate has no per-operation source FK. Independent
+                # type-22 stock exits are the source evidence for that branch.
+                if not independent_branch:
+                    destination.issues.add(issue)
+                    unresolved_movements.append(
+                        MonthlyPointUnresolvedMovement(
+                            source="conversion_source",
+                            movement_id=conversion.movement_external_id,
+                            source_hash=conversion.source_hash,
+                            item_code=conversion.source_item_code,
+                            item_name=conversion.source_item_name,
+                            quantity=quantity,
+                            issue=issue,
+                        )
                     )
-                )
             if source_recipe_id is None or factor is None:
                 continue
+            if source_recipe_id in independent_source_recipe_ids:
+                continue  # Never count a configured factor on top of an original exit.
             source = result.setdefault(source_recipe_id, _MutableBalanceRow())
             source.add("conversion_out", quantity / factor, count_name="conversion_out_rows")
             source.record_origin(origin)
@@ -3559,6 +3714,8 @@ class MonthlyPointProductBalanceService:
             "raw_rows_read": len(all_conversions),
             "unresolved_rows": len(unresolved_movements) + len(unresolved_conversions),
             "excluded_documentary_rows": excluded,
+            "independent_stock_exits": source_evidence,
+            "outside_recipe_stock_exits": outside_recipe,
             "excluded_documentary_quantity_by_unit": {"PZA": str(sum(
                 (Decimal(item["quantity"]) for item in excluded), ZERO))} if excluded else {},
             **authority,
