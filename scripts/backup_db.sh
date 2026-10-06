@@ -15,6 +15,7 @@ if [[ -n "${INVENTORY_AUDIT_EVIDENCE_DIR:-}" ]]; then
     exit 1
 fi
 INVENTORY_AUDIT_PRIVATE_ROOT="${INVENTORY_AUDIT_PRIVATE_ROOT:-$SCRIPT_DIR/../storage/inventory_audit_evidence}"
+MEDIA_ROOT="${MEDIA_ROOT:-$SCRIPT_DIR/../storage/media}"
 KEEP_LAST="${BACKUP_KEEP_LAST:-7}"
 BACKUP_EXPORT_DIR="${BACKUP_EXPORT_DIR:-}"
 BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
@@ -22,6 +23,10 @@ BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
 if [[ -n "$BACKUP_EXPORT_DIR" && -z "$BACKUP_EXPORT_GROUP" ]] ||
    [[ -z "$BACKUP_EXPORT_DIR" && -n "$BACKUP_EXPORT_GROUP" ]]; then
     echo "BACKUP_EXPORT_DIR y BACKUP_EXPORT_GROUP deben configurarse juntos" >&2
+    exit 1
+fi
+if [ ! -d "$MEDIA_ROOT" ]; then
+    echo "MEDIA_ROOT no es un directorio accesible; no se publicará un respaldo sin archivos" >&2
     exit 1
 fi
 
@@ -57,7 +62,8 @@ cleanup() {
     local status=$?
     if [ "$PUBLISHED" -eq 0 ] && [ -n "$PREFIX" ]; then
         rm -f "$BACKUP_DIR/$PREFIX.sql.gz" "$BACKUP_DIR/$PREFIX.conteos.tar.gz" \
-            "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.incomplete"
+            "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.media.tar.gz" \
+            "$BACKUP_DIR/$PREFIX.incomplete"
     fi
     if [ -n "$STAGING" ]; then rm -rf "$STAGING"; fi
     if [ -n "$LOCK_DIR" ]; then rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR"; fi
@@ -69,7 +75,7 @@ trap 'exit 143' TERM
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 CANDIDATE="backup_${TIMESTAMP}"
-for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz manifest incomplete; do
+for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz media.tar.gz manifest incomplete; do
     if [ -e "$BACKUP_DIR/$CANDIDATE.$suffix" ]; then
         log "ERROR: el identificador $CANDIDATE ya existe; no se sobrescribe"
         exit 1
@@ -113,6 +119,10 @@ else
     log "ERROR: la fuente de evidencias de auditoría de inventario no es un directorio"
     exit 1
 fi
+if ! tar -czf "$STAGING/$PREFIX.media.tar.gz" -C "$MEDIA_ROOT" .; then
+    log "ERROR: falló el respaldo de MEDIA_ROOT"
+    exit 1
+fi
 
 # Standard SHA-256 check-file format. Verify from BACKUP_DIR during restore using
 # sha256sum -c backup_<timestamp>.manifest (or shasum -a 256 -c ...).
@@ -121,6 +131,9 @@ checksum_files() (
     files=("$2.sql.gz" "$2.conteos.tar.gz")
     if [ -f "$2.inventory-audit.tar.gz" ]; then
         files+=("$2.inventory-audit.tar.gz")
+    fi
+    if [ -f "$2.media.tar.gz" ]; then
+        files+=("$2.media.tar.gz")
     fi
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "${files[@]}"
@@ -132,7 +145,7 @@ complete_set() {
     local directory="$1" base="$2" actual
     [ -f "$directory/$base.sql.gz" ] && [ -f "$directory/$base.conteos.tar.gz" ] &&
         [ -f "$directory/$base.manifest" ] || return 1
-    # New sets contain three payloads. Legacy two-payload manifests remain valid
+    # New sets contain four payloads. Legacy two/three-payload manifests remain valid
     # during retention; never follow paths read from a manifest.
     actual=$(checksum_files "$directory" "$base") || return 1
     [ "$actual" = "$(cat "$directory/$base.manifest")" ]
@@ -147,17 +160,18 @@ fi
 mv "$STAGING/$PREFIX.sql.gz" "$BACKUP_DIR/$PREFIX.sql.gz"
 mv "$STAGING/$PREFIX.conteos.tar.gz" "$BACKUP_DIR/$PREFIX.conteos.tar.gz"
 mv "$STAGING/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz"
+mv "$STAGING/$PREFIX.media.tar.gz" "$BACKUP_DIR/$PREFIX.media.tar.gz"
 # The manifest is the completion marker, always published last.
 mv "$STAGING/$PREFIX.manifest" "$BACKUP_DIR/$PREFIX.manifest"
 PUBLISHED=1
 rm -f "$BACKUP_DIR/$PREFIX.incomplete"
 
-# Publish hard links only after the manifest is complete. This exposes the three
+# Publish hard links only after the manifest is complete. This exposes the four
 # verified files to a restricted reader without storing a second local copy.
 if [ -n "$BACKUP_EXPORT_DIR" ]; then
     install -d -m 0750 "$BACKUP_EXPORT_DIR"
     chgrp "$BACKUP_EXPORT_GROUP" "$BACKUP_EXPORT_DIR"
-    for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz manifest; do
+    for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz media.tar.gz manifest; do
         file="$BACKUP_DIR/$PREFIX.$suffix"
         chgrp "$BACKUP_EXPORT_GROUP" "$file"
         chmod 0640 "$file"
@@ -178,6 +192,8 @@ for sql in "$BACKUP_DIR"/backup_*.sql.gz; do
         COMPLETE+=("$base")
     elif [ ! -e "$BACKUP_DIR/$base.manifest" ] &&
         [ ! -e "$BACKUP_DIR/$base.conteos.tar.gz" ] &&
+        [ ! -e "$BACKUP_DIR/$base.inventory-audit.tar.gz" ] &&
+        [ ! -e "$BACKUP_DIR/$base.media.tar.gz" ] &&
         [ ! -e "$BACKUP_DIR/$base.incomplete" ] && gzip -t "$sql" 2>/dev/null; then
         COMPLETE+=("$base")
     fi
@@ -187,11 +203,12 @@ for ((i=0; i<DELETE_COUNT; i++)); do
     old=${COMPLETE[$i]}
     if [ -n "$BACKUP_EXPORT_DIR" ]; then
         rm -f "$BACKUP_EXPORT_DIR/$old.manifest" "$BACKUP_EXPORT_DIR/$old.sql.gz" "$BACKUP_EXPORT_DIR/$old.conteos.tar.gz"
-        rm -f "$BACKUP_EXPORT_DIR/$old.inventory-audit.tar.gz"
+        rm -f "$BACKUP_EXPORT_DIR/$old.inventory-audit.tar.gz" "$BACKUP_EXPORT_DIR/$old.media.tar.gz"
     fi
     rm -f "$BACKUP_DIR/$old.manifest" "$BACKUP_DIR/$old.sql.gz" \
         "$BACKUP_DIR/$old.conteos.tar.gz" "$BACKUP_DIR/$old.inventory-audit.tar.gz" \
+        "$BACKUP_DIR/$old.media.tar.gz" \
         "$BACKUP_DIR/$old.incomplete"
     log "Rotado conjunto: $old"
 done
-log "Backup completado: $BACKUP_DIR/$PREFIX.manifest (SQL y evidencias privadas con manifiesto SHA-256)"
+log "Backup completado: $BACKUP_DIR/$PREFIX.manifest (SQL, evidencias privadas y MEDIA_ROOT con manifiesto SHA-256)"

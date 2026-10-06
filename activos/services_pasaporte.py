@@ -57,7 +57,7 @@ def activos_autorizados(user):
     sucursal sólo ve los activos vigentes de su propia sucursal, y cualquier
     otro UUID le resulta inexistente.
     """
-    if not user or not user.is_authenticated:
+    if not user or not user.is_authenticated or not user.is_active:
         return Activo.objects.none()
 
     if can_access_mantenimiento(user):
@@ -80,7 +80,7 @@ def puede_reportar_activo(user, activo) -> bool:
     Refleja exactamente la regla que ya aplica `operacion.views.fallas_crear_api`:
     consultar la ficha y poder abrir un reporte son permisos distintos.
     """
-    if not user or not user.is_authenticated or not activo:
+    if not user or not user.is_authenticated or not user.is_active or not activo:
         return False
     if not activo.activo or not activo.sucursal_id:
         return False
