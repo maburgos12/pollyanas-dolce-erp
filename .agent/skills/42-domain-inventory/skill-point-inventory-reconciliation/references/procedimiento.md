@@ -126,6 +126,14 @@ y cierre. Pruebas reproducibles en `test_historical_inventory_closing` y
 
 Reutilizar `AuditStockHistoryService.reconcile_many` para identificar casos con diferencia real, apertura y cierre comprobados, sin movimientos desconocidos y remanente histórico cero. Revisar venta comercial frente a stock antes de seleccionar. Un fetched_at anterior al fin de mes puede explicar cobertura INCOMPLETE aunque toda la suma cuadre.
 
+#### Cero histórico con respuesta original y snapshots que rodean el corte
+
+Si el consolidado sólo conserva `two_independent_no_history_current_zero`, **no** usar las dos existencias actuales como saldo histórico. Para un corte anterior, el lector puede componer una respuesta original íntegra y vacía de `Stock/GetHistorial` con límite500 y snapshots originales del **mismo FK producto/sucursal** inmediatamente antes y después del corte UTC. Archivar esa respuesta como `POINT_STOCK_HISTORY_BOUNDARY_ONLY`, separada del hash y la cobertura canónicos: validar petición literal reconstruida desde el script de adquisición, fecha de recibo posterior al corte, SHA de `[]`, dominio PRODUCT, external IDs y PK exactas. Segunda entrada idéntica no escribe; otra procedencia para el mismo corte requiere revisión, no reemplazo.
+
+Exigir manifiesto STOCK/VERIFIED, fecha y membresía completas, línea original stock0 con `history_rows=0` y al menos dos intentos. Los snapshots de la ventana de tres horas a cada lado deben ser stock0 también en `raw.row[4]`, `raw.row[8]` ÚltimoMovimiento vacío y `raw.row[9]` producto, con job inventory SUCCESS y log original de sucursal válido. Ambos lados son indispensables; raw corrupto, un saldo distinto, una canónica existente, archivo o procedencia inválidos vetan la prueba. La ventana sólo delimita la evidencia consultada: no equiparar ventas y movimientos por cercanía horaria.
+
+Salida `POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1`: saldo **documental Point del corte** cero, firmas de archivo y snapshots, cobertura canónica conservada MISSING, `canonical_history_verified=False`, `physical_count_verified=False`. No derivar de esto que no hubo ventas, pérdidas o errores humanos. Una venta comercial del mismo código sigue independiente y su diferencia requiere expediente; una regla de complemento aprobada por sí sola no aporta FK del ticket ni descuenta la base 1:1. Si existe nota original con ambas líneas, usar su PK/Folio exactos para explicar la selección del complemento sin alterar venta ni inventar salida de Stock. Releer dos veces sin HTTP ni cambios operativos antes de aceptar; el guard mensual completo permanece independiente.
+
 ### Frontera documental con snapshot original, autorización4oct2026
 
 Usar el mismo lector `documentary_historical_boundary`, no otra captura/tabla.
