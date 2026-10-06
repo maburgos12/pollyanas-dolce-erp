@@ -4,6 +4,32 @@ Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes
 
 ## Estado verificado que sustituye bloqueos históricos posteriores
 
+### Corte 6oct2026: conversiones por presentación, sin cerrar origen
+
+Mauricio revisará con los programadores de Point el salto 23→22 piezas entre
+1668666 y 1668695 del producto 0065. No repetir esa consulta, imputar una pieza
+ni atribuirla a un usuario. El resto de la conciliación continúa independiente.
+
+En CEDIS, el agregado179 Zanahoria Chico2 corresponde a una secuencia original:
+1677659 entrada Rebanada16 / 1677660 salida Chico2; 1677686 entrada Chico2 /
+1677687 salida Rebanada16 (reversión); 1677688 entrada Rebanada12 / 1677689
+salida Chico2. Neto Chico −2, Rebanada +12. La interpretación operativa de
+Mauricio es que se deshizo un corte inicial de ocho rebanadas por chico y se
+repitió a seis para obtener piezas de tamaño adecuado. Es consistente con los
+movimientos, pero no sustituye motivo ni actor documentales. No imputar cuatro
+rebanadas faltantes. El rendimiento depende de tamaño/presentación: no aplicar
+una razón universal ni suponer que sólo se rebanan pasteles medianos.
+
+Cruce read-only de 23 destinos de producto `AGG-*` del job77629 contra entradas
+Stock tipo21 guardadas, con sucursal ERP y SKU de producto únicos: 18 coinciden
+en cantidad mensual; **sólo acredita suma de destino**, no origen/ejecución ni
+cobertura completa. Cinco carecen de importación Stock del par exacto:
+192 Las Glorias/Fresas con Crema Rebanada6; 197 Matriz/Pay de Plátano Rebanada4;
+201 Matriz/Fresas con Crema Rebanada66; 202 Matriz/3 Leches Rebanada6;
+204 Matriz/Ciruela Rebanada10. No afirmar que faltan en Point. Extra10 y Vela
+no forman parte de esos 23 productos. Conservar el guard de orígenes sin folio
+transaccional y no materializar ni cerrar por esta comparación.
+
 ### Corte5oct2026: frontera2354 y causas todavía separadas
 
 PR1485 merge b6711b2 publicó seis cierres de originales parciales (2082,2117,2118,

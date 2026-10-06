@@ -503,6 +503,29 @@ Si enviado≠recibido, Point finalizado puede registrar retorno administrativo; 
 
 ## 4. Fuentes comerciales y cobertura de mermas
 
+### Conversiones: ejecución antes que agregado
+
+`PointConversionLine` con ID `AGG-*` resume destinos del reporte mensual; no es
+folio, origen ni ejecución individual. Buscar primero los originales Stock de
+ENTRADA POR CONVERSIÓN (tipo 21) y SALIDA POR CONVERSIÓN (tipo 22), con sucursal,
+producto/insumo, dominio, fecha efectiva y FK documental exactos. Deduplicar
+por sucursal, producto y FK del movimiento, preservando cancelaciones y raw UTC.
+Comparar sumas mensuales sólo después de comprobar cobertura y membresía; una
+suma igual no enlaza por sí sola origen y destino de una ejecución.
+
+El rendimiento de rebanadas depende de la presentación y del producto: un
+pastel chico puede rendir menos que uno mediano y un pie mediano menos que uno
+grande. La regla o receta configurada no prueba la conversión ejecutada. Separar
+reversión de una conversión nueva; conservar cada entrada y salida original y su
+secuencia. No inferir pares por nombre, horario o cociente de cantidades, ni
+asignar faltantes a merma o a una persona sin documento.
+
+Para el mes siguiente, reutilizar primero originales y capturas COMPLETE; agrupar
+por identidad y causa en el plan del agente, sin repetir HTTP. Registrar destino,
+origen acreditado o faltante exacto, cobertura, reversos y siguiente paso. Si no
+hay vínculo transaccional o la fuente está incompleta, mantener el guard cerrado;
+la explicación operativa humana y el conteo físico se documentan por separado.
+
 ### Clasificación comercial documental, no identidad transaccional
 
 Reparación `auditor-clasificacion-documental` publicada y aceptada por PR1477. Usar
