@@ -22,11 +22,16 @@ el500 fue recibido5oct23:58:03 UTC, SHA wire
 Snapshots28602633/28605628, jobs34842/35042 SUCCESS, stock0 y raw ÚltimoMovimiento
 vacío rodean el corte1sep07:00UTC. La respuesta debe archivarse como evidencia de
 corte independiente, **no** como importación canónica COMPLETE. No repetir Point.
-El reporte comercial conserva venta923543,1PZA el1sep, y la relación de addon3
-activa/APPROVED enlaza receta107 con base70; no hay FK del ticket que permita
-descontar la base 1:1. La ecuación guardada0−1=−1 contra Point0 deja diferencia
-+1 sin atribución humana. Aun probando apertura documental, se mantiene esta
-explicación comercial/operativa pendiente y el conteo físico no existe.
+El reporte comercial conserva venta923543,1PZA el1sep. Consulta Point acotada y
+protegida encontró una sola nota del producto ese día: PK_Nota897829/folio65207,
+Colosio, cabecera FK_Sucursal5. Su detalle reúne en **el mismo documento** `0002`
+Pay de Queso Mediano1PZA/$380.01 y `SGALLETACAJETAM`1 línea/$0. La relación
+de addon3 activa/APPROVED enlaza receta107 con base70; la identidad transaccional
+queda acreditada por la nota, no por cercanía horaria/nombre. El complemento es
+una selección de esa venta, no una segunda pieza con salida propia de Stock.
+La ecuación guardada0−1=−1 contra Point0 todavía da diferencia+1 porque el caso
+conserva la línea comercial original; explicarla no autoriza normalizar ventas ni
+descontar la base dos veces. No atribuir error a persona. Conteo físico inexistente.
 
 ### Corte5oct2026: vacío/cero publicado y membresía original en reparación
 
