@@ -253,6 +253,12 @@ class Empleado(models.Model):
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
+        if (
+            self.pk and self.activo
+            and type(self).objects.filter(pk=self.pk, activo=False).exists()
+            and EmpleadoBaja.objects.filter(empleado_id=self.pk).exists()
+        ):
+            raise ValidationError({"activo": "La persona tiene una baja registrada; revisa su reingreso antes de reactivarla."})
         # El área y el nivel se comparan contra catálogos cerrados (ver
         # CatalogoFuncionOperativa, que ya normaliza los suyos). Capturar
         # «Preparación» desde la pantalla dejaba un valor que no empata con
@@ -735,14 +741,32 @@ class EmpleadoBaja(models.Model):
     def en_periodo_prueba(self) -> bool:
         return self.antiguedad_meses <= Decimal("3")
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         creating = self._state.adding
         if self.empleado_id:
+            if creating:
+                Empleado.objects.select_for_update().get(pk=self.empleado_id)
+            if self.nombre and normalizar_nombre(self.nombre) != normalizar_nombre(self.empleado.nombre):
+                raise ValidationError({"empleado": "La ficha seleccionada no corresponde al nombre de la baja."})
             self.nombre = self.nombre or self.empleado.nombre
             self.area = self.area or self.empleado.area
             self.puesto = self.puesto or self.empleado.puesto
             self.tipo_contrato = self.tipo_contrato or self.empleado.tipo_contrato
             self.fecha_ingreso = self.fecha_ingreso or self.empleado.fecha_ingreso
+            if creating and type(self).objects.filter(empleado_id=self.empleado_id, fecha_baja=self.fecha_baja).exists():
+                raise ValidationError({"fecha_baja": "Esta persona ya tiene una baja registrada en esa fecha."})
+        elif creating:
+            nombre_normalizado = normalizar_nombre(self.nombre or "")
+            if not nombre_normalizado:
+                raise ValidationError({"nombre": "Escribe el nombre o selecciona una ficha de empleado."})
+            if Empleado.objects.filter(nombre_normalizado=nombre_normalizado).exists():
+                raise ValidationError({"empleado": "Esta persona ya existe en el catálogo; selecciona su ficha."})
+            if any(
+                normalizar_nombre(nombre) == nombre_normalizado
+                for nombre in type(self).objects.filter(fecha_baja=self.fecha_baja).values_list("nombre", flat=True)
+            ):
+                raise ValidationError({"fecha_baja": "Esta baja ya está registrada en esa fecha."})
         super().save(*args, **kwargs)
         # Invariante: registrar una baja desactiva al empleado en todo el ERP,
         # sin importar la ruta de captura (vistas, admin, shell, imports).
