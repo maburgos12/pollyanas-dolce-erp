@@ -5587,6 +5587,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     total_closing_sucursales = _sum_available_export_values(export_rows, "closing_point_sucursales")
     total_closing_point = _sum_available_export_values(export_rows, "closing_point")
     total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
+    documented_opening_lines = sum(row["opening_balance"] is not None for row in export_rows)
+    documented_calculated_lines = sum(row["calculated_closing"] is not None for row in export_rows)
+    documented_closing_lines = sum(row["closing_point"] is not None for row in export_rows)
 
     conversion_rows = [
         row
@@ -5819,6 +5822,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "total_closing_sucursales": total_closing_sucursales,
         "total_closing_point": total_closing_point,
         "total_closing_difference": total_closing_difference,
+        "documented_opening_lines": documented_opening_lines,
+        "documented_calculated_lines": documented_calculated_lines,
+        "documented_closing_lines": documented_closing_lines,
         "catalog_issue_count": len(catalog_issue_rows),
         "conversion_rows": conversion_rows[:8],
         "catalog_issue_rows": catalog_issue_rows[:8],

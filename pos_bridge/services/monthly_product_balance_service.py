@@ -1547,6 +1547,8 @@ class MonthlyPointProductBalanceService:
         applied_coverage_keys: set[tuple[int, int]] = set()
         applied_mapped_recipe_keys: set[tuple[int, int, int]] = set()
         recipe_scope_totals: dict[int, dict[str, Decimal]] = {}
+        unresolved_recipe_ids: set[int] = set()
+        unlocalized_unresolved_rows = 0
 
         boundary = "opening" if source == "opening_snapshot" else "closing"
         month = ((snapshot_date + timedelta(days=1)).replace(day=1)
@@ -1559,6 +1561,10 @@ class MonthlyPointProductBalanceService:
         for line in lines:
             receta = self._match_recipe(code=line.product.sku, name=line.product.name)
             if line.id in unproven_ids:
+                if receta is None:
+                    unlocalized_unresolved_rows += 1
+                else:
+                    unresolved_recipe_ids.add(receta.id)
                 unresolved.append(MonthlyPointUnresolvedMovement(
                     source=source, movement_id=str(line.id), item_code=line.product.sku,
                     item_name=line.product.name, quantity=Decimal(line.stock),
@@ -1568,6 +1574,7 @@ class MonthlyPointProductBalanceService:
                 continue
             quantity = boundary_values[line.id]
             if receta is None:
+                unlocalized_unresolved_rows += 1
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
                         source=source,
@@ -1629,6 +1636,8 @@ class MonthlyPointProductBalanceService:
             "recipe_scope_totals": recipe_scope_totals,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
+            "unresolved_recipe_ids": tuple(sorted(unresolved_recipe_ids)),
+            "unlocalized_unresolved_rows": unlocalized_unresolved_rows,
             "historical_boundary_evidence": tuple(boundary_evidence.values()),
         })
         if authoritative and closing.source == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:

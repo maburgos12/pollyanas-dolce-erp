@@ -167,6 +167,17 @@ histórico anterior como vigente sin consultar ese corte y las fuentes actuales.
 
 ## Verificación
 
+La pantalla `Cierre producto` lee `ProductoMonthClosure` guardado, no la
+observación `review` ni un `preview` reciente. Tras una corrección de fuente,
+contrastar el corte y la firma visibles con el preview sin HTTP. Si el cierre
+no está bloqueado y el rebuild está autorizado, actualizarlo por
+`ProductMonthClosureService.build(rebuild=True, lock_after_build=False)` y
+verificar la vista autenticada y las exportaciones. Una frontera incompleta de
+una receta no oculta los saldos documentados de otras; la autoridad mensual y
+el permiso de lock permanecen falsos hasta resolver todas las guardas. No
+presentar un saldo parcial de la receta afectada como dato final ni inferir
+conteo físico.
+
 Pruebas de runtime con HTTP prohibido, capture prohibido, fuentes no autoritativas,
 ventas originales, finalización pendiente, identidad de hallazgos y segunda revisión.
 Publicación exige CI, deploy oficial y revisión real visible en Orquestación.

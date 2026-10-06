@@ -764,6 +764,12 @@ class ProductMonthClosureService:
         ).order_by("id"):
             derived_relations.setdefault(item.receta_derivada_id, item)
         global_issues = set(balance.issues if global_issues is None else global_issues)
+        # Missing quantities belong to their recipe, not every projected line.
+        global_issues.difference_update({
+            "OPENING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_MISSING",
+            "CLOSING_SNAPSHOT_SCOPE_MISSING", "CALCULATED_CLOSING_MISSING",
+            "POINT_DIFFERENCE_MISSING", "SALES_SOURCE_MISSING",
+        })
         source_authority = {
             family: bool((balance.sources.get(family) or {}).get("authoritative"))
             for family in (
@@ -775,6 +781,20 @@ class ProductMonthClosureService:
                 "closing_snapshot",
             )
         }
+        localized_snapshots = {}
+        for family in ("opening_snapshot", "closing_snapshot"):
+            meta = balance.sources.get(family) or {}
+            unresolved_ids = meta.get("unresolved_recipe_ids")
+            localized_snapshots[family] = (
+                meta.get("source") == "PointHistoricalInventoryClosing"
+                and meta.get("product_manifest_verified") is True
+                and meta.get("sync_job_verified") is True
+                and meta.get("within_tolerance") is True
+                and int(meta.get("unresolved_rows") or 0) > 0
+                and isinstance(unresolved_ids, (tuple, list))
+                and bool(unresolved_ids)
+                and meta.get("unlocalized_unresolved_rows") == 0
+            )
         buckets: dict[int, dict[str, object]] = {}
         for receta_id, raw_row in sorted(balance.rows.items()):
             receta = recipes.get(receta_id)
@@ -876,9 +896,16 @@ class ProductMonthClosureService:
         for parent_id in sorted(buckets):
             bucket = buckets[parent_id]
             issues = set(bucket["issues"])
-            if bucket["opening_missing"]:
+            raw_ids = set(bucket["raw_recipe_ids"])
+            opening_unproven = bool(raw_ids.intersection(
+                (balance.sources.get("opening_snapshot") or {}).get("unresolved_recipe_ids") or ()
+            ))
+            closing_unproven = bool(raw_ids.intersection(
+                (balance.sources.get("closing_snapshot") or {}).get("unresolved_recipe_ids") or ()
+            ))
+            if bucket["opening_missing"] or opening_unproven:
                 issues.add("OPENING_SNAPSHOT_MISSING")
-            if bucket["closing_missing"]:
+            if bucket["closing_missing"] or closing_unproven:
                 issues.add("CLOSING_SNAPSHOT_MISSING")
             scopes_available = not bool(bucket["closing_cedis_missing"] or bucket["closing_sucursales_missing"])
             if scopes_available and abs(bucket["closing"] - bucket["closing_cedis"] - bucket["closing_sucursales"]) > Decimal("0.01"):
@@ -923,12 +950,20 @@ class ProductMonthClosureService:
                     "raw_recipe_ids": sorted(bucket["raw_recipe_ids"]),
                     "point_final_scopes_available": scopes_available,
                     "sales_source_available": not bool(bucket["sales_missing"]),
-                    "opening_source_authoritative": source_authority["opening_snapshot"],
+                    "opening_source_authoritative": source_authority["opening_snapshot"] or (
+                        localized_snapshots["opening_snapshot"]
+                        and not bucket["opening_missing"]
+                        and not opening_unproven
+                    ),
                     "sales_source_authoritative": source_authority["sales"],
                     "production_source_authoritative": source_authority["production"],
                     "waste_source_authoritative": source_authority["waste"],
                     "conversion_source_authoritative": source_authority["conversions"],
-                    "closing_source_authoritative": source_authority["closing_snapshot"],
+                    "closing_source_authoritative": source_authority["closing_snapshot"] or (
+                        localized_snapshots["closing_snapshot"]
+                        and not bucket["closing_missing"]
+                        and not closing_unproven
+                    ),
                 }
             )
             rows.append(

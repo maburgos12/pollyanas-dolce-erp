@@ -44,7 +44,7 @@
         </article>
         <article class="bi-hero-highlight">
           <div class="bi-hero-highlight-label">Saldo calculado</div>
-          <div class="bi-hero-highlight-value">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+          <div class="bi-hero-highlight-value">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin total mensual{% endif %}</div>
           <div class="bi-hero-highlight-meta">{{ inventory_balance_label }} {% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · {{ inventory_difference_label }} {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
         </article>
       </div>
@@ -123,13 +123,21 @@
         </div>
         {% endif %}
       </div>
+      {% if closure and total_ending == None %}
+      <div class="bi-note pending">
+        Avance documental: {{ documented_opening_lines }}/{{ closure_display_rows|length }} líneas con apertura,
+        {{ documented_calculated_lines }}/{{ closure_display_rows|length }} con saldo calculado y
+        {{ documented_closing_lines }}/{{ closure_display_rows|length }} con cierre Point.
+        Los importes faltantes impiden un total mensual y no se sustituyen por cero.
+      </div>
+      {% endif %}
     </div>
   </section>
 
   {% if closure %}
   <section class="bi-kpi-grid">
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-value">{% if total_opening != None %}{{ total_opening|floatformat:2|intcomma }}{% else %}Sin total mensual{% endif %}</div>
       <div class="bi-kpi-label">{{ opening_balance_label }}</div>
       <div class="bi-kpi-note">{{ closure.get_opening_source_display }}{% if closure.opening_reference_date %} · {{ closure.opening_reference_date|date:"Y-m-d" }}{% endif %}</div>
     </article>
@@ -144,12 +152,12 @@
       <div class="bi-kpi-note">{% if total_derived_sales != None %}{{ total_derived_sales|floatformat:2|intcomma }} vienen de presentaciones derivadas{% else %}Fuente de venta no disponible{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-value {% if total_ending != None and total_ending < 0 %}danger{% endif %}">{% if total_ending != None %}{{ total_ending|floatformat:2|intcomma }}{% else %}Sin total mensual{% endif %}</div>
       <div class="bi-kpi-label">Saldo calculado</div>
       <div class="bi-kpi-note">{% if total_waste != None %}{{ total_waste|floatformat:2|intcomma }} de merma equivalente en el mes{% else %}Sin dato de merma autoritativa{% endif %}</div>
     </article>
     <article class="bi-kpi-card">
-      <div class="bi-kpi-value">{% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</div>
+      <div class="bi-kpi-value">{% if total_closing_point != None %}{{ total_closing_point|floatformat:2|intcomma }}{% else %}Sin total mensual{% endif %}</div>
       <div class="bi-kpi-label">{{ inventory_balance_label }}</div>
       <div class="bi-kpi-note">{{ inventory_difference_label }} {% if total_closing_difference != None %}{{ total_closing_difference|floatformat:2|intcomma }}{% else %}Sin dato{% endif %} · {% if is_historical_inventory %}saldo calculado menos conteo histórico{% else %}Point menos saldo calculado{% endif %}</div>
     </article>
@@ -359,7 +367,7 @@
       <div>
         <div class="bi-kicker">Auditoría de líneas</div>
         <h2 class="bi-panel-title">Detalle del cierre mensual {{ selected_month }}</h2>
-        <p class="bi-panel-copy">Balance bloqueable del mes {{ selected_month }}. La diferencia conserva el signo {% if is_historical_inventory %}Saldo calculado menos Inventario histórico físico{% else %}Fin. Point menos Saldo calculado{% endif %}.</p>
+        <p class="bi-panel-copy">Balance documental del mes {{ selected_month }}. El bloqueo mensual requiere guardas completas aparte. La diferencia conserva el signo {% if is_historical_inventory %}Saldo calculado menos Inventario histórico físico{% else %}Fin. Point menos Saldo calculado{% endif %}.</p>
       </div>
       <div class="bi-panel-actions">
         <span class="bi-pill is-muted">Fuente: {{ movement_source_label }}</span>
@@ -393,6 +401,9 @@
             <td class="bi-closure-name-cell">
               <strong>{{ row.line.receta_padre.nombre }}</strong>
               {% if row.line.receta_padre.codigo_point %}<div class="bi-subtle">{{ row.line.receta_padre.codigo_point }}</div>{% endif %}
+              {% if not is_historical_inventory %}
+              <div class="bi-subtle">Fuente: apertura {% if row.source_authority.opening %}acreditada{% else %}pendiente{% endif %} · cierre {% if row.source_authority.closing %}acreditado{% else %}pendiente{% endif %}</div>
+              {% endif %}
             </td>
             <td class="text-end bi-closure-metric-cell">{% if row.opening_balance != None %}{{ row.opening_balance|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>
             <td class="text-end bi-closure-metric-cell">{% if row.production != None %}{{ row.production|floatformat:2|intcomma }}{% else %}Sin dato{% endif %}</td>

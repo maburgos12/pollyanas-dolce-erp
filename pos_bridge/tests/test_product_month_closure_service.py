@@ -20,6 +20,7 @@ from openpyxl import Workbook
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailySale, PointInventorySnapshot, PointProduct, PointSyncJob, PointWasteLine
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
+from pos_bridge.services.product_closure_projection import project_product_closure_line
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointBalance,
     MonthlyPointBalanceRow,
@@ -204,6 +205,70 @@ class ProductMonthClosureServiceTests(TestCase):
         self.assertTrue(metadata["waste_source_authoritative"])
         self.assertTrue(metadata["conversion_source_authoritative"])
         self.assertFalse(metadata["closing_source_authoritative"])
+
+    def test_localized_unproven_snapshot_does_not_hide_other_recipe_sources(self):
+        class CanonicalBalance:
+            def __init__(self, balance):
+                self.balance = balance
+
+            def build(self, month, **kwargs):
+                return self.balance
+
+        missing = Receta.objects.create(
+            nombre="Pastel con frontera sin probar",
+            codigo_point="SIN-FRONTERA",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-sin-frontera",
+        )
+        balance = self._lockable_fingerprint_balance()
+        rows = dict(balance.rows)
+        rows[missing.id] = replace(rows[self.parent.id], receta_id=missing.id)
+        sources = dict(balance.sources)
+        for family in ("opening_snapshot", "closing_snapshot"):
+            sources[family] = MappingProxyType({
+                **dict(sources[family]),
+                "source": "PointHistoricalInventoryClosing",
+                "authoritative": False,
+                "product_manifest_verified": True,
+                "sync_job_verified": True,
+                "within_tolerance": True,
+                "unresolved_rows": 1,
+                "unresolved_recipe_ids": (missing.id,),
+                "unlocalized_unresolved_rows": 0,
+            })
+        balance = replace(
+            balance,
+            rows=MappingProxyType(rows),
+            sources=MappingProxyType(sources),
+            issues=("MONTH_SOURCE_INCOMPLETE", "OPENING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_MISSING"),
+        )
+
+        preview = ProductMonthClosureService(balance_service=CanonicalBalance(balance)).preview(month="2025-09")
+        projected = {row["receta"].id: row for row in preview["line_rows"]}
+        safe = projected[self.parent.id]
+        blocked = projected[missing.id]
+        self.assertTrue(safe["metadata"]["opening_source_authoritative"], safe)
+        self.assertTrue(safe["metadata"]["closing_source_authoritative"])
+        self.assertFalse(blocked["metadata"]["opening_source_authoritative"])
+        self.assertFalse(blocked["metadata"]["closing_source_authoritative"])
+        self.assertNotIn("OPENING_SNAPSHOT_MISSING", safe["metadata"]["issues"])
+        self.assertIn("OPENING_SNAPSHOT_MISSING", blocked["metadata"]["issues"])
+        self.assertIn("MONTH_SOURCE_INCOMPLETE", safe["metadata"]["issues"])
+        self.assertFalse(preview["metadata"]["validation"]["lock_ready"])
+        safe_line = ProductoMonthClosureLine(receta_padre=safe["receta"], **{k: v for k, v in safe.items() if k != "receta"})
+        blocked_line = ProductoMonthClosureLine(receta_padre=blocked["receta"], **{k: v for k, v in blocked.items() if k != "receta"})
+        self.assertEqual(project_product_closure_line(safe_line)["opening_point"], Decimal("10"))
+        self.assertIsNone(project_product_closure_line(blocked_line)["opening_point"])
+
+        unknown_sources = dict(sources)
+        unknown_sources["opening_snapshot"] = MappingProxyType({
+            **dict(sources["opening_snapshot"]), "unlocalized_unresolved_rows": 1,
+        })
+        unknown_balance = replace(balance, sources=MappingProxyType(unknown_sources))
+        unknown_rows = ProductMonthClosureService(
+            balance_service=CanonicalBalance(unknown_balance)
+        ).preview(month="2025-09")["line_rows"]
+        self.assertFalse(next(row for row in unknown_rows if row["receta"].id == self.parent.id)["metadata"]["opening_source_authoritative"])
 
     def test_preview_projects_canonical_rows_to_parent_and_preserves_json_metadata(self):
         class CanonicalBalance:

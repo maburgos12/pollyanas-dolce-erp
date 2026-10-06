@@ -1024,6 +1024,8 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         self.assertTrue(metadata["source_present"])
         self.assertEqual(metadata["applied_rows"], 1)
         self.assertEqual(metadata["unresolved_rows"], 1)
+        self.assertEqual(metadata["unresolved_recipe_ids"], (missing_recipe.pk,))
+        self.assertEqual(metadata["unlocalized_unresolved_rows"], 0)
         self.assertEqual([(item.movement_id, item.issue) for item in unresolved],
                          [(str(missing_line.pk), "SOURCE_INCOMPLETE")])
         proofs = {item["line_id"]: item for item in metadata["historical_boundary_evidence"]}
