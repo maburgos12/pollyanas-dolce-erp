@@ -264,6 +264,11 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 STATICFILES_DIRS = [os.path.join(BASE_DIR, "static")]
 MEDIA_URL = os.getenv("MEDIA_URL", "/media/")
 MEDIA_ROOT = os.getenv("MEDIA_ROOT", os.path.join(BASE_DIR, "storage", "media"))
+# Disabled until a private, read-only NAS mount and verified local index exist.
+MEDIA_ARCHIVE_ROOT = os.getenv("MEDIA_ARCHIVE_ROOT", "")
+MEDIA_ARCHIVE_MOUNT_SOURCE = os.getenv("MEDIA_ARCHIVE_MOUNT_SOURCE", "")
+MEDIA_ARCHIVE_INDEX_ROOT = os.path.join(BASE_DIR, "storage", "media_archive_index")
+DEFAULT_FILE_STORAGE = "core.media_archive.ArchivedMediaStorage"
 INVENTORY_AUDIT_PRIVATE_ROOT = os.getenv(
     "INVENTORY_AUDIT_PRIVATE_ROOT",
     os.path.join(BASE_DIR, "storage", "inventory_audit_evidence"),

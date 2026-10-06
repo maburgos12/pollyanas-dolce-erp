@@ -1684,9 +1684,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v94-repartidor-revisiones"},
+            {"route-control-v95-evidencias-network-only"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v94-repartidor-revisiones", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v95-evidencias-network-only", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5489,9 +5489,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v94-repartidor-revisiones", pwa_html)
+        self.assertIn("?v=route-control-v95-evidencias-network-only", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v94-repartidor-revisiones", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v95-evidencias-network-only", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5654,7 +5654,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v94-repartidor-revisiones", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v95-evidencias-network-only", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -9375,7 +9375,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v94-repartidor-revisiones", pwa_html)
+        self.assertIn("route-control-v95-evidencias-network-only", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
