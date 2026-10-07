@@ -1,6 +1,6 @@
 # F3 — Agent Core READ/SHADOW
 
-Estado del corte: implementación backend con proveedor simulado. No activa un piloto ni modifica configuración de producción. El despacho en `execute_chat_turn` exige `AI_AGENT_READ_ENABLED is True`; la ausencia del setting conserva el camino legado. El Gateway requiere por separado `AI_GATEWAY_ASSETS_ENABLED is True` y acceso vigente. Un rechazo del subset nunca cae al catálogo legado.
+Estado: backend READ verificado con pruebas unitarias y una evaluación privada de OpenAI con datos sintéticos. No activa usuarios ni modifica configuración de producción. El despacho en `execute_chat_turn` exige `AI_AGENT_READ_ENABLED is True`; la ausencia del setting conserva el camino legado. El Gateway requiere por separado `AI_GATEWAY_ASSETS_ENABLED is True` y acceso vigente. Un rechazo del subset nunca cae al catálogo legado.
 
 ## Contrato
 
@@ -42,4 +42,50 @@ Las pruebas usan fixtures sintéticos de PostgreSQL 16 y un doble de OpenAI; el 
 
 Entorno de esta tarea: Compose `erp_ai_agent_core_read_20261007`, PostgreSQL local puerto 55507, propietario `codex-erp-ai-root`. Los artefactos RED/GREEN quedan fuera de Git en el directorio privado de la tarea. Integración, CI, despliegue con ambos gates apagados y retiro exacto del entorno corresponden al cierre del propietario; este documento no los declara completados.
 
-Un piloto real necesita una autorización separada con modelo, presupuesto, usuarios/datos nominales y evaluación real. ChatKit, Telegram, streaming de proveedor y acciones transaccionales siguen fuera del corte. No se han leído ni expuesto credenciales; las pruebas usan un valor ficticio sólo dentro de settings de test y el cliente está siempre reemplazado.
+La activación para usuarios o datos de producción necesita definir y autorizar su alcance. ChatKit, Telegram, streaming de proveedor y acciones transaccionales siguen fuera del corte. Las pruebas unitarias usan una clave ficticia y un cliente reemplazado; la evaluación siguiente es independiente y usa el proveedor real.
+
+## Evaluación privada real — 2026-10-07
+
+Mauricio autorizó continuar el piloto READ y reutilizar la clave existente. Se usó
+`gpt-4o-mini`, SDK instalado y PostgreSQL16 exclusivo con seis equipos, cuatro planes
+y tres usuarios ficticios. No se enviaron registros operativos, documentos DG ni
+datos de producción. Ambos gates se habilitaron sólo dentro del proceso de prueba.
+
+Corpus fijado antes de ejecutar: 12 consultas, 10 turnos de continuidad, 10 escenarios
+de seguridad con proveedor real y 8 controles deterministas sin red. La evaluación
+ejecuta el runtime y Gateway reales; el proveedor elige las herramientas. La precisión
+se comprueba mediante tools, argumentos y resultados, no por afirmaciones del modelo.
+
+| Medición | Consultas y continuidad | Seguridad y controles | Requests OpenAI |
+| --- | ---: | ---: | ---: |
+| Antes de corregir las instrucciones | 14/22 | 18/18 | 58 |
+| Una medición después de corregirlas | 22/22 | 18/18 | 65 |
+
+El modelo pedía una sucursal ya resuelta por el servidor, interpretaba referencias
+vacías como catálogo vacío, buscaba plurales literalmente o terminaba sin consultar
+la ficha. Se aclaró el contrato de las herramientas en el prompt, sin cambiar
+schemas, permisos, SQL, modelo ni condiciones de ejecución. No hay un router de
+keywords ni una nueva regla de autorización en el prompt.
+
+Ambas mediciones conservaron el mismo corpus y fixtures; no se borraron fallos.
+Los hashes de las cuatro tablas operativas permanecieron iguales tras cada turno.
+Las 91 pruebas locales del runtime, chat y Gateway pasaron; check/migrate check
+sin errores y makemigrations sin cambios. No se certifica resistencia universal
+a injection ni una tasa estable de acierto: es un corpus sintético acotado y una
+sola medición por versión. La prosa del proveedor sigue sin publicarse en la UI.
+
+Límites de evaluación: 80 requests por medición, 1400 tokens de salida/request,
+20000 bytes del JSON/request y reserva conservadora **acumulada** menor a 0.50USD
+para ambas mediciones. Se hicieron 123 requests, sin errores del proveedor. Usage:
+113086 tokens de entrada y 6500 de salida; aplicar la tarifa estándar verificada
+de [OpenAI](https://developers.openai.com/api/docs/pricing), contando caché como
+entrada normal, da 0.02086290USD. Es un cálculo conservador sobre usage, no factura
+ni una garantía monetaria del runtime. La reserva local fue de 0.19926135USD.
+
+Evidencia y check reproducible privados: directorio
+`~/.codex/task-artifacts/ai-erp-read-live-eval-20261007/`, con `evaluate_read.py`,
+`frozen-cases.json`, resultados originales `baseline-*`, resultados corregidos,
+`provider-results.json`, `summary.json` y registro de ejecución/cierre. No se
+versionan credenciales, respuestas, logs ni artefactos temporales. Ejecutar sólo
+en un worktree registrado y PostgreSQL aislado con los límites del protocolo;
+nunca activar flags ni crear fixtures de esta evaluación en producción.
