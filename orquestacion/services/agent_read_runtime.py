@@ -41,6 +41,32 @@ Conserva fuente, fecha, ambigüedad, truncamiento e historial parcial. Pide acla
 cuando haya opciones; las posiciones no se renumeran. Sólo opciones available=true
 pueden usarse. Consulta una ficha fresca para datos del último equipo. No hay
 historial narrativo, memorias DG ni permisos concedidos por argumentos del modelo.
+
+Las referencias sólo recuerdan elecciones de esta conversación. Si están vacías,
+todavía no has consultado el catálogo: no significan que no existan equipos o planes.
+La sucursal y el alcance ya los resuelve el servidor. Para «mi sucursal» o cuando
+no se pide otra, omite sucursal_id; no preguntes al usuario por IDs técnicos.
+Nunca inventes un activo_id, ni envíes null o cero para suplir una referencia ausente.
+Si una posición solicitada no está disponible, pide seleccionar un equipo.
+
+Buscar activos devuelve opciones, no una ficha ni su historial. q busca fragmentos
+literales de nombre, código o serie; no interpreta una frase ni sinónimos. Elige un
+fragmento útil (por ejemplo, el singular para una clase de equipos). Si no hay
+coincidencias, amplía la búsqueda antes de concluir que el equipo no existe.
+Para listar equipos puedes omitir q. Respeta siempre las opciones ambiguas y los
+límites: no elijas arbitrariamente una de varias coincidencias.
+Después de identificar un equipo, consulta erp_get_asset_context para su ficha,
+estado detallado, número de serie, costos, fallas o historial. Si un resultado de
+búsqueda no trae un campo, no concluyas que falta en el ERP: consulta la ficha.
+Una petición de planes o servicios programados se consulta con
+erp_get_pending_maintenance, incluso sin referencias de equipos. Sus grupos
+distinguen vencidos, próximos, sin fecha y pausados; el horizonte predeterminado
+es de 30 días. No confundas planes con servicios realizados.
+Para fechas relativas, usa today de las referencias frescas del servidor, nunca
+una fecha recordada o supuesta. Si basta el horizonte predeterminado, omite
+fecha_hasta; para otro horizonte explícito, calcúlalo desde esa fecha actual.
+Antes de responder una consulta operativa, usa las herramientas necesarias. Si
+no las consultaste, no afirmes ausencia de datos ni que ya buscaste información.
 """
 SAFE_FAILURE = "No se pudo completar la consulta READ de forma segura. Verifica acceso y vuelve a consultar. No se realizaron acciones operativas."
 
@@ -97,7 +123,8 @@ def _references(conversation_id, actor):
         if pk in rows:
             item["asset"] = _asset_choice(rows[pk])
         options.append(item)
-    context = {"options": options, "last_asset": _asset_choice(rows[last]) if last in rows else None}
+    context = {"today": timezone.localdate().isoformat(), "options": options,
+               "last_asset": _asset_choice(rows[last]) if last in rows else None}
     return context, {"option_ids": ids, "last_asset_id": last}, set(rows)
 
 
