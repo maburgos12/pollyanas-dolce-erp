@@ -16,6 +16,12 @@
     <p class="inventory-audit-difference-summary"><span>Diferencia</span><strong>{% if difference == None %}Sin comprobar{% else %}{{ difference|floatformat:"-4"|intcomma }}{% endif %}</strong></p>
   </header>
 
+  <div class="inventory-audit-notice" role="status">
+    <strong>{% if documentary_closed %}Cerrado documentalmente{% else %}Cierre documental pendiente{% endif %}</strong>
+    {% if not documentary_closed %}<span>{{ documentary_reason }}</span>{% endif %}
+    <span>El conteo físico y el cierre mensual se revisan por separado.</span>
+  </div>
+
   <section class="inventory-audit-state-strip" aria-label="Estado del caso">
     <div><span>Cierre Point</span><strong>{{ status.point }}</strong></div>
     <div><span>Saldo de inventario</span><strong>{{ status.balance }}</strong></div>

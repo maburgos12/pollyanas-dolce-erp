@@ -300,6 +300,30 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual({line.product.id for line in result.lines}, {self.product.id})
         self.assertEqual(PointDailySale.objects.filter(product__in=consumed).count(), 2)
 
+    def test_partial_read_keeps_proven_pair_without_weakening_monthly_guard(self):
+        other = PointProduct.objects.create(
+            external_id="PASTEL-002", sku="PASTEL-002", name="Otro pastel"
+        )
+        self._closing_lines(
+            date(2026, 7, 31),
+            {(self.centro, self.product): "3", (self.centro, other): "2"},
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {(self.centro, self.product): "3"},
+            expected_product_ids=[self.product.id, other.id],
+        )
+        monthly = self.service.build(date(2026, 8, 1))
+        self.assertFalse(monthly.source_complete)
+        self.assertEqual(monthly.lines, ())
+
+        partial = self.service.build(date(2026, 8, 1), allow_partial=True)
+        self.assertFalse(partial.source_complete)
+        by_product = {line.product.id: line for line in partial.lines}
+        self.assertEqual(by_product[self.product.id].difference, Decimal("0"))
+        self.assertEqual(by_product[self.product.id].issues, ())
+        self.assertTrue(by_product[other.id].issues)
+
     def _closing_lines(
         self,
         operational_date,

@@ -120,6 +120,13 @@ El reporte `AGG` y Stock pueden tener distintos PK de `PointBranch` para la mism
 sucursal: cotejar FK ERP y nombre originales de ambos dominios; nunca sus PK
 Point entre sí ni una pareja de movimientos que no existe.
 
+Confirmación DG del 6 de octubre: auditar cada producto y sucursal en el
+Historial de Inventario de Point por fecha, tipo, cantidad y continuidad de
+existencia anterior/posterior. Un folio o referencia común no es requisito
+universal, especialmente para conversiones. Una vista de los últimos 500
+movimientos no prueba por sí sola cobertura completa de septiembre; conservar
+el límite, el original y los extremos acreditados antes de cerrar el par.
+
 Ante recetas estacionales sin cierre calculado, separar preparación (`IsInsumo=True`)
 de producto final antes de interpretar producción, venta o merma. La presencia en
 catálogo o en un snapshot con saldo cero no prueba actividad mensual ni historia

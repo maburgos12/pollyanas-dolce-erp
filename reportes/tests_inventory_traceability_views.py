@@ -29,10 +29,27 @@ from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
     ProductInventoryAuditRun,
+    ProductInventoryDocumentaryEvent,
 )
 
 
 class InventoryTraceabilityViewsTests(TestCase):
+    def test_documentary_close_is_distinct_from_balanced_and_pending_has_plain_reason(self):
+        self.client.force_login(self.viewer)
+        url = reverse("reportes:inventory_audit")
+        pending = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(pending, "Pendiente")
+        self.assertContains(pending, "Ver motivo")
+        self.assertNotContains(pending, "Cerrado documentalmente")
+
+        ProductInventoryDocumentaryEvent.objects.create(
+            month=self.run.month, branch=self.branch, product=self.product,
+            action=ProductInventoryDocumentaryEvent.Action.CLOSE,
+            source_fingerprint="f" * 64, evidence={"checked": True}, actor=self.approver,
+        )
+        closed = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(closed, "Cerrado documentalmente")
+
     def test_missing_close_is_not_labeled_as_a_proven_zero_or_available_close(self):
         from reportes.views_inventory_traceability import _case_status_context, _case_payload
         self.case.movement_status = "SOURCE_INCOMPLETE"
@@ -299,7 +316,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, 'aria-current="page">Excepciones')
         self.assertContains(response, 'tab=balanced')
         self.assertContains(response, "Excepciones <span>2</span>", html=True)
-        self.assertContains(response, "Conciliados <span>1</span>", html=True)
+        self.assertContains(response, "Saldo cuadrado <span>1</span>", html=True)
         self.assertContains(response, self.product.name)
         self.assertContains(response, pending_product.name)
         self.assertNotContains(response, balanced_product.name)
@@ -371,7 +388,7 @@ class InventoryTraceabilityViewsTests(TestCase):
             {"month": "2026-08", "tab": "balanced"},
             HTTP_ACCEPT="text/html",
         )
-        self.assertContains(balanced_response, 'aria-current="page">Conciliados')
+        self.assertContains(balanced_response, 'aria-current="page">Saldo cuadrado')
         self.assertContains(balanced_response, balanced_product.name)
         self.assertNotContains(balanced_response, self.product.name)
         self.assertNotContains(balanced_response, pending_product.name)
