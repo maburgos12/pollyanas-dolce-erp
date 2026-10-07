@@ -1250,6 +1250,8 @@ class BranchInventoryTraceabilityService:
                 else ZERO
             )
             if product_id is None:
+                if not (origin_in_month or destination_in_month):
+                    continue
                 issues.append(
                     TraceSourceIssue(
                         code=issue_code or "UNRESOLVED_PRODUCT",
