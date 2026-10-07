@@ -717,7 +717,12 @@ productos en `PointWasteLine`/`PointConversionLine`, ni ventas en
 tablas/filtros**, no apertura cero, ausencia universal en Point ni permiso de lock.
 El cierre guardado consultado6oct para receta371 `Pan de Muerto` muestra5 en
 Point al30sep frente a0 producción final seleccionada y apertura no autoritativa.
-Conservar esas5 como dato Point pendiente de explicar por fuente/identidad exacta;
+`PointHistoricalInventoryClosingLine` ID7 da4 en Matriz (línea9668,
+FK1382876, `CANCELACION VENTA` 26oct2025) y1 en Colosio (línea9671,
+FK1375371, `CANCELACION VENTA` 17oct2025); son sus últimos movimientos
+documentados, no entradas de septiembre. El cierre histórico ID6 de31ago no
+contiene línea del external855/SKU0124, por lo que no se acredita la apertura.
+Conservar esas5 como dato Point con origen histórico y frontera inicial pendiente;
 no llamarlas producción omitida, sobrante físico ni error de un operador.
 
 Rosca Dulce de Leche: producto external334/SKU0621/receta401, diez líneas de
