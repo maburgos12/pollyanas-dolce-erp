@@ -697,4 +697,41 @@ Otros pendientes independientes:38571/539098 enviado0/recibido1 carga32733=0;391
 
 ## Publicaciones ya completadas
 
+### Comprobación primaria de temporada, 6oct2026
+
+Lectura ERP producción de solo lectura, sin Point HTTP ni escrituras, del período
+1–30sep. `PointProductionLine` de CEDIS registra cinco detalles de preparación
+`PMH028`/`PAN DE MUERTO HORNEADO`, `IsInsumo=True`: producción/detalle
+23098/87235=10 (17sep), 23115/87318=8 (18sep), 23139/87516=8 (22sep),
+23204/87941=8 y 23201/87914=40 (29sep). Total **74 unidades de preparación**,
+no 74 panes terminados; jobs78172/83616 SUCCESS. `PointWasteLine` conserva el
+original1684716, 34 PZA de esa preparación en CEDIS el29sep, receta511/insumo635,
+job83600 SUCCESS. Su justificación documenta pruebas de tamaño y toppings del
+17–28sep. No inferir que 74−34 sea existencia final: faltan consumos y destinos.
+
+En las tablas persistidas consultadas por recetas finales169/371/401, códigos
+`01PANMUERTOF`/`0124`/`0621` y nombres, no aparecieron líneas de septiembre de
+producto final en `PointProductionLine`, ni otras mermas/conversiones de esos
+productos en `PointWasteLine`/`PointConversionLine`, ni ventas en
+`PointSalesNormalized`/`PointSalesDailyProductFact`. Es ausencia **acotada a esas
+tablas/filtros**, no apertura cero, ausencia universal en Point ni permiso de lock.
+El cierre guardado consultado6oct para receta371 `Pan de Muerto` muestra5 en
+Point al30sep frente a0 producción final seleccionada y apertura no autoritativa.
+`PointHistoricalInventoryClosingLine` ID7 da4 en Matriz (línea9668,
+FK1382876, `CANCELACION VENTA` 26oct2025) y1 en Colosio (línea9671,
+FK1375371, `CANCELACION VENTA` 17oct2025); son sus últimos movimientos
+documentados, no entradas de septiembre. El cierre histórico ID6 de31ago no
+contiene línea del external855/SKU0124, por lo que no se acredita la apertura.
+Conservar esas5 como dato Point con origen histórico y frontera inicial pendiente;
+no llamarlas producción omitida, sobrante físico ni error de un operador.
+
+Rosca Dulce de Leche: producto external334/SKU0621/receta401, diez líneas de
+`PointHistoricalInventoryClosing` ID7 al30sep con stock0; nueve conservan último
+movimiento de enero7–14 y Guamúchil marca `no_history_current_zero`. Import815 de
+Bamoa guarda28 movimientos hasta9ene. Es compatible con que no se trabajó Rosca
+en septiembre, sin probar historia completa o pérdida.
+Para el agente: no mezclar preparación y producto final, no fabricar saldo a partir
+de catálogo/snapshot, y mantener las tres recetas pendientes del cierre oficial
+hasta que sus extremos y ecuaciones cumplan los controles reales.
+
 PR1438/c6ac758 cerrado: evidencia carga0 validada incluso revisión cerrada. PR1439/b071ec68 cerrado: ajustes por delta. PR1440/1181c869 cerrado: conservar ventas comerciales discrepantes. PR1441/087cbec2 cerrado: filtro shared de addons activosAPPROVED;280casos/ventas intactos,0addonsaprobados sold_products. CI/deploy/auth ya verificados en seguimiento, no repetir implementación. Ninguna de estas publicaciones acredita cierre mensual.

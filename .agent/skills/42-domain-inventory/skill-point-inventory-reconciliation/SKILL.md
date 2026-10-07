@@ -120,6 +120,13 @@ El reporte `AGG` y Stock pueden tener distintos PK de `PointBranch` para la mism
 sucursal: cotejar FK ERP y nombre originales de ambos dominios; nunca sus PK
 Point entre sí ni una pareja de movimientos que no existe.
 
+Ante recetas estacionales sin cierre calculado, separar preparación (`IsInsumo=True`)
+de producto final antes de interpretar producción, venta o merma. La presencia en
+catálogo o en un snapshot con saldo cero no prueba actividad mensual ni historia
+completa. La comprobación acotada de Pan de Muerto y Rosca de septiembre está en
+el checkpoint; no trasladar cantidades de preparación a producto terminado ni
+atribuir diferencias a personas por una ausencia en tablas filtradas.
+
 ## Límites y siguiente paso
 
 ### Plan mensual antes de revisar uno por uno
