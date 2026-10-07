@@ -1531,6 +1531,33 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             any(transfer.id in issue.source_ids for issue in result.global_issues)
         )
 
+    def test_future_open_transfer_snapshot_member_does_not_block_prior_month(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            registered_at=datetime(
+                2026, 9, 2, 9, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            sent_at=None,
+            received_at=None,
+            is_received=False,
+            is_finalized=False,
+            is_open=True,
+            item_code="unresolved",
+            raw_payload={"detail": {"FK_articulo": 999999, "isInsumo": False}},
+            sync_job=self.open_transfer_job,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(
+            any(
+                "transferencia" in issue.message
+                and transfer.detail_external_id in issue.message
+                for issue in result.global_issues
+            )
+        )
+
     def test_transfer_fk_articulo_requires_explicit_product_domain(self):
         fk_product = PointProduct.objects.create(
             external_id="903",
