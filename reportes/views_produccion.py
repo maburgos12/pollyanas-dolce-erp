@@ -184,6 +184,10 @@ def _format_decimal(value: Any, *, places: int = 2, trim: bool = True) -> str:
 
 
 def _export_raw_value(row: dict[str, Any], key: str) -> Any:
+    coverage = row.get("point_coverage", {}).get(key)
+    if row.get(key) is None and coverage and coverage["known"]:
+        unit = "sucursales" if row.get("_row_type") == "detail" else "producto-sucursal"
+        return f"Parcial: {_format_decimal(coverage['known_sum'], places=1)} ({coverage['known']}/{coverage['total']} {unit})"
     if key == "dif" and row.get("produccion_referencia"):
         return "Referencia"
     if key == "estado_inventario" and row.get(key) == "Conciliado" and row.get("estado_trazabilidad") not in (None, "Conciliado"):
@@ -597,6 +601,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "diferencia_inventario": _sum_or_none(rows, "diferencia_inventario"),
             "produccion_referencia": bool(rows) and all(row.get("produccion_referencia") for row in rows),
             "dif_referencia": _sum_or_none(rows, "dif_referencia"),
+        }
+        totals["point_coverage"] = {
+            key: {"known": sum(row["point_coverage"][key]["known"] for row in rows),
+                  "total": sum(row["point_coverage"][key]["total"] for row in rows),
+                  "known_sum": sum((row["point_coverage"][key]["known_sum"] for row in rows), ZERO)}
+            for key in ("inventario_inicial", "inventario_final_point_total")
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")

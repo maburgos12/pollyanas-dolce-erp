@@ -15,7 +15,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Sucursal
-from pos_bridge.models import PointProduct
+from pos_bridge.models import PointBranch, PointProduct
 from recetas.models import Receta
 from reportes.models import ProductInventoryAuditRun
 from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
@@ -74,6 +74,33 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("Falta información", self.render(context))
         for export in ("_export_csv", "_export_xlsx", "_export_pdf"):
             self.assertEqual(getattr(self.view, export)(context).status_code, 200)
+
+    def test_partial_branch_stock_shows_proven_balance_without_claiming_full_total(self):
+        self.make_case(opening_point=10, point_closing=9)
+        other = PointBranch.objects.create(external_id="AUDITOR-SECOND", name="Otra sucursal")
+        self.make_case(branch=other, opening_point=0, point_closing=0,
+            movement_status="SOURCE_INCOMPLETE", source_trace={"opening": [], "closing": []},
+            issue_codes=["SOURCE_INCOMPLETE"])
+
+        context = self.context()
+        row = context["groups"][0]["rows"][0]
+        self.assertIsNone(row["inventario_inicial"])
+        self.assertEqual(row["point_coverage"]["inventario_inicial"],
+                         {"known": 1, "total": 2, "known_sum": Decimal("10")})
+        self.assertEqual(context["grand_total"]["point_coverage"]["inventario_inicial"],
+                         row["point_coverage"]["inventario_inicial"])
+        html = self.render(context)
+        self.assertIn("Parcial: 10", html)
+        self.assertIn("1 de 2 sucursales", html)
+        self.assertIn("Otra sucursal", html)
+        self.assertIn("Inicio Point comprobado: 1 de 2 producto-sucursal", html)
+        self.assertIn("Fuentes: ventas netas", html)
+        self.assertIn("Parcial: 10 (1/2 sucursales)", self.view._export_csv(context).content.decode())
+        workbook = load_workbook(BytesIO(self.view._export_xlsx(context).content), read_only=True)
+        sheet = workbook["Producido vs Vendido"]
+        headers = next(sheet.iter_rows(min_row=5, max_row=5, values_only=True))
+        detail = next(sheet.iter_rows(min_row=7, max_row=7, values_only=True))
+        self.assertEqual(detail[headers.index("Ini. Point")], "Parcial: 10 (1/2 sucursales)")
 
     def test_unknown_slice_origin_does_not_create_fractional_parent_exit(self):
         self.make_case(conversion_in=414, conversion_out=0, issue_codes=["CONVERSION_SOURCE_UNRESOLVED"])

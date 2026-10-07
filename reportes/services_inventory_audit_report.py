@@ -129,6 +129,8 @@ def read_audit_report(month, *, branch=""):
             "cases": [{"id": c.id, "branch": c.branch.erp_branch.nombre if c.branch.erp_branch_id else c.branch.name,
                        "status": audit_status([case_balance_status(c)]),
                        "traceability_status": audit_status([c.movement_status]),
+                       "opening": _case_quantity(c, "opening_point"),
+                       "closing": _case_quantity(c, "point_closing"),
                        "url": reverse("reportes:inventory_audit_case", args=[c.id])}
                       for c in sorted(cases, key=lambda c: c.branch.name)],
             "conversion_provenance_label": "Origen por identificar" if any(
@@ -136,9 +138,15 @@ def read_audit_report(month, *, branch=""):
                 for case in cases for code in case.issue_codes
             ) else "Movimientos Point",
         }
+        row["point_coverage"] = {}
         for field, output in QUANTITY_FIELDS.items():
             values = [_case_quantity(case, field) for case in cases]
             row[output] = None if any(v is None for v in values) else sum(values, ZERO)
+            if field in {"opening_point", "point_closing"}:
+                known = [value for value in values if value is not None]
+                row["point_coverage"][output] = {
+                    "known": len(known), "total": len(values), "known_sum": sum(known, ZERO),
+                }
         row["familia"] = row["categoria"]
         row["convertido"] = row["conversion_entrada"]
         row["enteros_equivalentes"] = row["conversion_salida"]

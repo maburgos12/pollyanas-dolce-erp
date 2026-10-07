@@ -105,6 +105,25 @@ class InventoryAuditRefreshMaterializationTests(TraceabilityTestFixtures, TestCa
     def setUp(self):
         cache.clear()
 
+    def test_routine_refresh_preserves_authorized_partial_publication(self):
+        from pos_bridge.services.branch_inventory_traceability_service import TraceSourceIssue
+        from reportes.models import ProductInventoryAuditRun
+        from reportes.services_inventory_audit_refresh import refresh_inventory_audit_month
+
+        ProductInventoryAuditRun.objects.create(month=date(2026, 8, 1), partial_published=True)
+        missing = TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta frontera",
+            branch_id=self.branch.pk, product_id=self.product.pk)
+        with patch("reportes.services_inventory_traceability.BranchInventoryTraceabilityService") as source:
+            source.return_value.build.return_value = self._result(
+                self._line(issues=(missing,)), source_complete=False,
+                global_issues=(TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta fuente"),),
+            )
+            result = refresh_inventory_audit_month("2026-08")
+
+        source.return_value.build.assert_called_once_with(date(2026, 8, 1), allow_partial=True)
+        self.assertEqual(result["status"], "partial")
+        self.assertTrue(ProductInventoryAuditRun.objects.get(month=date(2026, 8, 1)).partial_published)
+
     def test_signature_tracks_snapshot_document_and_capture_without_save_signals(self):
         from datetime import datetime, timedelta, timezone
         from pos_bridge.models import PointInventorySnapshot, PointSyncJob
