@@ -27,6 +27,8 @@ class BackupTests(unittest.TestCase):
         self.evidence.mkdir(parents=True)
         self.audit_evidence = self.root / 'private' / 'inventory_audit_evidence'
         self.audit_evidence.mkdir(parents=True)
+        self.media = self.root / 'storage' / 'media'
+        self.media.mkdir(parents=True)
         self.log = self.root / 'backup.log'
         self.bin = self.root / 'bin'
         self.bin.mkdir()
@@ -35,9 +37,11 @@ class BackupTests(unittest.TestCase):
         # Keep legacy pre-change execution isolated even before it supports overrides.
         script = SOURCE.read_text().replace('/opt/backups/erp', str(self.backups)).replace('/var/log/erp_backup.log', str(self.log))
         self.script.write_text(script)
+        shutil.copy2(SOURCE.parent / 'media_manifest.py', self.script.parent / 'media_manifest.py')
         self.env = {**os.environ, 'PATH': str(self.bin) + os.pathsep + os.environ['PATH'],
                     'BACKUP_DIR': str(self.backups), 'LOG_FILE': str(self.log),
-                    'CONTEOS_EVIDENCE_DIR': str(self.evidence), 'CONTAINER': 'isolated-test-db'}
+                    'CONTEOS_EVIDENCE_DIR': str(self.evidence), 'MEDIA_ROOT': str(self.media),
+                    'CONTAINER': 'isolated-test-db'}
         self.env['INVENTORY_AUDIT_PRIVATE_ROOT'] = str(self.audit_evidence)
         self.stub('docker', 'printf "CREATE TABLE evidence (id int);\\n"\nexit "${FAIL_DUMP:-0}"\n')
         self.stub('tar', 'if [ "${FAIL_TAR:-0}" = 1 ]; then exit 19; fi\nexec ' + shutil.which('tar') + ' "$@"\n')
@@ -71,12 +75,13 @@ class BackupTests(unittest.TestCase):
     def test_restorable_pair_and_checksums(self):
         (self.evidence / 'proof.pdf').write_bytes(b'%PDF-1.4 evidence')
         (self.audit_evidence / 'audit-proof.pdf').write_bytes(b'%PDF-1.4 audit evidence')
+        (self.media / 'proof.pdf').write_bytes(b'%PDF-1.4 active media')
         result = self.run_backup()
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         manifest = self.backups / f'backup_{STAMP}.manifest'
         self.assertTrue(manifest.exists(), 'SQL alone is not a complete backup')
         entries = manifest.read_text().splitlines()
-        self.assertEqual(len(entries), 3)
+        self.assertEqual(len(entries), 4)
         for entry in entries:
             digest, name = entry.split('  ', 1)
             self.assertEqual(digest, hashlib.sha256((self.backups / name).read_bytes()).hexdigest())
@@ -87,6 +92,10 @@ class BackupTests(unittest.TestCase):
         with tarfile.open(self.backups / f'backup_{STAMP}.inventory-audit.tar.gz') as archive:
             proof = next(m for m in archive.getmembers() if Path(m.name).name == 'audit-proof.pdf')
             self.assertEqual(archive.extractfile(proof).read(), b'%PDF-1.4 audit evidence')
+        manifest_media = self.backups / f'backup_{STAMP}.media.json'
+        verified = subprocess.run(['python3', str(self.script.parent / 'media_manifest.py'),
+                                   'verify', str(self.media), str(manifest_media)], capture_output=True, text=True)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertFalse(any('partial' in p.name for p in self.backups.iterdir()))
 
     def test_legacy_inventory_audit_path_variable_fails_loudly(self):
@@ -137,7 +146,7 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertEqual(len(list(self.backups.glob('backup_*.manifest'))), 3)
         self.assertEqual(len(list(export.glob('backup_*.manifest'))), 3)
-        for suffix in ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'manifest'):
+        for suffix in ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'media.json', 'manifest'):
             name = f'backup_{STAMP}.{suffix}'
             self.assertEqual((self.backups / name).stat().st_ino, (export / name).stat().st_ino)
             self.assertEqual((export / name).stat().st_mode & 0o777, 0o640)
@@ -214,6 +223,30 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(archive.getnames(), [])
         with tarfile.open(self.backups / f'backup_{STAMP}.inventory-audit.tar.gz') as archive:
             self.assertEqual(archive.getnames(), [])
+
+    def test_missing_media_fails_without_rotating(self):
+        original = self.seed()
+        self.media.rmdir()
+        result = self.run_backup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(set(p.name for p in self.backups.iterdir()), original)
+
+    def test_media_manifest_detects_changed_or_missing_file(self):
+        file = self.media / 'active.pdf'
+        file.write_bytes(b'original')
+        self.assertEqual(self.run_backup().returncode, 0)
+        manifest = self.backups / f'backup_{STAMP}.media.json'
+        file.write_bytes(b'changed')
+        result = subprocess.run(['python3', str(self.script.parent / 'media_manifest.py'),
+                                 'verify', str(self.media), str(manifest)], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('checksum mismatch', result.stderr)
+
+    def test_media_symlink_fails_without_publishing(self):
+        (self.media / 'outside.pdf').symlink_to(self.evidence / 'proof.pdf')
+        result = self.run_backup()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(list(self.backups.glob('backup_2099*')))
 
     def test_publication_failure_leaves_old_backups_intact(self):
         original = self.seed()
