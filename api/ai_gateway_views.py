@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied
 from rest_framework import status
+from rest_framework.exceptions import ParseError, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -12,6 +13,8 @@ from .ai_gateway_serializers import (
     AIToolInvokeSerializer,
 )
 from .ai_gateway_services import (
+    READ_SHADOW_KEYS,
+    record_invalid_read_shadow_attempt,
     build_gateway_manifest,
     build_gateway_openapi_spec,
     decide_tool_approval,
@@ -111,8 +114,16 @@ class AIGatewayToolInvokeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, tool_key: str):
-        serializer = AIToolInvokeSerializer(data=request.data or {})
-        serializer.is_valid(raise_exception=True)
+        try:
+            data = request.data
+            if tool_key in READ_SHADOW_KEYS and not isinstance(data, dict):
+                raise ValidationError({"detail": "El cuerpo debe ser un objeto JSON."})
+            serializer = AIToolInvokeSerializer(data=data or {})
+            serializer.is_valid(raise_exception=True)
+        except (ParseError, ValidationError):
+            if tool_key in READ_SHADOW_KEYS:
+                record_invalid_read_shadow_attempt(user=request.user, tool_key=tool_key)
+            raise
         try:
             result = invoke_tool(
                 user=request.user,
