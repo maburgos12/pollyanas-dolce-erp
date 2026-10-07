@@ -657,6 +657,10 @@ class InventoryAuditMaterializer:
             )
             point_history_payload["aggregate_comparison"] = comparison
             source_trace["point_history"] = point_history_payload
+        if "point_history" in source_trace:
+            source_trace["point_history"] = _plain_documentary_evidence(
+                source_trace["point_history"]
+            )
         quantities = {
             name: _decimal_text(value)
             for name, value in normalized_quantities.items()
