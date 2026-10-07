@@ -134,15 +134,18 @@ def refresh_inventory_audit_month(month):
             previous = None
         if previous == signature:
             return {"month": str(month), "status": "unchanged"}
-        result = InventoryAuditMaterializer().rebuild(month=month)
-        if result.required_sources_available:
+        previously_partial = ProductInventoryAuditRun.objects.filter(
+            month=month, partial_published=True).exists()
+        result = InventoryAuditMaterializer().rebuild(month=month, allow_partial=True) if previously_partial else InventoryAuditMaterializer().rebuild(month=month)
+        if result.required_sources_available or result.partial_published:
             def save_revision():
                 try:
                     cache.set(key, signature, timeout=86400)
                 except Exception:
                     logger.exception("No se pudo guardar vigencia de auditoría %s", month)
             transaction.on_commit(save_revision)
-        return {"month": str(month), "status": "updated" if result.required_sources_available else "incomplete", "counts": dict(result)}
+        status = "updated" if result.required_sources_available else "partial" if result.partial_published else "incomplete"
+        return {"month": str(month), "status": status, "counts": dict(result)}
 
 
 def enqueue_inventory_audit_months(months):

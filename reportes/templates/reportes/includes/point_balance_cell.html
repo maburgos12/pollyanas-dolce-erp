@@ -1,0 +1,9 @@
+{% load humanize %}
+{% if value is not None %}
+{{ value|floatformat:"-1"|intcomma }}
+{% elif coverage.known %}
+<span title="Suma de los saldos comprobados; no es el total del producto">Parcial: {{ coverage.known_sum|floatformat:"-1"|intcomma }}</span>
+<small class="muted d-block">{{ coverage.known }} de {{ coverage.total }} {{ unit }}</small>
+{% else %}
+<span class="muted">Sin saldo comprobado</span>
+{% endif %}
