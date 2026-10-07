@@ -4,7 +4,9 @@ Estado: backend READ verificado con pruebas unitarias y una evaluación privada 
 
 ## Contrato
 
-El servicio usa Responses del SDK instalado y exclusivamente las tools `erp.search_assets`, `erp.get_asset_context` y `erp.get_pending_maintenance` del Gateway. READ es una decisión del servidor; los schemas se reutilizan con `strict=False` explícito. Los serializers existentes validan tipos, campos extra y alcance. JSON inválido nunca se convierte en argumentos vacíos. No hay aprobaciones, sincronizaciones, jobs, nuevas tablas ni escrituras operativas.
+El catálogo F3 usa Responses del SDK instalado y las tools `erp.search_assets`, `erp.get_asset_context` y `erp.get_pending_maintenance` del Gateway. READ es una decisión del servidor; los schemas se reutilizan con `strict=False` explícito. Los serializers existentes validan tipos, campos extra y alcance. JSON inválido nunca se convierte en argumentos vacíos. F3 no incluye aprobaciones, sincronizaciones, jobs, nuevas tablas ni escrituras operativas.
+
+[F4.1/F4.2](AI_ERP_WORKFLOWS_READ.md) añade tres herramientas técnicas de continuidad al mismo runtime sólo detrás de su gate independiente, apagado por defecto. Las tres herramientas READ conservan sus contratos. La nueva tabla guarda intención y referencias; no captura entidades operativas ni reemplaza el estado del chat.
 
 Antes de llamar al proveedor y de cada tool se refrescan identidad, conversación activa, permisos, ACL, sucursal y acceso financiero. Los mensajes deben pertenecer a la conversación y al turno, con usuario autor y roles correctos. Un fingerprint de permisos y la revalidación de activos materializados detienen el turno ante revocaciones antes de retransmitir contexto previo.
 

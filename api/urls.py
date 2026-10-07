@@ -10,6 +10,9 @@ from .ai_gateway_views import (
     AIGatewayToolDetailView,
     AIGatewayToolInvokeView,
     AIGatewayToolsView,
+    AIGatewayWorkflowListView,
+    AIGatewayWorkflowDetailView,
+    AIGatewayWorkflowResumeView,
 )
 from .views import (
     ApiTokenAuthView,
@@ -216,6 +219,9 @@ from .special_hours_views import (
 )
 
 urlpatterns = [
+    path("ai-gateway/workflows/", AIGatewayWorkflowListView.as_view(), name="api_ai_gateway_workflows"),
+    path("ai-gateway/workflows/<uuid:workflow_id>/", AIGatewayWorkflowDetailView.as_view(), name="api_ai_gateway_workflow_detail"),
+    path("ai-gateway/workflows/<uuid:workflow_id>/resume/", AIGatewayWorkflowResumeView.as_view(), name="api_ai_gateway_workflow_resume"),
     path("ai-gateway/manifest/", AIGatewayManifestView.as_view(), name="api_ai_gateway_manifest"),
     path("ai-gateway/openapi/", AIGatewayOpenAPIView.as_view(), name="api_ai_gateway_openapi"),
     path("ai-gateway/tools/", AIGatewayToolsView.as_view(), name="api_ai_gateway_tools"),
