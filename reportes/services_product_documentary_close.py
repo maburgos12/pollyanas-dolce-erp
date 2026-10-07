@@ -48,6 +48,7 @@ class ProductDocumentaryCloseService:
                 "branch_id": key[0],
                 "product_id": key[1],
                 "quantities": prepared["quantities"],
+                "calculation_fingerprint": prepared["fingerprint"],
                 "source_trace": prepared["source_trace"],
                 "point_history": history.as_dict(
                     opening=Decimal(line.opening), point_closing=Decimal(line.point_closing)

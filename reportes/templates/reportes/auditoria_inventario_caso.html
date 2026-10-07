@@ -19,6 +19,9 @@
   <div class="inventory-audit-notice" role="status">
     <strong>{% if documentary_closed %}Cerrado documentalmente{% else %}Cierre documental pendiente{% endif %}</strong>
     {% if not documentary_closed %}<span>{{ documentary_reason }}</span>{% endif %}
+    {% if documentary_quantities %}
+    <span>Inicio {{ documentary_quantities.opening_point }} + producción {{ documentary_quantities.production }} + transferencias recibidas {{ documentary_quantities.transfer_in }} + entradas por conversión {{ documentary_quantities.conversion_in }} − ventas {{ documentary_quantities.sales }} − merma {{ documentary_quantities.waste }} − transferencias enviadas {{ documentary_quantities.transfer_out }} − salidas por conversión {{ documentary_quantities.conversion_out }} = cierre Point {{ documentary_quantities.point_closing }}.</span>
+    {% endif %}
     <span>El conteo físico y el cierre mensual se revisan por separado.</span>
   </div>
 
@@ -74,7 +77,7 @@
 
   <section class="inventory-audit-balance" aria-labelledby="balance-title">
     <div class="inventory-audit-results-heading">
-      <div><h2 id="balance-title">Secuencia del saldo</h2><p>Los pasos se presentan en el mismo orden del cálculo mensual.</p></div>
+      <div><h2 id="balance-title">Secuencia del saldo de la corrida mensual</h2><p>{% if documentary_closed and not documentary_projection_current %}Esta corrida es anterior a la revisión documental mostrada arriba.{% else %}Los pasos se presentan en el mismo orden del cálculo mensual.{% endif %}</p></div>
     </div>
     <ol class="inventory-audit-balance-list">
       {% for step in balance_steps %}

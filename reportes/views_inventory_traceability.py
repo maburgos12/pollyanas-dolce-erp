@@ -888,6 +888,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         ordered_cases = case_queryset.annotate(
             documentary_action=models.Subquery(latest_documentary.values("action")[:1]),
             documentary_reason=models.Subquery(latest_documentary.values("reason")[:1]),
+            documentary_evidence=models.Subquery(latest_documentary.values("evidence")[:1]),
         ).select_related(
             "branch", "product", "assigned_to"
         ).order_by(
@@ -940,6 +941,10 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             case.ui_documentary_closed = (
                 case.documentary_action == ProductInventoryDocumentaryEvent.Action.CLOSE
             )
+            if case.ui_documentary_closed:
+                quantities = (case.documentary_evidence or {}).get("quantities") or {}
+                if "difference" in quantities:
+                    case.ui_difference = Decimal(str(quantities["difference"]))
             case.ui_documentary_reason = (
                 case.documentary_reason
                 or (
@@ -1047,10 +1052,17 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
     documentary_closed = bool(
         documentary_event and documentary_event.action == ProductInventoryDocumentaryEvent.Action.CLOSE
     )
+    documentary_evidence = documentary_event.evidence if documentary_closed else {}
+    documentary_quantities = documentary_evidence.get("quantities") or {}
+    documentary_projection_current = bool(
+        documentary_closed
+        and documentary_evidence.get("calculation_fingerprint") == case.calculation_fingerprint
+    )
     payload = _case_payload(case)
     payload["documentary_close"] = {
         "status": "CLOSED" if documentary_closed else "PENDING",
         "reviewed_at": documentary_event.created_at.isoformat() if documentary_event else None,
+        "quantities": documentary_quantities,
     }
     payload["events"] = [
         {
@@ -1093,13 +1105,19 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             {
                 "case": case,
                 "documentary_closed": documentary_closed,
+                "documentary_quantities": documentary_quantities,
+                "documentary_projection_current": documentary_projection_current,
                 "documentary_reason": (
                     documentary_event.reason if documentary_event and documentary_event.reason
                     else "El cierre documental de este producto y sucursal aún no está acreditado."
                 ),
                 "status": _case_status_context(case),
                 "possible_cause": _possible_cause(case),
-                "difference": _case_quantity(case, "difference"),
+                "difference": (
+                    Decimal(str(documentary_quantities["difference"]))
+                    if "difference" in documentary_quantities
+                    else _case_quantity(case, "difference")
+                ),
                 "balance_steps": [
                     {
                         "number": index,
