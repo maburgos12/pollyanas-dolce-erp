@@ -27,7 +27,7 @@ El inventario léxico `inventario_fuentes_datos --term 'auditoria inventario pro
 
 ## Decisión de diseño
 
-Extender el materializador y el reporte existentes, sin segunda captura ni tabla maestra. La publicación parcial es explícita; solo procede con líneas identificadas e incidencias por par, nunca con una incidencia global de cobertura. El estado mensual sigue `SOURCE_INCOMPLETE`, conserva la última fecha completa y añade una marca separada de publicación parcial. Los totales estrictos del detalle/exportación permanecen estrictos; las tarjetas muestran suma conocida con cobertura visible.
+Extender el materializador y el reporte existentes, sin segunda captura ni tabla maestra. La publicación parcial es explícita; solo procede con líneas identificadas e incidencias por par. Las incidencias globales conocidas de cobertura (`SOURCE_INCOMPLETE`) o destino de conversión no homologado (`MISSING_CONVERSION_DESTINATION`) permanecen en el run y no bloquean las filas identificadas; cualquier código global distinto falla cerrado. En producción se observaron dos cierres Point incompletos y las conversiones 189/195 sin destino homologado. El estado mensual sigue `SOURCE_INCOMPLETE`, conserva la última fecha completa y añade una marca separada de publicación parcial. Los totales estrictos del detalle/exportación permanecen estrictos; las tarjetas muestran suma conocida con cobertura visible y etiqueta parcial aun si todas sus filas tienen valor.
 
 Procedimiento reproducible: PostgreSQL 16 local; `python3 manage.py inventario_fuentes_datos --term ...`; lectura de `ProductInventoryAuditRun` y `read_audit_report(2026-09)` en producción sin escritura; regresiones Django en base aislada.
 

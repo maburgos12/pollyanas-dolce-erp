@@ -168,12 +168,30 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
         on_commit.assert_not_called()
 
     def test_partial_rebuild_rejects_month_wide_source_issue(self):
-        issue = TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Manifiesto incompleto")
+        issue = TraceSourceIssue(code="UNEXPECTED_SOURCE", message="Fuente no verificable")
         counts = self._materializer(self._result(
             self._line(), source_complete=False, global_issues=(issue,),
         )).rebuild(MONTH, allow_partial=True)
         self.assertFalse(counts.partial_published)
         self.assertFalse(ProductInventoryAuditCase.objects.exists())
+
+    def test_partial_rebuild_preserves_known_global_issues_without_claiming_month_ready(self):
+        issues = (
+            TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Cierre Point incompleto"),
+            TraceSourceIssue(code="MISSING_CONVERSION_DESTINATION", message="Destino desconocido"),
+        )
+        counts = self._materializer(self._result(
+            self._line(issues=(TraceSourceIssue(
+                code="SOURCE_INCOMPLETE", message="Falta frontera", branch_id=self.branch.pk,
+                product_id=self.product.pk,
+            ),)), source_complete=False, global_issues=issues,
+        )).rebuild(MONTH, allow_partial=True)
+        run = ProductInventoryAuditRun.objects.get(month=MONTH)
+        self.assertTrue(counts.partial_published)
+        self.assertFalse(counts.required_sources_available)
+        self.assertEqual(run.status, ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE)
+        self.assertEqual({issue["code"] for issue in run.source_issues},
+                         {"SOURCE_INCOMPLETE", "MISSING_CONVERSION_DESTINATION"})
 
     def test_documentary_utc_boundary_evidence_survives_materialization_and_fingerprint(self):
         from types import MappingProxyType

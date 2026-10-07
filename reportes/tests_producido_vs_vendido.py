@@ -148,6 +148,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         html = self.render(context)
         self.assertIn("Actualización parcial", html)
         self.assertIn("septiembre no está cerrado", html)
+        self.assertIn("Parcial: 1 de 1 productos", html)
 
     def test_kpis_show_known_products_as_partial_not_zero_for_missing_product(self):
         self.make_case(production=5, sales=4, waste=0)
