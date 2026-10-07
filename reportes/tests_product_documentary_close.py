@@ -117,7 +117,32 @@ class ProductDocumentaryCloseTests(TestCase):
     def test_global_unproven_source_prevents_any_close(self):
         trace = SimpleNamespace(
             lines=(),
-            global_issues=(SimpleNamespace(code="SOURCE_INCOMPLETE", message="Falta fuente de merma."),),
+            global_issues=(SimpleNamespace(code="SOURCE_INCOMPLETE", message="Falta fuente de merma.", branch_id=None),),
         )
         with patch("reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build", return_value=trace):
             self.assertEqual(self.service.evaluate(date(2026, 9, 1)), {})
+
+    def test_unidentified_product_blocks_only_its_branch(self):
+        other = PointBranch.objects.create(external_id="OTHER", name="Otra sucursal")
+        lines = tuple(SimpleNamespace(branch=branch, product=self.product, opening=0, point_closing=0) for branch in (self.branch, other))
+        trace = SimpleNamespace(
+            lines=lines,
+            global_issues=(SimpleNamespace(
+                code="AMBIGUOUS_PRODUCT", message="No fue posible asignar la fila 11715 de production a un único producto Point.",
+                branch_id=self.branch.id, product_id=None,
+            ),),
+        )
+        history = SimpleNamespace(as_dict=lambda **kwargs: {})
+        with patch("reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build", return_value=trace), patch(
+            "reportes.services_product_documentary_close.BranchInventoryTraceabilityService.canonical_branch_identity",
+            return_value=({self.branch.id: self.branch.id, other.id: other.id}, {}),
+        ), patch(
+            "reportes.services_product_documentary_close.AuditStockHistoryService.reconcile_many",
+            return_value={(other.id, self.product.id): history},
+        ), patch.object(self.service, "_pending_reason", return_value=""), patch(
+            "reportes.services_product_documentary_close.InventoryAuditMaterializer._prepare_line",
+            return_value={"quantities": {}, "fingerprint": "f", "source_trace": {}},
+        ):
+            decisions = self.service.evaluate(date(2026, 9, 1))
+        self.assertFalse(decisions[self.key]["eligible"])
+        self.assertTrue(decisions[(other.id, self.product.id)]["eligible"])
