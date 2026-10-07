@@ -11,7 +11,11 @@ from django.core.exceptions import PermissionDenied
 from django.db import models, transaction
 from django.db.models import Count, Max, Min, Q, Sum
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
+from api.ai_gateway_assets import (
+    ASSET_READERS, READ_SHADOW_KEYS, asset_branch_scope, can_read_assets, fresh_asset_user, json_dto,
+)
 from control.services import build_discrepancias_report, resolve_period_range
 from compras.models import OrdenCompra, SolicitudCompra
 from api.serializers import ComprasSolicitudCreateSerializer
@@ -1981,6 +1985,84 @@ TOOLS: dict[str, AIToolDefinition] = {
 }
 
 
+# Additive reads share the existing registry and response contract. Disabled by default.
+TOOLS.update({
+    key: AIToolDefinition(
+        key=key, name=name, description=description, operation_type="read",
+        data_domain="assets", branch_scoped=True, requires_approval=False,
+        access_check=can_read_assets, handler=handler,
+        argument_schema=serializer.argument_schema(),
+        result_contract={"status": "ok|ambiguous|no_data", "payload": "bounded authorized asset/maintenance data"},
+    )
+    for key, (serializer, handler, name, description) in ASSET_READERS.items()
+})
+
+
+def _read_shadow_mode(mode):
+    if mode not in ("READ", "SHADOW"):
+        raise PermissionDenied("Modo no permitido para lecturas de activos del ERP AI Gateway.")
+    return mode
+
+
+def list_read_shadow_tools(*, user, mode="READ") -> list[dict[str, Any]]:
+    """Server callers choose mode; model arguments cannot grant identity or scope."""
+    _read_shadow_mode(mode)
+    user = fresh_asset_user(user)
+    if not can_read_assets(user):
+        return []
+    return [dict(_serialize_tool_definition(TOOLS[key]), mode=mode) for key in sorted(READ_SHADOW_KEYS)]
+
+
+def _audit_read_shadow(*, user, tool_key, scope, arguments, status):
+    audit_arguments = json_dto(arguments)
+    if "q" in audit_arguments:
+        audit_arguments["q_length"] = len(audit_arguments.pop("q"))
+    log_event(user, "AI_GATEWAY_TOOL_INVOKE", "api.ai_gateway", tool_key, {
+        "tool_key": tool_key, "operation_type": "read", "data_domain": "assets",
+        "requires_approval": False, "scope": scope, "arguments": audit_arguments,
+        "result_status": status,
+    })
+
+
+def _read_shadow_actor_scope(user, mode):
+    # Retain server actor for denial audit without granting stale identity scope.
+    actor_id = getattr(user, "pk", None) if getattr(user, "is_authenticated", False) else None
+    return fresh_asset_user(user), {"actor_id": actor_id, "mode": mode if mode in ("READ", "SHADOW") else "invalid", "branch_scoped_tool": True}
+
+
+def record_invalid_read_shadow_attempt(*, user, tool_key):
+    """HTTP parse/envelope failures occur before invoke; never log their body."""
+    user, scope = _read_shadow_actor_scope(user, "READ")
+    registered_key = tool_key if isinstance(tool_key, str) and tool_key in READ_SHADOW_KEYS else "unregistered"
+    _audit_read_shadow(user=user, tool_key=registered_key, scope=scope, arguments={}, status="invalid_arguments")
+
+
+def invoke_read_shadow_tool(*, user, tool_key, arguments, mode="READ") -> dict[str, Any]:
+    user, scope = _read_shadow_actor_scope(user, mode)
+    registered_key = tool_key if isinstance(tool_key, str) and tool_key in READ_SHADOW_KEYS else "unregistered"
+    safe_arguments = {}
+    try:
+        _read_shadow_mode(mode)
+        # Deny before every handler and approval path, including legacy reads.
+        if registered_key == "unregistered":
+            raise PermissionDenied("Herramienta fuera del subconjunto READ/SHADOW autorizado.")
+        if not can_read_assets(user):
+            raise PermissionDenied("No tienes acceso a las lecturas de activos del ERP AI Gateway.")
+        tool = TOOLS[tool_key]
+        serializer = ASSET_READERS[tool_key][0](data=arguments)
+        serializer.is_valid(raise_exception=True)
+        safe_arguments = serializer.validated_data
+        scope["authorized_branch_ids"] = asset_branch_scope(user)
+        response = _tool_response(tool=tool, scope=scope, result=tool.handler(user, safe_arguments))
+    except Exception as exc:
+        status = "denied" if isinstance(exc, PermissionDenied) else "invalid_arguments" if isinstance(exc, ValidationError) else "failed"
+        _audit_read_shadow(user=user, tool_key=registered_key, scope=scope, arguments=safe_arguments, status=status)
+        raise
+    # Logger failures propagate; they must never silently turn into an OK result.
+    _audit_read_shadow(user=user, tool_key=registered_key, scope=scope, arguments=safe_arguments, status=response["result"].get("status"))
+    return response
+
+
 def list_allowed_tools(user) -> list[dict[str, Any]]:
     allowed = []
     for tool in TOOLS.values():
@@ -2316,6 +2398,8 @@ def build_gateway_openapi_spec(
 
 
 def invoke_tool(*, user, tool_key: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    if tool_key in READ_SHADOW_KEYS:
+        return invoke_read_shadow_tool(user=user, tool_key=tool_key, arguments=arguments)
     tool = TOOLS.get(tool_key)
     if tool is None:
         raise PermissionDenied("Herramienta no registrada en el ERP AI Gateway.")
