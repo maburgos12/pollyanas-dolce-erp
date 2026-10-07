@@ -1511,6 +1511,26 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue_codes, ["TRANSFER_PRODUCT_FK_UNKNOWN"])
         self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
 
+    def test_future_transfer_identity_issue_does_not_block_prior_month(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            item_code=self.product.external_id,
+            sent_at=datetime(
+                2026, 9, 2, 9, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            received_at=datetime(
+                2026, 9, 2, 12, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            raw_payload={"detail": {"FK_articulo": 999999, "isInsumo": False}},
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(
+            any(transfer.id in issue.source_ids for issue in result.global_issues)
+        )
+
     def test_transfer_fk_articulo_requires_explicit_product_domain(self):
         fk_product = PointProduct.objects.create(
             external_id="903",
