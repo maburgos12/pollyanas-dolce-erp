@@ -24,6 +24,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--month", required=True, type=_parse_month)
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--allow-partial", action="store_true", help="Publica solo productos con evidencia identificada; no acredita el cierre mensual.")
 
     def handle(self, *args, **options):
         month = options["month"]
@@ -32,11 +33,12 @@ class Command(BaseCommand):
         counts = InventoryAuditMaterializer().rebuild(
             month,
             dry_run=bool(options["dry_run"]),
+            allow_partial=bool(options["allow_partial"]),
         )
         self.stdout.write(
             " ".join(f"{name}={value}" for name, value in counts.items())
         )
-        if not counts.required_sources_available:
+        if not counts.required_sources_available and not counts.partial_published:
             raise CommandError(
                 "No están disponibles todas las fuentes requeridas para reconstruir el mes."
             )
