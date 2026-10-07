@@ -144,6 +144,30 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    def test_rebuild_does_not_rewrite_json_normalized_point_history(self):
+        history = PointHistoryReconciliation(
+            coverage_status="COMPLETE", production=Decimal("3"), sales=Decimal("2"),
+            original_batch_evidence={
+                "duplicate_movement_ids": (123,), "stock_chain_gaps": (),
+            },
+        )
+        materializer = self._materializer(self._result(self._line()))
+        with patch(
+            "reportes.services_inventory_traceability.AuditStockHistoryService.reconcile_many",
+            return_value={(self.branch.id, self.product.id): history},
+        ):
+            materializer.rebuild(MONTH)
+            case = ProductInventoryAuditCase.objects.get(month=MONTH)
+            first_updated_at = case.updated_at
+            second = materializer.rebuild(MONTH)
+            case.refresh_from_db()
+
+        self.assertEqual(second["updated"], 0)
+        self.assertEqual(case.updated_at, first_updated_at)
+        self.assertEqual(case.source_trace["point_history"]["original_batch_evidence"], {
+            "duplicate_movement_ids": [123], "stock_chain_gaps": [],
+        })
+
     @patch("reportes.services_inventory_traceability.transaction.on_commit")
     def test_partial_rebuild_publishes_only_identified_lines_without_claiming_success(self, on_commit):
         incomplete = self._line(issues=(TraceSourceIssue(
