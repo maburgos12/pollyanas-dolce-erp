@@ -24,19 +24,36 @@ class ProductDocumentaryCloseService:
     def evaluate(self, month: date) -> dict[tuple[int, int], dict]:
         month = month.replace(day=1)
         trace = BranchInventoryTraceabilityService().build(month, allow_partial=True)
-        if any(
-            issue.code != "SOURCE_INCOMPLETE"
-            or not issue.message.startswith("El cierre Point verificado tiene cobertura incompleta para ")
-            for issue in trace.global_issues
-        ):
-            return {}
+        blocked_branches = set()
+        aliases = None
+        for issue in trace.global_issues:
+            if issue.code == "SOURCE_INCOMPLETE" and issue.message.startswith(
+                "El cierre Point verificado tiene cobertura incompleta para "
+            ):
+                continue
+            local_production = issue.code in {"AMBIGUOUS_PRODUCT", "UNRESOLVED_PRODUCT"} and issue.message.endswith(
+                "de production a un único producto Point."
+            )
+            local_conversion = issue.code == "MISSING_CONVERSION_DESTINATION"
+            if issue.branch_id is None or not (local_production or local_conversion):
+                return {}
+            if aliases is None:
+                aliases, _ = BranchInventoryTraceabilityService.canonical_branch_identity()
+            blocked_branches.add(aliases.get(issue.branch_id, issue.branch_id))
+        safe_lines = tuple(line for line in trace.lines if line.branch.id not in blocked_branches)
         histories = AuditStockHistoryService().reconcile_many(
-            trace.lines, month, include_zero_difference=True
+            safe_lines, month, include_zero_difference=True
         )
         prepare = InventoryAuditMaterializer()._prepare_line
         decisions = {}
         for line in trace.lines:
             key = (line.branch.id, line.product.id)
+            if key[0] in blocked_branches:
+                decisions[key] = {
+                    "eligible": False,
+                    "reason": "Hay movimientos de esta sucursal sin producto identificado.",
+                }
+                continue
             history = histories.get(key)
             reason = self._pending_reason(line, history)
             if reason:
