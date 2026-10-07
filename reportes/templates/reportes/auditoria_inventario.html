@@ -58,7 +58,7 @@
 
   <nav class="inventory-audit-tabs" aria-label="Conjunto de resultados">
     <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}{% if selected_attention %}&amp;attention={{ selected_attention }}{% endif %}&amp;tab=exceptions"{% if selected_tab == 'exceptions' %} aria-current="page"{% endif %}>Excepciones <span>{{ tab_counts.exceptions }}</span></a>
-    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}{% if selected_attention %}&amp;attention={{ selected_attention }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Conciliados <span>{{ tab_counts.balanced }}</span></a>
+    <a href="?month={{ selected_month }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}{% if selected_status %}&amp;status={{ selected_status }}{% endif %}{% if selected_attention %}&amp;attention={{ selected_attention }}{% endif %}&amp;tab=balanced"{% if selected_tab == 'balanced' %} aria-current="page"{% endif %}>Saldo cuadrado <span>{{ tab_counts.balanced }}</span></a>
   </nav>
 
   {% if run and run.status == 'SOURCE_INCOMPLETE' %}
@@ -71,8 +71,8 @@
   <section class="inventory-audit-results" aria-labelledby="inventory-audit-results-title">
     <div class="inventory-audit-results-heading">
       <div>
-        <h2 id="inventory-audit-results-title">{% if selected_tab == 'balanced' %}Productos conciliados{% else %}Productos por revisar{% endif %}</h2>
-        <p>{% if selected_tab == 'balanced' %}Estos productos cuadran con Point o tienen una explicación aprobada.{% else %}La diferencia por sí sola no determina merma ni responsabilidad; abre el caso para seguir la evidencia.{% endif %}</p>
+        <h2 id="inventory-audit-results-title">{% if selected_tab == 'balanced' %}Productos con saldo cuadrado{% else %}Productos por revisar{% endif %}</h2>
+        <p>{% if selected_tab == 'balanced' %}Un saldo cuadrado no equivale por sí solo a cierre documental.{% else %}La diferencia por sí sola no determina merma ni responsabilidad.{% endif %}</p>
       </div>
       <span>{{ result_count }} resultado{{ result_count|pluralize }}</span>
     </div>
@@ -99,21 +99,20 @@
             <th scope="col">Producto</th>
             <th scope="col">Ubicación</th>
             <th class="text-end" scope="col">Diferencia</th>
-            <th scope="col">Posible causa</th>
-            <th scope="col">Estado</th>
+            <th scope="col">Pendiente</th>
+            <th scope="col">Cierre documental</th>
             <th scope="col">Revisar</th>
           </tr>
         </thead>
         <tbody>
           {% for case in cases %}
           <tr class="{% if case.movement_status == 'BALANCED' or case.movement_status == 'RESOLVED' %}is-secondary{% else %}is-exception{% endif %}">
-            <td><strong>{{ case.product.name }}</strong>{% if case.product.sku %}<small>{{ case.product.sku }}</small>{% endif %}</td>
+            <td><strong>{{ case.product.name }}</strong></td>
             <td>{{ case.branch.name }}</td>
             <td class="text-end"><span class="inventory-audit-difference is-{{ case.movement_status|lower }}">{% if case.ui_difference == None %}Sin comprobar{% else %}{{ case.ui_difference|floatformat:"-4"|intcomma }}{% endif %}</span></td>
-            <td>{{ case.ui_possible_cause }}</td>
+            <td>{% if case.ui_documentary_closed %}—{% else %}<button type="button" class="inventory-audit-review-link" data-documentary-reason="{{ case.ui_documentary_reason }}" data-documentary-product="{{ case.product.name }}">Ver motivo</button>{% endif %}</td>
             <td>
-              <span class="inventory-audit-attention is-{{ case.attention_level|lower }}">{{ case.get_attention_level_display }}</span>
-              <span class="inventory-audit-status is-{{ case.movement_status|lower }}">{{ case.ui_movement_status }}</span>
+              <span class="inventory-audit-status">{% if case.ui_documentary_closed %}Cerrado documentalmente{% else %}Pendiente{% endif %}</span>
               <small class="inventory-audit-owner">{{ case.get_responsible_area_display }}{% if case.assigned_to %} · {{ case.assigned_to.get_full_name|default:case.assigned_to.username }}{% endif %}</small>
             </td>
             <td><a class="inventory-audit-review-link" href="{% url 'reportes:inventory_audit_case' case.pk %}">Ver trazabilidad<span aria-hidden="true"> →</span></a></td>
@@ -122,6 +121,23 @@
         </tbody>
       </table>
     </div>
+    <dialog id="inventory-audit-reason-dialog" aria-labelledby="inventory-audit-reason-title">
+      <h2 id="inventory-audit-reason-title"></h2>
+      <p id="inventory-audit-reason-text"></p>
+      <form method="dialog"><button type="submit" class="btn btn-primary">Cerrar</button></form>
+    </dialog>
+    <script>
+      (() => {
+        const dialog = document.getElementById('inventory-audit-reason-dialog');
+        document.querySelectorAll('[data-documentary-reason]').forEach((button) => {
+          button.addEventListener('click', () => {
+            document.getElementById('inventory-audit-reason-title').textContent = button.dataset.documentaryProduct;
+            document.getElementById('inventory-audit-reason-text').textContent = button.dataset.documentaryReason;
+            dialog.showModal();
+          });
+        });
+      })();
+    </script>
     {% else %}
     <div class="inventory-audit-empty">
       <strong>No hay productos para estos filtros.</strong>

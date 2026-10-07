@@ -126,7 +126,7 @@ def canonical_point_branch_identity() -> tuple[
 
 
 class BranchInventoryTraceabilityService:
-    def build(self, month: date) -> BranchInventoryTraceability:
+    def build(self, month: date, *, allow_partial: bool = False) -> BranchInventoryTraceability:
         self._historical_boundary_cache = {}
         self._historical_boundary_issues = []
         self._historical_boundary_evidence = {}
@@ -168,7 +168,7 @@ class BranchInventoryTraceabilityService:
 
         opening = self._load_closing(opening_closing, month=month_start, boundary="opening")
         closing = self._load_closing(point_closing, month=month_start, boundary="closing")
-        if self._historical_boundary_issues:
+        if self._historical_boundary_issues and not allow_partial:
             return BranchInventoryTraceability(
                 month=month_start, lines=(), global_issues=tuple(self._historical_boundary_issues),
                 company_difference=ZERO, exception_count=0, source_complete=False,
@@ -181,7 +181,7 @@ class BranchInventoryTraceabilityService:
             )
             if not self._coverage_complete(selected, balances)
         ]
-        if incomplete_manifests:
+        if incomplete_manifests and not allow_partial:
             return BranchInventoryTraceability(
                 month=month_start,
                 lines=(),
@@ -288,7 +288,7 @@ class BranchInventoryTraceabilityService:
         movement_issues = [issue for issue in movement_issues if issue.product_id not in consumption_ids]
         movement_keys = set().union(*(source.keys() for source in movement_sources))
         uncovered_movement_issues = []
-        for branch_id, product_id in sorted(movement_keys):
+        for branch_id, product_id in sorted(opening.keys() | closing.keys() | movement_keys):
             missing_manifests = []
             if (branch_id, product_id) not in opening:
                 missing_manifests.append("apertura")
@@ -319,6 +319,11 @@ class BranchInventoryTraceabilityService:
                 )
             )
         movement_issues = [*movement_issues, *uncovered_movement_issues]
+        if allow_partial:
+            movement_issues.extend(
+                replace(issue, branch_id=branch_id_aliases.get(issue.branch_id, issue.branch_id))
+                for issue in self._historical_boundary_issues
+            )
         keys = sorted(
             opening.keys()
             | closing.keys()
@@ -338,7 +343,14 @@ class BranchInventoryTraceabilityService:
         }
         products_by_id = {product.id: product for product in products}
 
-        global_issues = []
+        global_issues = [
+            TraceSourceIssue(
+                code="SOURCE_INCOMPLETE",
+                message=f"El cierre Point verificado tiene cobertura incompleta para {required_date.isoformat()}.",
+                source_ids=(selected.id,),
+            )
+            for required_date, selected, _balances in incomplete_manifests
+        ] if allow_partial else []
         issues_by_key: dict[tuple[int, int], list[TraceSourceIssue]] = {}
         for issue in movement_issues:
             if issue.branch_id is not None and issue.product_id is not None:
@@ -460,7 +472,7 @@ class BranchInventoryTraceabilityService:
             global_issues=tuple(global_issues),
             company_difference=sum((line.difference for line in frozen_lines), ZERO),
             exception_count=sum(line.difference != ZERO for line in frozen_lines),
-            source_complete=True,
+            source_complete=not (self._historical_boundary_issues or incomplete_manifests),
         )
 
     @staticmethod

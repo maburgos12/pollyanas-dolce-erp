@@ -40,6 +40,7 @@ from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
     ProductInventoryAuditRun,
+    ProductInventoryDocumentaryEvent,
 )
 from ventas.services.sales_read_service import point_sales_evidence_by_ids
 from reportes.services_inventory_audit_report import case_balance_status, _case_quantity
@@ -879,7 +880,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     else RECONCILED_STATUSES
                 )
             )
-        ordered_cases = case_queryset.select_related(
+        latest_documentary = ProductInventoryDocumentaryEvent.objects.filter(
+            month=models.OuterRef("month"),
+            branch_id=models.OuterRef("branch_id"),
+            product_id=models.OuterRef("product_id"),
+        ).order_by("-id")
+        ordered_cases = case_queryset.annotate(
+            documentary_action=models.Subquery(latest_documentary.values("action")[:1]),
+            documentary_reason=models.Subquery(latest_documentary.values("reason")[:1]),
+            documentary_evidence=models.Subquery(latest_documentary.values("evidence")[:1]),
+        ).select_related(
             "branch", "product", "assigned_to"
         ).order_by(
             models.Case(
@@ -928,6 +938,21 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             case.ui_movement_status = MOVEMENT_STATUS_LABELS.get(
                 case.movement_status, "Por revisar"
             )
+            case.ui_documentary_closed = (
+                case.documentary_action == ProductInventoryDocumentaryEvent.Action.CLOSE
+            )
+            if case.ui_documentary_closed:
+                quantities = (case.documentary_evidence or {}).get("quantities") or {}
+                if "difference" in quantities:
+                    case.ui_difference = Decimal(str(quantities["difference"]))
+            case.ui_documentary_reason = (
+                case.documentary_reason
+                or (
+                    case.ui_possible_cause
+                    if case.ui_possible_cause != "Sin diferencia"
+                    else "Aún no hay constancia de cierre documental de este producto y sucursal."
+                )
+            )
             if case_balance_status(case) == "BALANCED" and case.movement_status == "NEEDS_EXPLANATION":
                 case.ui_movement_status = "Saldo conciliado · trazabilidad pendiente"
 
@@ -968,7 +993,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 if run is not None
                 else None
             ),
-            "cases": [_case_payload(case) for case in cases],
+            "cases": [
+                {
+                    **_case_payload(case),
+                    "documentary_close": {
+                        "status": "CLOSED" if case.ui_documentary_closed else "PENDING",
+                        "reason": "" if case.ui_documentary_closed else case.ui_documentary_reason,
+                    },
+                }
+                for case in cases
+            ],
             "pagination": {
                 "page": page_obj.number if page_obj else 1,
                 "pages": page_obj.paginator.num_pages if page_obj else 0,
@@ -1012,7 +1046,24 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
     case.prefetched_events = [
         event for event in related_events if event.case_id == case.id
     ]
+    documentary_event = ProductInventoryDocumentaryEvent.objects.filter(
+        month=case.month, branch_id=case.branch_id, product_id=case.product_id,
+    ).order_by("-id").first()
+    documentary_closed = bool(
+        documentary_event and documentary_event.action == ProductInventoryDocumentaryEvent.Action.CLOSE
+    )
+    documentary_evidence = documentary_event.evidence if documentary_closed else {}
+    documentary_quantities = documentary_evidence.get("quantities") or {}
+    documentary_projection_current = bool(
+        documentary_closed
+        and documentary_evidence.get("calculation_fingerprint") == case.calculation_fingerprint
+    )
     payload = _case_payload(case)
+    payload["documentary_close"] = {
+        "status": "CLOSED" if documentary_closed else "PENDING",
+        "reviewed_at": documentary_event.created_at.isoformat() if documentary_event else None,
+        "quantities": documentary_quantities,
+    }
     payload["events"] = [
         {
             "id": event.pk,
@@ -1053,9 +1104,20 @@ def case_detail(request: HttpRequest, pk: int) -> HttpResponse:
             "reportes/auditoria_inventario_caso.html",
             {
                 "case": case,
+                "documentary_closed": documentary_closed,
+                "documentary_quantities": documentary_quantities,
+                "documentary_projection_current": documentary_projection_current,
+                "documentary_reason": (
+                    documentary_event.reason if documentary_event and documentary_event.reason
+                    else "El cierre documental de este producto y sucursal aún no está acreditado."
+                ),
                 "status": _case_status_context(case),
                 "possible_cause": _possible_cause(case),
-                "difference": _case_quantity(case, "difference"),
+                "difference": (
+                    Decimal(str(documentary_quantities["difference"]))
+                    if "difference" in documentary_quantities
+                    else _case_quantity(case, "difference")
+                ),
                 "balance_steps": [
                     {
                         "number": index,

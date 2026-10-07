@@ -623,6 +623,19 @@ un contador recuperado no corrige automáticamente un job que omitió un registr
 
 ## 5. Verificación de resultado y cierre
 
+Para cierre documental individual, evaluar cada producto final y sucursal con
+apertura y cierre originales de ese mismo par, autoridad de las fuentes del mes,
+historial Point COMPLETE sin movimientos desconocidos, remanente cero y
+comparación de cada rubro de la ecuación. El lector parcial puede conservar
+renglones probados aunque otros pares falten; `source_complete=False` sigue
+bloqueando el cierre mensual. Una entrada o salida por conversión se comprueba
+por sí misma en el historial y la secuencia de existencias; no exigir folio
+común ni inferir una pareja o rendimiento fijo. El cierre individual se registra
+en evento separado, con huella de fuentes y actor autorizado. La segunda
+ejecución idéntica no registra eventos; si la prueba deja de ser válida, se
+registra reapertura y se conserva el cierre anterior para auditoría. Esto no
+equivale a conteo físico, aprobación de expedientes ni `ProductMonthClosureService.lock`.
+
 Antes/después: IDs canónicos, filas por importación, FK_Movimiento/row_number duplicados, saldos, source_trace/investigation, avisos y fingerprints pertinentes. Segunda ejecución debe hacer cero HTTP, no agregar filas/importaciones/duplicados ni avisos. Probar con cliente que rechaza HTTP o `requests.Session.request` prohibido en el ámbito de la prueba, sin afectar procesos ajenos.
 
 Pantalla autenticada: ecuación, cantidades comerciales conservadas, diferencia, fuentes, Qué falta, trazabilidad y conteo separados; consola y solicitudes relevantes. No pulsar Guardar/Aprobar/Resolver para una verificación read-only. Si etiqueta contradice missing, no aceptar cierre.
