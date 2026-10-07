@@ -15,6 +15,7 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Sucursal
+from pos_bridge.models import PointProduct
 from recetas.models import Receta
 from reportes.models import ProductInventoryAuditRun
 from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
@@ -132,6 +133,35 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertTrue(context["audit_metadata"]["stale"])
         self.assertEqual(context["audit_updated_at"], stamp)
         self.assertIn("Pendiente de actualización", self.render(context))
+
+    def test_partial_publication_uses_its_timestamp_without_claiming_month_closed(self):
+        self.make_case()
+        stamp = timezone.now()
+        self.audit_run.last_successful_rebuild_at = stamp
+        self.audit_run.rebuilt_at = stamp + timezone.timedelta(minutes=1)
+        self.audit_run.partial_published = True
+        self.audit_run.status = ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE
+        self.audit_run.save()
+        context = self.context()
+        self.assertTrue(context["audit_metadata"]["partial"])
+        self.assertEqual(context["audit_updated_at"], self.audit_run.rebuilt_at)
+        html = self.render(context)
+        self.assertIn("Actualización parcial", html)
+        self.assertIn("septiembre no está cerrado", html)
+
+    def test_kpis_show_known_products_as_partial_not_zero_for_missing_product(self):
+        self.make_case(production=5, sales=4, waste=0)
+        missing = PointProduct.objects.create(
+            external_id="MISSING-PRODUCT", sku="MISSING-PRODUCT", name="Producto sin fuente",
+        )
+        self.make_case(product=missing, movement_status="SOURCE_INCOMPLETE",
+                       issue_codes=["CASE_MISSING_FROM_REBUILD"])
+        context = self.context()
+        self.assertIsNone(context["grand_total"]["vendido"])
+        self.assertEqual(context["kpi_totals"]["vendido"], 4)
+        self.assertEqual(context["kpi_totals"]["producido"], 5)
+        self.assertEqual(context["kpi_coverage"]["vendido"], {"known": 1, "total": 2})
+        self.assertIn("Parcial: 1 de 2 productos", self.render(context))
 
     def test_month_catalog_uses_runs_not_raw_history(self):
         ProductInventoryAuditRun.objects.create(month=date(2026, 6, 1))

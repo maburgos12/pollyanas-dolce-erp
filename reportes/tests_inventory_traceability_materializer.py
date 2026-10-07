@@ -43,7 +43,7 @@ class MutableTraceabilityService:
         self.result = result
         self.months = []
 
-    def build(self, month):
+    def build(self, month, *, allow_partial=False):
         self.months.append(month)
         return self.result
 
@@ -144,6 +144,37 @@ class TraceabilityTestFixtures:
 
 
 class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
+    @patch("reportes.services_inventory_traceability.transaction.on_commit")
+    def test_partial_rebuild_publishes_only_identified_lines_without_claiming_success(self, on_commit):
+        incomplete = self._line(issues=(TraceSourceIssue(
+            code="SOURCE_INCOMPLETE", message="Falta cierre", branch_id=self.branch.pk,
+            product_id=self.product.pk,
+        ),))
+        materializer = self._materializer(self._result(incomplete, source_complete=False))
+
+        first = materializer.rebuild(MONTH, allow_partial=True)
+        second = materializer.rebuild(MONTH, allow_partial=True)
+
+        run = ProductInventoryAuditRun.objects.get(month=MONTH)
+        case = ProductInventoryAuditCase.objects.get(month=MONTH)
+        self.assertEqual((first["created"], second["unchanged"]), (1, 1))
+        self.assertFalse(first.required_sources_available)
+        self.assertTrue(first.partial_published)
+        self.assertEqual(run.status, ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE)
+        self.assertTrue(run.partial_published)
+        self.assertIsNone(run.last_successful_rebuild_at)
+        self.assertEqual(case.movement_status, "SOURCE_INCOMPLETE")
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        on_commit.assert_not_called()
+
+    def test_partial_rebuild_rejects_month_wide_source_issue(self):
+        issue = TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Manifiesto incompleto")
+        counts = self._materializer(self._result(
+            self._line(), source_complete=False, global_issues=(issue,),
+        )).rebuild(MONTH, allow_partial=True)
+        self.assertFalse(counts.partial_published)
+        self.assertFalse(ProductInventoryAuditCase.objects.exists())
+
     def test_documentary_utc_boundary_evidence_survives_materialization_and_fingerprint(self):
         from types import MappingProxyType
         proof = MappingProxyType({"opening": MappingProxyType({
@@ -897,6 +928,19 @@ class InventoryAuditMaterializerTests(TraceabilityTestFixtures, TestCase):
 
 
 class RebuildProductInventoryAuditCommandTests(TraceabilityTestFixtures, TestCase):
+    def test_command_explicit_partial_publication_retains_incomplete_status(self):
+        issue = TraceSourceIssue(code="SOURCE_INCOMPLETE", message="Falta cierre",
+                                 branch_id=self.branch.pk, product_id=self.product.pk)
+        fake = MutableTraceabilityService(self._result(
+            self._line(issues=(issue,)), source_complete=False,
+        ))
+        with patch("reportes.services_inventory_traceability.BranchInventoryTraceabilityService",
+                   return_value=fake):
+            call_command("rebuild_product_inventory_audit", month="2026-08", allow_partial=True,
+                         stdout=StringIO())
+        self.assertTrue(ProductInventoryAuditRun.objects.get(month=MONTH).partial_published)
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+
     def test_command_rejects_non_strict_month_format(self):
         for invalid in ("2026-8", "2026-08-01", "08-2026", "2026/08"):
             with self.subTest(invalid=invalid), self.assertRaises(CommandError):

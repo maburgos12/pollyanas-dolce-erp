@@ -57,6 +57,7 @@ class InventoryAuditRebuildCounts(dict):
             {key: 0 for key in PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS}
         )
         self.required_sources_available = required_sources_available
+        self.partial_published = False
 
 
 def _empty_counts(*, required_sources_available=True) -> InventoryAuditRebuildCounts:
@@ -153,7 +154,7 @@ class InventoryAuditMaterializer:
             traceability_service or BranchInventoryTraceabilityService()
         )
 
-    def rebuild(self, month: date, dry_run: bool = False) -> dict[str, int]:
+    def rebuild(self, month: date, dry_run: bool = False, *, allow_partial: bool = False) -> dict[str, int]:
         month_start = month.replace(day=1)
         started_at = timezone.now()
 
@@ -163,10 +164,24 @@ class InventoryAuditMaterializer:
             # Dry runs take the same lock so their preview is comparable; the xact lock
             # is released automatically and never persists data.
             self._lock_source_months(month_start)
-            traceability = self.traceability_service.build(month_start)
+            traceability = (
+                self.traceability_service.build(month_start, allow_partial=True)
+                if allow_partial
+                else self.traceability_service.build(month_start)
+            )
             source_built_at = timezone.now()
 
-            if not traceability.source_complete:
+            partial = bool(
+                allow_partial
+                and not traceability.source_complete
+                and traceability.lines
+                and not traceability.global_issues
+                and any(
+                    issue.code == "SOURCE_INCOMPLETE"
+                    for line in traceability.lines for issue in line.issues
+                )
+            )
+            if not traceability.source_complete and not partial:
                 return self._record_incomplete_run(
                     month=month_start,
                     traceability=traceability,
@@ -198,6 +213,9 @@ class InventoryAuditMaterializer:
                 prepared_lines=prepared_lines,
                 existing_cases=existing_cases,
             )
+            if partial:
+                counts.required_sources_available = False
+                counts.partial_published = True
             run_fingerprint = self._run_fingerprint(
                 month=month_start,
                 line_fingerprints=[item["fingerprint"] for item in prepared_lines],
@@ -212,13 +230,14 @@ class InventoryAuditMaterializer:
                 defaults={
                     "status": (
                         ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE
-                        if counts["source_incomplete"]
+                        if partial or counts["source_incomplete"]
                         else ProductInventoryAuditRun.Status.READY
                     ),
                     "source_issues": _sorted_issue_payloads(
                         traceability.global_issues
                     ),
                     "summary": counts,
+                    "partial_published": partial,
                     "calculation_fingerprint": run_fingerprint,
                     "started_at": started_at,
                     "rebuilt_at": source_built_at,
@@ -266,19 +285,18 @@ class InventoryAuditMaterializer:
 
             rebuilt_at = timezone.now()
             run.rebuilt_at = rebuilt_at
-            run.last_successful_rebuild_at = rebuilt_at
-            run.save(
-                update_fields=[
-                    "rebuilt_at",
-                    "last_successful_rebuild_at",
-                    "updated_at",
-                ]
-            )
-            transaction.on_commit(
-                lambda audit_month=month_start: self._investigate_committed_month(
-                    audit_month
+            if not partial:
+                run.last_successful_rebuild_at = rebuilt_at
+            run.save(update_fields=[
+                "rebuilt_at", "updated_at",
+                *([] if partial else ["last_successful_rebuild_at"]),
+            ])
+            if not partial:
+                transaction.on_commit(
+                    lambda audit_month=month_start: self._investigate_committed_month(
+                        audit_month
+                    )
                 )
-            )
             return counts
 
     def reconcile_existing_cases_from_point_history(
@@ -525,6 +543,7 @@ class InventoryAuditMaterializer:
             month=month,
             defaults={
                 "status": ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+                "partial_published": False,
                 "source_issues": issues,
                 "summary": counts,
                 "calculation_fingerprint": fingerprint,

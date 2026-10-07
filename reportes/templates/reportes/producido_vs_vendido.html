@@ -37,6 +37,7 @@
     <div id="audit-summary" class="production-source-summary is-{{ operational_summary.tone }}" role="status" data-version="{{ audit_version }}">
       <strong>{{ operational_summary.title }}</strong>
       <span>{% if audit_updated_at %}Actualizado {{ audit_updated_at|date:"d/m/Y H:i" }}{% else %}Sin revisión publicada{% endif %}</span>
+      {% if audit_metadata.partial %}<span>Solo productos con datos identificados. Los pendientes no se cuentan como cero; septiembre no está cerrado.</span>{% endif %}
     </div>
     <details class="production-source-diagnostics">
       <summary>Referencias del corte</summary>
@@ -87,41 +88,45 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h2l2.6 10.5a1 1 0 0 0 1 .8h9.8a1 1 0 0 0 1-.76L21 7H7.2"/><circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number{% if grand_total.vendido is None %} muted{% endif %}">{% if grand_total.vendido is None %}Sin dato{% else %}{{ grand_total.vendido|floatformat:0|intcomma }}{% endif %}</div>
+          <div class="kpi-number{% if kpi_totals.vendido is None %} muted{% endif %}">{% if kpi_totals.vendido is None %}Sin dato{% else %}{{ kpi_totals.vendido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Vendido</div>
+          {% if kpi_coverage.vendido.known < kpi_coverage.vendido.total %}<small>Parcial: {{ kpi_coverage.vendido.known }} de {{ kpi_coverage.vendido.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
-        <div class="kpi-icon{% if grand_total.producido is not None %} is-success{% endif %}">
+        <div class="kpi-icon{% if kpi_totals.producido is not None %} is-success{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 8.5 4.7v8.6L12 21l-8.5-4.7V7.7L12 3Z"/><path d="m3.5 7.7 8.5 4.8 8.5-4.8M12 12.5V21"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number{% if grand_total.producido is None %} muted{% else %} is-success{% endif %}">{% if grand_total.producido is None %}Sin dato{% else %}{{ grand_total.producido|floatformat:0|intcomma }}{% endif %}</div>
+          <div class="kpi-number{% if kpi_totals.producido is None %} muted{% else %} is-success{% endif %}">{% if kpi_totals.producido is None %}Sin dato{% else %}{{ kpi_totals.producido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Producido</div>
+          {% if kpi_coverage.producido.known < kpi_coverage.producido.total %}<small>Parcial: {{ kpi_coverage.producido.known }} de {{ kpi_coverage.producido.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card">
       <div class="kpi-card-inner">
-        <div class="kpi-icon{% if grand_total.dif is not None %} {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">
+        <div class="kpi-icon{% if kpi_totals.dif is not None %} {% if kpi_totals.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16"/><path d="m14 6 6 6-6 6"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number{% if grand_total.dif is None %} muted{% else %} {% if grand_total.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">{% if grand_total.dif is None %}Sin dato{% else %}{{ grand_total.dif|floatformat:0|intcomma }}{% endif %}</div>
+          <div class="kpi-number{% if kpi_totals.dif is None %} muted{% else %} {% if kpi_totals.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.dif is None %}Sin dato{% else %}{{ kpi_totals.dif|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Dif. operativa</div>
+          {% if kpi_coverage.dif.known < kpi_coverage.dif.total %}<small>Parcial: {{ kpi_coverage.dif.known }} de {{ kpi_coverage.dif.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
     <article class="kpi-card production-kpi-card production-kpi-card-currency">
       <div class="kpi-card-inner">
-        <div class="kpi-icon{% if grand_total.costo_merma is not None %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">
+        <div class="kpi-icon{% if kpi_totals.costo_merma is not None %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01"/></svg>
         </div>
         <div class="kpi-body">
-          <div class="kpi-number kpi-number-currency production-kpi-number-currency{% if grand_total.costo_merma is None %} muted{% else %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">{% if grand_total.costo_merma is None %}Sin dato{% else %}${{ grand_total.costo_merma|floatformat:2|intcomma }}{% endif %}</div>
+          <div class="kpi-number kpi-number-currency production-kpi-number-currency{% if kpi_totals.costo_merma is None %} muted{% else %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.costo_merma is None %}Sin dato{% else %}${{ kpi_totals.costo_merma|floatformat:2|intcomma }}{% endif %}</div>
           <div class="kpi-label">Costo merma</div>
+          {% if kpi_coverage.costo_merma.known < kpi_coverage.costo_merma.total %}<small>Parcial: {{ kpi_coverage.costo_merma.known }} de {{ kpi_coverage.costo_merma.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>

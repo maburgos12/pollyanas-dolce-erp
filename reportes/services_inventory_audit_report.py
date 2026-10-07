@@ -145,12 +145,14 @@ def read_audit_report(month, *, branch=""):
         row["conversion_provenance"] = row["conversion_provenance_label"]
         rows.append(row)
     cases = list(canonical_cases.values())
+    partial = bool(run and run.partial_published)
     stale = bool(run and (not run.last_successful_rebuild_at or (run.rebuilt_at and run.rebuilt_at > run.last_successful_rebuild_at)))
     return {
         "rows": rows, "run": run, "branches": branches, "selected_branch": str(selected.id) if selected else "",
         "selected_branch_label": selected.nombre if selected else "Todas las sucursales y almacenes",
         "audit_status": audit_status(c.movement_status for c in cases), "stale": stale,
-        "updated_at": run.last_successful_rebuild_at if run else None,
+        "partial": partial,
+        "updated_at": (run.rebuilt_at if partial else run.last_successful_rebuild_at) if run else None,
         "opening_reference": month - timedelta(days=1),
         "counts": {"balanced": sum(c.movement_status in {"BALANCED", "RESOLVED"} for c in cases),
                    "pending": sum(c.movement_status not in {"BALANCED", "RESOLVED", "SOURCE_INCOMPLETE"} for c in cases),

@@ -3436,6 +3436,7 @@ class ProductInventoryAuditRun(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     rebuilt_at = models.DateTimeField(null=True, blank=True)
     last_successful_rebuild_at = models.DateTimeField(null=True, blank=True)
+    partial_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     objects = ProductInventoryAuditRunQuerySet.as_manager()
