@@ -175,7 +175,10 @@ class InventoryAuditMaterializer:
                 allow_partial
                 and not traceability.source_complete
                 and traceability.lines
-                and not traceability.global_issues
+                and all(
+                    issue.code in {"SOURCE_INCOMPLETE", "MISSING_CONVERSION_DESTINATION"}
+                    for issue in traceability.global_issues
+                )
                 and any(
                     issue.code == "SOURCE_INCOMPLETE"
                     for line in traceability.lines for issue in line.issues

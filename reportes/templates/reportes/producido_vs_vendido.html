@@ -90,7 +90,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.vendido is None %} muted{% endif %}">{% if kpi_totals.vendido is None %}Sin dato{% else %}{{ kpi_totals.vendido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Vendido</div>
-          {% if kpi_coverage.vendido.known < kpi_coverage.vendido.total %}<small>Parcial: {{ kpi_coverage.vendido.known }} de {{ kpi_coverage.vendido.total }} productos</small>{% endif %}
+          {% if audit_metadata.partial or kpi_coverage.vendido.known < kpi_coverage.vendido.total %}<small>Parcial: {{ kpi_coverage.vendido.known }} de {{ kpi_coverage.vendido.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
@@ -102,7 +102,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.producido is None %} muted{% else %} is-success{% endif %}">{% if kpi_totals.producido is None %}Sin dato{% else %}{{ kpi_totals.producido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Producido</div>
-          {% if kpi_coverage.producido.known < kpi_coverage.producido.total %}<small>Parcial: {{ kpi_coverage.producido.known }} de {{ kpi_coverage.producido.total }} productos</small>{% endif %}
+          {% if audit_metadata.partial or kpi_coverage.producido.known < kpi_coverage.producido.total %}<small>Parcial: {{ kpi_coverage.producido.known }} de {{ kpi_coverage.producido.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
@@ -114,7 +114,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.dif is None %} muted{% else %} {% if kpi_totals.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.dif is None %}Sin dato{% else %}{{ kpi_totals.dif|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Dif. operativa</div>
-          {% if kpi_coverage.dif.known < kpi_coverage.dif.total %}<small>Parcial: {{ kpi_coverage.dif.known }} de {{ kpi_coverage.dif.total }} productos</small>{% endif %}
+          {% if audit_metadata.partial or kpi_coverage.dif.known < kpi_coverage.dif.total %}<small>Parcial: {{ kpi_coverage.dif.known }} de {{ kpi_coverage.dif.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
@@ -126,7 +126,7 @@
         <div class="kpi-body">
           <div class="kpi-number kpi-number-currency production-kpi-number-currency{% if kpi_totals.costo_merma is None %} muted{% else %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.costo_merma is None %}Sin dato{% else %}${{ kpi_totals.costo_merma|floatformat:2|intcomma }}{% endif %}</div>
           <div class="kpi-label">Costo merma</div>
-          {% if kpi_coverage.costo_merma.known < kpi_coverage.costo_merma.total %}<small>Parcial: {{ kpi_coverage.costo_merma.known }} de {{ kpi_coverage.costo_merma.total }} productos</small>{% endif %}
+          {% if audit_metadata.partial or kpi_coverage.costo_merma.known < kpi_coverage.costo_merma.total %}<small>Parcial: {{ kpi_coverage.costo_merma.known }} de {{ kpi_coverage.costo_merma.total }} productos</small>{% endif %}
         </div>
       </div>
     </article>
