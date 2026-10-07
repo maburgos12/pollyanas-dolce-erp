@@ -715,6 +715,10 @@ producto final en `PointProductionLine`, ni otras mermas/conversiones de esos
 productos en `PointWasteLine`/`PointConversionLine`, ni ventas en
 `PointSalesNormalized`/`PointSalesDailyProductFact`. Es ausencia **acotada a esas
 tablas/filtros**, no apertura cero, ausencia universal en Point ni permiso de lock.
+El cierre guardado consultado6oct para receta371 `Pan de Muerto` muestra5 en
+Point al30sep frente a0 producción final seleccionada y apertura no autoritativa.
+Conservar esas5 como dato Point pendiente de explicar por fuente/identidad exacta;
+no llamarlas producción omitida, sobrante físico ni error de un operador.
 
 Rosca Dulce de Leche: producto external334/SKU0621/receta401, diez líneas de
 `PointHistoricalInventoryClosing` ID7 al30sep con stock0; nueve conservan último
