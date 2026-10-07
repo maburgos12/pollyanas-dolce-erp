@@ -59,7 +59,8 @@ se comprueba mediante tools, argumentos y resultados, no por afirmaciones del mo
 | Medición | Consultas y continuidad | Seguridad y controles | Requests OpenAI |
 | --- | ---: | ---: | ---: |
 | Antes de corregir las instrucciones | 14/22 | 18/18 | 58 |
-| Una medición después de corregirlas | 22/22 | 18/18 | 65 |
+| Instrucciones sin fecha del servidor, resultado revisado | 20/22 | 18/18 | 65 |
+| Instrucciones y fecha fresca del servidor | 22/22 | 18/18 | 64 |
 
 El modelo pedía una sucursal ya resuelta por el servidor, interpretaba referencias
 vacías como catálogo vacío, buscaba plurales literalmente o terminaba sin consultar
@@ -67,24 +68,32 @@ la ficha. Se aclaró el contrato de las herramientas en el prompt, sin cambiar
 schemas, permisos, SQL, modelo ni condiciones de ejecución. No hay un router de
 keywords ni una nueva regla de autorización en el prompt.
 
-Ambas mediciones conservaron el mismo corpus y fixtures; no se borraron fallos.
+La segunda medición se contó inicialmente como 22/22, pero la revisión de sus
+argumentos encontró dos horizontes relativos de 2023; ese conteo quedó invalidado.
+El evaluador ahora comprueba también el horizonte enviado. Se aporta `today`
+desde `timezone.localdate()` en las referencias efímeras de cada turno, sin
+guardarlo como estado ni depender de la fecha que recuerde el modelo. Una prueba
+de regresión reprodujo su ausencia y verifica dos días consecutivos.
+
+Las tres mediciones conservaron el mismo corpus y fixtures; no se borraron fallos.
 Los hashes de las cuatro tablas operativas permanecieron iguales tras cada turno.
-Las 91 pruebas locales del runtime, chat y Gateway pasaron; check/migrate check
+Las 92 pruebas locales del runtime, chat y Gateway pasaron; check/migrate check
 sin errores y makemigrations sin cambios. No se certifica resistencia universal
 a injection ni una tasa estable de acierto: es un corpus sintético acotado y una
 sola medición por versión. La prosa del proveedor sigue sin publicarse en la UI.
 
 Límites de evaluación: 80 requests por medición, 1400 tokens de salida/request,
 20000 bytes del JSON/request y reserva conservadora **acumulada** menor a 0.50USD
-para ambas mediciones. Se hicieron 123 requests, sin errores del proveedor. Usage:
-113086 tokens de entrada y 6500 de salida; aplicar la tarifa estándar verificada
+para las tres mediciones. Se hicieron 187 requests, sin errores del proveedor. Usage:
+189286 tokens de entrada y 10418 de salida; aplicar la tarifa estándar verificada
 de [OpenAI](https://developers.openai.com/api/docs/pricing), contando caché como
-entrada normal, da 0.02086290USD. Es un cálculo conservador sobre usage, no factura
-ni una garantía monetaria del runtime. La reserva local fue de 0.19926135USD.
+entrada normal, da 0.03464370USD. Es un cálculo conservador sobre usage, no factura
+ni una garantía monetaria del runtime. La reserva local fue de 0.30566385USD.
 
 Evidencia y check reproducible privados: directorio
 `~/.codex/task-artifacts/ai-erp-read-live-eval-20261007/`, con `evaluate_read.py`,
-`frozen-cases.json`, resultados originales `baseline-*`, resultados corregidos,
+`frozen-cases.json`, resultados originales `baseline-*`, segunda medición
+`instructions-only-*`, resultados finales con calendario,
 `provider-results.json`, `summary.json` y registro de ejecución/cierre. No se
 versionan credenciales, respuestas, logs ni artefactos temporales. Ejecutar sólo
 en un worktree registrado y PostgreSQL aislado con los límites del protocolo;

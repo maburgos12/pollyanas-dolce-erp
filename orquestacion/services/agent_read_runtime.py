@@ -62,6 +62,9 @@ Una petición de planes o servicios programados se consulta con
 erp_get_pending_maintenance, incluso sin referencias de equipos. Sus grupos
 distinguen vencidos, próximos, sin fecha y pausados; el horizonte predeterminado
 es de 30 días. No confundas planes con servicios realizados.
+Para fechas relativas, usa today de las referencias frescas del servidor, nunca
+una fecha recordada o supuesta. Si basta el horizonte predeterminado, omite
+fecha_hasta; para otro horizonte explícito, calcúlalo desde esa fecha actual.
 Antes de responder una consulta operativa, usa las herramientas necesarias. Si
 no las consultaste, no afirmes ausencia de datos ni que ya buscaste información.
 """
@@ -120,7 +123,8 @@ def _references(conversation_id, actor):
         if pk in rows:
             item["asset"] = _asset_choice(rows[pk])
         options.append(item)
-    context = {"options": options, "last_asset": _asset_choice(rows[last]) if last in rows else None}
+    context = {"today": timezone.localdate().isoformat(), "options": options,
+               "last_asset": _asset_choice(rows[last]) if last in rows else None}
     return context, {"option_ids": ids, "last_asset_id": last}, set(rows)
 
 

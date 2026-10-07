@@ -2,6 +2,7 @@
 import copy
 import json
 from dataclasses import replace
+from datetime import date
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -69,6 +70,15 @@ class AgentReadRuntimeTests(TestCase):
         self.messages[1].refresh_from_db()
         self.assertEqual(self.messages[1].status, ChatMessage.STATUS_ERROR)
         self.assertFalse(ChatToolCall.objects.filter(status=ChatToolCall.STATUS_RUNNING).exists())
+
+    def test_relative_date_context_uses_fresh_server_day_each_turn(self):
+        for position, today in enumerate((date(2026, 10, 7), date(2026, 10, 8))):
+            if position:
+                self.messages = create_user_turn(user=self.user, conversation=self.conversation, content="¿Y los próximos servicios?")
+            with patch("orquestacion.services.agent_read_runtime.timezone.localdate", return_value=today):
+                self.run_turn()
+            references = json.loads(self.requests[-1]["input"][1]["content"].split(": ", 1)[1])
+            self.assertEqual(references.get("today"), today.isoformat())
 
     def test_chains_real_gateway_three_responses_and_persists_usage(self):
         reasoning = {"type": "reasoning", "id": "rs1", "summary": [], "encrypted_content": "PRIVATE-REASONING"}
