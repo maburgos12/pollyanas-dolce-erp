@@ -499,6 +499,26 @@ Si falta estado posterior, consulta read-only puntual de cabecera/detalle, con s
 
 Una revisión de carga cerrada sigue siendo evidencia: reutilizar FK y resolución validada con revisor/fecha/cantidades coherentes. No limitarse a discrepancias abiertas. No crear actor, explicación ni nueva discrepancia para simular aprobación.
 
+### Identidad original de producción Point
+
+Una línea `PointProductionLine` puede conservar en
+`raw_payload.detail.PK_Producto` el producto Point exacto aunque `item_code`/SKU
+colisione. En septiembre 2026, CEDIS/Bollo Lotus conserva FK 818 en la línea
+11715 (SKU 0160) y Ciruela Mediano FK 112 en la 11895 (SKU 0112). Resolver
+contra `PointProduct.external_id` solo si la FK es entero positivo exacto,
+`detail.IsInsumo=false`, la fila es producto, existe identidad única y un SKU
+único no apunta a otro producto. FK presente inválida, desconocida o
+contradictoria deja issue; no recurrir a nombre para ocultarlo. FK ausente
+conserva el lector previo y sus ambigüedades. Este contrato es de producción,
+no reinterpreta transferencia, merma, venta ni conversión.
+
+Después de resolver, verificar por producto/sucursal la cantidad producida,
+apertura y cierre originales, ventas netas, otras entradas/salidas e historia
+Point. Una identidad liberada no equivale a `COMPLETE`, saldo correcto ni
+autorización de cierre. La ficha de fuentes del 7 de octubre documenta 19
+líneas afectadas y los consumidores. Segunda revisión: ninguna captura HTTP ni
+cambio operativo por releer la identidad.
+
 Si enviado≠recibido, Point finalizado puede registrar retorno administrativo; verificar si se cargó y custodia física real cuando corresponda. No imputar pérdida, otro retorno o destino de rebanadas. Si falta evidencia humana, usar expediente existente, responsable autorizado y solicitud con folio, fecha, producto, sucursal, cantidad y acción comprobable. Avisar/asignar material/recurrente/alto riesgo; agrupar menores. No duplicar solicitudes ni modificar RRHH para encontrar responsable.
 
 ## 4. Fuentes comerciales y cobertura de mermas
