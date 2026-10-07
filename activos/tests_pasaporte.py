@@ -49,6 +49,20 @@ class PasaporteAlcanceTests(TestCase):
     def test_anonimo_no_ve_ningun_activo(self):
         self.assertEqual(activos_autorizados(AnonymousUser()).count(), 0)
 
+    def test_usuario_desactivado_no_consulta_ni_reporta_aunque_conserve_sucursal_y_rol(self):
+        for usuario in (self.operativa, self.mantenimiento, self.dg):
+            with self.subTest(usuario=usuario.username):
+                if not hasattr(usuario, "userprofile"):
+                    UserProfile.objects.create(user=usuario, sucursal=self.payan)
+                self.assertTrue(activos_autorizados(usuario).exists())
+                self.assertTrue(puede_reportar_activo(usuario, self.activo_payan))
+                usuario.is_active = False
+                usuario.save(update_fields=["is_active"])
+                usuario = User.objects.get(pk=usuario.pk)
+
+                self.assertFalse(activos_autorizados(usuario).exists())
+                self.assertFalse(puede_reportar_activo(usuario, self.activo_payan))
+
     def test_usuario_sin_sucursal_ni_mantenimiento_no_ve_nada(self):
         self.assertEqual(activos_autorizados(self.sin_acceso).count(), 0)
 

@@ -15,6 +15,7 @@ if [[ -n "${INVENTORY_AUDIT_EVIDENCE_DIR:-}" ]]; then
     exit 1
 fi
 INVENTORY_AUDIT_PRIVATE_ROOT="${INVENTORY_AUDIT_PRIVATE_ROOT:-$SCRIPT_DIR/../storage/inventory_audit_evidence}"
+MEDIA_ROOT="${MEDIA_ROOT:-$SCRIPT_DIR/../storage/media}"
 KEEP_LAST="${BACKUP_KEEP_LAST:-7}"
 BACKUP_EXPORT_DIR="${BACKUP_EXPORT_DIR:-}"
 BACKUP_EXPORT_GROUP="${BACKUP_EXPORT_GROUP:-}"
@@ -57,7 +58,8 @@ cleanup() {
     local status=$?
     if [ "$PUBLISHED" -eq 0 ] && [ -n "$PREFIX" ]; then
         rm -f "$BACKUP_DIR/$PREFIX.sql.gz" "$BACKUP_DIR/$PREFIX.conteos.tar.gz" \
-            "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.incomplete"
+            "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.media.json" \
+            "$BACKUP_DIR/$PREFIX.incomplete"
     fi
     if [ -n "$STAGING" ]; then rm -rf "$STAGING"; fi
     if [ -n "$LOCK_DIR" ]; then rm -f "$LOCK_DIR/pid"; rmdir "$LOCK_DIR"; fi
@@ -69,7 +71,7 @@ trap 'exit 143' TERM
 
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 CANDIDATE="backup_${TIMESTAMP}"
-for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz manifest incomplete; do
+for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz media.json manifest incomplete; do
     if [ -e "$BACKUP_DIR/$CANDIDATE.$suffix" ]; then
         log "ERROR: el identificador $CANDIDATE ya existe; no se sobrescribe"
         exit 1
@@ -114,6 +116,14 @@ else
     exit 1
 fi
 
+# Media is copied directly by NAS HBS from the restricted read-only rsync module.
+# This small inventory binds the SQL restore point to exact file bytes without
+# accumulating a full media archive on the VPS.
+if ! python3 "$SCRIPT_DIR/media_manifest.py" create "$MEDIA_ROOT" "$STAGING/$PREFIX.media.json"; then
+    log "ERROR: no se pudo inventariar media; se conservan respaldos anteriores"
+    exit 1
+fi
+
 # Standard SHA-256 check-file format. Verify from BACKUP_DIR during restore using
 # sha256sum -c backup_<timestamp>.manifest (or shasum -a 256 -c ...).
 checksum_files() (
@@ -121,6 +131,9 @@ checksum_files() (
     files=("$2.sql.gz" "$2.conteos.tar.gz")
     if [ -f "$2.inventory-audit.tar.gz" ]; then
         files+=("$2.inventory-audit.tar.gz")
+    fi
+    if [ -f "$2.media.json" ]; then
+        files+=("$2.media.json")
     fi
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "${files[@]}"
@@ -147,6 +160,7 @@ fi
 mv "$STAGING/$PREFIX.sql.gz" "$BACKUP_DIR/$PREFIX.sql.gz"
 mv "$STAGING/$PREFIX.conteos.tar.gz" "$BACKUP_DIR/$PREFIX.conteos.tar.gz"
 mv "$STAGING/$PREFIX.inventory-audit.tar.gz" "$BACKUP_DIR/$PREFIX.inventory-audit.tar.gz"
+mv "$STAGING/$PREFIX.media.json" "$BACKUP_DIR/$PREFIX.media.json"
 # The manifest is the completion marker, always published last.
 mv "$STAGING/$PREFIX.manifest" "$BACKUP_DIR/$PREFIX.manifest"
 PUBLISHED=1
@@ -157,7 +171,7 @@ rm -f "$BACKUP_DIR/$PREFIX.incomplete"
 if [ -n "$BACKUP_EXPORT_DIR" ]; then
     install -d -m 0750 "$BACKUP_EXPORT_DIR"
     chgrp "$BACKUP_EXPORT_GROUP" "$BACKUP_EXPORT_DIR"
-    for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz manifest; do
+    for suffix in sql.gz conteos.tar.gz inventory-audit.tar.gz media.json manifest; do
         file="$BACKUP_DIR/$PREFIX.$suffix"
         chgrp "$BACKUP_EXPORT_GROUP" "$file"
         chmod 0640 "$file"
@@ -188,10 +202,12 @@ for ((i=0; i<DELETE_COUNT; i++)); do
     if [ -n "$BACKUP_EXPORT_DIR" ]; then
         rm -f "$BACKUP_EXPORT_DIR/$old.manifest" "$BACKUP_EXPORT_DIR/$old.sql.gz" "$BACKUP_EXPORT_DIR/$old.conteos.tar.gz"
         rm -f "$BACKUP_EXPORT_DIR/$old.inventory-audit.tar.gz"
+        rm -f "$BACKUP_EXPORT_DIR/$old.media.json"
     fi
     rm -f "$BACKUP_DIR/$old.manifest" "$BACKUP_DIR/$old.sql.gz" \
         "$BACKUP_DIR/$old.conteos.tar.gz" "$BACKUP_DIR/$old.inventory-audit.tar.gz" \
+        "$BACKUP_DIR/$old.media.json" \
         "$BACKUP_DIR/$old.incomplete"
     log "Rotado conjunto: $old"
 done
-log "Backup completado: $BACKUP_DIR/$PREFIX.manifest (SQL y evidencias privadas con manifiesto SHA-256)"
+log "Backup completado: $BACKUP_DIR/$PREFIX.manifest (SQL, evidencias y catálogo media; recepción NAS pendiente de verificar)"
