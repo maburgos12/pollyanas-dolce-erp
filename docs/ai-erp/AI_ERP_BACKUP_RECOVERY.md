@@ -32,12 +32,16 @@ read-only, and limited to two connections. Before enabling HBS, check that the
 reader can traverse and read every active media file, while another network host
 cannot connect. Do not copy credentials into the repository or logs.
 
-Create an HBS **backup** job on NASDOLCE from `erp_media_active` to a dedicated
-folder under `ERP_BACKUPS`, with version history/retention that preserves the
-media generation paired to each SQL manifest. Schedule it after the existing
-daily SQL job, with no overlapping rsync sessions. Verify the configured source,
-destination, schedule, retry/error notifications and version behavior in HBS.
-The old photo archive job and its restricted ERP reader are separate.
+Create an HBS **Active Sync** job on NASDOLCE that pulls `erp_media_active` into
+a dedicated NAS staging folder. Use the Copy policy so a source deletion does
+not erase the received file. Schedule it after the existing SQL pull without
+overlapping rsync sessions, and configure retry and failure notifications.
+Active Sync alone is not a versioned backup: an updated source file replaces
+its prior NAS copy. Preserve recoverable generations through a separate local
+NAS backup job with version management, or NAS snapshots if supported by the
+actual volume. Confirm capacity, version retention and a matching SQL/media
+restore before declaring the configuration complete. The old photo archive
+job and its restricted ERP reader are separate.
 
 ## Backup run and failure boundary
 
