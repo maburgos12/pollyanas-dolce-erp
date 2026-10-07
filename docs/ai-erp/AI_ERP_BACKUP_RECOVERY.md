@@ -9,39 +9,25 @@ Neither a local backup manifest nor a successful HBS status proves recovery.
 ## Private transport
 
 Keep the existing `erp` SQL and `erp_media_archive` historical modules unchanged.
-Add an rsync daemon module on the VPS with these settings, reusing the existing
-NAS-to-VPS WireGuard route and HBS rsync identity. No ERP process receives NAS
+The VPS exposes `storage/media` at `hbs-export/active-media` through an enabled,
+read-only systemd bind mount. The `erp` daemon module stays bound to WireGuard
+`10.77.216.1:873`, chrooted, read-only, and limited to NAS `10.77.216.2`. The
+existing HBS storage connection reads this second folder without a new password
+or a full media copy on the VPS; the SQL job still selects only `daily`. Verify
+the bind mount is read-only after a VPS reboot. No ERP process receives NAS
 backup credentials or access to the SQL backup share.
 
-```ini
-[erp_media_active]
-    path = /opt/pastelerias-erp/storage/media
-    comment = ERP active media backup source
-    uid = erp_backup_reader
-    gid = erp_backup_reader
-    read only = yes
-    list = no
-    auth users = erp_backup_reader
-    secrets file = /etc/rsyncd-erp.secrets
-    hosts allow = 10.77.216.2
-    hosts deny = *
-```
-
-The global daemon configuration remains bound to `10.77.216.1:873`, chrooted,
-read-only, and limited to two connections. Before enabling HBS, check that the
-reader can traverse and read every active media file, while another network host
-cannot connect. Do not copy credentials into the repository or logs.
-
-Create an HBS **Active Sync** job on NASDOLCE that pulls `erp_media_active` into
-a dedicated NAS staging folder. Use the Copy policy so a source deletion does
-not erase the received file. Schedule it after the existing SQL pull without
-overlapping rsync sessions, and configure retry and failure notifications.
+HBS Active Sync job `ERP medios activos VPS a NAS - diario` pulls `active-media`
+into `ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING` after the existing SQL pull. Its Copy
+policy keeps received files when the source deletes them. Confirm failure
+notifications have a configured delivery method before relying on alerts.
 Active Sync alone is not a versioned backup: an updated source file replaces
-its prior NAS copy. Preserve recoverable generations through a separate local
-NAS backup job with version management, or NAS snapshots if supported by the
-actual volume. Confirm capacity, version retention and a matching SQL/media
-restore before declaring the configuration complete. The old photo archive
-job and its restricted ERP reader are separate.
+its prior NAS copy. Local HBS job `ERP medios activos - 7 versiones` backs up the
+received staging folder to `ERP_BACKUPS/ERP_ACTIVE_MEDIA_VERSIONS` after Active
+Sync finishes, with seven retained generations, no destination deletion, and
+weekly quick/content integrity checks. Confirm a matching SQL/media restore
+before declaring the configuration complete. The old photo archive job and its
+restricted ERP reader are separate.
 
 ## Backup run and failure boundary
 
