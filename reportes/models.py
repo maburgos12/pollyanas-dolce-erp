@@ -3705,6 +3705,7 @@ class ProductInventoryDocumentaryEvent(models.Model):
     class Action(models.TextChoices):
         CLOSE = "CLOSE", "Cierre documental"
         REOPEN = "REOPEN", "Reabrir cierre documental"
+        PENDING = "PENDING", "Revisión documental pendiente"
 
     month = models.DateField(db_index=True)
     branch = models.ForeignKey("pos_bridge.PointBranch", on_delete=models.PROTECT)
@@ -3724,7 +3725,7 @@ class ProductInventoryDocumentaryEvent(models.Model):
         ]
         constraints = [
             models.CheckConstraint(check=models.Q(month__day=1), name="inv_doc_month_day_1"),
-            models.CheckConstraint(check=models.Q(action__in=("CLOSE", "REOPEN")), name="inv_doc_action_valid"),
+            models.CheckConstraint(check=models.Q(action__in=("CLOSE", "REOPEN", "PENDING")), name="inv_doc_action_valid"),
         ]
 
     def save(self, *args, **kwargs):

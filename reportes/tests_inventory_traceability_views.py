@@ -44,6 +44,14 @@ class InventoryTraceabilityViewsTests(TestCase):
 
         ProductInventoryDocumentaryEvent.objects.create(
             month=self.run.month, branch=self.branch, product=self.product,
+            action=ProductInventoryDocumentaryEvent.Action.PENDING,
+            source_fingerprint="", reason="Falta comprobar el saldo final de Point.", actor=self.approver,
+        )
+        pending_with_reason = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(pending_with_reason, "Falta comprobar el saldo final de Point.")
+
+        ProductInventoryDocumentaryEvent.objects.create(
+            month=self.run.month, branch=self.branch, product=self.product,
             action=ProductInventoryDocumentaryEvent.Action.CLOSE,
             source_fingerprint="f" * 64, evidence={"checked": True}, actor=self.approver,
         )

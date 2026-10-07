@@ -132,5 +132,12 @@ class ProductDocumentaryCloseService:
                     )
                     counts["reopened"] += 1
                 else:
+                    if not prior or prior.reason != decision["reason"]:
+                        ProductInventoryDocumentaryEvent.objects.create(
+                            month=month, branch_id=key[0], product_id=key[1],
+                            action=ProductInventoryDocumentaryEvent.Action.PENDING,
+                            source_fingerprint="",
+                            reason=decision["reason"], actor=actor,
+                        )
                     counts["pending"] += 1
         return counts

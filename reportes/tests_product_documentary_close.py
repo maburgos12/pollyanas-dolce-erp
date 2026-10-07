@@ -43,6 +43,19 @@ class ProductDocumentaryCloseTests(TestCase):
         with self.assertRaises(ValidationError):
             ProductInventoryDocumentaryEvent.objects.update(reason="alterado")
 
+    def test_pending_reason_is_recorded_once_and_updated_only_when_it_changes(self):
+        pending = {"eligible": False, "reason": "Falta comprobar el saldo final de Point."}
+        with patch.object(self.service, "evaluate", return_value={self.key: pending}):
+            self.service.close_eligible(date(2026, 9, 1), actor=self.actor)
+            self.service.close_eligible(date(2026, 9, 1), actor=self.actor)
+        self.assertEqual(ProductInventoryDocumentaryEvent.objects.count(), 1)
+        self.assertEqual(ProductInventoryDocumentaryEvent.objects.first().action, "PENDING")
+        pending["reason"] = "Falta comprobar la secuencia completa de movimientos del mes."
+        with patch.object(self.service, "evaluate", return_value={self.key: pending}):
+            self.service.close_eligible(date(2026, 9, 1), actor=self.actor)
+        self.assertEqual(ProductInventoryDocumentaryEvent.objects.count(), 2)
+        self.assertEqual(ProductInventoryDocumentaryEvent.objects.first().reason, pending["reason"])
+
     def test_conversion_without_common_folio_can_be_proven_independently(self):
         zero = Decimal("0")
         values = {field: zero for field in (

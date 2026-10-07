@@ -942,8 +942,11 @@ def dashboard(request: HttpRequest) -> HttpResponse:
             )
             case.ui_documentary_reason = (
                 case.documentary_reason
-                or "Falta acreditar el cierre documental de este producto y sucursal. "
-                + case.ui_possible_cause
+                or (
+                    case.ui_possible_cause
+                    if case.ui_possible_cause != "Sin diferencia"
+                    else "Aún no hay constancia de cierre documental de este producto y sucursal."
+                )
             )
             if case_balance_status(case) == "BALANCED" and case.movement_status == "NEEDS_EXPLANATION":
                 case.ui_movement_status = "Saldo conciliado · trazabilidad pendiente"

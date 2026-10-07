@@ -19,7 +19,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
                 ('month', models.DateField(db_index=True)),
-                ('action', models.CharField(choices=[('CLOSE', 'Cierre documental'), ('REOPEN', 'Reabrir cierre documental')], max_length=8)),
+                ('action', models.CharField(choices=[('CLOSE', 'Cierre documental'), ('REOPEN', 'Reabrir cierre documental'), ('PENDING', 'Revisión documental pendiente')], max_length=8)),
                 ('source_fingerprint', models.CharField(max_length=64)),
                 ('evidence', models.JSONField(default=dict)),
                 ('reason', models.CharField(blank=True, default='', max_length=240)),
@@ -39,6 +39,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='productinventorydocumentaryevent',
-            constraint=models.CheckConstraint(check=models.Q(('action__in', ('CLOSE', 'REOPEN'))), name='inv_doc_action_valid'),
+            constraint=models.CheckConstraint(check=models.Q(('action__in', ('CLOSE', 'REOPEN', 'PENDING'))), name='inv_doc_action_valid'),
         ),
     ]
