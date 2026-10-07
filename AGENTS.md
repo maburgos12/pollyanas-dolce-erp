@@ -59,6 +59,31 @@ existente no cubre la necesidad.
 | ERP Django | /opt/pastelerias-erp | 8011 | erp.pollyanasdolce.com |
 | Ad agent | /opt/ad-agent | 8004 | ads.pollyanasdolce.com |
 
+## Selección automática de skills
+
+Antes de comenzar una tarea, revisar el catálogo de skills disponibles en la
+sesión y las habilidades locales del proyecto en `.agents/skills/`. Seleccionar
+las que correspondan al resultado solicitado y leer su `SKILL.md` antes de
+aplicarlas. No es necesario que Mauricio las nombre explícitamente.
+
+- Elegir el skill más específico cuando varios cubran la misma tarea; evitar
+  repetir procesos y no leer ni activar todos los skills por defecto.
+- Indicar brevemente cuáles se utilizarán y para qué. Para consultas simples,
+  responder directamente si ningún skill aporta valor.
+- Para datos compartidos, mantener la revisión obligatoria con `erp-data-reuse`.
+  Para UI y diseño, seguir `PRODUCT.md` y el enrutamiento de `DESIGN_STACK.md`.
+- Cuando estén disponibles, usar `performance-optimization` para lentitud
+  medida; `observability-and-instrumentation` para logs, métricas y trazas;
+  `api-and-interface-design` para contratos de API e interfaces;
+  `deprecation-and-migration` para retirar o migrar sistemas; y
+  `shipping-and-launch` para preparar despliegues y reversión.
+- Las instrucciones de Mauricio y las reglas del proyecto tienen prioridad.
+  Los skills no amplían permisos para modificar datos, desplegar ni actuar
+  sobre sistemas externos, y no sustituyen el ciclo de vida ni las validaciones.
+- Si un skill no está disponible, indicarlo y continuar con las herramientas
+  existentes cuando sea viable. No instalar skills automáticamente ni asumir
+  que un catálogo escrito garantiza que están instalados.
+
 ## Contexto de producto y diseño
 Para cualquier tarea de UI, frontend, diseño visual, experiencia de usuario,
 branding, tienda online o marketing, leer primero:
