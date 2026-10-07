@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from collections.abc import Mapping
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -1026,6 +1027,69 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.code, "AMBIGUOUS_PRODUCT")
         self.assertEqual(issue.branch_id, self.centro.id)
         self.assertEqual(issue.source_ids, (ambiguous.id,))
+
+    def test_production_original_product_pk_resolves_ambiguous_sku(self):
+        target = PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        PointProduct.objects.create(external_id="948", sku="0112", name="Otro producto")
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        row = SimpleNamespace(
+            product_id=None,
+            item_code="0112",
+            item_name="Ciruela",
+            is_insumo=False,
+            raw_payload={"detail": {"PK_Producto": 112, "IsInsumo": False}},
+        )
+
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (target.id, None),
+        )
+
+    def test_production_original_product_pk_fails_closed_on_invalid_identity(self):
+        PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        row = SimpleNamespace(
+            product_id=None,
+            item_code="0112",
+            item_name="Ciruela",
+            is_insumo=False,
+            raw_payload={"detail": {"PK_Producto": 112, "IsInsumo": True}},
+        )
+
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_DOMAIN_CONFLICT"),
+        )
+        row.raw_payload["detail"] = {"PK_Producto": 999, "IsInsumo": False}
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_FK_UNKNOWN"),
+        )
+        row.raw_payload["detail"] = {"PK_Producto": True, "IsInsumo": False}
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_FK_INVALID"),
+        )
+
+    def test_production_original_pk_flows_into_monthly_pair(self):
+        target = PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        duplicate = PointProduct.objects.create(external_id="948", sku="0112", name="Otro")
+        opening = {(self.centro, product): "0" for product in (self.product, target, duplicate)}
+        closing = dict(opening)
+        closing[(self.centro, target)] = "2"
+        self._closing_lines(date(2026, 7, 31), opening)
+        self._closing_lines(date(2026, 8, 31), closing)
+        row = self._production(item_code="0112", item_name="Ciruela", quantity="2")
+        row.raw_payload = {"detail": {"PK_Producto": 112, "IsInsumo": False}}
+        row.save(update_fields=["raw_payload"])
+
+        result = self.service.build(date(2026, 8, 1), allow_partial=True)
+
+        self.assertFalse(any(issue.code == "AMBIGUOUS_PRODUCT" for issue in result.global_issues))
+        line = next(line for line in result.lines if line.product.id == target.id)
+        self.assertEqual(line.production, Decimal("2"))
+        self.assertEqual(line.difference, Decimal("0"))
+        self.assertEqual(line.source_trace["production"], (row.id,))
 
     def test_resolution_precedence_does_not_bypass_missing_closing_evidence(self):
         sku_product = PointProduct.objects.create(

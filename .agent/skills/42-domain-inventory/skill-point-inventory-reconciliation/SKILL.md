@@ -81,6 +81,13 @@ Se seleccionan por período y claves externas de producto/sucursal, nunca solo p
 nombre, SKU ambiguo o PK del expediente. No reemplazan FK documental ni prueban conteo
 físico. No consultar otra vez un folio verificado sin evidencia nueva.
 
+Para producción Point, cuando el SKU colisiona, revisar
+`PointProductionLine.raw_payload.detail.PK_Producto`: es la identidad original
+del producto, distinta de un nombre, receta o SKU. El procedimiento exige
+`IsInsumo=false`, FK positiva exacta y `PointProduct.external_id` único;
+contradicciones fallan cerrado. Resolver esa identidad no acredita por sí solo
+la ecuación, los cortes ni el cierre mensual.
+
 El procedimiento contiene el contrato temporal comprobado por dominio: Stock
 `raw_payload.Fecha` naive es UTC; notas `Fecha_Hora` naive es hora local. Aplicarlo
 también a apertura, cierre y cobertura, no solo a ventas. La actualización de este

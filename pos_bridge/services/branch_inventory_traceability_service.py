@@ -538,6 +538,7 @@ class BranchInventoryTraceabilityService:
                 "branch_id",
                 "item_code",
                 "item_name",
+                "raw_payload",
                 "produced_quantity",
                 "receta_id",
                 "sync_job_id",
@@ -706,7 +707,7 @@ class BranchInventoryTraceabilityService:
         for row in production_rows:
             if row.is_insumo:
                 continue
-            product_id, issue_code = self._resolve_product(row, product_indexes)
+            product_id, issue_code = self._resolve_production_product(row, product_indexes)
             self._record_direct_row(
                 balances=production,
                 issues=issues,
@@ -1678,6 +1679,28 @@ class BranchInventoryTraceabilityService:
         if len(name_matches) > 1:
             return None, "AMBIGUOUS_PRODUCT"
         return None, "UNRESOLVED_PRODUCT"
+
+    @classmethod
+    def _resolve_production_product(cls, row, indexes) -> tuple[int | None, str | None]:
+        raw_payload = getattr(row, "raw_payload", None)
+        detail = raw_payload.get("detail") if isinstance(raw_payload, Mapping) else None
+        if not isinstance(detail, Mapping) or "PK_Producto" not in detail:
+            return cls._resolve_product(row, indexes)
+
+        raw_fk = detail["PK_Producto"]
+        fk_text = str(raw_fk).strip()
+        if isinstance(raw_fk, bool) or not fk_text.isdecimal() or int(fk_text) <= 0:
+            return None, "PRODUCTION_PRODUCT_FK_INVALID"
+        if detail.get("IsInsumo") is not False or row.is_insumo is not False:
+            return None, "PRODUCTION_PRODUCT_DOMAIN_CONFLICT"
+        product_id = indexes["external_id"].get(str(int(fk_text)))
+        if product_id is None:
+            return None, "PRODUCTION_PRODUCT_FK_UNKNOWN"
+        item_code = str(getattr(row, "item_code", "") or "").strip()
+        sku_matches = indexes["sku"].get(item_code, ()) if item_code else ()
+        if len(sku_matches) == 1 and int(sku_matches[0]) != int(product_id):
+            return None, "PRODUCTION_PRODUCT_IDENTITY_CONFLICT"
+        return int(product_id), None
 
     @classmethod
     def _resolve_transfer_product(
