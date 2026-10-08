@@ -62,7 +62,6 @@ class PermisosDireccionTests(TestCase):
         items = next(g["items"] for g in groups if g["key"] == "mi_trabajo")
         item = next(i for i in items if i["label"] == "Permisos por autorizar")
         self.assertEqual(item["url"], self.url)
-        self.assertEqual(item["badge_count"], 1)
         rrhh = User.objects.create_user(username="rrhh")
         rrhh.groups.add(Group.objects.create(name="RRHH"))
         groups = build_nav_groups(rrhh, "/dashboard/")
@@ -84,5 +83,3 @@ class PermisosDireccionTests(TestCase):
         self.assertEqual(self.client.post(self.url, {
             "permiso_id": self.permiso.pk, "action": "autorizar_direccion",
         }).status_code, 403)
-        groups = build_nav_groups(self.carolina_user, "/dashboard/")
-        self.assertFalse(any(i["label"] == "Permisos por autorizar" for g in groups for i in g["items"]))

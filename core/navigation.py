@@ -1,4 +1,7 @@
 from core.access import (
+    ROLE_DG,
+    has_any_role,
+    can_view_rrhh,
     can_manage_module,
     can_review_seguimiento_global,
     can_view_reportes,
@@ -646,29 +649,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "badge_count": vacaciones_por_autorizar,
                 }
             )
-        try:
-            from core.access import can_view_rrhh
-            from rrhh.models import PermisoSalida
-            from rrhh.services_permisos import can_authorize_direccion
-
-            permisos_qs = PermisoSalida.objects.filter(
-                estado=PermisoSalida.ESTADO_SOLICITADO,
-            ).exclude(empleado__usuario_erp=user)
-            if can_authorize_direccion(user):
-                permisos_qs = permisos_qs.filter(
-                    requiere_direccion=True,
-                    estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
-                )
-            else:
-                permisos_qs = permisos_qs.filter(
-                    requiere_direccion=False,
-                    estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
-                    empleado__jefe_directo__usuario_erp=user,
-                )
-            permisos_por_autorizar = permisos_qs.count() if can_view_rrhh(user) else 0
-        except Exception:
-            permisos_por_autorizar = 0
-        if permisos_por_autorizar:
+        if (user.is_superuser or has_any_role(user, ROLE_DG)) and can_view_rrhh(user):
             match_len = len("/rrhh/permisos/") if current_path.startswith("/rrhh/permisos/") else 0
             best_match_len = max(best_match_len, match_len)
             mi_trabajo["items"].append(
@@ -680,7 +661,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "module": "rrhh",
                     "submodule": "permisos",
                     "initial": "P",
-                    "badge_count": permisos_por_autorizar,
                 }
             )
         try:
