@@ -1,5 +1,10 @@
 # Caso 3911 — finalización documental de cinco transferencias
 
+> Interpretación administrativa SUPERADA por verificación y decisión DG8oct2026:
+> Recibida es terminal. Las cinco recepciones completas no requieren finalización
+> adicional; isFinalizadoFalse no constituye un documento pendiente. Los datos
+> históricos siguientes se conservan, no su conclusión de exigir otro paso.
+
 3 de octubre de 2026. Revisión de solo lectura, VPS main087cbec2. Historial canónico691 COMPLETE: no recapturarlo. Saldo 2+22 entradas−13 ventas−8 mermas=3; diferencia0. No conteo físico.
 
 ## Fuentes existentes y registro exacto faltante

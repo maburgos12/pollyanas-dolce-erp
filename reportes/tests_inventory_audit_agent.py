@@ -94,6 +94,21 @@ class InventoryAuditAgentModelTests(InventoryAuditAgentFixtures, TestCase):
 
 
 class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
+    def test_received_equal_transfer_needs_no_finalization(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        transfer = PointTransferLine.objects.create(
+            origin_branch=self.branch, destination_branch=self.branch,
+            transfer_external_id='RECEIVED', detail_external_id='RECEIVED-1',
+            source_hash='8' * 64, registered_at=timezone.now(),
+            sent_at=timezone.now(), received_at=timezone.now(),
+            item_name=self.product.name, sent_quantity=2, received_quantity=2,
+            is_received=True, is_finalized=False)
+        self.assertEqual(InventoryAuditAgent._transfer_evidence([transfer.pk]), {})
+        transfer.received_at = None
+        transfer.save(update_fields=['received_at'])
+        self.assertIn('falta acreditar recepción',
+                      InventoryAuditAgent._transfer_evidence([transfer.pk])[transfer.pk]['missing'])
+
     def test_zero_stock_difference_keeps_traceability_separate(self):
         from reportes.services_inventory_audit_agent import InventoryAuditAgent
         case = self.make_case(difference=Decimal('0'), point_closing=Decimal('10'),
@@ -293,7 +308,8 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         reviewer = get_user_model().objects.create_user(username='load-reviewer')
         transfer, discrepancy = self._logistics_discrepancy(assigned_to=reviewer)
         transfer.received_quantity = Decimal('0')
-        transfer.save(update_fields=['received_quantity'])
+        transfer.is_finalized = False
+        transfer.save(update_fields=['received_quantity', 'is_finalized'])
         line = discrepancy.linea_carga
         line.cantidad_cargada = Decimal('0')
         line.estatus = RutaCargaChecklistLinea.ESTATUS_FALTANTE
@@ -328,7 +344,7 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(agent.investigate_case(case).summary['transfer_evidence'],
                          result.summary['transfer_evidence'])
         for field, invalid_value in [('received_quantity', Decimal('1')),
-                                     ('is_finalized', False), ('is_received', False),
+                                     ('is_received', False),
                                      ('is_cancelled', True), ('received_at', None)]:
             with self.subTest(transfer_field=field):
                 original = getattr(transfer, field)
@@ -720,6 +736,23 @@ class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
             ).count(),
             1,
         )
+
+    def test_bounded_refresh_is_idempotent_without_notifications(self):
+        owner = self._head(username="refresh-logistica", department=Empleado.DEP_LOGISTICA)
+        transfer, _ = self._logistics_discrepancy(assigned_to=owner)
+        case = self.make_case(issue_codes=["TRANSFER_QUANTITY_MISMATCH"],
+                              source_trace={"transfers": [transfer.id]})
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        first = InventoryAuditAgent().run_month(self.month, case_ids=[case.pk], notify=False)
+        second = InventoryAuditAgent().run_month(self.month, case_ids=[case.pk], notify=False)
+        self.assertEqual(first["total"], 1)
+        self.assertEqual(first["notifications"], 0)
+        self.assertEqual(second["updated"], 0)
+        self.assertEqual(second["notifications"], 0)
+        self.assertEqual(InventoryAuditAgent().run_month(self.month, case_ids=[], notify=False)["total"], 0)
+        case.refresh_from_db()
+        self.assertFalse(case.last_notified_fingerprint)
+        self.assertFalse(Notificacion.objects.filter(objeto_tipo="reportes.ProductInventoryAuditCaseGroup").exists())
 
     def test_multiple_high_cases_for_same_owner_create_one_grouped_notification(self):
         production_owner = self._head(

@@ -481,6 +481,35 @@ Aplicar proyección mediante `InventoryAuditMaterializer` solo si fuentes son au
 
 ## 3. Documentos de transferencia / Logística
 
+### Estado terminal: Recibida, autorización DG8oct2026
+
+Transferencia normal termina con recepción registrada (`is_received=True` y
+`received_at` presente). `isFinalizado` se conserva como dato original; no es
+un requisito adicional de auditoría ni una acción que deba pedir el agente.
+Frontend Point `/Transfer/tab_solicitudes` muestra RECIBIDO con isRecibido y
+mantiene comentada FinalizarTransferencia. No trasladar estados de pedidos
+especiales a transferencias ni cambiar los originales para ocultar la bandera.
+
+Entrada al destino = recibido; salida del origen = enviado; cuando recibido es
+menor, retorno administrativo al origen = enviado−recibido en fecha de recepción.
+Conservar cada tramo en su mes y no agregar un segundo retorno si el balance ya
+usa historial Stock. Falta de recepción/fecha, cancelaciones, contradicciones y
+diferencias de cantidades siguen sus controles; no convertirlos en pérdidas ni
+en conteo físico. Conservar la incidencia de fecha fallback cuando falta sent_at.
+
+Prueba octubre39577, CEDIS→Colosio, producto final1037/PSNICMINI: enviado2,
+recibido0. Historial CEDIS muestra salida1686766 de2 (3→1) y retorno1687006 de2
+(12→14) el1octUTC. Cabeceras Stock idénticas coinciden con cabecera original
+de transferencia, detalle de retorno únicamente Snickers Mini2. Hubo otra
+salida1 y producción12 entre ambos: no comparar los dos saldos como si no
+hubiera otros eventos. Es registro administrativo, no prueba de transporte
+físico. Este ejemplo no agrega movimientos a septiembre.
+
+Tras publicar la corrección, refrescar sólo los expedientes afectados mediante
+`investigate_inventory_audit_cases --month 2026-09 --case-id ID --no-notify`, sin
+`--refresh-point-history`. Comparar segunda ejecución updated0/notifications0;
+no volver a capturar ni enviar avisos para retirar una interpretación antigua.
+
 Buscar folio/detalle y línea canónica, raw de cabecera y detalle, snapshots y carga por FK exacta. Mantener separado recibido, finalizado, cancelado, cantidades del detalle y total de cabecera; el total de todos los artículos no es cantidad del producto auditado.
 
 Cuando SKU sea ambiguo, revisar identidad explícita del detalle, no pedir otra
@@ -519,7 +548,7 @@ autorización de cierre. La ficha de fuentes del 7 de octubre documenta 19
 líneas afectadas y los consumidores. Segunda revisión: ninguna captura HTTP ni
 cambio operativo por releer la identidad.
 
-Si enviado≠recibido, Point finalizado puede registrar retorno administrativo; verificar si se cargó y custodia física real cuando corresponda. No imputar pérdida, otro retorno o destino de rebanadas. Si falta evidencia humana, usar expediente existente, responsable autorizado y solicitud con folio, fecha, producto, sucursal, cantidad y acción comprobable. Avisar/asignar material/recurrente/alto riesgo; agrupar menores. No duplicar solicitudes ni modificar RRHH para encontrar responsable.
+Si enviado≠recibido, la recepción registrada determina el retorno administrativo; verificarlo contra el historial de origen y la carga/custodia física cuando corresponda al alcance. No exigir isFinalizado ni imputar pérdida, otro retorno o destino de rebanadas. Si falta evidencia humana, usar expediente existente, responsable autorizado y solicitud con folio, fecha, producto, sucursal, cantidad y acción comprobable. Avisar/asignar material/recurrente/alto riesgo; agrupar menores. No duplicar solicitudes ni modificar RRHH para encontrar responsable.
 
 ## 4. Fuentes comerciales y cobertura de mermas
 

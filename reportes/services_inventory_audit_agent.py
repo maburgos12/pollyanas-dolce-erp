@@ -95,7 +95,7 @@ class InventoryAuditAgent:
         self._transfer_cache = None
         self._history_cache = None
 
-    def run_month(self, month, *, dry_run: bool = False) -> dict[str, int]:
+    def run_month(self, month, *, dry_run: bool = False, case_ids=None, notify: bool = True) -> dict[str, int]:
         month = month.replace(day=1)
         counters = {
             "total": 0,
@@ -110,11 +110,14 @@ class InventoryAuditAgent:
         }
         notification_groups: dict[tuple[int, str], list[tuple[int, str]]] = {}
         branch_aliases, _ = canonical_point_branch_identity()
+        cases = ProductInventoryAuditCase.objects.sold_products().filter(
+            month=month,
+            branch_id__in=set(branch_aliases.values()),
+        )
+        if case_ids is not None:
+            cases = cases.filter(pk__in=case_ids)
         month_rows = list(
-            ProductInventoryAuditCase.objects.sold_products().filter(
-                month=month,
-                branch_id__in=set(branch_aliases.values()),
-            )
+            cases
             .order_by("id")
             .values("id", "product_id", "branch_id", "branch__erp_branch_id", "source_trace")
         )
@@ -134,7 +137,7 @@ class InventoryAuditAgent:
 
                     changed = self._projection_changed(case, result)
                     should_notify = (
-                        result.attention_level == ProductInventoryAuditCase.AttentionLevel.HIGH
+                        notify and result.attention_level == ProductInventoryAuditCase.AttentionLevel.HIGH
                         and result.assigned_to_id is not None
                         and case.last_notified_fingerprint != result.fingerprint
                     )
@@ -524,7 +527,7 @@ class InventoryAuditAgent:
         evidence = {}
         for transfer in PointTransferLine.objects.filter(id__in=transfer_ids).select_related(
                 'origin_branch', 'destination_branch').order_by('id'):
-            if transfer.is_received and transfer.received_at and transfer.is_finalized and transfer.sent_quantity == transfer.received_quantity:
+            if transfer.is_received and transfer.received_at and not transfer.is_cancelled and transfer.sent_quantity == transfer.received_quantity:
                 continue
             ref = f"{transfer.transfer_external_id}/{transfer.detail_external_id}"
             origin = transfer.origin_branch.name if transfer.origin_branch_id else 'Origen no identificado'
@@ -554,7 +557,7 @@ class InventoryAuditAgent:
                 and line.estatus == RutaCargaChecklistLinea.ESTATUS_FALTANTE
                 and review.cantidad_enviada == line.cantidad_enviada_esperada == transfer.sent_quantity
                 and transfer.sent_quantity > 0 and transfer.received_quantity == 0
-                and has_receipt and transfer.is_finalized and not transfer.is_cancelled
+                and has_receipt and not transfer.is_cancelled
             )
             if validated_no_load:
                 fact += (f" Discrepancia de carga {review.pk}, validada el "
@@ -565,8 +568,6 @@ class InventoryAuditAgent:
                            "el movimiento; incorporar esta explicación al expediente para aprobación separada.")
             elif not has_receipt:
                 missing = f"Transferencia {ref}: falta acreditar recepción en {destination} o retorno a {origin} de {sent} unidades."
-            elif not transfer.is_finalized:
-                missing = f"Transferencia {ref}: falta finalización Point; no se presume retorno al origen."
             elif transfer.sent_quantity != transfer.received_quantity:
                 missing = f"Transferencia {ref}: conciliar {sent} enviadas contra {received} recibidas"
                 if transfer.received_quantity < transfer.sent_quantity:

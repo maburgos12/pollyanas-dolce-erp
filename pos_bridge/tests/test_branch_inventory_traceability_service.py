@@ -1936,6 +1936,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         transfer = self._transfer(
             sent_quantity="4",
             received_quantity="3",
+            is_finalized=False,
             sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=local_tz),
             received_at=datetime(2026, 9, 1, 0, 5, tzinfo=local_tz),
         )
@@ -1980,6 +1981,28 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             {issue.branch_id for issue in september_issues},
             {self.centro.id, self.plaza.id},
         )
+
+    def test_received_zero_returns_sent_quantity_without_finalization(self):
+        transfer = self._transfer(sent_quantity="2", received_quantity="0", is_finalized=False)
+        transfer_in, transfer_out, issues = {}, {}, []
+        local_tz = timezone.get_current_timezone()
+        self.service._apply_transfers(
+            rows=[transfer], lower_bound=datetime(2026, 8, 1, tzinfo=local_tz),
+            upper_bound=datetime(2026, 9, 1, tzinfo=local_tz),
+            product_indexes=self.service._build_product_indexes([self.product]),
+            transfer_in=transfer_in, transfer_out=transfer_out, issues=issues)
+        key = (self.centro.id, self.product.id)
+        self.assertEqual(transfer_out[key][0], Decimal("2"))
+        self.assertEqual(transfer_in[key][0], Decimal("2"))
+        transfer.is_received = False
+        transfer_in.clear()
+        transfer_out.clear()
+        self.service._apply_transfers(
+            rows=[transfer], lower_bound=datetime(2026, 8, 1, tzinfo=local_tz),
+            upper_bound=datetime(2026, 9, 1, tzinfo=local_tz),
+            product_indexes=self.service._build_product_indexes([self.product]),
+            transfer_in=transfer_in, transfer_out=transfer_out, issues=[])
+        self.assertFalse(transfer_in)
 
     def test_exact_month_transfer_contract_is_independent_of_later_operational_legs(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})

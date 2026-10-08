@@ -614,7 +614,7 @@
     {
       "month": "2026-09-01", "branch_external_id": "13", "product_external_id": "63",
       "case_reference": 3911, "observed_at": "2026-10-03T13:58:07Z",
-      "note": "38657/540006,38700/540833,38927/542924,38999/543936,39541/549357 recibidos completos pero lectura actual confirma isFinalizadoFalse. No bandera vieja ni recaptura import691 COMPLETE. Trazabilidad debe seguir pendiente aunque resumen antiguo COMPLETE ignore missing. No finalizar Point ni atribuir cantidades totales de cabecera a Crunch."
+      "note": "38657/540006,38700/540833,38927/542924,38999/543936,39541/549357 recibidos completos; original isFinalizadoFalse conservado. Interpretación de exigir finalización superada por decisión DG8oct2026: Recibida es terminal, no pendiente por esa bandera. No recapturar import691 COMPLETE ni finalizar Point. Otras diferencias documentales permanecen independientes; no atribuir totales de cabecera a Crunch ni declarar cierre mensual."
     },
     {
       "month": "2026-09-01", "branch_external_id": "1", "product_external_id": "135",
