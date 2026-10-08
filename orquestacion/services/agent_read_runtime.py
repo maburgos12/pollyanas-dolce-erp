@@ -453,6 +453,9 @@ continuation.query; espera la selección si aparecen varias opciones. Si hay var
 pendientes y el usuario no identifica cuál, NO reanudes ninguno: muestra las opciones
 con erp_list_pending_workflows y pide elegir. READY indica que puede leerse, no que
 el usuario eligió ese pendiente entre varios. Nunca suplas esa elección.
+Un saludo o una petición fuera de READ no solicita continuar ningún pendiente,
+aunque sólo haya uno READY. En esos casos usa erp_list_pending_workflows para la
+primera lectura obligatoria; no prepares ni reanudes una consulta y luego termina.
 Las posiciones pertenecen exclusivamente a ese workflow, nunca a opciones globales.
 Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
 """ if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
@@ -477,8 +480,11 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
         while rounds < MAX_RESPONSES:
             actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
             remaining = _check_budget(started, context)
+            # First workflow cycle must obtain server evidence; later cycles may finish.
+            tool_policy = {"tool_choice": "required" if rounds == 0 else "auto",
+                           "parallel_tool_calls": False} if workflow_prompt else {}
             try:
-                result = client.with_options(max_retries=0, timeout=remaining).responses.create(model=model, input=context, tools=tools, store=False, max_output_tokens=1400)
+                result = client.with_options(max_retries=0, timeout=remaining).responses.create(model=model, input=context, tools=tools, store=False, max_output_tokens=1400, **tool_policy)
             except Exception:
                 raise ReadStopped("provider_failed") from None
             rounds += 1
