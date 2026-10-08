@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Chat ERP · Pollyana's Dolce{% endblock %}
-{% block page_title %}Chat ERP{% endblock %}
+{% block title %}Agente ERP · Pollyana's Dolce{% endblock %}
+{% block page_title %}Agente ERP{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261008-agent-results-v1">
 {% endblock %}
 
 {% block content %}
@@ -13,28 +13,38 @@
 {{ selected_conversation|json_script:"erp-chat-selected-data" }}
 {{ runtime_status|json_script:"erp-chat-runtime-status" }}
 
-<section class="erp-chat-shell">
+<section class="erp-chat-shell" aria-label="Agente ERP">
   <aside class="erp-chat-sidebar">
     <div class="erp-chat-sidebar-head">
-      <span class="erp-chat-badge"><span class="erp-chat-badge-dot"></span>Chat ERP nativo</span>
-      <h2 class="erp-chat-title">Pollyana's Dolce AI</h2>
-      <p class="erp-chat-subtitle">Consulta ventas, compras, inventario, producción, costos y riesgos operativos desde un solo chat.</p>
+      <h2 class="erp-chat-title">Agente ERP</h2>
+      <p class="erp-chat-subtitle">Conversaciones y procesos con información de tus módulos autorizados.</p>
       <button type="button" class="erp-chat-new-btn" id="erp-chat-new-btn">Nueva conversación</button>
     </div>
-    <div class="erp-chat-conversation-list" id="erp-chat-conversation-list"></div>
+    <details class="agent-history" open><summary>Conversaciones</summary>
+      <div class="erp-chat-conversation-list" id="erp-chat-conversation-list"></div>
+    </details>
+    <details class="agent-processes" id="agent-processes"><summary>Mis procesos</summary>
+      <div class="agent-process-controls">
+        <label for="agent-process-filter">Estado</label>
+        <select id="agent-process-filter"><option value="">Todos</option><option value="WAITING_INFORMATION">Falta información</option><option value="WAITING_SELECTION">Elegir equipo</option><option value="READY">Listos para consultar</option><option value="COMPLETED">Completados</option></select>
+        <button type="button" id="agent-process-refresh">Actualizar</button>
+      </div>
+      <div id="agent-process-list"><p>Abre esta sección para consultar tus procesos.</p></div>
+      <div class="agent-process-pages"><button type="button" id="agent-process-prev" disabled>Anterior</button><span id="agent-process-page">Página 1</span><button type="button" id="agent-process-next">Siguiente</button></div>
+    </details>
   </aside>
 
   <section class="erp-chat-main">
     <header class="erp-chat-main-head">
       <div>
         <h1 class="erp-chat-main-title" id="erp-chat-main-title">Nueva conversación</h1>
-        <p class="erp-chat-main-subtitle" id="erp-chat-main-subtitle">Consulta ventas, compras, inventario, producción, costos, forecast y discrepancias sin salir del ERP.</p>
+        <p class="erp-chat-main-subtitle" id="erp-chat-main-subtitle">La información disponible depende de tus permisos y de las herramientas habilitadas.</p>
       </div>
       <span class="erp-chat-badge {% if not runtime_status.ready %}is-warning{% endif %}" id="erp-chat-runtime-badge">
         {% if runtime_status.ready %}
-          IA privada empresarial
+          Modelo configurado
         {% else %}
-          Configuración pendiente del modelo
+          Conexión pendiente
         {% endif %}
       </span>
     </header>
@@ -42,35 +52,24 @@
     <div class="erp-chat-main-body" id="erp-chat-main-body">
       <div class="erp-chat-empty" id="erp-chat-empty-state">
         <img src="{% static 'favicon.ico' %}" alt="Pollyana's Dolce" class="pd-u-90314a5479">
-        <h2>Estoy lista para ayudarte con Pollyana's Dolce.</h2>
-        <p>Haz preguntas operativas reales del ERP y mantén conversaciones estables: gastos, compras, inventario, forecast, producción, costos o discrepancias.</p>
-        {% if not runtime_status.ready %}
-          <p class="pd-u-55b541e1fe">La interfaz ya está lista, pero falta completar la conexión del modelo para responder automáticamente.</p>
-        {% endif %}
+        <h2>¿Qué necesitas consultar?</h2>
+        <p>Pide información con tus palabras. Los resultados mostrarán su fuente y los procesos podrán conservarse para continuar después.</p>
+        {% if not runtime_status.ready %}<p>La conexión del agente está pendiente. Puedes revisar las conversaciones guardadas.</p>{% endif %}
         <div class="erp-chat-prompts">
-          <button type="button" class="erp-chat-prompt" data-prompt="¿Qué tanto gasto en insumos haremos en lo que resta del mes de abril?">
-            <strong>Forecast operativo</strong>
-            Estima gasto de insumos separando comprometido vs esperado.
-          </button>
-          <button type="button" class="erp-chat-prompt" data-prompt="¿Cuáles son los productos con mayor riesgo de stock bajo esta semana?">
-            <strong>Riesgo de inventario</strong>
-            Detecta faltantes y prioriza reabasto.
-          </button>
-          <button type="button" class="erp-chat-prompt" data-prompt="¿Qué discrepancias operativas críticas siguen abiertas hoy?">
-            <strong>Conciliación</strong>
-            Resume hallazgos pendientes y siguiente acción.
-          </button>
+          <button type="button" class="erp-chat-prompt" data-prompt="Busca la batidora 3 y muestra su mantenimiento.">Consultar un equipo</button>
+          <button type="button" class="erp-chat-prompt" data-prompt="¿Qué equipos tienen planes de mantenimiento vencidos?">Revisar mantenimientos</button>
         </div>
       </div>
-      <div class="erp-chat-message-list" id="erp-chat-message-list" hidden></div>
+      <div class="erp-chat-message-list" id="erp-chat-message-list" aria-label="Mensajes de la conversación" hidden></div>
     </div>
 
     <div class="erp-chat-composer-wrap">
       <div class="erp-chat-composer">
-        <textarea id="erp-chat-input" class="erp-chat-textarea" placeholder="Pregunta al ERP como hablarías con ChatGPT, por ejemplo: ¿cuánto vamos a gastar en insumos el resto del mes?"></textarea>
+        <label for="erp-chat-input" class="agent-input-label">Tu consulta</label>
+        <textarea id="erp-chat-input" aria-describedby="erp-chat-status" maxlength="12000" class="erp-chat-textarea" placeholder="Escribe lo que necesitas; por ejemplo, consulta el mantenimiento de una batidora."></textarea>
         <div class="erp-chat-composer-actions">
-          <div class="erp-chat-hint" id="erp-chat-status">Haz una pregunta y te responderé con contexto del ERP.</div>
-          <button type="button" class="erp-chat-send" id="erp-chat-send-btn">Enviar</button>
+          <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite">Haz una pregunta y te responderé con contexto del ERP.</div>
+          <button type="button" class="erp-chat-send" id="erp-chat-send-btn" {% if not runtime_status.ready %}disabled{% endif %}>Enviar</button>
         </div>
       </div>
     </div>
@@ -79,6 +78,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261008-agent-results-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -87,10 +87,15 @@
   const selectedSeed = JSON.parse(document.getElementById("erp-chat-selected-data").textContent || "null");
   const runtimeStatus = JSON.parse(document.getElementById("erp-chat-runtime-status").textContent || "{}");
 
+  if (window.matchMedia("(max-width:700px)").matches) document.querySelector(".agent-history").open = false;
+
+  const view = ERPAgentView;
   const state = {
     conversations: conversationsSeed,
     activeConversation: selectedSeed,
     sending: false,
+    loading: false,
+    creating: false,
   };
 
   const listEl = document.getElementById("erp-chat-conversation-list");
@@ -103,15 +108,7 @@
   const sendBtn = document.getElementById("erp-chat-send-btn");
   const statusEl = document.getElementById("erp-chat-status");
 
-  function escapeHtml(value) {
-    return (value || "").replace(/[&<>"']/g, (char) => ({
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#039;",
-    }[char]));
-  }
+  const escapeHtml = view.escape;
 
   function formatTimestamp(value) {
     if (!value) return "";
@@ -141,7 +138,9 @@
         <p class="erp-chat-conversation-preview">${escapeHtml(conversation.preview || "Sin mensajes todavía.")}</p>
         <div class="erp-chat-conversation-time">${formatTimestamp(conversation.last_message_at)}</div>
       `;
-      button.addEventListener("click", () => loadConversation(conversation.id));
+      button.disabled = state.sending || state.loading || state.creating;
+      button.setAttribute("aria-current", active ? "true" : "false");
+      button.addEventListener("click", () => loadConversation(conversation.id).catch(showError));
       listEl.appendChild(button);
     });
   }
@@ -152,7 +151,7 @@
       emptyEl.hidden = false;
       messageListEl.hidden = true;
       titleEl.textContent = detail?.conversation?.title || "Nueva conversación";
-      subtitleEl.textContent = "Consulta ventas, compras, inventario, producción, costos, forecast y discrepancias sin salir del ERP.";
+      subtitleEl.textContent = "La información disponible depende de tus permisos y de las herramientas habilitadas.";
       return;
     }
 
@@ -160,6 +159,7 @@
     messageListEl.hidden = false;
     titleEl.textContent = detail.conversation.title;
     subtitleEl.textContent = "Conversación guardada y lista para continuar.";
+    const nearBottom = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 100;
     messageListEl.innerHTML = "";
 
     detail.messages.forEach((message) => {
@@ -172,23 +172,16 @@
       if (message.status === "error") {
         bubbleClasses.push("is-error");
       }
-      const toolsHtml = (message.tool_calls || []).length
-        ? `
-          <div class="erp-chat-tool-box">
-            ${message.tool_calls.map((toolCall) => `
-              <div class="erp-chat-tool-item">
-                <strong>${escapeHtml(toolCall.tool_display_name || toolCall.tool_name)}</strong>
-                <p>${escapeHtml(toolCall.summary || "Herramienta ejecutada sin resumen adicional.")}</p>
-              </div>
-            `).join("")}
-          </div>
-        `
-        : "";
+      const toolsHtml = (message.tool_calls || []).map(view.tool).join("");
+      const responseHtml = toolsHtml
+        ? `<details class="agent-full-response"><summary>Texto completo de la respuesta</summary><p>${escapeHtml(message.content)}</p></details>`
+        : `<p>${escapeHtml(message.content || (message.status === "streaming" ? "Consultando el ERP…" : ""))}</p>`;
       row.innerHTML = `
         ${message.role === "user" ? "" : avatar}
         <div class="${bubbleClasses.join(" ")}" data-message-id="${message.id}">
-          <p>${escapeHtml(message.content)}</p>
+          <div class="agent-message-label">${message.role === "user" ? "Tú" : "Respuesta del agente"}${message.status === "error" ? " · No completada" : ""}</div>
           ${toolsHtml}
+          ${responseHtml}
           <div class="erp-chat-meta">${formatTimestamp(message.created_at)}</div>
         </div>
         ${message.role === "user" ? avatar : ""}
@@ -196,7 +189,7 @@
       messageListEl.appendChild(row);
     });
 
-    bodyEl.scrollTop = bodyEl.scrollHeight;
+    if (nearBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
   }
 
   async function refreshConversations() {
@@ -208,36 +201,57 @@
   }
 
   async function createConversation() {
-    const response = await fetch(`${apiBase}/conversations/new/`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRFToken": csrfToken,
-      },
-      body: JSON.stringify({}),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.detail || "No pude crear la conversación.");
+    if (state.creating) throw new Error("Espera a que se abra la conversación.");
+    state.creating = true;
+    sendBtn.disabled = true;
+    document.getElementById("erp-chat-new-btn").disabled = true;
+    renderConversationList();
+    try {
+      const response = await fetch(`${apiBase}/conversations/new/`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || "No pude crear la conversación.");
+      }
+      state.activeConversation = {
+        conversation: payload.conversation,
+        messages: [],
+      };
+      await refreshConversations();
+      renderMessages();
+      return state.activeConversation.conversation.id;
+    } finally {
+      state.creating = false;
+      sendBtn.disabled = state.sending || !runtimeStatus.ready;
+      document.getElementById("erp-chat-new-btn").disabled = state.sending;
+      renderConversationList();
     }
-    state.activeConversation = {
-      conversation: payload.conversation,
-      messages: [],
-    };
-    await refreshConversations();
-    renderMessages();
-    return state.activeConversation.conversation.id;
   }
 
-  async function loadConversation(id) {
-    const response = await fetch(`${apiBase}/conversations/${id}/`, { credentials: "same-origin" });
-    if (!response.ok) {
-      throw new Error("No pude abrir la conversación.");
-    }
-    state.activeConversation = await response.json();
+  async function loadConversation(id, afterSend = false) {
+    if (state.loading || state.creating || (state.sending && !afterSend)) return;
+    state.loading = true;
+    sendBtn.disabled = true;
+    document.getElementById("erp-chat-new-btn").disabled = true;
     renderConversationList();
-    renderMessages();
+    try {
+      const response = await fetch(`${apiBase}/conversations/${id}/`, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("No pude abrir la conversación. Intenta nuevamente.");
+      state.activeConversation = await response.json();
+      renderMessages();
+    } finally {
+      state.loading = false;
+      sendBtn.disabled = state.sending || !runtimeStatus.ready;
+      document.getElementById("erp-chat-new-btn").disabled = state.sending;
+      renderConversationList();
+    }
   }
 
   function appendOptimisticMessages(content) {
@@ -306,18 +320,22 @@
 
   async function sendMessage() {
     const content = inputEl.value.trim();
-    if (!content || state.sending) return;
+    if (!content || state.sending || state.loading || state.creating || !runtimeStatus.ready) return;
     state.sending = true;
+    renderConversationList();
+    document.getElementById("erp-chat-new-btn").disabled = true;
+    document.getElementById("agent-process-list").querySelectorAll("button").forEach(button => { button.disabled = true; });
     sendBtn.disabled = true;
     inputEl.disabled = true;
     statusEl.textContent = "Procesando tu consulta…";
 
+    let tempAssistant = null;
     try {
       if (!state.activeConversation || !state.activeConversation.conversation?.id) {
         await createConversation();
       }
       const conversationId = state.activeConversation.conversation.id;
-      const tempAssistant = appendOptimisticMessages(content);
+      tempAssistant = appendOptimisticMessages(content);
       inputEl.value = "";
 
       const response = await fetch(`${apiBase}/conversations/${conversationId}/stream/`, {
@@ -343,9 +361,11 @@
         return;
       }
 
+      if (!response.body) throw new Error("Este navegador no pudo recibir la respuesta. Abre la conversación para consultar el resultado.");
       const reader = response.body.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
+      let terminalEvent = false;
 
       while (true) {
         const { value, done } = await reader.read();
@@ -360,25 +380,31 @@
           if (!eventLine || !dataLine) return;
           const eventName = eventLine.replace("event:", "").trim();
           const payload = JSON.parse(dataLine.replace("data:", "").trim());
+          if (eventName === "done" || eventName === "error") terminalEvent = true;
           updateStreamingAssistant(tempAssistant, eventName, payload);
         });
       }
 
-      await loadConversation(conversationId);
+      if (!terminalEvent) throw new Error("La conexión se cerró antes de recibir el resultado. Abre la conversación antes de reenviar.");
+      await loadConversation(conversationId, true);
       await refreshConversations();
-      statusEl.textContent = "Respuesta lista.";
+      statusEl.textContent = state.activeConversation.messages.at(-1)?.status === "error" ? "La consulta no se completó. Revisa la respuesta." : "Respuesta lista.";
     } catch (error) {
-      console.error(error);
-      statusEl.textContent = error.message || "No pude completar la respuesta.";
+      if (tempAssistant) markAssistantError(tempAssistant, {detail:"Se interrumpió la conexión. La ejecución puede haber terminado en el servidor; abre la conversación antes de volver a enviar."});
+      showError(error);
     } finally {
       state.sending = false;
-      sendBtn.disabled = false;
+      sendBtn.disabled = !runtimeStatus.ready;
       inputEl.disabled = false;
+      document.getElementById("erp-chat-new-btn").disabled = false;
+      renderConversationList();
+      if (document.getElementById("agent-processes").open) refreshProcesses();
       inputEl.focus();
     }
   }
 
   document.getElementById("erp-chat-new-btn").addEventListener("click", async () => {
+    if (state.sending || state.loading || state.creating) return;
     try {
       await createConversation();
     } catch (error) {
@@ -395,7 +421,7 @@
 
   sendBtn.addEventListener("click", sendMessage);
   inputEl.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       sendMessage();
     }
@@ -403,8 +429,54 @@
 
   statusEl.textContent = runtimeStatus.ready
     ? "Pregunta al ERP con lenguaje natural y te responderé con contexto operativo."
-    : `Modo configuración pendiente: ${runtimeStatus.issue || "falta configurar el modelo del chat."}`;
+    : "Conexión pendiente. Puedes consultar las conversaciones guardadas.";
 
+  function showError(error) {
+    statusEl.textContent = error.name === "TypeError" || error.name === "SyntaxError"
+      ? "No se pudo recibir la información. Revisa tu conexión e intenta abrir la conversación nuevamente."
+      : error.message || "No se pudo cargar la información. Intenta nuevamente.";
+  }
+  let processPage = 1;
+  let processRequest = 0;
+  async function refreshProcesses() {
+    const request = ++processRequest;
+    const list = document.getElementById("agent-process-list");
+    list.innerHTML = '<p role="status">Consultando tus procesos…</p>';
+    const filter = document.getElementById("agent-process-filter").value;
+    try {
+      const response = await fetch(`/api/ai-gateway/workflows/?page=${processPage}&page_size=20${filter ? `&status=${encodeURIComponent(filter)}` : ''}`, {credentials:"same-origin"});
+      if (request !== processRequest) return;
+      if (response.status === 401 || response.status === 403) {
+        list.innerHTML = '<p>Los procesos no están habilitados para esta sesión. Las conversaciones siguen disponibles.</p>';
+        return;
+      }
+      if (!response.ok) throw new Error("No se pudieron cargar tus procesos. Usa Actualizar para volver a consultar.");
+      const payload = await response.json();
+      if (request !== processRequest) return;
+      list.innerHTML = (payload.items || []).map(row => view.workflow(row, true)).join('') || '<p>No hay procesos visibles en esta página.</p>';
+    } catch (error) {
+      if (request === processRequest) { list.textContent = "No se pudieron cargar tus procesos. Revisa tu conexión y usa Actualizar para volver a consultar."; }
+    } finally {
+      if (request === processRequest) {
+        document.getElementById("agent-process-page").textContent = `Página ${processPage}`;
+        document.getElementById("agent-process-prev").disabled = processPage <= 1;
+        document.getElementById("agent-process-next").disabled = processPage >= 1000;
+        list.querySelectorAll('button').forEach(button => {button.disabled = state.sending || state.loading || state.creating;});
+      }
+    }
+  }
+  document.getElementById("agent-processes").addEventListener("toggle", event => {if (event.target.open) refreshProcesses();});
+  document.getElementById("agent-process-refresh").addEventListener("click", refreshProcesses);
+  document.getElementById("agent-process-filter").addEventListener("change", () => {processPage = 1; refreshProcesses();});
+  document.getElementById("agent-process-prev").addEventListener("click", () => {if (processPage > 1) {processPage--; refreshProcesses();}});
+  document.getElementById("agent-process-next").addEventListener("click", () => {if (processPage < 1000) {processPage++; refreshProcesses();}});
+  document.getElementById("agent-process-list").addEventListener("click", event => {
+    const button = event.target.closest("[data-workflow-id]");
+    if (!button || state.sending || state.loading || state.creating) return;
+    inputEl.value = `Quiero continuar la consulta ${button.dataset.workflowId}. `;
+    inputEl.focus();
+    statusEl.textContent = "Añade el dato o la selección que falta y envía tu mensaje. El proceso aún no se ha ejecutado.";
+  });
   renderConversationList();
   renderMessages();
 })();

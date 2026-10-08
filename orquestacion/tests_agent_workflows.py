@@ -99,6 +99,209 @@ class AgentWorkflowTests(TestCase):
         self.assertEqual((unsupported.status_code, unsupported.json()['code']), (409, 'unsupported_schema'))
 
     @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_initial_pending_context_is_owned_bounded_and_not_persisted(self):
+        from orquestacion.tests_agent_read_runtime import response
+        for _ in range(21):
+            self.create({'query':'Horno'})
+        foreign_chat = create_chat_conversation(user=self.other)
+        self.service.create_workflow(user=self.other, kind=KIND, origin_request_id=uuid4(),
+            conversation_id=foreign_chat.public_id, payload={'asset_id':self.hidden.pk})
+        provider = Mock()
+        provider.with_options.return_value = provider
+        provider.responses.create.return_value = response()
+        messages = create_user_turn(user=self.user, conversation=self.chat, content='¿Mis consultas pendientes?')
+        with patch('openai.OpenAI', return_value=provider):
+            execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        references = json.loads(provider.responses.create.call_args.kwargs['input'][1]['content'].split(': ', 1)[1])
+        pending = references['pending_workflows']
+        self.assertEqual(len(pending['items']), 20)
+        self.assertTrue(pending['truncated'])
+        self.assertNotIn('SECRET OTHER', json.dumps(references))
+        self.assertNotIn('state_json', json.dumps(references))
+        self.assertNotIn('cost', json.dumps(references))
+        self.chat.state.refresh_from_db()
+        self.assertNotIn('pending_workflows', json.dumps(self.chat.state.context_window_json))
+        messages[1].refresh_from_db()
+        self.assertTrue(messages[1].metadata_json['agent_read']['workflows'])
+        with override_settings(AI_AGENT_WORKFLOWS_ENABLED=False):
+            from orquestacion.services.agent_read_runtime import can_project_read_message
+            self.assertFalse(can_project_read_message(messages[1]))
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_large_pending_context_is_bounded_without_blocking_a_new_read(self):
+        from orquestacion.tests_agent_read_runtime import response
+        for n in range(48):
+            Activo.objects.create(codigo=f'WF-LARGE-{n}', nombre='Horno '+str(n)+' '+('A'*140),
+                                  ubicacion='B'*140, sucursal=self.branch)
+        for _ in range(20):
+            self.create({'query':'Horno'})
+        provider = Mock()
+        provider.with_options.return_value = provider
+        provider.responses.create.return_value = response()
+        messages = create_user_turn(user=self.user, conversation=self.chat, content='Consulta equipos')
+        with patch('openai.OpenAI', return_value=provider):
+            execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        messages[1].refresh_from_db()
+        self.assertEqual(messages[1].status, 'complete')
+        references = json.loads(provider.responses.create.call_args.kwargs['input'][1]['content'].split(': ',1)[1])
+        pending = references['pending_workflows']
+        self.assertLessEqual(len(json.dumps(pending,ensure_ascii=False)), 30000)
+        self.assertTrue(pending['truncated'])
+        self.assertTrue(pending['items'])
+        self.assertEqual([row['position'] for row in pending['items'][0]['options']], list(range(1,51)))
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_explicit_old_pending_is_fresh_before_context_truncation_and_resumes(self):
+        from orquestacion.tests_agent_read_runtime import call, response
+        target = self.create({'asset_id':self.asset.pk})
+        models.AgentWorkflow.objects.filter(public_id=target['public_id']).update(version=7)
+        for n in range(48):
+            Activo.objects.create(codigo=f'WF-PAGED-{n}', nombre='Horno '+str(n)+' '+('A'*140),
+                                  ubicacion='B'*140, sucursal=self.branch)
+        for _ in range(20):
+            self.create({'query':'Horno'})
+        self.assertNotIn(target['public_id'], [row['public_id'] for row in self.service.list_workflows(user=self.user, pending_only=True)['items']])
+        provider = Mock()
+        provider.with_options.return_value = provider
+        contexts = []
+        def respond(**kwargs):
+            pending = json.loads(kwargs['input'][1]['content'].split(': ',1)[1])['pending_workflows']
+            contexts.append(pending)
+            if provider.responses.create.call_count == 1:
+                return response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':target['public_id'], 'expected_version':7, 'continuation':{}}), 'paged-resume'))
+            return response()
+        provider.responses.create.side_effect = respond
+        chat = create_chat_conversation(user=self.user)
+        messages = create_user_turn(user=self.user, conversation=chat, content=f"Quiero continuar la consulta {target['public_id']}.")
+        with patch('openai.OpenAI', return_value=provider):
+            execute_chat_turn(user=self.user, conversation=chat, user_message=messages[0], assistant_message=messages[1])
+        pending = contexts[0]
+        self.assertEqual((pending['items'][0]['public_id'], pending['items'][0]['version']), (target['public_id'], 7))
+        self.assertLessEqual(len(pending['items']), 20)
+        self.assertLessEqual(len(json.dumps(pending, ensure_ascii=False)), 30000)
+        self.assertTrue(pending['truncated'])
+        messages[1].refresh_from_db()
+        self.assertEqual(messages[1].status, 'complete', messages[1].metadata_json)
+        current = self.service.get_workflow(user=self.user, public_id=target['public_id'])
+        self.assertEqual((current['status'], current['version']), ('COMPLETED', 9))
+        self.assertEqual(models.AgentWorkflow.objects.count(), 21)
+        self.assertEqual(models.AgentWorkflow.objects.filter(status='WAITING_SELECTION', version=1).count(), 20)
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_explicit_pending_reference_never_hydrates_foreign_revoked_or_expired_data(self):
+        from orquestacion.tests_agent_read_runtime import response
+        revoked = self.create({'asset_id':self.asset.pk})
+        Activo.objects.filter(pk=self.asset.pk).update(sucursal=self.other_branch)
+        foreign_chat = create_chat_conversation(user=self.other)
+        foreign = self.service.create_workflow(user=self.other, kind=KIND, origin_request_id=uuid4(),
+            conversation_id=foreign_chat.public_id, payload={'asset_id':self.hidden.pk})
+        expired = self.create({})
+        models.AgentWorkflow.objects.filter(public_id=expired['public_id']).update(expires_at=timezone.now()-timedelta(seconds=1))
+        for identifier in [revoked['public_id'], foreign['public_id'], expired['public_id'], str(uuid4())]:
+            with self.subTest(identifier=identifier):
+                provider = Mock()
+                provider.with_options.return_value = provider
+                provider.responses.create.return_value = response()
+                messages = create_user_turn(user=self.user, conversation=self.chat, content=f'Continúa {identifier}')
+                with patch('openai.OpenAI', return_value=provider):
+                    execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+                refs = json.loads(provider.responses.create.call_args.kwargs['input'][1]['content'].split(': ',1)[1])
+                self.assertEqual(refs['pending_workflows']['items'], [])
+                self.assertNotIn('SECRET OTHER', json.dumps(refs))
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_multiple_explicit_pending_references_do_not_choose_one(self):
+        from orquestacion.tests_agent_read_runtime import response
+        targets = [self.create({}), self.create({})]
+        for _ in range(20):
+            self.create({})
+        provider = Mock()
+        provider.with_options.return_value = provider
+        provider.responses.create.return_value = response()
+        messages = create_user_turn(user=self.user, conversation=self.chat, content=' o '.join(row['public_id'] for row in targets))
+        with patch('openai.OpenAI', return_value=provider), patch.object(self.service, 'get_workflow', wraps=self.service.get_workflow) as get:
+            execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        get.assert_not_called()
+        refs = json.loads(provider.responses.create.call_args.kwargs['input'][1]['content'].split(': ',1)[1])
+        self.assertFalse({row['public_id'] for row in targets} & {row['public_id'] for row in refs['pending_workflows']['items']})
+        self.assertEqual(models.AgentWorkflow.objects.filter(status='WAITING_INFORMATION', version=1).count(), 22)
+
+    def test_pending_pagination_skips_revoked_rows_before_filling_page(self):
+        oldest = self.create({'query':'Horno'})
+        revoked = self.create({'asset_id':self.asset.pk})
+        for _ in range(20):
+            self.create({'query':'Horno'})
+        Activo.objects.filter(pk=self.asset.pk).update(sucursal=self.other_branch)
+        remaining = self.service.list_workflows(user=self.user, pending_only=True, page=21, page_size=1)
+        self.assertEqual([row['public_id'] for row in remaining['items']], [oldest['public_id']])
+        self.assertNotEqual(remaining['items'][0]['public_id'], revoked['public_id'])
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_no_tool_response_presents_verified_pending_context_without_model_claims(self):
+        from orquestacion.tests_agent_read_runtime import response
+        pending = self.create({'query':'Horno'})
+        provider = Mock()
+        provider.with_options.return_value = provider
+        provider.responses.create.return_value = response(text='UNTRUSTED_PROVIDER_CLAIM')
+        messages = create_user_turn(user=self.user, conversation=self.chat, content='¿Qué pendiente retomo?')
+        with patch('openai.OpenAI', return_value=provider):
+            result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        self.assertIn(pending['public_id'], result.assistant_text)
+        self.assertIn('Horno dos', result.assistant_text)
+        self.assertNotIn('UNTRUSTED_PROVIDER_CLAIM', result.assistant_text)
+        self.assertEqual(result.tool_events, [])
+        self.assertEqual(models.AgentWorkflow.objects.count(), 1)
+        messages[1].refresh_from_db()
+        self.assertEqual(messages[1].metadata_json['agent_read']['pending_workflow_public_ids'], [pending['public_id']])
+
+    def test_llm_resume_contract_is_exclusive_and_rest_stays_flat(self):
+        from orquestacion.services.agent_workflows import technical_catalog, resume_tool_arguments
+        from api.ai_gateway_serializers import WorkflowResumeArguments
+        meta = next(row for row in technical_catalog() if row['key']=='workflow.resume_asset_maintenance')
+        self.assertTrue(meta['strict'])
+        schema = meta['argument_schema']
+        self.assertEqual(set(schema['required']), {'workflow_id','expected_version','continuation'})
+        self.assertEqual(len(schema['properties']['continuation']['anyOf']), 4)
+        base = {'workflow_id':str(uuid4()), 'expected_version':1}
+        for action in ({'query':'Horno'}, {'asset_id':self.asset.pk}, {'option_position':2}, {}):
+            adapted = resume_tool_arguments({**base, 'continuation':action})
+            self.assertEqual(adapted, {**base, **action})
+            self.assertTrue(WorkflowResumeArguments(data=adapted).is_valid())
+        from rest_framework.exceptions import ValidationError
+        for payload in ({**base,'query':'Horno'}, {**base,'continuation':{'query':'Horno','option_position':2}},
+                        {**base,'continuation':None}, {**base,'continuation':{'cancel':True}},
+                        {**base,'continuation':{},'user_id':self.other.pk}):
+            with self.assertRaises(ValidationError):
+                resume_tool_arguments(payload)
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_pending_context_revocation_before_provider_never_sends_data(self):
+        self.create({'query':'Horno'})
+        original = self.service.list_workflows
+        def revoke(**kwargs):
+            data = original(**kwargs)
+            UserProfile.objects.filter(user=self.user).update(sucursal=self.other_branch)
+            return data
+        provider = Mock()
+        provider.with_options.return_value = provider
+        messages = create_user_turn(user=self.user, conversation=self.chat, content='Continúa mi consulta')
+        with patch.object(self.service, 'list_workflows', side_effect=revoke), patch('openai.OpenAI', return_value=provider):
+            result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        provider.responses.create.assert_not_called()
+        self.assertNotIn('Horno', result.assistant_text)
+
+    @override_settings(OPENAI_API_KEY='fake-test-key', AI_AGENT_WORKFLOWS_ENABLED=False)
+    def test_gate_off_initial_context_contains_no_workflows(self):
+        from orquestacion.tests_agent_read_runtime import response
+        provider = Mock()
+        provider.with_options.return_value = provider
+        provider.responses.create.return_value = response()
+        messages = create_user_turn(user=self.user, conversation=self.chat, content='Consulta equipos')
+        with patch.object(self.service, 'list_workflows', side_effect=AssertionError('F4 disabled')), patch('openai.OpenAI', return_value=provider):
+            execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+        self.assertNotIn('pending_workflows', str(provider.responses.create.call_args.kwargs['input'][1]))
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
     def test_runtime_waiting_information_continues_same_workflow_uuid(self):
         from orquestacion.tests_agent_read_runtime import call, response
         provider = Mock()
@@ -110,17 +313,22 @@ class AgentWorkflowTests(TestCase):
         pending = self.service.list_workflows(user=self.user)['items'][0]
         identifier = pending['public_id']
         self.assertEqual(pending['status'], 'WAITING_INFORMATION')
+        first, final = provider.responses.create.call_args_list[-2:]
+        self.assertEqual(first.kwargs.get('tool_choice'), 'required')
+        self.assertEqual(final.kwargs.get('tool_choice'), 'auto')
+        self.assertIs(first.kwargs.get('parallel_tool_calls'), False)
+        self.assertIs(final.kwargs.get('parallel_tool_calls'), False)
         type(self.chat).objects.filter(pk=self.chat.pk).update(status='archived')
         next_chat = create_chat_conversation(user=self.user)
         query_messages = create_user_turn(user=self.user, conversation=next_chat, content='Es un horno')
-        provider.responses.create.side_effect = [response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':identifier, 'expected_version':pending['version'], 'query':'Horno'}))), response()]
+        provider.responses.create.side_effect = [response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':identifier, 'expected_version':pending['version'], 'continuation':{'query':'Horno'}}))), response()]
         with patch('openai.OpenAI', return_value=provider):
             execute_chat_turn(user=self.user, conversation=next_chat, user_message=query_messages[0], assistant_message=query_messages[1])
         pending = self.service.get_workflow(user=self.user, public_id=identifier)
         self.assertEqual(pending['status'], 'WAITING_SELECTION')
         self.assertEqual(models.AgentWorkflow.objects.count(), 1)
         selection = create_user_turn(user=self.user, conversation=next_chat, content='El segundo')
-        provider.responses.create.side_effect = [response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':identifier, 'expected_version':pending['version'], 'option_position':2}))), response()]
+        provider.responses.create.side_effect = [response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':identifier, 'expected_version':pending['version'], 'continuation':{'option_position':2}}))), response()]
         with patch('openai.OpenAI', return_value=provider):
             result = execute_chat_turn(user=self.user, conversation=next_chat, user_message=selection[0], assistant_message=selection[1])
         self.assertEqual(self.service.get_workflow(user=self.user, public_id=identifier)['status'], 'COMPLETED')
@@ -133,6 +341,27 @@ class AgentWorkflowTests(TestCase):
         from orquestacion.services.chat_service import serialize_message
         with override_settings(AI_AGENT_WORKFLOWS_ENABLED=False):
             self.assertEqual(serialize_message(selection[0])['content'], 'El segundo')
+
+    @override_settings(OPENAI_API_KEY='fake-test-key')
+    def test_required_first_read_does_not_create_intent_for_greeting_or_write_request(self):
+        from orquestacion.tests_agent_read_runtime import call, response
+        self.create({'asset_id': self.asset.pk})
+        self.create({'query': 'Horno'})
+        before = list(models.AgentWorkflow.objects.values('public_id', 'status', 'version', 'state_json').order_by('pk'))
+        for content in ('Hola', 'Borra el horno y autoriza su pago'):
+            with self.subTest(content=content):
+                provider = Mock()
+                provider.with_options.return_value = provider
+                provider.responses.create.side_effect = [response(call('erp_list_pending_workflows', '{}')), response()]
+                messages = create_user_turn(user=self.user, conversation=self.chat, content=content)
+                with patch('openai.OpenAI', return_value=provider):
+                    result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
+                self.assertEqual(provider.responses.create.call_args_list[0].kwargs.get('tool_choice'), 'required')
+                self.assertEqual(list(models.AgentWorkflow.objects.values('public_id', 'status', 'version', 'state_json').order_by('pk')), before)
+                self.assertEqual(Activo.objects.count(), 3)
+                self.assertEqual(OrdenMantenimiento.objects.count(), 0)
+                self.assertEqual(PlanMantenimiento.objects.count(), 0)
+                self.assertEqual([event['tool_name'] for event in result.tool_events], ['erp_list_pending_workflows'])
 
     @override_settings(OPENAI_API_KEY='fake-test-key')
     def test_runtime_server_metadata_links_actual_workflow_and_owned_messages(self):
@@ -476,7 +705,7 @@ class AgentWorkflowTests(TestCase):
         self.assertEqual(self.chat.state.context_window_json.get('agent_read', {}).get('option_ids', []), [])
         new_chat = create_chat_conversation(user=self.user)
         messages = create_user_turn(user=self.user, conversation=new_chat, content='El segundo de mi consulta pendiente')
-        outputs[:] = [response(call('erp_list_pending_workflows', '{}')), response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':wf['public_id'],'expected_version':wf['version'],'option_position':2}), 'c2')), response()]
+        outputs[:] = [response(call('erp_list_pending_workflows', '{}')), response(call('erp_resume_asset_maintenance', json.dumps({'workflow_id':wf['public_id'],'expected_version':wf['version'],'continuation':{'option_position':2}}), 'c2')), response()]
         with patch('openai.OpenAI', return_value=provider):
             result = execute_chat_turn(user=self.user, conversation=new_chat, user_message=messages[0], assistant_message=messages[1])
         self.assertEqual(self.service.get_workflow(user=self.user, public_id=wf['public_id'])['status'], 'COMPLETED')

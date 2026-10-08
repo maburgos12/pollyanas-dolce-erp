@@ -90,6 +90,7 @@ class AgentReadRuntimeTests(TestCase):
         self.assertEqual(len(self.requests), 3)
         self.legacy.assert_not_called()
         self.assertTrue(all(r["store"] is False and r["model"] == "test-read" for r in self.requests))
+        self.assertTrue(all('tool_choice' not in r and 'parallel_tool_calls' not in r for r in self.requests))
         self.assertEqual({t["name"] for t in self.requests[0]["tools"]}, {"erp_search_assets", "erp_get_asset_context", "erp_get_pending_maintenance"})
         self.assertIn(reasoning, self.requests[1]["input"])
         self.assertEqual(ChatToolCall.objects.filter(status="complete").count(), 2)

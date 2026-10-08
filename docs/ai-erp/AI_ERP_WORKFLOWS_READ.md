@@ -62,6 +62,16 @@ Validación local: 150 pruebas pasaron con PostgreSQL 16, incluyendo continuidad
 
 La evaluación con OpenAI real del nuevo flujo es F4.3, independiente de estas pruebas. La evaluación previa F3 no demuestra interpretación del catálogo nuevo. La interfaz de pendientes es F5. Telegram, voz, documentos y acciones transaccionales requieren otros cortes; no se presentan como disponibles aquí.
 
+### Candidato F4.3: contexto inicial y continuación exclusiva
+
+El runtime recibe al iniciar un turno hasta 20 pendientes propios autorizados, con un límite adicional de 30 000 caracteres JSON. El servidor conserva completas las posiciones de cada DTO, indica truncamiento y revalida las referencias antes de publicar. Un registro inaccesible no consume una posición de la página. El snapshot se utiliza como contexto del turno; no se duplica en el estado persistente de la conversación. Su evidencia se oculta también en historial/replay si se apaga F4.
+
+Sólo el contrato enviado al LLM para `erp_resume_asset_maintenance` cambia: exige `workflow_id`, `expected_version` y `continuation`. Esta última contiene exactamente uno de `query`, `asset_id`, `option_position`, o un objeto vacío para continuar una consulta lista. Usa un schema estricto y una unión anidada; el adaptador comprueba exclusividad antes del serializer existente. Los contratos REST planos y los servicios permanecen compatibles. El schema no sustituye autorización, validación ni versionado del servidor.
+
+Si el proveedor no invoca herramientas, el servidor puede mostrar la lista autorizada como información encontrada, indicando su fuente. No utiliza texto del modelo como prueba de una acción ni fabrica eventos de ejecución. Mostrar pendientes no completa ninguno. La interfaz actual muestra esta evidencia como JSON: su presentación estructurada sigue pendiente para F5.
+
+Este candidato está validado localmente y **no cumple todavía la aceptación de fiabilidad para publicación**. [Mediciones y siguiente decisión](AI_ERP_WORKFLOWS_EVALUATION.md). No cambia modelo, variables, gates, permisos ni usuarios en producción.
+
 Para publicar: revisión del diff y migración, checks PG16, CI, merge y `scripts/deploy_web_safe.sh` oficial. Verificar migración aplicada, gates apagados y endpoints protegidos en el servidor servido; comprobar que el chat existente sigue accesible. No ejecutar fixtures ni activar flags en producción.
 
 Rollback: mantener gates apagados. Si se necesita retirar la integración, revertir por Git únicamente el API/runtime de este corte, conservando el modelo, su validador referenciado por la migración, la tabla, datos técnicos y migración aplicada. No revertir indiscriminadamente el commit completo: eso retiraría también la migración. No eliminar ni editar una migración aplicada, ni efectuar reversión destructiva de la base.

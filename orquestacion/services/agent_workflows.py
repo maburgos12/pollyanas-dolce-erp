@@ -175,14 +175,21 @@ def list_workflows(*, user, status=None, kind=None, page=1, page_size=20, pendin
     if pending_only:
         queryset = queryset.exclude(status__in=TERMINAL).exclude(expired).filter(state_json__provenance__access_fingerprint=fingerprint)
     items = []
-    for wf in queryset[(page-1)*page_size:page*page_size]:
+    offset = (page-1)*page_size
+    valid = 0
+    # Validate before pagination: revoked resources must not consume a page slot.
+    for wf in queryset.iterator(chunk_size=20):
         try:
             _validate(wf, actor, fingerprint)
         except WorkflowError:
             continue
         if status and _status(wf) != status or pending_only and _status(wf) in TERMINAL:
             continue
-        items.append(_dto(wf, actor))
+        if valid >= offset:
+            items.append(_dto(wf, actor))
+        valid += 1
+        if len(items) == page_size:
+            break
     return {'items':items, 'page':page, 'page_size':page_size}
 
 
@@ -364,14 +371,45 @@ def technical_serializer(key):
             'workflow.resume_asset_maintenance':WorkflowResumeArguments}[key]
 
 
+def resume_tool_arguments(value):
+    """Adapt the exclusive LLM contract; REST/service payloads remain unchanged."""
+    from rest_framework.exceptions import ValidationError
+    if not isinstance(value, dict) or set(value) != {'workflow_id', 'expected_version', 'continuation'}:
+        raise ValidationError('Invalid continuation contract.')
+    action = value['continuation']
+    if not isinstance(action, dict) or len(action) > 1 or set(action) - {'query', 'asset_id', 'option_position'}:
+        raise ValidationError('Use exactly one continuation variant.')
+    return {key:value[key] for key in ('workflow_id', 'expected_version')} | action
+
+
 def technical_catalog():
     definitions = [
-        ('workflow.prepare_asset_maintenance', 'erp_prepare_asset_maintenance', 'Conservar consulta de mantenimiento', 'Intención explícita de consultar mantenimiento de un equipo; conserva información faltante y selección. No usar para listar o buscar equipos solamente.'),
+        ('workflow.prepare_asset_maintenance', 'erp_prepare_asset_maintenance', 'Conservar consulta de mantenimiento', 'Inicia UNA consulta NUEVA explícitamente solicitada y conserva sus faltantes. No usar para continuar, completar, identificar ni seleccionar en una consulta que ya aparece en pending_workflows; para eso usa erp_resume_asset_maintenance. Una búsqueda común no crea un pendiente.'),
         ('workflow.list_pending', 'erp_list_pending_workflows', 'Consultar consultas pendientes', 'Máximo 20 consultas propias pendientes con UUID, versión y opciones actuales; sin historial narrativo.'),
-        ('workflow.resume_asset_maintenance', 'erp_resume_asset_maintenance', 'Reanudar consulta de mantenimiento', 'Reanuda consulta propia por UUID y expected_version en esta conversación activa. query o asset_id aporta información faltante; option_position selecciona opción del workflow. Una lectura sólo se ejecuta cuando está READY, sin acciones operativas.'),
+        ('workflow.resume_asset_maintenance', 'erp_resume_asset_maintenance', 'Reanudar consulta de mantenimiento', 'CONTINÚA el mismo UUID existente, también en WAITING_INFORMATION y WAITING_SELECTION: continuation.query aporta el equipo que faltaba, continuation.option_position elige su opción, continuation.asset_id identifica un equipo; continuation={} consulta y COMPLETA un READY. Guarda avances aunque falten datos, sin crear otro UUID. Exige selección del usuario entre pendientes ambiguos. Sin acciones operativas.'),
     ]
-    return [{'key':key, 'name':name, 'display_name':display, 'description':description, 'workflow':True,
-             'argument_schema':technical_serializer(key).argument_schema()} for key, name, display, description in definitions]
+    catalog = [{'key':key, 'name':name, 'display_name':display, 'description':description, 'workflow':True,
+                'argument_schema':technical_serializer(key).argument_schema()} for key, name, display, description in definitions]
+    resume = catalog[-1]
+    # Only the provider contract changes; backend validation still owns execution.
+    resume['strict'] = True
+    resume['argument_schema'] = {
+        'type':'object', 'additionalProperties':False,
+        'required':['workflow_id', 'expected_version', 'continuation'],
+        'properties':{
+            'workflow_id':{'type':'string', 'format':'uuid'},
+            'expected_version':{'type':'integer', 'minimum':1},
+            'continuation':{'anyOf':[
+                {'type':'object', 'properties':{key:schema}, 'required':[key], 'additionalProperties':False}
+                for key, schema in (
+                    ('query', {'type':'string', 'description':'Fragmento literal del equipo que faltaba identificar.'}),
+                    ('asset_id', {'type':'integer', 'minimum':1}),
+                    ('option_position', {'type':'integer', 'minimum':1, 'maximum':50}),
+                )
+            ] + [{'type':'object', 'properties':{}, 'required':[], 'additionalProperties':False}]},
+        },
+    }
+    return catalog
 
 
 def invoke_workflow_tool(*, user, tool_key, arguments, conversation, user_message, call_id):
