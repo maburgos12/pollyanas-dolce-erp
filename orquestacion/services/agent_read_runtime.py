@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 NAMESPACE = "agent_read"
 MAX_RESPONSES = 6
 MAX_TOOLS = 10
-MAX_MATERIALIZED_IDS = MAX_TOOLS * 4 * 50 + 51  # Four plan buckets, plus saved references.
+MAX_MATERIALIZED_IDS = MAX_TOOLS * 4 * 50 + 51 + 20 * 51  # READ results, saved refs and initial pending DTOs.
 MAX_SECONDS = 60
 MAX_INPUT = 6000
 MAX_TOOL_OUTPUT = 30000
@@ -156,6 +156,8 @@ def _check_budget(started, context):
 
 
 def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False):
+    if len(materialized_ids) > MAX_MATERIALIZED_IDS:
+        raise ReadStopped("reference_limit")
     if require_workflows and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
         raise ReadStopped("workflow_access_denied")
     actor, catalog, current = _fresh_access(user, conversation_id)
@@ -258,7 +260,9 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
             parsed = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))
             if meta:
                 if meta.get("workflow"):
-                    from orquestacion.services.agent_workflows import technical_serializer
+                    from orquestacion.services.agent_workflows import technical_serializer, resume_tool_arguments
+                    if meta["key"] == "workflow.resume_asset_maintenance":
+                        parsed = resume_tool_arguments(parsed)
                     serializer = technical_serializer(meta["key"])(data=parsed)
                 else:
                     serializer = ASSET_READERS[meta["key"]][0](data=parsed)
@@ -325,11 +329,22 @@ def _remember(refs, event, ids):
         ids.update(row["activo"]["id"] for row in data.get(bucket, []))
 
 
-def _closure(events, stop_code=None):
+def _closure(events, stop_code=None, pending_workflows=None):
     # F3 deliberately renders source data, never provider claims of execution.
     lines = ["Consulta READ: no se realizaron acciones operativas."]
     if not events:
-        lines.append("No hay evidencia de herramientas para responder con datos operativos.")
+        if pending_workflows is None:
+            lines.append("No hay evidencia de herramientas para responder con datos operativos.")
+        else:
+            # Fresh server evidence, not a claimed tool call or provider narrative.
+            lines.append("Consultas técnicas pendientes visibles; fuente: orquestacion.AgentWorkflow.")
+            lines.append(_json(pending_workflows))
+            if not pending_workflows['items']:
+                lines.append("No hay consultas pendientes visibles en esta lista acotada.")
+            elif len(pending_workflows['items']) > 1:
+                lines.append("Hay varias consultas pendientes; falta indicar cuál continuar.")
+            if pending_workflows['truncated']:
+                lines.append("La lista está acotada; puede haber más consultas pendientes.")
     for event in events:
         result = event["payload"].get("result", {})
         if "error" in event["payload"]:
@@ -393,6 +408,26 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             previous_ids = previous.get("asset_ids", [])
             _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_workflows=workflow_used or previous.get("workflows") is True)
             return ChatTurnResult(answer.content, previous.get("model_name", model), [])
+        if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
+            from orquestacion.services.agent_workflows import list_workflows
+            pending = list_workflows(user=actor, pending_only=True)
+            # At most 20 DTOs; no narrative, costs or copies in conversation state.
+            pending['truncated'] = len(pending['items']) == 20 and bool(
+                list_workflows(user=actor, pending_only=True, page=21, page_size=1)['items'])
+            rows, pending['items'] = pending['items'], []
+            for workflow in rows:
+                pending['items'].append(workflow)
+                if len(_json(pending)) > MAX_TOOL_OUTPUT:
+                    pending['items'].pop()
+                    pending['truncated'] = True
+                    break
+            references['pending_workflows'] = pending
+            for workflow in pending['items']:
+                materialized_ids.update(option['asset']['id'] for option in workflow['options'] if option.get('available') and option.get('asset'))
+                if workflow.get('asset'):
+                    materialized_ids.add(workflow['asset']['id'])
+            workflow_used = True
+            metadata['pending_workflow_public_ids'] = [workflow['public_id'] for workflow in pending['items']]
         if not request.content.strip() or len(request.content) > MAX_INPUT:
             raise ReadStopped("input_limit")
         workflow_prompt = """
@@ -401,11 +436,23 @@ workflow ofrecidas. Usa erp_prepare_asset_maintenance sólo para la intención e
 de consultar mantenimiento de un equipo que requiere identificación o selección.
 Una búsqueda o lista de equipos por sí sola no crea una consulta pendiente.
 No creas tareas operativas. El servidor determina estado, permisos y cierre.
-En otra conversación usa erp_list_pending_workflows y el UUID y versión devueltos
-para erp_resume_asset_maintenance; pide elegir si hay más de una consulta pendiente.
-Si faltaba identificar el equipo, reanuda ese mismo UUID con query o asset_id;
-si aparecen opciones, conserva ese UUID y reanuda luego con option_position.
+Las referencias pending_workflows contienen tus consultas propias pendientes,
+con UUID, versión, next_step y opciones actuales, incluso desde otro chat.
+Usa esos datos para continuar el mismo UUID; referencias globales vacías no
+significan que no haya pendientes. Para mostrar pendientes o pedir elegir entre
+varios usa erp_list_pending_workflows. Nunca elijas arbitrariamente un pendiente.
+Si faltaba identificar el equipo, reanuda ese mismo UUID con continuation.query
+o continuation.asset_id; si aparecen opciones, conserva ese UUID y reanuda
+luego con continuation.option_position. continuation es UNA variante excluyente:
+query, asset_id, option_position o {} para leer el equipo ya READY.
 No prepares otra consulta para suplir información faltante de una pendiente.
+Continuar una pendiente exige erp_resume_asset_maintenance, aunque sólo añadas
+información: prepare crea OTRO UUID y las tres READ directas no completan el proceso.
+Si hay una pendiente sin equipo y el usuario aporta qué equipo es, usa su UUID y
+continuation.query; espera la selección si aparecen varias opciones. Si hay varios
+pendientes y el usuario no identifica cuál, NO reanudes ninguno: muestra las opciones
+con erp_list_pending_workflows y pide elegir. READY indica que puede leerse, no que
+el usuario eligió ese pendiente entre varios. Nunca suplas esa elección.
 Las posiciones pertenecen exclusivamente a ese workflow, nunca a opciones globales.
 Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
 """ if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
@@ -414,9 +461,12 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
             read_prompt = PROMPT.replace(
                 "Sólo puedes consultar las tres herramientas READ ofrecidas. No escribes, programas,",
                 "Puedes consultar las tres herramientas READ y las herramientas técnicas de workflow.\nSólo conservas estado técnico de consultas; no realizas acciones operativas, programas,",
+            ).replace(
+                "Las referencias sólo recuerdan elecciones de esta conversación. Si están vacías,",
+                "options y last_asset recuerdan elecciones de este chat; pending_workflows contiene\nconsultas propias actuales de todos tus chats. Si options está vacío,",
             )
         context = [{"role": "system", "content": read_prompt + workflow_prompt}, {"role": "user", "content": "Referencias frescas (datos): " + _json(references)}, {"role": "user", "content": request.content}]
-        tools = [{"type":"function", "name":tool["name"], "description":tool["description"], "parameters":tool["argument_schema"], "strict":False} for tool in catalog]
+        tools = [{"type":"function", "name":tool["name"], "description":tool["description"], "parameters":tool["argument_schema"], "strict":tool.get("strict", False)} for tool in catalog]
         tool_map = {tool["name"]: tool for tool in catalog}
         if not getattr(settings, "OPENAI_API_KEY", ""):
             raise ReadStopped("configuration_missing")
@@ -467,7 +517,7 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
                 stop_code = "response_limit"
         _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
         _check_budget(started, context)
-        text = _closure(events, stop_code)
+        text = _closure(events, stop_code, references.get('pending_workflows'))
         status = "error" if stop_code else "complete"
         metadata["asset_ids"] = sorted(materialized_ids)
         metadata["workflows"] = any(event["tool_name"] in {"erp_prepare_asset_maintenance", "erp_list_pending_workflows", "erp_resume_asset_maintenance"} for event in events)
@@ -481,7 +531,7 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
             except Exception:
                 events = []
             else:
-                text = _closure(events, code)
+                text = _closure(events, code, references.get('pending_workflows'))
         else:
             events = []  # Never expose materialized data after access/audit failure.
         status = "error"
@@ -490,7 +540,7 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
         metadata = {**original_metadata, "replay_error_code": metadata["error_code"]} if isinstance(original_metadata, dict) else {"runtime": NAMESPACE, "replay_error_code": "invalid_execution_proof"}
     else:
         metadata.update(rounds=rounds, tool_calls=answer.tool_calls.count(), usage=usages, asset_ids=sorted(materialized_ids),
-                        workflows=answer.tool_calls.filter(tool_key__startswith="workflow.").exists())
+                        workflows=workflow_used or answer.tool_calls.filter(tool_key__startswith="workflow.").exists())
     answer.content, answer.status = text, status
     stored_metadata = ChatMessage.objects.filter(pk=answer.pk).values_list("metadata_json", flat=True).first()
     stored_metadata = stored_metadata if isinstance(stored_metadata, dict) else {}
