@@ -639,3 +639,27 @@ class SeguimientoPedido(models.Model):
 
     def __str__(self) -> str:
         return f"{self.pedido.folio} · {self.estatus_nuevo or 'nota'}"
+
+
+class PointOrderLink(models.Model):
+    """Explicit document identity, separate from the final sales-note provenance."""
+
+    order = models.OneToOneField(PedidoCliente, on_delete=models.PROTECT, related_name='point_order_link')
+    kind = models.CharField(max_length=10, choices=(('NOTE', 'Nota de venta'), ('SPECIAL', 'Pedido especial')))
+    point_id = models.CharField(max_length=120)
+    snapshot = models.JSONField(editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    checked_at = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    last_error = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['kind', 'point_id'], name='crm_point_document_unique')]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            original = type(self).objects.get(pk=self.pk)
+            if any(getattr(self, field) != getattr(original, field)
+                   for field in ('order_id', 'kind', 'point_id', 'snapshot')):
+                raise ValidationError('El vínculo documental Point es inmutable.')
+        super().save(*args, **kwargs)

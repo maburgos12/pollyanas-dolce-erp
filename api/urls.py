@@ -98,6 +98,8 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicPointSpecialOrdersView,
+    PublicWebPointLinkView,
     PublicOmnichannelDeliveryIdentitiesView,
     PublicOmnichannelDeliveriesView,
     PublicOmnichannelDeliveryDetailView,
@@ -219,6 +221,8 @@ from .special_hours_views import (
 )
 
 urlpatterns = [
+    path("public/v1/omnichannel/point-special-orders/", PublicPointSpecialOrdersView.as_view()),
+    path("public/v1/omnichannel/deliveries/<int:solicitud_id>/point-link/", PublicWebPointLinkView.as_view()),
     path("ai-gateway/workflows/", AIGatewayWorkflowListView.as_view(), name="api_ai_gateway_workflows"),
     path("ai-gateway/workflows/<uuid:workflow_id>/", AIGatewayWorkflowDetailView.as_view(), name="api_ai_gateway_workflow_detail"),
     path("ai-gateway/workflows/<uuid:workflow_id>/resume/", AIGatewayWorkflowResumeView.as_view(), name="api_ai_gateway_workflow_resume"),

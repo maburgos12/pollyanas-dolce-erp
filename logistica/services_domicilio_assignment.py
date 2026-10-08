@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from crm.services.point_document_link import has_verified_point, point_document
+
 from dataclasses import dataclass
 import logging
 from typing import Any
@@ -129,7 +131,7 @@ def _can_link_route(solicitud: SolicitudDomicilio) -> bool:
         and direccion.latitud is not None
         and direccion.longitud is not None
         and pedido
-        and pedido.point_note_id
+        and has_verified_point(pedido)
     )
 
 
@@ -343,6 +345,8 @@ def assign_domicilio(
                 pedido_cliente__public_api_client=owner_api_client,
             )
         solicitud = get_object_or_404(solicitudes, pk=solicitud_id)
+        if solicitud.pedido_cliente_id and point_document(solicitud.pedido_cliente) and not has_verified_point(solicitud.pedido_cliente):
+            raise DomicilioAssignmentError("El documento Point requiere revisión antes de asignar reparto.", 409)
         if (
             solicitud.estatus == SolicitudDomicilio.ESTATUS_PENDIENTE_POINT
             and solicitud.pedido_cliente_id is not None
@@ -362,7 +366,7 @@ def assign_domicilio(
             )
         if (
             solicitud.pedido_cliente_id is not None
-            and solicitud.pedido_cliente.point_note_id
+            and has_verified_point(solicitud.pedido_cliente)
             and (
                 solicitud.direccion_cliente_id is None
                 or solicitud.direccion_cliente.latitud is None

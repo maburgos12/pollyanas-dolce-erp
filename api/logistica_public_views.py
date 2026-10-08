@@ -232,7 +232,8 @@ class PublicLogisticaDomicilioAsignarView(APIView):
 def _serialize_domicilio(solicitud, *, is_next: bool):
     direccion = solicitud.direccion_cliente
     pedido = solicitud.pedido_cliente
-    snapshot = pedido.point_note_snapshot or {}
+    from crm.services.point_document_link import point_snapshot
+    snapshot = point_snapshot(pedido)
     unit = solicitud.unidad
     return {
         "id": solicitud.id,
@@ -254,7 +255,7 @@ def _serialize_domicilio(solicitud, *, is_next: bool):
         "descripcion": pedido.descripcion,
         "canal": pedido.canal,
         "fecha_compromiso": pedido.fecha_compromiso,
-        "folio": pedido.point_note_folio or pedido.folio,
+        "folio": pedido.point_note_folio or snapshot.get("folio") or pedido.folio,
         "instrucciones_entrega": solicitud.instrucciones_entrega,
         "unidad": (
             {"id": unit.id, "codigo": unit.codigo}
