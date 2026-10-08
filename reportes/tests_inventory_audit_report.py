@@ -88,10 +88,69 @@ class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
             product = PointProduct.objects.create(external_id=code, sku=code, name=name)
             self.make_case(product=product)
         PointProductCategory.objects.create(codigo_point="TOP-CAT", nombre="Fresa para consumo", category="TOPPING")
+        PointProduct.objects.filter(sku="TE").update(category="TE")
+        PointProduct.objects.filter(sku="CAJA").update(category="Industrias lec")
         report = self.service().read_audit_report(self.month)
-        self.assertEqual({row["receta"] for row in report["rows"]}, {"TE DEL JARDIN", "CAJA G PARA VENTA"})
+        self.assertEqual(report["rows"], [])
         self.assertEqual(ProductInventoryAuditCase.objects.count(), 5)
         self.assertEqual(ProductInventoryAuditCase.objects.sold_products().count(), 2)
+
+    def test_returns_location_does_not_hide_store_balances(self):
+        returns_erp = Sucursal.objects.get(codigo="DEVOLUCIONES")
+        returns = PointBranch.objects.create(external_id="12", name="Devoluciones")
+        self.make_case(difference=0, point_closing=10, movement_status="BALANCED")
+        self.make_case(branch=returns, movement_status="SOURCE_INCOMPLETE",
+                       source_trace={"opening": [], "closing": []})
+        report = self.service().read_audit_report(self.month)
+        row = report["rows"][0]
+        self.assertEqual(row["inventario_inicial"], 10)
+        self.assertEqual(row["inventario_final_teorico"], 10)
+        self.assertEqual(row["inventario_final_point_total"], 10)
+        self.assertEqual(row["diferencia_inventario"], 0)
+        self.assertEqual(row["point_coverage"]["inventario_inicial"],
+                         {"known": 1, "total": 1, "known_sum": Decimal("10")})
+        self.assertEqual(report["audit_status"], "Conciliado")
+        self.assertNotIn(returns_erp, report["branches"])
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 2)
+
+    def test_nonproduction_categories_are_excluded_even_when_recipe_category_is_wrong(self):
+        from recetas.models import Receta
+        categories = ("Accesorios de repostería", "Alegría", "Cake Topper", "Coca-cola",
+                      "D-rigaldi", "Granmark", "Industrias lec", "Plásticos", "REGALOS",
+                      "TE", "Vela Sparklers", "Velas", "Café", "Otros postres",
+                      "Vaso Preparado Mini", "Vasos Mini", "Vasos Grande", "Vasos Preparados Grande")
+        for index, category in enumerate(categories):
+            code = f"EXCLUDED-{index}"
+            product = PointProduct.objects.create(external_id=code, sku=code,
+                                                 name=f"Artículo {category}", category=category)
+            Receta.objects.create(nombre=product.name, codigo_point=code, hash_contenido=code,
+                                  tipo=Receta.TIPO_PRODUCTO_FINAL, categoria="Pastel Chico")
+            self.make_case(product=product, production=2, sales=1)
+        self.make_case()
+        report = self.service().read_audit_report(self.month)
+        self.assertEqual([r["product_id"] for r in report["rows"]], [self.product.id])
+        self.assertEqual(sum(report["counts"].values()), 1)
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), len(categories) + 1)
+
+    def test_recipe_production_scope_and_inactive_rosca(self):
+        from recetas.models import Receta
+        for index, overrides in enumerate((
+            {"modo_costeo": Receta.MODO_COSTEO_REVENTA},
+            {"modo_costeo": Receta.MODO_COSTEO_SERVICIO},
+        )):
+            code = f"NON-PRODUCTION-{index}"
+            product = PointProduct.objects.create(external_id=code, sku=code, name=code)
+            Receta.objects.create(nombre=code, codigo_point=code, hash_contenido=code,
+                                  tipo=Receta.TIPO_PRODUCTO_FINAL, **overrides)
+            self.make_case(product=product)
+        rosca = PointProduct.objects.create(external_id="ROSCA", sku="ROSCA",
+                                            name="Rosca de Dulce de Leche", category="Rosca")
+        case = self.make_case(product=rosca)
+        self.assertEqual(self.service().read_audit_report(self.month)["rows"], [])
+        case.production = 2
+        case.save(update_fields=["production"])
+        self.assertEqual([r["product_id"] for r in self.service().read_audit_report(self.month)["rows"]],
+                         [rosca.id])
 
     def test_only_active_approved_addons_are_separate_from_sold_products(self):
         from recetas.models import Receta, RecetaAgrupacionAddon

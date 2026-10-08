@@ -127,6 +127,21 @@ El reporte `AGG` y Stock pueden tener distintos PK de `PointBranch` para la mism
 sucursal: cotejar FK ERP y nombre originales de ambos dominios; nunca sus PK
 Point entre sí ni una pareja de movimientos que no existe.
 
+Alcance DG de 7 octubre para `Producido vs Vendido`: reutilizar
+`read_audit_report`; sólo producción en sucursales de venta y CEDIS. Devoluciones
+conserva su expediente y movimientos, pero sus saldos no son requisito de esta
+vista. Excluir reventa, accesorios, cargos, cafés/té/Coca-Cola, Alegría, Cake
+Topper, D-rigaldi, Granmark, Industrias Lec, Plásticos, Regalos, Velas, vasos y
+Otros postres. Revisar categoría original Point además de categoría de receta:
+una vela en Bollo o tarjeta en Media Plancha no se convierte en producto fabricado.
+Recetas de modo REVENTA/SERVICIO_ACCESORIO quedan fuera; conservar rebanadas y
+derivados fabricados aunque no pasen por captura de producción. Rosca sin
+actividad mensual también queda fuera. La exclusión sólo afecta pantalla,
+JSON y exportaciones de este reporte, no maestros, fuentes ni guard de cierre
+mensual. Mostrar saldos y ecuaciones guardados de las ubicaciones elegibles;
+si falta un dato real, explicarlo por sucursal en Ver detalle, sin claves técnicas.
+Pruebas y conocimiento actualizado no acreditan despliegue ni cierre por sí solos.
+
 Confirmación DG del 6 de octubre: auditar cada producto y sucursal en el
 Historial de Inventario de Point por fecha, tipo, cantidad y continuidad de
 existencia anterior/posterior. Un folio o referencia común no es requisito

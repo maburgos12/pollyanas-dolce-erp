@@ -5,7 +5,8 @@ from decimal import Decimal
 
 from django.core.exceptions import SuspiciousOperation
 from django.urls import reverse
-from django.db.models import Max, Count
+from django.db.models import Max, Count, Q
+from django.utils.text import slugify
 
 from core.models import Sucursal
 from pos_bridge.services.branch_inventory_traceability_service import canonical_point_branch_identity
@@ -14,6 +15,15 @@ from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
 
 
 ZERO = Decimal("0")
+# Alcance del reporte autorizado por el DG; no reclasifica el catálogo ni los casos.
+NON_PRODUCTION_CATEGORIES = {
+    "accesorios-de-reposteria", "alegria", "cake-topper", "caketopper",
+    "coca-cola", "d-rigaldi", "rigaldi", "granmark", "gran-mark",
+    "industrias-lec", "industrias-lek", "plasticos", "regalos", "te",
+    "vela-sparklers", "velas", "cafe", "otros-postres", "vaso-preparado-mini",
+    "vasos-mini", "vasos-grande", "vasos-preparados", "vasos-preparados-mini",
+    "vasos-preparados-chico", "vasos-preparados-mediano", "vasos-preparados-grande",
+}
 QUANTITY_FIELDS = {
     "opening_point": "inventario_inicial", "production": "producido",
     "sales": "vendido", "waste": "merma_reportada",
@@ -35,7 +45,7 @@ def audit_report_version(month, branch=""):
             raise SuspiciousOperation("Sucursal de auditoría inválida")
         cases = cases.filter(branch__erp_branch_id=branch)
     revision = cases.aggregate(latest=Max("updated_at"), count=Count("id"))
-    return str((runs, revision))
+    return str(("production-scope-v1", runs, revision))
 
 
 def audit_status(statuses):
@@ -78,7 +88,7 @@ def _case_quantity(case, field):
 
 def _confirmed_recipe_map():
     recipes = {r.id: r for r in Receta.objects.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).only(
-        "id", "codigo_point", "categoria", "pasa_modulo_produccion"
+        "id", "codigo_point", "categoria", "pasa_modulo_produccion", "modo_costeo"
     )}
     codes = defaultdict(set)
     for recipe in recipes.values():
@@ -90,9 +100,32 @@ def _confirmed_recipe_map():
     return recipes, codes
 
 
+def _production_report_product(product, recipe, cases):
+    categories = {slugify(product.category), slugify(recipe.categoria) if recipe else ""}
+    if categories & NON_PRODUCTION_CATEGORIES:
+        return False
+    # Rebanadas/derivados fabricados conservan sus conversiones aunque no se capturen en producción.
+    if recipe and recipe.modo_costeo != Receta.MODO_COSTEO_FABRICADO:
+        return False
+    if "rosca" in categories and not any(
+        getattr(case, field) for case in cases for field in QUANTITY_FIELDS
+        if field not in {"opening_point", "point_closing", "expected_closing", "difference"}
+    ):
+        return False
+    return True
+
+
+def _case_pending_reason(case):
+    if case.movement_status != "SOURCE_INCOMPLETE":
+        return ""
+    missing = [label for field, label in (("opening_point", "saldo inicial"), ("point_closing", "saldo final"))
+               if _case_quantity(case, field) is None]
+    return "Falta comprobar " + " y ".join(missing or ["movimientos del mes"])
+
+
 def read_audit_report(month, *, branch=""):
     month = month.replace(day=1)
-    branches = list(Sucursal.objects.order_by("nombre"))
+    branches = list(Sucursal.objects.exclude(codigo__iexact="DEVOLUCIONES").order_by("nombre"))
     selected = None
     if branch:
         selected = next((b for b in branches if str(b.id) == str(branch)), None)
@@ -100,7 +133,9 @@ def read_audit_report(month, *, branch=""):
             raise SuspiciousOperation("Sucursal de auditoría inválida")
     run = ProductInventoryAuditRun.objects.filter(month=month).first()
     aliases, _ = canonical_point_branch_identity()
-    qs = ProductInventoryAuditCase.objects.sold_products().filter(month=month).select_related("branch__erp_branch", "product")
+    qs = ProductInventoryAuditCase.objects.sold_products().filter(month=month).exclude(
+        Q(branch__name__iexact="Devoluciones") | Q(branch__erp_branch__codigo__iexact="DEVOLUCIONES")
+    ).select_related("branch__erp_branch", "product")
     if selected:
         qs = qs.filter(branch__erp_branch=selected)
     canonical_cases = {}
@@ -116,10 +151,14 @@ def read_audit_report(month, *, branch=""):
         grouped[case.product_id].append(case)
     recipes, codes = _confirmed_recipe_map()
     rows = []
+    report_cases = []
     for product_id, cases in grouped.items():
         product = cases[0].product
         matches = set().union(*(codes.get(code.strip().upper(), set()) for code in (product.sku, product.external_id) if code))
         recipe = recipes[next(iter(matches))] if len(matches) == 1 else None
+        if not _production_report_product(product, recipe, cases):
+            continue
+        report_cases.extend(cases)
         row = {
             "product_id": product_id, "receta_id": recipe.id if recipe else None,
             "receta": product.name, "categoria": recipe.categoria if recipe else (product.category or "Sin categoría"),
@@ -129,6 +168,7 @@ def read_audit_report(month, *, branch=""):
             "cases": [{"id": c.id, "branch": c.branch.erp_branch.nombre if c.branch.erp_branch_id else c.branch.name,
                        "status": audit_status([case_balance_status(c)]),
                        "traceability_status": audit_status([c.movement_status]),
+                       "pending_reason": _case_pending_reason(c),
                        "opening": _case_quantity(c, "opening_point"),
                        "closing": _case_quantity(c, "point_closing"),
                        "url": reverse("reportes:inventory_audit_case", args=[c.id])}
@@ -152,12 +192,12 @@ def read_audit_report(month, *, branch=""):
         row["enteros_equivalentes"] = row["conversion_salida"]
         row["conversion_provenance"] = row["conversion_provenance_label"]
         rows.append(row)
-    cases = list(canonical_cases.values())
+    cases = report_cases
     partial = bool(run and run.partial_published)
     stale = bool(run and (not run.last_successful_rebuild_at or (run.rebuilt_at and run.rebuilt_at > run.last_successful_rebuild_at)))
     return {
         "rows": rows, "run": run, "branches": branches, "selected_branch": str(selected.id) if selected else "",
-        "selected_branch_label": selected.nombre if selected else "Todas las sucursales y almacenes",
+        "selected_branch_label": selected.nombre if selected else "Sucursales de venta y CEDIS",
         "audit_status": audit_status(c.movement_status for c in cases), "stale": stale,
         "partial": partial,
         "updated_at": (run.rebuilt_at if partial else run.last_successful_rebuild_at) if run else None,

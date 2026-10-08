@@ -42,8 +42,9 @@
     </div>
     <details class="production-source-diagnostics">
       <summary>Referencias del corte</summary>
+      <p>Alcance: productos fabricados y sus derivados, en sucursales de venta y CEDIS. Reventa, accesorios, bebidas y cargos adicionales se revisan en Auditoría por sucursal. Devoluciones conserva sus movimientos allí.</p>
       <p>Inicial: cierre del {{ opening_reference|date:"d/m/Y" }}. Final: cierre del {{ closing_reference|date:"d/m/Y" }}. La fecha operativa determina el mes; son saldos de Point, no conteos físicos.</p>
-      <p>Fuentes: ventas netas, líneas de producción, merma, conversiones y transferencias Point guardadas; saldos de apertura y cierre acreditados por la auditoría documental. Abre “Ver trazabilidad” para ver cada sucursal y su caso. Una suma parcial no es el total del producto.</p>
+      <p>Fuentes: ventas netas, líneas de producción, merma, conversiones y transferencias Point guardadas; saldos de apertura y cierre acreditados por la auditoría documental. Abre “Ver detalle” para ver cada sucursal y su caso. Una suma parcial no es el total del producto.</p>
     </details>
   </section>
 
@@ -73,7 +74,7 @@
         <button class="btn btn-primary w-100" type="submit">Filtrar</button>
       </div>
       <div>
-        <label class="form-label" for="branch">Sucursal o almacén</label>
+        <label class="form-label" for="branch">Sucursal de venta o CEDIS</label>
         <select class="form-select" id="branch" name="branch">
           <option value="">Todas</option>
           {% for branch in branches %}<option value="{{ branch.id }}" {% if branch.id|stringformat:"s" == selected_branch %}selected{% endif %}>{{ branch.nombre }}</option>{% endfor %}
@@ -224,16 +225,16 @@
               {% endif %}
             </td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=group.total.inventario_inicial coverage=group.total.point_coverage.inventario_inicial unit="producto-sucursal" %}</td>
-            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle en el producto pendiente">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=group.total.inventario_final_point_total coverage=group.total.point_coverage.inventario_final_point_total unit="producto-sucursal" %}</td>
-            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-subtotal">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
           <tr>
             <td class="cell-wrap">{{ row.receta }}
-              <details id="trace-product-{{ row.product_id }}"><summary>Ver trazabilidad</summary>
-                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · {{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}</p>{% endfor %}
+              <details id="trace-product-{{ row.product_id }}"><summary>Ver detalle</summary>
+                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>{% endfor %}
                 <p>Transferencias: +{{ row.transferencia_entrada|floatformat:"-3" }} / −{{ row.transferencia_salida|floatformat:"-3" }}. Ajustes identificados: {{ row.ajuste_identificado|floatformat:"-3" }}.</p>
               </details>
             </td>
@@ -279,9 +280,9 @@
               {% endif %}
             </td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=row.inventario_inicial coverage=row.point_coverage.inventario_inicial unit="sucursales" %}</td>
-            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle para ver qué falta y en qué sucursal">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=row.inventario_final_point_total coverage=row.point_coverage.inventario_final_point_total unit="sucursales" %}</td>
-            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% elif row.estado_inventario == 'Conciliado' %}text-success{% else %}muted{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% elif row.estado_inventario == 'Conciliado' %}text-success{% else %}muted{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Conciliado' %}is-success{% elif row.estado_inventario == 'Pendiente de conciliar' %}is-warning{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
@@ -326,9 +327,9 @@
               {% endif %}
             </td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=grand_total.inventario_inicial coverage=grand_total.point_coverage.inventario_inicial unit="producto-sucursal" %}</td>
-            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted"{% if not is_open_period %} title="Falta validar una o más fuentes mensuales"{% endif %}>{% if is_open_period %}En curso{% else %}Pendiente por fuentes{% endif %}</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
+            <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle en el producto pendiente">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=grand_total.inventario_final_point_total coverage=grand_total.point_coverage.inventario_final_point_total unit="producto-sucursal" %}</td>
-            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente por fuentes{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
             <td class="production-state-cell"><span class="production-state-label is-total">Total</span></td>
           </tr>
         </tbody>

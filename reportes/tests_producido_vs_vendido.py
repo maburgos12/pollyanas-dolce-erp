@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointProduct
 from recetas.models import Receta
-from reportes.models import ProductInventoryAuditRun
+from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
 from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 from reportes.views_produccion import ProducidoVsVendidoMermaView
 
@@ -144,6 +144,19 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         context = self.context()
         self.assertIsNone(context["grand_total"]["dif"])
         self.assertEqual(context["json_rows"][0]["dif_referencia"], "1.0000")
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+
+    def test_resale_products_are_outside_screen_and_exports_but_cases_remain(self):
+        self.recipe.modo_costeo = Receta.MODO_COSTEO_REVENTA
+        self.recipe.save()
+        self.make_case(production=0, sales=2)
+        context = self.context()
+        self.assertEqual(context["json_rows"], [])
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertNotIn(self.product.name, self.view._export_csv(context).content.decode())
+        workbook = load_workbook(BytesIO(self.view._export_xlsx(context).content))
+        self.assertFalse(any(self.product.name in row for row in workbook.active.values))
+        self.assertEqual(self.view._export_pdf(context).status_code, 200)
 
     def test_no_audit_does_not_claim_zero_or_complete(self):
         context = self.context()
@@ -203,9 +216,10 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         from django.urls import reverse
         case = self.make_case()
         html = self.render(self.context())
-        self.assertIn("Ver trazabilidad", html)
+        self.assertIn("Ver detalle", html)
         self.assertIn(reverse("reportes:inventory_audit_case", args=[case.pk]), html)
-        self.assertIn("Sucursal o almacén", html)
+        self.assertIn("Sucursal de venta o CEDIS", html)
+        self.assertNotIn("Pendiente por fuentes", html)
         self.assertNotIn("production-source-list", html)
         self.assertNotIn("Autoridad Point:", html)
         self.assertIn("requestSubmit()", html)
