@@ -27,3 +27,5 @@ Procedimiento: inventario_fuentes_datos --term transferencia --term recepción s
 Riesgos: recepción es documental, no físico; no sustituir diferencias reales por cerrado. Las investigaciones guardadas requieren refresco oficial tras deploy. La publicación y aceptación no cierran septiembre automáticamente.
 
 Refresco reutilizado: `investigate_inventory_audit_cases --month 2026-09 --case-id ID --no-notify`, sin `--refresh-point-history`. El filtro ahora limita también la investigación conservada; los consumidores mensuales sin filtro mantienen el comportamiento anterior. Segunda ejecución debe dar updated0/notifications0; no cambia cantidades ni estado de cierre.
+
+Aceptación1514 detectó tres reescrituras sin cambio JSON ni fingerprint (2131/2149/2237); transacción revirtió el refresco. Comparar el JSON realmente persistido, no diferencias de tipos tuple/list antes de serializar. No modificar huellas, datos ni contratos de entrada. Regresión conserva detección de un valor verdaderamente distinto. Reparación de aceptación dentro del mismo objetivo, antes de cerrar la tarea.

@@ -2,6 +2,7 @@ from contextlib import nullcontext
 from datetime import date
 from decimal import Decimal
 from io import StringIO
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -94,6 +95,17 @@ class InventoryAuditAgentModelTests(InventoryAuditAgentFixtures, TestCase):
 
 
 class InventoryAuditAgentServiceTests(InventoryAuditAgentFixtures, TestCase):
+    def test_projection_compares_the_json_that_is_persisted(self):
+        from reportes.services_inventory_audit_agent import InventoryAuditAgent
+        case = self.make_case(investigation_summary={"rows": [[1, 2]]},
+                              investigation_fingerprint="same")
+        result = SimpleNamespace(**{key: getattr(case, key) for key in (
+            "attention_level", "responsible_area", "assigned_to_id", "assignment_reason")},
+            summary={"rows": [(1, 2)]}, fingerprint="same")
+        self.assertFalse(InventoryAuditAgent._projection_changed(case, result))
+        result.summary = {"rows": [(1, 3)]}
+        self.assertTrue(InventoryAuditAgent._projection_changed(case, result))
+
     def test_received_equal_transfer_needs_no_finalization(self):
         from reportes.services_inventory_audit_agent import InventoryAuditAgent
         transfer = PointTransferLine.objects.create(
