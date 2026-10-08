@@ -42,7 +42,9 @@
       </div>
       <span class="erp-chat-badge {% if not runtime_status.ready %}is-warning{% endif %}" id="erp-chat-runtime-badge">
         {% if runtime_status.ready %}
-          Modelo configurado
+          {% if runtime_status.pilot %}Piloto READ{% else %}Modelo configurado{% endif %}
+        {% elif runtime_status.pilot_blocked %}
+          Piloto detenido
         {% else %}
           Conexión pendiente
         {% endif %}
@@ -54,7 +56,7 @@
         <img src="{% static 'favicon.ico' %}" alt="Pollyana's Dolce" class="pd-u-90314a5479">
         <h2>¿Qué necesitas consultar?</h2>
         <p>Pide información con tus palabras. Los resultados mostrarán su fuente y los procesos podrán conservarse para continuar después.</p>
-        {% if not runtime_status.ready %}<p>La conexión del agente está pendiente. Puedes revisar las conversaciones guardadas.</p>{% endif %}
+        {% if not runtime_status.ready %}<p>{{ runtime_status.issue|default:"La conexión del agente está pendiente." }} Puedes revisar las conversaciones guardadas.</p>{% endif %}
         <div class="erp-chat-prompts">
           <button type="button" class="erp-chat-prompt" data-prompt="Busca la batidora 3 y muestra su mantenimiento.">Consultar un equipo</button>
           <button type="button" class="erp-chat-prompt" data-prompt="¿Qué equipos tienen planes de mantenimiento vencidos?">Revisar mantenimientos</button>
@@ -429,7 +431,7 @@
 
   statusEl.textContent = runtimeStatus.ready
     ? "Pregunta al ERP con lenguaje natural y te responderé con contexto operativo."
-    : "Conexión pendiente. Puedes consultar las conversaciones guardadas.";
+    : runtimeStatus.issue || "Conexión pendiente. Puedes consultar las conversaciones guardadas.";
 
   function showError(error) {
     statusEl.textContent = error.name === "TypeError" || error.name === "SyntaxError"
