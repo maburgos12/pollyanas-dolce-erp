@@ -371,8 +371,9 @@ def _closure(events, stop_code=None, pending_workflows=None):
 
 
 def execute_read_turn(*, user, conversation: ChatConversation, user_message: ChatMessage, assistant_message: ChatMessage) -> ChatTurnResult:
-    from orquestacion.services.chat_service import ChatTurnResult, DEFAULT_CHAT_MODEL
-    model = getattr(settings, "PRIVATE_AI_CHAT_MODEL", "") or DEFAULT_CHAT_MODEL
+    from orquestacion.services.chat_service import ChatTurnResult
+    from orquestacion.services.agent_pilot import PilotStopped, OUTPUT_TOKENS, reserve_request
+    model = getattr(settings, "AI_AGENT_READ_MODEL", "")
     started = monotonic()
     events, usages = [], []
     rounds = 0
@@ -392,7 +393,9 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             raise PermissionDenied("El turno no está disponible para ejecución.")
         if not replay:
             answer.status = "streaming"
-            answer.save(update_fields=["status", "updated_at"])
+            initial = answer.metadata_json if isinstance(answer.metadata_json, dict) else {}
+            answer.metadata_json = {**initial, NAMESPACE: {"runtime": NAMESPACE, "mode": MODE, "execution_pending": True}}
+            answer.save(update_fields=["status", "metadata_json", "updated_at"])
     answer_metadata = answer.metadata_json if isinstance(answer.metadata_json, dict) else {}
     original_metadata = answer_metadata.get(NAMESPACE)
     workflow_used = answer.tool_calls.filter(tool_key__startswith="workflow.").exists()
@@ -487,7 +490,7 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
         if not getattr(settings, "OPENAI_API_KEY", ""):
             raise ReadStopped("configuration_missing")
         from openai import OpenAI
-        client = OpenAI(api_key=settings.OPENAI_API_KEY, max_retries=0, timeout=_check_budget(started, context))
+        client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url="https://api.openai.com/v1", max_retries=0, timeout=_check_budget(started, context))
         seen_calls = set()
         stop_code = None
         while rounds < MAX_RESPONSES:
@@ -496,11 +499,19 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
             # First workflow cycle must obtain server evidence; later cycles may finish.
             tool_policy = {"tool_choice": "required" if rounds == 0 else "auto",
                            "parallel_tool_calls": False} if workflow_prompt else {}
+            payload = dict(model=model, input=context, tools=tools, store=False,
+                           max_output_tokens=OUTPUT_TOKENS, service_tier="default", **tool_policy)
+            reserve_request(user=actor, turn_id=answer.public_id, cycle=rounds + 1, payload=payload)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
+            remaining = _check_budget(started, context)
             try:
-                result = client.with_options(max_retries=0, timeout=remaining).responses.create(model=model, input=context, tools=tools, store=False, max_output_tokens=1400, **tool_policy)
+                result = client.with_options(max_retries=0, timeout=remaining).responses.create(**payload)
             except Exception:
                 raise ReadStopped("provider_failed") from None
             rounds += 1
+            observed = {key: value for key in ("model", "service_tier")
+                        if isinstance(value := getattr(result, key, None), str) and len(value) <= 128}
+            metadata.setdefault("provider", []).append(observed)
             usage = getattr(result, "usage", None)
             if usage:
                 usages.append({key: value for key in ("input_tokens", "output_tokens", "total_tokens") if type(value := getattr(usage, key, None)) is int and value >= 0})
@@ -541,9 +552,12 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
         metadata["asset_ids"] = sorted(materialized_ids)
         metadata["workflows"] = any(event["tool_name"] in {"erp_prepare_asset_maintenance", "erp_list_pending_workflows", "erp_resume_asset_maintenance"} for event in events)
     except Exception as exc:
-        code = exc.code if isinstance(exc, ReadStopped) else "runtime_failed"
+        code = exc.code if isinstance(exc, (ReadStopped, PilotStopped)) else "runtime_failed"
         metadata["error_code"] = code
-        text = SAFE_FAILURE
+        text = {
+            "pilot_turn_limit": "El piloto alcanzó sus 20 turnos. No se enviaron nuevas solicitudes a OpenAI; requiere revisión para ampliarlo.",
+            "pilot_spend_limit": "El saldo reservado del piloto no alcanza para otra llamada. No se envió esa solicitud a OpenAI; requiere revisión para ampliarlo.",
+        }.get(code, SAFE_FAILURE)
         if code in {"time_limit", "context_limit", "tool_limit", "provider_failed", "provider_incomplete"}:
             try:
                 _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -385,9 +387,19 @@ def _model_client():
     return OpenAI(api_key=api_key)
 
 
-def get_chat_runtime_status() -> dict[str, Any]:
+def get_chat_runtime_status(user=None) -> dict[str, Any]:
     api_key = getattr(settings, "OPENAI_API_KEY", "")
     model_name = getattr(settings, "PRIVATE_AI_CHAT_MODEL", "") or DEFAULT_CHAT_MODEL
+    from orquestacion.services.agent_pilot import is_pilot_participant, pilot_status, PilotStopped
+    quota = None
+    if getattr(settings, "AI_AGENT_READ_ENABLED", False) is True and is_pilot_participant(user):
+        model_name = getattr(settings, "AI_AGENT_READ_MODEL", "")
+        try:
+            quota = pilot_status(user)
+            if quota["turns"] >= quota["max_turns"] or Decimal(quota["reserved_usd"]) >= Decimal(quota["max_usd"]):
+                raise PilotStopped("pilot_limit")
+        except PilotStopped:
+            return {"ready": False, "model_name": model_name, "issue": "Piloto detenido; requiere revisión de sus controles.", "pilot_blocked": True}
     if not api_key:
         return {
             "ready": False,
@@ -398,6 +410,7 @@ def get_chat_runtime_status() -> dict[str, Any]:
         "ready": True,
         "model_name": model_name,
         "issue": "",
+        "pilot": quota,
     }
 
 
@@ -430,7 +443,10 @@ def create_user_turn(*, user, conversation: ChatConversation, content: str, sess
 
 
 def execute_chat_turn(*, user, conversation: ChatConversation, user_message: ChatMessage, assistant_message: ChatMessage) -> ChatTurnResult:
-    if getattr(settings, "AI_AGENT_READ_ENABLED", False) is True:
+    from orquestacion.services.agent_pilot import is_pilot_account
+    # Revocation must never route an existing READ conversation into legacy tools.
+    read_history = conversation.messages.filter(metadata_json__has_key="agent_read").exists()
+    if read_history or (getattr(settings, "AI_AGENT_READ_ENABLED", False) is True and is_pilot_account(user)):
         from orquestacion.services.agent_read_runtime import execute_read_turn
         return execute_read_turn(user=user, conversation=conversation, user_message=user_message, assistant_message=assistant_message)
 

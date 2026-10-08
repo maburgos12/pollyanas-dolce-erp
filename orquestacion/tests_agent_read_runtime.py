@@ -27,7 +27,7 @@ def response(*items, text="", usage=None):
     return SimpleNamespace(output=list(items), output_text=text, usage=usage)
 
 
-@override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, PRIVATE_AI_CHAT_MODEL="test-read", OPENAI_API_KEY="fake-test-key")
+@override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_READ_MODEL="gpt-6.1-sol", OPENAI_API_KEY="fake-test-key")
 class AgentReadRuntimeTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -41,6 +41,10 @@ class AgentReadRuntimeTests(TestCase):
         cls.hidden = Activo.objects.create(codigo="AR-3", nombre="SECRET OTHER", sucursal=cls.other_branch)
 
     def setUp(self):
+        pilot = override_settings(AI_AGENT_PILOT_USER_ID=self.user.pk)
+        pilot.enable(); self.addCleanup(pilot.disable)
+        quota = patch("orquestacion.services.agent_pilot.reserve_request", return_value={})
+        quota.start(); self.addCleanup(quota.stop)
         self.conversation = create_chat_conversation(user=self.user)
         self.messages = create_user_turn(user=self.user, conversation=self.conversation, content="Busca los hornos")
         self.requests = []
@@ -89,7 +93,7 @@ class AgentReadRuntimeTests(TestCase):
         ])
         self.assertEqual(len(self.requests), 3)
         self.legacy.assert_not_called()
-        self.assertTrue(all(r["store"] is False and r["model"] == "test-read" for r in self.requests))
+        self.assertTrue(all(r["store"] is False and r["model"] == "gpt-6.1-sol" for r in self.requests))
         self.assertTrue(all('tool_choice' not in r and 'parallel_tool_calls' not in r for r in self.requests))
         self.assertEqual({t["name"] for t in self.requests[0]["tools"]}, {"erp_search_assets", "erp_get_asset_context", "erp_get_pending_maintenance"})
         self.assertIn(reasoning, self.requests[1]["input"])
@@ -307,8 +311,9 @@ class AgentReadRuntimeTests(TestCase):
         self.assert_failed()
 
     def test_deadline_checked_after_provider_and_sdk_bounded(self):
-        with patch("orquestacion.services.agent_read_runtime.monotonic", side_effect=[0, 1, 2, 61]):
-            self.run_turn([response(call())])
+        clock = [0]
+        with patch("orquestacion.services.agent_read_runtime.monotonic", side_effect=lambda: clock[0]):
+            self.run_turn([response(call())], hook=lambda _: clock.__setitem__(0, 61))
         self.assertEqual(ChatToolCall.objects.count(), 0)
         self.assert_failed()
         self.assertEqual(self.sdk.call_args.kwargs['max_retries'], 0)
@@ -377,8 +382,9 @@ class AgentReadRuntimeTests(TestCase):
 
     def test_usage_observed_even_when_provider_exceeds_deadline(self):
         usage = SimpleNamespace(input_tokens=7, output_tokens=4, total_tokens=11)
-        with patch('orquestacion.services.agent_read_runtime.monotonic', side_effect=[0, 1, 2, 61]):
-            self.run_turn([response(call(), usage=usage)])
+        clock = [0]
+        with patch('orquestacion.services.agent_read_runtime.monotonic', side_effect=lambda: clock[0]):
+            self.run_turn([response(call(), usage=usage)], hook=lambda _: clock.__setitem__(0, 61))
         self.assert_failed()
         self.messages[1].refresh_from_db()
         self.assertEqual(self.messages[1].metadata_json['agent_read']['usage'], [{'input_tokens':7,'output_tokens':4,'total_tokens':11}])
@@ -631,23 +637,11 @@ class AgentReadRuntimeTests(TestCase):
         self.assertNotIn('SECRET', result.assistant_text)
         self.assert_history_hidden()
 
-    def test_gate_off_legacy_request_never_resends_read_history(self):
-        acl = self.history_fixture(finance=True)
-        for revoke_costs in (False, True):
-            with self.subTest(revoke_costs=revoke_costs):
-                if revoke_costs:
-                    acl.delete()
-                _, legacy_answer = create_user_turn(user=self.user, conversation=self.conversation, content='Pregunta legado')
-                ChatMessage.objects.filter(pk=legacy_answer.pk).update(content='LEGACY_ALLOWED_TEXT', status='complete', metadata_json={'legacy':True})
-                self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='Sigue con la consulta legado')
-                create = Mock(return_value=SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='Cierre legado', tool_calls=[]))]))
-                client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
-                with override_settings(AI_AGENT_READ_ENABLED=False), patch('orquestacion.services.chat_service._model_client', return_value=client), patch('orquestacion.services.chat_service._build_tool_definitions', return_value=([], {})), patch('orquestacion.services.chat_service._build_system_prompt', return_value='Sistema legado autorizado'):
-                    execute_chat_turn(user=self.user, conversation=self.conversation, user_message=self.messages[0], assistant_message=self.messages[1])
-                sent = json.dumps(create.call_args.kwargs['messages'])
-                self.assertNotIn('SECRET_READ_CONTENT', sent)
-                self.assertNotIn('Horno uno', sent)
-                self.assertNotIn('987654.32', sent)
-                self.assertNotIn('activos.Activo', sent)
-                self.assertIn('LEGACY_ALLOWED_TEXT', sent)
-                self.assertIn('Sigue con la consulta legado', sent)
+    def test_gate_off_read_conversation_never_falls_back_to_legacy(self):
+        self.history_fixture(finance=True)
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='Sigue con la consulta legado')
+        with override_settings(AI_AGENT_READ_ENABLED=False), patch('orquestacion.services.chat_service._model_client') as legacy:
+            result = execute_chat_turn(user=self.user, conversation=self.conversation, user_message=self.messages[0], assistant_message=self.messages[1])
+        legacy.assert_not_called()
+        self.assertNotIn('SECRET_READ_CONTENT', result.assistant_text)
+        self.assert_failed()

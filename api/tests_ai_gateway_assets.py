@@ -28,6 +28,10 @@ KEYS = {"erp.search_assets", "erp.get_asset_context", "erp.get_pending_maintenan
 
 @override_settings(AI_GATEWAY_ASSETS_ENABLED=True)
 class GatewayAssetsTests(TestCase):
+    def setUp(self):
+        gate = patch("orquestacion.services.agent_pilot.is_pilot_participant", return_value=True)
+        gate.start(); self.addCleanup(gate.stop)
+
     @classmethod
     def setUpTestData(cls):
         User = get_user_model()

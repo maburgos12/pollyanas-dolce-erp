@@ -58,6 +58,17 @@ class AIPrivateHubViewTests(TestCase):
         self.assertContains(response, "Puedes revisar las conversaciones guardadas.")
         self.assertContains(response, 'id="erp-chat-send-btn" disabled')
 
+    @patch("orquestacion.chat_views.get_chat_runtime_status")
+    def test_exhausted_pilot_is_visible_and_sending_disabled(self, status):
+        status.return_value = {"ready": False, "model_name": "gpt-6.1-sol",
+                               "issue": "Piloto detenido; requiere revisión de sus controles.", "pilot_blocked": True}
+        self.client.force_login(self.dg)
+        response = self.client.get(reverse("ai_private_hub"))
+        self.assertContains(response, "Piloto detenido")
+        self.assertContains(response, "requiere revisión de sus controles")
+        self.assertContains(response, 'id="erp-chat-send-btn" disabled')
+        status.assert_called_once_with(response.wsgi_request.user)
+
     def test_ai_private_hub_forbidden_for_non_governance_role(self):
         self.client.force_login(self.produccion)
         response = self.client.get(reverse("ai_private_hub"))
