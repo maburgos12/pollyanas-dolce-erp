@@ -409,11 +409,24 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_workflows=workflow_used or previous.get("workflows") is True)
             return ChatTurnResult(answer.content, previous.get("model_name", model), [])
         if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
-            from orquestacion.services.agent_workflows import list_workflows
+            from orquestacion.services.agent_workflows import TERMINAL, get_workflow, list_workflows
             pending = list_workflows(user=actor, pending_only=True)
             # At most 20 DTOs; no narrative, costs or copies in conversation state.
             pending['truncated'] = len(pending['items']) == 20 and bool(
                 list_workflows(user=actor, pending_only=True, page=21, page_size=1)['items'])
+            # Hydrate an explicit reference before truncation; it never selects an action.
+            identifiers = {str(UUID(value)) for value in re.findall(
+                r'\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b', request.content, re.I)}
+            if len(identifiers) == 1:
+                try:
+                    selected = get_workflow(user=actor, public_id=identifiers.pop())
+                except WorkflowError:
+                    pass
+                else:
+                    if selected['status'] not in TERMINAL:
+                        rows = [selected] + [row for row in pending['items'] if row['public_id'] != selected['public_id']]
+                        pending['truncated'] = pending['truncated'] or len(rows) > 20
+                        pending['items'] = rows[:20]
             rows, pending['items'] = pending['items'], []
             for workflow in rows:
                 pending['items'].append(workflow)

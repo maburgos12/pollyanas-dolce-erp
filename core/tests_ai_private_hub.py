@@ -37,10 +37,10 @@ class AIPrivateHubViewTests(TestCase):
         self.client.force_login(self.dg)
         response = self.client.get(reverse("ai_private_hub"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Chat ERP nativo")
-        self.assertContains(response, "Pollyana's Dolce AI")
+        self.assertContains(response, "Agente ERP")
+        self.assertContains(response, "Mis procesos")
         self.assertContains(response, "Nueva conversación")
-        self.assertContains(response, "¿Qué tanto gasto en insumos haremos en lo que resta del mes de abril?")
+        self.assertContains(response, "¿Qué equipos tienen planes de mantenimiento vencidos?")
 
     @patch("orquestacion.chat_views.get_chat_runtime_status")
     def test_ai_private_hub_shows_runtime_warning_when_model_not_ready(self, mock_runtime_status):
@@ -54,9 +54,9 @@ class AIPrivateHubViewTests(TestCase):
         response = self.client.get(reverse("ai_private_hub"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Configuración pendiente del modelo")
-        # Copy vigente del template (6d612668): "conexión del modelo".
-        self.assertContains(response, "falta completar la conexión del modelo")
+        self.assertContains(response, "Conexión pendiente")
+        self.assertContains(response, "Puedes revisar las conversaciones guardadas.")
+        self.assertContains(response, 'id="erp-chat-send-btn" disabled')
 
     def test_ai_private_hub_forbidden_for_non_governance_role(self):
         self.client.force_login(self.produccion)

@@ -6,7 +6,7 @@ Fecha: 2026-10-08. Estado: candidato local para revisión, sin publicación ni a
 
 La pantalla existente `/ia-privada/` conserva su sesión, conversaciones, CSRF y endpoints. Presenta los resultados estructurados proyectados por el servidor como fichas de equipos, órdenes, fallas, planes y procesos propios. No interpreta el texto del LLM como una autorización ni como un comando de interfaz.
 
-Este corte parte de `origin/main` b2bea57b; no incluye los candidatos no publicados F4.3/F4.4 ni cambia el modelo evaluado Sol. La autorización es para presentación y validación local. No se habilitaron usuarios, proveedor, flags, permisos o escritura operativa en producción.
+La presentación F5.1 partió de `origin/main` b2bea57b. El corte de integración local del 8 de octubre incorpora también los candidatos F4.3/F4.4 evaluados con Sol, sin modificar sus contratos REST ni su modelo. La autorización sigue limitada a integración y validación local. No se habilitaron usuarios, proveedor, flags, permisos o escritura operativa en producción.
 
 | Antes | Después | Motivo |
 |---|---|---|
@@ -55,7 +55,38 @@ Esto completa la presentación F5.1, no la fase F5 completa ni el agente operaci
 
 No se inventó un link al pasaporte del activo: el DTO no contiene el token/ruta canónica requerida. Hace falta una proyección autorizada antes de ofrecer ese enlace. Tampoco se cambia el contrato de paginación para inventar totales o `has_more`.
 
-Antes de publicar junto al candidato F4.3/F4.4, verificar sus contratos de continuación y vinculación de conversación; la prueba del controlador contra main no demuestra compatibilidad con una rama futura. Después, pilotar el flujo autenticado real con el proveedor aprobado y comprobar caché, permisos y referencias en producción. Una captura de fixture no prueba razonamiento Sol, Telegram ni funcionamiento operativo real.
+La compatibilidad local con F4.3/F4.4 se comprobó en el corte descrito a continuación. La publicación y el piloto autenticado sobre datos reales siguen pendientes de aprobación; requieren comprobar caché, permisos y referencias en producción. Una captura de fixture no prueba Telegram ni funcionamiento operativo real.
+
+## Integración F4.3/F4.4 + F5.1 con Sol real
+
+Rama `codex/ia-erp-sol-ui-integracion`, base b2bea57b. Se integraron los cinco commits de los candidatos previamente revisados sin conflictos. Se actualizaron los textos esperados por siete pruebas de `core/tests_ai_private_hub.py`, conservando sus verificaciones de acceso y comprobando el envío deshabilitado cuando falta conexión. La revisión independiente detectó y corrigió además la recuperación de referencias fuera de la primera página, descrita abajo. No se introdujeron tablas, migraciones, endpoints, dependencias o capturas operativas.
+
+Se comprobó desde `/ia-privada/` con usuario no administrador, sucursal y datos ficticios en PostgreSQL 16 aislado, y solicitudes reales al proveedor `gpt-6.1-sol`:
+
+| Interacción | Resultado persistido |
+|---|---|
+| Conservar revisión de mantenimiento sin identificar máquina | Un proceso propio, `WAITING_INFORMATION`, versión 1 |
+| Abrir otro chat y continuar el UUID indicando «Era un horno» | Mismo proceso, `WAITING_SELECTION`, versión 2, dos opciones autorizadas |
+| Elegir explícitamente la opción 2 | Mismo proceso, `COMPLETED`, versión 4; lectura del Horno dos y su plan |
+| Recargar pantalla y filtrar Completados | Resultado y proceso recuperados, sin duplicar el workflow ni repetir la inferencia |
+
+El servidor revalida actor, permisos y conversación activa al continuar. El workflow conserva la conversación de origen como referencia; no exige retomarlo en ese chat. La entrada `continuation` estricta del LLM se adapta al servicio existente; el navegador sólo prepara el UUID y no ejecuta al pulsar Continuar.
+
+Evidencia: un workflow en dos conversaciones, siete solicitudes Responses, cero errores del proveedor; `option_position: 2` y `expected_version: 2` observados en el tool call real. El modelo solicitó además una lectura del contexto del mismo activo; ambas proyecciones aparecen en la respuesta, sin escritura operativa. El SHA de las cuatro tablas operativas consultadas permaneció idéntico antes/después. El activo de otra sucursal y su costo restringido no aparecen en los mensajes persistidos ni en la pantalla. Las escrituras técnicas de conversaciones, workflow y auditoría son esperadas.
+
+Validación combinada: 150 pruebas Django del núcleo y guardrails, siete de acceso/pantalla y assertions Node de interfaz; `check`, `migrate --check` y `makemigrations --check --dry-run` sin problemas. Consola sin errores; tres POST SSE con respuesta 200 y recuperación posterior mediante GET. Escritorio 1440×1000 y móvil 390×844 sin desbordamiento horizontal. El móvil conserva el historial inicialmente colapsado.
+
+La revisión encontró que un UUID escogido en la página 2 podía faltar entre los primeros 20 pendientes enviados al modelo. El runtime ahora hidrata exactamente un UUID distinto presente en el mensaje mediante `get_workflow`, que revalida propiedad, acceso y recursos vigentes. Lo prioriza antes de aplicar los mismos límites de 20 DTOs/30k caracteres y el mismo registro de IDs/proof. No infiere intención por keywords ni ejecuta acciones al encontrar una referencia. UUIDs múltiples no seleccionan un destino; referencias ajenas, revocadas, desconocidas o terminales no añaden sus datos. No cambia el contrato REST ni el contrato de tools del LLM.
+
+Tres pruebas adicionales cubren el pendiente 21 con versión fresca y contexto grande, referencias denegadas/expiradas y elección ambigua. La regresión falla contra la función original con el fixture JSON correcto; las 160 pruebas combinadas pasan con la corrección. La revisión independiente del diff no dejó hallazgos abiertos.
+
+Sobre la huella corregida se eligió en la pantalla un pendiente de página 2 desde otra conversación. Sol recibió ese UUID primero, usó su versión fresca y completó el mismo proceso (`READY` v1 → `COMPLETED` v3). Los 20 pendientes hermanos quedaron intactos; recargar recuperó la respuesta completa. El primer intento de esta prueba completó la lectura, pero el guard privado de evaluación rechazó el contexto de la respuesta posterior por superar 20k bytes. Se conserva ese intento con mensaje en error; no se contabiliza como flujo completo. Se ajustó únicamente el límite del evaluador privado a 30k bytes, manteniendo todos los techos de gasto/solicitudes, y se repitió el caso con nuevos fixtures. No se relajó ningún límite del producto. La evidencia distingue ambas huellas e intentos; no atribuye a esta corrección los 44/44 turnos de la evaluación histórica de Sol.
+
+El presupuesto acotó esta prueba a 16 solicitudes y USD 1.00 de reserva adicional, dentro del techo acumulado ya autorizado de USD 11.50. Se usaron siete solicitudes, 16,604 tokens de entrada y 520 de salida; reserva adicional USD 0.3725725, acumulada USD 6.46692770. Estimación conservadora sin descuento de caché, incluyendo 4,082 tokens de escritura de caché: USD 0.046572 a las tarifas del plan de evaluación; no es una factura. El prefijo del ledger anterior se verificó por SHA antes y después de añadir las reservas.
+
+Incluyendo la prueba de página 2 y su intento detenido por el evaluador: diez solicitudes, 32,156 tokens de entrada, 832 de salida y 11,092 de escritura de caché; estimación conservadora total USD 0.094816, reserva del corte USD 0.5940100 y acumulada USD 6.68836520. Todos los techos permanecen satisfechos; el hash operativo y el prefijo del ledger anterior permanecen iguales. El ajuste del guard no accedió a producción ni copió la clave a archivos.
+
+Evidencias privadas: `/Users/mauricioburgos/.codex/task-artifacts/ai-erp-sol-ui-integration-20261008/`, particularmente `integration-result.json`, `provider-results.json`, `browser-network.json`, capturas y registro de ejecución. No se versionan credenciales, capturas ni logs. Los recursos locales se retiran con respaldo recuperable y verificación de propiedad; el código y las evidencias se entregan a `codex-erp-ai-root`, revisión 2026-10-10.
 
 ## Reversión y puerta de publicación
 
