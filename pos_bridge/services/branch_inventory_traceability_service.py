@@ -1232,7 +1232,7 @@ class BranchInventoryTraceabilityService:
             )
             origin_at = row.sent_at
             used_fallback = False
-            if origin_at is None and row.is_finalized:
+            if origin_at is None and (row.is_finalized or (row.is_received and row.received_at)):
                 origin_at = row.registered_at
                 used_fallback = True
             origin_in_month = origin_at is not None and lower_bound <= origin_at < upper_bound
@@ -1246,7 +1246,6 @@ class BranchInventoryTraceabilityService:
             returned_quantity = (
                 sent_quantity - received_quantity
                 if destination_in_month
-                and row.is_finalized
                 and received_quantity < sent_quantity
                 else ZERO
             )

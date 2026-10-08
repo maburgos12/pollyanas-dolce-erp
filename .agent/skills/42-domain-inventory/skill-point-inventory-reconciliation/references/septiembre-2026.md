@@ -1,5 +1,21 @@
 # Continuidad septiembre 2026 — corte 5 de octubre de 2026 UTC
 
+## Corrección DG8oct2026: Recibida es terminal, no falta finalización
+
+La interpretación anterior de3911 («finalizaciones faltan realmente») queda
+superada: los cinco documentos recibidos completos no quedan pendientes por
+isFinalizadoFalse. Conservar aquellos originales; no recapturar ni cambiar flags.
+La misma regla aplica a las26 líneas de2157 con recepción completa: no pedir un
+paso inexistente. Diferencias enviado/recibido y demás incidencias siguen aparte.
+
+Ejemplo **octubre**, nunca septiembre: folio39577 CEDIS→Colosio, detalle549605,
+producto Point1037/PSNICMINI, enviado2/recibido0. GET Stock historial CEDIS100
+del8oct acredita salida1686766 de2 y retorno1687006 de2; ambos GetHeader tienen
+la misma cabecera original de la transferencia. GetDetalle del retorno contiene
+sólo Snickers Mini2. Neto de esos dos eventos0, con otros movimientos intermedios.
+No acredita motivo ni transporte físico. Corrección lectora y conocimiento
+requieren CI/deploy/aceptación, no se presentan publicados por esta nota.
+
 Este archivo es un checkpoint, no una consulta viva. Revalidar hechos cambiantes con fuentes autorizadas y frescura necesaria; no volver a descargar hechos ya acreditados por rutina. Hilo/automatización: `01a0d98e-e017-7253-b4c9-9758f56c3827` / `conciliar-septiembre-hasta-cierre`. Septiembre NO cerrado. Regla humana vigente: no alterar inventario, mermas, ventas, RRHH o ajustes para forzar resultado.
 
 ## Decisión de alcance del DG, 6oct2026 (no acredita cierre)

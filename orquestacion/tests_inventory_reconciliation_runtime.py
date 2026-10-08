@@ -110,7 +110,7 @@ class InventoryReconciliationRuntimeTests(TestCase):
         self.case.refresh_from_db()
         self.assertEqual(self.case.sales, Decimal('14'))
 
-    def test_missing_document_wins_over_complete_traceability_label(self):
+    def test_received_transfer_without_finalization_is_not_a_missing_document(self):
         from pos_bridge.models import PointTransferLine
         transfer = PointTransferLine.objects.create(
             origin_branch=self.branch, destination_branch=self.branch,
@@ -120,8 +120,7 @@ class InventoryReconciliationRuntimeTests(TestCase):
             sent_quantity=1, received_quantity=1, is_received=True, is_finalized=False)
         self.save_case(source_trace={'opening': [1], 'closing': [2], 'transfers': [transfer.pk]})
         result = self.review()
-        self.assertEqual(result.observation['traceability_status'], 'PENDING')
-        self.assertIn('38657/540006', ' '.join(result.observation['missing']))
+        self.assertNotIn('38657/540006', ' '.join(result.observation['missing']))
         self.assertFalse(result.observation['closure_allowed'])
 
     def test_dated_verified_notes_are_loaded_only_for_matching_subject(self):

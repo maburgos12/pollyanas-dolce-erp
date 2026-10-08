@@ -38,6 +38,16 @@ Las capacidades externas declaradas en el catálogo no son ejecutadas por este g
 
 ## Conocimiento obligatorio
 
+Regla DG comprobada el 8oct2026: **Recibida es el estado terminal de una
+transferencia normal Point**. Exigir `is_received` y `received_at`, no
+`is_finalized` como otro paso. Conservar esa bandera original, sin generar
+«falta finalización». Enviado=recibido no deja pendiente por esa bandera;
+enviado>recibido conserva la diferencia y el retorno administrativo al origen
+en la fecha de recepción, sin duplicarlo ni inventar devolución física. Una
+transferencia sin recepción sigue pendiente. El ejemplo39577 pertenece a
+octubre, nunca a septiembre: Snickers Mini2 enviadas/0 recibidas, salida1686766
+y retorno1687006 comprobados en CEDIS. Ver procedimiento y checkpoint.
+
 Leer [procedimiento](references/procedimiento.md) y
 [continuidad septiembre 2026](references/septiembre-2026.md). El runtime carga ambos
 archivos y [hallazgos fechados](references/hallazgos.json), además de este archivo,
@@ -215,6 +225,6 @@ presentar un saldo parcial de la receta afectada como dato final ni inferir
 conteo físico.
 
 Pruebas de runtime con HTTP prohibido, capture prohibido, fuentes no autoritativas,
-ventas originales, finalización pendiente, identidad de hallazgos y segunda revisión.
+ventas originales, recepción pendiente, identidad de hallazgos y segunda revisión.
 Publicación exige CI, deploy oficial y revisión real visible en Orquestación.
 Sin scheduler nuevo: el operador/heartbeat invoca una revisión acotada por expediente.
