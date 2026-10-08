@@ -3174,18 +3174,30 @@ def permisos_list(request):
         .order_by("-creado_en")
     )
     permisos = permisos_qs[:500]
+    puede_direccion = can_authorize_direccion(request.user)
+    anteriores = Q(fecha_fin__date__lt=timezone.localdate()) | Q(
+        fecha_fin__isnull=True, fecha_inicio__date__lt=timezone.localdate()
+    )
+    permisos_vigentes = permisos_qs.exclude(anteriores)
 
     def _con_permisos_accion(qs):
         rows = list(qs[:120])
         for permiso in rows:
             permiso.puede_preautorizar_jefe = can_resolver_permiso_jefe(request.user, permiso)
+            permiso.puede_autorizar_direccion = (
+                puede_direccion
+                and permiso.estado == PermisoSalida.ESTADO_SOLICITADO
+                and permiso.requiere_direccion
+                and permiso.estado_direccion == PermisoSalida.ESTADO_DIRECCION_PENDIENTE
+                and permiso.empleado.usuario_erp_id != request.user.id
+            )
         return rows
 
     columnas = [
         (
             "jefe",
             "Pendiente jefe",
-            _con_permisos_accion(permisos_qs.filter(
+            _con_permisos_accion(permisos_vigentes.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
                 requiere_direccion=False,
@@ -3194,10 +3206,17 @@ def permisos_list(request):
         (
             "direccion",
             "Pendiente Dirección",
-            _con_permisos_accion(permisos_qs.filter(
+            _con_permisos_accion(permisos_vigentes.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 requiere_direccion=True,
                 estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
+            )),
+        ),
+        (
+            "anteriores",
+            "Pendientes anteriores",
+            _con_permisos_accion(permisos_qs.filter(
+                anteriores, estado=PermisoSalida.ESTADO_SOLICITADO,
             )),
         ),
         (
@@ -3211,6 +3230,7 @@ def permisos_list(request):
             _con_permisos_accion(permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)),
         ),
     ]
+    bandeja_activa = "direccion" if puede_direccion else "jefe"
     stats = {
         "total": permisos_qs.count(),
         "pendiente_jefe": permisos_qs.filter(
@@ -3235,7 +3255,8 @@ def permisos_list(request):
             "columnas": columnas,
             "stats": stats,
             "can_manage_rrhh": can_manage_rrhh(request.user),
-            "can_authorize_direccion": can_authorize_direccion(request.user),
+            "can_authorize_direccion": puede_direccion,
+            "bandeja_activa": bandeja_activa,
         },
     )
 
