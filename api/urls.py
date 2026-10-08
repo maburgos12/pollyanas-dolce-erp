@@ -105,6 +105,7 @@ from .omnichannel_views import (
     PublicOmnichannelDeliveryDetailView,
     PublicOmnichannelDeliveryIntakeView,
     PublicOmnichannelDeliveryStatusView,
+    PublicOmnichannelDeliveryPreparationView,
     PublicOmnichannelPointDeliverySyncHealthView,
     PublicOmnichannelOrderStatusView,
     PublicOmnichannelOrdersView,
@@ -601,6 +602,11 @@ urlpatterns = [
         "public/v1/omnichannel/point-delivery-sync/health/",
         PublicOmnichannelPointDeliverySyncHealthView.as_view(),
         name="api_public_omnichannel_point_delivery_sync_health",
+    ),
+    path(
+        "public/v1/omnichannel/deliveries/<int:solicitud_id>/preparation-status/",
+        PublicOmnichannelDeliveryPreparationView.as_view(),
+        name="api_public_omnichannel_delivery_preparation",
     ),
     path(
         "public/v1/omnichannel/deliveries/<int:solicitud_id>/status/",

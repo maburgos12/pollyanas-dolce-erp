@@ -1970,6 +1970,9 @@ class SolicitudDomicilio(models.Model):
                     "hasta que una reconciliación quite el indicador."
                 )
 
+        from crm.services.point_document_link import has_verified_point
+        verified_point = self.pedido_cliente_id and has_verified_point(self.pedido_cliente)
+
         ready_or_later = {
             self.ESTATUS_LISTO,
             self.ESTATUS_EN_RUTA,
@@ -1980,17 +1983,16 @@ class SolicitudDomicilio(models.Model):
             self.estatus == self.ESTATUS_CONFIRMADO
             and not legacy_terminal
             and (
-                not self.pedido_cliente_id
-                or not self.pedido_cliente.point_note_id
+                not verified_point
             )
         ):
             errors["pedido_cliente"] = (
-                "Se requiere un pedido vinculado con una nota de Point antes de confirmar."
+                "Se requiere un pedido vinculado con un documento Point verificado antes de confirmar."
             )
         if self.estatus in ready_or_later and not legacy_terminal:
-            if not self.pedido_cliente_id or not self.pedido_cliente.point_note_id:
+            if not verified_point:
                 errors["pedido_cliente"] = (
-                    "Se requiere un pedido vinculado con una nota de Point antes de marcarlo listo."
+                    "Se requiere un pedido vinculado con un documento Point verificado antes de marcarlo listo."
                 )
             if (
                 not self.direccion_cliente_id
@@ -2068,6 +2070,8 @@ class SolicitudDomicilioStatusOperation(models.Model):
         Repartidor,
         on_delete=models.PROTECT,
         related_name="domicilio_status_operations",
+        null=True,
+        blank=True,
     )
     requested_status = models.CharField(max_length=20)
     final_status = models.CharField(max_length=20)

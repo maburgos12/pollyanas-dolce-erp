@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
@@ -130,7 +131,7 @@ def update_domicilio_status(
     *,
     solicitud_id: int,
     api_client,
-    repartidor_id: int,
+    repartidor_id: int | None,
     requested_status: str,
     operation_id,
     actor: dict[str, str],
@@ -167,36 +168,46 @@ def update_domicilio_status(
                 )
             return dict(operation.result_snapshot)
 
-        if solicitud.repartidor_id != repartidor_id:
-            raise DomicilioStatusError(
-                "La solicitud ya no está asignada a este repartidor."
-            )
-        allowed = api_client.repartidores_logistica_autorizados.filter(
-            pk=repartidor_id
-        ).exists()
-        available = repartidores_disponibles_queryset().filter(
-            pk=repartidor_id
-        ).exists()
-        if not allowed or not available:
-            raise DomicilioStatusError("Repartidor no disponible.")
+        if requested_status in {SolicitudDomicilio.ESTATUS_PREPARANDO, SolicitudDomicilio.ESTATUS_LISTO}:
+            from crm.services.point_document_link import has_verified_point
+            if repartidor_id is not None or not has_verified_point(solicitud.pedido_cliente):
+                raise DomicilioStatusError("Se requiere un documento Point verificado para preparar.")
+            if solicitud.canal_origen == "POR_CONFIRMAR":
+                raise DomicilioStatusError("Confirma el canal antes de preparar.")
+        else:
+            if solicitud.repartidor_id != repartidor_id:
+                raise DomicilioStatusError(
+                    "La solicitud ya no está asignada a este repartidor."
+                )
+            allowed = api_client.repartidores_logistica_autorizados.filter(
+                pk=repartidor_id
+            ).exists()
+            available = repartidores_disponibles_queryset().filter(
+                pk=repartidor_id
+            ).exists()
+            if not allowed or not available:
+                raise DomicilioStatusError("Repartidor no disponible.")
 
         previous_status = solicitud.estatus
         if requested_status == solicitud.estatus:
             raise DomicilioStatusError(
                 f"La operación {requested_status} ya fue cerrada."
             )
-        changed = apply_domicilio_status_transition(
-            solicitud=solicitud,
-            requested_status=requested_status,
-            incidencia_motivo=reason,
-        )
+        try:
+            changed = apply_domicilio_status_transition(
+                solicitud=solicitud,
+                requested_status=requested_status,
+                incidencia_motivo=reason,
+            )
+        except ValidationError as exc:
+            raise DomicilioStatusError(" ".join(exc.messages)) from exc
         if not changed:
             raise DomicilioStatusError(
                 f"La operación {requested_status} ya fue cerrada."
             )
         snapshot = {
             "id": solicitud.id,
-            "repartidor_id": repartidor_id,
+            "repartidor_id": solicitud.repartidor_id,
             "estatus": solicitud.estatus,
             "revision": solicitud.revision,
             "idempotent": False,

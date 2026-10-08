@@ -210,6 +210,13 @@ class OmnichannelDeliveryStatusSerializer(serializers.Serializer):
         return {"id": actor_id, "nombre": name}
 
 
+class OmnichannelDeliveryPreparationSerializer(OmnichannelDeliveryStatusSerializer):
+    repartidor_id = None
+    estatus = serializers.ChoiceField(choices=(
+        SolicitudDomicilio.ESTATUS_PREPARANDO, SolicitudDomicilio.ESTATUS_LISTO,
+    ))
+
+
 class OmnichannelDeliveryIntakeSerializer(serializers.Serializer):
     canal = serializers.ChoiceField(
         choices=(
