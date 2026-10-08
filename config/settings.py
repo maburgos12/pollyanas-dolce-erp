@@ -618,3 +618,6 @@ RENT_MARGEN_BRUTO_MIN = 55.0
 RENT_MARGEN_NETO_MIN = 15.0
 RENT_ROI_OBJETIVO = 25.0
 RENT_PAYBACK_MAX_MESES = 36
+
+# Additive READ workflows remain disabled until explicitly enabled by operations.
+AI_AGENT_WORKFLOWS_ENABLED = env_bool("AI_AGENT_WORKFLOWS_ENABLED", default=False)

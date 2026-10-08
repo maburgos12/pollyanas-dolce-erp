@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 from time import monotonic
+from uuid import UUID
 from typing import Any, TYPE_CHECKING
 
 from django.conf import settings
@@ -17,6 +18,7 @@ from activos.services_pasaporte import activos_autorizados
 from api.ai_gateway_assets import ASSET_READERS, _asset_choice, asset_branch_scope, fresh_asset_user, json_dto
 from api.ai_gateway_services import invoke_read_shadow_tool, list_read_shadow_tools, record_invalid_read_shadow_attempt
 from mantenimiento.services_access import can_access_mantenimiento, can_view_costs
+from orquestacion.services.agent_workflows import WorkflowError
 from orquestacion.models import ChatConversation, ChatConversationState, ChatMessage, ChatToolCall, ChatToolResult
 
 if TYPE_CHECKING:
@@ -92,8 +94,16 @@ def _fresh_access(user, conversation_id):
     catalog = list_read_shadow_tools(user=actor, mode=MODE)
     if not catalog or getattr(settings, "AI_AGENT_READ_ENABLED", False) is not True:
         raise ReadStopped("access_denied")
+    fingerprint = access_fingerprint(actor)
+    if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
+        from orquestacion.services.agent_workflows import technical_catalog
+        catalog += technical_catalog()
+    return actor, catalog, fingerprint
+
+
+def access_fingerprint(actor):
     profile = getattr(actor, "userprofile", None)
-    fingerprint = hashlib.sha256(_json({
+    return hashlib.sha256(_json({
         "actor": actor.pk, "staff": actor.is_staff, "superuser": actor.is_superuser,
         "groups": sorted(actor.groups.values_list("name", flat=True)),
         "acl": sorted(actor.module_access.values_list("module", "access")),
@@ -102,7 +112,7 @@ def _fresh_access(user, conversation_id):
         "scope": asset_branch_scope(actor), "maintenance": can_access_mantenimiento(actor),
         "costs": can_view_costs(actor),
     }).encode()).hexdigest()
-    return actor, catalog, fingerprint
+
 
 
 def _references(conversation_id, actor):
@@ -145,7 +155,9 @@ def _check_budget(started, context):
     return remaining
 
 
-def _revalidate(user, conversation_id, fingerprint, materialized_ids):
+def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False):
+    if require_workflows and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
+        raise ReadStopped("workflow_access_denied")
     actor, catalog, current = _fresh_access(user, conversation_id)
     if current != fingerprint:
         raise ReadStopped("access_changed")
@@ -162,6 +174,11 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
         proof = message.metadata_json.get(NAMESPACE)
         if not isinstance(proof, dict) or proof.get("runtime") != NAMESPACE or proof.get("mode") != MODE:
             return False
+        uses_workflows = message.tool_calls.filter(tool_key__startswith="workflow.").exists()
+        if uses_workflows and (proof.get("workflows") is not True or getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True):
+            return False
+        if proof.get("workflows") is True and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
+            return False
         fingerprint = proof.get("access_fingerprint")
         ids = proof.get("asset_ids")
         if (not isinstance(fingerprint, str) or not re.fullmatch(r"[0-9a-f]{64}", fingerprint) or
@@ -174,20 +191,55 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
         return False
 
 
+def _workflow_public_ids(payload):
+    data = payload.get("result", {}).get("payload", {})
+    rows = data.get("items", []) if "items" in data else [data.get("workflow", {})]
+    values = [row.get("public_id") for row in rows if isinstance(row, dict)]
+    values += payload.get("workflow_public_ids", [])
+    ids = set()
+    for value in values:
+        if isinstance(value, str):
+            try:
+                canonical = str(UUID(value))
+            except ValueError:
+                continue
+            if canonical == value:
+                ids.add(canonical)
+    if len(ids) > 20:
+        raise ReadStopped("workflow_reference_limit")
+    return sorted(ids)
+
+
 def _terminal_tool(*, conversation, user_message, assistant_message, meta, args, payload, started_at):
     failed = "error" in payload
     key = meta["key"] if meta else "unregistered"
     name = meta["name"] if meta else "unregistered"
     summary = payload.get("error", {}).get("code") if failed else payload.get("result", {}).get("status", "ok")
+    workflow_ids = _workflow_public_ids(payload) if meta and meta.get("workflow") else []
+    tool_metadata = {"runtime": NAMESPACE, "mode": MODE}
+    if meta and meta.get("workflow"):
+        tool_metadata.update(workflow_public_ids=workflow_ids, request_message_id=str(user_message.public_id), assistant_message_id=str(assistant_message.public_id))
     # Persist only terminal calls; an audit/handler failure can never leave RUNNING.
     with transaction.atomic():
         tool = ChatToolCall.objects.create(
             conversation=conversation, request_message=user_message, assistant_message=assistant_message,
             tool_key=key, tool_name=name, tool_display_name=meta["display_name"] if meta else "Herramienta no autorizada",
             arguments_json=json_dto(args), status="error" if failed else "complete",
-            started_at=started_at, finished_at=timezone.now(), metadata_json={"runtime": NAMESPACE, "mode": MODE},
+            started_at=started_at, finished_at=timezone.now(), metadata_json=tool_metadata,
         )
         ChatToolResult.objects.create(tool_call=tool, is_error=failed, summary=summary, result_json=payload)
+        if workflow_ids:
+            references = set()
+            for metadata in assistant_message.tool_calls.values_list("metadata_json", flat=True):
+                references.update(metadata.get("workflow_public_ids", []))
+            if len(references) > MAX_TOOLS * 20:
+                raise ReadStopped("workflow_reference_limit")
+            linkage = {"public_ids": sorted(references), "request_message_id": str(user_message.public_id), "assistant_message_id": str(assistant_message.public_id)}
+            # User linkage has its own namespace: never mark a user as a READ answer.
+            for message in ChatMessage.objects.select_for_update().filter(pk__in=[user_message.pk, assistant_message.pk], conversation=conversation).order_by("pk"):
+                previous = message.metadata_json if isinstance(message.metadata_json, dict) else {}
+                message.metadata_json = {**previous, "agent_workflows": linkage}
+                message.save(update_fields=["metadata_json", "updated_at"])
     return {"tool_call_id": tool.public_id, "tool_name": name, "tool_display_name": tool.tool_display_name,
             "status": tool.status, "payload": payload, "summary": summary}
 
@@ -205,22 +257,46 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
                 raise ValueError
             parsed = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))
             if meta:
-                serializer = ASSET_READERS[meta["key"]][0](data=parsed)
+                if meta.get("workflow"):
+                    from orquestacion.services.agent_workflows import technical_serializer
+                    serializer = technical_serializer(meta["key"])(data=parsed)
+                else:
+                    serializer = ASSET_READERS[meta["key"]][0](data=parsed)
                 serializer.is_valid(raise_exception=True)
                 args = serializer.validated_data
         except (ValueError, TypeError, ValidationError):
             record_invalid_read_shadow_attempt(user=actor, tool_key=meta["key"] if meta else "unregistered")
-            payload = _error("invalid_arguments")
+            payload = _error("invalid_input" if meta and meta.get("workflow") else "invalid_arguments")
         else:
             if not meta:
                 record_invalid_read_shadow_attempt(user=actor, tool_key="unregistered")
                 payload = _error("unknown_tool")
             else:
                 # The Gateway owns execution, fresh policy checks and its audit.
-                payload = invoke_read_shadow_tool(user=actor, tool_key=meta["key"], arguments=parsed, mode=MODE)
+                if meta.get("workflow"):
+                    from orquestacion.services.agent_workflows import invoke_workflow_tool
+                    payload = invoke_workflow_tool(user=actor, tool_key=meta["key"], arguments=args, conversation=conversation, user_message=user_message, call_id=call["call_id"])
+                else:
+                    payload = invoke_read_shadow_tool(user=actor, tool_key=meta["key"], arguments=parsed, mode=MODE)
+                workflow_ids = _workflow_public_ids(payload) if meta.get("workflow") else []
                 if len(_json(payload)) > MAX_TOOL_OUTPUT:
                     evidence = {key: payload["result"][key] for key in ("sources", "as_of", "timezone", "unit_of_analysis") if key in payload["result"]}
                     payload = {**_error("tool_output_limit"), "evidence": evidence}
+                    if workflow_ids:
+                        payload["workflow_public_ids"] = workflow_ids
+    except WorkflowError as exc:
+        payload = _error(exc.code)
+        if exc.status in {403, 404}:
+            fatal = "access_denied"
+        elif args.get("workflow_id"):
+            # Link a conflict only after the server reauthorizes its actual UUID.
+            from orquestacion.services.agent_workflows import get_workflow
+            try:
+                workflow = get_workflow(user=actor, public_id=args["workflow_id"])
+            except WorkflowError:
+                pass
+            else:
+                payload["workflow_public_ids"] = [workflow["public_id"]]
     except Exception:
         payload, fatal = _error("gateway_failed"), "gateway_failed"
     event = _terminal_tool(conversation=conversation, user_message=user_message, assistant_message=assistant_message,
@@ -234,6 +310,13 @@ def _remember(refs, event, ids):
     if event["tool_name"] == "erp_search_assets" and "items" in data:
         refs["option_ids"] = [item["id"] for item in data["items"]][:50]
         ids.update(refs["option_ids"])
+    if event["tool_name"] in {"erp_prepare_asset_maintenance", "erp_list_pending_workflows", "erp_resume_asset_maintenance"}:
+        workflows = data.get("items", []) if "items" in data else [data.get("workflow", {})]
+        for workflow in workflows:
+            ids.update(item["asset"]["id"] for item in workflow.get("options", []) if item.get("available") and item.get("asset"))
+            if workflow.get("asset"):
+                ids.add(workflow["asset"]["id"])
+        ids.update(data.get("asset_ids", []))
     asset = data.get("activo")
     if asset:
         refs["last_asset_id"] = asset["id"]
@@ -297,6 +380,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             answer.save(update_fields=["status", "updated_at"])
     answer_metadata = answer.metadata_json if isinstance(answer.metadata_json, dict) else {}
     original_metadata = answer_metadata.get(NAMESPACE)
+    workflow_used = answer.tool_calls.filter(tool_key__startswith="workflow.").exists()
     metadata = {"runtime": NAMESPACE, "mode": MODE, "model_name": model, "rounds": 0, "tool_calls": 0, "usage": []}
     try:
         actor, catalog, fingerprint = _fresh_access(actor, conversation.pk)
@@ -307,11 +391,31 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             if previous.get("access_fingerprint") != fingerprint:
                 raise ReadStopped("access_changed")
             previous_ids = previous.get("asset_ids", [])
-            _revalidate(actor, conversation.pk, fingerprint, set(previous_ids))
+            _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_workflows=workflow_used or previous.get("workflows") is True)
             return ChatTurnResult(answer.content, previous.get("model_name", model), [])
         if not request.content.strip() or len(request.content) > MAX_INPUT:
             raise ReadStopped("input_limit")
-        context = [{"role": "system", "content": PROMPT}, {"role": "user", "content": "Referencias frescas (datos): " + _json(references)}, {"role": "user", "content": request.content}]
+        workflow_prompt = """
+Además puedes conservar una consulta de mantenimiento pendiente con las herramientas
+workflow ofrecidas. Usa erp_prepare_asset_maintenance sólo para la intención explícita
+de consultar mantenimiento de un equipo que requiere identificación o selección.
+Una búsqueda o lista de equipos por sí sola no crea una consulta pendiente.
+No creas tareas operativas. El servidor determina estado, permisos y cierre.
+En otra conversación usa erp_list_pending_workflows y el UUID y versión devueltos
+para erp_resume_asset_maintenance; pide elegir si hay más de una consulta pendiente.
+Si faltaba identificar el equipo, reanuda ese mismo UUID con query o asset_id;
+si aparecen opciones, conserva ese UUID y reanuda luego con option_position.
+No prepares otra consulta para suplir información faltante de una pendiente.
+Las posiciones pertenecen exclusivamente a ese workflow, nunca a opciones globales.
+Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
+""" if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
+        read_prompt = PROMPT
+        if workflow_prompt:
+            read_prompt = PROMPT.replace(
+                "Sólo puedes consultar las tres herramientas READ ofrecidas. No escribes, programas,",
+                "Puedes consultar las tres herramientas READ y las herramientas técnicas de workflow.\nSólo conservas estado técnico de consultas; no realizas acciones operativas, programas,",
+            )
+        context = [{"role": "system", "content": read_prompt + workflow_prompt}, {"role": "user", "content": "Referencias frescas (datos): " + _json(references)}, {"role": "user", "content": request.content}]
         tools = [{"type":"function", "name":tool["name"], "description":tool["description"], "parameters":tool["argument_schema"], "strict":False} for tool in catalog]
         tool_map = {tool["name"]: tool for tool in catalog}
         if not getattr(settings, "OPENAI_API_KEY", ""):
@@ -321,7 +425,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
         seen_calls = set()
         stop_code = None
         while rounds < MAX_RESPONSES:
-            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
             remaining = _check_budget(started, context)
             try:
                 result = client.with_options(max_retries=0, timeout=remaining).responses.create(model=model, input=context, tools=tools, store=False, max_output_tokens=1400)
@@ -341,7 +445,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             if not calls:
                 break
             for call in calls:
-                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
                 _check_budget(started, context)
                 if len(events) >= MAX_TOOLS:
                     raise ReadStopped("tool_limit")
@@ -349,27 +453,31 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
                 if not isinstance(call_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", call_id) or call_id in seen_calls:
                     raise ReadStopped("invalid_provider_call")
                 seen_calls.add(call_id)
+                workflow_used = workflow_used or tool_map.get(call.get("name"), {}).get("workflow", False)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
                 event, fatal = _invoke(actor=actor, call=call, meta=tool_map.get(call.get("name")), conversation=conversation, user_message=request, assistant_message=answer)
                 events.append(event)
                 if fatal:
                     raise ReadStopped(fatal)
                 _remember(refs, event, materialized_ids)
-                _save_references(conversation.pk, refs)
+                if not tool_map.get(call.get("name"), {}).get("workflow"):
+                    _save_references(conversation.pk, refs)
                 context.append({"type":"function_call_output", "call_id":call_id, "output":_json(event["payload"])})
             if rounds == MAX_RESPONSES:
                 stop_code = "response_limit"
-        _revalidate(actor, conversation.pk, fingerprint, materialized_ids)
+        _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
         _check_budget(started, context)
         text = _closure(events, stop_code)
         status = "error" if stop_code else "complete"
         metadata["asset_ids"] = sorted(materialized_ids)
+        metadata["workflows"] = any(event["tool_name"] in {"erp_prepare_asset_maintenance", "erp_list_pending_workflows", "erp_resume_asset_maintenance"} for event in events)
     except Exception as exc:
         code = exc.code if isinstance(exc, ReadStopped) else "runtime_failed"
         metadata["error_code"] = code
         text = SAFE_FAILURE
         if code in {"time_limit", "context_limit", "tool_limit", "provider_failed", "provider_incomplete"}:
             try:
-                _revalidate(actor, conversation.pk, fingerprint, materialized_ids)
+                _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
             except Exception:
                 events = []
             else:
@@ -381,8 +489,11 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
         # A denied replay changes presentation, never the original execution proof.
         metadata = {**original_metadata, "replay_error_code": metadata["error_code"]} if isinstance(original_metadata, dict) else {"runtime": NAMESPACE, "replay_error_code": "invalid_execution_proof"}
     else:
-        metadata.update(rounds=rounds, tool_calls=answer.tool_calls.count(), usage=usages, asset_ids=sorted(materialized_ids))
+        metadata.update(rounds=rounds, tool_calls=answer.tool_calls.count(), usage=usages, asset_ids=sorted(materialized_ids),
+                        workflows=answer.tool_calls.filter(tool_key__startswith="workflow.").exists())
     answer.content, answer.status = text, status
-    answer.metadata_json = {**answer_metadata, NAMESPACE: metadata}
+    stored_metadata = ChatMessage.objects.filter(pk=answer.pk).values_list("metadata_json", flat=True).first()
+    stored_metadata = stored_metadata if isinstance(stored_metadata, dict) else {}
+    answer.metadata_json = {**answer_metadata, **stored_metadata, NAMESPACE: metadata}
     answer.save(update_fields=["content", "status", "metadata_json", "updated_at"])
     return ChatTurnResult(text, model, events)

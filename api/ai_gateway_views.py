@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from django.core.exceptions import PermissionDenied
 from rest_framework import status
-from rest_framework.exceptions import ParseError, ValidationError
+from rest_framework.exceptions import APIException, ParseError, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -195,3 +195,76 @@ class AIGatewayApprovalExecuteView(APIView):
         except PermissionDenied as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
         return Response(result, status=status.HTTP_200_OK)
+
+
+class WorkflowAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def handle_exception(self, exc):
+        if not isinstance(exc, APIException):
+            return Response({'detail':'workflow_failed', 'code':'workflow_failed'}, status=503)
+        response = super().handle_exception(exc)
+        if isinstance(response.data, dict):
+            response.data.setdefault('code', 'authentication_required' if response.status_code == 401 else 'access_denied' if response.status_code == 403 else 'invalid_input')
+        return response
+
+
+class AIGatewayWorkflowListView(WorkflowAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        from orquestacion.services import agent_workflows as workflows
+        try:
+            if set(request.query_params) - {'status', 'kind', 'page', 'page_size'} or any(len(request.query_params.getlist(key)) != 1 for key in request.query_params):
+                raise workflows.WorkflowError('invalid_input', detail='invalid_filter')
+            result = workflows.list_workflows(user=request.user, status=request.query_params.get('status'), kind=request.query_params.get('kind'),
+                         page=int(request.query_params.get('page', '1')), page_size=int(request.query_params.get('page_size', '20')))
+        except ValueError:
+            return Response({'detail':'invalid_input', 'code':'invalid_input'}, status=400)
+        except workflows.WorkflowError as exc:
+            return Response({'detail':str(exc), 'code':exc.code}, status=exc.status)
+        return Response(result)
+
+    def post(self, request):
+        from .ai_gateway_serializers import WorkflowCreateSerializer
+        from orquestacion.services import agent_workflows as workflows
+        return _workflow_command(request, WorkflowCreateSerializer, workflows.create_workflow, status_code=201)
+
+
+class AIGatewayWorkflowDetailView(WorkflowAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, workflow_id):
+        from orquestacion.services import agent_workflows as workflows
+        try:
+            result = workflows.get_workflow(user=request.user, public_id=workflow_id)
+        except workflows.WorkflowError as exc:
+            return Response({'detail':str(exc), 'code':exc.code}, status=exc.status)
+        return Response(result)
+
+    def patch(self, request, workflow_id):
+        from .ai_gateway_serializers import WorkflowUpdateSerializer
+        from orquestacion.services import agent_workflows as workflows
+        return _workflow_command(request, WorkflowUpdateSerializer, workflows.command_workflow, public_id=workflow_id)
+
+
+class AIGatewayWorkflowResumeView(WorkflowAPIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, workflow_id):
+        from .ai_gateway_serializers import WorkflowResumeSerializer
+        from orquestacion.services import agent_workflows as workflows
+        return _workflow_command(request, WorkflowResumeSerializer, workflows.command_workflow, public_id=workflow_id, resume=True)
+
+
+def _workflow_command(request, serializer_type, handler, status_code=200, **kwargs):
+    from orquestacion.services import agent_workflows as workflows
+    try:
+        serializer = serializer_type(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = handler(user=request.user, **serializer.validated_data, **kwargs)
+    except (ParseError, ValidationError) as exc:
+        return Response({'detail':'invalid_input', 'code':'invalid_input', 'fields':exc.detail}, status=400)
+    except workflows.WorkflowError as exc:
+        return Response({'detail':str(exc), 'code':exc.code}, status=exc.status)
+    return Response(result.get('workflow', result), status=status_code)
