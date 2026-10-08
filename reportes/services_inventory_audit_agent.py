@@ -637,7 +637,7 @@ class InventoryAuditAgent:
                 case.responsible_area != result.responsible_area,
                 case.assigned_to_id != result.assigned_to_id,
                 case.assignment_reason != result.assignment_reason,
-                case.investigation_summary != result.summary,
+                json.dumps(case.investigation_summary, sort_keys=True) != json.dumps(result.summary, sort_keys=True),
                 case.investigation_fingerprint != result.fingerprint,
             )
         )
