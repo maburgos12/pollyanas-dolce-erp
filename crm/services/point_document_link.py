@@ -44,6 +44,19 @@ def _set_final_note(order, snapshot):
         point_note_snapshot=snapshot, point_note_fetched_at=timezone.now())
 
 
+def _confirm_final_note_delivery(order, actor):
+    from logistica.models import SolicitudDomicilio
+    from logistica.services_domicilio_status import transition_domicilio_status
+
+    if not order.point_note_id or not has_verified_point(order):
+        return
+    with transaction.atomic():
+        delivery = SolicitudDomicilio.objects.select_for_update().filter(pedido_cliente=order).first()
+        if delivery and delivery.estatus == SolicitudDomicilio.ESTATUS_PENDIENTE_POINT:
+            transition_domicilio_status(solicitud_id=delivery.pk,
+                requested_status=SolicitudDomicilio.ESTATUS_CONFIRMADO, audit_user=actor)
+
+
 def link_web_point(*, order, kind, point_id, delivery_date, actor, snapshot=None):
     if order.external_source != 'POLLYANAS_ECOMMERCE' or order.canal != 'WEB':
         raise ValidationError('Este vínculo requiere el pedido WEB original.')
@@ -70,6 +83,7 @@ def link_web_point(*, order, kind, point_id, delivery_date, actor, snapshot=None
         if link:
             if (link.kind, link.point_id) != (kind, point_id):
                 raise ValidationError('El pedido WEB ya tiene otro documento Point vinculado.')
+            _confirm_final_note_delivery(order, actor)
             return link
         if PointOrderLink.objects.filter(kind=kind, point_id=point_id).exists():
             raise ValidationError('El documento Point ya respalda otro pedido WEB.')
@@ -77,6 +91,7 @@ def link_web_point(*, order, kind, point_id, delivery_date, actor, snapshot=None
                                              snapshot=snapshot, checked_at=timezone.now())
         final = snapshot.get('nota_final') if kind == 'SPECIAL' else snapshot
         _set_final_note(order, final)
+        _confirm_final_note_delivery(order, actor)
         if kind == 'SPECIAL':
             from logistica.models import SolicitudDomicilio
             delivery = SolicitudDomicilio.objects.get(pedido_cliente=order)
@@ -104,11 +119,14 @@ def refresh_special_links():
                 _set_final_note(order, fresh.get('nota_final'))
                 link.is_active = not fresh['cancelado'] and Decimal(fresh['restante']) == 0
                 link.last_error = ''
+                link.checked_at = timezone.now()
+                link.save(update_fields=['is_active', 'last_error', 'checked_at'])
+                _confirm_final_note_delivery(order, None)
         except Exception as exc:
             # Preserve the source snapshot; any uncertain document blocks intake.
             logger.warning('Special Point verification failed link=%s error=%s', link.pk, type(exc).__name__)
             link.last_error = 'No se pudo verificar el pedido especial; requiere revisión en Point.'
             errors += 1
-        link.checked_at = timezone.now()
-        link.save(update_fields=['is_active', 'last_error', 'checked_at'])
+            link.checked_at = timezone.now()
+            link.save(update_fields=['last_error', 'checked_at'])
     return errors

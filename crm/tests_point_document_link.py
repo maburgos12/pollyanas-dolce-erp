@@ -44,6 +44,7 @@ class PointDocumentLinkTests(TestCase):
         self.assertEqual(self.order.point_note_id, '')
         self.assertEqual(self.delivery.ventana_inicio.isoformat(), '2026-10-09T19:30:19+00:00')
         self.assertTrue(has_verified_point(self.order))
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_PENDIENTE_POINT)
 
     def test_wrong_amount_date_unpaid_cancelled_and_identity_are_rejected(self):
         for delta in ({'total': '541'}, {'restante': '1'}, {'cancelado': True},
@@ -69,10 +70,57 @@ class PointDocumentLinkTests(TestCase):
         self.order.refresh_from_db()
         self.assertEqual(self.order.point_note_id, '99001')
         self.assertEqual(self.order.point_note_folio, '104422')
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        self.assertEqual(self.delivery.revision, 1)
         self.assertEqual(self.order.point_order_link.snapshot, self.snapshot)
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
         self.assertEqual(PedidoCliente.objects.count(), 1)
         self.assertTrue(PedidoCliente.objects.exclude(point_note_id='').filter(pk=self.order.pk).exists())
+
+    def test_final_note_confirms_once_on_repeated_link(self):
+        snapshot = {'pk_nota': '99002', 'folio': '104423', 'total': '540',
+                    'sold_at': '2026-10-09T12:30:19-07:00', 'lines': []}
+        self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        self.assertEqual(self.delivery.revision, 1)
+        self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.revision, 1)
+
+    def test_repeated_link_repairs_existing_pending_delivery(self):
+        snapshot = {'pk_nota': '99002', 'folio': '104423', 'total': '540',
+                    'sold_at': '2026-10-09T12:30:19-07:00', 'lines': []}
+        # Reproduce a document linked before status confirmation was implemented.
+        with patch('crm.services.point_document_link._confirm_final_note_delivery'):
+            self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        self.assertEqual(self.delivery.revision, 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_final_note_does_not_reopen_cancelled_delivery(self):
+        self.delivery.estatus = SolicitudDomicilio.ESTATUS_CANCELADO
+        self.delivery.cancelacion_motivo = 'Cancelado por cliente'
+        self.delivery.save(update_fields=['estatus', 'cancelacion_motivo'])
+        snapshot = {'pk_nota': '99002', 'folio': '104423', 'total': '540',
+                    'sold_at': '2026-10-09T12:30:19-07:00', 'lines': []}
+        self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_CANCELADO)
+
+    def test_inactive_link_does_not_confirm_existing_pending_delivery(self):
+        snapshot = {'pk_nota': '99002', 'folio': '104423', 'total': '540',
+                    'sold_at': '2026-10-09T12:30:19-07:00', 'lines': []}
+        with patch('crm.services.point_document_link._confirm_final_note_delivery'):
+            link = self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        link.is_active = False
+        link.save(update_fields=['is_active'])
+        self.link(kind='NOTE', point_id='99002', snapshot=snapshot)
+        self.delivery.refresh_from_db()
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_PENDIENTE_POINT)
 
     def test_failed_verification_blocks_dispatch_without_mutating_source(self):
         self.link()
