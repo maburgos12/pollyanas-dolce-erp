@@ -619,5 +619,12 @@ RENT_MARGEN_NETO_MIN = 15.0
 RENT_ROI_OBJETIVO = 25.0
 RENT_PAYBACK_MAX_MESES = 36
 
+# Finite READ pilot; separate from the existing private-chat provider configuration.
+AI_AGENT_READ_ENABLED = env_bool("AI_AGENT_READ_ENABLED", default=False)
+AI_GATEWAY_ASSETS_ENABLED = env_bool("AI_GATEWAY_ASSETS_ENABLED", default=False)
+AI_AGENT_READ_MODEL = os.getenv("AI_AGENT_READ_MODEL", "").strip()
+_pilot_user_id = os.getenv("AI_AGENT_PILOT_USER_ID", "0")
+AI_AGENT_PILOT_USER_ID = int(_pilot_user_id) if _pilot_user_id.isascii() and _pilot_user_id.isdecimal() and len(_pilot_user_id) <= 10 else 0
+
 # Additive READ workflows remain disabled until explicitly enabled by operations.
 AI_AGENT_WORKFLOWS_ENABLED = env_bool("AI_AGENT_WORKFLOWS_ENABLED", default=False)

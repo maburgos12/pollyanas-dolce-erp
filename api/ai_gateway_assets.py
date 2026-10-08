@@ -107,7 +107,8 @@ def can_read_assets(user):
     if getattr(settings, "AI_GATEWAY_ASSETS_ENABLED", False) is not True:
         return False
     user = fresh_asset_user(user)
-    return bool(user and asset_branch_scope(user) != [])
+    from orquestacion.services.agent_pilot import is_pilot_participant
+    return bool(is_pilot_participant(user) and asset_branch_scope(user) != [])
 
 
 def _assets(user, arguments):
