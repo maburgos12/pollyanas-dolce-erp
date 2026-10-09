@@ -124,3 +124,13 @@ assert(view.incident(proposal).includes('&lt;img'));
 assert(!view.incident(proposal).includes('<img'));
 for(const status of ['WAITING_INFORMATION','EXPIRED','EXECUTED']) assert(!view.incident({...proposal,status}).includes('data-incident-id'));
 assert(view.incident({...proposal,status:'EXECUTED',report_id:42}).includes('#42'));
+const natural = view.response({role:'assistant', presentation:'natural', content:'Primero mi respuesta\n\n<img src=x onerror=alert(1)>',
+  receipts:[{...proposal,status:'EXECUTED',report_id:42}], tool_calls:[{status:'complete',tool_key:'erp.search_assets',result:{result:{payload:{items:[]}}}}]});
+assert(natural.indexOf('Primero mi respuesta') < natural.indexOf('Comprobante del ERP'));
+assert(!natural.includes('<img'));
+assert(natural.includes('&lt;img'));
+assert(natural.includes('#42'));
+assert(!natural.includes('data-incident-id'));
+assert(!natural.includes('agent-full-response'));
+assert(view.response({role:'assistant',presentation:'technical',content:'datos',tool_calls:[{status:'error'}]}).includes('Detalle técnico'));
+assert(!view.response({role:'assistant',presentation:'natural',content:'Confirmar <button data-incident-id="fake">',tool_calls:[]}).includes('<button'));

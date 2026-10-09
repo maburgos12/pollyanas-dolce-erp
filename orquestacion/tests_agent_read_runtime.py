@@ -75,6 +75,85 @@ class AgentReadRuntimeTests(TestCase):
         self.assertEqual(self.messages[1].status, ChatMessage.STATUS_ERROR)
         self.assertFalse(ChatToolCall.objects.filter(status=ChatToolCall.STATUS_RUNNING).exists())
 
+    def test_natural_answer_keeps_server_evidence_and_history_in_next_turn(self):
+        from orquestacion.services.chat_service import serialize_message
+        from orquestacion.services.agent_read_context import ANSWER_FORMAT
+        self.run_turn([response(call()), response()])
+        first = self.messages
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='¿Cuál fue el segundo?')
+        self.requests.clear()
+        def answer(**kwargs):
+            self.requests.append(copy.deepcopy(kwargs))
+            if len(self.requests) == 1:
+                return response(call(call_id='fresh'))
+            evidence = json.loads(kwargs['input'][-1]['output'])['tool_call_id']
+            return response(text=json.dumps({'answer':'El segundo es Horno dos. ¿Quieres consultar su ficha?',
+                'evidence_ids':[evidence], 'action_claim':'none', 'incident_ids':[]}))
+        self.provider.responses.create.side_effect = answer
+        result = execute_chat_turn(user=self.user, conversation=self.conversation,
+            user_message=self.messages[0], assistant_message=self.messages[1])
+        self.assertEqual(result.assistant_text, 'El segundo es Horno dos. ¿Quieres consultar su ficha?')
+        sent = self.requests[0]['input']
+        self.assertEqual(sent[2]['content'], first[0].content)
+        self.assertIn('Horno dos', sent[3]['content'])
+        self.assertEqual(sent[-1]['content'], self.messages[0].content)
+        self.assertEqual(self.requests[0]['text']['format'], ANSWER_FORMAT)
+        self.messages[1].refresh_from_db()
+        self.assertEqual(serialize_message(self.messages[1])['presentation'], 'natural')
+        self.assertEqual(len(serialize_message(self.messages[1])['tool_calls']), 1)
+        self.assertFalse(OrdenMantenimiento.objects.exists())
+
+    def test_revoked_history_omits_both_answer_and_user_quotation(self):
+        from orquestacion.services.agent_read_context import history_context
+        from orquestacion.services.chat_service import serialize_message
+        self.run_turn([response(call()), response()])
+        ChatMessage.objects.filter(pk=self.messages[0].pk).update(content='PRIVATE QUOTATION Horno uno')
+        Activo.objects.filter(pk=self.asset.pk).update(sucursal=self.other_branch)
+        self.assertEqual(history_context(self.conversation, self.messages[1].sequence + 1), ([], set()))
+        self.messages[0].refresh_from_db()
+        self.assertNotIn('PRIVATE QUOTATION', serialize_message(self.messages[0])['content'])
+
+    def test_history_is_bounded_and_excludes_other_chats_future_and_unproved_messages(self):
+        from orquestacion.services.agent_read_context import history_context, MAX_HISTORY_MESSAGES, MAX_HISTORY_CHARS
+        self.run_turn([response(call()), response()])
+        cutoff = self.messages[1].sequence + 1
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='FUTURE REQUEST')
+        self.run_turn()
+        other = create_chat_conversation(user=self.user)
+        create_user_turn(user=self.user, conversation=other, content='OTHER CHAT SECRET')
+        history, ids = history_context(self.conversation, cutoff)
+        self.assertEqual(len(history), 2)
+        self.assertIn(self.asset.pk, ids)
+        self.assertNotIn('FUTURE REQUEST', str(history))
+        self.assertNotIn('OTHER CHAT SECRET', str(history))
+        self.assertLessEqual(len(history), MAX_HISTORY_MESSAGES)
+        self.assertLessEqual(sum(len(row['content']) for row in history), MAX_HISTORY_CHARS)
+        ChatMessage.objects.filter(conversation=self.conversation, sequence=2).update(metadata_json={})
+        self.assertEqual(history_context(self.conversation, cutoff), ([], set()))
+
+    def test_natural_response_rejects_unknown_references_and_unverified_execution(self):
+        from orquestacion.services.agent_read_context import natural_answer
+        incidents = [{'draft_id':'owned', 'status':'AWAITING_CONFIRMATION'}]
+        good = {'answer':'Falta tu confirmación.', 'evidence_ids':['owned'], 'action_claim':'proposal', 'incident_ids':['owned']}
+        self.assertEqual(natural_answer(json.dumps(good), [], incidents), good)
+        for overrides in ({'action_claim':'receipt'}, {'incident_ids':['other']}, {'evidence_ids':['other']},
+                          {'incident_ids':[]}, {'answer':''}, {'evidence_ids':[None]}, {'evidence_ids':['owned','owned']},
+                          {'unexpected':'secret'}, {'action_claim':'salary_paid'}):
+            with self.subTest(overrides=overrides):
+                self.assertIsNone(natural_answer(json.dumps({**good, **overrides}), [], incidents))
+        self.assertIsNone(natural_answer('Ya pagué y cambié el salario.', [], incidents))
+
+    @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True)
+    def test_history_allows_clarification_without_forcing_unrequested_tool(self):
+        self.run_turn([response(call()), response()])
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='Me refería a cuál sigue.')
+        self.requests.clear()
+        result = self.run_turn([response(text=json.dumps({'answer':'¿Te refieres al siguiente equipo o al próximo mantenimiento?',
+            'evidence_ids':[], 'action_claim':'none', 'incident_ids':[]}))])
+        self.assertEqual(self.requests[0]['tool_choice'], 'auto')
+        self.assertIn('¿Te refieres', result.assistant_text)
+        self.assertEqual(result.tool_events, [])
+
     @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True)
     def test_outside_pilot_explains_limit_without_unrelated_reads_or_second_request(self):
         from fallas.models import ReporteFalla, BitacoraFalla

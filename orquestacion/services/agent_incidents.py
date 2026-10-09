@@ -116,6 +116,10 @@ def project(draft, actor):
     if asset and metadata['branch_id'] != asset.sucursal_id:
         raise WorkflowError('incident_resource_changed', 409)
     status = metadata['incident_status']
+    if status == 'EXECUTED' and not ReporteFalla.objects.filter(
+            pk=metadata.get('report_id'), activo_relacionado=asset,
+            sucursal_id=metadata['branch_id'], reportado_por_id=metadata.get('confirmed_by')).exists():
+        raise WorkflowError('incident_receipt_unavailable', 409)
     if status != 'EXECUTED' and timezone.now() >= timezone.datetime.fromisoformat(metadata['expires_at']):
         status = 'EXPIRED'
     existing = list(ReporteFalla.objects.filter(activo_relacionado=asset, sucursal_id=asset.sucursal_id,
@@ -127,6 +131,7 @@ def project(draft, actor):
             'payload_hash':metadata['payload_hash'], 'missing_fields':missing,
             'fields':draft.arguments_json, 'asset':{'id':asset.pk, 'nombre':asset.nombre, 'codigo':asset.codigo, 'sucursal':asset.sucursal.nombre} if asset else None,
             'categoria':category.nombre if category else None, 'report_id':metadata.get('report_id'),
+            'confirmed_at':metadata.get('confirmed_at'),
             'expires_at':metadata['expires_at']}
 
 
