@@ -80,7 +80,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261009-incidents-v1"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261009-continuidad-v2"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -174,15 +174,11 @@
       if (message.status === "error") {
         bubbleClasses.push("is-error");
       }
-      const toolsHtml = (message.tool_calls || []).map(view.tool).join("");
-      const responseHtml = toolsHtml
-        ? `<details class="agent-full-response"><summary>Texto completo de la respuesta</summary><p>${escapeHtml(message.content)}</p></details>`
-        : `<p>${escapeHtml(message.content || (message.status === "streaming" ? "Consultando el ERP…" : ""))}</p>`;
+      const responseHtml = view.response(message);
       row.innerHTML = `
         ${message.role === "user" ? "" : avatar}
         <div class="${bubbleClasses.join(" ")}" data-message-id="${message.id}">
-          <div class="agent-message-label">${message.role === "user" ? "Tú" : "Respuesta del agente"}${message.status === "error" ? " · No completada" : ""}</div>
-          ${toolsHtml}
+          <div class="agent-message-label">${message.role === "user" ? "Tú" : "Respuesta IA"}${message.status === "error" ? " · No completada" : ""}</div>
           ${responseHtml}
           <div class="erp-chat-meta">${formatTimestamp(message.created_at)}</div>
         </div>

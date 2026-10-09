@@ -65,15 +65,15 @@
   }
   function incident(row) {
     if (!row || typeof row.draft_id !== 'string') return '';
+    if (row.status === 'EXECUTED') return `${asset(row.asset)}<p>Reporte creado · Folio de falla: <strong>#${escape(row.report_id)}</strong>.</p>${row.confirmed_at ? `<p class="agent-source">Confirmado: ${date(row.confirmed_at)}</p>` : ''}`;
     const fields = {activo_id:'Equipo', categoria_id:'Categoría', titulo:'Título', descripcion:'Qué ocurrió', prioridad:'Prioridad', justificacion_sin_foto:'Motivo de no adjuntar foto'};
     const missing = (row.missing_fields || []).map(key => escape(fields[key] || key)).join(', ');
-    const labels = {WAITING_INFORMATION:'Falta información', AWAITING_CONFIRMATION:'Pendiente de tu confirmación', EXECUTED:'Reporte creado', EXPIRED:'Propuesta vencida', REVIEW_REQUIRED:'Revisar falla existente'};
+    const labels = {WAITING_INFORMATION:'Falta información', AWAITING_CONFIRMATION:'Pendiente de tu confirmación', EXPIRED:'Propuesta vencida', REVIEW_REQUIRED:'Revisar falla existente'};
     return `${asset(row.asset)}<p><strong>${escape(labels[row.status] || 'Revisar propuesta')}</strong></p>
       <dl class="agent-facts">${Object.entries(row.fields || {}).filter(([key]) => !['activo_id','categoria_id'].includes(key)).map(([key,value]) => `<div><dt>${escape(fields[key] || key)}</dt><dd>${escape(value)}</dd></div>`).join('')}${row.categoria ? `<div><dt>Categoría</dt><dd>${escape(row.categoria)}</dd></div>` : ''}</dl>
       ${row.status === 'REVIEW_REQUIRED' ? `<p>Este equipo ya tiene fallas abiertas. Revisa su seguimiento antes de crear otra.</p><ul>${(row.existing_reports || []).map(report => `<li>#${escape(report.id)} · ${escape(report.titulo)}</li>`).join('')}</ul>` : ''}
       ${missing ? `<p>Falta: ${missing}. Puedes completar el reporte en esta conversación.</p>` : ''}
-      ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se creará el reporte en Fallas y quedará disponible para seguimiento en Mantenimiento.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y crear reporte</button>` : ''}
-      ${row.status === 'EXECUTED' ? `<p>Folio de falla: <strong>#${escape(row.report_id)}</strong>.</p>` : ''}`;
+      ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se creará el reporte en Fallas y quedará disponible para seguimiento en Mantenimiento.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y crear reporte</button>` : ''}`;
   }
   function tool(call) {
     const wrapper = call.result || call.payload || {};
@@ -88,5 +88,14 @@
       ${error ? '<p>No se pudo completar esta consulta. Revisa tu acceso o intenta consultar nuevamente.</p>' : approval ? '<p>La acción requiere autorización; no se presenta como ejecutada.</p>' : html || `<p>${escape(call.summary || (complete ? 'El servidor registró el resultado.' : 'Esperando resultado del servidor.'))}</p>`}
       ${html ? source(result) : ''}</section>`;
   }
-  globalThis.ERPAgentView = {escape, date, badge, workflow, tool, incident};
+  function response(message) {
+    const content = escape(message.content || (message.status === 'streaming' ? 'Consultando el ERP…' : ''));
+    const receipts = (message.receipts || []).map(row => `<section class="agent-tool"><div class="agent-result-head"><strong>Comprobante del ERP</strong>${badge(row.status)}</div>${incident(row)}</section>`).join('');
+    const tools = (message.tool_calls || []).map(tool).join('');
+    const prose = message.presentation === 'natural' || message.role === 'user' || (!tools && !receipts)
+      ? `<p class="agent-answer">${content}</p>`
+      : `<details class="agent-full-response"><summary>Detalle técnico de la consulta</summary><p>${content}</p></details>`;
+    return `${prose}${receipts}${tools}`;
+  }
+  globalThis.ERPAgentView = {escape, date, badge, workflow, tool, incident, response};
 })();

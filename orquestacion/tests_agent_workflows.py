@@ -346,7 +346,8 @@ class AgentWorkflowTests(TestCase):
         self.assertNotIn('agent_read', selection[0].metadata_json)
         from orquestacion.services.chat_service import serialize_message
         with override_settings(AI_AGENT_WORKFLOWS_ENABLED=False):
-            self.assertEqual(serialize_message(selection[0])['content'], 'El segundo')
+            # A quotation/selection belongs to the same visibility proof as its answer.
+            self.assertNotEqual(serialize_message(selection[0])['content'], 'El segundo')
 
     @override_settings(OPENAI_API_KEY='fake-test-key')
     def test_required_first_read_does_not_create_intent_for_greeting_or_write_request(self):
@@ -362,7 +363,8 @@ class AgentWorkflowTests(TestCase):
                 messages = create_user_turn(user=self.user, conversation=self.chat, content=content)
                 with patch('openai.OpenAI', return_value=provider):
                     result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
-                self.assertEqual(provider.responses.create.call_args_list[0].kwargs.get('tool_choice'), 'required')
+                self.assertEqual(provider.responses.create.call_args_list[0].kwargs.get('tool_choice'),
+                                 'required' if operation == 'UNKNOWN' else 'auto')
                 self.assertEqual(list(models.AgentWorkflow.objects.values('public_id', 'status', 'version', 'state_json').order_by('pk')), before)
                 self.assertEqual(Activo.objects.count(), 3)
                 self.assertEqual(OrdenMantenimiento.objects.count(), 0)

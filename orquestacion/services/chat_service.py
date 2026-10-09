@@ -163,6 +163,10 @@ READ_PROJECTION_UNAVAILABLE = "Esta consulta READ no está disponible con los pe
 def _read_message_visible(message: ChatMessage | None) -> bool:
     if not message:
         return False
+    if message.role == ChatMessage.ROLE_USER:
+        answer = message.conversation.messages.filter(sequence=message.sequence + 1, role='assistant').first()
+        if answer:
+            return _read_message_visible(answer)
     marked = isinstance(message.metadata_json, dict) and "agent_read" in message.metadata_json
     if not marked:
         marked = message.tool_calls.filter(metadata_json__runtime="agent_read").exists()
@@ -209,12 +213,17 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
     tool_calls = []
     if message.role == ChatMessage.ROLE_ASSISTANT:
         tool_calls = [serialize_tool_call(tool_call) for tool_call in message.tool_calls.select_related("result").all()]
+    visible = _read_message_visible(message)
+    proof = message.metadata_json.get('agent_read', {}) if isinstance(message.metadata_json, dict) else {}
+    from orquestacion.services.agent_read_context import projected_receipts
     return {
         "id": str(message.public_id),
         "sequence": message.sequence,
         "role": message.role,
         "status": message.status,
-        "content": message.content if _read_message_visible(message) else READ_PROJECTION_UNAVAILABLE,
+        "content": message.content if visible else READ_PROJECTION_UNAVAILABLE,
+        "presentation": proof.get('presentation', 'technical') if visible else 'unavailable',
+        "receipts": projected_receipts(message) if visible and message.role == 'assistant' else [],
         "created_at": message.created_at.isoformat(),
         "tool_calls": tool_calls,
     }

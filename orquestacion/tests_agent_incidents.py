@@ -169,6 +169,59 @@ class IncidentTests(TestCase):
         self.assertFalse(ChatToolCall.objects.exists())
         self.assertFalse(ReporteFalla.objects.exists())
 
+    @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True, AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake')
+    def test_confirmed_folio_is_available_to_model_and_ui_without_another_write(self):
+        import json
+        from unittest.mock import Mock
+        from orquestacion.services.chat_service import execute_chat_turn, serialize_message
+        dto = self.confirm(self.prepare())
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='¿Qué folio quedó?')
+        provider = Mock(); provider.with_options.return_value = provider
+        provider.responses.create.return_value = SimpleNamespace(output=[], usage=None, output_text=json.dumps({
+            'answer':f"Quedó el folio #{dto['report_id']} para Batidora 3, confirmado anteriormente.",
+            'evidence_ids':[dto['draft_id']], 'action_claim':'receipt', 'incident_ids':[dto['draft_id']]}))
+        with patch('openai.OpenAI', return_value=provider), patch('orquestacion.services.agent_pilot.reserve_request', return_value={}):
+            result = execute_chat_turn(user=self.user, conversation=self.conversation,
+                user_message=self.messages[0], assistant_message=self.messages[1])
+            replay = execute_chat_turn(user=self.user, conversation=self.conversation,
+                user_message=self.messages[0], assistant_message=self.messages[1])
+        self.assertIn(f"folio #{dto['report_id']}", result.assistant_text)
+        self.assertEqual(replay.assistant_text, result.assistant_text)
+        provider.responses.create.assert_called_once()
+        request = provider.responses.create.call_args.kwargs
+        self.assertEqual(request['tool_choice'], 'auto')
+        fresh = json.loads(request['input'][1]['content'].split(': ', 1)[1])
+        self.assertEqual(fresh['incident_drafts'][0]['report_id'], dto['report_id'])
+        self.messages[1].refresh_from_db()
+        projected = serialize_message(self.messages[1])
+        self.assertEqual(projected['presentation'], 'natural')
+        self.assertEqual(projected['receipts'][0]['report_id'], dto['report_id'])
+        self.assertEqual(ReporteFalla.objects.count(), 1)
+        self.assertEqual(BitacoraFalla.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action='AI_INCIDENT_CREATE').count(), 1)
+        with override_settings(AI_AGENT_INCIDENTS_ENABLED=False):
+            self.assertEqual(serialize_message(self.messages[1])['receipts'], [])
+            self.assertNotIn('Batidora 3', serialize_message(self.messages[1])['content'])
+
+    def test_receipt_requires_live_report_and_same_equipment_and_owner(self):
+        dto = self.confirm(self.prepare())
+        draft = ChatToolCall.objects.get()
+        ReporteFalla.objects.filter(pk=dto['report_id']).update(reportado_por=self.other)
+        with self.assertRaises(WorkflowError): incidents.project(draft, self.user)
+        ReporteFalla.objects.filter(pk=dto['report_id']).update(reportado_por=self.user)
+        ReporteFalla.objects.filter(pk=dto['report_id']).delete()
+        with self.assertRaises(WorkflowError): incidents.project(draft, self.user)
+
+    def test_incident_context_is_owned_bounded_and_includes_executed(self):
+        from orquestacion.services.agent_read_context import incident_context
+        dto = self.confirm(self.prepare())
+        self.assertEqual(incident_context(self.conversation, self.user)[0]['report_id'], dto['report_id'])
+        self.assertEqual(incident_context(self.conversation, self.other), [])
+        other_chat = create_chat_conversation(user=self.user)
+        self.assertEqual(incident_context(other_chat, self.user), [])
+        with override_settings(AI_AGENT_INCIDENTS_ENABLED=False):
+            self.assertEqual(incident_context(self.conversation, self.user), [])
+
 
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True)
 class IncidentConcurrencyTests(TransactionTestCase):
