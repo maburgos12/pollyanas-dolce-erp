@@ -117,3 +117,10 @@ async function controllerChecks() {
   console.log('Agent UI checks passed: safe projections, empty results, workflow fields, incomplete SSE, no retries, navigation locks and mobile history.');
 }
 controllerChecks().catch(error=>{console.error(error);process.exitCode=1;});
+
+const proposal = {draft_id:'server-id', status:'AWAITING_CONFIRMATION', version:2, payload_hash:'a'.repeat(64), missing_fields:[], fields:{titulo:hostile,descripcion:'No gira',justificacion_sin_foto:'Sin cámara'}};
+assert(view.incident(proposal).includes('Confirmar y crear reporte'));
+assert(view.incident(proposal).includes('&lt;img'));
+assert(!view.incident(proposal).includes('<img'));
+for(const status of ['WAITING_INFORMATION','EXPIRED','EXECUTED']) assert(!view.incident({...proposal,status}).includes('data-incident-id'));
+assert(view.incident({...proposal,status:'EXECUTED',report_id:42}).includes('#42'));

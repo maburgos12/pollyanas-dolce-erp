@@ -628,3 +628,4 @@ AI_AGENT_PILOT_USER_ID = int(_pilot_user_id) if _pilot_user_id.isascii() and _pi
 
 # Additive READ workflows remain disabled until explicitly enabled by operations.
 AI_AGENT_WORKFLOWS_ENABLED = env_bool("AI_AGENT_WORKFLOWS_ENABLED", default=False)
+AI_AGENT_INCIDENTS_ENABLED = env_bool("AI_AGENT_INCIDENTS_ENABLED", default=False)

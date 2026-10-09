@@ -268,3 +268,24 @@ def _workflow_command(request, serializer_type, handler, status_code=200, **kwar
     except workflows.WorkflowError as exc:
         return Response({'detail':str(exc), 'code':exc.code}, status=exc.status)
     return Response(result.get('workflow', result), status=status_code)
+
+
+class AIGatewayIncidentConfirmationView(APIView):
+    # Human UI only: session auth enforces CSRF; no tool exposes this endpoint.
+    from rest_framework.authentication import SessionAuthentication
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, draft_id):
+        from orquestacion.services.agent_incidents import confirm
+        from orquestacion.services.agent_workflows import WorkflowError
+        try:
+            return Response(confirm(user=request.user, draft_id=draft_id, arguments=request.data))
+        except WorkflowError as exc:
+            return Response({'code':exc.code, 'detail':str(exc)}, status=exc.status)
+        except ValidationError:
+            raise
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('Incident confirmation failed')
+            return Response({'code':'incident_failed', 'detail':'No se pudo confirmar el resultado. Reintenta la misma propuesta.'}, status=503)

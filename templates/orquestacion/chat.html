@@ -80,7 +80,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261008-read-limit-v1"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261009-incidents-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -478,6 +478,32 @@
     inputEl.value = `Quiero continuar la consulta ${button.dataset.workflowId}. `;
     inputEl.focus();
     statusEl.textContent = "Añade el dato o la selección que falta y envía tu mensaje. El proceso aún no se ha ejecutado.";
+  });
+  messageListEl.addEventListener("click", async event => {
+    const button = event.target.closest("[data-incident-id]");
+    if (!button || button.disabled || state.sending || state.loading || state.creating) return;
+    button.disabled = true;
+    state.sending = true;
+    sendBtn.disabled = true;
+    statusEl.textContent = "Confirmando el reporte con el servidor…";
+    try {
+      const response = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(button.dataset.incidentId)}/confirm/`, {
+        method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json", "X-CSRFToken":csrfToken},
+        body:JSON.stringify({confirm:true, expected_version:Number(button.dataset.version), payload_hash:button.dataset.hash})});
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || "No se pudo confirmar el reporte. Revisa los datos y tu acceso.");
+      const report = payload.result?.payload?.incident;
+      statusEl.textContent = report?.status === 'EXECUTED' ? `Reporte creado: folio #${report.report_id}.` : "El servidor no confirmó la creación.";
+      await loadConversation(state.activeConversation.conversation.id, true);
+    } catch (error) {
+      statusEl.textContent = error.message || "No se recibió confirmación. Puedes reintentar la misma propuesta; el servidor evita duplicados.";
+      button.disabled = false;
+    } finally {
+      state.sending = false;
+      sendBtn.disabled = state.loading || !runtimeStatus.ready;
+      document.getElementById("erp-chat-new-btn").disabled = state.loading || state.creating;
+      renderConversationList();
+    }
   });
   renderConversationList();
   renderMessages();

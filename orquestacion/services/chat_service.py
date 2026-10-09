@@ -185,6 +185,13 @@ def serialize_tool_call(tool_call: ChatToolCall) -> dict[str, Any]:
     result = getattr(tool_call, "result", None)
     marked = isinstance(tool_call.metadata_json, dict) and tool_call.metadata_json.get("runtime") == "agent_read"
     visible = _read_message_visible(tool_call.assistant_message) if tool_call.assistant_message_id else not marked
+    incident_payload = None
+    if visible and tool_call.tool_key == 'incident.prepare':
+        from orquestacion.services.agent_incidents import project, _response
+        try:
+            incident_payload = _response(project(tool_call, tool_call.conversation.owner))
+        except Exception:
+            visible = False
     return {
         "id": str(tool_call.public_id),
         "tool_key": tool_call.tool_key if visible else "read_unavailable",
@@ -193,7 +200,7 @@ def serialize_tool_call(tool_call: ChatToolCall) -> dict[str, Any]:
         "status": tool_call.status,
         "requires_approval": tool_call.requires_approval if visible else False,
         "summary": (result.summary if result else "") if visible else READ_PROJECTION_UNAVAILABLE,
-        "result": result.result_json if result and visible else {},
+        "result": (incident_payload or result.result_json) if result and visible else {},
         "created_at": tool_call.created_at.isoformat(),
     }
 
