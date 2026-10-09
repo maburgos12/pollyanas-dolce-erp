@@ -758,6 +758,7 @@
               <td class="cell-actions">
                 {% if can_manage_rrhh %}
                   <span class="muted">Editar</span>
+                  <a href="{% url 'rrhh:gafetes' %}?q={{ e.codigo|urlencode }}">Gafete</a>
                 {% else %}
                   <span class="muted">Consulta</span>
                 {% endif %}

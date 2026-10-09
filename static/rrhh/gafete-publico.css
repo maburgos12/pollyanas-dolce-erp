@@ -1,0 +1,27 @@
+/* Hallmark · pre-emit critique: P5 H5 E4 S5 R5 V4 */
+:root {
+ --color-paper:#F5F0EB; --color-surface:#FFFAF5; --color-ink:#3D2B2B; --color-muted:#75615F;
+ --color-accent:#8B2252; --color-gold:#C9A84C; --color-rule:#E7DDD4;
+ --color-success:#236143; --color-success-paper:#EAF2EB; --color-warning:#844324; --color-warning-paper:#F4EBE3;
+ --font-display:'Playfair Display',Georgia,serif; --font-body:'Nunito',sans-serif;
+ --space-sm:8px; --space-md:16px; --space-lg:24px; --space-xl:32px; --space-2xl:48px;
+ --text-sm:13px; --text-base:16px; --text-lg:20px; --text-display:34px;
+ --radius-panel:8px;
+}
+
+/* Hallmark · macrostructure: Long Document (verification record) · tone: formal and warm · theme: existing Pollyanas brand · nav: N9 · footer: Ft2 · enrichment: official logo · motion: none */
+
+
+*{box-sizing:border-box}html,body{margin:0;overflow-x:clip}body{background:var(--color-paper);color:var(--color-ink);font-family:var(--font-body);font-size:var(--text-base);line-height:1.55;min-height:100svh;padding:var(--space-lg) var(--space-md) var(--space-xl)}
+.draft{max-width:464px;margin:0 auto var(--space-lg);font-size:var(--text-sm);color:var(--color-muted);text-align:center}
+.sheet{max-width:464px;margin:auto;background:var(--color-surface);border:1px solid var(--color-rule);border-top:3px solid var(--color-gold);border-radius:var(--radius-panel);padding:var(--space-xl) var(--space-lg)}
+.brand{padding-bottom:var(--space-lg);border-bottom:1px solid var(--color-rule)}.brand img{display:block;width:212px;height:auto;max-width:100%}.brand p{font-size:var(--text-sm);margin:var(--space-md) 0 0;color:var(--color-muted)}
+.status{display:flex;align-items:center;gap:var(--space-sm);font-weight:800;color:var(--color-success);font-size:var(--text-base);margin:var(--space-xl) 0 var(--space-lg)}.status svg{width:26px;height:26px;flex:none;stroke:currentColor;fill:var(--color-success-paper)}
+h1{font-family:var(--font-display);font-weight:500;font-size:var(--text-display);line-height:1.2;letter-spacing:-.025em;overflow-wrap:anywhere;min-width:0;margin:0 0 var(--space-md)}.confirmation{margin:0;color:var(--color-muted)}
+dl{margin:var(--space-xl) 0;padding:var(--space-lg) 0;border-block:1px solid var(--color-rule)}dt{font-size:var(--text-sm);color:var(--color-muted);margin-bottom:var(--space-sm)}dd{margin:0;font-size:var(--text-lg);font-weight:700;font-variant-numeric:tabular-nums}
+.note{font-size:var(--text-sm);color:var(--color-muted);margin:0}.note strong{font-weight:800;color:var(--color-ink)}
+footer{max-width:464px;margin:var(--space-lg) auto 0;font-size:var(--text-sm);color:var(--color-muted);text-align:center}
+.inactive .status{color:var(--color-warning)}.inactive .status svg{fill:var(--color-warning-paper)}.inactive h1{font-size:30px}.inactive .note{border-top:1px solid var(--color-rule);padding-top:var(--space-lg);margin-top:var(--space-xl)}
+@media(min-width:40rem){body{padding-top:var(--space-2xl)}.sheet{padding:var(--space-xl)}}
+
+.employee-code{margin-bottom:var(--space-lg);font-variant-numeric:tabular-nums}

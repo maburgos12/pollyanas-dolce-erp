@@ -1,0 +1,10 @@
+{% load static %}
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer"><title>Verificación de gafete · Pollyana’s Dolce</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:wght@500;600&display=swap"><link rel="stylesheet" href="{% static 'rrhh/gafete-publico.css' %}"></head>
+<body{% if not empleado %} class="inactive"{% endif %}><main class="sheet"><header class="brand"><img src="{% static 'operacion/pollyanas-logo-transparent.png' %}" width="1020" height="355" alt="Pollyana’s Dolce Pastelería"><p>Verificación de gafete</p></header>
+{% if empleado %}
+<p class="status"><svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" stroke-width="1.5"/><path d="m8 13 3 3 7-7" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>Empleado activo</p>
+<h1>{{ empleado.nombre }}</h1><p class="note employee-code">Código de colaborador: <strong>{{ empleado.codigo }}</strong></p><p class="confirmation">Forma parte del equipo de<br>Pollyana’s Dolce.</p><dl><dt>Fecha de ingreso</dt><dd>{{ empleado.fecha_ingreso|date:"j \d\e F \d\e Y"|lower }}</dd></dl><p class="note"><strong>Vigencia laboral confirmada.</strong><br>Comprueba que el nombre coincida con el gafete presentado.</p>
+{% else %}
+<p class="status"><svg viewBox="0 0 26 26" aria-hidden="true"><circle cx="13" cy="13" r="11.5" stroke-width="1.5"/><path d="M13 7v7m0 4v.1" stroke-width="2" stroke-linecap="round"/></svg>Gafete sin vigencia</p><h1>Esta credencial<br>ya no está vigente.</h1><p class="confirmation">No permite confirmar una relación laboral activa con Pollyana’s Dolce.</p><p class="note">Para aclaraciones, solicita al titular que se comunique con Capital Humano.</p>
+{% endif %}
+</main><footer>Pollyana’s Dolce · Capital Humano</footer></body></html>

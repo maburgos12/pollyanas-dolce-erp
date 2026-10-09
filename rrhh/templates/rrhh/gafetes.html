@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Capital Humano · Gafetes{% endblock %}
+{% block page_title %}Gafetes{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'rrhh/gafetes.css' %}">{% endblock %}
+{% block content %}
+<section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
+  {% for tab in module_tabs %}<a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>{% endfor %}
+</section>
+<section class="card gafetes-panel">
+  <h2>QR de colaboradores</h2>
+  <p>El QR se genera al dar de alta al colaborador. El código de colaborador conserva el que ya tiene en RRHH.</p>
+  {% if can_manage %}<p><a class="btn btn-primary" href="{% url 'rrhh:gafetes_descargar' %}">Descargar QR vigentes</a></p>
+  <p class="muted">El ZIP incluye un SVG por colaborador y un listado con nombre, código, fecha de ingreso y liga de verificación. Reimprimir conserva el QR; revocar lo invalida definitivamente.</p>{% endif %}
+  <form method="get" class="gafetes-search"><label for="gafete-q">Buscar por nombre o código</label><input id="gafete-q" class="input-field" name="q" value="{{ q }}"><button type="submit" class="btn btn-secondary">Buscar</button></form>
+  <div class="table-responsive"><table class="table"><thead><tr><th>Colaborador</th><th>Código</th><th>Ingreso</th><th>Gafete</th>{% if can_manage %}<th>Acciones</th>{% endif %}</tr></thead><tbody>
+  {% for e in empleados %}<tr><td>{{ e.nombre }}</td><td>{{ e.codigo }}</td><td>{{ e.fecha_ingreso|date:"d/m/Y" }}</td><td>{% if not e.activo %}Sin vigencia · Colaborador inactivo{% elif e.gafete_token %}Vigente{% else %}Revocado / Sin emitir{% endif %}</td>
+  {% if can_manage %}<td><div class="gafetes-actions">
+  {% if e.activo and e.gafete_token %}<a class="btn btn-secondary" href="{% url 'rrhh:gafete_qr' e.pk %}">Descargar QR</a><a class="btn btn-secondary" href="{% url 'verificar_gafete' e.gafete_token %}" target="_blank" rel="noopener noreferrer">Ver página</a>
+  <details><summary>Revocar gafete</summary><p>El QR impreso dejará de funcionar. Para un gafete perdido, revoca este y emite uno nuevo.</p><form method="post" action="{% url 'rrhh:gafete_accion' e.pk %}">{% csrf_token %}<input type="hidden" name="token_actual" value="{{ e.gafete_token }}"><input type="hidden" name="accion" value="revocar"><button class="btn btn-danger" type="submit">Revocar este QR</button></form></details>
+  {% elif e.activo %}<form method="post" action="{% url 'rrhh:gafete_accion' e.pk %}">{% csrf_token %}<input type="hidden" name="token_actual" value=""><input type="hidden" name="accion" value="emitir"><button class="btn btn-primary" type="submit">Emitir nuevo QR</button></form>{% endif %}
+  </div></td>{% endif %}</tr>{% empty %}<tr><td colspan="5">No hay colaboradores que coincidan con la búsqueda.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
