@@ -27,3 +27,6 @@ Reutilizar PedidoCliente, SolicitudDomicilio, correo del servidor y backfill de 
 Procedimiento: inventario_fuentes_datos --term pedido --term domicilio --term point; consultas Point acotadas por fecha de entrega; GetById para claves confirmadas; consultar dos especiales vendidos para comprobar LPK_Nota. No ejecutar cambiarStatus ni recapturar en Point.
 
 Riesgos: un folio especial aún no es una nota de venta; el correo del folio final depende de que Point publique esa nota. Conflictos con notas ya vinculadas requieren revisión, nunca fusión automática.
+
+## Operación de entrega (2026-10-08)
+La bandeja publica point_link también en el resumen para que WEB conserve su identidad y admita el folio especial/final sin mezclar fuentes. Un documento verificado confirma exclusivamente domicilios PENDIENTE_POINT; no avanza preparación ni entrega automáticamente. Reutilizar SolicitudDomicilio.NEXT_STATUS y SolicitudDomicilioStatusOperation para preparación, listo, en ruta y entregado. La preparación audita actor/operation_id sin repartidor; el reparto conserva la validación de repartidor, unidad, GPS, propietario y autorización. No crear otra captura Point ni otro historial de estados.

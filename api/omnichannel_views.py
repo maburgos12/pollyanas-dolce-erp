@@ -26,6 +26,7 @@ from api.omnichannel_serializers import (
     OmnichannelDeliveryIntakeSerializer,
     OmnichannelDeliveryQuerySerializer,
     OmnichannelDeliveryStatusSerializer,
+    OmnichannelDeliveryPreparationSerializer,
     OmnichannelCustomerOutputSerializer,
     OmnichannelOrderInputSerializer,
     PendingPointOrderSerializer,
@@ -1437,6 +1438,7 @@ def _serialize_delivery_summary(delivery):
         "created_at": delivery.created_at,
         "external_source": order.external_source,
         "external_id": order.external_id,
+        "point_link": _serialize_point_link(order),
     }
 
 
@@ -1980,6 +1982,7 @@ class PublicOmnichannelDeliveryIntakeView(APIView):
 
 class PublicOmnichannelDeliveryStatusView(APIView):
     permission_classes = [AllowAny]
+    serializer_class = OmnichannelDeliveryStatusSerializer
 
     def patch(self, request, solicitud_id):
         api_client, error = _auth_public_client(request)
@@ -1991,7 +1994,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
         logistics_error = _authorize_logistica_assignment(api_client, request)
         if logistics_error:
             return logistics_error
-        serializer = OmnichannelDeliveryStatusSerializer(data=request.data)
+        serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -2009,7 +2012,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
                 payload = update_domicilio_status(
                     solicitud_id=solicitud_id,
                     api_client=api_client,
-                    repartidor_id=values["repartidor_id"],
+                    repartidor_id=values.get("repartidor_id"),
                     requested_status=values["estatus"],
                     operation_id=values["operation_id"],
                     actor=values["actor"],
@@ -2025,6 +2028,10 @@ class PublicOmnichannelDeliveryStatusView(APIView):
             )
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload)
+
+
+class PublicOmnichannelDeliveryPreparationView(PublicOmnichannelDeliveryStatusView):
+    serializer_class = OmnichannelDeliveryPreparationSerializer
 
 
 def _serialize_point_link(order):

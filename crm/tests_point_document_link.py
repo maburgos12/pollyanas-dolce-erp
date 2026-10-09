@@ -44,6 +44,12 @@ class PointDocumentLinkTests(TestCase):
         self.assertEqual(self.order.point_note_id, '')
         self.assertEqual(self.delivery.ventana_inicio.isoformat(), '2026-10-09T19:30:19+00:00')
         self.assertTrue(has_verified_point(self.order))
+        self.assertEqual(self.delivery.estatus, SolicitudDomicilio.ESTATUS_CONFIRMADO)
+        from logistica.services_domicilio_status import DomicilioStatusError, apply_domicilio_status_transition
+        apply_domicilio_status_transition(solicitud=self.delivery, requested_status='PREPARANDO')
+        apply_domicilio_status_transition(solicitud=self.delivery, requested_status='LISTO')
+        with self.assertRaises(DomicilioStatusError):
+            apply_domicilio_status_transition(solicitud=self.delivery, requested_status='ENTREGADO')
 
     def test_wrong_amount_date_unpaid_cancelled_and_identity_are_rejected(self):
         for delta in ({'total': '541'}, {'restante': '1'}, {'cancelado': True},
@@ -117,4 +123,29 @@ class WebPointLinkApiTests(PointDocumentLinkTests):
         self.assertEqual(response.data['fuente']['tipo'], 'POLLYANAS_ECOMMERCE')
         self.assertEqual(response.data['point_link']['folio'], '00428')
         self.assertIsNone(response.data['point_link']['folio_final'])
+        summary = self.client.get('/api/public/v1/omnichannel/deliveries/', HTTP_X_API_KEY=self.key)
+        self.assertEqual(summary.data['results'][0]['point_link']['folio'], '00428')
         self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+
+    def test_preparation_is_owned_sequential_and_idempotent_without_driver(self):
+        from uuid import uuid4
+        from logistica.models import SolicitudDomicilioStatusOperation
+        self.owner.capabilities = ['OMNICHANNEL', 'LOGISTICA_ASSIGNMENT']
+        self.owner.save(update_fields=['capabilities'])
+        self.link()
+        url = f'/api/public/v1/omnichannel/deliveries/{self.delivery.pk}/preparation-status/'
+        payload = {'estatus': 'PREPARANDO', 'operation_id': str(uuid4()),
+                   'actor': {'id': 'admin-1', 'nombre': 'Operación'}}
+        self.assertEqual(self.client.patch(url, payload, format='json').status_code, 401)
+        response = self.client.patch(url, payload, format='json', HTTP_X_API_KEY=self.key)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertIsNone(response.data['repartidor_id'])
+        replay = self.client.patch(url, payload, format='json', HTTP_X_API_KEY=self.key)
+        self.assertEqual(replay.data, response.data)
+        self.assertEqual(SolicitudDomicilioStatusOperation.objects.count(), 1)
+        conflict = self.client.patch(url, {**payload, 'estatus': 'LISTO'}, format='json', HTTP_X_API_KEY=self.key)
+        self.assertEqual(conflict.status_code, 409)
+        ready = self.client.patch(url, {**payload, 'estatus': 'LISTO', 'operation_id': str(uuid4())}, format='json', HTTP_X_API_KEY=self.key)
+        self.assertEqual(ready.status_code, 200, ready.data)
+        delivery = self.client.patch(url, {**payload, 'estatus': 'ENTREGADO', 'operation_id': str(uuid4())}, format='json', HTTP_X_API_KEY=self.key)
+        self.assertEqual(delivery.status_code, 400)
