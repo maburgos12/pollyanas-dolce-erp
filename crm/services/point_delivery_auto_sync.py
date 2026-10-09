@@ -131,21 +131,41 @@ class PointDeliveryAutoSyncService:
                 successful_branches += 1
                 counts["seen"] += batch.seen_count
                 counts["existing"] += batch.seen_count - len(batch) - len(batch.failures)
-                counts["failed"] += len(batch.failures)
-                error_codes.extend(failure.error_code for failure in batch.failures)
+                for failure in batch.failures:
+                    note = failure.note
+                    pending = self._pending_capture(note) if note is not None else None
+                    if pending is not None and self._reconcile_pending_capture(
+                        order=pending, note=note, owner=owner,
+                        point_customer_id=note.customer_external_id or "",
+                    ):
+                        existing_note_ids.add(note.pk_nota)
+                        counts["existing"] += 1
+                        continue
+                    counts["failed"] += 1
+                    error_codes.append(failure.error_code)
+                    job.logs.create(
+                        level="ERROR", message="No se sincronizó la nota de domicilio Point.",
+                        context={"point_note_id": failure.point_note_id, "folio": failure.folio,
+                                 "branch_id": branch.external_id, "error_code": failure.error_code},
+                    )
                 for delivery_note in batch:
                     pending_order = self._pending_capture(delivery_note.note)
                     if pending_order is not None:
                         if self._reconcile_pending_capture(
                             order=pending_order,
-                            delivery_note=delivery_note,
+                            note=delivery_note.note,
                             owner=owner,
+                            point_customer_id=delivery_note.customer_external_id,
                         ):
                             existing_note_ids.add(delivery_note.note.pk_nota)
                             counts["existing"] += 1
                         else:
                             counts["failed"] += 1
                             error_codes.append("POINT_PENDING_REVIEW")
+                            job.logs.create(level="ERROR", message="La captura pendiente requiere revisión.",
+                                            context={"point_note_id": delivery_note.note.pk_nota,
+                                                     "branch_id": branch.external_id,
+                                                     "error_code": "POINT_PENDING_REVIEW"})
                         continue
                     try:
                         command = LinkPointOrderCommand(
@@ -187,8 +207,14 @@ class PointDeliveryAutoSyncService:
                     except Exception as exc:  # noqa: BLE001
                         counts["failed"] += 1
                         error_codes.append(self._error_code(exc))
+                        job.logs.create(level="ERROR", message="No se vinculó la nota de domicilio Point.",
+                                        context={"point_note_id": delivery_note.note.pk_nota,
+                                                 "branch_id": branch.external_id,
+                                                 "error_code": self._error_code(exc)})
             except Exception as exc:  # noqa: BLE001
                 branch_error_codes.append(self._error_code(exc))
+                job.logs.create(level="ERROR", message="No se completó la consulta de domicilios de la sucursal.",
+                                context={"branch_id": branch.external_id, "error_code": self._error_code(exc)})
 
         all_error_codes = [*error_codes, *branch_error_codes]
         if not all_error_codes:
@@ -289,7 +315,7 @@ class PointDeliveryAutoSyncService:
         )
 
     @staticmethod
-    def _reconcile_pending_capture(*, order, delivery_note, owner) -> bool:
+    def _reconcile_pending_capture(*, order, note, owner, point_customer_id) -> bool:
         pending = (
             order.payload_snapshot.get("point_pending", {})
             if isinstance(order.payload_snapshot, dict)
@@ -307,7 +333,7 @@ class PointDeliveryAutoSyncService:
 
         try:
             command = LinkPointOrderCommand(
-                pk_nota=delivery_note.note.pk_nota,
+                pk_nota=note.pk_nota,
                 channel=str(capture["channel"]),
                 customer_name=str(capture["customer_name"]),
                 customer_phone=str(capture.get("customer_phone", "")),
@@ -325,12 +351,12 @@ class PointDeliveryAutoSyncService:
                     capture.get("delivery_window_end"),
                 ),
                 instructions=str(capture.get("instructions", "")),
-                point_customer_id=delivery_note.customer_external_id,
+                point_customer_id=point_customer_id,
             )
             linked = link_point_note(
                 command=command,
                 actor=owner.created_by,
-                point_service=_PreloadedPointNoteService(delivery_note.note),
+                point_service=_PreloadedPointNoteService(note),
             )
         except Exception:  # noqa: BLE001 - queda pendiente sin duplicar ni persistir PII
             return False

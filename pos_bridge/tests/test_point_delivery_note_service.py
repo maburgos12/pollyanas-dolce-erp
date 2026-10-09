@@ -101,6 +101,27 @@ def _note(*, pk_nota="887410", folio="15616"):
 
 
 class PointDeliveryNoteServiceTests(SimpleTestCase):
+    def test_wrong_delivery_customer_is_rejected_before_catalog_lookup(self):
+        tray = [{"PK_Nota": 887410, "Folio": 15616, "Sucursal": "Matriz",
+                 "Fecha_Hora_Cierre": "2026-08-05T14:16:50", "Total": 514, "Facturado": False}]
+        customer = {"PK_Cliente": 999, "Cliente": "Otro cliente", "Calle": "Otra calle"}
+        service, session, _http, _detail = self._service([tray, customer])
+        result = service.fetch_range(start_date=date(2026, 8, 5), end_date=date(2026, 8, 5))
+        self.assertEqual(result.notes, ())
+        self.assertEqual(result.failures[0].error_code, "POINT_CONTRACT")
+        self.assertIsNone(result.failures[0].note)
+        self.assertEqual(len(session.requests), 2)
+
+    def test_customer_transport_error_retains_only_verified_note_for_manual_recovery(self):
+        tray = [{"PK_Nota": 887410, "Folio": 15616, "Sucursal": "Matriz",
+                 "Fecha_Hora_Cierre": "2026-08-05T14:16:50", "Total": 514, "Facturado": False}]
+        service, session, _http, _detail = self._service([tray, requests.Timeout("private error")])
+        result = service.fetch_range(start_date=date(2026, 8, 5), end_date=date(2026, 8, 5))
+        self.assertEqual(result.failures[0].error_code, "POINT_DELIVERY_CUSTOMER_UNAVAILABLE")
+        self.assertEqual(result.failures[0].note, _note())
+        self.assertEqual(result.failures[0].folio, "15616")
+        self.assertTrue(session.closed)
+
     def _service(self, responses, *, note=None):
         session = _FakeSession(responses)
         http = _FakeHttpSessionService(session)
@@ -270,7 +291,10 @@ class PointDeliveryNoteServiceTests(SimpleTestCase):
 
                 self.assertEqual(result.notes, ())
                 self.assertEqual(len(result.failures), 1)
-                self.assertEqual(result.failures[0].error_code, "POINT_CONTRACT")
+                self.assertEqual(result.failures[0].error_code, (
+                    "POINT_DELIVERY_CUSTOMER_UNAVAILABLE" if label == "point_error" else "POINT_CONTRACT"
+                ))
+                self.assertEqual(result.failures[0].note, _note() if label == "point_error" else None)
                 self.assertEqual(len(session.requests), 2)
                 self.assertTrue(session.closed)
 
