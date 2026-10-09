@@ -511,6 +511,7 @@ RRHH_MODULE_TABS = [
     {"label": "Organización", "url_name": "rrhh:rrhh_organizacion", "key": "organizacion", "submodule": "organizacion"},
     {"label": "Catálogos", "url_name": "rrhh:rrhh_catalogos", "key": "catalogos", "submodule": "catalogos"},
     {"label": "Empleados", "url_name": "rrhh:empleados", "key": "empleados", "submodule": "empleados"},
+    {"label": "Gafetes", "url_name": "rrhh:gafetes", "key": "gafetes", "submodule": "empleados"},
     {"label": "Cumpleaños", "url_name": "rrhh:rrhh_cumpleanos", "key": "cumpleanos", "submodule": "cumpleanos"},
     {"label": "Permisos", "url_name": "rrhh:rrhh_permisos_list", "key": "permisos", "submodule": "permisos"},
     {"label": "Suspensiones", "url_name": "rrhh:rrhh_suspensiones", "key": "suspensiones", "submodule": "permisos"},

@@ -150,6 +150,7 @@ class BranchCaptureOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/gafetes/",
         "/app/",
         "/recetas/reabasto-cedis/",
         "/logout/",
@@ -183,6 +184,7 @@ class BonosProduccionCaptureOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/gafetes/",
         "/bp/",
         "/bonos-produccion/app/",
         "/bonos-produccion/manifest.json",
@@ -219,6 +221,7 @@ class RepartidorOnlyMiddleware:
     """
 
     ALLOWED_PREFIXES = (
+        "/gafetes/",
         "/app/",
         "/logistica/app/",
         "/logistica/sw.js",
@@ -270,6 +273,7 @@ class MermasOnlyMiddleware:
         "/erp-sw.js",
     )
     ALLOWED_PREFIXES = (
+        "/gafetes/",
         "/app/higiene/",
         "/app/conteos/",
         "/app/api/fallas/",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+import uuid
 
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
@@ -99,6 +100,7 @@ class Empleado(models.Model):
     ]
 
     codigo = models.CharField(max_length=40, unique=True, blank=True)
+    gafete_token = models.UUIDField(default=uuid.uuid4, unique=True, null=True, editable=False)
     nombre = models.CharField(max_length=180)
     nombre_normalizado = models.CharField(max_length=180, db_index=True, editable=False)
     rfc = models.CharField(max_length=20, blank=True, default="", db_index=True)
@@ -250,18 +252,32 @@ class Empleado(models.Model):
                 ),
             })
 
+    @transaction.atomic
     def save(self, *args, **kwargs):
         self.codigo = (self.codigo or "").strip()
         self.nombre_normalizado = normalizar_nombre(self.nombre or "")
         update_fields = kwargs.get("update_fields")
-        if self.pk and self.activo and (update_fields is None or "activo" in update_fields):
-            anterior = type(self).objects.filter(pk=self.pk).values("activo", "fecha_ingreso").first()
-            if anterior and not anterior["activo"]:
-                ingreso = self.fecha_ingreso if update_fields is None or "fecha_ingreso" in update_fields else anterior["fecha_ingreso"]
-                if EmpleadoBaja.objects.filter(empleado_id=self.pk, fecha_baja__gte=ingreso).exists():
-                    raise ValidationError({
-                        "activo": "Esta persona tiene una baja; para reingresarla captura una fecha de ingreso posterior a la baja."
-                    })
+        if update_fields is not None and not update_fields:
+            return
+        if update_fields is None or "activo" in update_fields:
+            anterior = (
+                type(self).objects.select_for_update().filter(pk=self.pk)
+                .values("activo", "fecha_ingreso", "gafete_token").first()
+            ) if self.pk else None
+            if anterior:
+                # Una ficha cargada antes de una revocación no debe restaurar el QR.
+                self.gafete_token = anterior["gafete_token"]
+                if self.activo and not anterior["activo"]:
+                    ingreso = self.fecha_ingreso if update_fields is None or "fecha_ingreso" in update_fields else anterior["fecha_ingreso"]
+                    if EmpleadoBaja.objects.filter(empleado_id=self.pk, fecha_baja__gte=ingreso).exists():
+                        raise ValidationError({
+                            "activo": "Esta persona tiene una baja; para reingresarla captura una fecha de ingreso posterior a la baja."
+                        })
+                    self.gafete_token = uuid.uuid4()
+            if not self.activo:
+                self.gafete_token = None
+            if update_fields is not None:
+                kwargs["update_fields"] = set(update_fields) | {"gafete_token"}
         # El área y el nivel se comparan contra catálogos cerrados (ver
         # CatalogoFuncionOperativa, que ya normaliza los suyos). Capturar
         # «Preparación» desde la pantalla dejaba un valor que no empata con

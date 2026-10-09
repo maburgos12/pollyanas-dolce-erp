@@ -397,6 +397,7 @@ class NavigationActiveStateTests(TestCase):
                 "Organización",
                 "Catálogos",
                 "Empleados",
+                "Gafetes",
                 "Permisos",
                 "Suspensiones",
                 "Incapacidades",

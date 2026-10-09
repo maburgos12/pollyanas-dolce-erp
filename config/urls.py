@@ -5,6 +5,7 @@ from django.conf import settings
 from django.urls import path, include, re_path
 from django.views.static import serve as static_serve
 from django.views.generic import RedirectView
+from rrhh.views_gafetes import verificar_gafete
 from core import shortcut_views
 from core import views as core_views
 from core.private_operational_media import serve_private_maintenance_media
@@ -17,6 +18,7 @@ admin.site.site_url = "/dashboard/"
 
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("gafetes/<uuid:token>/", verificar_gafete, name="verificar_gafete"),
     path("health/", core_views.health_check, name="health"),
     path("favicon.ico", RedirectView.as_view(url="/static/favicon.ico", permanent=False)),
     path("apple-touch-icon.png", RedirectView.as_view(url="/static/apple-touch-icon.png", permanent=False)),
