@@ -179,8 +179,8 @@
                 throw new Error(payload.error || `HTTP ${response.status}`);
             }
             const finalPath = new URL(response.url || window.location.href).pathname;
-            if (response.redirected && finalPath === "/mermas/app/") {
-                throw new Error("La sesión del formulario expiró. Recarga la página e inténtalo de nuevo.");
+            if (response.redirected && (finalPath === "/mermas/app/" || finalPath === "/login/")) {
+                throw new Error("La sesión del formulario expiró. Mantén esta página abierta; inicia sesión en otra pestaña del mismo navegador y vuelve a guardar.");
             }
             window.location.assign(response.url || window.location.href);
         } catch (error) {

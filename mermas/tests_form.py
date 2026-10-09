@@ -47,6 +47,14 @@ class MermaProductoFormularioTests(TestCase):
         self.assertEqual(response.json()["error"], "Toma o sube la foto del ticket Point.")
         self.assertFalse(MermaRegistro.objects.exists())
 
+    def test_post_sin_sesion_redirige_a_login_sin_crear_merma(self):
+        self.client.logout()
+        response = self.client.post(reverse("mermas:app"), {"cantidad[]": "2"},
+                                    HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login") + "?next="))
+        self.assertFalse(MermaRegistro.objects.exists())
+
     def test_formulario_envia_cabecera_ajax_y_muestra_error_del_servidor(self):
         response = self.client.get(reverse("mermas:app"))
 

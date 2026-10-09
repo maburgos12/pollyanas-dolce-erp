@@ -246,6 +246,12 @@ class OperacionMermasInsumosApiTests(TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertFalse(MermaInsumo.objects.exists())
 
+    def test_catalogo_sin_sesion_redirige_a_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"), {"codigo_point": "INS-001"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login") + "?next="))
+
     @patch("operacion.views.consultar_existencia_insumo_point", side_effect=PointLiveInventoryBusyError("Point está sincronizando"))
     def test_point_ocupado_informa_espera_sin_crear_merma(self, _mock):
         response = self.client.post(reverse("operacion:mermas_insumos_crear_api"),

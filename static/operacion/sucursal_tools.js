@@ -110,7 +110,7 @@
         cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "No fue posible actualizar los insumos.");
+      if (!response.ok || response.redirected || !Array.isArray(payload.insumos)) throw new Error(payload.error || "No fue posible actualizar los insumos. Revisa tu sesión y reintenta.");
       const items = Array.isArray(payload.insumos) ? payload.insumos : [];
       const selectedCode = supply.value || restoredCode;
       const placeholder = supply.querySelector('option[value=""]') || document.createElement("option");
@@ -185,7 +185,8 @@
         ? "Point sigue ocupado. Tu captura se conserva; vuelve a seleccionar el insumo para reintentar."
         : payload.error || "No fue posible consultar Point.");
       if (requestId !== stockRequest) return;
-      const stock = payload.insumo?.existencia ?? "";
+      if (response.redirected || payload.insumo?.existencia == null) throw new Error("No recibimos la existencia de Point. Revisa tu sesión; tu captura se conserva.");
+      const stock = payload.insumo.existencia;
       const liveUnit = payload.insumo?.unidad || unit;
       if (unitLabel) unitLabel.textContent = liveUnit ? `(${liveUnit})` : "";
       if (quantity) quantity.max = stock;
