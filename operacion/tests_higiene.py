@@ -1142,7 +1142,7 @@ class HigieneDiariaTests(TestCase):
 
         self.assertContains(captura, "20260926-higiene-continuidad-v1", count=2)
         self.assertIn(
-            'const CACHE_NAME = "pollyanas-app-operativa-pwa-v54-captura-operativa";',
+            'const CACHE_NAME = "pollyanas-app-operativa-pwa-v55-mermas-guardado-seguro";',
             sw_source,
         )
         bypass = 'if (url.pathname === "/app/higiene/fallas-coincidentes/") return;'
