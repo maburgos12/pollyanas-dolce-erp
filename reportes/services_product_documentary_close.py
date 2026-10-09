@@ -5,7 +5,9 @@ from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import F
 
+from pos_bridge.models import PointTransferLine
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
@@ -45,6 +47,7 @@ class ProductDocumentaryCloseService:
         histories = AuditStockHistoryService().reconcile_many(
             safe_lines, month, include_zero_difference=True
         )
+        returns = self._documentary_returns(safe_lines, month)
         prepare = InventoryAuditMaterializer()._prepare_line
         decisions = {}
         for line in trace.lines:
@@ -56,7 +59,7 @@ class ProductDocumentaryCloseService:
                 }
                 continue
             history = histories.get(key)
-            reason = self._pending_reason(line, history)
+            reason = self._pending_reason(line, history, returns)
             if reason:
                 decisions[key] = {"eligible": False, "reason": reason}
                 continue
@@ -72,6 +75,13 @@ class ProductDocumentaryCloseService:
                     opening=Decimal(line.opening), point_closing=Decimal(line.point_closing)
                 ),
             }
+            return_evidence = {
+                str(source_id): returns[source_id]
+                for issue in line.issues if issue.code == "TRANSFER_QUANTITY_MISMATCH"
+                for source_id in issue.source_ids
+            }
+            if return_evidence:
+                evidence["administrative_returns"] = return_evidence
             decisions[key] = {
                 "eligible": True,
                 "reason": "",
@@ -81,7 +91,7 @@ class ProductDocumentaryCloseService:
         return decisions
 
     @staticmethod
-    def _pending_reason(line, history) -> str:
+    def _pending_reason(line, history, returns=None) -> str:
         batch = getattr(history, "original_batch_evidence", None) or {}
         month_ids = set(getattr(history, "movement_ids", ()))
         if any(gap["movement_id"] in month_ids for gap in batch.get("stock_chain_gaps", ())):
@@ -115,11 +125,54 @@ class ProductDocumentaryCloseService:
             if Decimal(history.documentary_closing) != Decimal(line.point_closing):
                 return "El saldo final del historial no coincide con el documento de cierre."
         for issue in line.issues:
+            if issue.code == "TRANSFER_QUANTITY_MISMATCH":
+                proofs = [(returns or {}).get(source_id) for source_id in issue.source_ids]
+                if proofs and all(
+                    proof
+                    and proof["product_external_id"] == str(line.product.external_id)
+                    and line.branch.id in (proof["origin_branch_id"], proof["destination_branch_id"])
+                    and source_id in line.source_trace.get("transfers", ())
+                    and (line.branch.id != proof["origin_branch_id"]
+                         or source_id in line.source_trace.get("transfer_in", ()))
+                    for source_id, proof in zip(issue.source_ids, proofs)
+                ):
+                    continue
             if issue.code not in _INDEPENDENT_CONVERSION_ISSUES:
                 return "Hay una fuente de este producto que necesita aclaración."
             if not line.source_trace.get("conversion_in"):
                 return "Falta comprobar la entrada por conversión de este producto."
         return ""
+
+    @staticmethod
+    def _documentary_returns(lines, month):
+        ids = {source_id for line in lines for issue in line.issues
+               if issue.code == "TRANSFER_QUANTITY_MISMATCH" for source_id in issue.source_ids}
+        if not ids:
+            return {}
+        lower, upper = BranchInventoryTraceabilityService._month_datetime_bounds(month)
+        aliases, _ = BranchInventoryTraceabilityService.canonical_branch_identity()
+        proofs = {}
+        for row in PointTransferLine.objects.filter(
+            pk__in=ids, is_received=True, is_cancelled=False, is_current_snapshot=True,
+            is_insumo=False, received_at__gte=lower, received_at__lt=upper,
+            received_quantity__gte=0, sent_quantity__gt=F("received_quantity"),
+        ):
+            detail = row.raw_payload.get("detail", {}) if isinstance(row.raw_payload, dict) else {}
+            fk = detail.get("FK_articulo") if isinstance(detail, dict) else None
+            if isinstance(fk, bool) or not str(fk).isdecimal() or int(fk) <= 0:
+                continue
+            if detail.get("isInsumo") is not False:
+                continue
+            proofs[row.id] = {
+                "product_external_id": str(int(fk)),
+                "origin_branch_id": aliases.get(row.origin_branch_id, row.origin_branch_id),
+                "destination_branch_id": aliases.get(row.destination_branch_id, row.destination_branch_id),
+                "sent": str(row.sent_quantity), "received": str(row.received_quantity),
+                "returned": str(row.sent_quantity - row.received_quantity),
+                "received_at": row.received_at.isoformat(), "source_hash": row.source_hash,
+                "physical_custody_verified": False,
+            }
+        return proofs
 
     def close_eligible(self, month: date, *, actor) -> dict[str, int]:
         if not actor or not actor.is_active or not actor.has_perm("reportes.approve_product_inventory_audit"):

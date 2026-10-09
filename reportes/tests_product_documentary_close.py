@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime
+from dataclasses import replace
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -6,8 +7,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase
+from django.utils import timezone
 
-from pos_bridge.models import PointBranch, PointProduct
+from pos_bridge.models import PointBranch, PointProduct, PointTransferLine
 from pos_bridge.services.audit_stock_history_service import PointHistoryReconciliation
 from reportes.models import ProductInventoryDocumentaryEvent
 from reportes.services_product_documentary_close import ProductDocumentaryCloseService
@@ -139,9 +141,98 @@ class ProductDocumentaryCloseTests(TestCase):
         with patch("reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build", return_value=trace):
             self.assertEqual(self.service.evaluate(date(2026, 9, 1)), {})
 
+    def test_received_return_is_documentary_but_preserves_custody_warning(self):
+        destination = PointBranch.objects.create(external_id="DEST", name="Destino")
+        received = timezone.make_aware(datetime(2026, 9, 15, 12))
+        row = PointTransferLine.objects.create(
+            origin_branch=self.branch, destination_branch=destination,
+            transfer_external_id="T1", detail_external_id="D1", source_hash="a" * 64,
+            registered_at=received, sent_at=received, received_at=received,
+            item_code=self.product.external_id, item_name=self.product.name,
+            sent_quantity=2, received_quantity=0, is_received=True, is_finalized=False,
+            raw_payload={"detail": {"FK_articulo": 101, "isInsumo": False}},
+        )
+        self.product.external_id = "101"
+        self.product.save(update_fields=["external_id"])
+        zero = Decimal("0")
+        values = {field: zero for field in (
+            "production", "sales", "waste", "transfer_in", "transfer_out",
+            "conversion_in", "conversion_out", "identified_adjustment",
+        )}
+        values.update(transfer_in=Decimal("2"), transfer_out=Decimal("2"))
+        issue = SimpleNamespace(
+            code="TRANSFER_QUANTITY_MISMATCH", message="Retorno Point; custodia física pendiente.",
+            branch_id=self.branch.id, product_id=self.product.id, source_ids=(row.id,),
+        )
+        line = SimpleNamespace(
+            month=date(2026, 9, 1), branch=self.branch, product=self.product,
+            opening=zero, point_closing=zero, expected_closing=zero, difference=zero,
+            source_trace={"opening": (1,), "closing": (2,), "transfers": (row.id,),
+                          "transfer_in": (row.id,), "transfer_out": (row.id,)},
+            issues=(issue,), **values,
+        )
+        history = PointHistoryReconciliation(
+            coverage_status="COMPLETE", documentary_opening=zero, documentary_closing=zero,
+            **values,
+        )
+        trace = SimpleNamespace(lines=(line,), global_issues=())
+        with patch("reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build", return_value=trace), patch(
+            "reportes.services_product_documentary_close.AuditStockHistoryService.reconcile_many", return_value={self.key: history},
+        ):
+            decision = self.service.evaluate(date(2026, 9, 1))[self.key]
+            self.assertTrue(decision["eligible"])
+            self.assertEqual(line.issues, (issue,))
+            self.assertFalse(decision["evidence"]["administrative_returns"][str(row.id)]["physical_custody_verified"])
+            first = self.service.close_eligible(date(2026, 9, 1), actor=self.actor)
+            second = self.service.close_eligible(date(2026, 9, 1), actor=self.actor)
+            self.assertEqual(first["closed"], 1)
+            self.assertEqual(second["unchanged"], 1)
+            self.assertEqual(ProductInventoryDocumentaryEvent.objects.count(), 1)
+            for trace_key in ("transfers", "transfer_in"):
+                with self.subTest(trace_key=trace_key):
+                    saved = line.source_trace.pop(trace_key)
+                    self.assertFalse(self.service.evaluate(date(2026, 9, 1))[self.key]["eligible"])
+                    line.source_trace[trace_key] = saved
+            for change in (
+                {"is_received": False}, {"is_cancelled": True}, {"is_current_snapshot": False},
+                {"received_at": None}, {"received_at": received.replace(month=10)},
+                {"received_quantity": 3}, {"received_quantity": -1}, {"is_insumo": True},
+                {"raw_payload": {"detail": {"FK_articulo": 102, "isInsumo": False}}},
+                {"raw_payload": {"detail": {"FK_articulo": True, "isInsumo": False}}},
+                {"raw_payload": {"detail": {"FK_articulo": 101, "isInsumo": True}}},
+                {"raw_payload": []},
+            ):
+                with self.subTest(change=change):
+                    PointTransferLine.objects.filter(pk=row.pk).update(**change)
+                    self.assertFalse(self.service.evaluate(date(2026, 9, 1))[self.key]["eligible"])
+                    PointTransferLine.objects.filter(pk=row.pk).update(
+                        is_received=True, is_cancelled=False, is_current_snapshot=True,
+                        received_at=received, received_quantity=0, is_insumo=False,
+                        raw_payload={"detail": {"FK_articulo": 101, "isInsumo": False}},
+                    )
+            self.assertIn("no coincide", self.service._pending_reason(
+                line, replace(history, transfer_in=Decimal("1"), transfer_out=Decimal("1"))
+            ))
+
+    def test_name_warning_is_not_a_documentary_identity(self):
+        zero = Decimal("0")
+        values = {field: zero for field in (
+            "production", "sales", "waste", "transfer_in", "transfer_out",
+            "conversion_in", "conversion_out", "identified_adjustment",
+        )}
+        line = SimpleNamespace(
+            opening=zero, point_closing=zero, difference=zero,
+            source_trace={"opening": (1,), "closing": (2,)},
+            issues=(SimpleNamespace(code="PRODUCT_RESOLVED_BY_NAME"),), **values,
+        )
+        history = PointHistoryReconciliation(
+            coverage_status="COMPLETE", documentary_opening=zero, documentary_closing=zero, **values,
+        )
+        self.assertIn("necesita aclaración", self.service._pending_reason(line, history))
+
     def test_unidentified_product_blocks_only_its_branch(self):
         other = PointBranch.objects.create(external_id="OTHER", name="Otra sucursal")
-        lines = tuple(SimpleNamespace(branch=branch, product=self.product, opening=0, point_closing=0) for branch in (self.branch, other))
+        lines = tuple(SimpleNamespace(branch=branch, product=self.product, opening=0, point_closing=0, issues=()) for branch in (self.branch, other))
         trace = SimpleNamespace(
             lines=lines,
             global_issues=(SimpleNamespace(
