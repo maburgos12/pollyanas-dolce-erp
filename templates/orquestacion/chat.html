@@ -42,7 +42,7 @@
       </div>
       <span class="erp-chat-badge {% if not runtime_status.ready %}is-warning{% endif %}" id="erp-chat-runtime-badge">
         {% if runtime_status.ready %}
-          {% if runtime_status.pilot %}Piloto READ{% else %}Modelo configurado{% endif %}
+          {% if runtime_status.pilot %}Piloto{% else %}Modelo configurado{% endif %}
         {% elif runtime_status.pilot_blocked %}
           Piloto detenido
         {% else %}

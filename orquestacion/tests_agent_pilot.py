@@ -101,11 +101,23 @@ class AgentPilotTests(TransactionTestCase):
         self.assertEqual(pilot.pilot_status(self.user)['turns'], 20)
 
     def test_dollar_limit_blocks_before_provider(self):
-        self.receipt('0.99')
+        near_limit = str(pilot.MAX_USD - Decimal('0.01'))
+        self.receipt(near_limit)
         provider, result=self.run_provider()
         provider.responses.create.assert_not_called()
         self.assertIn('saldo reservado', result.assistant_text)
-        self.assertEqual(pilot.pilot_status(self.user)['reserved_usd'], '0.99')
+        self.assertEqual(pilot.pilot_status(self.user)['reserved_usd'], near_limit)
+
+    def test_approved_five_dollar_cap_keeps_existing_reservations(self):
+        previous = self.receipt('0.99')
+        original = previous.payload.copy()
+        result = self.reserve()
+        previous.refresh_from_db()
+        self.assertEqual(previous.payload, original)
+        self.assertEqual(pilot.MAX_USD, Decimal('5.00'))
+        self.assertGreater(Decimal(result['total_reserved_usd']), Decimal('1.00'))
+        self.assertEqual(Decimal(result['total_reserved_usd']), Decimal('0.99') + Decimal(result['reserved_usd']))
+        self.assertEqual(pilot.pilot_status(self.user)['turns'], 2)
 
     def test_same_cycle_never_dispatched_twice_and_sequential_rounds_required(self):
         turn=uuid4(); self.reserve(turn)
