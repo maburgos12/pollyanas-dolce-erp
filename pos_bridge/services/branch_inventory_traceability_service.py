@@ -28,6 +28,7 @@ from pos_bridge.models.product import _normalize_name, inventory_consumption_fil
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
     documentary_historical_boundary,
+    documentary_original_boundaries,
     _freeze_mapping,
 )
 from pos_bridge.services.open_transfer_sync_service import (
@@ -200,6 +201,24 @@ class BranchInventoryTraceabilityService:
                 exception_count=0,
                 source_complete=False,
             )
+
+        for role, balances, opposite in (("opening", opening, point_closing),
+                                         ("closing", closing, opening_closing)):
+            present_keys = {key for key, proof in self._historical_boundary_evidence.items() if role in proof}
+            opposite_role = "closing" if role == "opening" else "opening"
+            missing_keys = {key for key, proof in self._historical_boundary_evidence.items()
+                            if opposite_role in proof and key not in present_keys}
+            if not missing_keys:
+                continue
+            candidates = [line for line in opposite.lines.filter(
+                branch_id__in={key[0] for key in missing_keys},
+                product_id__in={key[1] for key in missing_keys},
+            ).select_related("branch", "product") if (line.branch_id, line.product_id) in missing_keys]
+            for key, (quantity, proof) in documentary_original_boundaries(
+                    candidates, month=month_start, boundary=role, excluded_keys=present_keys,
+                    cache=self._historical_boundary_cache).items():
+                balances[key] = (quantity, [])
+                self._historical_boundary_evidence.setdefault(key, {})[role] = proof
 
         products = list(PointProduct.objects.annotate(
             is_consumption=Case(When(inventory_consumption_filter(), then=Value(True)),
@@ -1376,7 +1395,10 @@ class BranchInventoryTraceabilityService:
     ):
         recipe_indexes = self._build_recipe_indexes()
         relations = self._conversion_relations()
+        commercial_reader = MonthlyPointProductBalanceService()
         for row in rows:
+            if commercial_reader._documentary_commercial_exclusion(row, source="conversions"):
+                continue
             destination_id, destination_issue = self._resolve_product(
                 row, product_indexes
             )

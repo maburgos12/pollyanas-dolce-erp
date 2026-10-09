@@ -9,6 +9,7 @@ from django.db import transaction
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary
 from reportes.models import ProductInventoryDocumentaryEvent
 from reportes.services_inventory_traceability import InventoryAuditMaterializer, _sha256
 
@@ -86,7 +87,7 @@ class ProductDocumentaryCloseService:
         if any(gap["movement_id"] in month_ids for gap in batch.get("stock_chain_gaps", ())):
             return "Point presenta un salto de existencias sin movimiento intermedio. Pendiente de aclaración con Point."
         boundary = line.source_trace.get("historical_boundary_evidence", {})
-        if not (line.source_trace.get("opening") and line.source_trace.get("closing")):
+        if not all(has_documentary_boundary(line.source_trace, role) for role in ("opening", "closing")):
             return "Falta comprobar el saldo inicial o el saldo final de Point."
         if Decimal(line.difference) != 0:
             return "El saldo final no coincide con las entradas y salidas comprobadas."

@@ -818,6 +818,58 @@ def _bracketed_original_empty_boundaries(lines, *, cutoff):
     return proofs
 
 
+def has_documentary_boundary(trace, boundary):
+    if trace.get(boundary):
+        return True
+    proof = trace.get("historical_boundary_evidence", {}).get(boundary, {})
+    batch = proof.get("original_batch_evidence", {})
+    return bool(proof.get("contract") == "POINT_ORIGINAL_HISTORY_BOUNDARY_V1"
+                and proof.get("boundary") == boundary and proof.get("canonical_history_verified")
+                and proof.get("effective_stock") is not None and proof.get("movement_ids")
+                and batch.get("contract") == "POINT_ORIGINAL_BATCH_MEMBERSHIP_V1"
+                and batch.get("import_id") and batch.get("source_signature"))
+
+
+@transaction.atomic(savepoint=False)
+def documentary_original_boundaries(lines, *, month, boundary, excluded_keys, cache):
+    """Supplement absent manifest pairs from verified originals, never override a line."""
+    if boundary not in {"opening", "closing"}:
+        raise ValueError("Frontera documental inválida.")
+    lock_product_month_sources([month])
+    if cache.get("source_transaction_scope") is not connection.run_on_commit:
+        cache.clear()
+        cache["source_transaction_scope"] = connection.run_on_commit
+    candidates = {(line.branch.id, line.product.id): line for line in lines
+                  if (line.branch.id, line.product.id) not in excluded_keys}
+    monthly = cache.setdefault(month, {})
+    requested = [SimpleNamespace(branch=line.branch, product=line.product, difference=ZERO)
+                 for key, line in candidates.items() if key not in monthly]
+    monthly.update(AuditStockHistoryService().reconcile_many(
+        requested, month, include_zero_difference=True))
+    cutoff_date = month if boundary == "opening" else month + timedelta(days=monthrange(month.year, month.month)[1])
+    cutoff = datetime.combine(cutoff_date, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+    result = {}
+    for key in candidates:
+        history = monthly.get(key)
+        batch = getattr(history, "original_batch_evidence", None) or {}
+        quantity = getattr(history, f"documentary_{boundary}", None)
+        retrieved = parse_datetime(batch.get("retrieved_at", ""))
+        if (not history or history.coverage_status != "COMPLETE" or history.unknown_movement_ids
+                or quantity is None or not history.documentary_boundary_movement_ids
+                or batch.get("contract") != "POINT_ORIGINAL_BATCH_MEMBERSHIP_V1"
+                or not retrieved or not timezone.is_aware(retrieved) or retrieved < cutoff):
+            continue
+        result[key] = (Decimal(quantity), {
+            "contract": "POINT_ORIGINAL_HISTORY_BOUNDARY_V1", "line_id": None,
+            "branch_id": key[0], "product_id": key[1], "month": month.isoformat(),
+            "boundary": boundary, "cutoff": cutoff.isoformat(),
+            "effective_stock": str(quantity), "movement_ids": history.documentary_boundary_movement_ids,
+            "original_batch_evidence": dict(batch), "coverage_status": history.coverage_status,
+            "canonical_history_verified": True, "physical_count_verified": False,
+        })
+    return result
+
+
 @transaction.atomic(savepoint=False)
 def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
     """Read UTC Stock boundaries in bulk; never rewrite the stored closing."""
@@ -1557,6 +1609,16 @@ class MonthlyPointProductBalanceService:
             closing, lines, month=month, boundary=boundary, cache=self._historical_boundary_cache,
         )
         unproven_ids = {line.id for line in unproven}
+        opposite_date = (date(month.year, month.month, monthrange(month.year, month.month)[1])
+                         if boundary == "opening" else month - timedelta(days=1))
+        opposite = PointHistoricalInventoryClosing.objects.filter(
+            operational_date=opposite_date, status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+        ).order_by("-id").first()
+        candidates = list(opposite.lines.select_related("branch", "branch__erp_branch", "product")) if opposite else []
+        independent = documentary_original_boundaries(
+            candidates, month=month, boundary=boundary, excluded_keys=selected_keys,
+            cache=self._historical_boundary_cache,
+        )
 
         for line in lines:
             receta = self._match_recipe(code=line.product.sku, name=line.product.name)
@@ -1599,6 +1661,23 @@ class MonthlyPointProductBalanceService:
                 scope = "cedis" if self._is_cedis_inventory_scope(line) else "sucursales"
                 scopes[scope] += quantity
 
+        for line in candidates:
+            key = (line.branch_id, line.product_id)
+            if key not in independent:
+                continue
+            quantity, proof = independent[key]
+            receta = self._match_recipe(code=line.product.sku, name=line.product.name)
+            if receta is None:
+                continue
+            current, count = values.get(receta.id, (ZERO, 0))
+            values[receta.id] = (current + quantity, count + 1)
+            applied_branch_ids.add(line.branch_id)
+            applied_coverage_keys.add(key)
+            applied_mapped_recipe_keys.add((line.branch_id, line.product_id, receta.id))
+            if source == "closing_snapshot":
+                scopes = recipe_scope_totals.setdefault(receta.id, {"cedis": ZERO, "sucursales": ZERO})
+                scopes["cedis" if self._is_cedis_inventory_scope(line) else "sucursales"] += quantity
+
         authoritative = manifest_complete and not unresolved
         meta = self._empty_snapshot_meta(snapshot_date, 0)
         meta.update({
@@ -1638,7 +1717,8 @@ class MonthlyPointProductBalanceService:
             "unresolved_rows": len(unresolved),
             "unresolved_recipe_ids": tuple(sorted(unresolved_recipe_ids)),
             "unlocalized_unresolved_rows": unlocalized_unresolved_rows,
-            "historical_boundary_evidence": tuple(boundary_evidence.values()),
+            "historical_boundary_evidence": (*boundary_evidence.values(), *(proof for _, proof in independent.values())),
+            "independent_original_boundary_keys": tuple(sorted(independent)),
         })
         if authoritative and closing.source == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
             meta["historical_boundary_contract"] = "POINT_STOCK_RAW_UTC"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary
+
 import hashlib
 import json
 import logging
@@ -408,7 +410,7 @@ class InventoryAuditAgent:
             closing_date = date(case.month.year, case.month.month,
                                 monthrange(case.month.year, case.month.month)[1])
             for source, stamp in (("opening", opening_date), ("closing", closing_date)):
-                if not (case.source_trace or {}).get(source):
+                if not has_documentary_boundary(case.source_trace or {}, source):
                     missing.append(
                         f"Falta fuente de {'apertura' if source == 'opening' else 'cierre'} Point del "
                         f"{stamp:%d/%m/%Y}: {case.product.name} en {case.branch.name}. "
