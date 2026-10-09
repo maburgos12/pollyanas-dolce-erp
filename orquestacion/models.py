@@ -1045,3 +1045,69 @@ class ChatMemoryPin(models.Model):
 
     def __str__(self) -> str:
         return f"{self.conversation_id} · {self.label}"
+
+
+def validate_workflow_state(value):
+    """Only bounded technical continuation data belongs in a workflow."""
+    import json
+    import re
+    from django.core.exceptions import ValidationError
+    from django.utils.dateparse import parse_datetime
+    keys = {'query', 'option_ids', 'asset_id', 'missing_fields', 'provenance'}
+    valid_id = lambda pk: type(pk) is int and 0 < pk <= 9223372036854775807
+    try:
+        if not isinstance(value, dict) or set(value) != keys or len(json.dumps(value)) > 8192:
+            raise ValueError
+        if not isinstance(value['query'], str) or len(value['query']) > 180:
+            raise ValueError
+        ids = value['option_ids']
+        if not isinstance(ids, list) or len(ids) > 50 or any(not valid_id(pk) for pk in ids) or len(set(ids)) != len(ids):
+            raise ValueError
+        if value['asset_id'] is not None and not valid_id(value['asset_id']):
+            raise ValueError
+        missing = value['missing_fields']
+        if not isinstance(missing, list) or len(missing) > 2 or any(key not in ('query_or_asset', 'asset_selection') for key in missing):
+            raise ValueError
+        proof = value['provenance']
+        if not isinstance(proof, dict) or set(proof) != {'origin_hash', 'access_fingerprint', 'sources', 'as_of'}:
+            raise ValueError
+        if any(not isinstance(proof[key], str) or not re.fullmatch('[0-9a-f]{64}', proof[key]) for key in ('origin_hash', 'access_fingerprint')):
+            raise ValueError
+        if not isinstance(proof['sources'], list) or len(proof['sources']) > 4 or any(source not in ('activos.Activo', 'activos.OrdenMantenimiento', 'activos.PlanMantenimiento', 'fallas.ReporteFalla') for source in proof['sources']):
+            raise ValueError
+        if not isinstance(proof['as_of'], str) or len(proof['as_of']) > 40 or parse_datetime(proof['as_of']) is None:
+            raise ValueError
+    except (ValueError, TypeError, KeyError):
+        raise ValidationError('Estado de workflow inválido.') from None
+
+
+class AgentWorkflow(models.Model):
+    """Technical READ intent; never a second operational task or asset master."""
+    KIND = 'CONSULT_ASSET_MAINTENANCE'
+    STATUSES = ('WAITING_INFORMATION', 'WAITING_SELECTION', 'READY', 'RUNNING',
+                'REVALIDATION_REQUIRED', 'COMPLETED', 'CANCELLED', 'EXPIRED')
+    public_id = models.UUIDField(default=uuid4, unique=True, editable=False)
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='agent_workflows')
+    origin_conversation = models.ForeignKey(ChatConversation, null=True, blank=True, on_delete=models.SET_NULL, related_name='origin_workflows')
+    origin_request_id = models.UUIDField(unique=True)
+    kind = models.CharField(max_length=40, choices=[(KIND, KIND)])
+    schema_version = models.PositiveSmallIntegerField(default=1)
+    status = models.CharField(max_length=32, choices=[(value, value) for value in STATUSES])
+    version = models.PositiveIntegerField(default=1)
+    state_json = models.JSONField(validators=[validate_workflow_state])
+    last_request_id = models.UUIDField(null=True, blank=True)
+    last_request_hash = models.CharField(max_length=64, blank=True, default='')
+    last_response_json = models.JSONField(default=dict)
+    lease_token = models.UUIDField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=['owner', 'status', 'updated_at']), models.Index(fields=['owner', 'kind', 'status'])]
+        constraints = [
+            models.CheckConstraint(check=models.Q(kind='CONSULT_ASSET_MAINTENANCE', schema_version=1), name='workflow_read_kind_schema'),
+            models.CheckConstraint(check=models.Q(status__in=('WAITING_INFORMATION', 'WAITING_SELECTION', 'READY', 'RUNNING', 'REVALIDATION_REQUIRED', 'COMPLETED', 'CANCELLED', 'EXPIRED')), name='workflow_read_status'),
+            models.CheckConstraint(check=models.Q(version__gte=1), name='workflow_positive_version'),
+        ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import MappingProxyType, SimpleNamespace
@@ -22,10 +24,12 @@ from pos_bridge.models import (
     PointInventorySnapshot,
     PointProduct,
     PointProductionLine,
+    PointProductHistoryRow,
     PointSyncJob,
     PointWasteLine,
 )
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import Receta, RecetaEquivalencia, RecetaPresentacionDerivada, VentaHistorica
 from reportes.models import FactProduccionDiaria
@@ -74,6 +78,84 @@ class MonthlyProductBalanceConversionTests(TestCase):
         }
         values.update(overrides)
         return PointConversionLine.objects.create(**values)
+
+    def test_original_stock_exit_is_independent_of_aggregate_destination_and_factor(self):
+        source_product = PointProduct.objects.create(external_id="56", sku=self.parent.codigo_point,
+            name=self.parent.nombre, category="Pasteles")
+        original = [
+            {"FK_Movimiento": 101, "Movimiento": "ENTRADA POR PRODUCCIÓN", "Fecha": "2026-08-31T18:00:00",
+             "Cantidad": 2, "Existencia_anterior": 0, "Existencia_nueva": 2, "Cancelado": False},
+            {"FK_Movimiento": 102, "Movimiento": "SALIDA POR CONVERSIÓN", "Fecha": "2026-09-15T18:00:00",
+             "Cantidad": 1, "Existencia_anterior": 2, "Existencia_nueva": 1, "Cancelado": False},
+            {"FK_Movimiento": 103, "Movimiento": "VENTA", "Fecha": "2026-10-02T18:00:00",
+             "Cantidad": 1, "Existencia_anterior": 1, "Existencia_nueva": 0, "Cancelado": False},
+        ]
+        source_code = "# original acquisition reader\n"
+        evidence = {"source": "POINT_STOCK_HISTORY_API", "domain": "PRODUCT", "response_complete": True,
+            "branch_id": self.branch.pk, "product_id": source_product.pk,
+            "request": {"path": "/Stock/GetHistorial", "params": {"tipo": "false",
+                "almacen": self.branch.external_id, "pkproducto": source_product.external_id,
+                "movimientos": "5", "tipoMovimiento": ""}},
+            "retrieved_at": "2026-10-04T18:26:15.406476+00:00", "history_limit": 5,
+            "fetched_rows": len(original),
+            "raw_sha256": hashlib.sha256(json.dumps(original, sort_keys=True, default=str).encode()).hexdigest(),
+            "original_locator": {"source_file": "/evidence/original.jsonl", "source_line": 1},
+            "request_provenance": {"kind": "DERIVED_FROM_ACQUISITION_SCRIPT",
+                "source_file": "/evidence/read-original.py", "source_code": source_code,
+                "source_sha256": hashlib.sha256(source_code.encode()).hexdigest(),
+                "client_contract": "PointHttpSessionClient.get_stock_history"}}
+        AuditStockHistoryService().ingest_original_response(
+            self.branch, source_product, date(2026, 9, 1), original, evidence=evidence)
+        report_branch = PointBranch.objects.create(
+            external_id="Sucursal Conversiones", name=self.branch.name,
+            erp_branch=self.sucursal,
+        )
+        self._conversion(quantity="6", when=datetime(2026, 9, 15, 12, 0),
+            branch=report_branch, source_item_code="", source_item_name="")
+
+        values, _, unresolved, counts, metadata = self._service()._load_conversions(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+
+        self.assertEqual(values[self.slice.id].conversion_in, Decimal("6"))
+        self.assertEqual(values[self.parent.id].conversion_out, Decimal("1"))
+        self.assertFalse(any(row.issue == "CONVERSION_ORIGIN_UNRESOLVED" for row in unresolved))
+        self.assertEqual(counts["independent_stock_exit_rows"], 1)
+        self.assertEqual(metadata["independent_stock_exits"][0]["movement_ids"], (102,))
+
+        other_branch = PointBranch.objects.create(
+            external_id="OTHER", name=self.branch.name,
+            erp_branch=Sucursal.objects.create(codigo="OTHR", nombre="Otra sucursal"),
+        )
+        aggregate = PointConversionLine.objects.get()
+        aggregate.branch = other_branch
+        aggregate.save(update_fields=["branch"])
+        _, _, unresolved, _, _ = self._service()._load_conversions(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertTrue(any(row.issue == "CONVERSION_ORIGIN_UNRESOLVED" for row in unresolved))
+        aggregate.branch = report_branch
+        aggregate.save(update_fields=["branch"])
+
+        RecetaEquivalencia.objects.create(receta_padre=self.parent, receta_porcion=self.slice,
+            factor_conversion=10, tipo_relacion=RecetaEquivalencia.TIPO_CONVERSION, activo=True)
+        aggregate = PointConversionLine.objects.get()
+        aggregate.source_item_code = self.parent.codigo_point
+        aggregate.source_item_name = self.parent.nombre
+        aggregate.save(update_fields=["source_item_code", "source_item_name"])
+        values, _, _, _, _ = self._service()._load_conversions(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertEqual(values[self.parent.id].conversion_out, Decimal("1"))
+
+        exit_row = PointProductHistoryRow.objects.get(row_number=102)
+        exit_row.raw_payload["Fecha"] = "invalid"
+        exit_row.save(update_fields=["raw_payload"])
+        _, _, unresolved, _, _ = self._service()._load_conversions(
+            month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertTrue(any(row.issue == "CONVERSION_STOCK_HISTORY_INCOMPLETE" for row in unresolved))
+
+        with patch.object(AuditStockHistoryService, "reconcile_many", return_value={}):
+            _, _, unresolved, _, _ = self._service()._load_conversions(
+                month_start=date(2026, 9, 1), month_end=date(2026, 9, 30))
+        self.assertTrue(any(row.issue == "CONVERSION_STOCK_HISTORY_INCOMPLETE" for row in unresolved))
 
     def test_blank_point_origin_keeps_destination_without_inferring_parent(self):
         RecetaEquivalencia.objects.create(

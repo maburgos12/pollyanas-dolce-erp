@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone as datetime_timezone
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 from typing import Iterable
 
 from django.db import transaction
@@ -16,7 +19,7 @@ from pos_bridge.models import (
     PointHistoricalInventoryClosingLine,
     PointProduct,
 )
-from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, POINT_BUSINESS_TIMEZONE
 from recetas.models import ProductoMonthClosure
 
 
@@ -48,11 +51,78 @@ def _movement_datetime(row: dict) -> datetime:
         raise HistoricalInventoryCaptureError(f"Fecha inválida en historial Point: {value or '(vacía)'}") from exc
 
 
+def point_stock_history_instant(raw_payload: dict) -> datetime:
+    """Stock Fecha uses moment.utc in Point; legacy persisted dates stay intact.
+
+    This contract is exclusive to Stock history, not commercial note timestamps.
+    Invalid evidence must fail closed rather than fall back to a derived date.
+    """
+    if not isinstance(raw_payload, dict):
+        raise HistoricalInventoryCaptureError("Historial Stock sin payload documental.")
+    stamp = _movement_datetime(raw_payload)
+    if timezone.is_naive(stamp):
+        stamp = stamp.replace(tzinfo=datetime_timezone.utc)
+    return stamp.astimezone(datetime_timezone.utc)
+
+
 def _decimal(value, *, field: str) -> Decimal:
     try:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError) as exc:
         raise HistoricalInventoryCaptureError(f"{field} inválida en historial Point: {value!r}") from exc
+
+
+@dataclass(frozen=True)
+class HistoricalWasteEffect:
+    status: str = "NO_SPECIAL"
+    direction: int = 0
+    signed_waste: Decimal = Decimal("0")
+
+
+def historical_waste_effect(raw: dict) -> HistoricalWasteEffect:
+    """Original debit and reversal are independent events, never an inferred pair."""
+    if not isinstance(raw, dict):
+        return HistoricalWasteEffect()
+    name = " ".join("".join(char for char in unicodedata.normalize(
+        "NFKD", str(raw.get("Movimiento") or "")) if not unicodedata.combining(char)).upper().split())
+    def flag(value):
+        if type(value) is bool:
+            return value
+        if type(value) is str and value.casefold() in {"true", "false"}:
+            return value.casefold() == "true"
+        return None
+    cancelled = flag(raw.get("Cancelado"))
+    kind = raw.get("FK_Tipo_Movimiento")
+    if type(kind) is int and kind == 5 and name == "MERMA" and cancelled is False:
+        return HistoricalWasteEffect()
+    if not (name == "CANCELACION DE MERMA" or kind == 15
+            or cancelled is not False and (name == "MERMA" or kind == 5)):
+        return HistoricalWasteEffect()
+    invalid = HistoricalWasteEffect("INVALID")
+    raw_id = raw.get("FK_Movimiento")
+    if not ((type(raw_id) is int and raw_id > 0)
+            or type(raw_id) is str and re.fullmatch(r"[0-9]+", raw_id) and int(raw_id) > 0):
+        return invalid
+    if "isInsumo" in raw and flag(raw["isInsumo"]) is not False:
+        return invalid
+    if type(kind) is not int:
+        return invalid
+    direction = -1 if kind == 5 and name == "MERMA" and cancelled is True else (
+        1 if kind == 15 and name == "CANCELACION DE MERMA" and cancelled is False else 0)
+    if not direction or "isCargo" in raw and flag(raw["isCargo"]) is not (direction == -1):
+        return invalid
+    try:
+        values = [raw.get(key) for key in ("Existencia_anterior", "Existencia_nueva", "Cantidad")]
+        if any(value is None or value == "" or type(value) is bool for value in values):
+            return invalid
+        previous, new, quantity = (Decimal(str(value)) for value in values)
+        if not all(value.is_finite() for value in (previous, new, quantity)) or quantity <= 0:
+            return invalid
+        if Fraction(new) - Fraction(previous) != direction * Fraction(quantity):
+            return invalid
+    except (InvalidOperation, TypeError, ValueError):
+        return invalid
+    return HistoricalWasteEffect("VALID", direction, -direction * quantity)
 
 
 def _movement_evidence(row: dict, *, method: str, history_rows: int) -> dict:
@@ -86,14 +156,18 @@ def resolve_stock_at_close(
             )
         raise HistoricalInventoryCaptureError("Producto sin historial suficiente para acreditar el saldo de cierre.")
 
-    dated_rows = [(_movement_datetime(row), row) for row in history]
-    at_or_before = [(stamp, row) for stamp, row in dated_rows if stamp.date() <= operational_date]
+    dated_rows = [(point_stock_history_instant(row), row) for row in history]
+    if any(historical_waste_effect(row).status == "INVALID" for _, row in dated_rows):
+        raise HistoricalInventoryCaptureError("Efecto histórico de merma sin identidad o contrato original válido.")
+    at_or_before = [(stamp, row) for stamp, row in dated_rows
+                    if stamp.astimezone(POINT_BUSINESS_TIMEZONE).date() <= operational_date]
     if at_or_before:
         _stamp, boundary = max(
             at_or_before,
             key=lambda item: (item[0], int(item[1].get("FK_Movimiento") or 0)),
         )
-        if boundary.get("Cancelado"):
+        effect = historical_waste_effect(boundary)
+        if effect.status == "INVALID" or boundary.get("Cancelado") and effect.status != "VALID":
             raise HistoricalInventoryCaptureError("El movimiento límite está cancelado y no acredita un saldo.")
         return HistoricalStockResolution(
             stock=_decimal(boundary.get("Existencia_nueva"), field="Existencia_nueva"),
@@ -113,7 +187,8 @@ def resolve_stock_at_close(
         dated_rows,
         key=lambda item: (item[0], int(item[1].get("FK_Movimiento") or 0)),
     )
-    if first_later.get("Cancelado"):
+    effect = historical_waste_effect(first_later)
+    if effect.status == "INVALID" or first_later.get("Cancelado") and effect.status != "VALID":
         raise HistoricalInventoryCaptureError("El movimiento límite está cancelado y no acredita un saldo.")
     return HistoricalStockResolution(
         stock=_decimal(first_later.get("Existencia_anterior"), field="Existencia_anterior"),

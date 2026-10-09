@@ -1,0 +1,4 @@
+{% load static %}
+<script id="captura-contexto" type="application/json">{"actor":"{{ request.user.pk }}","superficie":"{{ captura_superficie }}"}</script>
+{{ captura_borrador|default:None|json_script:"captura-borrador" }}
+<script src="{% static 'activos/capturas.js' %}" defer></script>

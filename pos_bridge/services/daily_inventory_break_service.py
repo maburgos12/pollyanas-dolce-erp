@@ -397,7 +397,7 @@ class DailyInventoryBreakService:
                 warnings.append(f"No se encontró la transferencia conservada #{transfer_id}.")
                 continue
             if transfer_id in transfer_out_ids:
-                occurred_at = row.sent_at or (row.registered_at if row.is_finalized else None)
+                occurred_at = row.sent_at or (row.registered_at if row.is_finalized or (row.is_received and row.received_at) else None)
                 if occurred_at is not None:
                     movements.append(
                         DailyMovement(
@@ -423,7 +423,7 @@ class DailyInventoryBreakService:
                     )
                 )
             returned = Decimal(row.sent_quantity) - Decimal(row.received_quantity)
-            if origin_id == canonical_branch_id and row.is_finalized and returned > 0:
+            if origin_id == canonical_branch_id and row.is_received and returned > 0:
                 movements.append(
                     DailyMovement(
                         "transfer_return", row.received_at, returned, (row.id,)

@@ -27,6 +27,9 @@ from pos_bridge.models import (
 from pos_bridge.models.product import _normalize_name, inventory_consumption_filter
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService,
+    documentary_historical_boundary,
+    documentary_original_boundaries,
+    _freeze_mapping,
 )
 from pos_bridge.services.open_transfer_sync_service import (
     OPEN_TRANSFER_MANIFEST_KEY,
@@ -61,6 +64,7 @@ TRACE_SOURCE_NAMES = (
 TRACE_VIEW_METADATA_NAMES = (
     "conversion_in_impacts",
     "conversion_out_impacts",
+    "historical_boundary_evidence",
 )
 
 
@@ -123,7 +127,10 @@ def canonical_point_branch_identity() -> tuple[
 
 
 class BranchInventoryTraceabilityService:
-    def build(self, month: date) -> BranchInventoryTraceability:
+    def build(self, month: date, *, allow_partial: bool = False) -> BranchInventoryTraceability:
+        self._historical_boundary_cache = {}
+        self._historical_boundary_issues = []
+        self._historical_boundary_evidence = {}
         month_start = month.replace(day=1)
         opening_date = month_start - timedelta(days=1)
         closing_date = date(
@@ -160,8 +167,13 @@ class BranchInventoryTraceabilityService:
                 source_complete=False,
             )
 
-        opening = self._load_closing(opening_closing)
-        closing = self._load_closing(point_closing)
+        opening = self._load_closing(opening_closing, month=month_start, boundary="opening")
+        closing = self._load_closing(point_closing, month=month_start, boundary="closing")
+        if self._historical_boundary_issues and not allow_partial:
+            return BranchInventoryTraceability(
+                month=month_start, lines=(), global_issues=tuple(self._historical_boundary_issues),
+                company_difference=ZERO, exception_count=0, source_complete=False,
+            )
         incomplete_manifests = [
             (required_date, selected, balances)
             for required_date, selected, balances in (
@@ -170,7 +182,7 @@ class BranchInventoryTraceabilityService:
             )
             if not self._coverage_complete(selected, balances)
         ]
-        if incomplete_manifests:
+        if incomplete_manifests and not allow_partial:
             return BranchInventoryTraceability(
                 month=month_start,
                 lines=(),
@@ -189,6 +201,24 @@ class BranchInventoryTraceabilityService:
                 exception_count=0,
                 source_complete=False,
             )
+
+        for role, balances, opposite in (("opening", opening, point_closing),
+                                         ("closing", closing, opening_closing)):
+            present_keys = {key for key, proof in self._historical_boundary_evidence.items() if role in proof}
+            opposite_role = "closing" if role == "opening" else "opening"
+            missing_keys = {key for key, proof in self._historical_boundary_evidence.items()
+                            if opposite_role in proof and key not in present_keys}
+            if not missing_keys:
+                continue
+            candidates = [line for line in opposite.lines.filter(
+                branch_id__in={key[0] for key in missing_keys},
+                product_id__in={key[1] for key in missing_keys},
+            ).select_related("branch", "product") if (line.branch_id, line.product_id) in missing_keys]
+            for key, (quantity, proof) in documentary_original_boundaries(
+                    candidates, month=month_start, boundary=role, excluded_keys=present_keys,
+                    cache=self._historical_boundary_cache).items():
+                balances[key] = (quantity, [])
+                self._historical_boundary_evidence.setdefault(key, {})[role] = proof
 
         products = list(PointProduct.objects.annotate(
             is_consumption=Case(When(inventory_consumption_filter(), then=Value(True)),
@@ -277,7 +307,7 @@ class BranchInventoryTraceabilityService:
         movement_issues = [issue for issue in movement_issues if issue.product_id not in consumption_ids]
         movement_keys = set().union(*(source.keys() for source in movement_sources))
         uncovered_movement_issues = []
-        for branch_id, product_id in sorted(movement_keys):
+        for branch_id, product_id in sorted(opening.keys() | closing.keys() | movement_keys):
             missing_manifests = []
             if (branch_id, product_id) not in opening:
                 missing_manifests.append("apertura")
@@ -308,6 +338,11 @@ class BranchInventoryTraceabilityService:
                 )
             )
         movement_issues = [*movement_issues, *uncovered_movement_issues]
+        if allow_partial:
+            movement_issues.extend(
+                replace(issue, branch_id=branch_id_aliases.get(issue.branch_id, issue.branch_id))
+                for issue in self._historical_boundary_issues
+            )
         keys = sorted(
             opening.keys()
             | closing.keys()
@@ -327,7 +362,14 @@ class BranchInventoryTraceabilityService:
         }
         products_by_id = {product.id: product for product in products}
 
-        global_issues = []
+        global_issues = [
+            TraceSourceIssue(
+                code="SOURCE_INCOMPLETE",
+                message=f"El cierre Point verificado tiene cobertura incompleta para {required_date.isoformat()}.",
+                source_ids=(selected.id,),
+            )
+            for required_date, selected, _balances in incomplete_manifests
+        ] if allow_partial else []
         issues_by_key: dict[tuple[int, int], list[TraceSourceIssue]] = {}
         for issue in movement_issues:
             if issue.branch_id is not None and issue.product_id is not None:
@@ -405,6 +447,9 @@ class BranchInventoryTraceabilityService:
                     (branch_id, product_id), {}
                 ),
             }
+            boundary_evidence = self._historical_boundary_evidence.get((branch_id, product_id))
+            if boundary_evidence:
+                trace_values["historical_boundary_evidence"] = boundary_evidence
             lines.append(
                 BranchProductBalance(
                     branch=branches[branch_id],
@@ -424,7 +469,7 @@ class BranchInventoryTraceabilityService:
                     source_trace=MappingProxyType(
                         {
                             source_name: (
-                                MappingProxyType(dict(trace_values[source_name]))
+                                _freeze_mapping(trace_values[source_name])
                                 if source_name in TRACE_VIEW_METADATA_NAMES
                                 else tuple(trace_values[source_name])
                             )
@@ -432,6 +477,7 @@ class BranchInventoryTraceabilityService:
                                 *TRACE_SOURCE_NAMES,
                                 *TRACE_VIEW_METADATA_NAMES,
                             )
+                            if source_name in trace_values
                         }
                     ),
                     issues=tuple(issues_by_key.get((branch_id, product_id), ())),
@@ -445,7 +491,7 @@ class BranchInventoryTraceabilityService:
             global_issues=tuple(global_issues),
             company_difference=sum((line.difference for line in frozen_lines), ZERO),
             exception_count=sum(line.difference != ZERO for line in frozen_lines),
-            source_complete=True,
+            source_complete=not (self._historical_boundary_issues or incomplete_manifests),
         )
 
     @staticmethod
@@ -511,6 +557,7 @@ class BranchInventoryTraceabilityService:
                 "branch_id",
                 "item_code",
                 "item_name",
+                "raw_payload",
                 "produced_quantity",
                 "receta_id",
                 "sync_job_id",
@@ -523,7 +570,7 @@ class BranchInventoryTraceabilityService:
                 movement_at__gte=lower_bound,
                 movement_at__lt=upper_bound,
             )
-            .select_related("branch", "sync_job")
+            .select_related("branch", "sync_job", "receta")
             .only(
                 "id",
                 "branch_id",
@@ -531,6 +578,7 @@ class BranchInventoryTraceabilityService:
                 "item_name",
                 "quantity",
                 "receta_id",
+                "receta__tipo",
                 "insumo_id",
                 "sync_job_id",
             )
@@ -559,6 +607,7 @@ class BranchInventoryTraceabilityService:
                 "received_at",
                 "item_code",
                 "item_name",
+                "raw_payload",
                 "sent_quantity",
                 "received_quantity",
                 "is_insumo",
@@ -678,7 +727,7 @@ class BranchInventoryTraceabilityService:
         for row in production_rows:
             if row.is_insumo:
                 continue
-            product_id, issue_code = self._resolve_product(row, product_indexes)
+            product_id, issue_code = self._resolve_production_product(row, product_indexes)
             self._record_direct_row(
                 balances=production,
                 issues=issues,
@@ -690,7 +739,9 @@ class BranchInventoryTraceabilityService:
                 quantity=row.produced_quantity,
             )
         for row in waste_rows:
-            if row.receta_id is None and row.insumo_id is not None:
+            if row.insumo_id is not None and (
+                row.receta_id is None or row.receta.tipo == Receta.TIPO_PREPARACION
+            ):
                 continue
             product_id, issue_code = self._resolve_product(row, product_indexes)
             if (
@@ -1171,16 +1222,39 @@ class BranchInventoryTraceabilityService:
         issues,
     ):
         for row in rows:
-            if (
-                row.is_cancelled
-                or not getattr(row, "is_current_snapshot", True)
-                or row.is_insumo
-            ):
+            if row.is_cancelled or not getattr(row, "is_current_snapshot", True):
                 continue
-            product_id, issue_code = self._resolve_product(row, product_indexes)
+            if row.is_insumo:
+                raw_payload = getattr(row, "raw_payload", None)
+                detail = (
+                    raw_payload.get("detail")
+                    if isinstance(raw_payload, Mapping)
+                    else None
+                )
+                if (
+                    isinstance(detail, Mapping)
+                    and "FK_articulo" in detail
+                    and detail.get("isInsumo") is False
+                ):
+                    issues.append(
+                        TraceSourceIssue(
+                            code="TRANSFER_PRODUCT_DOMAIN_CONFLICT",
+                            message=(
+                                f"La transferencia {row.transfer_external_id}/"
+                                f"{row.detail_external_id} contradice el dominio "
+                                "de producto reportado por Point."
+                            ),
+                            branch_id=row.origin_branch_id,
+                            source_ids=(row.id,),
+                        )
+                    )
+                continue
+            product_id, issue_code = self._resolve_transfer_product(
+                row, product_indexes
+            )
             origin_at = row.sent_at
             used_fallback = False
-            if origin_at is None and row.is_finalized:
+            if origin_at is None and (row.is_finalized or (row.is_received and row.received_at)):
                 origin_at = row.registered_at
                 used_fallback = True
             origin_in_month = origin_at is not None and lower_bound <= origin_at < upper_bound
@@ -1194,11 +1268,12 @@ class BranchInventoryTraceabilityService:
             returned_quantity = (
                 sent_quantity - received_quantity
                 if destination_in_month
-                and row.is_finalized
                 and received_quantity < sent_quantity
                 else ZERO
             )
             if product_id is None:
+                if not (origin_in_month or destination_in_month):
+                    continue
                 issues.append(
                     TraceSourceIssue(
                         code=issue_code or "UNRESOLVED_PRODUCT",
@@ -1323,7 +1398,10 @@ class BranchInventoryTraceabilityService:
     ):
         recipe_indexes = self._build_recipe_indexes()
         relations = self._conversion_relations()
+        commercial_reader = MonthlyPointProductBalanceService()
         for row in rows:
+            if commercial_reader._documentary_commercial_exclusion(row, source="conversions"):
+                continue
             destination_id, destination_issue = self._resolve_product(
                 row, product_indexes
             )
@@ -1626,6 +1704,58 @@ class BranchInventoryTraceabilityService:
             return None, "AMBIGUOUS_PRODUCT"
         return None, "UNRESOLVED_PRODUCT"
 
+    @classmethod
+    def _resolve_production_product(cls, row, indexes) -> tuple[int | None, str | None]:
+        raw_payload = getattr(row, "raw_payload", None)
+        detail = raw_payload.get("detail") if isinstance(raw_payload, Mapping) else None
+        if not isinstance(detail, Mapping) or "PK_Producto" not in detail:
+            return cls._resolve_product(row, indexes)
+
+        raw_fk = detail["PK_Producto"]
+        fk_text = str(raw_fk).strip()
+        if isinstance(raw_fk, bool) or not fk_text.isdecimal() or int(fk_text) <= 0:
+            return None, "PRODUCTION_PRODUCT_FK_INVALID"
+        if detail.get("IsInsumo") is not False or row.is_insumo is not False:
+            return None, "PRODUCTION_PRODUCT_DOMAIN_CONFLICT"
+        product_id = indexes["external_id"].get(str(int(fk_text)))
+        if product_id is None:
+            return None, "PRODUCTION_PRODUCT_FK_UNKNOWN"
+        item_code = str(getattr(row, "item_code", "") or "").strip()
+        sku_matches = indexes["sku"].get(item_code, ()) if item_code else ()
+        if len(sku_matches) == 1 and int(sku_matches[0]) != int(product_id):
+            return None, "PRODUCTION_PRODUCT_IDENTITY_CONFLICT"
+        return int(product_id), None
+
+    @classmethod
+    def _resolve_transfer_product(
+        cls, row, indexes
+    ) -> tuple[int | None, str | None]:
+        raw_payload = getattr(row, "raw_payload", None)
+        detail = raw_payload.get("detail") if isinstance(raw_payload, Mapping) else None
+        if not isinstance(detail, Mapping) or "FK_articulo" not in detail:
+            return cls._resolve_product(row, indexes)
+
+        raw_fk = detail["FK_articulo"]
+        fk_text = str(raw_fk).strip()
+        if (
+            isinstance(raw_fk, bool)
+            or not fk_text.isdecimal()
+            or int(fk_text) <= 0
+        ):
+            return None, "TRANSFER_PRODUCT_FK_INVALID"
+        if detail.get("isInsumo") is not False or row.is_insumo is not False:
+            return None, "TRANSFER_PRODUCT_DOMAIN_CONFLICT"
+
+        fk_product_id = indexes["external_id"].get(str(int(fk_text)))
+        if fk_product_id is None:
+            return None, "TRANSFER_PRODUCT_FK_UNKNOWN"
+
+        item_code = str(getattr(row, "item_code", "") or "").strip()
+        sku_matches = indexes["sku"].get(item_code, ()) if item_code else ()
+        if len(sku_matches) == 1 and int(sku_matches[0]) != int(fk_product_id):
+            return None, "TRANSFER_PRODUCT_IDENTITY_CONFLICT"
+        return int(fk_product_id), None
+
     @staticmethod
     def _record_direct_row(
         *,
@@ -1723,17 +1853,40 @@ class BranchInventoryTraceabilityService:
             .first()
         )
 
-    @staticmethod
     def _load_closing(
+        self,
         closing: PointHistoricalInventoryClosing,
+        *, month: date | None = None, boundary: str = "closing",
     ) -> dict[tuple[int, int], tuple[Decimal, list[int]]]:
         balances: dict[tuple[int, int], tuple[Decimal, list[int]]] = {}
-        lines = PointHistoricalInventoryClosingLine.objects.filter(
+        lines = list(PointHistoricalInventoryClosingLine.objects.filter(
             closing=closing
-        ).values_list("id", "branch_id", "product_id", "stock")
-        for line_id, branch_id, product_id, line_stock in lines:
-            key = (branch_id, product_id)
+        ).select_related("branch", "product").order_by("id"))
+        cache = getattr(self, "_historical_boundary_cache", None)
+        if cache is None:
+            self._historical_boundary_cache = cache = {}
+        if not hasattr(self, "_historical_boundary_issues"):
+            self._historical_boundary_issues = []
+            self._historical_boundary_evidence = {}
+        quantities, evidence, unproven = documentary_historical_boundary(
+            closing, lines, month=month or closing.operational_date.replace(day=1),
+            boundary=boundary, cache=cache,
+        )
+        for line in unproven:
+            self._historical_boundary_issues.append(TraceSourceIssue(
+                code="SOURCE_INCOMPLETE", message=(
+                    f"Cierre histórico {closing.operational_date.isoformat()} sin límite Stock UTC "
+                    "documentado y cobertura canónica completa."
+                ), branch_id=line.branch_id, product_id=line.product_id, source_ids=(line.id,),
+            ))
+        for line in lines:
+            if line.id in evidence:
+                self._historical_boundary_evidence.setdefault((line.branch_id, line.product_id), {})[
+                    boundary] = evidence[line.id]
+            if line.id not in quantities:
+                continue
+            key = (line.branch_id, line.product_id)
             stock, source_ids = balances.get(key, (ZERO, []))
-            source_ids.append(line_id)
-            balances[key] = (stock + line_stock, source_ids)
+            source_ids.append(line.id)
+            balances[key] = (stock + quantities[line.id], source_ids)
         return balances

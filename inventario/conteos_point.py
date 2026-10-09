@@ -68,7 +68,12 @@ def referencia_conteo(conteo, *, now=None):
     result = {'estado': 'SIN_REFERENCIA', 'corte_verificado': False,
               'consultado_en': now.isoformat(), 'corte_conteo': cutoff.isoformat(),
               'advertencias': ['La hora de extracción no certifica un corte físico.'], 'lineas': {}}
-    branches = list(PointBranch.objects.filter(erp_branch_id=conteo.sucursal_id, status=PointBranch.STATUS_ACTIVE)[:2])
+    branches = list(PointBranch.objects.filter(erp_branch_id=conteo.sucursal_id, status=PointBranch.STATUS_ACTIVE))
+    if len(branches) > 1:
+        # Point usa IDs numéricos; ventas también conserva alias de texto de la misma sucursal.
+        numeric = [branch for branch in branches if str(branch.external_id or '').strip().isdigit()]
+        if len(numeric) == 1:
+            branches = numeric
     if len(branches) != 1:
         result['advertencias'].append('Sucursal Point sin correspondencia única.')
         return result

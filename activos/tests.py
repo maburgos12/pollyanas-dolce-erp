@@ -2,6 +2,7 @@ from decimal import Decimal
 from io import BytesIO
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -50,7 +51,7 @@ class ActivosFlowsTests(TestCase):
         self.assertContains(self.client.get(reverse("activos:planes")), reverse("activos:calendario"))
         self.assertContains(self.client.get(reverse("activos:ordenes")), reverse("activos:registro_rapido"))
         self.assertContains(self.client.get(reverse("activos:reportes")), reverse("activos:solicitudes_falla"))
-        self.assertContains(self.client.get(reverse("activos:reportes")), "Solicitudes históricas de falla")
+        self.assertContains(self.client.get(reverse("activos:reportes")), "Solicitudes de falla")
 
     def test_equipment_list_precedes_secondary_capture_and_keeps_actions(self):
         self.client.force_login(self.admin)
@@ -97,7 +98,7 @@ class ActivosFlowsTests(TestCase):
         self.assertLess(html.index("Reportes correctivos"), html.index('id="nuevo-reporte"'))
         self.assertContains(reportes, 'name="semaforo"')
         self.assertContains(reportes, "export=csv")
-        self.assertContains(reportes, "Levantar reporte")
+        self.assertContains(reportes, "Crear trabajo correctivo")
 
     def test_zero_plans_reports_missing_preventive_coverage(self):
         self.client.force_login(self.admin)
@@ -131,6 +132,7 @@ class ActivosFlowsTests(TestCase):
             reverse("activos:reportes"),
             {
                 "activo_id": str(activo.id),
+                "clave_captura": str(uuid4()),
                 "prioridad": "MEDIA",
                 "descripcion": "No enfría correctamente",
             },
@@ -588,21 +590,14 @@ class ActivosFlowsTests(TestCase):
 
     def test_admin_can_import_bitacora_from_ui_apply(self):
         self.client.force_login(self.admin)
-        upload = self._build_bitacora_upload("bitacora_apply.xlsx")
-        response = self.client.post(
-            reverse("activos:activos"),
-            {
-                "action": "import_bitacora",
-                "archivo_bitacora": upload,
-            },
-            follow=True,
-        )
+        activo = Activo.objects.create(nombre="HORNO TEST UI")
+        response = self._confirmar_bitacora_upload(self._build_bitacora_upload("bitacora_apply.xlsx"), activo, fila=4)
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(Activo.objects.filter(nombre="HORNO TEST UI").exists())
-        self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
-        self.assertTrue(
-            AuditLog.objects.filter(action="IMPORT", model="activos.BitacoraImport", user=self.admin).exists()
-        )
+        self.assertEqual(Activo.objects.filter(nombre="HORNO TEST UI").count(), 1)
+        orden = OrdenMantenimiento.objects.get(activo_ref=activo)
+        self.assertIn("bitácora histórica", orden.descripcion)
+        self.assertEqual(orden.costo_otros, Decimal("1200"))
+        self.assertTrue(AuditLog.objects.filter(action="IMPORT", model="activos.BitacoraImport", user=self.admin).exists())
 
     def test_activos_view_shows_import_runs_block(self):
         AuditLog.objects.create(
@@ -720,35 +715,35 @@ class ActivosFlowsTests(TestCase):
 
     def test_admin_can_import_bitacora_csv_from_ui_apply(self):
         self.client.force_login(self.admin)
-        upload = self._build_bitacora_csv_upload("bitacora_apply.csv")
-        response = self.client.post(
-            reverse("activos:activos"),
-            {
-                "action": "import_bitacora",
-                "archivo_bitacora": upload,
-            },
-            follow=True,
-        )
+        activo = Activo.objects.create(nombre="HORNO TEST CSV")
+        response = self._confirmar_bitacora_upload(self._build_bitacora_csv_upload("bitacora_apply.csv"), activo)
         self.assertEqual(response.status_code, 200)
-        self.assertTrue(Activo.objects.filter(nombre="HORNO TEST CSV").exists())
-        self.assertTrue(OrdenMantenimiento.objects.filter(descripcion__icontains="bitácora histórica").exists())
+        self.assertEqual(Activo.objects.filter(nombre="HORNO TEST CSV").count(), 1)
+        orden = OrdenMantenimiento.objects.get(activo_ref=activo)
+        self.assertIn("bitácora histórica", orden.descripcion)
+        self.assertEqual(orden.costo_otros, Decimal("950.50"))
 
     def test_admin_can_import_bitacora_csv_semicolon_decimal_comma(self):
         self.client.force_login(self.admin)
-        upload = self._build_bitacora_csv_upload("bitacora_decimal.csv", semicolon_decimal=True)
-        response = self.client.post(
-            reverse("activos:activos"),
-            {
-                "action": "import_bitacora",
-                "archivo_bitacora": upload,
-            },
-            follow=True,
-        )
+        activo = Activo.objects.create(nombre="HORNO TEST CSV DECIMAL")
+        response = self._confirmar_bitacora_upload(self._build_bitacora_csv_upload("bitacora_decimal.csv", semicolon_decimal=True), activo)
         self.assertEqual(response.status_code, 200)
-        activo = Activo.objects.get(nombre="HORNO TEST CSV DECIMAL")
-        orden = OrdenMantenimiento.objects.filter(activo_ref=activo).order_by("-id").first()
-        self.assertIsNotNone(orden)
+        self.assertEqual(Activo.objects.filter(nombre="HORNO TEST CSV DECIMAL").count(), 1)
+        orden = OrdenMantenimiento.objects.get(activo_ref=activo)
         self.assertEqual(str(orden.costo_otros), "1250.75")
+
+    def _confirmar_bitacora_upload(self, upload, activo, *, fila=2):
+        url = reverse("activos:activos")
+        preview = self.client.post(url, {"action":"import_bitacora", "archivo_bitacora":upload}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(OrdenMantenimiento.objects.filter(activo_ref=activo).count(), 0)
+        self.assertEqual(AuditLog.objects.filter(model="activos.BitacoraImport").count(), 0)
+        review = self.client.post(url, {"action":"import_bitacora", "fase":"review", "archivo_token":preview.json()["archivo_token"],
+            f"accion_{fila}_1":"crear", f"activo_id_{fila}_1":activo.pk,
+            f"motivo_{fila}_1":"Equipo revisado por ID", f"evidencia_{fila}_1":"Bitácora fuente"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(review.status_code, 200)
+        self.assertEqual(OrdenMantenimiento.objects.filter(activo_ref=activo).count(), 0)
+        return self.client.post(url, {"action":"import_bitacora", "fase":"confirm", "revision_token":review.json()["revision_token"], "confirmado":"1"}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
 
     def test_orden_folio_retries_on_collision(self):
         # Simula creación concurrente: el primer folio calculado ya existe;

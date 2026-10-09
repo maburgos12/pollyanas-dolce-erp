@@ -5,11 +5,13 @@
 {% block body_class %}page-activos-reportes{% endblock %}
 
 {% block content %}
+{% include "activos/_captura_contexto.html" with captura_superficie="reportes" %}
 <div class="quick-actions pd-mb-3">
   <a class="btn btn-secondary" href="{% url 'activos:calendario' %}">Ver calendario</a>
-  <a class="btn btn-primary" href="#nuevo-reporte" onclick="document.getElementById('nuevo-reporte').open = true">Levantar reporte de falla</a>
-  <a class="btn btn-secondary" href="{% url 'activos:solicitudes_falla' %}">Solicitudes históricas de falla</a>
+  <a class="btn btn-primary" href="#nuevo-reporte" onclick="document.getElementById('nuevo-reporte').open = true">Crear trabajo correctivo</a>
+  <a class="btn btn-secondary" href="{% url 'activos:solicitudes_falla' %}">Solicitudes de falla</a>
 </div>
+<p class="text-muted">Solicitudes de falla conserva el registro legado y permite capturar solicitudes; es distinto de los trabajos correctivos.</p>
 
 {% if focus_summary %}
 <p class="pd-mb-3"><strong>Vista enfocada · {{ focus_summary.label }}</strong> · {{ focus_summary.detail }}
@@ -72,8 +74,8 @@
       </thead>
       <tbody>
         {% for item in reportes %}
-          <tr>
-            <td>{{ item.orden.folio }}</td>
+          <tr id="orden-{{ item.orden.id }}">
+            <td><a href="{% url 'activos:orden_evidencias' item.orden.id %}?origen=reportes&amp;return_query={{ request.GET.urlencode|urlencode }}" aria-label="Consultar trabajo y soporte de {{ item.orden.folio }}">{{ item.orden.folio }}</a></td>
             <td>{{ item.orden.fecha_programada|date:"Y-m-d" }}</td>
             <td>{{ item.orden.activo_ref.nombre }}</td>
             <td>{{ item.orden.get_prioridad_display }}</td>
@@ -86,6 +88,7 @@
                 <div class="quick-actions pd-u-5dfbd1ecfa">
                   <form method="post" action="{% url 'activos:orden_estatus' item.orden.id 'EN_PROCESO' %}">
                     {% csrf_token %}
+
                     <button class="btn btn-secondary" type="submit">En proceso</button>
                   </form>
                   <form method="post" action="{% url 'activos:orden_estatus' item.orden.id 'CERRADA' %}">
@@ -106,17 +109,22 @@
   </div>
 </section>
 
-<details class="card" id="nuevo-reporte">
-  <summary class="card-header">Levantar reporte de falla</summary>
-  <form method="post">
+<details class="card" id="nuevo-reporte" {% if captura_error %}open{% endif %}>
+  <summary class="card-header">Crear trabajo correctivo</summary>
+  <p>Registra una orden de mantenimiento correctivo para atender el problema del equipo.</p>
+  <form method="post" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true" data-captura-activos>
     {% csrf_token %}
+    <input type="hidden" name="clave_captura" value="{{ clave_captura }}">
+    <div data-captura-feedback role="status" aria-live="polite">{% if captura_error %}{{ captura_error }}{% endif %}</div>
+    {% if captura_archivos_perdidos %}<p role="alert">Vuelve a seleccionar los archivos antes de reintentar; el navegador no conserva adjuntos después de este envío.</p>{% endif %}
+
     <div class="row pd-u-6136e5cbe4">
       <div>
         <label>Activo</label>
         <select name="activo_id" required>
           <option value="">Selecciona...</option>
           {% for a in activos %}
-            <option value="{{ a.id }}">{{ a.nombre }}</option>
+            <option value="{{ a.id }}" {% if captura_datos.activo_id == a.id|stringformat:"s" %}selected{% endif %}>{{ a.nombre }}</option>
           {% endfor %}
         </select>
       </div>
@@ -124,25 +132,25 @@
         <label>Prioridad</label>
         <select name="prioridad">
           {% for v, l in prioridad_choices %}
-            <option value="{{ v }}">{{ l }}</option>
+            <option value="{{ v }}" {% if captura_datos.prioridad == v %}selected{% endif %}>{{ l }}</option>
           {% endfor %}
         </select>
       </div>
       <div>
         <label>Responsable</label>
-        <input type="text" name="responsable" placeholder="Reporta o atiende">
+        <input type="text" name="responsable" value="{{ captura_datos.responsable }}" placeholder="Reporta o atiende">
       </div>
       <div>
         <label>Fecha de atención sugerida</label>
-        <input type="date" name="fecha_programada" value="{{ today|date:'Y-m-d' }}">
+        <input type="date" name="fecha_programada" value="{% if captura_datos %}{{ captura_datos.fecha_programada }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}">
       </div>
       <div class="pd-u-cc21d3525a">
         <label>Descripción del problema</label>
-        <textarea name="descripcion" rows="3" required placeholder="Detalle de falla, ruido, fuga, no enciende, etc."></textarea>
+        <textarea name="descripcion" rows="3" required placeholder="Detalle de falla, ruido, fuga, no enciende, etc.">{{ captura_datos.descripcion }}</textarea>
       </div>
     </div>
     <div class="pd-u-9374e84210 quick-actions">
-      <button type="submit" class="btn btn-primary">Levantar reporte</button>
+      <button type="submit" class="btn btn-primary">Crear trabajo correctivo</button>
       <a class="btn btn-secondary" href="{% url 'activos:ordenes' %}">Ver todas las órdenes</a>
     </div>
   </form>

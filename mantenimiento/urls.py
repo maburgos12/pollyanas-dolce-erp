@@ -1,5 +1,8 @@
 from django.urls import path
 
+from .views_documentos_financieros import documentos_trabajo
+from .views_conciliacion_documental import conciliacion_documental, conciliacion_documental_csv
+from .views_vinculos_proveedores import vinculos_proveedores
 from . import views
 from .views_reporte_orden import orden_desde_reporte
 from .views_consolidacion_higiene import consolidacion_higiene
@@ -7,6 +10,10 @@ from .views_consolidacion_higiene import consolidacion_higiene
 app_name = "mantenimiento"
 
 urlpatterns = [
+    path("conciliacion-documental/", conciliacion_documental, name="conciliacion_documental"),
+    path("conciliacion-documental/exportar/", conciliacion_documental_csv, name="conciliacion_documental_csv"),
+    path("trabajos/<str:tipo>/<int:pk>/documentos/", documentos_trabajo, name="documentos-trabajo"),
+    path("proveedores/vinculos-documentales/", vinculos_proveedores, name="vinculos-proveedores"),
     path("reportes/<int:pk>/orden/", orden_desde_reporte, name="orden-desde-reporte"),
     path("", views.dashboard, name="dashboard"),
     path(

@@ -96,7 +96,7 @@ def can_view_costs(user):
 
 
 def can_write_mantenimiento(user) -> bool:
-    if not user or not user.is_authenticated:
+    if not user or not user.is_authenticated or not user.is_active:
         return False
     grupos = set(user.groups.values_list("name", flat=True))
     return (

@@ -36,6 +36,7 @@ from mantenimiento.services_access import (
     authorized_unit_reports,
     authorized_unit_services,
     can_view_costs,
+    can_write_mantenimiento,
 )
 from mantenimiento.services_history import canonical_status, period_bounds
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
@@ -610,6 +611,22 @@ class MaintenanceAccessTests(TestCase):
 
     def test_inactive_user_with_branch_sees_nothing(self):
         self._assert_no_authorized_objects(self.inactive_user)
+
+    def test_desactivacion_revoca_escritura_incluso_con_grupo_o_permiso_previo(self):
+        from django.core.exceptions import PermissionDenied
+        from mantenimiento.services_vinculos import _require_write
+
+        for usuario in (self.maintenance_group_user, self.dg_user, self.manager, self.admin):
+            with self.subTest(usuario=usuario.username):
+                self.assertTrue(can_write_mantenimiento(usuario))
+                usuario.is_active = False
+                usuario.save(update_fields=["is_active"])
+                usuario = get_user_model().objects.get(pk=usuario.pk)
+
+                self.assertFalse(can_write_mantenimiento(usuario))
+                self._assert_no_authorized_objects(usuario)
+                with self.assertRaises(PermissionDenied):
+                    _require_write(usuario)
 
     def test_every_real_read_gate_returns_endpoint_data(self):
         users = (

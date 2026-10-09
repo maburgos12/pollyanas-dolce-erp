@@ -71,7 +71,7 @@ def chat_home(request):
         "chat_api_base": "/ia-privada/api",
         "conversations": [serialize_conversation(conversation) for conversation in conversations],
         "selected_conversation": serialize_conversation_detail(selected) if selected else None,
-        "runtime_status": get_chat_runtime_status(),
+        "runtime_status": get_chat_runtime_status(request.user),
     }
     return render(request, "orquestacion/chat.html", context)
 

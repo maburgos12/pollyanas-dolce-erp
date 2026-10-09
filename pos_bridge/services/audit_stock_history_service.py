@@ -1,26 +1,42 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import json
 import unicodedata
-from dataclasses import dataclass
-from datetime import date, datetime, time
-from decimal import Decimal, InvalidOperation
+import zlib
+from copy import deepcopy
+from dataclasses import dataclass, replace
+from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q, prefetch_related_objects
 from django.utils import timezone
 
 from pos_bridge.models import (
+    PointBranch,
+    PointHistoricalInventoryClosingLine,
     PointProductHistoryImport,
     PointProductHistoryRow,
+    PointProduct,
 )
-from pos_bridge.services.historical_inventory_capture import _movement_datetime
+from pos_bridge.services.historical_inventory_capture import (
+    HistoricalInventoryCaptureError,
+    _movement_datetime,
+    point_stock_history_instant,
+    historical_waste_effect,
+    HistoricalWasteEffect,
+)
+from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 
 
 HISTORY_LIMIT = 500
+ORIGINAL_HISTORY_LIMITS = frozenset({5, 10, 15, 50, 100, 300, 500})
 SOURCE_NAME = "POINT_STOCK_HISTORY_API"
+BOUNDARY_ONLY_SOURCE_NAME = "POINT_STOCK_HISTORY_BOUNDARY_ONLY"
 
 
 class AuditStockHistoryError(RuntimeError):
@@ -41,6 +57,10 @@ class PointHistoryReconciliation:
     movement_ids: tuple[int, ...] = ()
     movement_ids_by_category: dict[str, tuple[int, ...]] | None = None
     unknown_movement_ids: tuple[int, ...] = ()
+    documentary_opening: Decimal | None = None
+    documentary_closing: Decimal | None = None
+    documentary_boundary_movement_ids: tuple[int, ...] = ()
+    original_batch_evidence: dict | None = None
 
     def expected_closing(self, opening: Decimal) -> Decimal:
         return (
@@ -83,6 +103,10 @@ class PointHistoryReconciliation:
                 for key, value in (self.movement_ids_by_category or {}).items()
             },
             "unknown_movement_ids": list(self.unknown_movement_ids),
+            "documentary_opening": str(self.documentary_opening) if self.documentary_opening is not None else None,
+            "documentary_closing": str(self.documentary_closing) if self.documentary_closing is not None else None,
+            "documentary_boundary_movement_ids": list(self.documentary_boundary_movement_ids),
+            **({"original_batch_evidence": self.original_batch_evidence} if self.original_batch_evidence else {}),
         }
 
 
@@ -153,13 +177,160 @@ class AuditStockHistoryService:
         return PointProductHistoryImport.objects.filter(
             file_hash=self._file_hash(branch, product),
             raw_metadata__source=SOURCE_NAME,
-        ).first()
+        ).select_related("point_branch", "point_product").first()
 
     @staticmethod
-    def _covers_month(record, month: date) -> bool:
+    def _original_batch(record=None, *, rows=None, branch=None, product=None, fingerprint=None):
+        """Separate preserved response occurrences from canonical identities.
+
+        Legacy metadata is not an archive: duplicate membership only becomes
+        usable with the exact latest original response and its verified proof.
+        """
+        archive = None
+        if record is not None:
+            metadata = record.raw_metadata or {}
+            if not isinstance(metadata, dict):
+                raise AuditStockHistoryError("Metadatos originales inválidos.")
+            latest_fingerprint = metadata.get("latest_response_fingerprint")
+            if fingerprint is None and "latest_response_fingerprint" not in metadata:
+                return None
+            fingerprint = latest_fingerprint if fingerprint is None else fingerprint
+            is_latest = fingerprint == latest_fingerprint
+            try:
+                branch, product = record.point_branch, record.point_product
+                if not isinstance(fingerprint, str) or len(fingerprint) != 64:
+                    raise AuditStockHistoryError("Identificador del archivo original inválido.")
+                if (not isinstance(metadata.get("original_responses"), dict)
+                        or not isinstance(metadata.get("response_provenance"), list)
+                        or any(not isinstance(item, dict) for item in metadata["response_provenance"])):
+                    raise AuditStockHistoryError("Estructura de procedencia original inválida.")
+                archive = metadata["original_responses"][fingerprint]
+                matches = [item for item in metadata["response_provenance"] if item.get("fingerprint") == fingerprint]
+                if not isinstance(archive, dict) or len(matches) != 1:
+                    raise AuditStockHistoryError("Archivo original ausente o ambiguo.")
+                proof = matches[0]
+                evidence = {key: value for key, value in proof.items()
+                            if key not in {"fingerprint", "ingested_at"}}
+                if set(evidence) != {"source", "domain", "response_complete", "branch_id", "product_id", "request",
+                        "retrieved_at", "history_limit", "fetched_rows", "raw_sha256", "original_locator", "request_provenance"}:
+                    raise AuditStockHistoryError("Contrato original incompleto o con campos ajenos.")
+                locator = evidence.get("original_locator")
+                request_proof = evidence.get("request_provenance")
+                if (not isinstance(locator, dict) or set(locator) != {"source_file", "source_line"}
+                        or not isinstance(locator.get("source_file"), str) or not locator["source_file"].strip()
+                        or type(locator.get("source_line")) is not int or locator["source_line"] <= 0
+                        or not isinstance(request_proof, dict) or set(request_proof) != {
+                            "kind", "source_file", "source_code", "source_sha256", "client_contract"}
+                        or request_proof.get("kind") != "DERIVED_FROM_ACQUISITION_SCRIPT"
+                        or request_proof.get("client_contract") != "PointHttpSessionClient.get_stock_history"
+                        or not isinstance(request_proof.get("source_file"), str) or not request_proof["source_file"].strip()
+                        or not isinstance(request_proof.get("source_code"), str) or not request_proof["source_code"].strip()
+                        or hashlib.sha256(request_proof["source_code"].encode()).hexdigest() != request_proof.get("source_sha256")):
+                    raise AuditStockHistoryError("Localizador o script original inválido.")
+                if (archive.get("encoding") != "zlib-base64-json"
+                        or any(json.dumps(archive.get(key), sort_keys=True) != json.dumps(value, sort_keys=True)
+                               for key, value in proof.items())
+                        or hashlib.sha256(json.dumps(evidence, sort_keys=True, default=str).encode()).hexdigest() != fingerprint):
+                    raise AuditStockHistoryError("Procedencia del lote original inválida.")
+                original = zlib.decompress(base64.b64decode(archive["raw_zlib_base64"], validate=True))
+                if hashlib.sha256(original).hexdigest() != proof.get("raw_sha256"):
+                    raise AuditStockHistoryError("SHA del lote original inválido.")
+                rows = json.loads(original)
+                count, limit = proof.get("fetched_rows"), proof.get("history_limit")
+                request = {"path": "/Stock/GetHistorial", "params": {
+                    "tipo": "false", "almacen": str(record.point_branch.external_id),
+                    "pkproducto": str(record.point_product.external_id),
+                    "movimientos": str(limit), "tipoMovimiento": "",
+                }}
+                if (proof.get("source") != SOURCE_NAME or proof.get("domain") != "PRODUCT"
+                        or proof.get("response_complete") is not True
+                        or type(proof.get("branch_id")) is not int or proof["branch_id"] != record.point_branch_id
+                        or type(proof.get("product_id")) is not int or proof["product_id"] != record.point_product_id
+                        or proof.get("request") != request
+                        or type(count) is not int or type(limit) is not int
+                        or limit not in ORIGINAL_HISTORY_LIMITS or count != len(rows) or count > limit
+                        or is_latest and (type(metadata.get("fetched_rows")) is not int or metadata["fetched_rows"] != count
+                            or type(metadata.get("history_limit")) is not int or metadata["history_limit"] != limit
+                            or metadata.get("fetched_at") != proof.get("retrieved_at"))):
+                    raise AuditStockHistoryError("Identidad o conteo del lote original inválido.")
+                receipt = AuditStockHistoryService._aware_receipt(proof["retrieved_at"])
+            except (KeyError, TypeError, ValueError, StopIteration, zlib.error) as exc:
+                raise AuditStockHistoryError("Archivo original canónico ausente o corrupto.") from exc
+        if not isinstance(rows, list):
+            raise AuditStockHistoryError("Respuesta original inválida.")
+        unique, signatures, occurrences = {}, {}, {}
+        for position, raw in enumerate(rows):
+            if not isinstance(raw, dict):
+                raise AuditStockHistoryError("Movimiento original inválido.")
+            movement_id = raw.get("FK_Movimiento")
+            if type(movement_id) is not int or movement_id <= 0:
+                raise AuditStockHistoryError("FK_Movimiento original inválido.")
+            signature = json.dumps(raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+            if movement_id in signatures and signature != signatures[movement_id]:
+                raise AuditStockHistoryError("FK_Movimiento repetido con contenido o tipos distintos.")
+            for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+                value = raw.get(field)
+                if value is None or value == "" or type(value) is bool or not _decimal(value).is_finite():
+                    raise AuditStockHistoryError("Cantidad o existencia original incompleta.")
+            instant = point_stock_history_instant(raw)
+            if record is not None:
+                if instant > receipt:
+                    raise AuditStockHistoryError("Movimiento posterior a consulta original.")
+                cancelled = raw.get("Cancelado")
+                if not (type(cancelled) is bool or type(cancelled) is str and cancelled in {"true", "false", "True", "False"}):
+                    raise AuditStockHistoryError("Estado de cancelación original inválido.")
+            if "isInsumo" in raw and not (raw["isInsumo"] is False
+                    or type(raw["isInsumo"]) is str and raw["isInsumo"].casefold() == "false"):
+                raise AuditStockHistoryError("Movimiento original de otro dominio.")
+            for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"):
+                if product is not None and field in raw and str(raw[field]) != str(product.external_id):
+                    raise AuditStockHistoryError("Movimiento original de otro producto.")
+            for field in ("FK_Sucursal", "PK_Sucursal"):
+                if branch is not None and field in raw and str(raw[field]) != str(branch.external_id):
+                    raise AuditStockHistoryError("Movimiento original de otra sucursal.")
+            unique.setdefault(movement_id, raw)
+            signatures[movement_id] = signature
+            occurrences.setdefault(movement_id, []).append(position)
+        ids = [raw["FK_Movimiento"] for raw in rows]
+        if record is not None and is_latest:
+            stored_ids = metadata.get("fetched_movement_ids")
+            if (not isinstance(stored_ids, list) or any(type(value) is not int for value in stored_ids)
+                    or stored_ids != ids):
+                raise AuditStockHistoryError("Membresía no coincide con respuesta original.")
+        effective = [raw for raw in unique.values()
+                     if not _boolean(raw.get("Cancelado")) or historical_waste_effect(raw).status == "VALID"]
+        ordered = sorted(effective, key=lambda raw: (point_stock_history_instant(raw), raw["FK_Movimiento"]))
+        gaps = tuple({"previous_movement_id": previous["FK_Movimiento"], "movement_id": current["FK_Movimiento"],
+                      "previous_movement_at": point_stock_history_instant(previous).isoformat(),
+                      "movement_at": point_stock_history_instant(current).isoformat(),
+                      "previous_stock": str(_decimal(previous["Existencia_nueva"])),
+                      "current_previous_stock": str(_decimal(current["Existencia_anterior"]))}
+                     for previous, current in zip(ordered, ordered[1:])
+                     if _decimal(previous["Existencia_nueva"]) != _decimal(current["Existencia_anterior"]))
+        result = {"rows": rows, "unique_rows": list(unique.values()), "unique_ids": tuple(unique),
+                  "original_count": len(rows), "duplicate_movement_ids": tuple(
+                      movement_id for movement_id, positions in occurrences.items() if len(positions) > 1),
+                  "duplicate_positions": {str(movement_id): positions for movement_id, positions in occurrences.items()
+                                          if len(positions) > 1}, "stock_chain_gaps": gaps}
+        if record is not None:
+            result["evidence"] = {"contract": "POINT_ORIGINAL_BATCH_MEMBERSHIP_V1", "import_id": record.pk,
+                "response_fingerprint": fingerprint, "raw_sha256": proof["raw_sha256"],
+                "original_count": len(rows), "unique_count": len(unique), "history_limit": limit,
+                "retrieved_at": proof["retrieved_at"], "duplicate_movement_ids": result["duplicate_movement_ids"],
+                "duplicate_positions": result["duplicate_positions"], "stock_chain_gaps": gaps,
+                "source_signature": hashlib.sha256(json.dumps({"archive": archive,
+                    "membership": ids}, sort_keys=True, default=str).encode()).hexdigest()}
+        return result
+
+    @staticmethod
+    def _covers_month(record, month: date, *, boundary_rows=None) -> bool:
         if record is None:
             return False
         metadata = record.raw_metadata or {}
+        try:
+            original_batch = AuditStockHistoryService._original_batch(record)
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError):
+            return False
         if "fetched_rows" not in metadata:
             return False
         _, month_end = _month_bounds(month)
@@ -169,18 +340,114 @@ class AuditStockHistoryService:
             return False
         if timezone.is_naive(fetched_at) or fetched_at < month_end:
             return False
-        fetched_rows = int(metadata.get("fetched_rows") or 0)
-        history_limit = int(metadata.get("history_limit") or HISTORY_LIMIT)
+        try:
+            fetched_rows = int(metadata.get("fetched_rows") or 0)
+            history_limit = int(metadata.get("history_limit", HISTORY_LIMIT))
+        except (TypeError, ValueError):
+            return False
+        if fetched_rows < 0 or history_limit <= 0 or fetched_rows > history_limit:
+            return False
+        fetched_ids = metadata.get("fetched_movement_ids")
+        if "fetched_movement_ids" in metadata and (
+            not isinstance(fetched_ids, list)
+            or any(type(value) is not int or value <= 0 for value in fetched_ids)
+            or len(fetched_ids) != fetched_rows
+            or original_batch is None and len(set(fetched_ids)) != len(fetched_ids)
+        ):
+            return False
         if fetched_rows < history_limit:
             return True
         month_start, _ = _month_bounds(month)
-        earliest = str(metadata.get("earliest_movement_at") or "")
-        if not earliest:
+        if original_batch is not None:
+            return bool(original_batch["rows"] and min(
+                point_stock_history_instant(raw) for raw in original_batch["rows"]) <= month_start)
+        earliest = AuditStockHistoryService._boundary_stamp(record)
+        if earliest is None:
+            return False
+        if boundary_rows is None:
+            boundary_rows = list(record.rows.filter(movement_at=earliest))
+        matches = [row for row in boundary_rows if row.movement_at == earliest
+                   and (not fetched_ids or row.row_number in fetched_ids)]
+        if not matches:
             return False
         try:
-            return datetime.fromisoformat(earliest) <= month_start
-        except ValueError:
+            # The boundary belongs to the latest capture, not older retained rows.
+            return all(point_stock_history_instant(row.raw_payload) <= month_start for row in matches)
+        except HistoricalInventoryCaptureError:
             return False
+
+    @staticmethod
+    def _boundary_stamp(record):
+        try:
+            stamp = datetime.fromisoformat(str((record.raw_metadata or {}).get("earliest_movement_at") or ""))
+        except (TypeError, ValueError):
+            return None
+        return stamp if timezone.is_aware(stamp) else None
+
+    @staticmethod
+    def _candidate_filter(records, month):
+        month_start, month_end = _month_bounds(month)
+        # Legacy naive dates were persisted seven hours late. Explicit-zone rows
+        # remain correct; the raw reader performs the exact cut for both kinds.
+        query = Q(movement_at__gte=month_start, movement_at__lt=month_end + timedelta(hours=7))
+        for record in records:
+            boundary = AuditStockHistoryService._boundary_stamp(record)
+            if boundary is not None:
+                query |= Q(import_record_id=record.pk, movement_at=boundary)
+        return query
+
+    def _reconcile_candidates(self, record, month, candidates):
+        month_start, month_end = _month_bounds(month)
+        selected, invalid = [], []
+        for row in candidates:
+            if row.cancelled and self._validated_waste_effect(row, record).status == "NO_SPECIAL":
+                continue
+            try:
+                instant = point_stock_history_instant(row.raw_payload)
+            except HistoricalInventoryCaptureError:
+                invalid.append(row.row_number)
+                continue
+            if month_start <= instant < month_end:
+                selected.append((instant, row.row_number, row))
+        rows = [entry[2] for entry in sorted(selected, key=lambda entry: entry[:2])]
+        return self._reconcile_record(record, month, rows, boundary_rows=candidates, invalid_ids=invalid)
+
+    @staticmethod
+    def _validated_waste_effect(row, record):
+        effect = historical_waste_effect(getattr(row, "raw_payload", None))
+        canonical_name = _normalized(row.movement_type)
+        if effect.status == "NO_SPECIAL" and (canonical_name == "CANCELACION DE MERMA"
+                or getattr(row, "cancelled", False) and canonical_name == "MERMA"):
+            return HistoricalWasteEffect("INVALID")
+        if effect.status != "VALID":
+            return effect
+        invalid = HistoricalWasteEffect("INVALID")
+        raw = row.raw_payload
+        try:
+            movement_id, defaults = AuditStockHistoryService._parse_row(raw)
+            if movement_id != row.row_number or movement_id <= 0 or type(raw.get("FK_Movimiento")) is bool:
+                return invalid
+            for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                defaults[field] = defaults[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+            if any(getattr(row, field) != defaults[field] for field in (
+                    "movement_type", "previous_existence", "quantity", "new_existence", "cancelled", "total_cost", "unit_cost")):
+                return invalid
+            if (not timezone.is_aware(row.movement_at) or not timezone.is_aware(defaults["movement_at"])
+                    or row.movement_at.astimezone(ZoneInfo("UTC")) != defaults["movement_at"].astimezone(ZoneInfo("UTC"))):
+                return invalid
+            if "isInsumo" in raw and not (raw["isInsumo"] is False
+                    or type(raw["isInsumo"]) is str and raw["isInsumo"].casefold() == "false"):
+                return invalid
+            for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"):
+                if field in raw and str(raw[field]) != str(record.point_product.external_id):
+                    return invalid
+            for field in ("FK_Sucursal", "PK_Sucursal"):
+                if field in raw and str(raw[field]) != str(record.point_branch.external_id):
+                    return invalid
+        except (AuditStockHistoryError, InvalidOperation, TypeError, ValueError, AttributeError):
+            return invalid
+        return effect
 
     def capture(self, branch, product, month: date, *, force: bool = False):
         record = self._existing_import(branch, product)
@@ -194,10 +461,262 @@ class AuditStockHistoryService:
             branch.external_id,
             movements=HISTORY_LIMIT,
         )
-        record = self._canonical_import(branch, product)
-        parsed_rows = [self._parse_row(row) for row in rows]
+        fetched_at = timezone.now().isoformat()
+        self._persist_response(
+            branch, product, month, rows, fetched_at=fetched_at,
+            history_limit=HISTORY_LIMIT,
+        )
+        return self.reconcile(branch, product, month)
+
+    @staticmethod
+    def _aware_receipt(value):
+        try:
+            stamp = datetime.fromisoformat(value)
+        except (TypeError, ValueError) as exc:
+            raise AuditStockHistoryError("Fecha original de consulta inválida.") from exc
+        if timezone.is_naive(stamp):
+            raise AuditStockHistoryError("La consulta original requiere zona horaria.")
+        return stamp
+
+    def ingest_original_response(self, branch, product, month: date, rows, *, evidence):
+        """Ingest a complete preserved Point response, without contacting Point.
+
+        The caller supplies the original request and locator, not a reconstructed
+        boundary pair. Receipt time remains distinct from this database write.
+        """
+        rows, evidence = deepcopy(rows), deepcopy(evidence)
+        raw_json = self._validate_original_response(branch, product, rows, evidence)
+        self._persist_response(
+            branch, product, month, rows, fetched_at=evidence["retrieved_at"],
+            history_limit=evidence["history_limit"], evidence=evidence, raw_json=raw_json,
+        )
+        return self.reconcile(branch, product, month)
+
+    @staticmethod
+    def _validate_original_response(branch, product, rows, evidence):
+        if not isinstance(branch, PointBranch) or not isinstance(product, PointProduct):
+            raise AuditStockHistoryError("La identidad requiere sucursal y producto Point canónicos.")
+        if not isinstance(rows, list) or not isinstance(evidence, dict):
+            raise AuditStockHistoryError("Se requiere respuesta original íntegra y evidencia.")
+        expected_keys = {"source", "domain", "response_complete", "branch_id", "product_id", "request",
+                         "retrieved_at", "history_limit", "fetched_rows", "raw_sha256", "original_locator", "request_provenance"}
+        if set(evidence) != expected_keys:
+            raise AuditStockHistoryError("El contrato de evidencia original tiene campos faltantes o ajenos.")
+        limit, count = evidence.get("history_limit"), evidence.get("fetched_rows")
+        if (type(limit) is not int or type(count) is not int or
+                limit not in ORIGINAL_HISTORY_LIMITS or count != len(rows) or count > limit):
+            raise AuditStockHistoryError("Conteo/límite no acredita la respuesta original completa.")
+        request = {"path": "/Stock/GetHistorial", "params": {
+            "tipo": "false", "almacen": str(branch.external_id),
+            "pkproducto": str(product.external_id), "movimientos": str(limit), "tipoMovimiento": "",
+        }}
+        if (evidence.get("source") != SOURCE_NAME or evidence.get("domain") != "PRODUCT" or
+                evidence.get("response_complete") is not True or
+                type(evidence.get("branch_id")) is not int or evidence["branch_id"] != branch.pk or
+                type(evidence.get("product_id")) is not int or evidence["product_id"] != product.pk or
+                evidence.get("request") != request or not branch.external_id or not product.external_id):
+            raise AuditStockHistoryError("Identidad, dominio o petición original Point no coincide.")
+        locator = evidence.get("original_locator")
+        if (not isinstance(locator, dict) or set(locator) != {"source_file", "source_line"} or not isinstance(locator.get("source_file"), str) or
+                not locator["source_file"].strip() or type(locator.get("source_line")) is not int or
+                locator["source_line"] <= 0):
+            raise AuditStockHistoryError("Falta localizador de la evidencia original.")
+        request_proof = evidence["request_provenance"]
+        if (not isinstance(request_proof, dict) or set(request_proof) != {
+                "kind", "source_file", "source_code", "source_sha256", "client_contract"} or
+                request_proof.get("kind") != "DERIVED_FROM_ACQUISITION_SCRIPT" or
+                request_proof.get("client_contract") != "PointHttpSessionClient.get_stock_history" or
+                not isinstance(request_proof.get("source_file"), str) or not request_proof["source_file"].strip() or
+                not isinstance(request_proof.get("source_code"), str) or not request_proof["source_code"].strip() or
+                hashlib.sha256(request_proof["source_code"].encode()).hexdigest() != request_proof.get("source_sha256")):
+            raise AuditStockHistoryError("Procedencia del script de adquisición original inválida.")
+        receipt = AuditStockHistoryService._aware_receipt(evidence.get("retrieved_at"))
+        if receipt > timezone.now():
+            raise AuditStockHistoryError("La fecha original de consulta está en el futuro.")
+        try:
+            raw_json = json.dumps(rows, sort_keys=True, default=str).encode()
+        except (TypeError, ValueError) as exc:
+            raise AuditStockHistoryError("Respuesta original no serializable.") from exc
+        if hashlib.sha256(raw_json).hexdigest() != evidence.get("raw_sha256"):
+            raise AuditStockHistoryError("SHA de respuesta original no coincide.")
+        for raw in rows:
+            if not isinstance(raw, dict):
+                raise AuditStockHistoryError("Movimiento original inválido.")
+            movement_id = raw.get("FK_Movimiento")
+            if type(movement_id) is not int or movement_id <= 0:
+                raise AuditStockHistoryError("FK_Movimiento original inválido.")
+            for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+                if raw.get(field) in (None, "") or not _decimal(raw[field]).is_finite():
+                    raise AuditStockHistoryError("Cantidad o existencia original incompleta.")
+            cancelled = raw.get("Cancelado")
+            if not (type(cancelled) is bool or (type(cancelled) is str and cancelled in {"true", "false", "True", "False"})):
+                raise AuditStockHistoryError("Estado de cancelación original inválido.")
+            try:
+                instant = point_stock_history_instant(raw)
+            except HistoricalInventoryCaptureError as exc:
+                raise AuditStockHistoryError("Fecha original de movimiento inválida.") from exc
+            if instant > receipt:
+                raise AuditStockHistoryError("Movimiento posterior a su consulta original.")
+        AuditStockHistoryService._original_batch(rows=rows, branch=branch, product=product)
+        return raw_json
+
+    def archive_empty_boundary_response(self, branch, product, cutoff, *, evidence):
+        """Keep an original empty response independent of canonical coverage."""
+        evidence = deepcopy(evidence)
+        raw_json = self._validate_original_response(branch, product, [], evidence)
+        if (evidence["history_limit"] != 500 or not timezone.is_aware(cutoff)
+                or self._aware_receipt(evidence["retrieved_at"]) <= cutoff):
+            raise AuditStockHistoryError("El cero original no acredita el corte solicitado.")
+        cutoff = cutoff.astimezone(datetime_timezone.utc)
+        fingerprint = hashlib.sha256(json.dumps(
+            evidence, sort_keys=True, default=str,
+        ).encode()).hexdigest()
+        # ponytail: one response per pair/cut; version this key only if a second
+        # independently documented response must be retained for the same cut.
+        file_hash = hashlib.sha256(
+            f"point-boundary-only:{branch.pk}:{product.pk}:{cutoff.isoformat()}".encode()
+        ).hexdigest()
+        proof = {**evidence, "fingerprint": fingerprint, "ingested_at": timezone.now().isoformat()}
+        archive = {**proof, "encoding": "zlib-base64-json",
+                   "raw_zlib_base64": base64.b64encode(zlib.compress(raw_json)).decode("ascii")}
+        metadata = {"source": BOUNDARY_ONLY_SOURCE_NAME, "cutoff": cutoff.isoformat(),
+                    "history_limit": 500, "fetched_rows": 0, "fetched_movement_ids": [],
+                    "fetched_at": evidence["retrieved_at"], "latest_response_fingerprint": fingerprint,
+                    "response_provenance": [proof], "original_responses": {fingerprint: archive}}
         with transaction.atomic():
+            lock_product_month_sources([cutoff.date().replace(day=1)])
+            record, created = PointProductHistoryImport.objects.get_or_create(
+                file_hash=file_hash,
+                defaults={"source_filename": "point-original-boundary-only", "report_path": "/Stock/GetHistorial",
+                          "report_title": "Evidencia original de corte, no canónica", "product_name": product.name,
+                          "branch_name": branch.name, "point_branch": branch, "point_product": product,
+                          "row_count": 0, "raw_metadata": metadata},
+            )
+            record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
+            if (record.point_branch_id != branch.pk or record.point_product_id != product.pk
+                    or record.row_count != 0 or record.raw_metadata.get("source") != metadata["source"]
+                    or record.raw_metadata.get("cutoff") != metadata["cutoff"]
+                    or record.rows.exists()):
+                raise AuditStockHistoryError("La evidencia de corte existente tiene identidad incompatible.")
+            if not created:
+                existing = self._original_batch(record)
+                prior = record.raw_metadata["response_provenance"][0]
+                if (existing is None or existing["rows"] != []
+                        or {key: value for key, value in prior.items()
+                            if key not in {"fingerprint", "ingested_at"}} != evidence):
+                    raise AuditStockHistoryError("La respuesta original de corte existente no coincide.")
+            return record
+
+    def _persist_response(self, branch, product, month, rows, *, fetched_at, history_limit,
+                          evidence=None, raw_json=None):
+        receipt = self._aware_receipt(fetched_at)
+        rows = deepcopy(rows)
+        if evidence is None:
+            parsed_rows = [self._parse_row(row) for row in rows]
+            if len({movement_id for movement_id, _ in parsed_rows}) != len(parsed_rows):
+                raise AuditStockHistoryError("Membresía duplicada requiere archivo original verificable.")
+        else:
+            batch = self._original_batch(rows=rows, branch=branch, product=product)
+            parsed_rows = [self._parse_row(row) for row in batch["unique_rows"]]
+        with transaction.atomic():
+            # Unique canonical identity serializes creation too. A losing creator
+            # rereads the committed import before discovering all affected months.
+            record = self._canonical_import(branch, product)
+            record = PointProductHistoryImport.objects.select_for_update().get(pk=record.pk)
+            if (record.point_branch_id != branch.pk or record.point_product_id != product.pk or
+                    (record.raw_metadata or {}).get("source") != SOURCE_NAME):
+                raise AuditStockHistoryError("Identidad canónica ocupada por otra fuente o claves incompatibles.")
+            metadata = deepcopy(record.raw_metadata or {})
+            legacy_membership = "response_provenance" not in metadata
+            proof = deepcopy(evidence) if evidence is not None else {
+                "source": SOURCE_NAME, "domain": "PRODUCT", "response_complete": True,
+                "retrieved_at": fetched_at, "history_limit": history_limit, "fetched_rows": len(rows),
+                "raw_sha256": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+                "request": {"path": "/Stock/GetHistorial", "params": {
+                    "tipo": "false", "almacen": str(branch.external_id), "pkproducto": str(product.external_id),
+                    "movimientos": str(history_limit), "tipoMovimiento": "",
+                }},
+                "request_provenance": {"kind": "LIVE_HTTP", "client_contract": "PointHttpSessionClient.get_stock_history"},
+            }
+            fingerprint = hashlib.sha256(json.dumps(proof, sort_keys=True, default=str).encode()).hexdigest()
+            proofs = metadata.setdefault("response_provenance", [])
+            if any(item.get("fingerprint") == fingerprint for item in proofs):
+                if evidence is not None:
+                    archive = metadata.get("original_responses", {}).get(fingerprint, {})
+                    try:
+                        archived_json = zlib.decompress(base64.b64decode(archive["raw_zlib_base64"], validate=True))
+                    except (KeyError, TypeError, ValueError, zlib.error) as exc:
+                        raise AuditStockHistoryError("Archivo original canónico ausente o corrupto.") from exc
+                    if (archived_json != raw_json or archive.get("fingerprint") != fingerprint or
+                            archive.get("encoding") != "zlib-base64-json" or
+                            any(archive.get(key) != value for key, value in evidence.items())):
+                        raise AuditStockHistoryError("Procedencia del archivo original canónico no coincide.")
+                return
+            previous_rows = list(record.rows.all())
+            previous_by_id = {row.row_number: row for row in previous_rows}
+            versions = metadata.setdefault("movement_fetched_at", {})
+            try:
+                latest_receipt = self._aware_receipt(metadata.get("fetched_at"))
+            except AuditStockHistoryError:
+                latest_receipt = None
+            legacy_ids = metadata.get("fetched_movement_ids")
+            if (legacy_membership and latest_receipt is not None and isinstance(legacy_ids, list) and
+                    type(metadata.get("fetched_rows")) is int and len(legacy_ids) == metadata["fetched_rows"] and
+                    all(type(value) is int and value > 0 and value in previous_by_id for value in legacy_ids) and
+                    len(set(legacy_ids)) == len(legacy_ids)):
+                # Only the exact last-capture membership has a known legacy age.
+                # Unselected retained rows must never inherit that receipt time.
+                for movement_id in legacy_ids:
+                    versions.setdefault(str(movement_id), metadata["fetched_at"])
+            writes = []
             for movement_id, defaults in parsed_rows:
+                old = previous_by_id.get(movement_id)
+                same = old is not None and json.dumps(old.raw_payload, sort_keys=True) == json.dumps(
+                    defaults["raw_payload"], sort_keys=True)
+                known = versions.get(str(movement_id))
+                try:
+                    row_receipt = self._aware_receipt(known)
+                except AuditStockHistoryError:
+                    row_receipt = None
+                if old is not None and not same:
+                    if evidence is not None and (row_receipt is None or receipt <= row_receipt):
+                        raise AuditStockHistoryError("Conflicto de movimiento sin procedencia anterior verificable.")
+                    if row_receipt is not None and receipt <= row_receipt:
+                        raise AuditStockHistoryError("La respuesta no puede sobrescribir un movimiento más reciente.")
+                if not same:
+                    writes.append((movement_id, defaults))
+                if (old is None or evidence is None or row_receipt is not None) and (row_receipt is None or receipt > row_receipt):
+                    versions[str(movement_id)] = fetched_at
+            local_tz = ZoneInfo(settings.TIME_ZONE)
+            months = {month.replace(day=1), timezone.localdate().replace(day=1)}
+            for _, values in parsed_rows:
+                months.add(timezone.localtime(values["movement_at"], local_tz).date().replace(day=1))
+                months.add(timezone.localtime(point_stock_history_instant(values["raw_payload"]), local_tz).date().replace(day=1))
+            for old in previous_rows:
+                months.add(timezone.localtime(old.movement_at, local_tz).date().replace(day=1))
+                months.add(timezone.localtime(point_stock_history_instant(old.raw_payload), local_tz).date().replace(day=1))
+            # A metadata replacement also changes coverage of months with no
+            # movements. Existing audits and closures may read those months;
+            # closures are company-wide and have no branch/product key.
+            from recetas.models import ProductoMonthClosure
+            from reportes.models import ProductInventoryAuditCase
+            months.update(ProductoMonthClosure.objects.values_list("month_start", flat=True))
+            months.update(ProductInventoryAuditCase.objects.filter(
+                branch=branch, product=product,
+            ).values_list("month", flat=True))
+            months.update(day.replace(day=1) for day in
+                          PointHistoricalInventoryClosingLine.objects.filter(
+                              branch=branch, product=product,
+                          ).values_list("closing__operational_date", flat=True))
+            oldest, newest = min(months), max(months)
+            cursor = oldest
+            while cursor <= newest:
+                months.add(cursor)
+                cursor = date(cursor.year + (cursor.month == 12), cursor.month % 12 + 1, 1)
+            # A historical closing is the next month's documentary opening.
+            months.add(cursor)
+            lock_product_month_sources(sorted(months))
+            for movement_id, defaults in writes:
                 PointProductHistoryRow.objects.update_or_create(
                     import_record=record,
                     row_number=movement_id,
@@ -210,25 +729,41 @@ class AuditStockHistoryService:
             record.report_title = "Historial transaccional Point"
             record.product_name = product.name
             record.branch_name = branch.name
-            record.report_date = timezone.localdate()
+            promote = latest_receipt is None or receipt > latest_receipt
+            if promote:
+                record.report_date = timezone.localdate(receipt)
             record.point_branch = branch
             record.point_product = product
             record.row_count = all_rows.count()
             record.latest_movement_at = last.movement_at if last else None
             record.latest_unit_cost = last.unit_cost if last else Decimal("0")
-            record.raw_metadata = {
+            if promote:
+                metadata.update({
                 "source": SOURCE_NAME,
-                "history_limit": HISTORY_LIMIT,
+                "history_limit": history_limit,
                 "fetched_rows": len(rows),
                 "earliest_movement_at": min(
                     (values["movement_at"] for _, values in parsed_rows), default=None,
                 ).isoformat() if parsed_rows else "",
-                "fetched_movement_ids": [movement_id for movement_id, _ in parsed_rows],
+                "fetched_movement_ids": ([row["FK_Movimiento"] for row in rows] if evidence is not None
+                                        else [movement_id for movement_id, _ in parsed_rows]),
                 "latest_movement_at": last.movement_at.isoformat() if last else "",
-                "fetched_at": timezone.now().isoformat(),
-            }
+                "fetched_at": fetched_at,
+                })
+            proof.update({"fingerprint": fingerprint, "ingested_at": timezone.now().isoformat()})
+            proofs.append(proof)
+            if evidence is not None:
+                metadata.setdefault("original_responses", {})[fingerprint] = {
+                    **proof, "encoding": "zlib-base64-json",
+                    "raw_zlib_base64": base64.b64encode(zlib.compress(raw_json)).decode("ascii"),
+                }
+            if promote:
+                if evidence is not None:
+                    metadata["latest_response_fingerprint"] = fingerprint
+                else:
+                    metadata.pop("latest_response_fingerprint", None)
+            record.raw_metadata = metadata
             record.save()
-        return self.reconcile(branch, product, month)
 
     @staticmethod
     def _parse_row(row: dict) -> tuple[int, dict[str, object]]:
@@ -256,15 +791,10 @@ class AuditStockHistoryService:
         if record is None:
             return PointHistoryReconciliation(coverage_status="MISSING")
 
-        month_start, month_end = _month_bounds(month)
         rows = list(
-            record.rows.filter(
-                movement_at__gte=month_start,
-                movement_at__lt=month_end,
-                cancelled=False,
-            ).order_by("movement_at", "row_number")
+            record.rows.filter(self._candidate_filter([record], month)).order_by("movement_at", "row_number")
         )
-        return self._reconcile_record(record, month, rows)
+        return self._reconcile_candidates(record, month, rows)
 
     def reconcile_many(self, lines, month: date, *, include_zero_difference=False) -> dict[tuple[int, int], PointHistoryReconciliation]:
         keys = {
@@ -274,21 +804,19 @@ class AuditStockHistoryService:
         }
         if not keys:
             return {}
-        month_start, month_end = _month_bounds(month)
-        month_rows = PointProductHistoryRow.objects.filter(
-            movement_at__gte=month_start,
-            movement_at__lt=month_end,
-            cancelled=False,
-        ).order_by("movement_at", "row_number")
-        records = PointProductHistoryImport.objects.filter(
+        records = list(PointProductHistoryImport.objects.filter(
             point_branch_id__in={key[0] for key in keys},
             point_product_id__in={key[1] for key in keys},
             raw_metadata__source=SOURCE_NAME,
-        ).prefetch_related(
+        ).select_related("point_branch", "point_product"))
+        month_rows = PointProductHistoryRow.objects.filter(
+            self._candidate_filter(records, month),
+        ).order_by("movement_at", "row_number")
+        prefetch_related_objects(records,
             Prefetch("rows", queryset=month_rows, to_attr="audit_month_rows")
         )
         return {
-            (record.point_branch_id, record.point_product_id): self._reconcile_record(
+            (record.point_branch_id, record.point_product_id): self._reconcile_candidates(
                 record,
                 month,
                 record.audit_month_rows,
@@ -302,8 +830,25 @@ class AuditStockHistoryService:
         record,
         month: date,
         rows,
+        *,
+        boundary_rows=None,
+        invalid_ids=(),
     ) -> PointHistoryReconciliation:
-        coverage_status = "COMPLETE" if self._covers_month(record, month) else "INCOMPLETE"
+        coverage_status = "COMPLETE" if not invalid_ids and self._covers_month(record, month, boundary_rows=boundary_rows) else "INCOMPLETE"
+        batch = None
+        try:
+            batch = self._original_batch(record)
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError):
+            coverage_status = "INCOMPLETE"
+        if batch is not None:
+            month_start, month_end = _month_bounds(month)
+            expected = {raw["FK_Movimiento"]: raw for raw in batch["unique_rows"]
+                        if month_start <= point_stock_history_instant(raw) < month_end
+                        and (not _boolean(raw.get("Cancelado")) or historical_waste_effect(raw).status == "VALID")}
+            if (set(expected) != {row.row_number for row in rows}
+                    or any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
+                           for row in rows if row.row_number in expected)):
+                coverage_status = "INCOMPLETE"
         totals = {
             "production": Decimal("0"),
             "sales": Decimal("0"),
@@ -315,10 +860,18 @@ class AuditStockHistoryService:
             "identified_adjustment": Decimal("0"),
         }
         ids_by_category = {key: [] for key in totals}
-        unknown_ids = []
+        unknown_ids = list(invalid_ids)
         movement_ids = []
         for row in rows:
             movement_ids.append(row.row_number)
+            effect = self._validated_waste_effect(row, record)
+            if effect.status == "INVALID":
+                unknown_ids.append(row.row_number)
+                continue
+            if effect.status == "VALID":
+                totals["waste"] += -effect.direction * abs(row.quantity)
+                ids_by_category["waste"].append(row.row_number)
+                continue
             category = self._category(row.movement_type, row.quantity)
             if category is None:
                 if row.quantity:
@@ -345,8 +898,9 @@ class AuditStockHistoryService:
             totals[category] += amount
             ids_by_category[category].append(row.row_number)
 
-        return PointHistoryReconciliation(
+        result = PointHistoryReconciliation(
             coverage_status=coverage_status,
+            original_batch_evidence=batch["evidence"] if batch is not None else None,
             **totals,
             movement_ids=tuple(movement_ids),
             movement_ids_by_category={
@@ -354,6 +908,32 @@ class AuditStockHistoryService:
             },
             unknown_movement_ids=tuple(unknown_ids),
         )
+        if coverage_status == "COMPLETE" and rows and not unknown_ids:
+            opening, closing = rows[0].previous_existence, rows[-1].new_existence
+            continuous = all(
+                current.previous_existence == previous.new_existence
+                for previous, current in zip(rows, rows[1:])
+            )
+            if batch is not None:
+                # Validate links crossing both period cuts too; an isolated
+                # monthly row must not lend itself an invented opening stock.
+                continuous = continuous and not any(
+                    month_start <= datetime.fromisoformat(gap["movement_at"]) < month_end
+                    for gap in batch["stock_chain_gaps"])
+                later = sorted((raw for raw in batch["unique_rows"]
+                    if point_stock_history_instant(raw) >= month_end
+                    and (not _boolean(raw.get("Cancelado")) or historical_waste_effect(raw).status == "VALID")),
+                    key=lambda raw: (point_stock_history_instant(raw), raw["FK_Movimiento"]))
+                if later:
+                    continuous = continuous and closing == _decimal(later[0]["Existencia_anterior"])
+            if continuous and result.expected_closing(opening) == closing:
+                return replace(
+                    result,
+                    documentary_opening=opening,
+                    documentary_closing=closing,
+                    documentary_boundary_movement_ids=(rows[0].row_number, rows[-1].row_number),
+                )
+        return result
 
     @staticmethod
     def _category(movement_type: str, quantity: Decimal) -> str | None:

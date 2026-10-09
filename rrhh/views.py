@@ -733,6 +733,18 @@ def _pct(numerator: Decimal | int, denominator: Decimal | int) -> Decimal:
     return (Decimal(str(numerator or "0")) / denominator * Decimal("100")).quantize(Decimal("0.01"))
 
 
+def _bajas_unicas(queryset):
+    vistas = set()
+    bajas = []
+    for baja in queryset.order_by("fecha_baja", "creado_en", "id"):
+        identidad = baja.empleado_id or normalizar_nombre(baja.nombre)
+        clave = (identidad, baja.fecha_baja)
+        if clave not in vistas:
+            vistas.add(clave)
+            bajas.append(baja)
+    return bajas
+
+
 def _rrhh_document_stage_rows(
     *,
     empleados_total: int,
@@ -1470,25 +1482,35 @@ def empleados(request):
         if action == "baja":
             empleado = None
             empleado_id = (request.POST.get("empleado") or "").strip()
+            if empleado_id and not empleado_id.isdigit():
+                messages.error(request, "Selecciona una ficha de empleado válida.")
+                return redirect("rrhh:empleados")
             if empleado_id.isdigit():
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
+                if not empleado:
+                    messages.error(request, "La ficha de empleado seleccionada ya no existe.")
+                    return redirect("rrhh:empleados")
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            with transaction.atomic():
-                baja = EmpleadoBaja.objects.create(
-                    empleado=empleado,
-                    nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
-                    area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
-                    puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
-                    tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                    fecha_baja=fecha_baja,
-                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                    observacion=(request.POST.get("observacion") or "").strip(),
-                    creado_por=request.user,
-                )
-                if empleado:
-                    desactivar_identidad_operativa_empleado(empleado)
+            try:
+                with transaction.atomic():
+                    baja = EmpleadoBaja.objects.create(
+                        empleado=empleado,
+                        nombre=(request.POST.get("nombre_baja") or (empleado.nombre if empleado else "")).strip(),
+                        area=_area_key(request.POST.get("area_baja") or (empleado.area if empleado else "")),
+                        puesto=(request.POST.get("puesto_baja") or (empleado.puesto if empleado else "")).strip(),
+                        tipo_contrato=(request.POST.get("tipo_contrato_baja") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                        fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                        fecha_baja=fecha_baja,
+                        motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                        observacion=(request.POST.get("observacion") or "").strip(),
+                        creado_por=request.user,
+                    )
+                    if empleado:
+                        desactivar_identidad_operativa_empleado(empleado)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+                return redirect("rrhh:empleados")
             messages.success(request, f"Baja capturada para {baja.nombre}.")
             return redirect("rrhh:empleados")
         if action == "plantilla":
@@ -1986,7 +2008,10 @@ def empleados(request):
         "sucursales_app": Sucursal.objects.filter(activa=True).order_by("nombre"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
         "months": range(1, 13),
-        "bajas_recientes": EmpleadoBaja.objects.select_related("empleado").order_by("-fecha_baja")[:8],
+        "bajas_recientes": sorted(
+            _bajas_unicas(EmpleadoBaja.objects.select_related("empleado")),
+            key=lambda baja: (baja.fecha_baja, baja.creado_en), reverse=True,
+        )[:8],
         "plantillas": PlantillaAutorizada.objects.order_by("-anio", "-mes", "area")[:8],
         "identidades_pendientes": identidades_pendientes,
         "empleados_identidad_opciones": empleados_identidad_opciones,
@@ -2485,25 +2510,35 @@ def indicadores_ch(request):
         if action == "baja":
             empleado = None
             empleado_id = (request.POST.get("empleado") or "").strip()
+            if empleado_id and not empleado_id.isdigit():
+                messages.error(request, "Selecciona una ficha de empleado válida.")
+                return redirect("rrhh:rrhh_indicadores")
             if empleado_id.isdigit():
                 empleado = Empleado.objects.filter(pk=int(empleado_id)).first()
+                if not empleado:
+                    messages.error(request, "La ficha de empleado seleccionada ya no existe.")
+                    return redirect("rrhh:rrhh_indicadores")
             fecha_baja = _parse_date(request.POST.get("fecha_baja")) or timezone.localdate()
             fecha_ingreso = _parse_date(request.POST.get("fecha_ingreso"))
-            with transaction.atomic():
-                baja = EmpleadoBaja.objects.create(
-                    empleado=empleado,
-                    nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
-                    area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
-                    puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
-                    tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
-                    fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
-                    fecha_baja=fecha_baja,
-                    motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
-                    observacion=(request.POST.get("observacion") or "").strip(),
-                    creado_por=request.user,
-                )
-                if empleado:
-                    desactivar_identidad_operativa_empleado(empleado)
+            try:
+                with transaction.atomic():
+                    baja = EmpleadoBaja.objects.create(
+                        empleado=empleado,
+                        nombre=(request.POST.get("nombre") or (empleado.nombre if empleado else "")).strip(),
+                        area=_area_key(request.POST.get("area") or (empleado.area if empleado else "")),
+                        puesto=(request.POST.get("puesto") or (empleado.puesto if empleado else "")).strip(),
+                        tipo_contrato=(request.POST.get("tipo_contrato") or (empleado.tipo_contrato if empleado else Empleado.CONTRATO_FIJO)).strip(),
+                        fecha_ingreso=fecha_ingreso or (empleado.fecha_ingreso if empleado else fecha_baja),
+                        fecha_baja=fecha_baja,
+                        motivo=(request.POST.get("motivo") or EmpleadoBaja.MOTIVO_OTRO).strip(),
+                        observacion=(request.POST.get("observacion") or "").strip(),
+                        creado_por=request.user,
+                    )
+                    if empleado:
+                        desactivar_identidad_operativa_empleado(empleado)
+            except ValidationError as exc:
+                messages.error(request, exc.messages[0])
+                return redirect("rrhh:rrhh_indicadores")
             messages.success(request, f"Baja capturada para {baja.nombre}.")
         elif action == "plantilla":
             anio = int(request.POST.get("anio") or inicio.year)
@@ -2555,8 +2590,8 @@ def indicadores_ch(request):
     )
 
     altas = Empleado.objects.filter(fecha_ingreso__gte=inicio, fecha_ingreso__lte=fin).count()
-    bajas = EmpleadoBaja.objects.filter(fecha_baja__gte=inicio, fecha_baja__lte=fin)
-    bajas_count = bajas.count()
+    bajas = _bajas_unicas(EmpleadoBaja.objects.filter(fecha_baja__gte=inicio, fecha_baja__lte=fin).select_related("empleado", "creado_por"))
+    bajas_count = len(bajas)
     promedio_base = (Decimal(plantilla_inicial) + Decimal(plantilla_final)) / Decimal("2") if plantilla_inicial or plantilla_final else Decimal("0")
     rotacion = _pct(bajas_count, promedio_base)
 
@@ -2591,7 +2626,10 @@ def indicadores_ch(request):
         _area_key(row["linea__empleado__area"]): row
         for row in he_conceptos.values("linea__empleado__area").annotate(horas=Sum("valor"), costo=Sum("importe"))
     }
-    bajas_area = {_area_key(row["area"]): row["total"] for row in bajas.values("area").annotate(total=Count("id"))}
+    bajas_area = {}
+    for baja in bajas:
+        area = _area_key(baja.area)
+        bajas_area[area] = bajas_area.get(area, 0) + 1
     plantilla_area = {
         _area_key(row["area"]): row["total"] for row in plantilla_qs.values("area").annotate(total=Sum("cantidad"))
     }
@@ -2647,7 +2685,7 @@ def indicadores_ch(request):
             "promedio_cobertura": promedio_cobertura,
         },
         "area_rows": area_rows,
-        "bajas": bajas.select_related("empleado", "creado_por")[:20],
+        "bajas": sorted(bajas, key=lambda baja: (baja.fecha_baja, baja.creado_en), reverse=True)[:20],
         "vacantes": vacantes.select_related("empleado_cubrio", "creado_por")[:20],
         "plantillas": plantilla_qs.select_related("actualizado_por")[:20],
         "periodos": periodos,
@@ -3136,18 +3174,30 @@ def permisos_list(request):
         .order_by("-creado_en")
     )
     permisos = permisos_qs[:500]
+    puede_direccion = can_authorize_direccion(request.user)
+    anteriores = Q(fecha_fin__date__lt=timezone.localdate()) | Q(
+        fecha_fin__isnull=True, fecha_inicio__date__lt=timezone.localdate()
+    )
+    permisos_vigentes = permisos_qs.exclude(anteriores)
 
     def _con_permisos_accion(qs):
         rows = list(qs[:120])
         for permiso in rows:
             permiso.puede_preautorizar_jefe = can_resolver_permiso_jefe(request.user, permiso)
+            permiso.puede_autorizar_direccion = (
+                puede_direccion
+                and permiso.estado == PermisoSalida.ESTADO_SOLICITADO
+                and permiso.requiere_direccion
+                and permiso.estado_direccion == PermisoSalida.ESTADO_DIRECCION_PENDIENTE
+                and permiso.empleado.usuario_erp_id != request.user.id
+            )
         return rows
 
     columnas = [
         (
             "jefe",
             "Pendiente jefe",
-            _con_permisos_accion(permisos_qs.filter(
+            _con_permisos_accion(permisos_vigentes.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 estado_jefe=PermisoSalida.ESTADO_JEFE_PENDIENTE,
                 requiere_direccion=False,
@@ -3156,10 +3206,17 @@ def permisos_list(request):
         (
             "direccion",
             "Pendiente Dirección",
-            _con_permisos_accion(permisos_qs.filter(
+            _con_permisos_accion(permisos_vigentes.filter(
                 estado=PermisoSalida.ESTADO_SOLICITADO,
                 requiere_direccion=True,
                 estado_direccion=PermisoSalida.ESTADO_DIRECCION_PENDIENTE,
+            )),
+        ),
+        (
+            "anteriores",
+            "Pendientes anteriores",
+            _con_permisos_accion(permisos_qs.filter(
+                anteriores, estado=PermisoSalida.ESTADO_SOLICITADO,
             )),
         ),
         (
@@ -3173,6 +3230,7 @@ def permisos_list(request):
             _con_permisos_accion(permisos_qs.filter(estado=PermisoSalida.ESTADO_RECHAZADO)),
         ),
     ]
+    bandeja_activa = "direccion" if puede_direccion else "jefe"
     stats = {
         "total": permisos_qs.count(),
         "pendiente_jefe": permisos_qs.filter(
@@ -3197,7 +3255,8 @@ def permisos_list(request):
             "columnas": columnas,
             "stats": stats,
             "can_manage_rrhh": can_manage_rrhh(request.user),
-            "can_authorize_direccion": can_authorize_direccion(request.user),
+            "can_authorize_direccion": puede_direccion,
+            "bandeja_activa": bandeja_activa,
         },
     )
 

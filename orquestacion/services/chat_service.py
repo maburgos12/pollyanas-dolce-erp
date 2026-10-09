@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,24 +157,54 @@ def create_chat_conversation(*, user, session_key: str = "") -> ChatConversation
     return conversation
 
 
+READ_PROJECTION_UNAVAILABLE = "Esta consulta READ no está disponible con los permisos actuales."
+
+
+def _read_message_visible(message: ChatMessage | None) -> bool:
+    if not message:
+        return False
+    if message.role == ChatMessage.ROLE_USER:
+        answer = message.conversation.messages.filter(sequence=message.sequence + 1, role='assistant').first()
+        if answer:
+            return _read_message_visible(answer)
+    marked = isinstance(message.metadata_json, dict) and "agent_read" in message.metadata_json
+    if not marked:
+        marked = message.tool_calls.filter(metadata_json__runtime="agent_read").exists()
+    if not marked:
+        return True
+    from orquestacion.services.agent_read_runtime import can_project_read_message
+    return can_project_read_message(message)
+
+
 def _message_preview(message: ChatMessage | None) -> str:
     if not message:
         return ""
+    if not _read_message_visible(message):
+        return READ_PROJECTION_UNAVAILABLE
     text = (message.content or "").strip().replace("\n", " ")
     return text[:120]
 
 
 def serialize_tool_call(tool_call: ChatToolCall) -> dict[str, Any]:
     result = getattr(tool_call, "result", None)
+    marked = isinstance(tool_call.metadata_json, dict) and tool_call.metadata_json.get("runtime") == "agent_read"
+    visible = _read_message_visible(tool_call.assistant_message) if tool_call.assistant_message_id else not marked
+    incident_payload = None
+    if visible and tool_call.tool_key == 'incident.prepare':
+        from orquestacion.services.agent_incidents import project, _response
+        try:
+            incident_payload = _response(project(tool_call, tool_call.conversation.owner))
+        except Exception:
+            visible = False
     return {
         "id": str(tool_call.public_id),
-        "tool_key": tool_call.tool_key,
-        "tool_name": tool_call.tool_name,
-        "tool_display_name": tool_call.tool_display_name or tool_call.tool_name,
+        "tool_key": tool_call.tool_key if visible else "read_unavailable",
+        "tool_name": tool_call.tool_name if visible else "read_unavailable",
+        "tool_display_name": (tool_call.tool_display_name or tool_call.tool_name) if visible else "Consulta READ no disponible",
         "status": tool_call.status,
-        "requires_approval": tool_call.requires_approval,
-        "summary": result.summary if result else "",
-        "result": result.result_json if result else {},
+        "requires_approval": tool_call.requires_approval if visible else False,
+        "summary": (result.summary if result else "") if visible else READ_PROJECTION_UNAVAILABLE,
+        "result": (incident_payload or result.result_json) if result and visible else {},
         "created_at": tool_call.created_at.isoformat(),
     }
 
@@ -181,12 +213,17 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
     tool_calls = []
     if message.role == ChatMessage.ROLE_ASSISTANT:
         tool_calls = [serialize_tool_call(tool_call) for tool_call in message.tool_calls.select_related("result").all()]
+    visible = _read_message_visible(message)
+    proof = message.metadata_json.get('agent_read', {}) if isinstance(message.metadata_json, dict) else {}
+    from orquestacion.services.agent_read_context import projected_receipts
     return {
         "id": str(message.public_id),
         "sequence": message.sequence,
         "role": message.role,
         "status": message.status,
-        "content": message.content,
+        "content": message.content if visible else READ_PROJECTION_UNAVAILABLE,
+        "presentation": proof.get('presentation', 'technical') if visible else 'unavailable',
+        "receipts": projected_receipts(message) if visible and message.role == 'assistant' else [],
         "created_at": message.created_at.isoformat(),
         "tool_calls": tool_calls,
     }
@@ -253,7 +290,8 @@ def _build_model_history(user, conversation: ChatConversation) -> list[dict[str,
         .order_by("-sequence", "-id")[:MAX_HISTORY_MESSAGES]
     )
     for message in reversed(list(queryset)):
-        history.append({"role": message.role, "content": message.content})
+        if _read_message_visible(message):
+            history.append({"role": message.role, "content": message.content})
     return history
 
 
@@ -365,9 +403,19 @@ def _model_client():
     return OpenAI(api_key=api_key)
 
 
-def get_chat_runtime_status() -> dict[str, Any]:
+def get_chat_runtime_status(user=None) -> dict[str, Any]:
     api_key = getattr(settings, "OPENAI_API_KEY", "")
     model_name = getattr(settings, "PRIVATE_AI_CHAT_MODEL", "") or DEFAULT_CHAT_MODEL
+    from orquestacion.services.agent_pilot import is_pilot_participant, pilot_status, PilotStopped
+    quota = None
+    if getattr(settings, "AI_AGENT_READ_ENABLED", False) is True and is_pilot_participant(user):
+        model_name = getattr(settings, "AI_AGENT_READ_MODEL", "")
+        try:
+            quota = pilot_status(user)
+            if quota["turns"] >= quota["max_turns"] or Decimal(quota["reserved_usd"]) >= Decimal(quota["max_usd"]):
+                raise PilotStopped("pilot_limit")
+        except PilotStopped:
+            return {"ready": False, "model_name": model_name, "issue": "Piloto detenido; requiere revisión de sus controles.", "pilot_blocked": True}
     if not api_key:
         return {
             "ready": False,
@@ -378,6 +426,7 @@ def get_chat_runtime_status() -> dict[str, Any]:
         "ready": True,
         "model_name": model_name,
         "issue": "",
+        "pilot": quota,
     }
 
 
@@ -410,6 +459,13 @@ def create_user_turn(*, user, conversation: ChatConversation, content: str, sess
 
 
 def execute_chat_turn(*, user, conversation: ChatConversation, user_message: ChatMessage, assistant_message: ChatMessage) -> ChatTurnResult:
+    from orquestacion.services.agent_pilot import is_pilot_account
+    # Revocation must never route an existing READ conversation into legacy tools.
+    read_history = conversation.messages.filter(metadata_json__has_key="agent_read").exists()
+    if read_history or (getattr(settings, "AI_AGENT_READ_ENABLED", False) is True and is_pilot_account(user)):
+        from orquestacion.services.agent_read_runtime import execute_read_turn
+        return execute_read_turn(user=user, conversation=conversation, user_message=user_message, assistant_message=assistant_message)
+
     client = _model_client()
     model_name = getattr(settings, "PRIVATE_AI_CHAT_MODEL", "") or DEFAULT_CHAT_MODEL
     messages = _build_model_history(user, conversation)

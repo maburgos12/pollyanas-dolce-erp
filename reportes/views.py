@@ -5587,6 +5587,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     total_closing_sucursales = _sum_available_export_values(export_rows, "closing_point_sucursales")
     total_closing_point = _sum_available_export_values(export_rows, "closing_point")
     total_closing_difference = _sum_available_export_values(export_rows, "point_difference")
+    documented_opening_lines = sum(row["opening_balance"] is not None for row in export_rows)
+    documented_calculated_lines = sum(row["calculated_closing"] is not None for row in export_rows)
+    documented_closing_lines = sum(row["closing_point"] is not None for row in export_rows)
 
     conversion_rows = [
         row
@@ -5819,6 +5822,9 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
         "total_closing_sucursales": total_closing_sucursales,
         "total_closing_point": total_closing_point,
         "total_closing_difference": total_closing_difference,
+        "documented_opening_lines": documented_opening_lines,
+        "documented_calculated_lines": documented_calculated_lines,
+        "documented_closing_lines": documented_closing_lines,
         "catalog_issue_count": len(catalog_issue_rows),
         "conversion_rows": conversion_rows[:8],
         "catalog_issue_rows": catalog_issue_rows[:8],
@@ -6297,7 +6303,7 @@ def bi(request: HttpRequest) -> HttpResponse:
     )
     executive_panels = _bi_cached_value(
         runtime_cache=bi_runtime_cache,
-        section="executive-panels",
+        section="executive-panels-confidence-v1",
         builder=lambda: build_executive_bi_panels(
             months=months_window,
             branch_id=branch_id,
@@ -6313,6 +6319,9 @@ def bi(request: HttpRequest) -> HttpResponse:
         ),
     )
 
+    from reportes.sales_confidence import build_sales_confidence
+    cutoff = executive_panels.get("latest_cutoff_date") or timezone.localdate()
+    executive_panels["sales_confidence"] = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
     export_format = (request.GET.get("export") or "").lower()
     if branch_id and export_format == "csv":
         return _export_branch_bi_csv(executive_panels["branch_pricing_panel"], executive_panels["branch_contribution_panel"])
@@ -6334,6 +6343,7 @@ def bi(request: HttpRequest) -> HttpResponse:
     context = {
         "snapshot": snapshot,
         "executive_panels": executive_panels,
+        "sales_confidence": executive_panels["sales_confidence"],
         "forecast_panel": executive_panels["forecast_panel"],
         "yoy_panel": executive_panels["yoy_panel"],
         "profitability_panel": executive_panels["profitability_panel"],
@@ -6544,6 +6554,8 @@ def bi(request: HttpRequest) -> HttpResponse:
         maturity_summary=context["maturity_summary"],
         default_owner="Dirección General",
     )
+    from reportes.commercial_analytics import commercial_panel_from_request
+    context["commercial_analytics"] = commercial_panel_from_request(request)
     return render(request, "reportes/bi.html", context)
 
 

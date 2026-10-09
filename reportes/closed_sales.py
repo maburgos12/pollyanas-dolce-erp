@@ -7,10 +7,11 @@ from itertools import groupby
 from django.db.models import F
 from django.utils import timezone
 
+from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointExtractionLog, PointSyncJob
 from ventas.services.sales_read_service import get_daily_sales_bulk
 
-CLOSED_SALES_VERSION = 'closed-sales-v4-historical-network'
+CLOSED_SALES_VERSION = 'closed-sales-v5-branch-opening'
 MONTHS = ('', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
 
 
@@ -87,6 +88,8 @@ def closed_month_comparison(*, cutoff: date, previous_totals: dict | None = None
     branches = required_sales_branches(cutoff)
     expected = {row['branch_id'] for row in branches}
     names = {row['branch_id']: row['branch_name'] for row in branches}
+    opening_dates = dict(Sucursal.objects.filter(id__in=expected)
+                         .values_list('id', 'fecha_apertura'))
     current_days = [start + timedelta(days=i) for i in range(last_day)]
     previous_days = [prev_start + timedelta(days=i) for i in range(last_day)]
     read_days = current_days + (previous_days if previous_totals is None else [])
@@ -105,6 +108,11 @@ def closed_month_comparison(*, cutoff: date, previous_totals: dict | None = None
             payload = bulk['dates'].get(day.isoformat(), {})
             rows = {row['branch_id']: row for row in payload.get('rows', [])}
             for branch_id in expected:
+                opening_date = opening_dates.get(branch_id)
+                # A new branch owes coverage only from its registered opening,
+                # including that day. Do not invent zero sales before opening.
+                if opening_date is not None and day < opening_date:
+                    continue
                 row = rows.get(branch_id)
                 if row is not None and payload.get('coverage_accepted'):
                     amount += Decimal(str(row.get('amount') or 0))

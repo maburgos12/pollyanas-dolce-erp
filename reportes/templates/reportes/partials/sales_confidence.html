@@ -1,0 +1,24 @@
+{% load humanize %}
+{% if sales_confidence %}
+<section class="sales-confidence" aria-label="Confianza de ventas y costos">
+  <div class="sales-confidence-heading">
+    <h2>Confianza de los datos</h2>
+    <strong>{{ sales_confidence.status }}</strong>
+  </div>
+  <p>{{ sales_confidence.start_date|date:"d M Y" }} al {{ sales_confidence.end_date|date:"d M Y" }} · {{ sales_confidence.days_observed }} día{{ sales_confidence.days_observed|pluralize:"s" }} con registros · {{ sales_confidence.branches }} sucursales observadas.</p>
+  <div class="sales-confidence-metrics">
+    <div><span>Venta neta observada</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.net_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
+    <div><span>Venta con costo respaldado</span><strong>{% if sales_confidence.cost_coverage_pct is not None %}{{ sales_confidence.cost_coverage_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong></div>
+    <div><span>Venta sin costo respaldado</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.missing_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
+    <div><span>Venta con costo de meses anteriores</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.prior_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
+  </div>
+  <details>
+    <summary>Ver alcance y fechas de las fuentes</summary>
+    <p>Cobertura de costo sobre ventas positivas registradas. No certifica que todos los días o sucursales hayan enviado información. Esta lectura usa venta neta sin impuestos; otras tarjetas pueden usar venta total o bruta.</p>
+    <p>Origen: {{ sales_confidence.source_labels|join:", "|default:"Sin registros" }}. Última venta: {{ sales_confidence.latest_sale|date:"Y-m-d"|default:"N/D" }}. Actualización de ventas: {{ sales_confidence.updated_at|date:"Y-m-d H:i"|default:"N/D" }}.</p>
+    <p>Meses de costo: {% for period in sales_confidence.cost_periods %}{{ period|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% empty %}Sin evidencia de costo mensual{% endfor %}. Un costo anterior es una estimación; no se usan costos futuros.</p>
+    <p>Se conserva la sucursal registrada en el histórico y la clave original de cada producto; no se unen productos por nombre. {% if sales_confidence.identity_pending_rows %}<strong>{{ sales_confidence.identity_pending_rows }} filas tienen identidad pendiente: sin sucursal o anteriores a su apertura registrada. No se reasignan automáticamente.</strong>{% endif %}</p>
+    <p>{% if sales_confidence.margin is None %}Margen de la venta observada: <strong>N/D</strong>; falta evidencia de costo o identidad.{% else %}Margen estimado de la venta observada: ${{ sales_confidence.margin|floatformat:2|intcomma }}; no equivale a utilidad operativa.{% endif %}</p>
+  </details>
+</section>
+{% endif %}

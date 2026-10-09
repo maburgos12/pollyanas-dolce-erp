@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from collections.abc import Mapping
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -300,6 +301,30 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual({line.product.id for line in result.lines}, {self.product.id})
         self.assertEqual(PointDailySale.objects.filter(product__in=consumed).count(), 2)
 
+    def test_partial_read_keeps_proven_pair_without_weakening_monthly_guard(self):
+        other = PointProduct.objects.create(
+            external_id="PASTEL-002", sku="PASTEL-002", name="Otro pastel"
+        )
+        self._closing_lines(
+            date(2026, 7, 31),
+            {(self.centro, self.product): "3", (self.centro, other): "2"},
+        )
+        self._closing_lines(
+            date(2026, 8, 31),
+            {(self.centro, self.product): "3"},
+            expected_product_ids=[self.product.id, other.id],
+        )
+        monthly = self.service.build(date(2026, 8, 1))
+        self.assertFalse(monthly.source_complete)
+        self.assertEqual(monthly.lines, ())
+
+        partial = self.service.build(date(2026, 8, 1), allow_partial=True)
+        self.assertFalse(partial.source_complete)
+        by_product = {line.product.id: line for line in partial.lines}
+        self.assertEqual(by_product[self.product.id].difference, Decimal("0"))
+        self.assertEqual(by_product[self.product.id].issues, ())
+        self.assertTrue(by_product[other.id].issues)
+
     def _closing_lines(
         self,
         operational_date,
@@ -312,7 +337,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         closing = PointHistoricalInventoryClosing.objects.create(
             operational_date=operational_date,
             status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
-            source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+            source=PointHistoricalInventoryClosing.SOURCE_OFFICIAL_REPORT,
             source_fingerprint=f"closing-{operational_date.isoformat()}{fingerprint_suffix}",
             expected_branch_ids=(
                 sorted({branch.id for branch, _product in stocks})
@@ -456,6 +481,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         is_insumo=False,
         item_code=None,
         item_name=None,
+        raw_payload=None,
         sync_job=...,
         transfer_external_id=None,
     ):
@@ -501,6 +527,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             is_open=is_open,
             is_current_snapshot=is_current_snapshot,
             is_insumo=is_insumo,
+            raw_payload={} if raw_payload is None else raw_payload,
         )
         if sync_job == self.transfer_job:
             self._increment_movement_job(self.transfer_job, "transfer_lines_seen")
@@ -920,6 +947,21 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(line.source_trace["waste"], (finished_waste.id,))
         self.assertNotIn(ingredient_waste.id, line.source_trace["waste"])
 
+    def test_preparation_waste_cannot_borrow_finished_product_identity(self):
+        recipe = Receta.objects.create(nombre=self.product.name, tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="traceability-preparation")
+        insumo = Insumo.objects.create(nombre=self.product.name, tipo_item=Insumo.TIPO_INTERNO)
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        for code in ("", self.product.external_id):
+            self._waste(item_code=code, receta=recipe, insumo=insumo, quantity="42")
+        result = self.service.build(month=date(2026, 8, 1))
+        self.assertTrue(result.source_complete)
+        self.assertEqual(result.lines[0].waste, Decimal("0"))
+        self.assertEqual(result.lines[0].source_trace["waste"], ())
+        self.assertEqual(result.lines[0].difference, Decimal("0"))
+        self.assertEqual(PointWasteLine.objects.filter(receta=recipe).count(), 2)
+
     def test_dual_mapped_waste_uses_exact_point_product_evidence(self):
         recipe = Receta.objects.create(
             nombre=self.product.name,
@@ -1000,6 +1042,69 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.code, "AMBIGUOUS_PRODUCT")
         self.assertEqual(issue.branch_id, self.centro.id)
         self.assertEqual(issue.source_ids, (ambiguous.id,))
+
+    def test_production_original_product_pk_resolves_ambiguous_sku(self):
+        target = PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        PointProduct.objects.create(external_id="948", sku="0112", name="Otro producto")
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        row = SimpleNamespace(
+            product_id=None,
+            item_code="0112",
+            item_name="Ciruela",
+            is_insumo=False,
+            raw_payload={"detail": {"PK_Producto": 112, "IsInsumo": False}},
+        )
+
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (target.id, None),
+        )
+
+    def test_production_original_product_pk_fails_closed_on_invalid_identity(self):
+        PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        row = SimpleNamespace(
+            product_id=None,
+            item_code="0112",
+            item_name="Ciruela",
+            is_insumo=False,
+            raw_payload={"detail": {"PK_Producto": 112, "IsInsumo": True}},
+        )
+
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_DOMAIN_CONFLICT"),
+        )
+        row.raw_payload["detail"] = {"PK_Producto": 999, "IsInsumo": False}
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_FK_UNKNOWN"),
+        )
+        row.raw_payload["detail"] = {"PK_Producto": True, "IsInsumo": False}
+        self.assertEqual(
+            self.service._resolve_production_product(row, indexes),
+            (None, "PRODUCTION_PRODUCT_FK_INVALID"),
+        )
+
+    def test_production_original_pk_flows_into_monthly_pair(self):
+        target = PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
+        duplicate = PointProduct.objects.create(external_id="948", sku="0112", name="Otro")
+        opening = {(self.centro, product): "0" for product in (self.product, target, duplicate)}
+        closing = dict(opening)
+        closing[(self.centro, target)] = "2"
+        self._closing_lines(date(2026, 7, 31), opening)
+        self._closing_lines(date(2026, 8, 31), closing)
+        row = self._production(item_code="0112", item_name="Ciruela", quantity="2")
+        row.raw_payload = {"detail": {"PK_Producto": 112, "IsInsumo": False}}
+        row.save(update_fields=["raw_payload"])
+
+        result = self.service.build(date(2026, 8, 1), allow_partial=True)
+
+        self.assertFalse(any(issue.code == "AMBIGUOUS_PRODUCT" for issue in result.global_issues))
+        line = next(line for line in result.lines if line.product.id == target.id)
+        self.assertEqual(line.production, Decimal("2"))
+        self.assertEqual(line.difference, Decimal("0"))
+        self.assertEqual(line.source_trace["production"], (row.id,))
 
     def test_resolution_precedence_does_not_bypass_missing_closing_evidence(self):
         sku_product = PointProduct.objects.create(
@@ -1383,6 +1488,338 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(by_branch["DEVOLUCIONES"].source_trace["transfers"], (transfer.id,))
         self.assertIsNone(by_branch["DEVOLUCIONES"].branch.erp_branch_id)
 
+    def test_transfer_fk_articulo_resolves_external_id_despite_ambiguous_sku(self):
+        target = PointProduct.objects.create(
+            external_id="901",
+            sku="SKU-REPETIDO",
+            name="Producto identificado por FK",
+        )
+        for suffix in ("A", "B"):
+            PointProduct.objects.create(
+                external_id=f"AMBIGUOUS-{suffix}",
+                sku="SKU-REPETIDO",
+                name=f"Producto ambiguo {suffix}",
+            )
+        stocks = {
+            (self.centro, target): Decimal("10"),
+            (self.plaza, target): Decimal("0"),
+        }
+        self._closing_lines(date(2026, 7, 31), stocks)
+        self._closing_lines(
+            date(2026, 8, 31),
+            {
+                (self.centro, target): Decimal("6"),
+                (self.plaza, target): Decimal("4"),
+            },
+        )
+        transfer = self._transfer(
+            item_code="SKU-REPETIDO",
+            item_name="Nombre que tampoco identifica",
+            raw_payload={
+                "detail": {"FK_articulo": "901", "isInsumo": False}
+            },
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        by_branch = {line.branch.external_id: line for line in result.lines}
+        self.assertEqual(by_branch["CENTRO"].product, target)
+        self.assertEqual(by_branch["CENTRO"].transfer_out, Decimal("4"))
+        self.assertEqual(by_branch["PLAZA"].transfer_in, Decimal("4"))
+        self.assertEqual(by_branch["CENTRO"].source_trace["transfer_out"], (transfer.id,))
+        self.assertFalse(
+            any(issue.code == "AMBIGUOUS_PRODUCT" for issue in result.global_issues)
+        )
+
+    def test_transfer_without_fk_articulo_preserves_legacy_fallback(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
+        transfer = self._transfer(
+            item_code=self.product.external_id,
+            raw_payload={"detail": {"isInsumo": False}},
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        line = next(item for item in result.lines if item.branch == self.centro)
+        self.assertEqual(line.product, self.product)
+        self.assertEqual(line.transfer_out, Decimal("4"))
+        self.assertEqual(line.source_trace["transfer_out"], (transfer.id,))
+
+    def test_transfer_invalid_fk_articulo_does_not_fallback(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+
+        for invalid_fk in (None, False, True, 0, -1, 1.5, "abc"):
+            with self.subTest(invalid_fk=invalid_fk):
+                transfer = self._transfer(
+                    item_code=self.product.external_id,
+                    raw_payload={
+                        "detail": {
+                            "FK_articulo": invalid_fk,
+                            "isInsumo": False,
+                        }
+                    },
+                )
+                result = self.service.build(month=date(2026, 8, 1))
+                issue_codes = [
+                    issue.code
+                    for issue in result.global_issues
+                    if transfer.id in issue.source_ids
+                ]
+                self.assertEqual(issue_codes, ["TRANSFER_PRODUCT_FK_INVALID"])
+                self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_transfer_unknown_fk_articulo_does_not_fallback(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            item_code=self.product.external_id,
+            raw_payload={
+                "detail": {"FK_articulo": 999999, "isInsumo": False}
+            },
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        issue_codes = [
+            issue.code
+            for issue in result.global_issues
+            if transfer.id in issue.source_ids
+        ]
+        self.assertEqual(issue_codes, ["TRANSFER_PRODUCT_FK_UNKNOWN"])
+        self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_future_transfer_identity_issue_does_not_block_prior_month(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            item_code=self.product.external_id,
+            sent_at=datetime(
+                2026, 9, 2, 9, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            received_at=datetime(
+                2026, 9, 2, 12, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            raw_payload={"detail": {"FK_articulo": 999999, "isInsumo": False}},
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(
+            any(transfer.id in issue.source_ids for issue in result.global_issues)
+        )
+
+    def test_future_open_transfer_snapshot_member_does_not_block_prior_month(self):
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            registered_at=datetime(
+                2026, 9, 2, 9, 0, tzinfo=timezone.get_current_timezone()
+            ),
+            sent_at=None,
+            received_at=None,
+            is_received=False,
+            is_finalized=False,
+            is_open=True,
+            item_code="unresolved",
+            raw_payload={"detail": {"FK_articulo": 999999, "isInsumo": False}},
+            sync_job=self.open_transfer_job,
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        self.assertFalse(
+            any(
+                "transferencia" in issue.message
+                and transfer.detail_external_id in issue.message
+                for issue in result.global_issues
+            )
+        )
+
+    def test_transfer_fk_articulo_requires_explicit_product_domain(self):
+        fk_product = PointProduct.objects.create(
+            external_id="903",
+            sku="FK-903",
+            name="Producto FK para dominio",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+
+        for detail in (
+            {"FK_articulo": int(fk_product.external_id), "isInsumo": True},
+            {"FK_articulo": int(fk_product.external_id)},
+            {"FK_articulo": int(fk_product.external_id), "isInsumo": "false"},
+        ):
+            with self.subTest(detail=detail):
+                transfer = self._transfer(
+                    item_code=self.product.external_id,
+                    raw_payload={"detail": detail},
+                )
+                result = self.service.build(month=date(2026, 8, 1))
+                issue_codes = [
+                    issue.code
+                    for issue in result.global_issues
+                    if transfer.id in issue.source_ids
+                ]
+                self.assertEqual(
+                    issue_codes, ["TRANSFER_PRODUCT_DOMAIN_CONFLICT"]
+                )
+                self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_transfer_row_domain_conflict_is_audited_before_ingredient_skip(self):
+        fk_product = PointProduct.objects.create(
+            external_id="909",
+            sku="FK-909",
+            name="Producto FK en conflicto de dominio",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            is_insumo=True,
+            item_code=self.product.external_id,
+            raw_payload={
+                "detail": {
+                    "FK_articulo": int(fk_product.external_id),
+                    "isInsumo": False,
+                }
+            },
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        issue_codes = [
+            issue.code
+            for issue in result.global_issues
+            if transfer.id in issue.source_ids
+        ]
+        self.assertEqual(issue_codes, ["TRANSFER_PRODUCT_DOMAIN_CONFLICT"])
+        self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_coherent_ingredient_and_inactive_transfer_rows_remain_silent(self):
+        fk_product = PointProduct.objects.create(
+            external_id="910",
+            sku="FK-910",
+            name="Insumo coherente",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        raw_product = {
+            "detail": {
+                "FK_articulo": int(fk_product.external_id),
+                "isInsumo": False,
+            }
+        }
+        rows = (
+            self._transfer(
+                is_insumo=True,
+                raw_payload={
+                    "detail": {
+                        "FK_articulo": int(fk_product.external_id),
+                        "isInsumo": True,
+                    }
+                },
+            ),
+            self._transfer(is_cancelled=True, raw_payload=raw_product),
+            self._transfer(is_current_snapshot=False, raw_payload=raw_product),
+            self._transfer(
+                is_insumo=True,
+                is_received=False,
+                received_at=None,
+            ),
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        source_ids = {
+            source_id
+            for issue in result.global_issues
+            for source_id in issue.source_ids
+        }
+        self.assertTrue(all(row.id not in source_ids for row in rows))
+        self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_transfer_fk_articulo_rejects_unique_sku_for_another_product(self):
+        fk_product = PointProduct.objects.create(
+            external_id="904",
+            sku="FK-904",
+            name="Producto señalado por FK",
+        )
+        conflicting_product = PointProduct.objects.create(
+            external_id="902",
+            sku="SKU-OTRO-PRODUCTO",
+            name="Otro producto",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        transfer = self._transfer(
+            item_code=conflicting_product.sku,
+            raw_payload={
+                "detail": {
+                    "FK_articulo": int(fk_product.external_id),
+                    "isInsumo": False,
+                }
+            },
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        issue_codes = [
+            issue.code
+            for issue in result.global_issues
+            if transfer.id in issue.source_ids
+        ]
+        self.assertEqual(issue_codes, ["TRANSFER_PRODUCT_IDENTITY_CONFLICT"])
+        self.assertEqual(result.lines[0].transfer_out, Decimal("0"))
+
+    def test_transfer_fk_rules_do_not_change_other_movement_domains(self):
+        target = PointProduct.objects.create(
+            external_id="907",
+            sku="SKU-AMBIGUO-OTRO-DOMINIO",
+            name="Objetivo FK fuera de transferencias",
+        )
+        PointProduct.objects.create(
+            external_id="908",
+            sku=target.sku,
+            name="Segundo producto del mismo SKU",
+        )
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        production = self._production(
+            item_code=target.sku,
+            item_name="Sin coincidencia por nombre",
+        )
+        PointProductionLine.objects.filter(pk=production.pk).update(
+            raw_payload={
+                "detail": {
+                    "FK_articulo": int(target.external_id),
+                    "isInsumo": False,
+                }
+            }
+        )
+        sale = self._sale(product=self.product, quantity="2")
+        PointDailySale.objects.filter(pk=sale.pk).update(
+            raw_payload={
+                "detail": {
+                    "FK_articulo": int(target.external_id),
+                    "isInsumo": False,
+                }
+            }
+        )
+
+        result = self.service.build(month=date(2026, 8, 1))
+
+        issue = next(
+            issue for issue in result.global_issues if production.id in issue.source_ids
+        )
+        self.assertEqual(issue.code, "AMBIGUOUS_PRODUCT")
+        self.assertEqual(result.lines[0].production, Decimal("0"))
+        own_line = next(item for item in result.lines if item.product == self.product)
+        self.assertEqual(own_line.sales, Decimal("2"))
+        self.assertFalse(
+            any(item.product == target and item.sales for item in result.lines)
+        )
+
     def test_movement_location_missing_from_closings_becomes_auditable_source_issue(self):
         devoluciones = PointBranch.objects.create(
             external_id="DEVOLUCIONES-MISSING",
@@ -1514,6 +1951,7 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         transfer = self._transfer(
             sent_quantity="4",
             received_quantity="3",
+            is_finalized=False,
             sent_at=datetime(2026, 8, 31, 23, 0, tzinfo=local_tz),
             received_at=datetime(2026, 9, 1, 0, 5, tzinfo=local_tz),
         )
@@ -1558,6 +1996,28 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             {issue.branch_id for issue in september_issues},
             {self.centro.id, self.plaza.id},
         )
+
+    def test_received_zero_returns_sent_quantity_without_finalization(self):
+        transfer = self._transfer(sent_quantity="2", received_quantity="0", is_finalized=False)
+        transfer_in, transfer_out, issues = {}, {}, []
+        local_tz = timezone.get_current_timezone()
+        self.service._apply_transfers(
+            rows=[transfer], lower_bound=datetime(2026, 8, 1, tzinfo=local_tz),
+            upper_bound=datetime(2026, 9, 1, tzinfo=local_tz),
+            product_indexes=self.service._build_product_indexes([self.product]),
+            transfer_in=transfer_in, transfer_out=transfer_out, issues=issues)
+        key = (self.centro.id, self.product.id)
+        self.assertEqual(transfer_out[key][0], Decimal("2"))
+        self.assertEqual(transfer_in[key][0], Decimal("2"))
+        transfer.is_received = False
+        transfer_in.clear()
+        transfer_out.clear()
+        self.service._apply_transfers(
+            rows=[transfer], lower_bound=datetime(2026, 8, 1, tzinfo=local_tz),
+            upper_bound=datetime(2026, 9, 1, tzinfo=local_tz),
+            product_indexes=self.service._build_product_indexes([self.product]),
+            transfer_in=transfer_in, transfer_out=transfer_out, issues=[])
+        self.assertFalse(transfer_in)
 
     def test_exact_month_transfer_contract_is_independent_of_later_operational_legs(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
@@ -1809,6 +2269,11 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
 
     def test_historical_open_transfer_uses_immutable_snapshot_after_live_row_changes(self):
+        later_product = PointProduct.objects.create(
+            external_id="905",
+            sku="LATER-905",
+            name="Producto mutable posterior",
+        )
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})
         transfer = self._transfer(is_received=False, received_at=None)
@@ -1820,7 +2285,13 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
             is_cancelled=True,
             is_open=False,
             is_current_snapshot=False,
-            item_code="OTRO",
+            item_code=later_product.sku,
+            raw_payload={
+                "detail": {
+                    "FK_articulo": int(later_product.external_id),
+                    "isInsumo": False,
+                }
+            },
         )
 
         result = self.service.build(month=date(2026, 8, 1))
@@ -1831,6 +2302,12 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(line.source_trace["transfer_out"], ())
         self.assertEqual(
             line.source_trace["open_transfer_snapshot_out"], (member.id,)
+        )
+        self.assertFalse(
+            any(
+                item.product.id == later_product.id and item.transfer_out
+                for item in result.lines
+            )
         )
 
     def test_branch_tampering_is_blocked_and_hash_mismatch_fails_closed(self):
@@ -2446,6 +2923,39 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
                 is_received=False,
                 received_at=None,
                 transfer_external_id=f"open-query-{sequence}",
+            )
+        with CaptureQueriesContext(connection) as expanded_queries:
+            expanded = self.service.build(month=date(2026, 8, 1))
+
+        self.assertTrue(baseline.source_complete)
+        self.assertTrue(expanded.source_complete)
+        self.assertEqual(len(expanded_queries), len(baseline_queries))
+        self.assertLessEqual(len(expanded_queries), 25)
+
+    def test_query_count_does_not_grow_with_transfer_raw_payloads(self):
+        target = PointProduct.objects.create(
+            external_id="906",
+            sku="TRANSFER-906",
+            name="Producto transferido por FK",
+        )
+        stocks = {
+            (self.centro, target): Decimal("20"),
+            (self.plaza, target): Decimal("0"),
+        }
+        self._closing_lines(date(2026, 7, 31), stocks)
+        self._closing_lines(date(2026, 8, 31), stocks)
+        raw_payload = {
+            "detail": {"FK_articulo": int(target.external_id), "isInsumo": False}
+        }
+        self._transfer(item_code=target.sku, raw_payload=raw_payload)
+        with CaptureQueriesContext(connection) as baseline_queries:
+            baseline = self.service.build(month=date(2026, 8, 1))
+
+        for sequence in range(2, 12):
+            self._transfer(
+                item_code=target.sku,
+                raw_payload=raw_payload,
+                transfer_external_id=f"raw-query-{sequence}",
             )
         with CaptureQueriesContext(connection) as expanded_queries:
             expanded = self.service.build(month=date(2026, 8, 1))

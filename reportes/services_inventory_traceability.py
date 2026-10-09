@@ -57,6 +57,7 @@ class InventoryAuditRebuildCounts(dict):
             {key: 0 for key in PRODUCT_INVENTORY_AUDIT_SUMMARY_KEYS}
         )
         self.required_sources_available = required_sources_available
+        self.partial_published = False
 
 
 def _empty_counts(*, required_sources_available=True) -> InventoryAuditRebuildCounts:
@@ -87,6 +88,16 @@ def _sorted_issue_payloads(issues) -> list[dict[str, object]]:
     )
 
 
+def _plain_documentary_evidence(value):
+    if isinstance(value, Mapping):
+        return {str(key): _plain_documentary_evidence(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list)):
+        return [_plain_documentary_evidence(item) for item in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    return value
+
+
 def _source_trace_payload(source_trace) -> dict[str, object]:
     payload: dict[str, object] = {}
     for source_name, source_value in sorted(source_trace.items()):
@@ -96,6 +107,9 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
             continue
         if name == "point_history":
             payload[name] = source_value if isinstance(source_value, Mapping) else {}
+            continue
+        if name == "historical_boundary_evidence":
+            payload[name] = _plain_documentary_evidence(source_value) if isinstance(source_value, Mapping) else {}
             continue
         if name in _TRACE_IMPACT_KEYS:
             if not isinstance(source_value, Mapping):
@@ -112,12 +126,16 @@ def _source_trace_payload(source_trace) -> dict[str, object]:
     return payload
 
 
-def _fingerprint_source_trace(source_trace: dict[str, object]) -> dict[str, list[int]]:
+def _fingerprint_source_trace(source_trace: dict[str, object]) -> dict[str, object]:
     """Keep the deployed fingerprint contract independent of UI projections."""
-    return {
+    payload = {
         source_name: list(source_trace.get(source_name, []))
         for source_name in _LEGACY_FINGERPRINT_TRACE_KEYS
     }
+    # Boundary proof changes are source changes, not merely UI decoration.
+    if "historical_boundary_evidence" in source_trace:
+        payload["historical_boundary_evidence"] = source_trace["historical_boundary_evidence"]
+    return payload
 
 
 def _sha256(payload: object) -> str:
@@ -136,7 +154,7 @@ class InventoryAuditMaterializer:
             traceability_service or BranchInventoryTraceabilityService()
         )
 
-    def rebuild(self, month: date, dry_run: bool = False) -> dict[str, int]:
+    def rebuild(self, month: date, dry_run: bool = False, *, allow_partial: bool = False) -> dict[str, int]:
         month_start = month.replace(day=1)
         started_at = timezone.now()
 
@@ -146,10 +164,27 @@ class InventoryAuditMaterializer:
             # Dry runs take the same lock so their preview is comparable; the xact lock
             # is released automatically and never persists data.
             self._lock_source_months(month_start)
-            traceability = self.traceability_service.build(month_start)
+            traceability = (
+                self.traceability_service.build(month_start, allow_partial=True)
+                if allow_partial
+                else self.traceability_service.build(month_start)
+            )
             source_built_at = timezone.now()
 
-            if not traceability.source_complete:
+            partial = bool(
+                allow_partial
+                and not traceability.source_complete
+                and traceability.lines
+                and all(
+                    issue.code in {"SOURCE_INCOMPLETE", "MISSING_CONVERSION_DESTINATION"}
+                    for issue in traceability.global_issues
+                )
+                and any(
+                    issue.code == "SOURCE_INCOMPLETE"
+                    for line in traceability.lines for issue in line.issues
+                )
+            )
+            if not traceability.source_complete and not partial:
                 return self._record_incomplete_run(
                     month=month_start,
                     traceability=traceability,
@@ -181,6 +216,9 @@ class InventoryAuditMaterializer:
                 prepared_lines=prepared_lines,
                 existing_cases=existing_cases,
             )
+            if partial:
+                counts.required_sources_available = False
+                counts.partial_published = True
             run_fingerprint = self._run_fingerprint(
                 month=month_start,
                 line_fingerprints=[item["fingerprint"] for item in prepared_lines],
@@ -195,13 +233,14 @@ class InventoryAuditMaterializer:
                 defaults={
                     "status": (
                         ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE
-                        if counts["source_incomplete"]
+                        if partial or counts["source_incomplete"]
                         else ProductInventoryAuditRun.Status.READY
                     ),
                     "source_issues": _sorted_issue_payloads(
                         traceability.global_issues
                     ),
                     "summary": counts,
+                    "partial_published": partial,
                     "calculation_fingerprint": run_fingerprint,
                     "started_at": started_at,
                     "rebuilt_at": source_built_at,
@@ -249,19 +288,18 @@ class InventoryAuditMaterializer:
 
             rebuilt_at = timezone.now()
             run.rebuilt_at = rebuilt_at
-            run.last_successful_rebuild_at = rebuilt_at
-            run.save(
-                update_fields=[
-                    "rebuilt_at",
-                    "last_successful_rebuild_at",
-                    "updated_at",
-                ]
-            )
-            transaction.on_commit(
-                lambda audit_month=month_start: self._investigate_committed_month(
-                    audit_month
+            if not partial:
+                run.last_successful_rebuild_at = rebuilt_at
+            run.save(update_fields=[
+                "rebuilt_at", "updated_at",
+                *([] if partial else ["last_successful_rebuild_at"]),
+            ])
+            if not partial:
+                transaction.on_commit(
+                    lambda audit_month=month_start: self._investigate_committed_month(
+                        audit_month
+                    )
                 )
-            )
             return counts
 
     def reconcile_existing_cases_from_point_history(
@@ -508,6 +546,7 @@ class InventoryAuditMaterializer:
             month=month,
             defaults={
                 "status": ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+                "partial_published": False,
                 "source_issues": issues,
                 "summary": counts,
                 "calculation_fingerprint": fingerprint,
@@ -618,6 +657,10 @@ class InventoryAuditMaterializer:
             )
             point_history_payload["aggregate_comparison"] = comparison
             source_trace["point_history"] = point_history_payload
+        if "point_history" in source_trace:
+            source_trace["point_history"] = _plain_documentary_evidence(
+                source_trace["point_history"]
+            )
         quantities = {
             name: _decimal_text(value)
             for name, value in normalized_quantities.items()

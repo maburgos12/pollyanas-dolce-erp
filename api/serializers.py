@@ -441,6 +441,7 @@ class ComprasRecepcionStatusSerializer(serializers.Serializer):
 
 
 class ActivosOrdenCreateSerializer(serializers.Serializer):
+    clave_captura = serializers.UUIDField(required=False)
     activo_id = serializers.IntegerField(min_value=1)
     plan_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
     tipo = serializers.ChoiceField(

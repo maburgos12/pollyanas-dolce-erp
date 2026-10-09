@@ -1,6 +1,7 @@
 """Creación atómica y reintentos de las tres capturas directas de equipos."""
 import hashlib
 import json
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
@@ -13,6 +14,9 @@ from rest_framework.exceptions import APIException
 from core.audit import log_event
 from mantenimiento.models import ComprobanteCapturaEquipo
 from mantenimiento.services_access import authorized_branch_ids, authorized_orders, can_write_mantenimiento
+
+
+logger = logging.getLogger(__name__)
 
 
 class CapturaEquipoError(APIException):
@@ -68,7 +72,14 @@ def guardar_factura(orden, archivo, archivos_nuevos):
 
 
 def capturar_equipo(*, usuario, activo, operacion, clave, contenido, crear):
-    validar_equipo(usuario, activo)
+    return capturar_equipo_autorizado(usuario=usuario, activo=activo, operacion=operacion,
+        clave=clave, contenido=contenido, crear=crear, validar=validar_equipo,
+        ordenes=authorized_orders)
+
+
+def capturar_equipo_autorizado(*, usuario, activo, operacion, clave, contenido, crear, validar, ordenes, audit_metadata=None):
+    """Motor común; cada consumidor mantiene explícitamente su permiso y ámbito."""
+    validar(usuario, activo)
     if clave is not None:
         try:
             clave = UUID(str(clave))
@@ -89,17 +100,21 @@ def capturar_equipo(*, usuario, activo, operacion, clave, contenido, crear):
                         raise CapturaEquipoError('Esta captura ya se envió con otros datos. Conserva el intento original y revisa el conflicto.')
                     if recibo.orden_id is None:
                         raise CapturaEquipoError('La orden de esta captura fue eliminada; este intento no puede recrearla.', 410)
-                    orden = authorized_orders(usuario).filter(pk=recibo.orden_id, activo_ref=activo).first()
+                    orden = ordenes(usuario).filter(pk=recibo.orden_id, activo_ref=activo).first()
                     if orden is None:
                         raise PermissionDenied('La orden ya no está en tu ámbito autorizado.')
                     return orden, True
             orden = crear(archivos_nuevos)
-            log_event(usuario, 'CREATE', 'activos.OrdenMantenimiento', str(orden.pk), {'origen': operacion})
+            log_event(usuario, 'CREATE', 'activos.OrdenMantenimiento', str(orden.pk), audit_metadata(orden) if audit_metadata else {'origen': operacion})
             if recibo:
                 recibo.orden = orden
                 recibo.save(update_fields=['orden'])
             return orden, False
     except Exception:
         for storage, name in archivos_nuevos:
-            storage.delete(name)
+            try:
+                storage.delete(name)
+            except Exception:
+                # Intentar todos los archivos sin ocultar la causa del rollback.
+                logger.exception('No se pudo limpiar archivo de captura revertida: %s', name)
         raise

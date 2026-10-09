@@ -6,12 +6,16 @@
 {% block body_class %}page-dashboard-executive{% endblock %}
 
 {% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/commercial_analytics.css' %}?v=20261004-v2">
+<link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
 <link rel="stylesheet" href="/static/css/template_modules/core-templates-core-dashboard-executive.css?v=20260703-hero-mobile-center-v2">
 {% endblock %}
 
 {% block content %}
 <div class="home-exec-shell">
+  {% include "reportes/partials/commercial_analytics.html" %}
+  {% if commercial_analytics %}<details class="ca-legacy"><summary>Operación, pronósticos y detalle de costos</summary>{% endif %}
   <section class="home-exec-hero">
     <div>
       <div class="home-exec-kicker">Dirección general</div>
@@ -36,6 +40,8 @@
       </div>
     </div>
   </section>
+
+  {% include "reportes/partials/sales_confidence.html" %}
 
   {% if seguimiento_pendientes %}
   <section class="home-exec-card is-warning">
@@ -231,6 +237,8 @@
           <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months={{ months_window }}">Comparativo ventas</a>
         </div>
       </div>
+      <p class="home-exec-note">{{ yoy_panel.hero_note }}</p>
+      {% if yoy_panel.coverage_note %}<p class="home-exec-note">{{ yoy_panel.coverage_note }}</p>{% endif %}
       <div class="home-exec-chart-stage is-short">
         <canvas id="homeYoyChart" aria-label="Comparativo mensual contra año anterior" role="img"></canvas>
       </div>
@@ -344,7 +352,8 @@
     <article class="home-exec-card">
       <div class="home-exec-section-head">
         <div>
-          <h2 class="home-exec-title">Top margen</h2>
+          <h2 class="home-exec-title">Top margen estimado</h2>
+          <p class="home-exec-copy">{{ profitability_panel.basis_note }}</p>
         </div>
         <div class="home-exec-panel-actions">
           <span class="home-exec-pill">{{ profitability_panel.lookback_days }} días</span>
@@ -590,6 +599,7 @@
       </div>
     </article>
   </section>
+{% if commercial_analytics %}</details>{% endif %}
 </div>
 {% endblock %}
 
@@ -598,6 +608,8 @@
 {{ yoy_panel.rows|json_script:"home-yoy-data" }}
 <script src="{% static 'js/dashboard_cut_refresh.js' %}?v=20260913-cut-refresh-poll-v1" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{{ commercial_analytics|json_script:"commercial-analytics-data" }}
+<script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>
 <script>
   (() => {
     const parse = (id) => {

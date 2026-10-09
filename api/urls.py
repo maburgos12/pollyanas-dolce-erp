@@ -1,6 +1,7 @@
 from django.urls import path
 from rest_framework_simplejwt.views import TokenRefreshView
 from .ai_gateway_views import (
+    AIGatewayIncidentConfirmationView,
     AIGatewayApprovalDecisionView,
     AIGatewayApprovalExecuteView,
     AIGatewayApprovalListView,
@@ -10,6 +11,9 @@ from .ai_gateway_views import (
     AIGatewayToolDetailView,
     AIGatewayToolInvokeView,
     AIGatewayToolsView,
+    AIGatewayWorkflowListView,
+    AIGatewayWorkflowDetailView,
+    AIGatewayWorkflowResumeView,
 )
 from .views import (
     ApiTokenAuthView,
@@ -95,11 +99,14 @@ from .crm_views import (
 )
 from .omnichannel_views import (
     PublicOmnichannelCustomersView,
+    PublicPointSpecialOrdersView,
+    PublicWebPointLinkView,
     PublicOmnichannelDeliveryIdentitiesView,
     PublicOmnichannelDeliveriesView,
     PublicOmnichannelDeliveryDetailView,
     PublicOmnichannelDeliveryIntakeView,
     PublicOmnichannelDeliveryStatusView,
+    PublicOmnichannelDeliveryPreparationView,
     PublicOmnichannelPointDeliverySyncHealthView,
     PublicOmnichannelOrderStatusView,
     PublicOmnichannelOrdersView,
@@ -216,6 +223,12 @@ from .special_hours_views import (
 )
 
 urlpatterns = [
+    path("public/v1/omnichannel/point-special-orders/", PublicPointSpecialOrdersView.as_view()),
+    path("public/v1/omnichannel/deliveries/<int:solicitud_id>/point-link/", PublicWebPointLinkView.as_view()),
+    path("ai-gateway/incidents/<uuid:draft_id>/confirm/", AIGatewayIncidentConfirmationView.as_view(), name="api_ai_incident_confirm"),
+    path("ai-gateway/workflows/", AIGatewayWorkflowListView.as_view(), name="api_ai_gateway_workflows"),
+    path("ai-gateway/workflows/<uuid:workflow_id>/", AIGatewayWorkflowDetailView.as_view(), name="api_ai_gateway_workflow_detail"),
+    path("ai-gateway/workflows/<uuid:workflow_id>/resume/", AIGatewayWorkflowResumeView.as_view(), name="api_ai_gateway_workflow_resume"),
     path("ai-gateway/manifest/", AIGatewayManifestView.as_view(), name="api_ai_gateway_manifest"),
     path("ai-gateway/openapi/", AIGatewayOpenAPIView.as_view(), name="api_ai_gateway_openapi"),
     path("ai-gateway/tools/", AIGatewayToolsView.as_view(), name="api_ai_gateway_tools"),
@@ -591,6 +604,11 @@ urlpatterns = [
         "public/v1/omnichannel/point-delivery-sync/health/",
         PublicOmnichannelPointDeliverySyncHealthView.as_view(),
         name="api_public_omnichannel_point_delivery_sync_health",
+    ),
+    path(
+        "public/v1/omnichannel/deliveries/<int:solicitud_id>/preparation-status/",
+        PublicOmnichannelDeliveryPreparationView.as_view(),
+        name="api_public_omnichannel_delivery_preparation",
     ),
     path(
         "public/v1/omnichannel/deliveries/<int:solicitud_id>/status/",

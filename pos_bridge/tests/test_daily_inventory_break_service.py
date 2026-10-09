@@ -198,7 +198,7 @@ class DailyInventoryBreakServiceTests(TestCase):
             sent_quantity=Decimal("2"),
             received_quantity=Decimal("1"),
             is_received=True,
-            is_finalized=True,
+            is_finalized=False,
         )
         case = self.make_case(
             source_trace={

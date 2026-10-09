@@ -1,4 +1,4 @@
-{% load static %}
+{% load static destinos_documentales documentos_financieros %}
 <!doctype html>
 <html lang="es" class="operacion-app-html">
 <head>
@@ -44,6 +44,10 @@
       {% endif %}
     </section>
 
+    {% consulta_compras_destino request.user 'ACTIVO' activo.pk as compras_destino_url %}
+    {% if compras_destino_url %}<p><a class="volver" href="{{ compras_destino_url }}">Compras relacionadas con este equipo</a></p>{% endif %}
+    {% consulta_procedencia_activo request.user activo.pk as procedencia_url %}{% if procedencia_url %}<p><a class="volver" href="{{ procedencia_url }}">Procedencia de adquisición de este equipo</a></p>{% endif %}
+
     {% if fallas_abiertas %}
       <section class="bloque bloque-alerta" aria-labelledby="fallas-abiertas">
         <h2 id="fallas-abiertas">Ya hay {{ fallas_abiertas|length }} reporte{{ fallas_abiertas|pluralize }} abierto{{ fallas_abiertas|pluralize }}</h2>
@@ -54,6 +58,7 @@
                 <b>{{ falla.titulo }}</b>
                 <small>{{ falla.estatus_label }} · Prioridad {{ falla.prioridad_label }} · {{ falla.fecha_reporte|date:"d/m/Y" }}</small>
               </a>
+              {% consulta_documentos_trabajo request.user "falla" falla.id as documentos_url %}{% if documentos_url %}<a href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
             </li>
           {% endfor %}
         </ul>
@@ -85,6 +90,7 @@
           {% for orden in ordenes_recientes %}
             <li>
               <b>{{ orden.folio }}</b>
+              {% consulta_documentos_trabajo request.user "orden" orden.id as documentos_url %}{% if documentos_url %}<a href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
               <small>{{ orden.tipo }} · {{ orden.estatus_label }} · {{ orden.fecha|date:"d/m/Y" }}</small>
               {% if orden.descripcion %}<p>{{ orden.descripcion }}</p>{% endif %}
               {% if puede_ver_costos %}
@@ -99,8 +105,14 @@
     {% if puede_ver_costos %}
       <section class="bloque bloque-costos" aria-labelledby="costos">
         <h2 id="costos">Costos y compra</h2>
-        <p class="dato"><span>Adquisición</span><b>{% if costos.adquisicion %}{{ costos.adquisicion|floatformat:2 }} MXN{% else %}Sin capturar{% endif %}</b></p>
-        <p class="dato"><span>Mantenimiento acumulado</span><b>{{ costos.mantenimiento_total|floatformat:2 }} MXN</b></p>
+        <p class="dato"><span>Adquisición</span><b>{% if costos.adquisicion != None %}{{ costos.adquisicion|floatformat:2 }} MXN{% else %}Sin capturar{% endif %}</b></p>
+        <p class="dato"><span>Costos registrados en órdenes</span><b>{{ costos.mantenimiento_total|floatformat:2 }} MXN</b></p>
+        <p class="muted">Suma repuestos, mano de obra y otros costos de todas las órdenes, incluidas pendientes y canceladas. No acredita gasto pagado ni conciliado.</p>
+        {% if not ordenes_recientes %}
+          <p class="muted">No hay costos de órdenes registrados.</p>
+        {% elif costos.mantenimiento_total == 0 %}
+          <p class="muted">Las órdenes registran un total cero. Confirma importes y soporte.</p>
+        {% endif %}
         <p class="dato"><span>Proveedor de compra</span><b>{% if proveedor_compra %}{{ proveedor_compra }}{% else %}Sin capturar{% endif %}</b></p>
         <p class="dato"><span>Garantía</span><b>{% if garantia_hasta %}{{ garantia_hasta|date:"d/m/Y" }}{% else %}Sin capturar{% endif %}</b></p>
         {% if facturas %}

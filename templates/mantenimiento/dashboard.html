@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static humanize %}
+{% load static humanize documentos_financieros %}
 
 {% block title %}Mantenimiento{% endblock %}
 {% block page_title %}Mantenimiento{% endblock %}
@@ -11,6 +11,7 @@
 {% endblock %}
 
 {% block content %}
+<p><a class="btn btn-secondary" href="{% url 'mantenimiento:conciliacion_documental' %}">Conciliación documental de trabajos</a></p>
 <div class="module-shell bi-shell">
   <div class="module-tabs">
     <a href="#tab-dashboard" class="module-tab active" data-tab="tab-dashboard">Dashboard</a>
@@ -165,6 +166,7 @@
                     <div class="mant-ticket-meta">{{ item.proveedor|default:"Sin proveedor" }} · Est. ${{ item.costo_estimado|default:"0" }} · Real ${{ item.costo_real|default:"0" }}</div>
                   {% endif %}
                   <div class="mant-ticket-actions">
+                    {% consulta_documentos_trabajo request.user item.tipo item.id as documentos_url %}{% if documentos_url %}<a class="btn btn-secondary btn-sm" href="{{ documentos_url }}">Documentos financieros</a>{% endif %}
                     <button class="btn btn-secondary btn-sm" type="button" data-open-follow
                       data-maintenance-uid="{{ item.uid }}"
                       data-action="{% url 'mantenimiento:mant-actualizar' item.tipo item.id %}"
@@ -228,7 +230,7 @@
       {% if planes_proximos %}
       <div class="mant-planes-grid">
         {% for plan in planes_proximos %}
-        <article class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
+        <article id="planCard{{ plan.pk }}" class="mant-plan-row {% if plan.vencido %}vencido{% endif %}">
           <div>
             <div class="mant-plan-title">
               {% if plan.vencido %}
@@ -245,16 +247,23 @@
             <div class="mant-plan-meta">
               <strong>{{ plan.activo_ref.nombre }}</strong>{% if plan.activo_ref.sucursal %} · {{ plan.activo_ref.sucursal.nombre }}{% endif %}<br>
               {{ plan.get_tipo_display }} · Cada {{ plan.frecuencia_dias }} días{% if plan.responsable %} · {{ plan.responsable }}{% endif %}<br>
-              Próxima: <strong>{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong>{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}
+              Próxima: <strong class="plan-next-date">{% if plan.proxima_ejecucion %}{{ plan.proxima_ejecucion|date:"d/m/Y" }}{% else %}Sin fecha{% endif %}</strong><span class="plan-last-date">{% if plan.ultima_ejecucion %} · Última: {{ plan.ultima_ejecucion|date:"d/m/Y" }}{% endif %}</span>
             </div>
           </div>
           <div class="mant-action-column">
-            <form method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}">
+            <form id="planForm{{ plan.pk }}" method="post" action="{% url 'mantenimiento:mant-plan-ejecutar' plan.pk %}" data-async-action data-capture-snapshot="true" data-action-inline-feedback="true" data-plan-capture="{{ plan.pk }}" {% if plan_captura_success == plan.pk %}data-capture-completed="true"{% endif %}>
               {% csrf_token %}
-              <input type="hidden" name="fecha_ejecucion" value="{{ today|date:'Y-m-d' }}">
-              <button class="btn btn-primary btn-sm" type="submit">
-                Hecho hoy
-              </button>
+              <input type="hidden" name="clave_captura" value="{{ plan.clave_captura }}">
+              <fieldset class="plan-capture-fields" {% if plan_captura_success == plan.pk %}disabled{% endif %}>
+                <label>Fecha de ejecución <input type="date" name="fecha_ejecucion" required value="{% if plan_captura_id == plan.pk %}{{ plan_captura_datos.fecha_ejecucion }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}"></label>
+                <label>Notas del trabajo <textarea name="notas" rows="2">{% if plan_captura_id == plan.pk %}{{ plan_captura_datos.notas }}{% endif %}</textarea></label>
+                <label><input type="checkbox" name="intervencion_adicional" {% if plan_captura_id == plan.pk and plan_captura_datos.intervencion_adicional %}checked{% endif %}> Es una intervención adicional independiente</label>
+                <label>Motivo de la intervención adicional <textarea name="motivo_adicional" rows="2">{% if plan_captura_id == plan.pk %}{{ plan_captura_datos.motivo_adicional }}{% endif %}</textarea></label>
+              </fieldset>
+              <div class="plan-open-orders">{% for orden in plan.ordenes_abiertas %}<p><a href="{% url 'mantenimiento:dashboard' %}?open=orden:{{ orden.pk }}#tab-seguimiento">Abrir orden {{ orden.folio }}</a></p>{% endfor %}</div>
+              <p class="plan-capture-error" role="alert" {% if plan_captura_id != plan.pk %}hidden{% endif %}>{% if plan_captura_id == plan.pk %}{{ plan_captura_error }}{% endif %}</p>
+              <button class="btn btn-primary btn-sm" type="submit" {% if plan_captura_success == plan.pk %}disabled{% endif %}>Guardar ejecución</button>
+              <div id="planResultado{{ plan.pk }}" role="status">{% if plan_captura_success == plan.pk %}Ejecución guardada. <a href="{% url 'mantenimiento:dashboard' %}?open=orden:{{ plan_captura_orden.pk }}#tab-seguimiento">Abrir orden {{ plan_captura_orden.folio }} y sus evidencias</a> <button type="button" class="btn btn-secondary" onclick="otraEjecucionPlan({{ plan.pk }})">Otra ejecución</button>{% endif %}</div>
             </form>
             <button class="btn btn-secondary btn-sm" type="button"
               onclick="abrirEditarPlan({{ plan.pk }},'{{ plan.nombre|escapejs }}',{{ plan.activo_ref.pk }},'{{ plan.tipo }}','{{ plan.estatus }}',{{ plan.frecuencia_dias }},{{ plan.tolerancia_dias }},'{{ plan.proxima_ejecucion|date:'Y-m-d' }}','{{ plan.ultima_ejecucion|date:'Y-m-d' }}','{{ plan.responsable|escapejs }}','{{ plan.instrucciones|escapejs }}')">
@@ -345,6 +354,7 @@
       <div>
         <div class="bi-kicker">Catálogo</div>
         <h2 class="bi-panel-title">Proveedores de servicio</h2>
+        {% if puede_ver_vinculos %}<p><a href="{% url 'mantenimiento:vinculos-proveedores' %}">Vínculos documentales con el maestro comercial</a></p>{% endif %}
         <p class="bi-copy">Talleres, técnicos y empresas de mantenimiento. Agrégalos aquí para asignarlos rápidamente a cualquier reporte u orden.</p>
         {% if proveedores_sin_contacto %}
           <p class="bi-copy"><strong>{{ proveedores_sin_contacto }}</strong> de {{ proveedores_todos|length }} no tienen teléfono ni WhatsApp. Complétalos cuando los uses: sin número no hay a quién llamar en una urgencia.</p>
@@ -971,6 +981,7 @@
   </div>
 </div>
 
+
 {% endblock %}
 
 {% block extra_js %}
@@ -1035,10 +1046,11 @@ function requireElements(scope, elementMap) {
   window.addEventListener("hashchange", syncTabFromHash);
 
   // Restore on load or activate from URL hash
-  const saved = syncTabFromHash() ? null : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
+  const fromHash = syncTabFromHash();
+  const saved = fromHash ? null : (() => { try { return sessionStorage.getItem("mant_tab"); } catch(e) { return null; } })();
   if (saved && document.getElementById(saved)) {
     activateTab(saved);
-  } else {
+  } else if (!fromHash) {
     // default: dashboard; but if origen filter is active go to seguimiento
     const hasOrigen = new URLSearchParams(location.search).has("origen");
     activateTab(hasOrigen ? "tab-seguimiento" : "tab-dashboard");
@@ -1885,5 +1897,99 @@ document.getElementById("modalProveedor").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { cerrarModalPlan(); cerrarModalServicioLegacy(); cerrarModalTipoServicio(); cerrarModalProveedor(); }
 });
+</script>
+<script>
+(function () {
+  document.querySelectorAll('[data-plan-capture]').forEach(function (form) {
+    var fields = form.querySelector('fieldset');
+    var error = form.querySelector('.plan-capture-error');
+    var draftKey = 'pd_plan_execution_web_{{ request.user.pk }}_' + form.dataset.planCapture;
+    if (form.dataset.captureCompleted === 'true') { try { sessionStorage.removeItem(draftKey); } catch (error) {} }
+    var names = ['clave_captura','fecha_ejecucion','notas','intervencion_adicional','motivo_adicional'];
+    try {
+      var saved = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
+      if (saved && saved.clave_captura && form.dataset.captureCompleted !== 'true') {
+        names.forEach(function (name) {
+          var input = form.querySelector('[name="' + name + '"]');
+          if (input.type === 'checkbox') input.checked = Boolean(saved[name]); else input.value = saved[name] || '';
+        });
+        // Tomar el CSRF vigente del formulario; sólo los campos de negocio se restauran.
+        form._captureSnapshot = saved._editable ? null : new FormData(form);
+        fields.inert = !saved._editable;
+        form.querySelector('[type="submit"]').textContent = 'Reintentar ejecución';
+        error.hidden = false; error.textContent = 'Conservamos el intento anterior. Reintenta para recuperar su resultado.';
+      }
+    } catch (error) {}
+    form.addEventListener('erp:action-start', function (event) {
+      fields.inert = true; error.hidden = true;
+      var payload = {_editable:false}; names.forEach(function (name) { payload[name] = event.detail.formData.get(name); });
+      try { sessionStorage.setItem(draftKey, JSON.stringify(payload)); } catch (error) {}
+    });
+    form.addEventListener('erp:action-success', function (event) {
+      try { sessionStorage.removeItem(draftKey); } catch (error) {}
+      fields.inert = true; form.dataset.captureCompleted = 'true';
+      var data = event.detail; var card = document.getElementById('planCard' + form.dataset.planCapture);
+      card.querySelector('.plan-next-date').textContent = data.proxima_label;
+      card.querySelector('.plan-last-date').textContent = ' · Última: ' + data.ultima_label;
+      card.classList.toggle('vencido', data.dias_para_vencer < 0);
+      var badge = card.querySelector('.mant-plan-title .mant-badge');
+      if (!badge) { badge = document.createElement('span'); card.querySelector('.mant-plan-title').prepend(badge); }
+      badge.className = 'mant-badge is-spaced ' + data.badge_class;
+      badge.textContent = data.badge_label;
+    });
+    form.addEventListener('erp:action-error', async function (event) {
+      var activeConflict = event.detail.statusCode === 409 && event.detail.message.includes('ya tiene órdenes abiertas');
+      form.dataset.activeConflict = activeConflict ? 'true' : 'false';
+      var editable = event.detail.statusCode === 400 || activeConflict;
+      if (editable) {
+        try { var saved = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); if (saved) { saved._editable = true; sessionStorage.setItem(draftKey, JSON.stringify(saved)); } } catch (error) {}
+        form._captureSnapshot = null;
+      } else if ([403,404].includes(event.detail.statusCode)) { form._captureSnapshot = new FormData(form); }
+      fields.inert = !editable;
+      error.hidden = false; error.textContent = event.detail.message;
+      if (activeConflict) {
+        // Releer la misma bandeja web conserva su permiso global, distinto del ámbito móvil.
+        try {
+          var dashboardPath = "{% url 'mantenimiento:dashboard' %}";
+          var response = await fetch(dashboardPath, {cache:'no-store', credentials:'same-origin'});
+          if (!response.ok) throw new Error('dashboard');
+          var page = new DOMParser().parseFromString(await response.text(), 'text/html');
+          var current = page.querySelector('#planForm' + form.dataset.planCapture + ' .plan-open-orders');
+          if (!current) throw new Error('plan');
+          var links = [];
+          current.querySelectorAll('a[href]').forEach(function (anchor) {
+            var url = new URL(anchor.getAttribute('href'), window.location.origin);
+            if (url.origin !== window.location.origin || url.pathname !== dashboardPath ||
+                !/^orden:\d+$/.test(url.searchParams.get('open') || '') || url.hash !== '#tab-seguimiento') return;
+            var link = document.createElement('a'); link.href = url.href; link.textContent = anchor.textContent;
+            links.push(link);
+          });
+          if (!links.length) throw new Error('ordenes');
+          form.querySelector('.plan-open-orders').replaceChildren(...links);
+        } catch (err) { error.textContent += ' No pudimos actualizar los enlaces. Consulta Seguimiento para abrir la orden actual.'; }
+      }
+    });
+    form.querySelector('[name="intervencion_adicional"]').addEventListener('change', function () {
+      if (form.dataset.activeConflict === 'true') form._captureSnapshot = null;
+    });
+  });
+  window.otraEjecucionPlan = async function (id) {
+    var form = document.getElementById('planForm' + id);
+    if (form.dataset.captureCompleted !== 'true') return;
+    var error = form.querySelector('.plan-capture-error');
+    try {
+      var response = await fetch('/api/mantenimiento/resumen/', {cache:'no-store', credentials:'same-origin'});
+      var resumen = response.ok ? await response.json() : null;
+      if (!resumen || !/^\d{4}-\d{2}-\d{2}$/.test(resumen.fecha)) throw new Error('fecha');
+      form.reset(); form._captureSnapshot = null; form.dataset.captureCompleted = 'false';
+      try { sessionStorage.removeItem('pd_plan_execution_web_{{ request.user.pk }}_' + id); } catch (error) {}
+      form.querySelector('[name="clave_captura"]').value = crypto.randomUUID();
+      form.querySelector('[name="fecha_ejecucion"]').value = resumen.fecha;
+      var fields = form.querySelector('fieldset'); fields.disabled = false; fields.inert = false;
+      form.querySelector('[type="submit"]').disabled = false;
+      document.getElementById('planResultado' + id).textContent = ''; error.hidden = true;
+    } catch (err) { error.hidden = false; error.textContent = 'Recupera la conexión para obtener la fecha del ERP e iniciar otra ejecución.'; }
+  };
+})();
 </script>
 {% endblock %}

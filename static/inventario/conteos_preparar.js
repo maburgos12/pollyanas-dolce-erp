@@ -13,7 +13,12 @@
     Array.from(event.formData.keys()).forEach(function(name){if(name==='articulos'||name.indexOf('unidad_')===0||name.indexOf('fuente_')===0)event.formData.delete(name);});
     event.formData.set('articulos_json',JSON.stringify(items));
   });
-  function uuid(){return window.crypto.randomUUID();}
+  function uuid() {
+    var bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+    bytes[6]=(bytes[6]&15)|64; bytes[8]=(bytes[8]&63)|128;
+    var h=Array.from(bytes,function(b){return b.toString(16).padStart(2,'0');}).join('');
+    return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+  }
   function summary(){var n=form.querySelectorAll('input[name="articulos"]:checked').length;document.querySelector('[data-selection-status]').textContent=n+' artículos seleccionados. Se conservan al buscar en otro catálogo.';}
   form.addEventListener('input',function(){remember();form.elements.request_id.value=uuid();summary();});
   search.addEventListener('submit',async function(event){

@@ -83,13 +83,13 @@ class MantenimientoUnifiedAccessTests(TestCase):
         worker = self.client.get(reverse("mantenimiento:pwa-sw"))
 
         self.assertEqual(app.status_code, 200)
-        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261003-filtros-cedis", { scope: "/mantenimiento/" })')
+        self.assertContains(app, 'navigator.serviceWorker.register("/mantenimiento/sw.js?v=20261005-documentos-financieros-v1", { scope: "/mantenimiento/" })')
         self.assertEqual(worker.status_code, 200)
         self.assertEqual(worker["Content-Type"], "application/javascript")
         worker_source = worker.content.decode()
         self.assertIn('const CACHE_PREFIX = "pollyanas-mantenimiento-pwa-";', worker_source)
         cache_version = re.search(r'const CACHE_VERSION = "([^"]+)";', worker_source).group(1)
-        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v30-${CACHE_VERSION}`;", worker_source)
+        self.assertIn("const CACHE_NAME = `${CACHE_PREFIX}v36-${CACHE_VERSION}`;", worker_source)
         registration_source = app.content.decode()
         registration_version = re.search(r'/mantenimiento/sw\.js\?v=([^"&]+)', registration_source).group(1)
         self.assertEqual(cache_version, registration_version)
@@ -405,7 +405,7 @@ class MantenimientoUnifiedAccessTests(TestCase):
         self.assertContains(app, 'counts: {abiertos: 0, en_proceso: 0, criticos: 0, cerrados: 0}')
         self.assertContains(app, 'history: {periodo: vistaInicial === "historial" ? "todo" : "30d", activo: vistaInicial === "historial" ? (entrada.get("activo") || "") : "", tipo: "todo", estado: "todo", sucursal: "", unidad: "", autor: "", page: 1')
         self.assertContains(app, "detailCache: new Map()")
-        self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0}")
+        self.assertContains(app, "requestGeneration: {inbox: 0, history: 0, detail: 0, capture: 0}")
         self.assertContains(app, 'apiV2Fetch(`/items/${tipo}/${id}/`)')
         self.assertContains(app, 'periodo=${encodeURIComponent(state.history.periodo)}')
         self.assertContains(app, "Cargar más")
@@ -1674,7 +1674,7 @@ class AltaProveedorDesdeSeguimientoTests(TestCase):
 
     def test_service_worker_bumpeado_con_el_cambio_de_template(self):
         sw = (Path(settings.BASE_DIR) / "static/mantenimiento/sw.js").read_text()
-        self.assertIn("20261003-filtros-cedis", sw)
+        self.assertIn("20261005-documentos-financieros-v1", sw)
 
 
 class ProveedorTelefonoWhatsappTests(TestCase):

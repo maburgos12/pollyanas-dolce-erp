@@ -3572,6 +3572,44 @@ class RRHHViewsTests(TestCase):
         empleado.refresh_from_db()
         self.assertFalse(empleado.activo)
 
+    def test_baja_rechaza_ficha_equivocada_y_repeticion(self):
+        empleado = Empleado.objects.create(nombre="ANGELICA GASTELUM", codigo="355")
+        otro = Empleado.objects.create(nombre="JOHAN FIGUEROA", codigo="356")
+        url = reverse("rrhh:empleados")
+        datos = {"action": "baja", "empleado": str(otro.pk), "nombre_baja": empleado.nombre,
+                 "fecha_baja": "2026-09-10", "motivo": EmpleadoBaja.MOTIVO_OTRO}
+
+        self.client.post(url, datos)
+        self.assertFalse(EmpleadoBaja.objects.exists())
+        otro.refresh_from_db()
+        self.assertTrue(otro.activo)
+
+        datos["empleado"] = ""
+        self.client.post(url, datos)
+        self.assertFalse(EmpleadoBaja.objects.exists())
+
+        datos["empleado"] = str(empleado.pk)
+        self.client.post(url, datos)
+        self.client.post(url, datos)
+        self.assertEqual(EmpleadoBaja.objects.filter(empleado=empleado).count(), 1)
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.activo)
+
+    def test_bajas_heredadas_repetidas_cuentan_una_salida(self):
+        empleado = Empleado.objects.create(nombre="JORGE ISAAC", codigo="270")
+        primera = EmpleadoBaja.objects.create(
+            empleado=empleado, fecha_ingreso=empleado.fecha_ingreso, fecha_baja="2026-08-22",
+        )
+        EmpleadoBaja.objects.bulk_create([EmpleadoBaja(
+            empleado=empleado, nombre=empleado.nombre, fecha_ingreso=empleado.fecha_ingreso,
+            fecha_baja="2026-08-22", motivo=EmpleadoBaja.MOTIVO_NO_APTO,
+        )])
+
+        listado = self.client.get(reverse("rrhh:empleados"))
+        self.assertEqual([baja.id for baja in listado.context["bajas_recientes"]], [primera.id])
+        indicadores = self.client.get(reverse("rrhh:rrhh_indicadores"), {"mes": "2026-08"})
+        self.assertEqual(indicadores.context["stats"]["bajas"], 1)
+
     def test_empleados_crea_usuario_repartidor_con_password_y_licencia(self):
         from logistica.models import Repartidor
 
@@ -5500,6 +5538,13 @@ class ListaRayaIdentidadTests(TestCase):
             departamento=Empleado.DEP_PRODUCCION,
             sucursal_ref=sucursal,
         )
+        EmpleadoBaja.objects.create(
+            empleado=empleado, nombre=empleado.nombre,
+            fecha_ingreso=empleado.fecha_ingreso, fecha_baja=date(2026, 5, 31),
+        )
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.activo)
+        fecha_ingreso = empleado.fecha_ingreso
         row = EmpleadoListaRaya(
             codigo="346",
             nombre="REY IVAN VALDEZ FELIX",
@@ -5550,6 +5595,8 @@ class ListaRayaIdentidadTests(TestCase):
         self.assertEqual(pendiente.empleado_sugerido, empleado)
         empleado.refresh_from_db()
         self.assertEqual(empleado.codigo, "EMP-2606-001")
+        self.assertFalse(empleado.activo)
+        self.assertEqual(empleado.fecha_ingreso, fecha_ingreso)
 
 
 class NominaLineaSnapshotTests(TestCase):

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
 from datetime import date, datetime
-from decimal import Decimal
-from io import StringIO
+from decimal import Decimal, InvalidOperation
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from django.db import transaction
+import hashlib
+from zipfile import ZipFile
 
 from openpyxl import load_workbook
 
-from activos.models import Activo, BitacoraMantenimiento, OrdenMantenimiento
 
 
 SECTION_HINTS = (
@@ -67,116 +66,76 @@ SKIP_SERIES_VALUES: frozenset[str] = frozenset({"INSTALACION"})
 FORCE_INCLUDE_NAMES: frozenset[str] = frozenset({"CORTINA METALICA"})
 
 
-@dataclass
-class ParsedRow:
-    nombre: str
-    marca: str
-    modelo: str
-    serie: str
-    ubicacion: str
-    fecha_1: date | None
-    costo_1: Decimal
-    fecha_2: date | None
-    costo_2: Decimal
+MAX_FILE_BYTES = 2 * 1024 * 1024
+MAX_SOURCE_ROWS = 1000
 
 
-def import_bitacora(
-    archivo: str | Path | BinaryIO,
-    *,
-    sheet_name: str = "",
-    dry_run: bool = False,
-    skip_servicios: bool = False,
-) -> dict[str, Any]:
-    source = _build_source_rows(archivo=archivo, sheet_name=sheet_name)
+def leer_archivo(archivo):
+    """Bytes exactos; el nombre sólo elige el formato, nunca la identidad."""
+    nombre = _get_source_name(archivo)
+    if Path(nombre).suffix.lower() not in {'.csv', '.tsv', '.xlsx'}:
+        raise ValueError('Selecciona un archivo CSV o XLSX.')
+    if isinstance(archivo, (str, Path)):
+        with open(archivo, 'rb') as stream:
+            raw = stream.read(MAX_FILE_BYTES + 1)
+    else:
+        archivo.seek(0)
+        raw = archivo.read(MAX_FILE_BYTES + 1)
+        archivo.seek(0)
+    if not isinstance(raw, bytes) or not raw or len(raw) > MAX_FILE_BYTES:
+        raise ValueError('El archivo debe contener datos y no superar 2 MB.')
+    return nombre, raw
 
-    stats = {
-        "sheet_name": source["sheet_name"],
-        "source_format": source["source_format"],
-        "filas_leidas": 0,
-        "filas_validas": 0,
-        "activos_creados": 0,
-        "activos_actualizados": 0,
-        "servicios_creados": 0,
-        "servicios_omitidos": 0,
-    }
 
-    current_location = ""
-
-    @transaction.atomic
-    def _run():
-        nonlocal current_location
-        for row_idx, raw_row in source["rows"]:
-            stats["filas_leidas"] += 1
-            raw_name = _as_text(raw_row.get("nombre"))
-            raw_brand = _as_text(raw_row.get("marca"))
-            raw_model = _as_text(raw_row.get("modelo"))
-            raw_serial = _as_text(raw_row.get("serie"))
-            raw_date_1 = raw_row.get("fecha_1")
-            raw_cost_1 = raw_row.get("costo_1")
-            raw_date_2 = raw_row.get("fecha_2")
-            raw_cost_2 = raw_row.get("costo_2")
-
-            if not any(
-                [raw_name, raw_brand, raw_model, raw_serial, raw_date_1, raw_cost_1, raw_date_2, raw_cost_2]
-            ):
+def preview_bitacora(archivo, *, sheet_name=''):
+    """Parser puro: ni consultas, ni escrituras, ni signals, ni secuencias."""
+    nombre, raw = leer_archivo(archivo)
+    stream = BytesIO(raw); stream.name = nombre
+    try:
+        source = _build_source_rows(stream, sheet_name)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError('No se pudo leer el CSV/XLSX. Revisa el formato y las columnas del archivo.') from exc
+    servicios = []
+    ubicacion = ''
+    validas = 0
+    for fila, row in source['rows']:
+        texts = [_as_text(row.get(key)) for key in ('nombre','marca','modelo','serie')]
+        name, brand, model, serial = texts
+        values = [row.get(key) for key in ('fecha_1','costo_1','fecha_2','costo_2')]
+        if _is_section_row(*texts, *values):
+            ubicacion = name
+            continue
+        if _is_header_row(*texts):
+            if name and _looks_like_section(name):
+                ubicacion = name
+            continue
+        if not name or ubicacion.upper() in SKIP_SECTIONS:
+            continue
+        if serial.upper() in SKIP_SERIES_VALUES and name.upper() not in FORCE_INCLUDE_NAMES:
+            continue
+        validas += 1
+        for slot in (1, 2):
+            fecha_raw, costo_raw = row.get(f'fecha_{slot}'), row.get(f'costo_{slot}')
+            if not _as_text(fecha_raw) and not _as_text(costo_raw):
                 continue
+            fecha, costo = _as_date(fecha_raw), _as_decimal(costo_raw)
+            servicios.append(dict(fila=fila, slot=slot, nombre=name, marca=brand, modelo=model,
+                serie=serial, ubicacion=ubicacion, fecha=fecha.isoformat() if fecha else None,
+                costo=str(costo) if costo is not None else None,
+                fecha_fuente=_as_text(fecha_raw), costo_fuente=_as_text(costo_raw)))
+    return dict(filename=Path(nombre).name, sha256=hashlib.sha256(raw).hexdigest(),
+                sheet_name=source['sheet_name'], source_format=source['source_format'],
+                filas_leidas=len(source['rows']), filas_validas=validas, servicios=servicios,
+                activos_creados=0, activos_actualizados=0, servicios_creados=0, servicios_omitidos=0)
 
-            if _is_section_row(raw_name, raw_brand, raw_model, raw_serial, raw_date_1, raw_cost_1, raw_date_2, raw_cost_2):
-                current_location = raw_name.strip()
-                continue
 
-            if _is_header_row(raw_name, raw_brand, raw_model, raw_serial):
-                # Capturar nombre de sección cuando viene en la misma fila que los headers de columna
-                if raw_name and _looks_like_section(raw_name):
-                    current_location = raw_name.strip()
-                continue
-
-            if not raw_name:
-                continue
-
-            # Omitir secciones excluidas (ej. logística — tiene su propio módulo)
-            if current_location.upper() in SKIP_SECTIONS:
-                continue
-
-            # Omitir registros de instalación/trabajo civil (no son activos físicos)
-            if raw_serial.upper() in SKIP_SERIES_VALUES and raw_name.upper() not in FORCE_INCLUDE_NAMES:
-                continue
-
-            parsed = ParsedRow(
-                nombre=raw_name.strip(),
-                marca=raw_brand.strip(),
-                modelo=raw_model.strip(),
-                serie=raw_serial.strip(),
-                ubicacion=current_location,
-                fecha_1=_as_date(raw_date_1),
-                costo_1=_as_decimal(raw_cost_1),
-                fecha_2=_as_date(raw_date_2),
-                costo_2=_as_decimal(raw_cost_2),
-            )
-            stats["filas_validas"] += 1
-
-            activo, created, changed = _upsert_activo(parsed)
-            if created:
-                stats["activos_creados"] += 1
-            elif changed:
-                stats["activos_actualizados"] += 1
-
-            if skip_servicios:
-                continue
-
-            for fecha, costo in ((parsed.fecha_1, parsed.costo_1), (parsed.fecha_2, parsed.costo_2)):
-                if not fecha:
-                    continue
-                if _ensure_service_order(activo, fecha, costo):
-                    stats["servicios_creados"] += 1
-                else:
-                    stats["servicios_omitidos"] += 1
-
-        if dry_run:
-            transaction.set_rollback(True)
-
-    _run()
-    return stats
+def import_bitacora(archivo, *, sheet_name='', dry_run=False, skip_servicios=False):
+    """Compatibilidad segura: sólo lectura. Apply exige actor y revisión explícitos."""
+    if not dry_run:
+        raise ValueError('La importación requiere vista previa, equipo existente y decisiones revisadas.')
+    return preview_bitacora(archivo, sheet_name=sheet_name)
 
 
 def _normalize_header(value: Any) -> str:
@@ -195,36 +154,43 @@ def _build_source_rows(archivo: str | Path | BinaryIO, sheet_name: str) -> dict[
             "rows": rows,
         }
 
-    wb = load_workbook(archivo, data_only=True)
-    selected_sheet_name = sheet_name or wb.sheetnames[0]
-    if selected_sheet_name not in wb.sheetnames:
-        raise ValueError(f"La hoja '{selected_sheet_name}' no existe. Hojas: {', '.join(wb.sheetnames)}")
-    ws = wb[selected_sheet_name]
-    return {
-        "sheet_name": selected_sheet_name,
-        "source_format": "XLSX",
-        "rows": _iter_xlsx_rows(ws),
-    }
+    with ZipFile(archivo) as zipped:
+        if sum(item.file_size for item in zipped.infolist()) > 30 * 1024 * 1024:
+            raise ValueError('El XLSX descomprimido supera 30 MB.')
+    archivo.seek(0) if hasattr(archivo, 'seek') else None
+    wb = load_workbook(archivo, data_only=True, read_only=True)
+    formulas = None
+    try:
+        selected_sheet_name = sheet_name or wb.sheetnames[0]
+        if len(selected_sheet_name) > 31:
+            raise ValueError('El nombre real de la hoja supera 31 caracteres.')
+        if selected_sheet_name not in wb.sheetnames:
+            raise ValueError(f"La hoja '{selected_sheet_name}' no existe.")
+        archivo.seek(0) if hasattr(archivo, 'seek') else None
+        formulas = load_workbook(archivo, data_only=False, read_only=True)
+        return {'sheet_name': selected_sheet_name, 'source_format': 'XLSX',
+                'rows': _iter_xlsx_rows(wb[selected_sheet_name], formulas[selected_sheet_name])}
+    finally:
+        wb.close()
+        if formulas is not None:
+            formulas.close()
 
 
-def _iter_xlsx_rows(ws) -> list[tuple[int, dict[str, Any]]]:
-    rows: list[tuple[int, dict[str, Any]]] = []
-    for row_idx in range(1, ws.max_row + 1):
-        rows.append(
-            (
-                row_idx,
-                {
-                    "nombre": ws.cell(row_idx, 2).value,
-                    "marca": ws.cell(row_idx, 3).value,
-                    "modelo": ws.cell(row_idx, 4).value,
-                    "serie": ws.cell(row_idx, 5).value,
-                    "fecha_1": ws.cell(row_idx, 6).value,
-                    "costo_1": ws.cell(row_idx, 7).value,
-                    "fecha_2": ws.cell(row_idx, 8).value,
-                    "costo_2": ws.cell(row_idx, 9).value,
-                },
-            )
-        )
+def _iter_xlsx_rows(ws, formula_ws=None):
+    if ws.max_row > MAX_SOURCE_ROWS or ws.max_column > 32:
+        raise ValueError('Máximo 1000 filas y 32 columnas por hoja.')
+    rows, header_map = [], {}
+    formula_rows = formula_ws.iter_rows() if formula_ws is not None else None
+    for row_idx, values in enumerate(ws.iter_rows(values_only=True), start=1):
+        if formula_rows is not None:
+            cells = next(formula_rows)
+            values = [value if value is not None or cell.data_type != 'f' else 'Fórmula sin resultado almacenado'
+                      for value, cell in zip(values, cells)]
+        detected = _detect_csv_header(list(values))
+        if detected:
+            header_map = detected
+            continue
+        rows.append((row_idx, _extract_csv_row(list(values), header_map)))
     return rows
 
 
@@ -268,16 +234,20 @@ def _iter_csv_rows(archivo: str | Path | BinaryIO) -> list[tuple[int, dict[str, 
     }
     delimiter = max(delimiter_scores, key=delimiter_scores.get)
     reader = csv.reader(StringIO(text), delimiter=delimiter)
-    all_rows = list(reader)
-    if not all_rows:
-        return []
-
-    header_map = _detect_csv_header(all_rows[0])
-    payload_rows = all_rows[1:] if header_map else all_rows
-    parsed_rows: list[tuple[int, dict[str, Any]]] = []
-    start_idx = 2 if header_map else 1
-    for idx, row in enumerate(payload_rows, start=start_idx):
-        parsed_rows.append((idx, _extract_csv_row(row, header_map)))
+    parsed_rows, header_map = [], {}
+    while True:
+        start_line = reader.line_num + 1
+        try:
+            row = next(reader)
+        except StopIteration:
+            break
+        if reader.line_num > MAX_SOURCE_ROWS:
+            raise ValueError('Máximo 1000 filas físicas por archivo.')
+        detected = _detect_csv_header(row)
+        if detected:
+            header_map = detected
+            continue
+        parsed_rows.append((start_line, _extract_csv_row(row, header_map)))
     return parsed_rows
 
 
@@ -343,12 +313,15 @@ def _extract_csv_row(row: list[str], header_map: dict[str, int]) -> dict[str, An
 def _as_text(value) -> str:
     if value is None:
         return ""
-    return str(value).strip()
+    text = str(value).strip()
+    if '\x00' in text:
+        raise ValueError('El archivo contiene caracteres nulos no válidos.')
+    return text
 
 
-def _as_decimal(value) -> Decimal:
+def _as_decimal(value) -> Decimal | None:
     if value in (None, ""):
-        return Decimal("0")
+        return None
     try:
         text = str(value).strip().replace("$", "").replace(" ", "")
         if "," in text and "." in text:
@@ -358,9 +331,13 @@ def _as_decimal(value) -> Decimal:
                 text = text.replace(",", "")
         elif "," in text and "." not in text:
             text = text.replace(",", ".")
-        return Decimal(text).quantize(Decimal("0.01"))
+        number = Decimal(text)
+        if not number.is_finite() or number < 0 or number >= Decimal('1e16'):
+            return None
+        number = number.quantize(Decimal('0.01'))
+        return number if number < Decimal('1e16') else None
     except Exception:
-        return Decimal("0")
+        return None
 
 
 def _as_date(value) -> date | None:
@@ -387,8 +364,8 @@ def _looks_like_section(name: str) -> bool:
 
 
 def _is_header_row(name: str, brand: str, model: str, serial: str) -> bool:
-    key = " ".join([name, brand, model, serial]).upper()
-    return "FECHA MANTENIMIENTO" in key or ("MARCA" in key and "MODELO" in key)
+    return (brand.upper() == 'MARCA' and model.upper() == 'MODELO'
+            and (_normalize_header(name) in {'nombre', 'equipo', 'activo'} or _looks_like_section(name)))
 
 
 def _is_section_row(name: str, brand: str, model: str, serial: str, d1, c1, d2, c2) -> bool:
@@ -398,133 +375,3 @@ def _is_section_row(name: str, brand: str, model: str, serial: str, d1, c1, d2, 
         return False
     upper = name.upper()
     return any(h in upper for h in SECTION_HINTS)
-
-
-def _infer_categoria(nombre: str) -> str:
-    n = (nombre or "").upper()
-    if "HORNO" in n:
-        return "Hornos"
-    if "AIRE" in n or "MINISPLIT" in n or "ACONDICIONADO" in n or "ACONDIONADO" in n:
-        return "Aire acondicionado"
-    if "CUARTO FRIO" in n or "CUARTO FRÍO" in n:
-        return "Cuartos fríos"
-    if "REFRIG" in n or "FREEZER" in n or "COOLER" in n or "MESA REFRIG" in n:
-        return "Refrigeración"
-    if "BITRINA" in n or "VITRINA" in n or "CARRITO" in n:
-        return "Exhibición"
-    if "BATIDORA" in n:
-        return "Batidoras"
-    if "BASCULA" in n:
-        return "Básculas"
-    if "LICUADORA" in n:
-        return "Licuadoras"
-    if "COMPUTADORA" in n or "LAPTOP" in n or "IPAD" in n:
-        return "Cómputo"
-    if "IMPRESORA" in n:
-        return "Impresoras/POS"
-    if "CORTINA" in n:
-        return "Infraestructura"
-    if "EXTRACTOR" in n:
-        return "Ventilación"
-    if "TARTERA" in n or "LAMINADORA" in n or "RALLADOR" in n or "CREMADORA" in n:
-        return "Equipos de pastelería"
-    if "MICROONDAS" in n or "ESTUFA" in n or "TARJA" in n or "COMPRESOR" in n:
-        return "Equipos de cocina"
-    return "Equipos"
-
-
-def _compose_notes(marca: str, modelo: str, serie: str, previous: str) -> str:
-    tags = []
-    if marca:
-        tags.append(f"Marca: {marca}")
-    if modelo:
-        tags.append(f"Modelo: {modelo}")
-    if serie:
-        tags.append(f"Serie: {serie}")
-    base = " | ".join(tags)
-    if previous and base and base not in previous:
-        return (previous + "\n" + base).strip()
-    if previous:
-        return previous
-    return base
-
-
-def _upsert_activo(parsed: ParsedRow) -> tuple[Activo, bool, bool]:
-    new_notes = _compose_notes(parsed.marca, parsed.modelo, parsed.serie, "")
-
-    # Buscar coincidencia exacta por nombre + ubicación + notas idénticas
-    qs = Activo.objects.filter(nombre__iexact=parsed.nombre)
-    if parsed.ubicacion:
-        qs = qs.filter(ubicacion__iexact=parsed.ubicacion)
-
-    # Si hay serie, intentar match exacto por notas que contengan esa serie
-    if parsed.serie:
-        match = qs.filter(notas__icontains=parsed.serie).order_by("id").first()
-        if match:
-            return match, False, False
-
-    # Sin serie: tomar el primero cuyas notas sean idénticas al nuevo registro
-    # (evita fusionar piezas distintas con el mismo nombre)
-    if new_notes:
-        match = qs.filter(notas=new_notes).order_by("id").first()
-        if match:
-            return match, False, False
-    elif not parsed.serie:
-        # Mismo nombre, misma ubicación, sin serie ni notas:
-        # contar cuántos ya existen con notas vacías para no crear infinitos duplicados
-        existing_empty = list(qs.filter(notas="").order_by("id"))
-        if existing_empty:
-            # Ya existe al menos uno sin serie — devolver el último para no duplicar
-            # en re-importaciones, pero NO crear uno nuevo aquí; se crea abajo si no hay ninguno
-            return existing_empty[-1], False, False
-
-    # Crear nuevo activo — cada pieza física es un registro independiente
-    nombre_final = parsed.nombre
-    # Si ya existe otro con mismo nombre+ubicación, añadir sufijo para distinguirlos
-    count = qs.count()
-    if count > 0:
-        nombre_final = f"{parsed.nombre} ({count + 1})"
-
-    activo = Activo(
-        nombre=nombre_final,
-        categoria=_infer_categoria(parsed.nombre),
-        ubicacion=parsed.ubicacion,
-        estado=Activo.ESTADO_OPERATIVO,
-        criticidad=Activo.CRITICIDAD_MEDIA,
-        notas=new_notes,
-        activo=True,
-    )
-    activo.save()
-    return activo, True, False
-
-
-def _ensure_service_order(activo: Activo, fecha: date, costo: Decimal) -> bool:
-    existing = OrdenMantenimiento.objects.filter(
-        activo_ref=activo,
-        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
-        fecha_programada=fecha,
-        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
-    ).first()
-    if existing:
-        return False
-
-    orden = OrdenMantenimiento.objects.create(
-        activo_ref=activo,
-        tipo=OrdenMantenimiento.TIPO_PREVENTIVO,
-        prioridad=OrdenMantenimiento.PRIORIDAD_MEDIA,
-        estatus=OrdenMantenimiento.ESTATUS_CERRADA,
-        fecha_programada=fecha,
-        fecha_inicio=fecha,
-        fecha_cierre=fecha,
-        responsable="Servicio externo",
-        descripcion="Servicio importado desde bitácora histórica",
-        costo_otros=costo,
-    )
-    BitacoraMantenimiento.objects.create(
-        orden=orden,
-        accion="IMPORT_SERVICIO",
-        comentario="Registro importado desde archivo histórico",
-        usuario=None,
-        costo_adicional=Decimal("0"),
-    )
-    return True

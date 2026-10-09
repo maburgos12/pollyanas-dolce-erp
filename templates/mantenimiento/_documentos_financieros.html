@@ -1,0 +1,40 @@
+<div id="documentos-trabajo">
+  {% if mostrar_mensaje and mensaje %}<p {% if ok %}role="status"{% else %}role="alert"{% endif %}>{{ mensaje }}</p>{% endif %}
+  {% if error_documento_id %}<p>{{ error_documento_id }} Selecciona un documento existente para continuar.</p>
+  <label for="motivo-borrador">Motivo conservado</label><textarea id="motivo-borrador" class="form-control" readonly>{{ motivo }}</textarea>
+  <label for="evidencia-borrador">Evidencia conservada</label><textarea id="evidencia-borrador" class="form-control" readonly>{{ evidencia }}</textarea>{% endif %}
+  <h2>Buscar documento existente</h2>
+  <form method="get">
+    <label for="tipo_documento">Fuente</label>
+    <select class="form-select" name="tipo_documento" id="tipo_documento">{% for valor, label in tipos %}<option value="{{ valor }}" {% if tipo_documento == valor %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <label for="q">ID o referencia</label><input class="form-control" id="q" name="q" value="{{ q }}" maxlength="200">
+    <button type="submit" class="btn btn-secondary">Buscar</button>
+  </form>
+  <div class="table-responsive"><table class="table"><thead><tr><th>Registro de origen</th><th>Estado y naturaleza</th><th>Importe fuente</th><th>Revisar</th></tr></thead><tbody>
+    {% for opcion in opciones %}<tr><td>{{ opcion.detalle.titulo }} · ID {{ opcion.pk }}{% if opcion.detalle.espejo_id %}<br>Gasto espejo ID {{ opcion.detalle.espejo_id }}{% endif %}</td><td>{{ opcion.detalle.estado }} · {{ opcion.detalle.naturaleza }}</td><td>{% if opcion.detalle.importe != None %}{{ opcion.detalle.importe }} {{ opcion.detalle.moneda }}{% else %}Importe no disponible en tu alcance{% endif %}</td><td><a href="?tipo_documento={{ tipo_documento }}&amp;documento_id={{ opcion.pk }}&amp;q={{ q|urlencode }}&amp;page={{ pagina.number }}">Revisar documento</a></td></tr>{% empty %}<tr><td colspan="4">No hay documentos en esta búsqueda y tu alcance actual.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <nav aria-label="Páginas de documentos">{% if pagina.has_previous %}<a href="?tipo_documento={{ tipo_documento }}&amp;q={{ q|urlencode }}&amp;page={{ pagina.previous_page_number }}">Anterior</a>{% endif %} Página {{ pagina.number }} de {{ pagina.paginator.num_pages }} {% if pagina.has_next %}<a href="?tipo_documento={{ tipo_documento }}&amp;q={{ q|urlencode }}&amp;page={{ pagina.next_page_number }}">Siguiente</a>{% endif %}</nav>
+  {% if elegida %}
+  <section><h2>Documento seleccionado</h2><p>{{ tipo_documento }} · ID {{ documento_id }} · {{ detalle_elegida.titulo }} · {{ detalle_elegida.estado }} · {% if detalle_elegida.importe != None %}{{ detalle_elegida.importe }} {{ detalle_elegida.moneda }}{% else %}Importe no disponible en tu alcance{% endif %}</p>
+    {% if detalle_elegida.espejo_id %}<p>Gasto espejo ID {{ detalle_elegida.espejo_id }}: representa el mismo hecho de esta obligación.</p>{% endif %}
+    {% for etapa in detalle_elegida.etapas %}<p>{{ etapa.tipo }} · ID {{ etapa.id }} · {{ etapa.fecha|date:'d/m/Y' }} · {{ etapa.referencia }}{% if etapa.importe != None %} · {{ etapa.importe }} MXN{% endif %}</p>{% endfor %}
+    {% if tipo_documento == 'obligacion' and not detalle_elegida.etapas %}<p>Sin etapas en las tablas de parcialidades y pagos de esta obligación. No acredita ausencia de pagos en otras fuentes.</p>{% endif %}
+    {% if detalle_elegida.cfdi_relacionado_id %}<p>CFDI relacionado en banco: ID {{ detalle_elegida.cfdi_relacionado_id }}</p>{% endif %}
+    {% if detalle_elegida.movimiento_relacionado_id %}<p>Movimiento relacionado en banco: ID {{ detalle_elegida.movimiento_relacionado_id }}</p>{% endif %}
+    {% if puede_crear %}
+    <form method="post" action="{% url 'mantenimiento:documentos-trabajo' tipo trabajo_id %}" data-async-action>
+      {% csrf_token %}<input type="hidden" name="tipo_documento" value="{{ tipo_documento }}"><input type="hidden" name="documento_id" value="{{ documento_id }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="page" value="{{ pagina.number }}">
+      <label for="motivo">Motivo del soporte</label><textarea class="form-control" name="motivo" id="motivo" maxlength="2000" rows="3" required>{{ motivo }}</textarea>
+      <label for="evidencia">Evidencia: documento, folio o referencia verificable</label><textarea class="form-control" name="evidencia" id="evidencia" maxlength="4000" rows="3" required>{{ evidencia }}</textarea>
+      <p><label><input type="checkbox" name="confirmado" required {% if confirmado %}checked{% endif %}> Revisé el documento actual y confirmo el soporte de este trabajo.</label></p>
+      <button type="submit" class="btn btn-primary">Confirmar soporte</button>
+    </form>
+    {% else %}<p>Acceso de lectura. La confirmación exige gestión del trabajo y capacidad vigente en la fuente.</p>{% endif %}
+  </section>
+  {% endif %}
+  <h2>Soportes confirmados</h2>
+  <div class="table-responsive"><table class="table"><thead><tr><th>Documento</th><th>Estado e importe fuente</th><th>Motivo y evidencia</th><th>Confirmación original</th></tr></thead><tbody>
+  {% for v in vinculos %}<tr><td>{{ v.get_tipo_documento_display }} · ID {{ v.documento_original_id }}<br>{{ v.detalle.titulo }}{% if v.gasto_original_id and v.tipo_documento == 'obligacion' %}<br>Gasto espejo ID {{ v.gasto_original_id }}{% endif %}</td><td>{{ v.detalle.estado }} · {{ v.detalle.naturaleza }}<br>{% if v.detalle.importe != None %}{{ v.detalle.importe }} {{ v.detalle.moneda }}{% else %}Importe no disponible en tu alcance{% endif %}</td><td>{{ v.motivo|linebreaksbr }}<br>{{ v.evidencia|linebreaksbr }}</td><td>{{ v.creado_en|date:'d/m/Y H:i' }}<br>{% if v.autor %}{{ v.autor.get_username }}{% else %}Cuenta eliminada{% endif %} · ID {{ v.autor_original_id }}</td></tr>{% empty %}<tr><td colspan="4">Sin soporte confirmado visible. Los documentos fuera de tu alcance no se muestran.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p><a href="{% url 'mantenimiento:documentos-trabajo' tipo trabajo_id %}?tipo_documento={{ tipo_documento }}&amp;documento_id={{ documento_id }}&amp;q={{ q|urlencode }}&amp;page={{ pagina.number }}">Revisar de nuevo el documento actual</a></p>
+</div>

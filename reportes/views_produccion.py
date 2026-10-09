@@ -184,6 +184,10 @@ def _format_decimal(value: Any, *, places: int = 2, trim: bool = True) -> str:
 
 
 def _export_raw_value(row: dict[str, Any], key: str) -> Any:
+    coverage = row.get("point_coverage", {}).get(key)
+    if row.get(key) is None and coverage and coverage["known"]:
+        unit = "sucursales" if row.get("_row_type") == "detail" else "producto-sucursal"
+        return f"Parcial: {_format_decimal(coverage['known_sum'], places=1)} ({coverage['known']}/{coverage['total']} {unit})"
     if key == "dif" and row.get("produccion_referencia"):
         return "Referencia"
     if key == "estado_inventario" and row.get(key) == "Conciliado" and row.get("estado_trazabilidad") not in (None, "Conciliado"):
@@ -506,13 +510,20 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             row["pct_merma"] = waste / sold * 100 if waste is not None and sold and sold > ZERO else None
             row["json"] = {k: str(v) if isinstance(v, Decimal) else v for k, v in row.items()}
         groups, grand_total = self._group_rows(rows)
+        kpi_rows = {key: ([row for row in rows if not row["produccion_referencia"]] if key == "dif" else rows)
+                    for key in ("vendido", "producido", "dif", "costo_merma")}
+        kpi_coverage = {key: {"known": sum(row[key] is not None for row in eligible), "total": len(eligible)}
+                        for key, eligible in kpi_rows.items()}
+        kpi_totals = {key: (sum((row[key] for row in eligible if row[key] is not None), ZERO)
+                            if kpi_coverage[key]["known"] else None)
+                      for key, eligible in kpi_rows.items()}
         fuentes = {key: {"label": "Auditoría guardada / evidencia Point local"} for key in ("ventas", "produccion", "merma", "inventario")}
         updated = report["updated_at"]
-        metadata = {"status": report["audit_status"], "stale": report["stale"],
+        metadata = {"status": report["audit_status"], "stale": report["stale"], "partial": report["partial"],
                     "updated_at": updated.isoformat() if updated else None, "counts": report["counts"],
                     "branch": report["selected_branch"], "branch_label": report["selected_branch_label"]}
         operational_summary = {"tone": "success" if report["audit_status"] == "Conciliado" and not report["stale"] else "warning",
-                               "title": "Pendiente de actualización" if report["stale"] else report["audit_status"],
+                               "title": "Actualización parcial" if report["partial"] else "Pendiente de actualización" if report["stale"] else report["audit_status"],
                                "message": report["selected_branch_label"]}
         periodos = self._available_periods(selected=period.value)
 
@@ -527,6 +538,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "familias": categories,
             "groups": groups,
             "grand_total": grand_total,
+            "kpi_totals": kpi_totals,
+            "kpi_coverage": kpi_coverage,
             "json_rows": [row["json"] for row in rows],
             "fuentes": fuentes,
             "banners": [],
@@ -588,6 +601,12 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "diferencia_inventario": _sum_or_none(rows, "diferencia_inventario"),
             "produccion_referencia": bool(rows) and all(row.get("produccion_referencia") for row in rows),
             "dif_referencia": _sum_or_none(rows, "dif_referencia"),
+        }
+        totals["point_coverage"] = {
+            key: {"known": sum(row["point_coverage"][key]["known"] for row in rows),
+                  "total": sum(row["point_coverage"][key]["total"] for row in rows),
+                  "known_sum": sum((row["point_coverage"][key]["known_sum"] for row in rows), ZERO)}
+            for key in ("inventario_inicial", "inventario_final_point_total")
         }
         totals["pct_merma"] = (
             (totals["merma_reportada"] / totals["vendido"]) * Decimal("100")

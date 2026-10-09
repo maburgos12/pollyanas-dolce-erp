@@ -29,10 +29,40 @@ from reportes.models import (
     ProductInventoryAuditCase,
     ProductInventoryAuditEvent,
     ProductInventoryAuditRun,
+    ProductInventoryDocumentaryEvent,
 )
 
 
 class InventoryTraceabilityViewsTests(TestCase):
+    def test_documentary_close_is_distinct_from_balanced_and_pending_has_plain_reason(self):
+        self.client.force_login(self.viewer)
+        url = reverse("reportes:inventory_audit")
+        pending = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(pending, "Pendiente")
+        self.assertContains(pending, "Ver motivo")
+        self.assertNotContains(pending, "Cerrado documentalmente")
+
+        ProductInventoryDocumentaryEvent.objects.create(
+            month=self.run.month, branch=self.branch, product=self.product,
+            action=ProductInventoryDocumentaryEvent.Action.PENDING,
+            source_fingerprint="", reason="Falta comprobar el saldo final de Point.", actor=self.approver,
+        )
+        pending_with_reason = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(pending_with_reason, "Falta comprobar el saldo final de Point.")
+
+        ProductInventoryDocumentaryEvent.objects.create(
+            month=self.run.month, branch=self.branch, product=self.product,
+            action=ProductInventoryDocumentaryEvent.Action.CLOSE,
+            source_fingerprint="f" * 64,
+            evidence={"calculation_fingerprint": "f" * 64, "quantities": {"difference": "0", "opening_point": "10", "point_closing": "10"}},
+            actor=self.approver,
+        )
+        closed = self.client.get(url, {"month": "2026-08"}, HTTP_ACCEPT="text/html")
+        self.assertContains(closed, "Cerrado documentalmente")
+        self.assertContains(closed, '<td class="text-end"><span class="inventory-audit-difference is-needs_explanation">0</span></td>', html=True)
+        detail = self.client.get(reverse("reportes:inventory_audit_case", args=[self.case.pk]), HTTP_ACCEPT="text/html")
+        self.assertContains(detail, "Esta corrida es anterior a la revisión documental")
+
     def test_missing_close_is_not_labeled_as_a_proven_zero_or_available_close(self):
         from reportes.views_inventory_traceability import _case_status_context, _case_payload
         self.case.movement_status = "SOURCE_INCOMPLETE"
@@ -299,7 +329,7 @@ class InventoryTraceabilityViewsTests(TestCase):
         self.assertContains(response, 'aria-current="page">Excepciones')
         self.assertContains(response, 'tab=balanced')
         self.assertContains(response, "Excepciones <span>2</span>", html=True)
-        self.assertContains(response, "Conciliados <span>1</span>", html=True)
+        self.assertContains(response, "Saldo cuadrado <span>1</span>", html=True)
         self.assertContains(response, self.product.name)
         self.assertContains(response, pending_product.name)
         self.assertNotContains(response, balanced_product.name)
@@ -371,7 +401,7 @@ class InventoryTraceabilityViewsTests(TestCase):
             {"month": "2026-08", "tab": "balanced"},
             HTTP_ACCEPT="text/html",
         )
-        self.assertContains(balanced_response, 'aria-current="page">Conciliados')
+        self.assertContains(balanced_response, 'aria-current="page">Saldo cuadrado')
         self.assertContains(balanced_response, balanced_product.name)
         self.assertNotContains(balanced_response, self.product.name)
         self.assertNotContains(balanced_response, pending_product.name)

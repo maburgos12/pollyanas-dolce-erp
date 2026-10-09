@@ -101,3 +101,82 @@ class ComprobanteCapturaEquipo(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_captura_usuario_op_clave_uniq')]
+
+
+class ComprobanteConfiguracionPlan(models.Model):
+    """Recibo técnico; el resultado pertenece a Plan, incluso tras su eliminación."""
+    usuario = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    operacion = models.CharField(max_length=32)
+    clave = models.UUIDField()
+    huella = models.CharField(max_length=64)
+    plan = models.ForeignKey('activos.PlanMantenimiento', on_delete=models.SET_NULL, null=True)
+    activo_ref = models.ForeignKey('activos.Activo', on_delete=models.SET_NULL, null=True)
+    objeto_id = models.PositiveIntegerField(null=True)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['usuario', 'operacion', 'clave'], name='mant_plan_usuario_op_clave_uniq')]
+
+
+class VinculoProveedorDocumental(models.Model):
+    """M:N confirmado por IDs, con procedencia conservada tras borrar fuentes."""
+    perfil = models.ForeignKey(ProveedorServicio, null=True, on_delete=models.SET_NULL,
+                               related_name="vinculos_documentales")
+    proveedor = models.ForeignKey("maestros.Proveedor", null=True, on_delete=models.SET_NULL,
+                                  related_name="vinculos_tecnicos_documentales")
+    perfil_original_id = models.PositiveBigIntegerField(editable=False)
+    proveedor_original_id = models.PositiveBigIntegerField(editable=False)
+    motivo = models.TextField()
+    evidencia = models.TextField()
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+                              related_name="vinculos_proveedores_confirmados")
+    autor_original_id = models.PositiveBigIntegerField(editable=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
+        constraints = [models.UniqueConstraint(fields=["perfil_original_id", "proveedor_original_id"],
+                                               name="mant_vinculo_proveedor_par_unico")]
+
+
+class DocumentoFinancieroTrabajo(models.Model):
+    """Confirmación M:N de soporte existente; nunca equivale a un nuevo gasto."""
+    tipo_trabajo = models.CharField(max_length=8, choices=[("orden", "Orden"), ("falla", "Incidencia")])
+    trabajo_original_id = models.PositiveBigIntegerField(editable=False)
+    tipo_documento = models.CharField(max_length=12, choices=[("obligacion", "Obligación"), ("gasto", "Gasto"), ("cfdi", "CFDI"), ("movimiento", "Movimiento")])
+    documento_original_id = models.PositiveBigIntegerField(editable=False)
+    orden = models.ForeignKey("activos.OrdenMantenimiento", null=True, on_delete=models.SET_NULL, related_name="documentos_financieros")
+    falla = models.ForeignKey("fallas.ReporteFalla", null=True, on_delete=models.SET_NULL, related_name="documentos_financieros")
+    obligacion = models.ForeignKey("reportes.ObligacionGasto", null=True, on_delete=models.SET_NULL, related_name="trabajos_documentados")
+    gasto = models.ForeignKey("reportes.GastoOperativoMensual", null=True, on_delete=models.SET_NULL, related_name="trabajos_documentados")
+    cfdi = models.ForeignKey("sat_client.CfdiDescargado", null=True, on_delete=models.SET_NULL, related_name="trabajos_documentados")
+    movimiento = models.ForeignKey("syncfy_client.MovimientoBancario", null=True, on_delete=models.SET_NULL, related_name="trabajos_documentados")
+    orden_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    falla_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    obligacion_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    gasto_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    cfdi_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    movimiento_original_id = models.PositiveBigIntegerField(null=True, editable=False)
+    motivo = models.TextField(max_length=2000)
+    evidencia = models.TextField(max_length=4000)
+    autor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name="documentos_trabajo_confirmados")
+    autor_original_id = models.PositiveBigIntegerField(editable=False)
+    creado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creado_en", "-pk"]
+        constraints = [
+            models.UniqueConstraint(fields=["tipo_trabajo", "trabajo_original_id", "tipo_documento", "documento_original_id"], name="mant_trabajo_documento_unico"),
+            models.UniqueConstraint(fields=["tipo_trabajo", "trabajo_original_id", "gasto_original_id"], condition=models.Q(gasto_original_id__isnull=False), name="mant_trabajo_gasto_unico"),
+            models.CheckConstraint(check=(models.Q(tipo_trabajo="orden", orden_original_id=models.F("trabajo_original_id"), orden_original_id__isnull=False, falla_original_id__isnull=True) | models.Q(tipo_trabajo="falla", falla_original_id=models.F("trabajo_original_id"), falla_original_id__isnull=False, orden_original_id__isnull=True)), name="mant_documento_trabajo_tipo"),
+            models.CheckConstraint(check=(models.Q(tipo_documento="obligacion", obligacion_original_id=models.F("documento_original_id"), obligacion_original_id__isnull=False, cfdi_original_id__isnull=True, movimiento_original_id__isnull=True) | models.Q(tipo_documento="gasto", gasto_original_id=models.F("documento_original_id"), gasto_original_id__isnull=False, obligacion_original_id__isnull=True, cfdi_original_id__isnull=True, movimiento_original_id__isnull=True) | models.Q(tipo_documento="cfdi", cfdi_original_id=models.F("documento_original_id"), cfdi_original_id__isnull=False, obligacion_original_id__isnull=True, gasto_original_id__isnull=True, movimiento_original_id__isnull=True) | models.Q(tipo_documento="movimiento", movimiento_original_id=models.F("documento_original_id"), movimiento_original_id__isnull=False, obligacion_original_id__isnull=True, gasto_original_id__isnull=True, cfdi_original_id__isnull=True)), name="mant_documento_fuente_tipo"),
+            *[models.CheckConstraint(check=models.Q(**{f"{campo}__isnull": True}) | models.Q(**{f"{campo}_id": models.F(f"{campo}_original_id"), f"{campo}_original_id__isnull": False}), name=f"mant_doc_{campo}_original") for campo in ("orden", "falla", "obligacion", "gasto", "cfdi", "movimiento", "autor")],
+        ]
+
+    def save(self, *args, **kwargs):
+        from django.core.exceptions import ValidationError
+        db = kwargs.get("using") or self._state.db or "default"
+        if not self._state.adding or (self.pk is not None and type(self).objects.using(db).filter(pk=self.pk).exists()):
+            raise ValidationError("La confirmación documental es inmutable.")
+        kwargs["force_insert"] = True
+        return super().save(*args, **kwargs)

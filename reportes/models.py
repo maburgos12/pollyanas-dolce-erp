@@ -3436,6 +3436,7 @@ class ProductInventoryAuditRun(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     rebuilt_at = models.DateTimeField(null=True, blank=True)
     last_successful_rebuild_at = models.DateTimeField(null=True, blank=True)
+    partial_published = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     objects = ProductInventoryAuditRunQuerySet.as_manager()
@@ -3694,6 +3695,47 @@ class ProductInventoryAuditCase(models.Model):
 
     def __str__(self) -> str:
         return f"{self.month:%Y-%m} · {self.branch} · {self.product}"
+
+
+class ProductInventoryDocumentaryEventQuerySet(_NoBulkMutationQuerySet):
+    def delete(self):
+        raise ValidationError("Los eventos documentales son inmutables.")
+
+
+class ProductInventoryDocumentaryEvent(models.Model):
+    class Action(models.TextChoices):
+        CLOSE = "CLOSE", "Cierre documental"
+        REOPEN = "REOPEN", "Reabrir cierre documental"
+        PENDING = "PENDING", "Revisión documental pendiente"
+
+    month = models.DateField(db_index=True)
+    branch = models.ForeignKey("pos_bridge.PointBranch", on_delete=models.PROTECT)
+    product = models.ForeignKey("pos_bridge.PointProduct", on_delete=models.PROTECT)
+    action = models.CharField(max_length=8, choices=Action.choices)
+    source_fingerprint = models.CharField(max_length=64)
+    evidence = models.JSONField(default=dict)
+    reason = models.CharField(max_length=240, blank=True, default="")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    objects = ProductInventoryDocumentaryEventQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [
+            models.Index(fields=["month", "branch", "product", "-id"], name="inv_doc_pair_latest_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(check=models.Q(month__day=1), name="inv_doc_month_day_1"),
+            models.CheckConstraint(check=models.Q(action__in=("CLOSE", "REOPEN", "PENDING")), name="inv_doc_action_valid"),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise ValidationError("Los eventos documentales son inmutables.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("Los eventos documentales son inmutables.")
 
 
 class ProductInventoryAuditEventQuerySet(_NoBulkMutationQuerySet):

@@ -40,3 +40,34 @@ Código actual: `_supersede_stale_waste_rows` elimina PointWasteLine y MermaPOS 
 Pantalla autenticada del expediente 3237: inicial 0 + entradas 518 - ventas 477 - merma 41 = cierre 0; saldo y trazabilidad etiquetados Conciliado, sin conteo manual. Al desplegar Merma / Ver evidencia (5), cuatro filas muestran 6, 16, 7 y 7 piezas; la quinta muestra «Evidencia ya no disponible en la fuente. Referencia conservada: Point #1676». Por tanto el total sigue siendo una proyección anterior, no una validación de la fuente actual. También enumera cinco transferencias con finalización pendiente. No se pulsó aprobar/resolver ni se alteró el caso; consola sin errores.
 
 Se requiere autorización concreta antes de corregir el importador compartido de mermas y reincorporar el registro original verificado, porque eso interviene fuentes operativas, no solamente la lectura del auditor. La recuperación propuesta queda limitada al folio 1683114, usando sus identificadores originales y deduplicación; no implica crear una merma comercial nueva, ajustar existencias ni modificar Point. Validar límites de extracción y sustitución con pruebas antes de elegir la implementación; no inventar un desplazamiento temporal o permitir borrar otras filas por mera ausencia del listado.
+
+## Actualización: autorización humana explícita
+
+Mauricio respondió «si» a esa reparación concreta. El respaldo identifica también
+MermaPOS1676: fecha27sept, receta16/ERP1/SKU0135, cantidad5, fuentePOINT_BRIDGE_WASTE.
+PointWasteLine1676 conserva aliasbranch24 y writer79066. VPS read-only comprobó
+ambas PK libres antes de intervenir. La recuperación publicada debe conservar
+ambos registros completos (incluidos timestamps/costos/raw), rechazar colisiones,
+ser dry-run por defecto y no producir HTTP ni stock/ventas/avisos. Una recuperación
+del contador267 no acredita por sí sola autoridad de los manifiestos posteriores.
+Registrar deploy/aplicación/UI e idempotencia antes de afirmar reparación ejecutada.
+
+## Aplicación comprobada en producción
+
+3oct17:16 Mazatlán: PR1455 fusionado75fb0de1 y desplegado por flujo oficial,
+CI37162776413 completo PASS, check0/migratecheck0/readiness exit0. Recuperación
+autorizada restauró únicamente los dos originales PK1676 de tablas distintas;
+backup montado read-only, dry-run0, primera2, segunda0, HTTP0. Se preservaron hash,
+movimiento1683114, cinco piezas, writer79066, branchalias24 y fechas UTC literales.
+Huella de las otras266 filas de cada fuente, ventas/casos/stock y jobs inalterada.
+No se creó merma Point ni ajuste de inventario.
+
+UI autenticada caso3237 muestra nuevamente referencia1683114, cantidad5 y
+responsable original Alondra Alvarado; conserva ventas477/merma41 y Sin conteo
+manual. Consola0; documento recargado HTTP200 desde network mediante serviceworker.
+Los cinco documentos de finalización pendientes no fueron aprobados ni omitidos.
+
+Autoridad fresca permanece falsa aunque hay267 waste rows: manifiesto78023,
+234 filas vinculadas, WASTE_SYNC_COUNT_MISMATCH/JOB_MIXED. No alterar counters viejos,
+componer cobertura por apariencia ni forzar materialización. Otra sincronización
+mensual requiere aprobación de alcance adicional; recuperación no equivale a cierre.

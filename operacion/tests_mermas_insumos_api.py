@@ -13,7 +13,7 @@ from django.utils import timezone
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from mermas.models import MermaInsumo, OrdenAjustePoint
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob, PointTransferLine
-from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryBusyError
 from rrhh.models import Empleado
 
 
@@ -170,7 +170,7 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20260911-pasaporte-qr-v2")
+        self.assertContains(pagina, "20261008-mermas-guardado-seguro-v3")
         self.assertContains(
             pagina,
             'navigator.serviceWorker.register("/app/sw.js?v=20260927-higiene-continuidad-v1"',
@@ -245,6 +245,23 @@ class OperacionMermasInsumosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertFalse(MermaInsumo.objects.exists())
+
+    def test_catalogo_sin_sesion_redirige_a_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"), {"codigo_point": "INS-001"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login") + "?next="))
+
+    @patch("operacion.views.consultar_existencia_insumo_point", side_effect=PointLiveInventoryBusyError("Point está sincronizando"))
+    def test_point_ocupado_informa_espera_sin_crear_merma(self, _mock):
+        response = self.client.post(reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload()), content_type="application/json")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "point_busy")
+        self.assertFalse(MermaInsumo.objects.exists())
+        response = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"), {"codigo_point":"INS-001"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "point_busy")
 
     @patch("operacion.views.consultar_existencia_insumo_point")
     def test_cantidad_superior_a_point_no_registra_merma(self, mock_consultar):
@@ -535,3 +552,30 @@ class OperacionMermasInsumosApiTests(TestCase):
             merma.refresh_from_db()
             self.assertEqual(merma.estatus, estado)
             self.assertFalse(OrdenAjustePoint.objects.filter(merma=merma).exists())
+
+    def test_reintento_identificado_no_duplica_ni_vuelve_a_consultar_point(self):
+        from uuid import uuid4
+        body = self.payload(request_id=str(uuid4()))
+        first = self.client.post(reverse("operacion:mermas_insumos_crear_api"), json.dumps(body), content_type="application/json")
+        with patch("operacion.views.consultar_existencia_insumo_point", side_effect=AssertionError("Replay must not call Point")):
+            retry = self.client.post(reverse("operacion:mermas_insumos_crear_api"), json.dumps(body), content_type="application/json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(first.json(), retry.json())
+        self.assertEqual(MermaInsumo.objects.count(), 1)
+
+    def test_misma_clave_insumo_con_datos_distintos_rechaza_y_nueva_clave_crea(self):
+        from uuid import uuid4
+        body = self.payload(request_id=str(uuid4()))
+        url = reverse("operacion:mermas_insumos_crear_api")
+        self.client.post(url, json.dumps(body), content_type="application/json")
+        body["cantidad"] = "2.000"
+        self.assertEqual(self.client.post(url, json.dumps(body), content_type="application/json").status_code, 409)
+        body["request_id"] = str(uuid4())
+        self.assertEqual(self.client.post(url, json.dumps(body), content_type="application/json").status_code, 201)
+        self.assertEqual(MermaInsumo.objects.count(), 2)
+
+    def test_clave_insumo_invalida_no_crea_y_conserva_campos(self):
+        body = self.payload(request_id="invalid")
+        response = self.client.post(reverse("operacion:mermas_insumos_crear_api"), json.dumps(body), content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MermaInsumo.objects.exists())

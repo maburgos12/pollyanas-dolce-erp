@@ -1,4 +1,7 @@
 from core.access import (
+    ROLE_DG,
+    has_any_role,
+    can_view_rrhh,
     can_manage_module,
     can_review_seguimiento_global,
     can_view_reportes,
@@ -644,6 +647,20 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "submodule": "vacaciones",
                     "initial": "V",
                     "badge_count": vacaciones_por_autorizar,
+                }
+            )
+        if (user.is_superuser or has_any_role(user, ROLE_DG)) and can_view_rrhh(user):
+            match_len = len("/rrhh/permisos/") if current_path.startswith("/rrhh/permisos/") else 0
+            best_match_len = max(best_match_len, match_len)
+            mi_trabajo["items"].append(
+                {
+                    "label": "Permisos por autorizar",
+                    "url": "/rrhh/permisos/",
+                    "active": False,
+                    "_match_len": match_len,
+                    "module": "rrhh",
+                    "submodule": "permisos",
+                    "initial": "P",
                 }
             )
         try:

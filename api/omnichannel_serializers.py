@@ -210,6 +210,13 @@ class OmnichannelDeliveryStatusSerializer(serializers.Serializer):
         return {"id": actor_id, "nombre": name}
 
 
+class OmnichannelDeliveryPreparationSerializer(OmnichannelDeliveryStatusSerializer):
+    repartidor_id = None
+    estatus = serializers.ChoiceField(choices=(
+        SolicitudDomicilio.ESTATUS_PREPARANDO, SolicitudDomicilio.ESTATUS_LISTO,
+    ))
+
+
 class OmnichannelDeliveryIntakeSerializer(serializers.Serializer):
     canal = serializers.ChoiceField(
         choices=(
@@ -275,3 +282,10 @@ class OmnichannelDeliveryIntakeSerializer(serializers.Serializer):
                 {"social_reference": "Este canal requiere una referencia."},
             )
         return attrs
+
+
+class WebPointLinkSerializer(serializers.Serializer):
+    external_id = serializers.CharField(max_length=120)
+    kind = serializers.ChoiceField(choices=('NOTE', 'SPECIAL'))
+    point_id = serializers.RegexField(r'^\d+$', max_length=120)
+    fecha = serializers.DateField()

@@ -15,8 +15,9 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Sucursal
+from pos_bridge.models import PointBranch, PointProduct
 from recetas.models import Receta
-from reportes.models import ProductInventoryAuditRun
+from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
 from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 from reportes.views_produccion import ProducidoVsVendidoMermaView
 
@@ -74,6 +75,33 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         for export in ("_export_csv", "_export_xlsx", "_export_pdf"):
             self.assertEqual(getattr(self.view, export)(context).status_code, 200)
 
+    def test_partial_branch_stock_shows_proven_balance_without_claiming_full_total(self):
+        self.make_case(opening_point=10, point_closing=9)
+        other = PointBranch.objects.create(external_id="AUDITOR-SECOND", name="Otra sucursal")
+        self.make_case(branch=other, opening_point=0, point_closing=0,
+            movement_status="SOURCE_INCOMPLETE", source_trace={"opening": [], "closing": []},
+            issue_codes=["SOURCE_INCOMPLETE"])
+
+        context = self.context()
+        row = context["groups"][0]["rows"][0]
+        self.assertIsNone(row["inventario_inicial"])
+        self.assertEqual(row["point_coverage"]["inventario_inicial"],
+                         {"known": 1, "total": 2, "known_sum": Decimal("10")})
+        self.assertEqual(context["grand_total"]["point_coverage"]["inventario_inicial"],
+                         row["point_coverage"]["inventario_inicial"])
+        html = self.render(context)
+        self.assertIn("Parcial: 10", html)
+        self.assertIn("1 de 2 sucursales", html)
+        self.assertIn("Otra sucursal", html)
+        self.assertIn("Inicio Point comprobado: 1 de 2 producto-sucursal", html)
+        self.assertIn("Fuentes: ventas netas", html)
+        self.assertIn("Parcial: 10 (1/2 sucursales)", self.view._export_csv(context).content.decode())
+        workbook = load_workbook(BytesIO(self.view._export_xlsx(context).content), read_only=True)
+        sheet = workbook["Producido vs Vendido"]
+        headers = next(sheet.iter_rows(min_row=5, max_row=5, values_only=True))
+        detail = next(sheet.iter_rows(min_row=7, max_row=7, values_only=True))
+        self.assertEqual(detail[headers.index("Ini. Point")], "Parcial: 10 (1/2 sucursales)")
+
     def test_unknown_slice_origin_does_not_create_fractional_parent_exit(self):
         self.make_case(conversion_in=414, conversion_out=0, issue_codes=["CONVERSION_SOURCE_UNRESOLVED"])
         row = self.context()["groups"][0]["rows"][0]
@@ -116,6 +144,19 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         context = self.context()
         self.assertIsNone(context["grand_total"]["dif"])
         self.assertEqual(context["json_rows"][0]["dif_referencia"], "1.0000")
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+
+    def test_resale_products_are_outside_screen_and_exports_but_cases_remain(self):
+        self.recipe.modo_costeo = Receta.MODO_COSTEO_REVENTA
+        self.recipe.save()
+        self.make_case(production=0, sales=2)
+        context = self.context()
+        self.assertEqual(context["json_rows"], [])
+        self.assertEqual(ProductInventoryAuditCase.objects.count(), 1)
+        self.assertNotIn(self.product.name, self.view._export_csv(context).content.decode())
+        workbook = load_workbook(BytesIO(self.view._export_xlsx(context).content))
+        self.assertFalse(any(self.product.name in row for row in workbook.active.values))
+        self.assertEqual(self.view._export_pdf(context).status_code, 200)
 
     def test_no_audit_does_not_claim_zero_or_complete(self):
         context = self.context()
@@ -133,6 +174,36 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(context["audit_updated_at"], stamp)
         self.assertIn("Pendiente de actualización", self.render(context))
 
+    def test_partial_publication_uses_its_timestamp_without_claiming_month_closed(self):
+        self.make_case()
+        stamp = timezone.now()
+        self.audit_run.last_successful_rebuild_at = stamp
+        self.audit_run.rebuilt_at = stamp + timezone.timedelta(minutes=1)
+        self.audit_run.partial_published = True
+        self.audit_run.status = ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE
+        self.audit_run.save()
+        context = self.context()
+        self.assertTrue(context["audit_metadata"]["partial"])
+        self.assertEqual(context["audit_updated_at"], self.audit_run.rebuilt_at)
+        html = self.render(context)
+        self.assertIn("Actualización parcial", html)
+        self.assertIn("septiembre no está cerrado", html)
+        self.assertIn("Parcial: 1 de 1 productos", html)
+
+    def test_kpis_show_known_products_as_partial_not_zero_for_missing_product(self):
+        self.make_case(production=5, sales=4, waste=0)
+        missing = PointProduct.objects.create(
+            external_id="MISSING-PRODUCT", sku="MISSING-PRODUCT", name="Producto sin fuente",
+        )
+        self.make_case(product=missing, movement_status="SOURCE_INCOMPLETE",
+                       issue_codes=["CASE_MISSING_FROM_REBUILD"])
+        context = self.context()
+        self.assertIsNone(context["grand_total"]["vendido"])
+        self.assertEqual(context["kpi_totals"]["vendido"], 4)
+        self.assertEqual(context["kpi_totals"]["producido"], 5)
+        self.assertEqual(context["kpi_coverage"]["vendido"], {"known": 1, "total": 2})
+        self.assertIn("Parcial: 1 de 2 productos", self.render(context))
+
     def test_month_catalog_uses_runs_not_raw_history(self):
         ProductInventoryAuditRun.objects.create(month=date(2026, 6, 1))
         with CaptureQueriesContext(connection) as queries:
@@ -145,9 +216,10 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         from django.urls import reverse
         case = self.make_case()
         html = self.render(self.context())
-        self.assertIn("Ver trazabilidad", html)
+        self.assertIn("Ver detalle", html)
         self.assertIn(reverse("reportes:inventory_audit_case", args=[case.pk]), html)
-        self.assertIn("Sucursal o almacén", html)
+        self.assertIn("Sucursal de venta o CEDIS", html)
+        self.assertNotIn("Pendiente por fuentes", html)
         self.assertNotIn("production-source-list", html)
         self.assertNotIn("Autoridad Point:", html)
         self.assertIn("requestSubmit()", html)

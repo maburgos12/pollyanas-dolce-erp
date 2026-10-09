@@ -38,7 +38,7 @@ def _source_signature(month):
         revision = cache.get(f"inventory-audit:dirty:{month}")
     except Exception:
         revision = None  # Cache is optional; a missing revision never proves freshness.
-    evidence = ["auditor-evidence-v1", revision]
+    evidence = ["auditor-evidence-v3-snapshot-boundary-utc", revision]
     # Aggregate bounded source records, including deletes and quantity changes.
     for app, name, field, quantity in (
         ("pos_bridge", "PointProductionLine", "production_date", "produced_quantity"),
@@ -54,6 +54,11 @@ def _source_signature(month):
         stamp = next((f for f in ("updated_at", "imported_at", "created_at") if f in fields), "id")
         is_datetime = model._meta.get_field(field).get_internal_type() == "DateTimeField"
         lower, upper = (datetime.combine(value, time.min, POINT_BUSINESS_TIMEZONE) for value in (month, end)) if is_datetime else (month, end)
+        if name == "PointProductHistoryRow":
+            # Legacy Stock naive dates were persisted as local (+7h). Hash the
+            # bounded candidate window used by the UTC reader, not just old dates.
+            # Extra candidates may invalidate freshness; they never prove coverage.
+            upper += timedelta(hours=7)
         evidence.append(model.objects.filter(**{field + "__gte": lower, field + "__lt": upper}).aggregate(
             count=Count("id"), latest=Max(stamp), last_id=Max("id"), quantity=Sum(quantity)))
     # These catalogs/manifests also change authority, aliases and historical returns.
@@ -77,13 +82,25 @@ def _source_signature(month):
     ):
         evidence.append(list(apps.get_model(app, name).objects.order_by("id").values_list(*fields)))
     snapshot_scope = Q()
-    window = max(0, int(getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", 3))) + 1
+    # The documentary fallback has a fixed three-day post-cut window. The extra
+    # day retains its inclusive upper edge even if a presentation tolerance is0.
+    window = max(3, int(getattr(settings, "PRODUCT_MONTH_CLOSURE_SNAPSHOT_TOLERANCE_DAYS", 3))) + 1
     for boundary in (month, end):
         lower = datetime.combine(boundary - timedelta(days=window), time.min, POINT_BUSINESS_TIMEZONE)
         upper = datetime.combine(boundary + timedelta(days=window), time.min, POINT_BUSINESS_TIMEZONE)
         snapshot_scope |= Q(captured_at__gte=lower, captured_at__lt=upper)
     snapshots = apps.get_model("pos_bridge", "PointInventorySnapshot")
-    evidence.append(list(snapshots.objects.filter(snapshot_scope).order_by("id").values_list("id", "branch_id", "product_id", "stock", "sync_job_id")))
+    scoped_snapshots = snapshots.objects.filter(snapshot_scope)
+    evidence.append(list(scoped_snapshots.order_by("id").values_list(
+        "id", "branch_id", "product_id", "stock", "sync_job_id", "captured_at",
+        "raw_payload", "product__external_id", "sync_job__status", "sync_job__job_type")))
+    # Snapshot boundary proof depends on the original branch extraction log.
+    # Bulk hash its provenance too: raw/queryset edits must not remain fresh just
+    # because they bypass save signals or do not change a job's updated_at.
+    logs = apps.get_model("pos_bridge", "PointExtractionLog")
+    evidence.append(list(logs.objects.filter(
+        sync_job_id__in=scoped_snapshots.values("sync_job_id")
+    ).order_by("id").values_list("id", "sync_job_id", "message", "level", "context")))
     closings = apps.get_model("pos_bridge", "PointHistoricalInventoryClosingLine")
     evidence.append(list(closings.objects.filter(closing__operational_date__in=[month - timedelta(days=1), end - timedelta(days=1)]).order_by("id").values_list("id", "branch_id", "product_id", "stock")))
     return hashlib.sha256(json.dumps(evidence, default=str, sort_keys=True).encode()).hexdigest()
@@ -117,15 +134,18 @@ def refresh_inventory_audit_month(month):
             previous = None
         if previous == signature:
             return {"month": str(month), "status": "unchanged"}
-        result = InventoryAuditMaterializer().rebuild(month=month)
-        if result.required_sources_available:
+        previously_partial = ProductInventoryAuditRun.objects.filter(
+            month=month, partial_published=True).exists()
+        result = InventoryAuditMaterializer().rebuild(month=month, allow_partial=True) if previously_partial else InventoryAuditMaterializer().rebuild(month=month)
+        if result.required_sources_available or result.partial_published:
             def save_revision():
                 try:
                     cache.set(key, signature, timeout=86400)
                 except Exception:
                     logger.exception("No se pudo guardar vigencia de auditoría %s", month)
             transaction.on_commit(save_revision)
-        return {"month": str(month), "status": "updated" if result.required_sources_available else "incomplete", "counts": dict(result)}
+        status = "updated" if result.required_sources_available else "partial" if result.partial_published else "incomplete"
+        return {"month": str(month), "status": status, "counts": dict(result)}
 
 
 def enqueue_inventory_audit_months(months):

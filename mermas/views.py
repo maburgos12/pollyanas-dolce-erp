@@ -3,6 +3,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from io import BytesIO
+from uuid import uuid4
 
 from django.contrib import messages
 from django.contrib.auth import logout
@@ -13,12 +14,14 @@ from django.db.models import Count, Q, Sum
 from django.http import HttpResponse, HttpResponseBadRequest, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.urls import reverse
 from django.views.decorators.http import require_GET, require_POST
 
 from core.access import ACCESS_MANAGE, ACCESS_VIEW, get_module_access, get_submodule_access
 from core.models import Sucursal, UserModuleAccess, sucursales_operativas
 from logistica.models import Repartidor
 from recetas.models import Receta
+from .captura import CapturaConflict, identificar_captura
 
 from .models import (
     MermaEvidencia, MermaInsumo, MermaProducto, MermaRegistro, MermaSucursalAcceso,
@@ -329,7 +332,7 @@ def _producto_rows_from_post(post):
             cantidad = Decimal(cantidad_raw)
         except (InvalidOperation, TypeError):
             raise ValidationError("La cantidad debe ser numérica.")
-        if cantidad <= Decimal("0"):
+        if not cantidad.is_finite() or cantidad <= Decimal("0"):
             raise ValidationError("La cantidad debe ser mayor a cero.")
         rows.append({"receta_id": receta_id or None, "producto_texto": texto, "cantidad": cantidad})
     if not rows:
@@ -376,6 +379,7 @@ def app_home(request):
 
 
 @login_required
+@transaction.atomic
 def crear_registro(request):
     _require_capture(request.user)
     sucursales = _sucursales_captura_producto(request.user)
@@ -392,8 +396,23 @@ def crear_registro(request):
                 raise ValidationError("Toma o sube al menos una foto del producto.")
             if not sucursales.filter(pk=sucursal.pk).exists():
                 raise PermissionDenied("No puedes registrar merma de otra sucursal.")
+            request_id, fingerprint, previous = identificar_captura(
+                MermaRegistro, request_id=request.POST.get("request_id"), actor_id=request.user.pk,
+                sucursal_id=sucursal.pk,
+                payload={"productos": [{**row, "cantidad": str(row["cantidad"])} for row in rows],
+                         "ticket": request.POST.get("ticket_point", "").strip(),
+                         "nota": request.POST.get("nota_sucursal", "").strip()},
+                files={"ticket": ticket_files, "producto": producto_files},
+            )
+            if previous:
+                if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                    return JsonResponse({"id": previous.pk, "folio": previous.folio,
+                                         "request_id": str(request_id),
+                                         "redirect_url": reverse("mermas:detalle", args=[previous.pk])})
+                return redirect("mermas:detalle", pk=previous.pk)
             with transaction.atomic():
                 registro = MermaRegistro.objects.create(
+                    request_id=request_id, payload_hash=fingerprint,
                     sucursal=sucursal,
                     ticket_point=request.POST.get("ticket_point", "").strip(),
                     registrado_por=request.user,
@@ -426,11 +445,15 @@ def crear_registro(request):
                         subido_por=request.user,
                     )
             messages.success(request, f"Merma {registro.folio} registrada. Queda abierta hasta asignar repartidor.")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest" and request_id:
+                return JsonResponse({"id": registro.pk, "folio": registro.folio,
+                                     "request_id": str(request_id),
+                                     "redirect_url": reverse("mermas:detalle", args=[registro.pk])}, status=201)
             return redirect("mermas:detalle", pk=registro.pk)
         except (ValidationError, PermissionDenied) as exc:
             error = exc.messages[0] if hasattr(exc, "messages") else str(exc)
             if request.headers.get("X-Requested-With") == "XMLHttpRequest":
-                return JsonResponse({"error": error}, status=400)
+                return JsonResponse({"error": error}, status=409 if isinstance(exc, CapturaConflict) else 400)
             messages.error(request, error)
 
     productos_iniciales = Receta.objects.order_by("nombre")
@@ -442,6 +465,7 @@ def crear_registro(request):
             "productos_iniciales": productos_iniciales,
             "now": timezone.localtime(),
             "can_dashboard": _can_dashboard(request.user),
+            "request_id": request.POST.get("request_id") or str(uuid4()),
         },
     )
 

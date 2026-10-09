@@ -26,6 +26,7 @@ from api.omnichannel_serializers import (
     OmnichannelDeliveryIntakeSerializer,
     OmnichannelDeliveryQuerySerializer,
     OmnichannelDeliveryStatusSerializer,
+    OmnichannelDeliveryPreparationSerializer,
     OmnichannelCustomerOutputSerializer,
     OmnichannelOrderInputSerializer,
     PendingPointOrderSerializer,
@@ -45,7 +46,8 @@ from crm.services.point_order_link import (
     point_pending_external_id,
     verify_point_link_fingerprint,
 )
-from crm.models import Cliente, DireccionCliente, PedidoCliente
+from crm.models import Cliente, DireccionCliente, PedidoCliente, PointOrderLink
+from crm.services.point_document_link import point_document, point_snapshot, has_verified_point
 from logistica.models import SolicitudDomicilio
 from logistica.services_domicilio_status import (
     DomicilioStatusError,
@@ -1392,6 +1394,7 @@ def _owned_deliveries(api_client):
         .select_related(
             "pedido_cliente",
             "pedido_cliente__cliente",
+            "pedido_cliente__point_order_link",
             "direccion_cliente",
             "repartidor",
             "repartidor__user",
@@ -1404,7 +1407,9 @@ def _owned_deliveries(api_client):
 
 def _mutable_owned_deliveries(api_client):
     """Status writes remain limited to deliveries backed by a Point note."""
-    return _owned_deliveries(api_client).filter(pedido_cliente__point_note_id__gt="")
+    return _owned_deliveries(api_client).filter(
+        Q(pedido_cliente__point_note_id__gt="") | Q(pedido_cliente_id__in=PointOrderLink.objects.filter(is_active=True, last_error="").values("order_id"))
+    )
 
 
 def _pending_point_snapshot(order):
@@ -1416,11 +1421,12 @@ def _pending_point_snapshot(order):
 def _serialize_delivery_summary(delivery):
     order = delivery.pedido_cliente
     pending = _pending_point_snapshot(order)
+    linked = point_document(order)
     return {
         "id": delivery.id,
         "pedido_id": order.id,
         "folio": order.folio,
-        "folio_point": order.point_note_folio or pending.get("folio") or "",
+        "folio_point": order.point_note_folio or (linked.snapshot["folio"] if linked else "") or pending.get("folio") or "",
         "canal": order.canal,
         "estatus": delivery.estatus,
         "ventana_inicio": delivery.ventana_inicio,
@@ -1432,6 +1438,7 @@ def _serialize_delivery_summary(delivery):
         "created_at": delivery.created_at,
         "external_source": order.external_source,
         "external_id": order.external_id,
+        "point_link": _serialize_point_link(order),
     }
 
 
@@ -1458,7 +1465,7 @@ def _serialize_delivery_detail(delivery):
     order = delivery.pedido_cliente
     customer = order.cliente
     address = delivery.direccion_cliente or order.direccion_entrega
-    snapshot = order.point_note_snapshot or {}
+    snapshot = point_snapshot(order)
     route_tracking = None
     if delivery.parada_ruta_id:
         parada = delivery.parada_ruta
@@ -1520,6 +1527,7 @@ def _serialize_delivery_detail(delivery):
         "id": delivery.id,
         "pedido_id": order.id,
         "fuente": _serialize_delivery_source(order),
+        "point_link": _serialize_point_link(order),
         "cliente": {
             "id": customer.id,
             "codigo": customer.codigo,
@@ -1974,6 +1982,7 @@ class PublicOmnichannelDeliveryIntakeView(APIView):
 
 class PublicOmnichannelDeliveryStatusView(APIView):
     permission_classes = [AllowAny]
+    serializer_class = OmnichannelDeliveryStatusSerializer
 
     def patch(self, request, solicitud_id):
         api_client, error = _auth_public_client(request)
@@ -1985,7 +1994,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
         logistics_error = _authorize_logistica_assignment(api_client, request)
         if logistics_error:
             return logistics_error
-        serializer = OmnichannelDeliveryStatusSerializer(data=request.data)
+        serializer = self.serializer_class(data=request.data)
         if not serializer.is_valid():
             _log_access(api_client, request, status.HTTP_400_BAD_REQUEST)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1994,7 +2003,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
             with transaction.atomic():
                 owned = (
                     _mutable_owned_deliveries(api_client)
-                    .select_for_update()
+                    .select_for_update(of=("self",))
                     .filter(pk=solicitud_id)
                     .exists()
                 )
@@ -2003,7 +2012,7 @@ class PublicOmnichannelDeliveryStatusView(APIView):
                 payload = update_domicilio_status(
                     solicitud_id=solicitud_id,
                     api_client=api_client,
-                    repartidor_id=values["repartidor_id"],
+                    repartidor_id=values.get("repartidor_id"),
                     requested_status=values["estatus"],
                     operation_id=values["operation_id"],
                     actor=values["actor"],
@@ -2019,3 +2028,79 @@ class PublicOmnichannelDeliveryStatusView(APIView):
             )
         _log_access(api_client, request, status.HTTP_200_OK)
         return Response(payload)
+
+
+class PublicOmnichannelDeliveryPreparationView(PublicOmnichannelDeliveryStatusView):
+    serializer_class = OmnichannelDeliveryPreparationSerializer
+
+
+def _serialize_point_link(order):
+    link = point_document(order)
+    if not link:
+        return None
+    return {"tipo": link.kind, "point_id": link.point_id, "folio": link.snapshot["folio"],
+            "sucursal": link.snapshot.get("sucursal", link.snapshot.get("branch_name", "")),
+            "fecha_entrega": link.snapshot.get("fecha_entrega"),
+            "folio_final": order.point_note_folio or None, "pk_nota": order.point_note_id or None,
+            "vigente": link.is_active and not link.last_error, "error": link.last_error or ("El documento Point dejó de estar vigente o liquidado; requiere revisión." if not link.is_active else "")}
+
+
+class PublicPointSpecialOrdersView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        if error := _authorize_omnichannel(api_client, request):
+            return error
+        if not _consume_point_search_limit(api_client):
+            return Response({"detail": "Límite de consultas Point excedido."}, status=429)
+        serializer = PointNoteSearchSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        if not data.get("fecha"):
+            return Response({"detail": "Indica la fecha de entrega programada."}, status=400)
+        from pos_bridge.services.point_special_order_service import PointSpecialOrderService
+        try:
+            results = PointSpecialOrderService().search(folio=data["folio"], branch=data["sucursal"], delivery_date=data["fecha"])
+        except (PointNoteDetailError, PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(api_client, request, _coerce_point_error(exc))
+        _log_access(api_client, request, 200)
+        return Response({"results": results, "count": len(results)})
+
+
+class PublicWebPointLinkView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request, solicitud_id):
+        api_client, error = _auth_public_client(request)
+        if error:
+            return error
+        if error := _authorize_omnichannel(api_client, request):
+            return error
+        from api.omnichannel_serializers import WebPointLinkSerializer
+        from crm.services.point_document_link import link_web_point
+        serializer = WebPointLinkSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        delivery = _owned_deliveries(api_client).filter(pk=solicitud_id).first()
+        if not delivery:
+            return Response({"detail": "Domicilio no encontrado."}, status=404)
+        if serializer.validated_data["external_id"] != delivery.pedido_cliente.external_id:
+            return Response({"detail": "La identidad WEB no coincide."}, status=409)
+        try:
+            from pos_bridge.services.point_account_session_lock import point_account_session_lock
+            with point_account_session_lock(wait=False) as acquired:
+                if not acquired:
+                    raise PointNoteUnavailableError("La cuenta Point está ocupada.")
+                link_web_point(order=delivery.pedido_cliente, kind=serializer.validated_data["kind"],
+                               point_id=serializer.validated_data["point_id"],
+                               delivery_date=serializer.validated_data["fecha"], actor=api_client.created_by)
+        except (PointNoteDetailError, PosBridgeError, requests.RequestException) as exc:
+            return _point_error_response(api_client, request, _coerce_point_error(exc))
+        except (ValidationError, IntegrityError) as exc:
+            message = ' '.join(exc.messages) if isinstance(exc, ValidationError) else 'El documento Point ya está vinculado.'
+            return Response({"detail": message}, status=409)
+        _log_access(api_client, request, 200)
+        delivery = _owned_deliveries(api_client).get(pk=solicitud_id)
+        return Response(_serialize_delivery_detail(delivery))

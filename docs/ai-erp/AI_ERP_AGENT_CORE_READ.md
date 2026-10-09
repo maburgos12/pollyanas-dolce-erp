@@ -1,0 +1,110 @@
+# F3 — Agent Core READ/SHADOW
+
+Estado: backend READ verificado con pruebas unitarias y una evaluación privada de OpenAI con datos sintéticos. No activa usuarios ni modifica configuración de producción. El despacho en `execute_chat_turn` exige `AI_AGENT_READ_ENABLED is True`; la ausencia del setting conserva el camino legado. El Gateway requiere por separado `AI_GATEWAY_ASSETS_ENABLED is True` y acceso vigente. Un rechazo del subset nunca cae al catálogo legado.
+
+## Contrato
+
+El catálogo F3 usa Responses del SDK instalado y las tools `erp.search_assets`, `erp.get_asset_context` y `erp.get_pending_maintenance` del Gateway. READ es una decisión del servidor; los schemas se reutilizan con `strict=False` explícito. Los serializers existentes validan tipos, campos extra y alcance. JSON inválido nunca se convierte en argumentos vacíos. F3 no incluye aprobaciones, sincronizaciones, jobs, nuevas tablas ni escrituras operativas.
+
+[F4.1/F4.2](AI_ERP_WORKFLOWS_READ.md) añade tres herramientas técnicas de continuidad al mismo runtime sólo detrás de su gate independiente, apagado por defecto. Las tres herramientas READ conservan sus contratos. La nueva tabla guarda intención y referencias; no captura entidades operativas ni reemplaza el estado del chat.
+
+Antes de llamar al proveedor y de cada tool se refrescan identidad, conversación activa, permisos, ACL, sucursal y acceso financiero. Los mensajes deben pertenecer a la conversación y al turno, con usuario autor y roles correctos. Un fingerprint de permisos y la revalidación de activos materializados detienen el turno ante revocaciones antes de retransmitir contexto previo.
+
+Responses recibe sólo el mensaje actual, un prompt operativo acotado y referencias rehidratadas. No recibe prompts DG, historial narrativo, pins ni otros namespaces de estado. `store=False`, `max_retries=0` y timeout igual al presupuesto temporal restante. Los reasoning items necesarios para continuar se conservan únicamente en memoria durante ese turno; no se persisten.
+
+| Presupuesto por turno | Máximo |
+| --- | ---: |
+| Respuestas de modelo | 6 |
+| Llamadas de tools | 10 |
+| Tiempo medido con reloj monótono | 60 segundos |
+| Texto del mensaje actual | 6000 caracteres |
+| JSON de argumentos | 6000 caracteres |
+| Salida individual de tool | 30000 caracteres |
+| Contexto serializado acumulado | 100000 caracteres |
+
+Estos límites no son un SLA, conteo de tokens ni cuota monetaria. Una salida grande se sustituye por un error JSON completo con metadata de fuente disponible; no se corta JSON. El timeout de SDK acota la espera del proveedor; un handler o consulta de base ya iniciados no se cancelan activamente al vencer el reloj. Se verifica el presupuesto al recuperar control, antes de la siguiente llamada y antes del cierre.
+
+## Referencias, auditoría y presentación
+
+`ChatConversationState.context_window_json.agent_read` conserva sólo `option_ids` (máximo 50, orden original) y `last_asset_id`. Cada nuevo turno los resuelve con `activos_autorizados` fresco; las opciones revocadas mantienen su posición y figuran como indisponibles sin nombre ni ID. La actualización bloquea brevemente la fila y conserva namespaces ajenos y metadata técnica de otros procesos. No son tareas transaccionales F4.
+
+Cada intento ejecutado tiene `ChatToolCall`/`ChatToolResult` terminal vinculado al turno. Los inputs inválidos guardan argumentos vacíos; nombres desconocidos guardan `unregistered`. Se reutiliza la auditoría Gateway incluso en rechazos previos al handler. Un fallo de auditoría o de permisos interrumpe el turno. Un fallo o respuesta incompleta del proveedor después de una tool conserva su evidencia en un cierre ERROR del servidor sólo si una revalidación fresca confirma que aún es accesible; una revocación simultánea oculta esa evidencia. Una salida que excede el límite muestra fuente, fecha, zona y unidad disponibles, sin su payload grande. No se almacenan excepciones, argumentos inválidos ni nombres arbitrarios del proveedor. Los timestamps abarcan el intento real.
+
+`ChatMessage.metadata_json.agent_read` guarda runtime, modelo, rondas, llamadas, fingerprint, IDs materializados y usage observado cuando el proveedor lo entrega. No se calcula costo ni se reemplazan tokens por caracteres. Un replay completo no vuelve a llamar al proveedor ni a tools: devuelve el cierre previo sólo si los permisos y activos siguen accesibles. Ante cambio de alcance produce un error seguro sin contenido anterior y conserva el fingerprint, IDs, rondas y usage del intento original; el rechazo del replay se registra por separado. Los cierres parciales ERROR también conservan los IDs materializados para esta comprobación.
+
+El cierre F3 es estructurado y construido por el servidor a partir de payloads del Gateway: incluye datos útiles de ficha y planes, fuente, fecha, ausencia de datos, ambigüedad y límites. La prosa final del proveedor no se publica. Esto evita que una afirmación del modelo se presente como una acción ejecutada; no pretende ser una evaluación de lenguaje natural. Las consultas de mantenimiento conservan el aviso de historial parcial y de que la ausencia de plan no prueba ausencia de servicio.
+
+### Salida explícita fuera del alcance READ
+
+`erp_explain_read_limit` es una salida técnica interna del runtime, no una nueva herramienta operativa del Gateway HTTP. Se ofrece sólo después de la autorización READ vigente, con schema estricto de una operación enum: READ, CREATE, UPDATE, ACTION, DELETE o UNKNOWN. READ explica que las consultas de otros módulos aún no están integradas; las operaciones restantes explican las capacidades o la ausencia de acciones habilitadas. No busca ventas, inventarios u otros módulos ni concede permisos.
+
+El modelo elige esta salida mediante tool calling cuando la solicitud no se puede resolver con el catálogo actual. El prompt deja de ordenar una lista de pendientes para esas peticiones. El servidor valida el enum, genera la explicación, conserva ChatToolCall/Result y AuditLog `AI_AGENT_READ_LIMIT` en una transacción, revalida acceso y termina sin otra llamada al proveedor. Un fallo de auditoría revierte el recibo técnico y no expone una explicación como resultado confirmado. Los límites y reservas del piloto siguen vigentes, sin reembolso ni renovación automática; el replay no añade llamadas ni reservas.
+
+La card muestra «Fuera del alcance», escapa su contenido y conserva fuente/fecha. Un cierre compuesto sólo por esta salida omite el aviso de historial de mantenimiento porque no se consultó ese historial. El texto libre del proveedor sigue sin publicarse. Las respuestas anteriores permanecen como evidencia histórica; corregir el código no recalcula chats ni convierte una pregunta de ventas en una consulta soportada.
+
+Las proyecciones de historial, herramientas y previews de F3 revalidan esa prueba original mediante la política del runtime antes de mostrar contenido, headers, resumen o payload. El acceso independiente a la página de chat no concede acceso a costos o equipos. Gates apagados, propietario inactivo, conversación archivada, prueba inválida, revocación de permisos o traslado de un equipo ocultan la proyección READ sin borrar sus registros técnicos/auditoría. La preparación del historial enviado al cliente legado usa el mismo guard: con el gate F3 apagado nunca reinyecta mensajes F3 antiguos, aunque sigan vigentes los permisos de lectura. El historial legado puro conserva su comportamiento.
+
+La fila assistant pasa de pending a streaming bajo un bloqueo breve: el mismo mensaje no se ejecuta simultáneamente. La serialización de turnos distintos de una conversación, recuperación tras interrupción de proceso y ejecución durable quedan fuera de F3 y requieren F4.
+
+## Evidencia local y puerta del piloto
+
+Las pruebas usan fixtures sintéticos de PostgreSQL 16 y un doble de OpenAI; el Gateway, serializers, permisos, queryset y auditoría se ejecutan realmente. Cubren encadenamiento en tres respuestas, referencias entre turnos, ordinales conservados, gates exactos, ownership, replay, inputs inválidos, tools desconocidas, límites, revocación financiera/sucursal, errores de proveedor/handler/auditoría, ausencia de datos e historial parcial. No demuestran interpretación real de OpenAI, su costo/latencia ni uso autenticado de un agente en producción.
+
+Entorno de esta tarea: Compose `erp_ai_agent_core_read_20261007`, PostgreSQL local puerto 55507, propietario `codex-erp-ai-root`. Los artefactos RED/GREEN quedan fuera de Git en el directorio privado de la tarea. Integración, CI, despliegue con ambos gates apagados y retiro exacto del entorno corresponden al cierre del propietario; este documento no los declara completados.
+
+La activación para usuarios o datos de producción necesita definir y autorizar su alcance. ChatKit, Telegram, streaming de proveedor y acciones transaccionales siguen fuera del corte. Las pruebas unitarias usan una clave ficticia y un cliente reemplazado; la evaluación siguiente es independiente y usa el proveedor real.
+
+## Evaluación privada real — 2026-10-07
+
+Mauricio autorizó continuar el piloto READ y reutilizar la clave existente. Se usó
+`gpt-4o-mini`, SDK instalado y PostgreSQL16 exclusivo con seis equipos, cuatro planes
+y tres usuarios ficticios. No se enviaron registros operativos, documentos DG ni
+datos de producción. Ambos gates se habilitaron sólo dentro del proceso de prueba.
+
+Corpus fijado antes de ejecutar: 12 consultas, 10 turnos de continuidad, 10 escenarios
+de seguridad con proveedor real y 8 controles deterministas sin red. La evaluación
+ejecuta el runtime y Gateway reales; el proveedor elige las herramientas. La precisión
+se comprueba mediante tools, argumentos y resultados, no por afirmaciones del modelo.
+
+| Medición | Consultas y continuidad | Seguridad y controles | Requests OpenAI |
+| --- | ---: | ---: | ---: |
+| Antes de corregir las instrucciones | 14/22 | 18/18 | 58 |
+| Instrucciones sin fecha del servidor, resultado revisado | 20/22 | 18/18 | 65 |
+| Instrucciones y fecha fresca del servidor | 22/22 | 18/18 | 64 |
+
+El modelo pedía una sucursal ya resuelta por el servidor, interpretaba referencias
+vacías como catálogo vacío, buscaba plurales literalmente o terminaba sin consultar
+la ficha. Se aclaró el contrato de las herramientas en el prompt, sin cambiar
+schemas, permisos, SQL, modelo ni condiciones de ejecución. No hay un router de
+keywords ni una nueva regla de autorización en el prompt.
+
+La segunda medición se contó inicialmente como 22/22, pero la revisión de sus
+argumentos encontró dos horizontes relativos de 2023; ese conteo quedó invalidado.
+El evaluador ahora comprueba también el horizonte enviado. Se aporta `today`
+desde `timezone.localdate()` en las referencias efímeras de cada turno, sin
+guardarlo como estado ni depender de la fecha que recuerde el modelo. Una prueba
+de regresión reprodujo su ausencia y verifica dos días consecutivos.
+
+Las tres mediciones conservaron el mismo corpus y fixtures; no se borraron fallos.
+Los hashes de las cuatro tablas operativas permanecieron iguales tras cada turno.
+Las 92 pruebas locales del runtime, chat y Gateway pasaron; check/migrate check
+sin errores y makemigrations sin cambios. No se certifica resistencia universal
+a injection ni una tasa estable de acierto: es un corpus sintético acotado y una
+sola medición por versión. La prosa del proveedor sigue sin publicarse en la UI.
+
+Límites de evaluación: 80 requests por medición, 1400 tokens de salida/request,
+20000 bytes del JSON/request y reserva conservadora **acumulada** menor a 0.50USD
+para las tres mediciones. Se hicieron 187 requests, sin errores del proveedor. Usage:
+189286 tokens de entrada y 10418 de salida; aplicar la tarifa estándar verificada
+de [OpenAI](https://developers.openai.com/api/docs/pricing), contando caché como
+entrada normal, da 0.03464370USD. Es un cálculo conservador sobre usage, no factura
+ni una garantía monetaria del runtime. La reserva local fue de 0.30566385USD.
+
+Evidencia y check reproducible privados: directorio
+`~/.codex/task-artifacts/ai-erp-read-live-eval-20261007/`, con `evaluate_read.py`,
+`frozen-cases.json`, resultados originales `baseline-*`, segunda medición
+`instructions-only-*`, resultados finales con calendario,
+`provider-results.json`, `summary.json` y registro de ejecución/cierre. No se
+versionan credenciales, respuestas, logs ni artefactos temporales. Ejecutar sólo
+en un worktree registrado y PostgreSQL aislado con los límites del protocolo;
+nunca activar flags ni crear fixtures de esta evaluación en producción.

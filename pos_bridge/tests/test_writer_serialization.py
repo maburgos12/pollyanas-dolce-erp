@@ -1,22 +1,215 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from threading import Barrier, Event, Thread
 from unittest.mock import patch
 
-from django.db import DatabaseError, close_old_connections, transaction
+from django.db import DatabaseError, close_old_connections, connection, transaction
 from django.test import TransactionTestCase
 from django.utils import timezone
 
-from pos_bridge.models import PointBranch, PointDailySale, PointExtractionLog, PointSyncJob
+from pos_bridge.models import PointBranch, PointDailySale, PointExtractionLog, PointSyncJob, PointProduct, PointProductHistoryImport, PointProductHistoryRow, PointRecipeExtractionRun, PointRecipeNode
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from recetas.models import ProductoMonthClosure, ProductoMonthClosureLine, Receta, RecetaCodigoPointAlias
+from reportes.models import ProductBusinessRule
 
 
 class WriterSerializationTests(TransactionTestCase):
     reset_sequences = True
+
+    def _catalog_closure(self):
+        ProductBusinessRule.objects.all().delete()
+        recipe = Receta.objects.create(nombre="Catalog seal", tipo=Receta.TIPO_PRODUCTO_FINAL, hash_contenido="catalog-seal")
+        closure = ProductoMonthClosure.objects.create(month_start=date(2026, 9, 1),
+            month_end=date(2026, 9, 30), status=ProductoMonthClosure.STATUS_BUILT)
+        ProductoMonthClosureLine.objects.create(closure=closure, receta_padre=recipe)
+        rule = ProductBusinessRule.objects.create(product_name="Catalog rule", classification="REVENTA")
+        node = PointRecipeNode.objects.create(run=PointRecipeExtractionRun.objects.create(),
+            identity_key="catalog-node", point_name="Catalog node", point_pk="test")
+        return closure, rule, node
+
+    def test_catalog_writes_block_but_selects_continue_until_seal_commits(self):
+        closure, rule, node = self._catalog_closure()
+        entered, release = Event(), Event()
+        errors = []
+        service = ProductMonthClosureService()
+        original = service._lock_canonical_source_month
+
+        def paused(month):
+            entered.set()
+            self.assertTrue(release.wait(5))
+            original(month)
+
+        with patch.object(service, "_lock_canonical_source_month", side_effect=paused):
+            thread = self._thread(lambda: service.lock(closure=closure), errors)
+            try:
+                self.assertTrue(entered.wait(5), errors)
+                for model, row in ((ProductBusinessRule, rule), (PointRecipeNode, node)):
+                    self.assertTrue(model.objects.filter(pk=row.pk).exists())
+                    table = connection.ops.quote_name(model._meta.db_table)
+                    for operation in ("INSERT", "UPDATE", "DELETE"):
+                        with self.subTest(model=model.__name__, operation=operation):
+                            with self.assertRaises(DatabaseError) as caught:
+                                with transaction.atomic(), connection.cursor() as cursor:
+                                    cursor.execute("SET LOCAL lock_timeout='200ms'")
+                                    if operation == "INSERT":
+                                        if model is ProductBusinessRule:
+                                            model.objects.create(product_name="Catalog phantom", classification="REVENTA")
+                                        else:
+                                            model.objects.create(run_id=node.run_id, identity_key="catalog-phantom", point_name="Catalog phantom")
+                                    elif operation == "UPDATE":
+                                        cursor.execute(f"UPDATE {table} SET id=id WHERE id=%s", [row.pk])
+                                    else:
+                                        cursor.execute(f"DELETE FROM {table} WHERE id=%s", [row.pk])
+                            self.assertEqual(getattr(caught.exception.__cause__, "sqlstate", None)
+                                or getattr(caught.exception.__cause__, "pgcode", None), "55P03")
+            finally:
+                release.set()
+                thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        closure.refresh_from_db()
+        self.assertTrue(closure.is_locked)
+        ProductBusinessRule.objects.filter(pk=rule.pk).update(is_fixed=False)
+        PointRecipeNode.objects.filter(pk=node.pk).update(category="after seal")
+
+    def test_busy_catalog_fails_before_month_mutex_and_releases_first_table(self):
+        closure, rule, node = self._catalog_closure()
+        entered, release = Event(), Event()
+        errors = []
+        table = connection.ops.quote_name(PointRecipeNode._meta.db_table)
+
+        def writer():
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute(f"LOCK TABLE {table} IN ROW EXCLUSIVE MODE")
+                entered.set()
+                self.assertTrue(release.wait(5))
+
+        thread = self._thread(writer, errors)
+        try:
+            self.assertTrue(entered.wait(5), errors)
+            service = ProductMonthClosureService()
+            with transaction.atomic(), patch.object(service, "_lock_canonical_source_month") as month_mutex:
+                with self.assertRaises(ProductMonthClosureError):
+                    service.lock(closure=closure)
+                month_mutex.assert_not_called()
+                probe_errors = []
+
+                def probe_released_rule():
+                    rule_table = connection.ops.quote_name(ProductBusinessRule._meta.db_table)
+                    with transaction.atomic(), connection.cursor() as cursor:
+                        cursor.execute(f"LOCK TABLE {rule_table} IN ROW EXCLUSIVE MODE NOWAIT")
+
+                probe = self._thread(probe_released_rule, probe_errors)
+                probe.join(5)
+                self.assertFalse(probe.is_alive())
+                self.assertEqual(probe_errors, [])
+            closure.refresh_from_db()
+            self.assertFalse(closure.is_locked)
+            self.assertNotIn("lock_event", closure.metadata)
+        finally:
+            release.set()
+            thread.join(5)
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+
+    def _original_history_input(self):
+        branch = PointBranch.objects.create(external_id="8", name="CEDIS")
+        product = PointProduct.objects.create(external_id="109", name="Pastel")
+        rows = [{"FK_Movimiento": 9000, "Fecha": "2026-09-10T18:00:00", "Movimiento": "VENTA",
+                 "Cantidad": 1, "Existencia_anterior": 2, "Existencia_nueva": 1, "Cancelado": False}]
+        evidence = {"source": "POINT_STOCK_HISTORY_API", "domain": "PRODUCT", "response_complete": True,
+            "branch_id": branch.pk, "product_id": product.pk, "history_limit": 300, "fetched_rows": 1,
+            "retrieved_at": "2026-10-03T18:00:00Z",
+            "raw_sha256": hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+            "original_locator": {"source_file": "/evidence/original.jsonl", "source_line": 1},
+            "request_provenance": {"kind": "DERIVED_FROM_ACQUISITION_SCRIPT", "source_file": "/evidence/read-original.py",
+                "source_code": "# original acquisition reader\n",
+                "source_sha256": hashlib.sha256(b"# original acquisition reader\n").hexdigest(),
+                "client_contract": "PointHttpSessionClient.get_stock_history"},
+            "request": {"path": "/Stock/GetHistorial", "params": {
+                "tipo": "false", "almacen": "8", "pkproducto": "109", "movimientos": "300", "tipoMovimiento": ""}}}
+        return branch, product, rows, evidence
+
+    def test_original_initial_creation_serializes_with_capture_on_same_import(self):
+        branch, product, rows, evidence = self._original_history_input()
+        created_uncommitted, release_creation, capture_received, capture_finished = Event(), Event(), Event(), Event()
+        errors = []
+        service = AuditStockHistoryService()
+        canonical_import = service._canonical_import
+
+        def hold_new_import(*args):
+            record = canonical_import(*args)
+            created_uncommitted.set()
+            self.assertTrue(release_creation.wait(5))
+            return record
+
+        class CaptureClient:
+            def get_stock_history(self, *_args, **_kwargs):
+                capture_received.set()
+                return [{**rows[0], "Cancelado": True}]
+
+        def capture_writer():
+            AuditStockHistoryService(client=CaptureClient()).capture(branch, product, date(2026, 9, 1), force=True)
+            capture_finished.set()
+
+        with patch.object(service, "_canonical_import", side_effect=hold_new_import):
+            original_thread = self._thread(lambda: service.ingest_original_response(branch, product, date(2026, 9, 1), rows, evidence=evidence), errors)
+            self.assertTrue(created_uncommitted.wait(5), errors)
+            capture_thread = self._thread(capture_writer, errors)
+            try:
+                self.assertTrue(capture_received.wait(5), errors)
+                self.assertFalse(capture_finished.wait(0.25), errors)
+                self.assertEqual(PointProductHistoryImport.objects.count(), 0)
+                self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+            finally:
+                release_creation.set()
+                original_thread.join(5)
+                capture_thread.join(5)
+        self.assertFalse(original_thread.is_alive() or capture_thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(capture_finished.is_set())
+        self.assertEqual(PointProductHistoryImport.objects.count(), 1)
+        record = PointProductHistoryImport.objects.get()
+        self.assertEqual(record.rows.count(), 1)
+        self.assertTrue(record.rows.get().cancelled)
+        self.assertEqual(len(record.raw_metadata["original_responses"]), 1)
+        self.assertEqual(len(record.raw_metadata["response_provenance"]), 2)
+
+    def test_original_ingest_waits_for_monthly_closure_source_mutex(self):
+        branch, product, rows, evidence = self._original_history_input()
+        locked, release_lock, writer_finished = Event(), Event(), Event()
+        errors = []
+
+        def hold_month():
+            with transaction.atomic():
+                ProductMonthClosureService._lock_canonical_source_month(date(2026, 9, 1))
+                locked.set()
+                self.assertTrue(release_lock.wait(5))
+
+        def original_writer():
+            AuditStockHistoryService().ingest_original_response(branch, product, date(2026, 9, 1), rows, evidence=evidence)
+            writer_finished.set()
+
+        locker = self._thread(hold_month, errors)
+        self.assertTrue(locked.wait(5), errors)
+        writer = self._thread(original_writer, errors)
+        try:
+            self.assertFalse(writer_finished.wait(0.25), errors)
+            self.assertEqual(PointProductHistoryRow.objects.count(), 0)
+        finally:
+            release_lock.set()
+            locker.join(5)
+            writer.join(5)
+        self.assertFalse(locker.is_alive() or writer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertTrue(writer_finished.is_set())
+        self.assertEqual(PointProductHistoryRow.objects.count(), 1)
 
     @staticmethod
     def _plan(note):

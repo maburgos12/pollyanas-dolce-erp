@@ -34,8 +34,9 @@ class Command(BaseCommand):
             action="append",
             type=int,
             default=[],
-            help="Limita la consulta Point a uno o más expedientes.",
+            help="Limita la investigación o consulta Point a uno o más expedientes.",
         )
+        parser.add_argument("--no-notify", action="store_true", help="Actualiza investigaciones sin enviar avisos.")
 
     def handle(self, *args, **options):
         try:
@@ -47,7 +48,10 @@ class Command(BaseCommand):
             self._refresh_point_history(month, case_ids=options["case_id"])
             return
 
-        counters = InventoryAuditAgent().run_month(month, dry_run=options["dry_run"])
+        counters = InventoryAuditAgent().run_month(
+            month, dry_run=options["dry_run"], case_ids=options["case_id"] or None,
+            notify=not options["no_notify"],
+        )
         mode = "VISTA PREVIA" if options["dry_run"] else "APLICADO"
         self.stdout.write(f"{mode} · {month:%Y-%m}")
         self.stdout.write(

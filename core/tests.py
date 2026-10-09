@@ -795,6 +795,21 @@ class LoginViewAuthenticatedRedirectTests(TestCase):
         self.user = get_user_model().objects.create_user(username="johana.lopez", password="test12345")
         self.client.force_login(self.user)
 
+    def test_login_muestra_aviso_de_sesion_vencida(self):
+        self.client.logout()
+        from django.contrib.messages import error
+        from django.test import RequestFactory
+        request = RequestFactory().get("/login/")
+        from django.contrib.sessions.middleware import SessionMiddleware
+        from django.contrib.messages.middleware import MessageMiddleware
+        SessionMiddleware(lambda r: None).process_request(request)
+        MessageMiddleware(lambda r: None).process_request(request)
+        error(request, "La sesión del formulario expiró.")
+        from django.template.loader import render_to_string
+        html = render_to_string("core/login.html", request=request)
+        self.assertIn("La sesión del formulario expiró.", html)
+        self.assertIn('autocapitalize="none"', html)
+
     def test_authenticated_user_without_dashboard_access_goes_to_seguimiento(self):
         # Desde 4b10af7c el dashboard requiere revisar seguimiento global
         # (superuser/DG/ADMIN); el resto aterriza en Mi Seguimiento.

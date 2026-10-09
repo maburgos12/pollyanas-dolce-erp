@@ -1,0 +1,39 @@
+{% extends 'base.html' %}
+{% block title %}Revisión documental de mantenimiento{% endblock %}
+{% block content %}
+<div class="module-shell">
+  <p><a href="{% url 'mantenimiento:dashboard' %}">Volver a Mantenimiento</a></p>
+  <h1>Revisión documental de mantenimiento</h1>
+  <p>Consulta el trabajo y sus soportes existentes. El importe conciliado sigue pendiente de revisión; relacionar documentos no cambia el gasto reconocido.</p>
+  {% if error %}<p class="alert alert-danger" role="alert">{{ error }}</p>{% endif %}
+  <form method="get" class="d-flex flex-wrap gap-3 align-items-end mb-4">
+    <div><label for="cd-year" class="form-label">Año</label><input id="cd-year" class="form-control" name="anio" type="number" min="1900" max="2100" value="{{ anio }}" required></div>
+    <div><label for="cd-month" class="form-label">Mes</label><select id="cd-month" name="mes" class="form-select"><option value="">Todo el año</option>{% for m in meses %}<option value="{{ m }}" {% if mes == m|stringformat:'s' %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+    <div><label for="cd-branch" class="form-label">Sucursal</label><select id="cd-branch" name="sucursal" class="form-select"><option value="">Todas las autorizadas</option>{% for s in sucursales %}<option value="{{ s.id }}" {% if sucursal == s.id|stringformat:'s' %}selected{% endif %}>{{ s.nombre }}</option>{% endfor %}</select></div>
+    <div><label for="cd-state" class="form-label">Estado</label><select id="cd-state" name="estado" class="form-select">{% for value,label in estados %}<option value="{{ value }}" {% if estado == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <button class="btn btn-primary" type="submit">Consultar</button>
+    {% if not error %}<a class="btn btn-outline-primary" href="{% url 'mantenimiento:conciliacion_documental_csv' %}?{{ filtros_query }}">Exportar CSV</a>{% endif %}
+  </form>
+  {% if not error %}
+  <p>{{ alcance }} · {{ filas_total }} trabajos en el periodo. Sucursal y ubicación corresponden al registro actual; no confirman la asignación histórica de Crucero o Bamoa.</p>
+  {% if puede_ver_costos %}
+    <p><strong>Índice técnico vigente: ${{ total_vigente }}</strong> · Total conciliado: pendiente.</p>
+    {% if diferencia_reproduccion != None %}<p>Diferencia de reproducción por grupo: ${{ diferencia_reproduccion }}.</p>{% endif %}
+    <p>Órdenes concluidas con fecha de cierre y reportes finalizados conservan el cálculo vigente. Un real cero prevalece sobre el estimado. Los componentes cero de una orden no acreditan que el trabajo fuera gratuito. Facturas, compromisos y pagos se consultan por separado, sin sumarlos otra vez.</p>
+  {% else %}<p>Tu permiso permite consultar trabajos y documentos autorizados. Los costos están restringidos.</p>{% endif %}
+  <div class="table-responsive"><table class="table align-middle">
+    <caption>Trabajos y soportes consultables del periodo</caption>
+    <thead><tr><th scope="col">Trabajo</th><th scope="col">Fecha fuente</th><th scope="col">Sucursal actual</th><th scope="col">Estado</th>{% if puede_ver_costos %}<th scope="col">Costo fuente</th>{% endif %}<th scope="col">Soporte y revisión</th></tr></thead>
+    <tbody>{% for fila in filas %}<tr>
+      <td><a href="{% url 'mantenimiento:documentos-trabajo' fila.tipo fila.id %}">{{ fila.titulo }}</a><br><span>{{ fila.equipo }} · {% if fila.tipo == 'orden' %}Orden{% else %}Incidencia{% endif %}</span></td>
+      <td>{{ fila.fecha }}<br>{{ fila.origen_fecha }}</td><td>{{ fila.sucursal }}{% if fila.ubicacion %}<br>{{ fila.ubicacion }}{% endif %}</td><td>{{ fila.estado }}</td>
+      {% if puede_ver_costos %}<td>{% if fila.importe_fuente != None %}${{ fila.importe_fuente }}{% else %}No capturado{% endif %}<br>{{ fila.clasificacion }}<br>{{ fila.motivo_indice }}</td>{% endif %}
+      <td>{{ fila.soporte }}<br>{{ fila.documentos }} documentos consultables{% if fila.duplicado_operativo %}<br>Duplicidad operativa: requiere revisión financiera independiente{% endif %}</td>
+    </tr>{% empty %}<tr><td colspan="6">No hay trabajos consultables para estos filtros. Puedes cambiar periodo o sucursal.</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <nav aria-label="Páginas de trabajos">{% if pagina.has_previous %}<a href="?{{ filtros_query }}&amp;page={{ pagina.previous_page_number }}">Anterior</a> · {% endif %}Página {{ pagina.number }} de {{ pagina.paginator.num_pages }}{% if pagina.has_next %} · <a href="?{{ filtros_query }}&amp;page={{ pagina.next_page_number }}">Siguiente</a>{% endif %}</nav>
+  {% if puede_ver_costos and resumen %}<h2>Reproducción del índice vigente</h2>
+  <div class="table-responsive"><table class="table"><caption>Costos técnicos por periodo y dimensión actual; documentos excluidos de esta suma</caption><thead><tr><th scope="col">Periodo</th><th scope="col">Sucursal</th><th scope="col">Ubicación actual</th><th scope="col">Importe vigente</th></tr></thead><tbody>{% for grupo in resumen %}<tr><td>{{ grupo.periodo }}</td><td>{{ grupo.sucursal|default:'Sin sucursal' }}</td><td>{{ grupo.ubicacion|default:'Sin ubicación' }}</td><td>${{ grupo.importe_vigente }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+  {% endif %}
+</div>
+{% endblock %}

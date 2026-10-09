@@ -24,6 +24,10 @@ class PointLiveInventoryLookupError(Exception):
     pass
 
 
+class PointLiveInventoryBusyError(PointLiveInventoryLookupError):
+    """La cuenta compartida está ocupada; no se inició ninguna sesión Point."""
+
+
 @dataclass(frozen=True, slots=True)
 class PointLiveInventoryResult:
     product_code: str
@@ -98,8 +102,8 @@ class PointLiveInventoryLookupService:
         try:
             with point_account_session_lock(wait=False) as acquired:
                 if not acquired:
-                    raise PointLiveInventoryLookupError(
-                        "Point está ocupado con una sincronización; se usará la existencia persistida."
+                    raise PointLiveInventoryBusyError(
+                        "Point está ocupado con una sincronización. Tu captura se conserva."
                     )
                 with self.client_factory(settings) as client:
                     client.login(branch_hint=sucursal.nombre or sucursal.codigo)

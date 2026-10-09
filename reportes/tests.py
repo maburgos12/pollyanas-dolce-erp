@@ -2766,7 +2766,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, 'option value="Mediano" selected')
 
     def test_costo_receta_filters_by_bucket(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta_baja = Receta.objects.create(
             nombre="Pastel Promo",
             hash_contenido="hash-cost-bucket-1",
@@ -2812,7 +2813,7 @@ class ReportesCanonicosTests(TestCase):
             PointDailySale.objects.create(
                 branch=point_branch,
                 product=point_product,
-                sale_date=timezone.localdate() - timedelta(days=1),
+                sale_date=sale_date,
                 receta=receta,
                 quantity=qty,
                 total_amount=amount,
@@ -2828,7 +2829,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, 'option value="Promocionar" selected')
 
     def test_costo_receta_usa_margen_real_contra_venta_y_semaforo_costo(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta = Receta.objects.create(
             nombre="Pastel Semaforo Financiero",
             hash_contenido="hash-cost-signal-1",
@@ -2862,7 +2864,7 @@ class ReportesCanonicosTests(TestCase):
         PointDailySale.objects.create(
             branch=point_branch,
             product=point_product,
-            sale_date=timezone.localdate() - timedelta(days=1),
+            sale_date=sale_date,
             receta=receta,
             quantity=Decimal("10"),
             total_amount=Decimal("2500"),
@@ -2900,7 +2902,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertContains(response, "Average Selling Price")
 
     def test_costo_receta_prefiere_costo_agrupado_si_hay_un_addon_aprobado(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         receta = Receta.objects.create(
             nombre="Pastel Fresa QA",
             codigo_point="PFQA",
@@ -2966,7 +2969,7 @@ class ReportesCanonicosTests(TestCase):
         PointDailySale.objects.create(
             branch=point_branch,
             product=point_product,
-            sale_date=timezone.localdate() - timedelta(days=1),
+            sale_date=sale_date,
             receta=receta,
             quantity=Decimal("10"),
             total_amount=Decimal("2000"),
@@ -2981,7 +2984,8 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.context["price_gap_rows"][0]["suggested_price"], Decimal("92.31"))
 
     def test_costo_receta_filters_by_coverage(self):
-        week_start = timezone.localdate() - timedelta(days=timezone.localdate().weekday())
+        sale_date = timezone.localdate() - timedelta(days=1)
+        week_start = sale_date - timedelta(days=sale_date.weekday())
         unidad = UnidadMedida.objects.create(codigo="kg-rpt-cov", nombre="Kg Rpt Cov", tipo=UnidadMedida.TIPO_MASA)
         insumo_ok = Insumo.objects.create(nombre="Insumo Cobertura OK", unidad_base=unidad, activo=True)
         insumo_partial = Insumo.objects.create(nombre="Insumo Cobertura Parcial", unidad_base=unidad, activo=True)
@@ -3077,7 +3081,7 @@ class ReportesCanonicosTests(TestCase):
             PointDailySale.objects.create(
                 branch=point_branch,
                 product=point_product,
-                sale_date=timezone.localdate() - timedelta(days=1),
+                sale_date=sale_date,
                 receta=receta,
                 quantity=Decimal("5"),
                 total_amount=Decimal("1500"),
@@ -3570,6 +3574,34 @@ class ReportesCanonicosTests(TestCase):
         self.assertNotIn("Final teórico", body)
         self.assertNotIn("final teórico", body)
         self.assertNotIn("cierre teórico", body.lower())
+
+        pending = Receta.objects.create(
+            nombre="Pastel HTML sin frontera",
+            codigo_point="HTMLPEND001",
+            tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="hash-html-pendiente-001",
+        )
+        ProductoMonthClosureLine.objects.create(
+            closure=closure,
+            receta_padre=pending,
+            metadata={
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "issues": ["OPENING_SNAPSHOT_MISSING", "CLOSING_SNAPSHOT_MISSING"],
+                "sales_source_available": True,
+                "opening_source_authoritative": False,
+                "sales_source_authoritative": True,
+                "production_source_authoritative": True,
+                "waste_source_authoritative": True,
+                "conversion_source_authoritative": True,
+                "closing_source_authoritative": False,
+            },
+        )
+        incomplete = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-08"})
+        self.assertEqual(incomplete.context["documented_opening_lines"], 1)
+        self.assertEqual(incomplete.context["documented_calculated_lines"], 1)
+        self.assertEqual(incomplete.context["documented_closing_lines"], 1)
+        self.assertContains(incomplete, "Avance documental: 1/2 líneas con apertura")
+        self.assertContains(incomplete, "Sin total mensual")
 
     def test_historical_non_point_opening_uses_honest_labels_in_html_csv_and_xlsx(self):
         receta = Receta.objects.create(

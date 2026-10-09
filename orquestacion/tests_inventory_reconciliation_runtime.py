@@ -110,7 +110,7 @@ class InventoryReconciliationRuntimeTests(TestCase):
         self.case.refresh_from_db()
         self.assertEqual(self.case.sales, Decimal('14'))
 
-    def test_missing_document_wins_over_complete_traceability_label(self):
+    def test_received_transfer_without_finalization_is_not_a_missing_document(self):
         from pos_bridge.models import PointTransferLine
         transfer = PointTransferLine.objects.create(
             origin_branch=self.branch, destination_branch=self.branch,
@@ -120,8 +120,7 @@ class InventoryReconciliationRuntimeTests(TestCase):
             sent_quantity=1, received_quantity=1, is_received=True, is_finalized=False)
         self.save_case(source_trace={'opening': [1], 'closing': [2], 'transfers': [transfer.pk]})
         result = self.review()
-        self.assertEqual(result.observation['traceability_status'], 'PENDING')
-        self.assertIn('38657/540006', ' '.join(result.observation['missing']))
+        self.assertNotIn('38657/540006', ' '.join(result.observation['missing']))
         self.assertFalse(result.observation['closure_allowed'])
 
     def test_dated_verified_notes_are_loaded_only_for_matching_subject(self):
@@ -147,6 +146,74 @@ class InventoryReconciliationRuntimeTests(TestCase):
         self.assertEqual(before, list(ProductInventoryAuditCase.objects.values()))
         self.assertEqual(counts, (PointProductHistoryImport.objects.count(), PointProductHistoryRow.objects.count(),
                                  Notificacion.objects.count(), AgentSuggestion.objects.count()))
+
+    def test_canonical_coverage_findings_retain_exact_identity_and_second_capture_proof(self):
+        subjects = (
+            ('5', '118', 2251, 76, '4+28-30-1=1', [28605464, 28797569]),
+            ('1', '445', 3371, 508, '7+171-169-1=8', [28607214, 28799418]),
+            ('1', '917', 3372, 509, '1+44-44=1', [28607215, 28799419]),
+            ('4', '818', 3432, 531, '1+32-31=2', [28607482, 28799695]),
+            ('2', '169', 2443, 138, '73-58=15', [28605103, 28797190]),
+            ('3', '169', 2835, 259, '46+200-131=115', [28606447, 28798606]),
+            ('6', '170', 3033, 339, '84+260-152=192', [28606784, 28798961]),
+            ('1', '169', 3218, 402, '101+300-331=70', [28607119, 28799314]),
+            ('1', '1001', 3220, 404, '16+11-23=4', [28607124, 28799319]),
+            ('1', '1044', 3413, 522, '17+21-65-29+140=84', [28607236, 28799444]),
+            ('4', '169', 3422, 524, '96+100-77=119', [28607455, 28799668]),
+            ('4', '1044', 3600, 584, '3+30-10-10=13', [28607572, 28799798]),
+            ('7', '169', 3608, 585, '111+100-35=176', [28607791, 28800022]),
+            ('13', '170', 3799, 649, '162-28=134', [28606112, 28798253]),
+            ("3","170",2836,260,"120+160-177=103",[28606448,28798607]),
+            ("2","1005",2464,147,"18-15=3",[28605166,28797262]),
+            ("5","169",2238,67,"114+100-86=128",[28605439,28797544]),
+            ("1","267",3271,442,"100+12-11=101",[28607225,28799431]),
+            ("11","1044",2829,258,"3+12-1=14",[28605892,28798028]),
+            ("13","169",3798,648,"45-10=35",[28606111,28798252]),
+            ("5","403",2296,92,"0+10-1=9",[28605558,28797677]),
+            ("2","664",2478,159,"2+10-1=11",[28605188,28797284]),
+            ("1","404",3278,448,"88-9=79",[28607234,28799441]),
+            ("2","660",2471,155,"2+10-2=10",[28605180,28797276]),
+        )
+        for branch, product, case_id, import_id, equation, snapshots in subjects:
+            with self.subTest(case=case_id):
+                self.branch.external_id = branch
+                self.branch.save()
+                self.product.external_id = product
+                self.product.save()
+                with patch.object(AuditStockHistoryService, 'capture', side_effect=AssertionError('No captura')):
+                    result = self.review()
+                note = next((item for item in result.observation['known_findings']
+                             if item['case_reference'] == case_id), None)
+                self.assertIsNotNone(note)
+                self.assertEqual(note['canonical_import_id'], import_id)
+                self.assertEqual(note['documentary_equation'], equation)
+                self.assertEqual(note['snapshot_ids'], snapshots)
+                self.assertEqual(note['history_coverage_at_observation'], 'COMPLETE')
+                self.assertEqual(note['second_capture'], {
+                    'http': 0, 'new_rows': 0, 'new_imports': 0, 'duplicates': 0, 'new_notices': 0})
+                self.assertFalse(note['projection_rebuilt'])
+                self.assertTrue(note['historical_evidence_only'])
+                # A historical COMPLETE finding must not falsify a missing live canonical import.
+                self.assertEqual(result.observation['point_history']['coverage_status'], 'MISSING')
+                self.assertFalse(result.observation['closure_allowed'])
+
+    def test_loaded_continuity_distinguishes_report_from_conversion_execution(self):
+        context = build_agent_context(self.goal(), base_dir=settings.BASE_DIR)
+        for token in ('Reporte1082', 'no es folio de ejecución',
+                      'f7c08d840141db5a21c0af6286c606591df99f525941e4f39fa8c6844684a833'):
+            self.assertTrue(token in context.context_markdown, f'Falta evidencia {token}')
+
+    def test_loaded_procedure_documents_history_limits_without_automatic_expansion(self):
+        context = build_agent_context(self.goal(), base_dir=settings.BASE_DIR)
+        for token in ('5/10/15/50/100/300/500', '101 no es un límite válido',
+                      'Una consulta corta que no cruza el corte no prueba la frontera'):
+            self.assertTrue(token in context.context_markdown, f'Falta contrato {token}')
+
+    def test_loaded_context_keeps_cancelled_waste_stock_timeline_unresolved(self):
+        context = build_agent_context(self.goal(), base_dir=settings.BASE_DIR)
+        for token in ('1680267', '1680271', '4→0→4', 'crédito ficticio',
+                      'Bamoa6COMPLETE', 'no fabricar fetched_movement_ids'):
+            self.assertTrue(token in context.context_markdown, f'Falta evidencia {token}')
 
     def test_publish_is_rejected_before_audit_writes(self):
         with self.assertRaisesMessage(ValueError, 'solo revisión'):
@@ -247,6 +314,11 @@ class InventoryReconciliationRuntimeTests(TestCase):
                       '\n'.join(result.context.loaded_files))
         self.assertIn('1683114', result.context.context_markdown)
         self.assertIn('38598/539340', result.context.context_markdown)
+        self.assertIn('El rendimiento de rebanadas depende de la presentación', result.context.context_markdown)
+        self.assertIn('1677688 entrada Rebanada12', result.context.context_markdown)
+        self.assertIn('23/23 destinos de producto', result.context.context_markdown)
+        self.assertIn('FK1674489', result.context.context_markdown)
+        self.assertIn('856–860', result.context.context_markdown)
 
     def test_existing_management_command_can_review_inventory_entity(self):
         from django.core.management import call_command

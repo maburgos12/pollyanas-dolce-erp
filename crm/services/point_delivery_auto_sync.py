@@ -108,6 +108,11 @@ class PointDeliveryAutoSyncService:
                 error_code="BRANCH_CONFIGURATION",
             )
 
+        from crm.services.point_document_link import refresh_special_links
+        if refresh_special_links():
+            return self._finish_job(job=job, status=PointSyncJob.STATUS_FAILED,
+                                    counts=counts, error_code='POINT_SPECIAL_REVIEW')
+
         existing_note_ids = set(
             PedidoCliente.objects.exclude(point_note_id="").values_list(
                 "point_note_id",

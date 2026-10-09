@@ -37,10 +37,10 @@
       {% for key, label, items in columnas %}
         <button
           type="button"
-          class="permisos-status-card {% if forloop.first %}active{% endif %}"
+          class="permisos-status-card {% if key == bandeja_activa %}active{% endif %}"
           data-permisos-filter="{{ key }}"
           aria-controls="permisos-panel-{{ key }}"
-          aria-selected="{% if forloop.first %}true{% else %}false{% endif %}"
+          aria-selected="{% if key == bandeja_activa %}true{% else %}false{% endif %}"
           role="tab"
         >
           <strong>{{ label }}</strong>
@@ -52,12 +52,15 @@
     <div class="permisos-row-table">
       {% for key, label, items in columnas %}
         <div
-          class="permisos-state-panel {% if forloop.first %}active{% endif %}"
+          class="permisos-state-panel {% if key == bandeja_activa %}active{% endif %}"
           id="permisos-panel-{{ key }}"
           data-permisos-panel="{{ key }}"
           role="tabpanel"
-          {% if not forloop.first %}hidden{% endif %}
+          {% if key != bandeja_activa %}hidden{% endif %}
         >
+        {% if key == "anteriores" %}
+          <p class="permisos-copy">Solicitudes de fechas pasadas sin resolución registrada. Conservan su estado; revisa lo ocurrido antes de autorizarlas o rechazarlas.</p>
+        {% endif %}
         {% for permiso in items %}
           <article class="permiso-row-item">
             <div>
@@ -77,19 +80,19 @@
                 {% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}
               </span>
             </div>
-            {% if permiso.puede_preautorizar_jefe %}
-              <form method="post" class="permiso-actions">
-                {% csrf_token %}
-                <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
-                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Autorizar jefe</button>
-                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
-              </form>
-            {% elif can_authorize_direccion and permiso.estado == "solicitado" and permiso.requiere_direccion and permiso.estado_direccion == "pendiente" %}
+            {% if permiso.puede_autorizar_direccion %}
               <form method="post" class="permiso-actions">
                 {% csrf_token %}
                 <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
                 <button class="btn btn-primary" type="submit" name="action" value="autorizar_direccion">Autorizar Dirección</button>
                 <button class="btn btn-secondary" type="submit" name="action" value="rechazar_direccion">Rechazar</button>
+              </form>
+            {% elif permiso.puede_preautorizar_jefe %}
+              <form method="post" class="permiso-actions">
+                {% csrf_token %}
+                <input type="hidden" name="permiso_id" value="{{ permiso.id }}">
+                <button class="btn btn-primary" type="submit" name="action" value="preautorizar_jefe">Autorizar jefe</button>
+                <button class="btn btn-secondary" type="submit" name="action" value="rechazar_jefe">Rechazar</button>
               </form>
             {% endif %}
           </article>

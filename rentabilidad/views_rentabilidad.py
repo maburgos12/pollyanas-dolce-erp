@@ -19,6 +19,7 @@ from decimal import Decimal
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
+from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
 from reportes.services_rentabilidad_mensual import (
     aplicar_costos_en_memoria, leer_costos_mensuales, costos_de_sucursal, ETIQUETAS,
@@ -106,7 +107,7 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         periodo=periodo,
     )
     for historico in historicos:
-        costos[historico.receta_id] = Decimal(historico.costo_total or 0)
+        costos[historico.receta_id] = Decimal(historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0")
 
     recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in costos]
     if recetas_sin_historico:
@@ -188,8 +189,8 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
             tiene_costo = costo_unitario > 0
 
         costo_total = (costo_unitario * cantidad).quantize(Decimal("0.01"))
-        utilidad = venta - costo_total
-        margen = _pct(utilidad, venta)
+        utilidad = venta - costo_total if tiene_costo and not es_anticipo else None
+        margen = _pct(utilidad, venta) if utilidad is not None and venta > 0 else None
         if not tiene_costo and venta > 0:
             costo_faltante += 1
             if es_anticipo:
@@ -215,10 +216,10 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         })
 
     return {
-        "top_utilidad": sorted(productos, key=lambda row: row["utilidad"], reverse=True)[:12],
+        "top_utilidad": sorted([row for row in productos if row["utilidad"] is not None], key=lambda row: row["utilidad"], reverse=True)[:12],
         "riesgo_margen": sorted(
             [row for row in productos if row["venta"] > 0],
-            key=lambda row: (row["tiene_costo"], row["margen"], -row["venta"]),
+            key=lambda row: (row["margen"] is not None, row["margen"] or Decimal("0"), -row["venta"]),
         )[:12],
         "costo_faltante": costo_faltante,
         "costo_faltante_reventa": costo_faltante_reventa,
@@ -406,8 +407,8 @@ def dashboard_rentabilidad(request):
         totales["pct_costo_variable"] = round(totales["costo_variable"] / totales["ventas_netas"] * 100, 2)
         totales["pct_gasto_fijo"] = round(totales["gasto_fijo"] / totales["ventas_netas"] * 100, 2)
     else:
-        totales["pct_utilidad"] = 0
-        totales["pct_margen_bruto"] = 0
+        totales["pct_utilidad"] = None
+        totales["pct_margen_bruto"] = None
         totales["pct_costo_variable"] = 0
         totales["pct_gasto_fijo"] = 0
 
@@ -430,16 +431,30 @@ def dashboard_rentabilidad(request):
         "diferencia": ventas_fuente["total"] - totales["ventas_brutas"],
         "max_calculado_en": registros.aggregate(max_calc=Max("calculado_en"))["max_calc"],
     }
-    fuente_estado["cuadra"] = abs(fuente_estado["diferencia"]) < Decimal("1.00")
+    conciliacion = reconcile_branch_sales(
+        source_rows=ventas_fuente["by_branch"],
+        snapshot_rows=[{"branch_id": item["obj"].sucursal_id, "name": item["obj"].sucursal.nombre, "total": item["obj"].ventas_brutas} for item in sucursales_data],
+    )
+    fuente_estado["cuadra"] = conciliacion["reconciled"]
+    fuente_estado["discrepancias"] = conciliacion["discrepancies"]
+
+    sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
+    totales["margen_disponible"] = bool(
+        fuente_estado["cuadra"] and sales_confidence["margin"] is not None
+        and all(item["obj"].costo_variable_total > 0 or item["obj"].ventas_netas <= 0 for item in sucursales_data)
+    )
+    if not totales["margen_disponible"]:
+        totales["pct_margen_bruto"] = None
+        totales["pct_utilidad"] = None
 
     diagnostico = {
-        "ranking_margen": sorted(sucursales_data, key=lambda item: item["obj"].porcentaje_margen_bruto),
-        "ranking_utilidad": sorted(sucursales_data, key=lambda item: item["obj"].utilidad_operativa, reverse=True),
+        "ranking_margen": sorted(sucursales_data, key=lambda item: item["obj"].porcentaje_margen_bruto) if totales["margen_disponible"] else [],
+        "ranking_utilidad": sorted(sucursales_data, key=lambda item: item["obj"].utilidad_operativa, reverse=True) if totales["margen_disponible"] else [],
         "ranking_pe": sorted(sucursales_data, key=lambda item: item["obj"].porcentaje_avance_pe),
         "interpretacion": [
             {
                 "titulo": "Margen bruto",
-                "valor": f"{totales['pct_margen_bruto']}%",
+                "valor": f"{totales['pct_margen_bruto']}%" if totales["pct_margen_bruto"] is not None else "N/D",
                 "detalle": "Mide cuánto queda después de producción, reventa y empaque.",
             },
             {
@@ -449,7 +464,7 @@ def dashboard_rentabilidad(request):
             },
             {
                 "titulo": "Resultado operativo",
-                "valor": f"{totales['pct_utilidad']}%",
+                "valor": f"{totales['pct_utilidad']}%" if totales["pct_utilidad"] is not None else "N/D",
                 "detalle": "Utilidad después de costo variable y gasto fijo.",
             },
         ],
@@ -457,6 +472,8 @@ def dashboard_rentabilidad(request):
     productos_panel = _build_productos_panel(periodo, fecha_inicio, fecha_fin)
     gastos_panel = _build_gastos_panel(periodo, costos_mensuales)
     totales["gastos_completos"] = gastos_panel["completo"]
+    if not gastos_panel["completo"]:
+        diagnostico["ranking_utilidad"] = []
     alertas_panel = _build_alertas_panel(
         sucursales_data,
         productos_panel,
@@ -474,6 +491,7 @@ def dashboard_rentabilidad(request):
         "conteo_estados":       conteo_estados,
         "alertas_urgentes":     alertas_urgentes,
         "fuente_estado":        fuente_estado,
+        "sales_confidence": sales_confidence,
         "diagnostico":          diagnostico,
         "productos_panel":      productos_panel,
         "gastos_panel":         gastos_panel,

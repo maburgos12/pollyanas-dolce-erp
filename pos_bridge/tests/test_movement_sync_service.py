@@ -13,7 +13,7 @@ from control.models import MermaPOS
 from core.models import Sucursal
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from maestros.models import Insumo, PointPendingMatch, UnidadMedida
-from pos_bridge.models import PointProductionLine, PointTransferLine, PointWasteLine
+from pos_bridge.models import PointBranch, PointExtractionLog, PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
 from recetas.models import InventarioCedisProducto, MovimientoProductoCedis, Receta
 
@@ -164,7 +164,7 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(merma.fuente, PointMovementSyncService.WASTE_SOURCE)
         self.assertEqual(merma.responsable_texto, "Alondra Alvarado")
 
-    def test_full_waste_rerun_replaces_stale_point_rows_in_requested_period(self):
+    def test_full_waste_rerun_rejects_missing_initial_day_row_without_cancellation(self):
         receta = Receta.objects.create(
             nombre="Pastel reemplazo mensual",
             codigo_point="REEMP-MES",
@@ -173,7 +173,7 @@ class PointMovementSyncServiceTests(TestCase):
         base = FakeWasteLine(
             branch={"external_id": "Matriz", "name": "Matriz", "status": "ACTIVE", "metadata": {}},
             movement_external_id="waste-current",
-            movement_at=datetime(2026, 8, 15, 12, 0),
+            movement_at=datetime(2026, 9, 27, 12, 0),
             responsible="Operación",
             item_name=receta.nombre,
             item_code="REEMP-MES",
@@ -187,31 +187,115 @@ class PointMovementSyncServiceTests(TestCase):
         )
         stale = replace(
             base,
-            movement_external_id="waste-stale",
-            source_hash="waste-stale-hash",
+            movement_external_id="1683114",
+            item_code="0135",
+            quantity=Decimal("5.000"),
+            raw_payload={"movement": {"PK_Movimiento": 1683114}},
+            source_hash="9f27f6de945bbc8b19cd",
         )
         outside_period = replace(
             base,
             movement_external_id="waste-july",
-            movement_at=datetime(2026, 7, 31, 12, 0),
+            movement_at=datetime(2026, 9, 26, 12, 0),
             source_hash="waste-july-hash",
         )
         service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([base, stale]))
-        service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+        service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
         service.waste_extractor = FakeWasteExtractor([outside_period])
-        service.run_waste_sync(start_date=date(2026, 7, 31), end_date=date(2026, 7, 31))
+        service.run_waste_sync(start_date=date(2026, 9, 26), end_date=date(2026, 9, 26))
 
         service.waste_extractor = FakeWasteExtractor([base])
-        job = service.run_waste_sync(start_date=date(2026, 8, 1), end_date=date(2026, 8, 31))
+        job = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
 
-        self.assertEqual(job.status, "SUCCESS")
-        self.assertEqual(job.result_summary["waste_lines_superseded"], 1)
-        self.assertEqual(job.result_summary["mermas_superseded"], 1)
-        self.assertFalse(PointWasteLine.objects.filter(source_hash="waste-stale-hash").exists())
-        self.assertFalse(MermaPOS.objects.filter(source_hash="waste-stale-hash").exists())
+        self.assertEqual(job.status, "FAILED")
+        self.assertTrue(PointWasteLine.objects.filter(source_hash=stale.source_hash).exists())
+        self.assertEqual(MermaPOS.objects.get(source_hash=stale.source_hash).cantidad, Decimal("5.000"))
+        self.assertEqual(job.artifacts["waste_coverage_missing_count"], 1)
+        sample = job.artifacts["waste_coverage_missing_sample"][0]
+        self.assertEqual(sample["movement_external_id"], "1683114")
+        self.assertEqual(sample["source_hash"], stale.source_hash)
+        self.assertEqual(sample["quantity"], "5.000")
+        self.assertEqual(sample["id"], PointWasteLine.objects.get(source_hash=stale.source_hash).id)
+        self.assertEqual(PointExtractionLog.objects.get(sync_job=job, level="ERROR").context, job.artifacts)
         self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-current-hash").exists())
         self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-july-hash").exists())
         self.assertTrue(MermaPOS.objects.filter(source_hash="waste-july-hash").exists())
+
+    def _coverage_waste_line(self):
+        return FakeWasteLine(
+            branch={"external_id": "Matriz", "name": "Matriz", "status": "ACTIVE", "metadata": {}},
+            movement_external_id="1683114",
+            movement_at=datetime(2026, 9, 27, 12, 0),
+            responsible="Operación", item_name="Empanadas cobertura", item_code="0135",
+            quantity=Decimal("5.000"), unit="PZA", unit_cost=Decimal("0"), total_cost=Decimal("0"),
+            justification="Merma", raw_payload={"movement": {"PK_Movimiento": 1683114}},
+            source_hash="9f27f6de945bbc8b19cd",
+        )
+
+    def test_missing_waste_row_rolls_back_all_persistence_writers(self):
+        base = self._coverage_waste_line()
+        missing = replace(base, source_hash="missing-hash", movement_external_id="missing-movement")
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([base, missing]))
+        previous_job = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+        self.assertEqual(previous_job.status, "SUCCESS")
+        models = (PointWasteLine, MermaPOS, PointBranch, PointPendingMatch)
+        before = [list(model.objects.order_by("pk").values()) for model in models]
+        updated = replace(base, quantity=Decimal("9.000"), justification="Actualizado",
+                          branch={**base.branch, "metadata": {"changed": True}})
+        new = replace(base, source_hash="new-hash", movement_external_id="new-movement",
+                      item_name="Nuevo sin correspondencia", branch={**base.branch, "external_id": "new-branch"})
+        service.waste_extractor = FakeWasteExtractor([updated, new])
+
+        job = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual(job.status, "FAILED")
+        self.assertEqual([list(model.objects.order_by("pk").values()) for model in models], before)
+        self.assertEqual(PointWasteLine.objects.get(source_hash=base.source_hash).sync_job_id, previous_job.id)
+
+    def test_changed_waste_hash_does_not_prove_replacement_or_cancellation(self):
+        base = self._coverage_waste_line()
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([base]))
+        service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+        service.waste_extractor = FakeWasteExtractor([replace(base, quantity=Decimal("4.000"), source_hash="changed-hash")])
+
+        job = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual(job.status, "FAILED")
+        self.assertEqual(PointWasteLine.objects.get().source_hash, base.source_hash)
+        self.assertEqual(MermaPOS.objects.get().cantidad, Decimal("5.000"))
+
+    def test_empty_full_waste_rerun_preserves_rows_and_bounds_missing_evidence(self):
+        base = self._coverage_waste_line()
+        rows = [replace(base, source_hash=f"coverage-{i}", movement_external_id=str(i)) for i in range(21)]
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor(rows))
+        service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+        service.waste_extractor = FakeWasteExtractor([])
+
+        job = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual(job.status, "FAILED")
+        self.assertEqual(PointWasteLine.objects.count(), 21)
+        self.assertEqual(MermaPOS.objects.count(), 21)
+        self.assertEqual(job.artifacts["waste_coverage_missing_count"], 21)
+        self.assertEqual(len(job.artifacts["waste_coverage_missing_sample"]), 20)
+
+    def test_complete_waste_rerun_deduplicates_and_updates_same_hash_detail(self):
+        base = self._coverage_waste_line()
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([base]))
+        first = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+        service.waste_extractor = FakeWasteExtractor([replace(base, quantity=Decimal("4.000"), justification="Corregido")])
+
+        second = service.run_waste_sync(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual(first.status, "SUCCESS")
+        self.assertEqual(second.status, "SUCCESS")
+        self.assertEqual(PointWasteLine.objects.count(), 1)
+        self.assertEqual(PointWasteLine.objects.get().sync_job_id, second.id)
+        self.assertEqual(MermaPOS.objects.count(), 1)
+        self.assertEqual(MermaPOS.objects.get().cantidad, Decimal("4.000"))
+        self.assertEqual(MermaPOS.objects.get().motivo, "Corregido")
+        self.assertEqual(second.result_summary["waste_lines_superseded"], 0)
+        self.assertEqual(second.result_summary["mermas_superseded"], 0)
 
     def test_filtered_waste_rerun_does_not_supersede_other_point_rows(self):
         receta = Receta.objects.create(
@@ -244,6 +328,7 @@ class PointMovementSyncServiceTests(TestCase):
             branch_filter="Sucursal Leyva",
         )
 
+        self.assertEqual(job.status, "SUCCESS")
         self.assertEqual(job.result_summary["waste_lines_superseded"], 0)
         self.assertEqual(job.result_summary["mermas_superseded"], 0)
         self.assertTrue(PointWasteLine.objects.filter(source_hash="waste-other-branch-hash").exists())

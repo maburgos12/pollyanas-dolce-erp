@@ -1,16 +1,25 @@
 from __future__ import annotations
 
 from calendar import monthrange
+import hashlib
+import json
+import math
+import re
+import unicodedata
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
-from decimal import Decimal
-from types import MappingProxyType
+from datetime import date, datetime, time, timedelta, timezone as datetime_timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from fractions import Fraction
+from types import MappingProxyType, SimpleNamespace
 from typing import Any, Mapping
 
 from django.apps import apps
 from django.conf import settings
+from django.db import connection, transaction
 from django.db.models import Count, Q, Subquery
+from django.db.models.functions import Trim, Upper
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 
 from pos_bridge.models import (
     PointConversionLine,
@@ -18,10 +27,21 @@ from pos_bridge.models import (
     PointHistoricalInventoryClosing,
     PointInventorySnapshot,
     PointProductionLine,
+    PointProductHistoryImport,
+    PointProductHistoryRow,
+    PointRecipeNode,
     PointSyncJob,
     PointWasteLine,
 )
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
+from pos_bridge.services.audit_stock_history_service import (
+    AuditStockHistoryService, AuditStockHistoryError, BOUNDARY_ONLY_SOURCE_NAME,
+)
+from pos_bridge.services.product_month_source_mutex import POINT_BUSINESS_TIMEZONE, lock_product_month_sources
+from pos_bridge.services.historical_inventory_capture import (
+    HistoricalInventoryCaptureError,
+    historical_waste_effect, point_stock_history_instant, resolve_stock_at_close,
+)
 from pos_bridge.models.product import inventory_consumption_filter
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
@@ -31,12 +51,14 @@ from pos_bridge.utils.dates import iter_business_dates
 from recetas.models import (
     ProductoMonthClosure,
     Receta,
+    RecetaCodigoPointAlias,
     RecetaEquivalencia,
     RecetaPresentacionDerivada,
     VentaHistorica,
 )
 from recetas.utils.normalizacion import normalizar_nombre
 from ventas.models import VentaAutoritativaPoint
+from reportes.models import ProductBusinessRule
 from ventas.services.sales_canonical_source import (
     legacy_point_sales_row_count_for_range,
     official_point_sales_rows_for_range,
@@ -46,10 +68,12 @@ ZERO = Decimal("0")
 DIFFERENCE_TOLERANCE = Decimal("0.01")
 
 ORIGIN_POINT = "POINT"
+ORIGIN_INDEPENDENT_POINT_STOCK = "POINT_STOCK_INDEPENDENT"
 ORIGIN_CONFIGURED_EQUIVALENCE = "EQUIVALENCIA_CONFIGURADA"
 ORIGIN_UNRESOLVED = "UNRESOLVED"
 ORIGIN_MIXED = "MIXED"
 ISSUE_CONVERSION_ORIGIN_UNRESOLVED = "CONVERSION_ORIGIN_UNRESOLVED"
+ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE = "CONVERSION_STOCK_HISTORY_INCOMPLETE"
 ISSUE_POINT_SOURCE_UNRESOLVED = "POINT_CONVERSION_SOURCE_UNRESOLVED"
 ISSUE_SOURCE_FACTOR_MISMATCH = "CONVERSION_SOURCE_FACTOR_MISMATCH"
 ISSUE_FACTOR_MISSING = "CONVERSION_FACTOR_MISSING"
@@ -91,6 +115,915 @@ ISSUE_CONVERSION_SOURCE_MISSING = "CONVERSION_SOURCE_MISSING"
 OFFICIAL_CATEGORY_REPORT_SOURCE = "POINT_OFFICIAL_MONTHLY_CATEGORY_REPORT"
 OFFICIAL_POINT_DAILY_SOURCE = "/Report/PrintReportes?idreporte=3"
 POINT_BRIDGE_SALES_SOURCE = "POINT_BRIDGE_SALES"
+SNAPSHOT_BOUNDARY_WINDOW = timedelta(days=3)
+SNAPSHOT_BOUNDARY_CONTRACT = "POINT_PRODUCT_SNAPSHOT_LAST_MOVEMENT_UTC_V1"
+SNAPSHOT_BOUNDARY_FRONTEND_SHA = "8a0516c8bd2b2d3735ec8f65d92ca5305ebab8fb902fc9b7270bd218bfb829a4"
+
+
+def _snapshot_historical_boundaries(lines, *, cutoff, cache):
+    """Read existing product snapshots with no movement after the UTC frontier.
+
+    Ult_Mov is a timestamp, never a movement identifier. The selected inventory
+    branch is preserved by the snapshot FK and its original successful job log.
+    Contradictory eligible quantities leave the frontier unproven.
+    """
+    cutoff = cutoff.astimezone(datetime_timezone.utc)
+    resolutions = cache.setdefault(("snapshot_boundaries", cutoff), {})
+    keys = {(line.branch_id, line.product_id) for line in lines} - resolutions.keys()
+    if not keys:
+        return resolutions
+    by_branch = {}
+    for branch_id, product_id in keys:
+        by_branch.setdefault(branch_id, set()).add(product_id)
+    pair_filter = Q(pk__in=[])
+    for branch_id, product_ids in by_branch.items():
+        pair_filter |= Q(branch_id=branch_id, product_id__in=product_ids)
+    snapshots = list(PointInventorySnapshot.objects.filter(
+        pair_filter, captured_at__gt=cutoff,
+        captured_at__lte=cutoff + SNAPSHOT_BOUNDARY_WINDOW,
+        sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    provenance = {}
+    for log in PointExtractionLog.objects.filter(
+        sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
+        level=PointExtractionLog.LEVEL_INFO, message__startswith="Sucursal procesada ",
+    ).order_by("id"):
+        context = log.context
+        if isinstance(context, dict) and type(context.get("branch_id")) is int:
+            provenance.setdefault((log.sync_job_id, context["branch_id"]), []).append(log)
+    candidates = {key: [] for key in keys}
+    for snapshot in snapshots:
+        logs = provenance.get((snapshot.sync_job_id, snapshot.branch_id), [])
+        if not logs or any(
+            log.context.get("branch_external_id") != snapshot.branch.external_id
+            or log.message != f"Sucursal procesada {snapshot.branch.external_id}."
+            for log in logs
+        ):
+            continue
+        raw = snapshot.raw_payload
+        if not isinstance(raw, dict):
+            continue
+        row, headers = raw.get("row"), raw.get("headers")
+        if not isinstance(row, list) or len(row) != 10 or not isinstance(headers, list):
+            continue
+        normalized_headers = [" ".join("".join(
+            char for char in unicodedata.normalize("NFKD", str(header))
+            if not unicodedata.combining(char)
+        ).casefold().split()) for header in headers]
+        if (normalized_headers[:3] != ["codigo", "producto", "cantidad"]
+                or "ultimo movimiento" not in normalized_headers
+                or row[0] != snapshot.product.external_id
+                or not (row[9] is False or isinstance(row[9], str) and row[9].casefold() == "false")
+                or not isinstance(row[8], str) or not re.fullmatch(
+                    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?", row[8])):
+            continue
+        try:
+            raw_stock = Decimal(str(row[4]))
+            stamp = datetime.fromisoformat(row[8])
+            if (not raw_stock.is_finite() or raw_stock != snapshot.stock
+                    or timezone.is_aware(stamp)):
+                continue
+            last_movement = stamp.replace(tzinfo=datetime_timezone.utc)
+            if last_movement >= cutoff or last_movement > snapshot.captured_at:
+                continue
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        proof = {
+            "contract": SNAPSHOT_BOUNDARY_CONTRACT,
+            "snapshot_id": snapshot.pk, "sync_job_id": snapshot.sync_job_id,
+            "branch_id": snapshot.branch_id, "product_id": snapshot.product_id,
+            "branch_external_id": snapshot.branch.external_id,
+            "product_external_id": snapshot.product.external_id,
+            "captured_at": snapshot.captured_at.isoformat(),
+            "last_movement_at": last_movement.isoformat(),
+            "effective_at": cutoff.isoformat(), "stock": str(snapshot.stock),
+            "raw_signature": hashlib.sha256(json.dumps(
+                raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode()).hexdigest(),
+            "branch_provenance_log_ids": tuple(log.pk for log in logs),
+            "provenance_signature": hashlib.sha256(json.dumps({
+                "job": {"id": snapshot.sync_job_id, "status": snapshot.sync_job.status,
+                        "type": snapshot.sync_job.job_type, "parameters": snapshot.sync_job.parameters},
+                "logs": [{"id": log.pk, "message": log.message, "context": log.context} for log in logs],
+            }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+            "branch_provenance": "POINT_INVENTORY_SELECTED_BRANCH_FK",
+            "table": "tablaProductosPA", "field": "Ult_Mov",
+            "frontend_sha256": SNAPSHOT_BOUNDARY_FRONTEND_SHA,
+        }
+        candidates[(snapshot.branch_id, snapshot.product_id)].append((snapshot.stock, proof))
+    for key, qualified in candidates.items():
+        resolutions[key] = qualified[0] if qualified and len({
+            (stock, proof["last_movement_at"]) for stock, proof in qualified
+        }) == 1 else None
+        if resolutions[key]:
+            stock, proof = resolutions[key]
+            proof = {**proof, "qualified_snapshot_signature": hashlib.sha256(json.dumps(
+                [candidate[1] for candidate in qualified], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False,
+            ).encode()).hexdigest()}
+            resolutions[key] = stock, proof
+    return resolutions
+
+
+def _empty_month_captured_boundaries(lines, *, month, reconciliations, cache):
+    """Resolve no-month-movement products using only the last documented batch."""
+    resolutions = cache.setdefault(("captured_boundaries", month), {})
+    eligible = {(line.branch_id, line.product_id) for line in lines
+                if (history := reconciliations.get((line.branch_id, line.product_id)))
+                and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids
+                and not history.movement_ids and history.documentary_opening is None
+                and (line.branch_id, line.product_id) not in resolutions}
+    if not eligible:
+        return resolutions
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in eligible},
+        point_product_id__in={key[1] for key in eligible},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ).select_related("point_branch", "point_product"))
+    batches = {}
+    row_filter = Q(pk__in=[])
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        if key not in eligible:
+            continue
+        resolutions[key] = {}
+        metadata = record.raw_metadata or {}
+        try:
+            original_batch = AuditStockHistoryService._original_batch(record)
+            count = int(metadata["fetched_rows"])
+            limit = int(metadata.get("history_limit", 500))
+            ids = metadata.get("fetched_movement_ids")
+            if ids is not None:
+                if not isinstance(ids, list) or any(isinstance(value, bool) for value in ids):
+                    continue
+                ids = {int(value) for value in ids}
+                if len(ids) != (len(original_batch["unique_ids"]) if original_batch is not None else count):
+                    continue
+            elif count >= limit or record.row_count != count:
+                continue
+            if count <= 0 or limit <= 0 or count > limit:
+                continue
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, KeyError, TypeError, ValueError):
+            continue
+        batches[record.pk] = (record, key, count, ids, limit, original_batch)
+        selected = Q(import_record_id=record.pk)
+        if ids is not None:
+            selected &= Q(row_number__in=ids)
+        row_filter |= selected
+    grouped = {record_id: [] for record_id in batches}
+    for row in PointProductHistoryRow.objects.filter(row_filter).only(
+        "import_record_id", "row_number", "raw_payload", "movement_at",
+    ):
+        grouped[row.import_record_id].append(row)
+    for record_id, (record, key, count, ids, limit, original_batch) in batches.items():
+        rows = grouped[record_id]
+        if len(rows) != (len(ids) if ids is not None else count) or (ids is not None and {row.row_number for row in rows} != ids):
+            continue
+        if not AuditStockHistoryService._covers_month(record, month, boundary_rows=rows):
+            continue
+        try:
+            raw = [row.raw_payload for row in rows]
+            if original_batch is not None:
+                expected = {payload["FK_Movimiento"]: payload for payload in original_batch["unique_rows"]}
+                if any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
+                       for row in rows):
+                    continue
+                opening_cut = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+                closing_cut = datetime.combine(date(month.year, month.month,
+                    monthrange(month.year, month.month)[1]) + timedelta(days=1), time.min,
+                    tzinfo=POINT_BUSINESS_TIMEZONE)
+                if any(datetime.fromisoformat(gap["previous_movement_at"]) < cut
+                        <= datetime.fromisoformat(gap["movement_at"])
+                        for gap in original_batch["stock_chain_gaps"] for cut in (opening_cut, closing_cut)):
+                    continue
+                raw = original_batch["rows"]
+            fetched_at = datetime.fromisoformat(str(record.raw_metadata["fetched_at"]).replace("Z", "+00:00"))
+            if any(point_stock_history_instant(payload) > fetched_at for payload in raw):
+                continue
+            opening = resolve_stock_at_close(raw, operational_date=month - timedelta(days=1), history_limit=limit)
+            closing = resolve_stock_at_close(raw, operational_date=date(
+                month.year, month.month, monthrange(month.year, month.month)[1]), history_limit=limit)
+            resolutions[key] = {"opening": opening, "closing": closing}
+        except (HistoricalInventoryCaptureError, TypeError, ValueError):
+            continue
+    return resolutions
+
+
+def _original_cut_boundaries(lines, *, month, cutoff, reconciliations, cache):
+    """Prove one cut from adjacent movements of an intact original response."""
+    proofs = cache.setdefault(("original_cut_boundaries", month, cutoff), {})
+    keys = {(line.branch_id, line.product_id) for line in lines
+            if (history := reconciliations.get((line.branch_id, line.product_id)))
+            and history.coverage_status == "INCOMPLETE" and not history.unknown_movement_ids
+            and (line.branch_id, line.product_id) not in proofs}
+    if not keys:
+        return proofs
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys},
+        point_product_id__in={key[1] for key in keys},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ).select_related("point_branch", "point_product"))
+    if not any((record.point_branch_id, record.point_product_id) in keys
+               and isinstance((record.raw_metadata or {}).get("original_responses"), dict)
+               and len(record.raw_metadata["original_responses"]) == 1 for record in records):
+        proofs.update(dict.fromkeys(keys))
+        return proofs
+    by_key = {}
+    for record in records:
+        by_key.setdefault((record.point_branch_id, record.point_product_id), []).append(record)
+    stored = {record.pk: [] for record in records}
+    for row in PointProductHistoryRow.objects.filter(import_record_id__in=stored):
+        stored[row.import_record_id].append(row)
+    month_start = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+    for key in keys:
+        proofs[key] = None
+        if len(by_key.get(key, ())) != 1:
+            continue
+        record = by_key[key][0]
+        try:
+            archives = (record.raw_metadata or {}).get("original_responses")
+            if not isinstance(archives, dict) or len(archives) != 1:
+                continue
+            batch = AuditStockHistoryService._original_batch(record, fingerprint=next(iter(archives)))
+            if batch is None or record.row_count != len(stored[record.pk]):
+                continue
+            receipt = datetime.fromisoformat(batch["evidence"]["retrieved_at"])
+            if receipt < cutoff:
+                continue
+            canonical = {row.row_number: row.raw_payload for row in stored[record.pk]}
+            original = {raw["FK_Movimiento"]: raw for raw in batch["unique_rows"]}
+            canonical_rows = {row.row_number: row for row in stored[record.pk]}
+            if (not original.keys() <= canonical.keys()
+                    or any(json.dumps(canonical[movement_id], sort_keys=True) != json.dumps(raw, sort_keys=True)
+                           for movement_id, raw in original.items())
+                    or any(month_start <= datetime.fromisoformat(gap["movement_at"]) < cutoff
+                           or datetime.fromisoformat(gap["previous_movement_at"]) < cutoff
+                           <= datetime.fromisoformat(gap["movement_at"])
+                           for gap in batch["stock_chain_gaps"])):
+                continue
+            for movement_id, raw in original.items():
+                parsed_id, parsed = AuditStockHistoryService._parse_row(raw)
+                row = canonical_rows[movement_id]
+                for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                    scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                    parsed[field] = parsed[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+                if (parsed_id != row.row_number or row.movement_at != parsed["movement_at"]
+                        or any(getattr(row, field) != parsed[field] for field in (
+                            "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
+                            "total_cost", "unit_cost"))):
+                    raise ValueError("Canonical movement contradicts archived original")
+            effective = sorted((raw for raw in batch["unique_rows"]
+                                if raw.get("Cancelado") in (False, "false", "False")
+                                or historical_waste_effect(raw).status == "VALID"),
+                               key=lambda raw: (point_stock_history_instant(raw), raw["FK_Movimiento"]))
+            earlier = [raw for raw in effective if point_stock_history_instant(raw) < cutoff]
+            later = [raw for raw in effective if point_stock_history_instant(raw) >= cutoff]
+            if not earlier or not later:
+                continue
+            before, after = earlier[-1], later[0]
+            before_key = point_stock_history_instant(before), before["FK_Movimiento"]
+            after_key = point_stock_history_instant(after), after["FK_Movimiento"]
+            if any(before_key < (point_stock_history_instant(row.raw_payload), row.row_number) < after_key
+                   for row in stored[record.pk] if row.row_number not in original
+                   and (not row.cancelled or historical_waste_effect(row.raw_payload).status == "VALID")):
+                continue
+            stock = Decimal(str(before["Existencia_nueva"]))
+            if stock != Decimal(str(after["Existencia_anterior"])):
+                continue
+            proof = {"contract": "POINT_ORIGINAL_CUT_BOUNDARY_V1", "cutoff": cutoff.isoformat(),
+                     "stock": str(stock), "before_movement_id": before["FK_Movimiento"],
+                     "after_movement_id": after["FK_Movimiento"],
+                     "original_batch_evidence": batch["evidence"],
+                     "coverage_promoted": False, "physical_count_verified": False}
+            proof["source_signature"] = hashlib.sha256(json.dumps({
+                "proof": proof, "canonical": [(row.row_number, row.raw_payload)
+                                               for row in sorted(stored[record.pk], key=lambda row: row.row_number)],
+            }, sort_keys=True, default=str).encode()).hexdigest()
+            proofs[key] = stock, proof
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError, KeyError):
+            continue
+    return proofs
+
+
+def _original_stock_delta_matches(raw, *, direction):
+    """Validate the original equation; float-only uncertainty is representational.
+
+    Binary centers and ULP radii are exact fractions, not decimal rounding or an
+    epsilon. A radius significant at the persisted model scale fails closed.
+    """
+    fields = ("Existencia_anterior", "Existencia_nueva", "Cantidad")
+    values = tuple(raw.get(field) for field in fields)
+    if any(value is None or value == "" or type(value) is bool for value in values):
+        return False
+    try:
+        decimals = tuple(Decimal(str(value)) for value in values)
+        if not all(value.is_finite() for value in decimals):
+            return False
+        previous, new, quantity = map(Fraction, decimals)
+        if new - previous == direction * abs(quantity):
+            return True
+        if quantity == 0 or direction * (new - previous) <= 0:
+            return False
+    except (InvalidOperation, ValueError, TypeError):
+        return False
+    if not all(type(value) is float and math.isfinite(value) for value in values):
+        return False
+    previous, new, quantity = map(Fraction.from_float, values)
+    radius = sum((Fraction.from_float(math.ulp(value)) / 2 for value in values), Fraction())
+    finest_scale = max(PointProductHistoryRow._meta.get_field(field).decimal_places
+                       for field in ("previous_existence", "new_existence", "quantity"))
+    if radius >= Fraction(1, 10 ** finest_scale) / 10:
+        return False
+    return abs(new - previous - direction * abs(quantity)) <= radius
+
+
+def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff, cache, empty_history=False, month=None):
+    """Retained facts may veto an independent frontier, not prove batch membership."""
+    results = cache.setdefault(("snapshot_canonical_consistency", cutoff, empty_history, month), {})
+    keys = {(line.branch_id, line.product_id) for line in lines
+            if (history := reconciliations.get((line.branch_id, line.product_id)))
+            and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
+            and snapshots.get((line.branch_id, line.product_id))
+            and ((line.branch_id, line.product_id) not in results
+                 or empty_history and results[(line.branch_id, line.product_id)].get("independent_source_signature")
+                 != snapshots[(line.branch_id, line.product_id)][1]["source_signature"])}
+    if not keys:
+        return results
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys}, point_product_id__in={key[1] for key in keys},
+        raw_metadata__source="POINT_STOCK_HISTORY_API",
+    ).select_related("point_branch", "point_product"))
+    records = [record for record in records if (record.point_branch_id, record.point_product_id) in keys]
+    grouped = {record.pk: [] for record in records}
+    pair_records = {}
+    for record in records:
+        pair_records.setdefault((record.point_branch_id, record.point_product_id), []).append(record)
+    for row in PointProductHistoryRow.objects.filter(import_record_id__in=grouped).order_by("row_number"):
+        grouped[row.import_record_id].append(row)
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        if key not in keys:
+            continue
+        rows, metadata = grouped[record.pk], record.raw_metadata
+        signature = hashlib.sha256(json.dumps({
+            "import_id": record.pk, "updated_at": record.updated_at.isoformat(),
+            "metadata": metadata, "row_count": record.row_count,
+            "rows": [{"id": row.pk, "movement_id": row.row_number, "raw": row.raw_payload,
+                      "stored": [row.movement_at.isoformat(), row.movement_type,
+                                 str(row.previous_existence), str(row.quantity),
+                                 str(row.new_existence), row.cancelled,
+                                 str(row.total_cost), str(row.unit_cost)]}
+                     for row in rows],
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        results[key] = {"valid": False, "import_id": record.pk, "source_signature": signature,
+                        "independent_source_signature": snapshots[key][1].get("source_signature"),
+                        "canonical_membership_verified": False,
+                        "canonical_coverage_status": reconciliations[key].coverage_status,
+                        "reason": "UNKNOWN_MOVEMENT_OR_RETAINED_COUNT_MISMATCH"}
+        if len(pair_records[key]) != 1:
+            results[key].update(reason="AMBIGUOUS_CANONICAL_IMPORTS", import_ids=tuple(sorted(
+                candidate.pk for candidate in pair_records[key])), source_signature=hashlib.sha256(json.dumps([
+                    {"id": candidate.pk, "metadata": candidate.raw_metadata, "row_count": candidate.row_count,
+                     "updated_at": candidate.updated_at.isoformat(),
+                     "rows": [{"movement_id": row.row_number, "raw": row.raw_payload,
+                               "stored": [row.movement_at.isoformat(), row.movement_type,
+                                          str(row.quantity), str(row.previous_existence), str(row.new_existence),
+                                          row.cancelled, str(row.total_cost), str(row.unit_cost)]}
+                              for row in grouped[candidate.pk]]}
+                    for candidate in sorted(pair_records[key], key=lambda candidate: candidate.pk)
+                ], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+            continue
+        if reconciliations[key].unknown_movement_ids or len(rows) != record.row_count:
+            continue
+        results[key]["reason"] = "INVALID_BATCH_METADATA"
+        if not isinstance(metadata, dict):
+            continue
+        try:
+            original_batch = AuditStockHistoryService._original_batch(record)
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError):
+            continue
+        if original_batch is not None:
+            expected = {raw["FK_Movimiento"]: raw for raw in original_batch["unique_rows"]}
+            if (not set(expected) <= {row.row_number for row in rows}
+                    or any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
+                           for row in rows if row.row_number in expected)):
+                continue
+            month_start = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE) if month else cutoff
+            if any((datetime.fromisoformat(gap["previous_movement_at"]) < cutoff
+                    <= datetime.fromisoformat(gap["movement_at"]))
+                    or month_start <= datetime.fromisoformat(gap["movement_at"]) < cutoff
+                    for gap in original_batch["stock_chain_gaps"]):
+                results[key]["reason"] = "ORIGINAL_BATCH_STOCK_CHAIN_CONTRADICTION"
+                continue
+        count, limit, ids = metadata.get("fetched_rows"), metadata.get("history_limit"), metadata.get("fetched_movement_ids")
+        if ("fetched_rows" in metadata and (type(count) is not int or count < 0)
+                or "history_limit" in metadata and (type(limit) is not int or limit <= 0)
+                or count is not None and limit is not None and count > limit):
+            continue
+        if "fetched_movement_ids" in metadata and (not isinstance(ids, list)
+                or any(type(value) is not int or value <= 0 for value in ids)
+                or count is not None and len(ids) != count
+                or original_batch is None and len(set(ids)) != len(ids)
+                or not set(ids) <= {row.row_number for row in rows}):
+            continue
+        try:
+            fetched_at = (datetime.fromisoformat(str(metadata["fetched_at"]).replace("Z", "+00:00"))
+                          if "fetched_at" in metadata else None)
+            if fetched_at is not None and timezone.is_naive(fetched_at):
+                continue
+            results[key]["reason"] = "RAW_OR_DOCUMENTARY_CONTRADICTION"
+            stock, snapshot = snapshots[key]
+            last_movement = None if empty_history else datetime.fromisoformat(snapshot["last_movement_at"])
+            captured_at = datetime.fromisoformat(snapshot["captured_at"])
+            parsed = []
+            for row in rows:
+                raw = row.raw_payload
+                raw_id = raw.get("FK_Movimiento") if isinstance(raw, dict) else None
+                if not ((type(raw_id) is int and raw_id > 0)
+                        or isinstance(raw_id, str) and re.fullmatch(r"[0-9]+", raw_id) and int(raw_id) > 0):
+                    raise ValueError("Invalid original movement identity")
+                if not isinstance(raw.get("Movimiento"), str) or not raw["Movimiento"].strip():
+                    raise ValueError("Missing original movement type")
+                for field in ("Cantidad", "Existencia_anterior", "Existencia_nueva"):
+                    value = raw.get(field)
+                    if value is None or value == "" or type(value) is bool or not Decimal(str(value)).is_finite():
+                        raise ValueError("Missing or invalid original quantity/stock")
+                if "isInsumo" in raw and not (raw["isInsumo"] is False
+                        or isinstance(raw["isInsumo"], str) and raw["isInsumo"].casefold() == "false"):
+                    raise ValueError("Original movement belongs to a different domain")
+                for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo"):
+                    if field in raw and str(raw[field]) != snapshots[key][1]["product_external_id"]:
+                        raise ValueError("Original product identity contradicts selected product")
+                for field in ("FK_Sucursal", "PK_Sucursal"):
+                    if field in raw and str(raw[field]) != snapshots[key][1]["branch_external_id"]:
+                        raise ValueError("Original branch identity contradicts selected branch")
+                flag = raw.get("Cancelado")
+                if not (type(flag) is bool or isinstance(flag, str) and flag.casefold() in {"true", "false"}):
+                    raise ValueError("Invalid original cancellation flag")
+                movement_id, defaults = AuditStockHistoryService._parse_row(raw)
+                instant = point_stock_history_instant(raw)
+                raw_quantity = defaults["quantity"]
+                raw_new_existence = defaults["new_existence"]
+                raw_delta = defaults["new_existence"] - defaults["previous_existence"]
+                for field in ("previous_existence", "quantity", "new_existence", "total_cost", "unit_cost"):
+                    scale = PointProductHistoryRow._meta.get_field(field).decimal_places
+                    defaults[field] = defaults[field].quantize(Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+                stored_stamp, parsed_stamp = row.movement_at, defaults["movement_at"]
+                if (not timezone.is_aware(stored_stamp) or not timezone.is_aware(parsed_stamp)
+                        or stored_stamp.astimezone(datetime_timezone.utc) != parsed_stamp.astimezone(datetime_timezone.utc)
+                        or movement_id != row.row_number or any(getattr(row, field) != defaults[field] for field in (
+                    "movement_type", "previous_existence", "quantity", "new_existence", "cancelled",
+                    "total_cost", "unit_cost",
+                ))):
+                    raise ValueError("Canonical/raw contradiction")
+                if not all(value.is_finite() for value in (row.quantity, row.previous_existence, row.new_existence)):
+                    raise ValueError("Nonfinite stock")
+                if fetched_at is not None and instant > fetched_at:
+                    raise ValueError("Movement newer than original retrieval")
+                if empty_history and instant <= captured_at:
+                    raise ValueError("Retained movement contradicts original empty history")
+                effect = AuditStockHistoryService._validated_waste_effect(row, record)
+                if effect.status == "INVALID":
+                    raise ValueError("Invalid original historical waste effect")
+                if instant <= captured_at and (not row.cancelled or effect.status == "VALID"):
+                    category = "waste" if effect.status == "VALID" else AuditStockHistoryService._category(row.movement_type, raw_quantity)
+                    if category is None:
+                        raise ValueError("Unresolved movement or reversal")
+                    words = " ".join("".join(char for char in unicodedata.normalize(
+                        "NFKD", row.movement_type) if not unicodedata.combining(char)).upper().split())
+                    delta = raw_delta
+                    if words == "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=1):
+                        raise ValueError("Invalid effective sale reversal")
+                    if category in {"sales", "waste"} and effect.status != "VALID" and words != "CANCELACION VENTA" and not _original_stock_delta_matches(raw, direction=-1):
+                        raise ValueError("Invalid effective sale/waste stock delta")
+                    if category in {"production", "transfer_in", "conversion_in"} and not _original_stock_delta_matches(raw, direction=1):
+                        raise ValueError("Invalid effective incoming stock delta")
+                    if category in {"transfer_out", "conversion_out"} and not _original_stock_delta_matches(raw, direction=-1):
+                        raise ValueError("Invalid effective outgoing stock delta")
+                    if category == "identified_adjustment" and (
+                        not _original_stock_delta_matches(raw, direction=1 if delta >= 0 else -1)
+                        or "SALIDA" in words.split() and delta > 0
+                        or "ENTRADA" in words.split() and delta < 0
+                    ):
+                        raise ValueError("Invalid effective stock adjustment")
+                    if instant > last_movement or (instant == last_movement and raw_new_existence != stock):
+                        raise ValueError("Original movement contradicts snapshot")
+                    parsed.append((instant, row.row_number, row))
+            ordered = sorted(parsed, key=lambda item: item[:2])
+            # A retained-history gap is not a demonstrated contradiction.
+            # Retained facts can veto a snapshot, never lend coverage to it.
+            results[key] = {"valid": True, "reason": "NO_KNOWN_DOCUMENTARY_CONTRADICTION",
+                            "independent_source_signature": snapshots[key][1].get("source_signature"),
+                            "import_id": record.pk, "source_signature": signature,
+                            "canonical_membership_verified": False,
+                            "canonical_coverage_status": reconciliations[key].coverage_status,
+                            "checked_movement_ids": tuple(row.row_number for _, _, row in ordered),
+                            "latest_batch_movement_ids": tuple(sorted(ids)) if ids is not None else None,
+                            "coverage_promoted": False, "contradiction_detected": False}
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError) as exc:
+            results[key]["reason"] = "RAW_OR_DOCUMENTARY_CONTRADICTION"
+            results[key]["detail"] = str(exc)
+            continue
+    return results
+
+
+def _original_zero_boundaries(closing, lines, *, cutoff):
+    """An original empty-history/live-zero result proves a frontier, not coverage."""
+    method = (closing.metadata or {}).get("method")
+    sources = [closing]
+    if method == "consolidated_point_stock_history_attempts":
+        ids = (closing.metadata or {}).get("source_closing_ids")
+        if (not isinstance(ids, list) or not ids
+                or any(type(pk) is not int or pk <= 0 or pk == closing.pk for pk in ids)
+                or len(ids) != len(set(ids))):
+            return {}
+        sources = list(PointHistoricalInventoryClosing.objects.filter(pk__in=ids).prefetch_related("lines"))
+        if len(sources) != len(ids):
+            return {}
+    elif method != "point_stock_history_boundary":
+        return {}
+    original_lines, source_signatures = {}, {}
+    for source in sources:
+        if (source.source != PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY
+                or source.status not in {"DRAFT", "VERIFIED"}
+                or source.operational_date != closing.operational_date
+                or (source.metadata or {}).get("method") != "point_stock_history_boundary"
+                or source.retrieved_at is None or not timezone.is_aware(source.retrieved_at)
+                or source.retrieved_at < cutoff):
+            return {}
+        source_signatures[source.pk] = hashlib.sha256(json.dumps({
+            "id": source.pk, "source": source.source, "status": source.status,
+            "operational_date": source.operational_date.isoformat(),
+            "retrieved_at": source.retrieved_at.isoformat(), "source_fingerprint": source.source_fingerprint,
+            "expected_branch_ids": source.expected_branch_ids, "expected_product_ids": source.expected_product_ids,
+            "metadata": source.metadata,
+        }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        for original in (lines if source.pk == closing.pk else source.lines.all()):
+            original_lines.setdefault((original.branch_id, original.product_id), []).append((source, original))
+    proofs = {}
+    for line in lines:
+        key = (line.branch_id, line.product_id)
+        originals = original_lines.get(key, [])
+        line_evidence = line.evidence or {}
+        if (not originals or line.stock != ZERO
+                or line_evidence.get("method") != "no_history_current_zero"
+                or type(line_evidence.get("history_rows")) is not int or line_evidence["history_rows"] != 0
+                or type(line_evidence.get("history_limit")) is not int or line_evidence["history_limit"] != 500):
+            continue
+        provenance = []
+        for source, original in originals:
+            evidence = original.evidence or {}
+            if (original.branch_id not in source.expected_branch_ids
+                    or original.product_id not in source.expected_product_ids
+                    or original.stock != ZERO or evidence != line_evidence
+                    or evidence.get("method") != "no_history_current_zero"
+                    or type(evidence.get("history_rows")) is not int or evidence["history_rows"] != 0
+                    or type(evidence.get("history_limit")) is not int or evidence["history_limit"] != 500
+                    or original.created_at is None or not timezone.is_aware(original.created_at)
+                    or original.created_at < cutoff or line.created_at is None
+                    or not timezone.is_aware(line.created_at) or original.created_at > line.created_at):
+                break
+            provenance.append({"closing_id": source.pk, "line_id": original.pk,
+                "source_fingerprint": source.source_fingerprint, "status": source.status,
+                "operational_date": source.operational_date.isoformat(),
+                "retrieved_at": source.retrieved_at.isoformat(), "created_at": original.created_at.isoformat(),
+                "stock": str(original.stock), "evidence": dict(evidence),
+                "source_manifest_signature": source_signatures[source.pk]})
+        else:
+            proofs[key] = (ZERO, {"branch_external_id": str(line.branch.external_id),
+                "product_external_id": str(line.product.external_id),
+                "captured_at": max(original.created_at for _, original in originals).isoformat(),
+                "original_sources": provenance,
+                "source_signature": hashlib.sha256(json.dumps(provenance, sort_keys=True,
+                    separators=(",", ":"), ensure_ascii=False).encode()).hexdigest(),
+                "coverage_promoted": False, "physical_count_verified": False})
+    return proofs
+
+
+def _bracketed_original_empty_boundaries(lines, *, cutoff):
+    """Prove a zero cut without treating an empty response as canonical history."""
+    candidates = [line for line in lines if Decimal(line.stock) == ZERO
+                  and (line.evidence or {}).get("method") == "two_independent_no_history_current_zero"
+                  and (line.evidence or {}).get("history_rows") == 0
+                  and line.created_at is not None and timezone.is_aware(line.created_at)
+                  and line.created_at >= cutoff
+                  and type((line.evidence or {}).get("independent_attempts")) is int
+                  and line.evidence["independent_attempts"] >= 2
+                  and str(line.evidence.get("observed_current_stock")) in {"0", "0.0", "0.000", "0.0000"}]
+    if not candidates:
+        return {}
+    cutoff = cutoff.astimezone(datetime_timezone.utc)
+    bounds = (cutoff - timedelta(hours=3), cutoff + timedelta(hours=3))
+    keys = {(line.branch_id, line.product_id) for line in candidates}
+    records = list(PointProductHistoryImport.objects.filter(
+        point_branch_id__in={key[0] for key in keys},
+        point_product_id__in={key[1] for key in keys},
+        raw_metadata__source=BOUNDARY_ONLY_SOURCE_NAME,
+        raw_metadata__cutoff=cutoff.isoformat(),
+    ).select_related("point_branch", "point_product"))
+    originals = {}
+    for record in records:
+        key = (record.point_branch_id, record.point_product_id)
+        if key not in keys:
+            continue
+        expected_hash = hashlib.sha256(
+            f"point-boundary-only:{key[0]}:{key[1]}:{cutoff.isoformat()}".encode()
+        ).hexdigest()
+        try:
+            batch = AuditStockHistoryService._original_batch(record)
+            receipt = datetime.fromisoformat(batch["evidence"]["retrieved_at"])
+            if (record.file_hash != expected_hash or record.row_count != 0 or record.rows.exists()
+                    or batch["rows"] or batch["original_count"] != 0
+                    or batch["evidence"]["history_limit"] != 500
+                    or receipt <= cutoff or not timezone.is_aware(receipt)):
+                continue
+        except (AuditStockHistoryError, HistoricalInventoryCaptureError, KeyError, TypeError, ValueError):
+            continue
+        originals[key] = batch["evidence"]
+    if not originals:
+        return {}
+    pair_filter = Q(pk__in=[])
+    for branch_id, product_id in originals:
+        pair_filter |= Q(branch_id=branch_id, product_id=product_id)
+    snapshots = list(PointInventorySnapshot.objects.filter(
+        pair_filter, captured_at__gte=bounds[0], captured_at__lte=bounds[1],
+        sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+    ).select_related("branch", "product", "sync_job").order_by("captured_at", "id"))
+    provenance = {}
+    for log in PointExtractionLog.objects.filter(
+        sync_job_id__in={snapshot.sync_job_id for snapshot in snapshots},
+        level=PointExtractionLog.LEVEL_INFO, message__startswith="Sucursal procesada ",
+    ).order_by("id"):
+        context = log.context
+        if isinstance(context, dict) and type(context.get("branch_id")) is int:
+            provenance.setdefault((log.sync_job_id, context["branch_id"]), []).append(log)
+    grouped = {key: [] for key in originals}
+    invalid = set()
+    for snapshot in snapshots:
+        key = (snapshot.branch_id, snapshot.product_id)
+        if key not in originals:
+            continue
+        logs = provenance.get((snapshot.sync_job_id, snapshot.branch_id), [])
+        raw = snapshot.raw_payload
+        row = raw.get("row") if isinstance(raw, dict) else None
+        headers = raw.get("headers") if isinstance(raw, dict) else None
+        try:
+            normalized = [" ".join("".join(char for char in unicodedata.normalize(
+                "NFKD", str(header)) if not unicodedata.combining(char)).casefold().split())
+                for header in headers]
+            valid = (logs and all(log.context.get("branch_external_id") == snapshot.branch.external_id
+                                  and log.message == f"Sucursal procesada {snapshot.branch.external_id}."
+                                  for log in logs)
+                     and normalized[:3] == ["codigo", "producto", "cantidad"]
+                     and "ultimo movimiento" in normalized
+                     and isinstance(row, list) and len(row) == 10
+                     and row[0] == snapshot.product.external_id
+                     and row[8] == ""
+                     and (row[9] is False or type(row[9]) is str and row[9].casefold() == "false")
+                     and Decimal(str(row[4])).is_finite()
+                     and Decimal(str(row[4])) == snapshot.stock == ZERO)
+        except (InvalidOperation, TypeError, ValueError):
+            valid = False
+        if not valid:
+            invalid.add(key)
+            continue
+        grouped[key].append({"snapshot_id": snapshot.pk, "job_id": snapshot.sync_job_id,
+                             "captured_at": snapshot.captured_at.isoformat(), "stock": str(snapshot.stock),
+                             "raw_signature": hashlib.sha256(json.dumps(
+                                 raw, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                             ).encode()).hexdigest(),
+                             "provenance_log_ids": tuple(log.pk for log in logs),
+                             "provenance_signature": hashlib.sha256(json.dumps({
+                                 "job": {"id": snapshot.sync_job_id, "status": snapshot.sync_job.status,
+                                         "type": snapshot.sync_job.job_type, "parameters": snapshot.sync_job.parameters},
+                                 "logs": [{"id": log.pk, "message": log.message, "context": log.context}
+                                          for log in logs],
+                             }, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()})
+    proofs = {}
+    for key, rows in grouped.items():
+        if key in invalid or not rows or not any(
+            datetime.fromisoformat(row["captured_at"]) < cutoff for row in rows
+        ) or not any(datetime.fromisoformat(row["captured_at"]) >= cutoff for row in rows):
+            continue
+        proof = {"contract": "POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1",
+                 "effective_at": cutoff.isoformat(), "original_batch_evidence": originals[key],
+                 "bracketing_snapshots": rows, "coverage_promoted": False,
+                 "physical_count_verified": False}
+        proof["source_signature"] = hashlib.sha256(json.dumps(
+            proof, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode()).hexdigest()
+        proofs[key] = ZERO, proof
+    return proofs
+
+
+def has_documentary_boundary(trace, boundary):
+    if trace.get(boundary):
+        return True
+    proof = trace.get("historical_boundary_evidence", {}).get(boundary, {})
+    batch = proof.get("original_batch_evidence", {})
+    return bool(proof.get("contract") == "POINT_ORIGINAL_HISTORY_BOUNDARY_V1"
+                and proof.get("boundary") == boundary and proof.get("canonical_history_verified")
+                and proof.get("effective_stock") is not None and proof.get("movement_ids")
+                and batch.get("contract") == "POINT_ORIGINAL_BATCH_MEMBERSHIP_V1"
+                and batch.get("import_id") and batch.get("source_signature"))
+
+
+@transaction.atomic(savepoint=False)
+def documentary_original_boundaries(lines, *, month, boundary, excluded_keys, cache):
+    """Supplement absent manifest pairs from verified originals, never override a line."""
+    if boundary not in {"opening", "closing"}:
+        raise ValueError("Frontera documental inválida.")
+    lock_product_month_sources([month])
+    if cache.get("source_transaction_scope") is not connection.run_on_commit:
+        cache.clear()
+        cache["source_transaction_scope"] = connection.run_on_commit
+    candidates = {(line.branch.id, line.product.id): line for line in lines
+                  if (line.branch.id, line.product.id) not in excluded_keys}
+    monthly = cache.setdefault(month, {})
+    requested = [SimpleNamespace(branch=line.branch, product=line.product, difference=ZERO)
+                 for key, line in candidates.items() if key not in monthly]
+    monthly.update(AuditStockHistoryService().reconcile_many(
+        requested, month, include_zero_difference=True))
+    cutoff_date = month if boundary == "opening" else month + timedelta(days=monthrange(month.year, month.month)[1])
+    cutoff = datetime.combine(cutoff_date, time.min, tzinfo=POINT_BUSINESS_TIMEZONE)
+    result = {}
+    for key in candidates:
+        history = monthly.get(key)
+        batch = getattr(history, "original_batch_evidence", None) or {}
+        quantity = getattr(history, f"documentary_{boundary}", None)
+        retrieved = parse_datetime(batch.get("retrieved_at", ""))
+        if (not history or history.coverage_status != "COMPLETE" or history.unknown_movement_ids
+                or quantity is None or not history.documentary_boundary_movement_ids
+                or batch.get("contract") != "POINT_ORIGINAL_BATCH_MEMBERSHIP_V1"
+                or not retrieved or not timezone.is_aware(retrieved) or retrieved < cutoff):
+            continue
+        result[key] = (Decimal(quantity), {
+            "contract": "POINT_ORIGINAL_HISTORY_BOUNDARY_V1", "line_id": None,
+            "branch_id": key[0], "product_id": key[1], "month": month.isoformat(),
+            "boundary": boundary, "cutoff": cutoff.isoformat(),
+            "effective_stock": str(quantity), "movement_ids": history.documentary_boundary_movement_ids,
+            "original_batch_evidence": dict(batch), "coverage_status": history.coverage_status,
+            "canonical_history_verified": True, "physical_count_verified": False,
+        })
+    return result
+
+
+@transaction.atomic(savepoint=False)
+def documentary_historical_boundary(closing, lines, *, month, boundary, cache):
+    """Read UTC Stock boundaries in bulk; never rewrite the stored closing."""
+    if closing.source != PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
+        return {line.id: Decimal(line.stock) for line in lines}, {}, ()
+    lock_product_month_sources([month])
+    # Atomic decorators reuse their Atomic instance. The callback queue instead
+    # is replaced at every outer commit/rollback, and remains shared in nested
+    # savepoints; do not keep source proofs across different transactions.
+    transaction_scope = connection.run_on_commit
+    if cache.get("source_transaction_scope") is not transaction_scope:
+        cache.clear()
+        cache["source_transaction_scope"] = transaction_scope
+    monthly = cache.setdefault(month, {})
+    missing_lines = [line for line in lines if (line.branch_id, line.product_id) not in monthly]
+    if missing_lines:
+        requested = [SimpleNamespace(branch=line.branch, product=line.product, difference=ZERO)
+                     for line in missing_lines]
+        reconciled = AuditStockHistoryService().reconcile_many(
+            requested, month, include_zero_difference=True,
+        )
+        monthly.update({(line.branch_id, line.product_id): reconciled.get(
+            (line.branch_id, line.product_id)) for line in missing_lines})
+    captured_boundaries = _empty_month_captured_boundaries(
+        lines, month=month, reconciliations=monthly, cache=cache,
+    )
+    # Preserve the legacy capture's explicit empty-history/live-zero proof.
+    # It predates canonical imports and has no timestamp subject to UTC repair.
+    # A later canonical import, however, must pass its own coverage guards.
+    zero_keys = {(line.branch_id, line.product_id) for line in lines
+                 if Decimal(line.stock) == ZERO and (line.evidence or {}).get("method") == "no_history_current_zero"}
+    zero_verified = set()
+    canonical_keys = {key for key, history in monthly.items() if history is not None}
+    if zero_keys:
+        records = PointProductHistoryImport.objects.filter(
+            point_branch_id__in={key[0] for key in zero_keys},
+            point_product_id__in={key[1] for key in zero_keys},
+            raw_metadata__source="POINT_STOCK_HISTORY_API",
+        )
+        for record in records:
+            key = (record.point_branch_id, record.point_product_id)
+            canonical_keys.add(key)
+            history = monthly.get(key)
+            if (record.raw_metadata.get("fetched_rows") == 0 and key in zero_keys
+                    and history and history.coverage_status == "COMPLETE" and not history.movement_ids):
+                if AuditStockHistoryService._covers_month(record, month):
+                    zero_verified.add(key)
+    expected_date = (month - timedelta(days=1) if boundary == "opening"
+                     else date(month.year, month.month, monthrange(month.year, month.month)[1]))
+    cutoff = datetime.combine(expected_date + timedelta(days=1), time.min,
+                              tzinfo=POINT_BUSINESS_TIMEZONE)
+    expected_keys = {(int(branch_id), int(product_id))
+                     for branch_id in closing.expected_branch_ids
+                     for product_id in closing.expected_product_ids}
+    manifest_method = (closing.metadata or {}).get("method")
+    boundary_manifest_valid = (
+        closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+        and closing.operational_date == expected_date
+        and isinstance(manifest_method, str)
+        and manifest_method in {"point_stock_history_boundary", "consolidated_point_stock_history_attempts"}
+        and bool(expected_keys)
+        and {(line.branch_id, line.product_id) for line in lines} == expected_keys
+        and closing.retrieved_at is not None
+        and timezone.is_aware(closing.retrieved_at) and closing.retrieved_at >= cutoff
+    )
+    original_zeros = (_original_zero_boundaries(closing, lines, cutoff=cutoff)
+                      if boundary_manifest_valid and zero_keys else {})
+    zero_consistency = _snapshot_canonical_consistency(
+        lines, snapshots=original_zeros, reconciliations=monthly, cutoff=cutoff, cache=cache,
+        empty_history=True,
+        month=month,
+    )
+    original_zero_keys = {key for key in original_zeros if key not in canonical_keys
+                          or zero_consistency.get(key, {}).get("valid")}
+    snapshot_boundaries = _snapshot_historical_boundaries(
+        [line for line in lines if (line.branch_id, line.product_id) not in canonical_keys
+         or (monthly.get((line.branch_id, line.product_id))
+             and (monthly[(line.branch_id, line.product_id)].coverage_status == "INCOMPLETE"
+                  or (monthly[(line.branch_id, line.product_id)].coverage_status == "COMPLETE"
+                      and not monthly[(line.branch_id, line.product_id)].unknown_movement_ids
+                      and getattr(monthly[(line.branch_id, line.product_id)], f"documentary_{boundary}", None) is None
+                      and not captured_boundaries.get((line.branch_id, line.product_id), {}).get(boundary)
+                      and (line.branch_id, line.product_id) not in zero_verified)))],
+        cutoff=cutoff, cache=cache,
+    ) if boundary_manifest_valid else {}
+    snapshot_consistency = _snapshot_canonical_consistency(
+        lines, snapshots=snapshot_boundaries, reconciliations=monthly, cutoff=cutoff, cache=cache, month=month,
+    )
+    original_cut_boundaries = (_original_cut_boundaries(
+        lines, month=month, cutoff=cutoff, reconciliations=monthly, cache=cache,
+    ) if boundary_manifest_valid else {})
+    bracketed_empty = (_bracketed_original_empty_boundaries(lines, cutoff=cutoff)
+                       if boundary_manifest_valid and boundary == "opening" else {})
+    values, evidence, unproven = {}, {}, []
+    for line in lines:
+        key = (line.branch_id, line.product_id)
+        history = monthly.get(key)
+        quantity = None
+        movement_ids = tuple(history.documentary_boundary_movement_ids) if history else ()
+        captured_evidence = {}
+        snapshot_evidence = {}
+        original_cut_evidence = {}
+        bracketed_empty_evidence = {}
+        if history and history.coverage_status == "COMPLETE" and not history.unknown_movement_ids:
+            quantity = getattr(history, f"documentary_{boundary}", None)
+            if quantity is None and (resolved := captured_boundaries.get(key, {}).get(boundary)):
+                quantity = resolved.stock
+                captured_evidence = dict(resolved.evidence)
+                movement_ids = (int(resolved.evidence["movement_id"]),)
+            if quantity is None and key in zero_verified:
+                quantity = ZERO
+        if quantity is None and key in original_zero_keys:
+            quantity = ZERO
+        if quantity is None and key not in canonical_keys and snapshot_boundaries.get(key):
+            quantity, snapshot_evidence = snapshot_boundaries[key]
+        elif (quantity is None and history and history.coverage_status in {"INCOMPLETE", "COMPLETE"}
+              and snapshot_boundaries.get(key) and snapshot_consistency.get(key, {}).get("valid")):
+            quantity, snapshot_evidence = snapshot_boundaries[key]
+            snapshot_evidence = {**snapshot_evidence, "canonical_consistency": snapshot_consistency[key]}
+        if quantity is None and original_cut_boundaries.get(key):
+            quantity, original_cut_evidence = original_cut_boundaries[key]
+        if quantity is None and key not in canonical_keys and bracketed_empty.get(key):
+            quantity, bracketed_empty_evidence = bracketed_empty[key]
+        evidence[line.id] = {
+            "line_id": line.id, "original_stock": str(line.stock),
+            "original_evidence": dict(line.evidence or {}),
+            "effective_stock": str(quantity) if quantity is not None else None,
+            "movement_ids": movement_ids,
+            "captured_boundary_evidence": captured_evidence,
+            "snapshot_boundary_evidence": dict(snapshot_evidence),
+            "original_cut_boundary_evidence": dict(original_cut_evidence),
+            "original_cut_boundary_verified": bool(original_cut_evidence),
+            "bracketed_empty_boundary_evidence": dict(bracketed_empty_evidence),
+            "canonical_consistency_evidence": dict(snapshot_consistency.get(key) or {}),
+            "snapshot_boundary_verified": bool(snapshot_evidence),
+            "physical_count_verified": False,
+            "coverage_status": history.coverage_status if history else "MISSING",
+            "original_batch_evidence": dict(getattr(history, "original_batch_evidence", None) or {}),
+            "canonical_history_verified": bool(quantity is not None and not snapshot_evidence and not original_cut_evidence
+                                               and key not in original_zero_keys
+                                               and history and history.coverage_status == "COMPLETE"
+                                               and not history.unknown_movement_ids),
+            "original_boundary_verified": key in original_zero_keys or bool(bracketed_empty_evidence),
+            "original_zero_boundary_evidence": dict(original_zeros.get(key, (ZERO, {}))[1]),
+            "original_zero_consistency_evidence": dict(zero_consistency.get(key) or {}),
+            "contract": ("POINT_ORIGINAL_EMPTY_BRACKETED_SNAPSHOTS_V1" if bracketed_empty_evidence else
+                         SNAPSHOT_BOUNDARY_CONTRACT if snapshot_evidence else
+                         "POINT_ORIGINAL_CUT_BOUNDARY_V1" if original_cut_evidence else "POINT_STOCK_RAW_UTC"),
+        }
+        if quantity is None:
+            unproven.append(line)
+        else:
+            values[line.id] = Decimal(quantity)
+    return values, evidence, tuple(unproven)
 
 
 def _empty_counts() -> Mapping[str, int]:
@@ -307,6 +1240,8 @@ class MonthlyPointProductBalanceService:
         self.refresh_official_sales = bool(refresh_official_sales)
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        self._historical_boundary_cache = {}
+        self._documentary_commercial_cache = None
 
     def build(
         self,
@@ -316,6 +1251,8 @@ class MonthlyPointProductBalanceService:
     ) -> MonthlyPointBalance:
         self._build_match_cache: dict[tuple[str, str], Receta | None] = {}
         self._build_conversion_cache: dict[tuple[str, str], Receta | None] = {}
+        self._historical_boundary_cache = {}
+        self._documentary_commercial_cache = None
         month_start = self._parse_month(month)
         month_end = date(month_start.year, month_start.month, monthrange(month_start.year, month_start.month)[1])
         today = timezone.localdate()
@@ -575,7 +1512,14 @@ class MonthlyPointProductBalanceService:
             metadata = previous.metadata or {}
             closing = metadata.get("closing_inventory_meta") or {}
             contract = (metadata.get("balance") or {}).get("contract")
-            if contract == "POINT_PRODUCT_BALANCE_V1" and str(closing.get("effective_date")) == snapshot_date.isoformat():
+            legacy_stock_boundary = (
+                closing.get("historical_closing_source") == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY
+                and closing.get("historical_boundary_contract") != "POINT_STOCK_RAW_UTC"
+            )
+            # A locked ledger can predate the raw-UTC Stock contract. Re-read
+            # the exact historical source; never rewrite that original ledger.
+            if (not legacy_stock_boundary and contract == "POINT_PRODUCT_BALANCE_V1"
+                    and str(closing.get("effective_date")) == snapshot_date.isoformat()):
                 values = {}
                 # Closure lines are parent-equivalent projections, even in V1.
                 # Only the original recipe ledger can feed the exact-product report.
@@ -601,6 +1545,9 @@ class MonthlyPointProductBalanceService:
                         "snapshot_rows": sum(count for _, count in values.values()),
                         "matched_recipe_count": len(values),
                     })
+                    for key in ("historical_closing_source", "historical_closing_id", "historical_boundary_contract"):
+                        if key in closing:
+                            meta[key] = closing[key]
                     # Compacted metadata can contain a hash/sample instead of
                     # full coverage arrays. Never compare those as actual keys.
                     coverage = (metadata.get("balance") or {}).get("closing_coverage") or closing
@@ -652,11 +1599,44 @@ class MonthlyPointProductBalanceService:
         applied_coverage_keys: set[tuple[int, int]] = set()
         applied_mapped_recipe_keys: set[tuple[int, int, int]] = set()
         recipe_scope_totals: dict[int, dict[str, Decimal]] = {}
+        unresolved_recipe_ids: set[int] = set()
+        unlocalized_unresolved_rows = 0
+
+        boundary = "opening" if source == "opening_snapshot" else "closing"
+        month = ((snapshot_date + timedelta(days=1)).replace(day=1)
+                 if boundary == "opening" else snapshot_date.replace(day=1))
+        boundary_values, boundary_evidence, unproven = documentary_historical_boundary(
+            closing, lines, month=month, boundary=boundary, cache=self._historical_boundary_cache,
+        )
+        unproven_ids = {line.id for line in unproven}
+        opposite_date = (date(month.year, month.month, monthrange(month.year, month.month)[1])
+                         if boundary == "opening" else month - timedelta(days=1))
+        opposite = PointHistoricalInventoryClosing.objects.filter(
+            operational_date=opposite_date, status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+        ).order_by("-id").first()
+        candidates = list(opposite.lines.select_related("branch", "branch__erp_branch", "product")) if opposite else []
+        independent = documentary_original_boundaries(
+            candidates, month=month, boundary=boundary, excluded_keys=selected_keys,
+            cache=self._historical_boundary_cache,
+        )
 
         for line in lines:
             receta = self._match_recipe(code=line.product.sku, name=line.product.name)
-            quantity = Decimal(line.stock)
+            if line.id in unproven_ids:
+                if receta is None:
+                    unlocalized_unresolved_rows += 1
+                else:
+                    unresolved_recipe_ids.add(receta.id)
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source=source, movement_id=str(line.id), item_code=line.product.sku,
+                    item_name=line.product.name, quantity=Decimal(line.stock),
+                    issue="SOURCE_INCOMPLETE", branch_external_id=line.branch.external_id,
+                    branch_name=line.branch.name, movement_date=snapshot_date,
+                ))
+                continue
+            quantity = boundary_values[line.id]
             if receta is None:
+                unlocalized_unresolved_rows += 1
                 unresolved.append(
                     MonthlyPointUnresolvedMovement(
                         source=source,
@@ -680,6 +1660,23 @@ class MonthlyPointProductBalanceService:
                 scopes = recipe_scope_totals.setdefault(receta.id, {"cedis": ZERO, "sucursales": ZERO})
                 scope = "cedis" if self._is_cedis_inventory_scope(line) else "sucursales"
                 scopes[scope] += quantity
+
+        for line in candidates:
+            key = (line.branch_id, line.product_id)
+            if key not in independent:
+                continue
+            quantity, proof = independent[key]
+            receta = self._match_recipe(code=line.product.sku, name=line.product.name)
+            if receta is None:
+                continue
+            current, count = values.get(receta.id, (ZERO, 0))
+            values[receta.id] = (current + quantity, count + 1)
+            applied_branch_ids.add(line.branch_id)
+            applied_coverage_keys.add(key)
+            applied_mapped_recipe_keys.add((line.branch_id, line.product_id, receta.id))
+            if source == "closing_snapshot":
+                scopes = recipe_scope_totals.setdefault(receta.id, {"cedis": ZERO, "sucursales": ZERO})
+                scopes["cedis" if self._is_cedis_inventory_scope(line) else "sucursales"] += quantity
 
         authoritative = manifest_complete and not unresolved
         meta = self._empty_snapshot_meta(snapshot_date, 0)
@@ -718,7 +1715,13 @@ class MonthlyPointProductBalanceService:
             "recipe_scope_totals": recipe_scope_totals,
             "matched_recipe_count": len(values),
             "unresolved_rows": len(unresolved),
+            "unresolved_recipe_ids": tuple(sorted(unresolved_recipe_ids)),
+            "unlocalized_unresolved_rows": unlocalized_unresolved_rows,
+            "historical_boundary_evidence": (*boundary_evidence.values(), *(proof for _, proof in independent.values())),
+            "independent_original_boundary_keys": tuple(sorted(independent)),
         })
+        if authoritative and closing.source == PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY:
+            meta["historical_boundary_contract"] = "POINT_STOCK_RAW_UTC"
         return values, meta, unresolved
 
     def _load_snapshot(self, *, snapshot_date: date, source: str):
@@ -1395,6 +2398,157 @@ class MonthlyPointProductBalanceService:
             **{key: value for key, value in authority.items() if key != "authoritative"},
         }, fact_unresolved
 
+    def _documentary_commercial_context(self):
+        if self._documentary_commercial_cache is None:
+            names = ("COCA-COLA 450 ML", "VELA INDIVIDUAL", "EXTRA 10")
+            rules = {rule.normalized_name: rule for rule in
+                ProductBusinessRule.objects.filter(normalized_name__in=names).order_by("pk")}
+            nodes = list(PointRecipeNode.objects.annotate(
+                documentary_name=Upper(Trim("point_name")),
+            ).filter(Q(point_code__in=("COCA450", "875", "0227")) |
+                     Q(documentary_name__in=names)).order_by("pk"))
+            self._documentary_commercial_cache = rules, nodes
+        return self._documentary_commercial_cache
+
+    @staticmethod
+    def _documentary_number_matches(value, expected):
+        if isinstance(value, bool) or value is None:
+            return False
+        try:
+            value = Decimal(str(value))
+            return value.is_finite() and value == Decimal(expected)
+        except (InvalidOperation, ValueError, TypeError):
+            return False
+
+    @staticmethod
+    def _documentary_digest(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+                                         separators=(",", ":")).encode()).hexdigest()
+
+    def _documentary_commercial_exclusion(self, row, *, source):
+        """Classify approved commercial documents, never infer a transaction FK."""
+        normalize = lambda value: ProductBusinessRule.normalize_product_name(value) if isinstance(value, str) else ""
+        name = normalize(row.item_name)
+        if row.receta_id is not None or getattr(row, "insumo_id", None) is not None:
+            return None
+        if name not in ("COCA-COLA 450 ML", "VELA INDIVIDUAL", "EXTRA 10"):
+            return None
+        if row.unit != "PZA" or not row.quantity.is_finite() or row.quantity <= ZERO:
+            return None
+        if row.erp_branch_id is not None and row.erp_branch_id != row.branch.erp_branch_id:
+            return None
+        raw = row.raw_payload
+        if not isinstance(raw, dict) or not row.source_hash:
+            return None
+        rules, nodes = self._documentary_commercial_context()
+        rule = rules.get(name)
+        if name == "COCA-COLA 450 ML":
+            if source != "waste" or row.source_endpoint != "/Mermas/get_mermas" or row.item_code:
+                return None
+            if (rule is None or not rule.is_fixed or rule.classification != "REVENTA"
+                    or normalize(rule.product_name) != name):
+                return None
+            movement, details = raw.get("movement"), raw.get("details")
+            if not isinstance(movement, dict) or not isinstance(details, list):
+                return None
+            movement_pk = movement.get("PK_Movimiento")
+            if not ((type(movement_pk) is int and movement_pk > 0) or
+                    (type(movement_pk) is str and re.fullmatch(r"[0-9]+", movement_pk)
+                     and int(movement_pk) > 0)):
+                return None
+            try:
+                # The separately verified Mermas frontend also reads Fecha as UTC.
+                stamp = parse_datetime(movement.get("Fecha"))
+                if stamp is None:
+                    return None
+                if timezone.is_naive(stamp):
+                    stamp = stamp.replace(tzinfo=datetime_timezone.utc)
+                date_matches = stamp.astimezone(datetime_timezone.utc) == row.movement_at.astimezone(datetime_timezone.utc)
+            except (ValueError, TypeError):
+                return None
+            if (str(movement_pk) != row.movement_external_id or not date_matches
+                    or normalize(movement.get("Sucursal")) != normalize(row.branch.name)):
+                return None
+            matches = [detail for detail in details if isinstance(detail, dict)
+                       and normalize(detail.get("Articulo")) == name]
+            if len(matches) != 1:
+                return None
+            detail = matches[0]
+            if (detail.get("Unidad") != row.unit or
+                    not self._documentary_number_matches(detail.get("Cantidad"), row.quantity) or
+                    not self._documentary_number_matches(detail.get("Costo_unitario"), row.unit_cost) or
+                    not self._documentary_number_matches(detail.get("Costo_total"), row.total_cost)):
+                return None
+            code, family, category, classification = "COCA450", "BEBIDAS", "COCA-COLA", "REVENTA"
+            criterion = "FIXED_REVENTA_EXACT_COMMERCIAL_DOCUMENT_V1"
+        else:
+            extra = name == "EXTRA 10"
+            if (source != "conversions" or row.source_endpoint != "/Report/crea_Reporte_Largo"
+                    or row.item_code != ("0227" if extra else "875")
+                    or not row.movement_external_id.startswith("AGG-")
+                    or row.source_item_code or row.source_item_name):
+                return None
+            if rule is not None and (not rule.is_fixed or rule.classification != ("SERVICIO" if extra else "ACCESORIO")):
+                return None
+            if (raw.get("CÓDIGO") != row.item_code or normalize(raw.get("PRODUCTO")) != name
+                    or raw.get("UNIDAD") != row.unit
+                    or normalize(raw.get("CATEGORÍA")) != ("OTROS POSTRES" if extra else "ALEGRÍA")
+                    or normalize(raw.get("SUCURSAL")) != normalize(row.branch.name)
+                    or not self._documentary_number_matches(raw.get("CANTIDAD"), row.quantity)
+                    or not self._documentary_number_matches(raw.get("COSTO"), row.total_cost)):
+                return None
+            if extra:
+                code, family, category, classification = "0227", "OTROS POSTRES", "OTROS POSTRES", "CARGO_ADICIONAL"
+                criterion = "APPROVED_EXTRA10_EXACT_NON_PRODUCED_CHARGE_V1"
+            else:
+                code, family, category, classification = "875", "VELAS", "ALEGRÍA", "ACCESORIO"
+                criterion = "APPROVED_VELAS_ALEGRIA_EXACT_COMMERCIAL_DOCUMENT_V1"
+        candidates = [node for node in nodes if (node.point_code == code or normalize(node.point_name) == name)
+                      and (name != "EXTRA 10" or normalize(node.point_name) == name)]
+        if not candidates:
+            return None
+        corroborations, identities = [], set()
+        for node in candidates:
+            detail = node.raw_detail
+            if not isinstance(detail, dict):
+                return None
+            pk = detail.get("PK_Producto")
+            if (type(pk) is not int or pk <= 0 or node.point_pk != str(pk)
+                    or node.source_type != "PRODUCT" or node.node_kind != "FINAL_PRODUCT"
+                    or node.identity_key != f"PRODUCT:{code}"
+                    or node.point_code != code or normalize(node.point_name) != name
+                    or detail.get("Codigo") != code or normalize(detail.get("Nombre")) != name
+                    or normalize(node.family) != family or normalize(node.category) != category
+                    or node.erp_recipe_id is not None or node.erp_insumo_id is not None
+                    or node.has_recipe_flag or node.raw_bom != []
+                    or detail.get("Produccion") is not False or detail.get("Rastreable") is not False
+                    or detail.get("Activo") is not True or type(detail.get("FK_Unidad")) is not int
+                    or detail["FK_Unidad"] != 5
+                    or name == "EXTRA 10" and (detail.get("Servicio") is not False
+                                                 or detail.get("Complemento") is not False)):
+                return None
+            identities.add((node.point_pk, node.point_code, name, node.source_type))
+            corroborations.append({"id": node.pk, "run_id": node.run_id,
+                "corroborating_point_pk": node.point_pk, "source_type": node.source_type,
+                "identity_key": node.identity_key, "point_code": node.point_code,
+                "point_name": node.point_name, "family": node.family, "category": node.category,
+                "updated_at": node.updated_at.isoformat(),
+                "raw_detail_sha256": self._documentary_digest(detail)})
+        if len(identities) != 1:
+            return None
+        return {"source": source, "id": row.pk, "movement_external_id": row.movement_external_id,
+            "source_hash": row.source_hash, "raw_payload_sha256": self._documentary_digest(raw),
+            "source_endpoint": row.source_endpoint, "sync_job_id": row.sync_job_id,
+            "branch_id": row.branch_id, "branch_external_id": row.branch.external_id,
+            "branch_name": row.branch.name, "erp_branch_id": row.erp_branch_id,
+            "movement_at": row.movement_at.isoformat(), "item_code": row.item_code,
+            "item_name": row.item_name, "unit": row.unit, "quantity": str(row.quantity),
+            "classification": classification, "criterion": criterion, "nodes": corroborations,
+            "rule": ({"id": rule.pk, "product_name": rule.product_name,
+                      "normalized_name": rule.normalized_name, "classification": rule.classification,
+                      "is_fixed": rule.is_fixed, "updated_at": rule.updated_at.isoformat()} if rule else None),
+            "transactional_product_identity_verified": False, "execution_origin_verified": False}
+
     def _load_waste(
         self,
         *,
@@ -1421,8 +2575,11 @@ class MonthlyPointProductBalanceService:
                 "branch_id",
                 "branch__external_id",
                 "branch__name",
+                "branch__erp_branch_id",
+                "erp_branch_id",
                 "sync_job_id",
                 "insumo_id",
+                "raw_payload", "unit", "unit_cost", "total_cost", "source_endpoint",
             )
             .order_by("id")
         )
@@ -1433,6 +2590,9 @@ class MonthlyPointProductBalanceService:
             row_job_ids=[row.sync_job_id for row in point_rows],
         )
         if point_rows or authority["authoritative"]:
+            excluded = [decision for row in point_rows
+                        if (decision := self._documentary_commercial_exclusion(row, source="waste"))]
+            excluded_ids = {decision["id"] for decision in excluded}
             finished_product_recipe_ids = finished_product_recipe_ids or set()
             matched = [
                 row
@@ -1460,7 +2620,7 @@ class MonthlyPointProductBalanceService:
                     movement_date=timezone.localtime(row.movement_at).date(),
                 )
                 for row in point_rows
-                if row.receta_id is None and row.insumo_id is None
+                if row.receta_id is None and row.insumo_id is None and row.pk not in excluded_ids
             ]
             return self._aggregate_rows(matched, "quantity"), {
                 "source": "PointWasteLine",
@@ -1469,6 +2629,9 @@ class MonthlyPointProductBalanceService:
                 "rows_read": len(point_rows),
                 "unresolved_rows": len(unresolved),
                 "internal_input_rows_excluded": internal_input_rows_excluded,
+                "excluded_documentary_rows": excluded,
+                "excluded_documentary_quantity_by_unit": {"PZA": str(sum(
+                    (Decimal(item["quantity"]) for item in excluded), ZERO))} if excluded else {},
                 **authority,
             }, unresolved
 
@@ -1688,7 +2851,7 @@ class MonthlyPointProductBalanceService:
     ):
         daily_authority_unresolved: list[MonthlyPointUnresolvedMovement] = []
         if include_daily:
-            daily, daily_unresolved, daily_rows_read, daily_rows = self._load_daily_sales(
+            daily, daily_unresolved, daily_rows_read, daily_rows, non_produced_sales = self._load_daily_sales(
                 month_start=month_start,
                 month_end=month_end,
             )
@@ -1716,6 +2879,7 @@ class MonthlyPointProductBalanceService:
                         "source_present": True,
                         "row_count": daily_rows_read,
                         "unresolved_rows": len(daily_unresolved),
+                        "excluded_non_produced_sales": non_produced_sales,
                         **daily_evidence,
                     },
                     configured_source_mode=configured_source_mode,
@@ -2328,13 +3492,34 @@ class MonthlyPointProductBalanceService:
                 "branch__name",
                 "branch__erp_branch_id",
                 "sync_job_id",
+                "source_endpoint", "raw_payload", "net_amount",
             )
             .order_by("id")
         )
         values: dict[int, tuple[Decimal, int]] = {}
         unresolved: list[MonthlyPointUnresolvedMovement] = []
+        non_produced_sales = []
         for row in rows:
             receta_id = row.receta_id
+            raw = row.raw_payload
+            if (receta_id is None and row.source_endpoint == "/Report/PrintReportes?idreporte=3"
+                    and isinstance(raw, dict) and raw.get("source") == "POINT_OFFICIAL_REPORT"
+                    and isinstance(raw.get("sku"), str) and raw["sku"]
+                    and raw["sku"] == row.product.sku
+                    and isinstance(raw.get("name"), str)
+                    and raw["name"] == row.product.name
+                    and raw["name"].startswith("CAKE TOPPER ")
+                    and raw.get("category") == row.product.category == "Cake Topper"
+                    and row.quantity > ZERO):
+                non_produced_sales.append({"id": row.pk, "classification": "ACCESORIO_COMPRADO",
+                    "criterion": "APPROVED_CAKE_TOPPER_EXACT_COMMERCIAL_SALE_V1",
+                    "source": row.source_endpoint, "raw_sha256": self._documentary_digest(raw),
+                    "branch_id": row.branch_id, "product_id": row.product_id,
+                    "sale_date": row.sale_date.isoformat(), "sku": raw["sku"], "name": raw["name"],
+                    "quantity": str(row.quantity), "net_amount": str(row.net_amount),
+                    "transactional_product_identity_verified": False,
+                    "physical_inventory_verified": False})
+                continue
             if receta_id is None:
                 receta = self._match_recipe(code=row.product.sku, name=row.product.name)
                 receta_id = receta.id if receta is not None else None
@@ -2362,7 +3547,118 @@ class MonthlyPointProductBalanceService:
                     movement_date=row.sale_date,
                 )
             )
-        return values, unresolved, len(rows), rows
+        return values, unresolved, len(rows), rows, non_produced_sales
+
+    def _load_stock_conversion_exits(self, *, month_start: date, month_end: date):
+        """Read actual Point type-22 exits; AGG destinations have no paired source FK."""
+        lower, upper = self._date_datetime_bounds(month_start, month_end)
+        complete_month = month_end.day == monthrange(month_start.year, month_start.month)[1]
+        candidates = PointProductHistoryRow.objects.filter(
+            movement_at__gte=lower, movement_at__lt=upper + timedelta(hours=7),
+            movement_type__icontains="CONVERS",
+            import_record__raw_metadata__source="POINT_STOCK_HISTORY_API",
+        ).select_related("import_record__point_branch", "import_record__point_product").order_by(
+            "import_record_id", "row_number")
+        grouped, valid_instants = {}, set()
+        for row in candidates:
+            if row.cancelled or AuditStockHistoryService._category(row.movement_type, row.quantity) != "conversion_out":
+                continue
+            try:
+                if not lower <= point_stock_history_instant(row.raw_payload) < upper:
+                    continue
+                valid_instants.add(row.pk)
+            except (HistoricalInventoryCaptureError, TypeError, ValueError):
+                pass  # The reconciliation below must fail closed on this original.
+            grouped.setdefault(row.import_record_id, []).append(row)
+        records = {rows[0].import_record.pk: rows[0].import_record for rows in grouped.values()}
+        pair_imports = {}
+        for record in records.values():
+            pair = (record.point_branch_id, record.point_product_id)
+            pair_imports[pair] = pair_imports.get(pair, 0) + 1
+        eligible = [record for record in records.values() if record.point_branch_id and record.point_product_id]
+        reconciliations = AuditStockHistoryService().reconcile_many(
+            [SimpleNamespace(branch=record.point_branch, product=record.point_product) for record in eligible],
+            month_start, include_zero_difference=True,
+        )
+        result, unresolved, evidence, outside_recipe = {}, [], [], []
+        branches = set()
+        for record in records.values():
+            product, branch = record.point_product, record.point_branch
+            selected = grouped[record.pk]
+            reconciliation = reconciliations.get((branch.pk, product.pk)) if product and branch else None
+            if reconciliation is None:
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source="conversion_source_stock", movement_id=str(record.pk),
+                    source_hash=record.file_hash, item_code=product.sku if product else "",
+                    item_name=product.name if product else "",
+                    quantity=sum((abs(row.quantity) for row in selected), ZERO),
+                    issue=ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE,
+                    branch_external_id=branch.external_id if branch else "",
+                    branch_name=branch.name if branch else "", movement_date=month_start,
+                ))
+                continue
+            recipe = self.identity_service.resolve_recipe(point_code=product.sku, point_name=product.name)
+            if recipe is not None and normalizar_nombre(recipe.nombre) != normalizar_nombre(product.name):
+                if not RecetaCodigoPointAlias.objects.filter(
+                    receta=recipe, activo=True, codigo_point__iexact=product.sku,
+                    nombre_point__iexact=product.name,
+                ).exists():
+                    recipe = None
+            movement_ids = tuple(sorted(row.row_number for row in selected))
+            accepted_ids = tuple(sorted((reconciliation.movement_ids_by_category or {}).get("conversion_out", ())))
+            quantity = sum((abs(row.quantity) for row in selected), ZERO)
+            raw_valid = (pair_imports[(branch.pk, product.pk)] == 1
+                and all(row.pk in valid_instants for row in selected)
+                and set(movement_ids) <= set(accepted_ids)
+                and (not complete_month or movement_ids == accepted_ids)
+                and (not complete_month or quantity == reconciliation.conversion_out)
+                and not reconciliation.unknown_movement_ids
+                and all(not row.cancelled and isinstance(row.raw_payload, dict)
+                        and str(row.raw_payload.get("FK_Movimiento")) == str(row.row_number)
+                        and ("isInsumo" not in row.raw_payload or row.raw_payload["isInsumo"] is False
+                             or isinstance(row.raw_payload["isInsumo"], str)
+                             and row.raw_payload["isInsumo"].casefold() == "false")
+                        and all(str(row.raw_payload[field]) == product.external_id
+                                for field in ("FK_Producto", "PK_Producto", "FK_articulo", "FK_Articulo")
+                                if field in row.raw_payload)
+                        and all(str(row.raw_payload[field]) == branch.external_id
+                                for field in ("FK_Sucursal", "PK_Sucursal") if field in row.raw_payload)
+                        and _original_stock_delta_matches(row.raw_payload, direction=-1)
+                        for row in selected))
+            fact = {"import_id": record.pk, "branch_id": branch.pk,
+                "branch_external_id": branch.external_id, "product_id": product.pk,
+                "product_external_id": product.external_id, "recipe_id": recipe.pk if recipe else None,
+                "movement_ids": movement_ids, "quantity": str(quantity),
+                "canonical_raw_sha256": self._documentary_digest(
+                    [(row.row_number, row.raw_payload) for row in sorted(selected, key=lambda item: item.row_number)]),
+                "import_metadata_sha256": self._documentary_digest(record.raw_metadata),
+                "coverage_status": reconciliation.coverage_status,
+                "documentary_chain_verified": (reconciliation.documentary_opening is not None
+                                                 and reconciliation.documentary_closing is not None),
+                "original_batch_verified": reconciliation.original_batch_evidence is not None,
+                "raw_valid": raw_valid}
+            evidence.append(fact)
+            if recipe is None:
+                outside_recipe.append(fact)
+                continue
+            if raw_valid and branch.erp_branch_id:
+                branches.add((branch.erp_branch_id, normalizar_nombre(branch.name)))
+                balance = result.setdefault(recipe.pk, _MutableBalanceRow())
+                balance.add("conversion_out", quantity,
+                            count_name="conversion_out_rows")
+                balance.counts["conversion_out_rows"] += len(selected) - 1
+                balance.record_origin(ORIGIN_POINT)
+            if not raw_valid or complete_month and (reconciliation.coverage_status != "COMPLETE"
+                    or reconciliation.documentary_opening is None or reconciliation.documentary_closing is None):
+                unresolved.append(MonthlyPointUnresolvedMovement(
+                    source="conversion_source_stock", movement_id=str(record.pk),
+                    source_hash=record.file_hash, item_code=product.sku,
+                    item_name=product.name, quantity=quantity,
+                    issue=ISSUE_CONVERSION_STOCK_HISTORY_INCOMPLETE,
+                    branch_external_id=branch.external_id, branch_name=branch.name,
+                    movement_date=month_start,
+                ))
+        return result, unresolved, branches, evidence, outside_recipe
 
     def _load_conversions(self, *, month_start: date, month_end: date | None = None):
         if month_end is None:
@@ -2372,6 +3668,7 @@ class MonthlyPointProductBalanceService:
             lower_bound, upper_bound = self._date_datetime_bounds(month_start, month_end)
         all_conversions = list(
             PointConversionLine.objects.filter(movement_at__gte=lower_bound, movement_at__lt=upper_bound)
+            .select_related("branch")
             .only(
                 "id",
                 "receta_id",
@@ -2384,6 +3681,8 @@ class MonthlyPointProductBalanceService:
                 "source_item_code",
                 "source_item_name",
                 "sync_job_id",
+                "branch_id", "branch__name", "branch__external_id", "branch__erp_branch_id",
+                "erp_branch_id", "raw_payload", "unit", "total_cost", "source_endpoint",
             )
             .order_by("movement_at", "id")
         )
@@ -2419,17 +3718,25 @@ class MonthlyPointProductBalanceService:
                 ),
             )
 
-        result: dict[int, _MutableBalanceRow] = {}
+        result, source_unresolved, source_branches, source_evidence, outside_recipe = self._load_stock_conversion_exits(
+            month_start=month_start, month_end=month_end)
+        independent_source_recipe_ids = set(result)
         unresolved_conversions: list[MonthlyPointUnresolvedConversion] = []
-        unresolved_movements: list[MonthlyPointUnresolvedMovement] = []
+        unresolved_movements: list[MonthlyPointUnresolvedMovement] = list(source_unresolved)
         source_counts = {
             "conversion_rows_read": len(conversions),
             "conversion_destination_rows_applied": 0,
             "conversion_rows_ignored_non_derived": 0,
+            "independent_stock_exit_rows": sum(len(item["movement_ids"]) for item in source_evidence),
         }
+        excluded = []
         for conversion in conversions:
             quantity = Decimal(conversion.quantity)
             if conversion.receta_id is None:
+                decision = self._documentary_commercial_exclusion(conversion, source="conversions")
+                if decision:
+                    excluded.append(decision)
+                    continue
                 unresolved_conversions.append(
                     MonthlyPointUnresolvedConversion(
                         movement_external_id=conversion.movement_external_id,
@@ -2463,22 +3770,34 @@ class MonthlyPointProductBalanceService:
             source_counts["conversion_destination_rows_applied"] += 1
             destination = result.setdefault(conversion.receta_id, _MutableBalanceRow())
             destination.add("conversion_in", quantity, count_name="conversion_in_rows")
-            destination.record_origin(origin)
+            independent_branch = (
+                issue == ISSUE_CONVERSION_ORIGIN_UNRESOLVED
+                and conversion.erp_branch_id is not None
+                and conversion.branch_id is not None
+                and conversion.branch.erp_branch_id == conversion.erp_branch_id
+                and (conversion.erp_branch_id, normalizar_nombre(conversion.branch.name)) in source_branches
+            )
+            destination.record_origin(ORIGIN_INDEPENDENT_POINT_STOCK if independent_branch else origin)
             if issue:
-                destination.issues.add(issue)
-                unresolved_movements.append(
-                    MonthlyPointUnresolvedMovement(
-                        source="conversion_source",
-                        movement_id=conversion.movement_external_id,
-                        source_hash=conversion.source_hash,
-                        item_code=conversion.source_item_code,
-                        item_name=conversion.source_item_name,
-                        quantity=quantity,
-                        issue=issue,
+                # Point's aggregate has no per-operation source FK. Independent
+                # type-22 stock exits are the source evidence for that branch.
+                if not independent_branch:
+                    destination.issues.add(issue)
+                    unresolved_movements.append(
+                        MonthlyPointUnresolvedMovement(
+                            source="conversion_source",
+                            movement_id=conversion.movement_external_id,
+                            source_hash=conversion.source_hash,
+                            item_code=conversion.source_item_code,
+                            item_name=conversion.source_item_name,
+                            quantity=quantity,
+                            issue=issue,
+                        )
                     )
-                )
             if source_recipe_id is None or factor is None:
                 continue
+            if source_recipe_id in independent_source_recipe_ids:
+                continue  # Never count a configured factor on top of an original exit.
             source = result.setdefault(source_recipe_id, _MutableBalanceRow())
             source.add("conversion_out", quantity / factor, count_name="conversion_out_rows")
             source.record_origin(origin)
@@ -2489,6 +3808,11 @@ class MonthlyPointProductBalanceService:
             "rows_read": len(conversions),
             "raw_rows_read": len(all_conversions),
             "unresolved_rows": len(unresolved_movements) + len(unresolved_conversions),
+            "excluded_documentary_rows": excluded,
+            "independent_stock_exits": source_evidence,
+            "outside_recipe_stock_exits": outside_recipe,
+            "excluded_documentary_quantity_by_unit": {"PZA": str(sum(
+                (Decimal(item["quantity"]) for item in excluded), ZERO))} if excluded else {},
             **authority,
         }
         return result, unresolved_conversions, unresolved_movements, source_counts, metadata
