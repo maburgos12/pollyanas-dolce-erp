@@ -3217,11 +3217,12 @@ class ResponsiveDesignAndContentTests(TestCase):
         self.assertNotIn("v21-", sw_content)
 
     def test_sin_red_no_se_finge_un_reporte_enviado(self):
-        """Un fallo de red debe decir que no se envió nada, no un error genérico."""
+        """Una respuesta perdida conserva la captura y evita un reenvío duplicado."""
         root = Path(__file__).resolve().parents[1]
         js = (root / "static/operacion/sucursal_tools.js").read_text(encoding="utf-8")
 
-        self.assertIn("No hay conexión; no se envió ningún reporte.", js)
+        self.assertIn("verifica el historial antes de reenviar, porque el servidor pudo haberla recibido.", js)
+        self.assertNotIn("No hay conexión; no se envió ningún reporte.", js)
         # Fase 1 sin autoenvío: el reintento lo decide la persona.
         self.assertNotIn("SyncManager", js)
         self.assertNotIn("background-sync", js)
