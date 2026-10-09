@@ -1,3 +1,5 @@
+import hashlib
+import json
 from datetime import date, datetime
 from dataclasses import replace
 from decimal import Decimal
@@ -9,8 +11,8 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
-from pos_bridge.models import PointBranch, PointProduct, PointTransferLine
-from pos_bridge.services.audit_stock_history_service import PointHistoryReconciliation
+from pos_bridge.models import PointBranch, PointProduct, PointTransferLine, PointWasteLine
+from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService, PointHistoryReconciliation
 from reportes.models import ProductInventoryDocumentaryEvent
 from reportes.services_product_documentary_close import ProductDocumentaryCloseService
 
@@ -140,6 +142,84 @@ class ProductDocumentaryCloseTests(TestCase):
         )
         with patch("reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build", return_value=trace):
             self.assertEqual(self.service.evaluate(date(2026, 9, 1)), {})
+
+    def test_original_waste_movement_proves_identity_without_master_alias(self):
+        month = date(2026, 9, 1)
+        raw = {'FK_Movimiento': 101, 'Movimiento': 'MERMA', 'FK_Tipo_Movimiento': 5,
+               'Fecha': '2026-09-15T18:00:00', 'Cantidad': 2, 'Existencia_anterior': 2,
+               'Existencia_nueva': 0, 'Cancelado': False, 'isCargo': True}
+        rows = [raw]
+        code = '# bounded original acquisition\n'
+        evidence = {'source': 'POINT_STOCK_HISTORY_API', 'domain': 'PRODUCT', 'response_complete': True,
+            'branch_id': self.branch.pk, 'product_id': self.product.pk,
+            'request': {'path': '/Stock/GetHistorial', 'params': {'tipo': 'false',
+                'almacen': self.branch.external_id, 'pkproducto': self.product.external_id,
+                'movimientos': '5', 'tipoMovimiento': ''}},
+            'retrieved_at': '2026-10-04T18:00:00+00:00', 'history_limit': 5, 'fetched_rows': 1,
+            'raw_sha256': hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest(),
+            'original_locator': {'source_file': '/evidence/waste.jsonl', 'source_line': 1},
+            'request_provenance': {'kind': 'DERIVED_FROM_ACQUISITION_SCRIPT',
+                'source_file': '/evidence/reader.py', 'source_code': code,
+                'source_sha256': hashlib.sha256(code.encode()).hexdigest(),
+                'client_contract': 'PointHttpSessionClient.get_stock_history'}}
+        stock = AuditStockHistoryService()
+        history = stock.ingest_original_response(self.branch, self.product, month, rows, evidence=evidence)
+        waste = PointWasteLine.objects.create(branch=self.branch, movement_external_id='101',
+            source_hash='d' * 64, movement_at=timezone.make_aware(datetime(2026, 9, 15, 11)),
+            item_name=self.product.name, quantity=2, unit='PZA', raw_payload={
+                'movement': {'PK_Movimiento': 101},
+                'details': [{'Articulo': self.product.name, 'Cantidad': 2, 'Unidad': 'PZA'}]})
+        zero = Decimal('0')
+        values = {field: zero for field in ('production', 'sales', 'waste', 'transfer_in',
+            'transfer_out', 'conversion_in', 'conversion_out', 'identified_adjustment')}
+        values['waste'] = Decimal('2')
+        issue = SimpleNamespace(code='PRODUCT_RESOLVED_BY_NAME',
+            message=f'La fila {waste.pk} de waste se asignó por una coincidencia secundaria que requiere auditoría.',
+            branch_id=self.branch.id, product_id=self.product.id, source_ids=(waste.id,))
+        line = SimpleNamespace(month=month, branch=self.branch, product=self.product,
+            opening=Decimal('2'), point_closing=zero, expected_closing=zero, difference=zero,
+            source_trace={'opening': (1,), 'closing': (2,), 'waste': (waste.id,)}, issues=(issue,), **values)
+        trace = SimpleNamespace(lines=(line,), global_issues=())
+        with patch('reportes.services_product_documentary_close.BranchInventoryTraceabilityService.build', return_value=trace), patch(
+            'reportes.services_product_documentary_close.AuditStockHistoryService.reconcile_many', return_value={self.key: history}):
+            decision = self.service.evaluate(month)[self.key]
+            self.assertTrue(decision['eligible'])
+            proof = decision['evidence']['corroborated_waste'][str(waste.id)]
+            self.assertEqual(proof['movement_id'], 101)
+            self.assertEqual(proof['product_id'], self.product.id)
+            self.assertEqual(line.issues, (issue,))
+            self.assertEqual(self.service.close_eligible(month, actor=self.actor)['closed'], 1)
+            self.assertEqual(self.service.close_eligible(month, actor=self.actor)['unchanged'], 1)
+            self.assertEqual(ProductInventoryDocumentaryEvent.objects.count(), 1)
+            original_payload = waste.raw_payload
+            for change in (
+                {'quantity': 1}, {'item_name': 'Otro producto'}, {'unit': 'KG'},
+                {'source_hash': ''}, {'insumo_id': None, 'movement_external_id': '102'},
+                {'movement_at': waste.movement_at.replace(month=10)},
+                {'raw_payload': {'movement': {'PK_Movimiento': True}, 'details': original_payload['details']}},
+                {'raw_payload': {'movement': {'PK_Movimiento': 102}, 'details': original_payload['details']}},
+                {'raw_payload': {'movement': original_payload['movement'], 'details': original_payload['details'] * 2}},
+                {'raw_payload': {'movement': original_payload['movement'], 'details': [
+                    {'Articulo': self.product.name, 'Cantidad': True, 'Unidad': 'PZA'}]}},
+                {'raw_payload': []},
+            ):
+                with self.subTest(change=change):
+                    PointWasteLine.objects.filter(pk=waste.pk).update(**change)
+                    self.assertFalse(self.service.evaluate(month)[self.key]['eligible'])
+                    PointWasteLine.objects.filter(pk=waste.pk).update(
+                        quantity=2, item_name=self.product.name, unit='PZA', source_hash='d' * 64,
+                        movement_external_id='101', movement_at=waste.movement_at,
+                        insumo_id=None, raw_payload=original_payload)
+            for altered in (replace(history, coverage_status='INCOMPLETE'),
+                            replace(history, original_batch_evidence={}),
+                            replace(history, waste=Decimal('1'))):
+                with patch('reportes.services_product_documentary_close.AuditStockHistoryService.reconcile_many',
+                           return_value={self.key: altered}):
+                    self.assertFalse(self.service.evaluate(month)[self.key]['eligible'])
+            with patch.object(AuditStockHistoryService, '_original_batch', return_value=None):
+                self.assertFalse(self.service.evaluate(month)[self.key]['eligible'])
+            issue.message = issue.message.replace('waste', 'production')
+            self.assertFalse(self.service.evaluate(month)[self.key]['eligible'])
 
     def test_received_return_is_documentary_but_preserves_custody_warning(self):
         destination = PointBranch.objects.create(external_id="DEST", name="Destino")

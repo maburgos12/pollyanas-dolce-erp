@@ -1,14 +1,16 @@
 """Cierre documental por producto/sucursal; no bloquea el cierre mensual ni el conteo físico."""
 
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.db.models import F
 
-from pos_bridge.models import PointTransferLine
-from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.models import PointTransferLine, PointWasteLine
+from pos_bridge.services.audit_stock_history_service import (
+    AuditStockHistoryService, AuditStockHistoryError, HistoricalInventoryCaptureError,
+)
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
 from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary
@@ -48,6 +50,7 @@ class ProductDocumentaryCloseService:
             safe_lines, month, include_zero_difference=True
         )
         returns = self._documentary_returns(safe_lines, month)
+        waste_proofs = self._documentary_waste(safe_lines, histories, month)
         prepare = InventoryAuditMaterializer()._prepare_line
         decisions = {}
         for line in trace.lines:
@@ -59,7 +62,7 @@ class ProductDocumentaryCloseService:
                 }
                 continue
             history = histories.get(key)
-            reason = self._pending_reason(line, history, returns)
+            reason = self._pending_reason(line, history, returns, waste_proofs)
             if reason:
                 decisions[key] = {"eligible": False, "reason": reason}
                 continue
@@ -82,6 +85,11 @@ class ProductDocumentaryCloseService:
             }
             if return_evidence:
                 evidence["administrative_returns"] = return_evidence
+            waste_evidence = {str(source_id): waste_proofs[key + (source_id,)]
+                              for source_id in getattr(line, "source_trace", {}).get("waste", ())
+                              if key + (source_id,) in waste_proofs}
+            if waste_evidence:
+                evidence["corroborated_waste"] = waste_evidence
             decisions[key] = {
                 "eligible": True,
                 "reason": "",
@@ -91,7 +99,7 @@ class ProductDocumentaryCloseService:
         return decisions
 
     @staticmethod
-    def _pending_reason(line, history, returns=None) -> str:
+    def _pending_reason(line, history, returns=None, waste_proofs=None) -> str:
         batch = getattr(history, "original_batch_evidence", None) or {}
         month_ids = set(getattr(history, "movement_ids", ()))
         if any(gap["movement_id"] in month_ids for gap in batch.get("stock_chain_gaps", ())):
@@ -125,6 +133,11 @@ class ProductDocumentaryCloseService:
             if Decimal(history.documentary_closing) != Decimal(line.point_closing):
                 return "El saldo final del historial no coincide con el documento de cierre."
         for issue in line.issues:
+            if (issue.code == "PRODUCT_RESOLVED_BY_NAME" and " de waste se asignó " in getattr(issue, "message", "")
+                    and issue.source_ids and all(
+                        (line.branch.id, line.product.id, source_id) in (waste_proofs or {})
+                        for source_id in issue.source_ids)):
+                continue
             if issue.code == "TRANSFER_QUANTITY_MISMATCH":
                 proofs = [(returns or {}).get(source_id) for source_id in issue.source_ids]
                 if proofs and all(
@@ -142,6 +155,70 @@ class ProductDocumentaryCloseService:
             if not line.source_trace.get("conversion_in"):
                 return "Falta comprobar la entrada por conversión de este producto."
         return ""
+
+    @staticmethod
+    def _documentary_waste(lines, histories, month):
+        candidates = {(line.branch.id, line.product.id): [source_id
+            for issue in line.issues if issue.code == "PRODUCT_RESOLVED_BY_NAME"
+            and " de waste se asignó " in getattr(issue, "message", "") for source_id in issue.source_ids
+            if source_id in line.source_trace.get("waste", ())] for line in lines}
+        ids = {source_id for sources in candidates.values() for source_id in sources}
+        if not ids:
+            return {}
+        lower, upper = BranchInventoryTraceabilityService._month_datetime_bounds(month)
+        aliases, _ = BranchInventoryTraceabilityService.canonical_branch_identity()
+        waste_rows = PointWasteLine.objects.filter(pk__in=ids, insumo__isnull=True,
+            movement_at__gte=lower, movement_at__lt=upper).in_bulk()
+        stock = AuditStockHistoryService()
+        proofs = {}
+        for line in lines:
+            key = (line.branch.id, line.product.id)
+            history = histories.get(key)
+            if not candidates[key] or not history or history.coverage_status != "COMPLETE":
+                continue
+            record = stock._existing_import(line.branch, line.product)
+            if record is None:
+                continue
+            try:
+                batch = stock._original_batch(record)
+            except (AuditStockHistoryError, HistoricalInventoryCaptureError, InvalidOperation, TypeError, ValueError):
+                continue
+            if batch is None or batch["evidence"] != history.original_batch_evidence:
+                continue
+            originals = {raw["FK_Movimiento"]: raw for raw in batch["unique_rows"]}
+            for source_id in candidates[key]:
+                row = waste_rows.get(source_id)
+                if (row is None or aliases.get(row.branch_id, row.branch_id) != line.branch.id
+                        or row.item_name != line.product.name or not row.source_hash):
+                    continue
+                payload = row.raw_payload if isinstance(row.raw_payload, dict) else {}
+                header, details = payload.get("movement"), payload.get("details")
+                if not isinstance(header, dict) or not isinstance(details, list):
+                    continue
+                movement_id = header.get("PK_Movimiento")
+                if (type(movement_id) is not int or movement_id <= 0
+                        or str(movement_id) != row.movement_external_id
+                        or movement_id not in history.movement_ids_by_category.get("waste", ())):
+                    continue
+                original = originals.get(movement_id)
+                matching = [detail for detail in details if isinstance(detail, dict)
+                            and detail.get("Articulo") == row.item_name]
+                if original is None or len(matching) != 1:
+                    continue
+                detail = matching[0]
+                try:
+                    if (type(detail.get("Cantidad")) is bool
+                            or Decimal(str(detail.get("Cantidad"))) != row.quantity
+                            or Decimal(str(original["Cantidad"])) != row.quantity
+                            or str(detail.get("Unidad", "")).strip() != row.unit):
+                        continue
+                except (InvalidOperation, TypeError, ValueError):
+                    continue
+                proofs[key + (source_id,)] = {"movement_id": movement_id,
+                    "branch_id": line.branch.id, "product_id": line.product.id,
+                    "quantity": str(row.quantity), "waste_source_hash": row.source_hash,
+                    "waste_raw_sha256": _sha256(payload), "stock_original": batch["evidence"]}
+        return proofs
 
     @staticmethod
     def _documentary_returns(lines, month):
