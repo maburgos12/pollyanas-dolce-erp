@@ -682,8 +682,10 @@ En septiembre2026, el4sep CEDIS produjo2 Chocolate/3 Vainilla y registró merma2
 «pruebas y fotos»: esos documentos acreditan esas pruebas, no toda la producción
 mensual. La autorización DG para interpretar pruebas no convierte cualquier
 merma sin motivo en prueba. Para PMH028 Pan de Muerto Horneado, IsInsumo=true,
-conservar74PZA producción/34PZA merma documentada por separado y revisar consumos
-y saldo antes de conciliar preparación; no trasladarlos al Pan de Muerto final.
+el original septiembre2026 acredita0+74−34=40: las34 acumuladas se mermaron
+con movimiento1684716 y después ingresaron40 con1685163. El vecino de octubre
+comienza con40. Esto concilia esa preparación, no74 panes finales ni merma74.
+Para otros meses revisar siempre el historial propio; no reutilizar estos saldos.
 Un salto acreditado por el original dentro del mes conserva pendiente de Point
 con motivo breve; no inventar un movimiento ni reutilizar saltos de otro período.
 

@@ -13,7 +13,7 @@ No reclasificar maestros ni sumar preparaciones a productos finales. Cero venta 
 |Producción|PointProductionLine|Sincronizador Point existente|17 detalles originales septiembre: Chocolate113PZA, Vainilla142PZA; SKU y detail.PK_Producto del dominio producto.|Materializador existente|
 |Merma|PointWasteLine|Sync existente|Chocolate25PZA/Vainilla36PZA en septiembre. CEDIS4sep:2/3PZA, motivo explícito pruebas y fotos; producción22975 detalles86550/86551:2/3.|Materializador existente|
 |Saldos y ecuaciones|ProductInventoryAuditCase|InventoryAuditMaterializer|Casos persistidos por par; ausencia de frontera conserva estado incompleto. No sumar ceros placeholder como prueba.|Reporte y exportaciones existentes|
-|Pruebas Pan de Muerto|PointProductionLine / PointWasteLine|Sincronizadores existentes|PMH028, IsInsumo=true/FK428:74PZA de preparación; merma1684716:34PZA con motivo pruebas. No corresponde automáticamente a74 productos finales ni demuestra saldo40.|Conocimiento del agente; no se traslada a producto final|
+|Pruebas Pan de Muerto|PointProductionLine / PointWasteLine / original Stock|Sincronizadores existentes / GET acotado principal protegido|PMH028, IsInsumo=true/FK428:74PZA preparación; merma1684716:34PZA pruebas. Original86filas/sin saturación prueba seis movimientos septiembre continuos0+74−34=40; producción40/1685163 posterior a merma y vecino octubre parte40.|Conocimiento del agente; no se traslada a producto final|
 
 ## Equivalencias y decisión
 
@@ -27,4 +27,4 @@ Procedimiento: inventario_fuentes_datos --term produccion --term merma --term au
 
 ## Riesgos y aceptación
 
-Pruebas: ambos Dot sin venta incluidos, reventa/categoría contradictoria excluidas, accesorios y demás categorías no reintroducidas, exportaciones usan el mismo lector. No alteración de fuentes o stock. Pan de Muerto requiere comprobar preparación, consumos y movimientos antes de afirmar que toda la producción terminó en merma; el motivo humano no fabrica esas filas.
+Pruebas: ambos Dot sin venta incluidos, reventa/categoría contradictoria excluidas, accesorios y demás categorías no reintroducidas, exportaciones usan el mismo lector. No alteración de fuentes o stock. Comprobación ejecutable comprobar-pan-preparacion-20261008.py verifica wireSHA, identidad, dominio, fechas UTC frente al corte local, cancelación, ecuación y cadena/vecino; no afirma que toda la producción acabó en merma ni infiere físico.
