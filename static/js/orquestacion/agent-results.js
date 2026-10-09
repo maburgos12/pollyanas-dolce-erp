@@ -6,6 +6,7 @@
     RUNNING:'En curso', REVALIDATION_REQUIRED:'Requiere revisión', COMPLETED:'Consulta completada',
     CANCELLED:'Cancelada', EXPIRED:'Vencida', complete:'Completada', error:'No completada',
     running:'En curso', pending:'Pendiente', approval_requested:'Requiere autorización',
+    out_of_scope:'Fuera del alcance',
   };
   const fields = {query:'Consulta', asset:'Equipo', query_or_asset:'Nombre o código del equipo', asset_selection:'Elegir uno de los equipos encontrados'};
   function date(value) {
@@ -43,6 +44,7 @@
   }
   function data(key, result) {
     const p = result.payload || {};
+    if (key === 'read.explain_limit') return `<p>${escape(p.message)}</p>`;
     if (result.status === 'no_data' && key !== 'erp.get_pending_maintenance') return '<p>No se encontraron registros con los filtros de esta consulta.</p>';
     if (key === 'erp.search_assets') return `${result.status === 'ambiguous' ? '<p>Hay varias coincidencias. Indica cuál equipo necesitas.</p>' : ''}${(p.items || []).map(asset).join('')}${p.truncated ? '<p>Hay más coincidencias; precisa la búsqueda.</p>' : ''}`;
     if (key === 'erp.get_asset_context') {
@@ -62,12 +64,12 @@
   function tool(call) {
     const wrapper = call.result || call.payload || {};
     const result = wrapper.result || {};
-    const key = call.tool_key || ({erp_search_assets:'erp.search_assets',erp_get_asset_context:'erp.get_asset_context',erp_get_pending_maintenance:'erp.get_pending_maintenance',erp_list_pending_workflows:'workflow.list_pending',erp_prepare_asset_maintenance:'workflow.prepare_asset_maintenance',erp_resume_asset_maintenance:'workflow.resume_asset_maintenance'}[call.tool_name]);
+    const key = call.tool_key || ({erp_explain_read_limit:'read.explain_limit',erp_search_assets:'erp.search_assets',erp_get_asset_context:'erp.get_asset_context',erp_get_pending_maintenance:'erp.get_pending_maintenance',erp_list_pending_workflows:'workflow.list_pending',erp_prepare_asset_maintenance:'workflow.prepare_asset_maintenance',erp_resume_asset_maintenance:'workflow.resume_asset_maintenance'}[call.tool_name]);
     const error = call.status === 'error' || Boolean(wrapper.error);
     const approval = call.status === 'approval_requested' || call.requires_approval === true;
     const complete = call.status === 'complete' && !error && !approval;
     const html = complete ? data(key,result) : '';
-    return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : approval ? 'approval_requested' : call.status)}</div>
+    return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : approval ? 'approval_requested' : complete && result.status === 'out_of_scope' ? 'out_of_scope' : call.status)}</div>
       ${error ? '<p>No se pudo completar esta consulta. Revisa tu acceso o intenta consultar nuevamente.</p>' : approval ? '<p>La acción requiere autorización; no se presenta como ejecutada.</p>' : html || `<p>${escape(call.summary || (complete ? 'El servidor registró el resultado.' : 'Esperando resultado del servidor.'))}</p>`}
       ${html ? source(result) : ''}</section>`;
   }

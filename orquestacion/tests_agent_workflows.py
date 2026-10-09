@@ -354,11 +354,11 @@ class AgentWorkflowTests(TestCase):
         self.create({'asset_id': self.asset.pk})
         self.create({'query': 'Horno'})
         before = list(models.AgentWorkflow.objects.values('public_id', 'status', 'version', 'state_json').order_by('pk'))
-        for content in ('Hola', 'Borra el horno y autoriza su pago'):
+        for content, operation in (('Hola', 'UNKNOWN'), ('Borra el horno y autoriza su pago', 'DELETE')):
             with self.subTest(content=content):
                 provider = Mock()
                 provider.with_options.return_value = provider
-                provider.responses.create.side_effect = [response(call('erp_list_pending_workflows', '{}')), response()]
+                provider.responses.create.side_effect = [response(call('erp_explain_read_limit', json.dumps({'operation':operation})))]
                 messages = create_user_turn(user=self.user, conversation=self.chat, content=content)
                 with patch('openai.OpenAI', return_value=provider):
                     result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
@@ -367,7 +367,9 @@ class AgentWorkflowTests(TestCase):
                 self.assertEqual(Activo.objects.count(), 3)
                 self.assertEqual(OrdenMantenimiento.objects.count(), 0)
                 self.assertEqual(PlanMantenimiento.objects.count(), 0)
-                self.assertEqual([event['tool_name'] for event in result.tool_events], ['erp_list_pending_workflows'])
+                self.assertEqual([event['tool_name'] for event in result.tool_events], ['erp_explain_read_limit'])
+                self.assertEqual(provider.responses.create.call_count, 1)
+                self.assertIn('erp_explain_read_limit', provider.responses.create.call_args.kwargs['input'][0]['content'])
 
     @override_settings(OPENAI_API_KEY='fake-test-key')
     def test_runtime_server_metadata_links_actual_workflow_and_owned_messages(self):
@@ -705,7 +707,7 @@ class AgentWorkflowTests(TestCase):
             execute_chat_turn(user=self.user, conversation=self.chat, user_message=messages[0], assistant_message=messages[1])
         self.assertEqual(models.AgentWorkflow.objects.count(), 1)
         self.assertNotIn('Sólo puedes consultar las tres herramientas READ ofrecidas.', requests[0]['input'][0]['content'])
-        self.assertEqual(len(requests[0]['tools']), 6)
+        self.assertEqual(len(requests[0]['tools']), 7)
         wf = self.service.list_workflows(user=self.user)['items'][0]
         self.assertEqual(wf['status'], 'WAITING_SELECTION')
         self.assertEqual(self.chat.state.context_window_json.get('agent_read', {}).get('option_ids', []), [])

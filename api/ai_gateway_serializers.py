@@ -34,6 +34,10 @@ class AIToolApprovalRequestSerializer(serializers.Serializer):
 from api.ai_gateway_assets import StrictArguments, StrictIntegerField, StrictStringField
 
 
+class ReadLimitArguments(StrictArguments):
+    operation = serializers.ChoiceField(choices=['READ', 'CREATE', 'UPDATE', 'ACTION', 'DELETE', 'UNKNOWN'])
+
+
 class WorkflowPrepareArguments(StrictArguments):
     query = StrictStringField(required=False, allow_blank=True, max_length=180)
     asset_id = StrictIntegerField(required=False, min_value=1, max_value=9223372036854775807)
