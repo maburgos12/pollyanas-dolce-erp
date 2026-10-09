@@ -6,7 +6,7 @@
     RUNNING:'En curso', REVALIDATION_REQUIRED:'Requiere revisión', COMPLETED:'Consulta completada',
     CANCELLED:'Cancelada', EXPIRED:'Vencida', complete:'Completada', error:'No completada',
     running:'En curso', pending:'Pendiente', approval_requested:'Requiere autorización',
-    out_of_scope:'Fuera del alcance',
+    out_of_scope:'Fuera del alcance', AWAITING_CONFIRMATION:'Pendiente de confirmación', EXECUTED:'Acción ejecutada', REVIEW_REQUIRED:'Revisar falla existente',
   };
   const fields = {query:'Consulta', asset:'Equipo', query_or_asset:'Nombre o código del equipo', asset_selection:'Elegir uno de los equipos encontrados'};
   function date(value) {
@@ -44,6 +44,8 @@
   }
   function data(key, result) {
     const p = result.payload || {};
+    if (key === 'incident.prepare') return incident(p.incident);
+    if (key === 'incident.requirements') return `<p>Se necesita equipo, categoría, descripción y evidencia o justificación.</p><ul>${(p.categories || []).map(row => `<li>${escape(row.nombre)}</li>`).join('')}</ul>`;
     if (key === 'read.explain_limit') return `<p>${escape(p.message)}</p>`;
     if (result.status === 'no_data' && key !== 'erp.get_pending_maintenance') return '<p>No se encontraron registros con los filtros de esta consulta.</p>';
     if (key === 'erp.search_assets') return `${result.status === 'ambiguous' ? '<p>Hay varias coincidencias. Indica cuál equipo necesitas.</p>' : ''}${(p.items || []).map(asset).join('')}${p.truncated ? '<p>Hay más coincidencias; precisa la búsqueda.</p>' : ''}`;
@@ -61,6 +63,18 @@
     if (['workflow.prepare_asset_maintenance','workflow.resume_asset_maintenance'].includes(key)) return `${workflow(p.workflow)}${p.consultation ? data('erp.get_asset_context',{payload:p.consultation, status:'ok'}) : ''}`;
     return '';
   }
+  function incident(row) {
+    if (!row || typeof row.draft_id !== 'string') return '';
+    const fields = {activo_id:'Equipo', categoria_id:'Categoría', titulo:'Título', descripcion:'Qué ocurrió', prioridad:'Prioridad', justificacion_sin_foto:'Motivo de no adjuntar foto'};
+    const missing = (row.missing_fields || []).map(key => escape(fields[key] || key)).join(', ');
+    const labels = {WAITING_INFORMATION:'Falta información', AWAITING_CONFIRMATION:'Pendiente de tu confirmación', EXECUTED:'Reporte creado', EXPIRED:'Propuesta vencida', REVIEW_REQUIRED:'Revisar falla existente'};
+    return `${asset(row.asset)}<p><strong>${escape(labels[row.status] || 'Revisar propuesta')}</strong></p>
+      <dl class="agent-facts">${Object.entries(row.fields || {}).filter(([key]) => !['activo_id','categoria_id'].includes(key)).map(([key,value]) => `<div><dt>${escape(fields[key] || key)}</dt><dd>${escape(value)}</dd></div>`).join('')}${row.categoria ? `<div><dt>Categoría</dt><dd>${escape(row.categoria)}</dd></div>` : ''}</dl>
+      ${row.status === 'REVIEW_REQUIRED' ? `<p>Este equipo ya tiene fallas abiertas. Revisa su seguimiento antes de crear otra.</p><ul>${(row.existing_reports || []).map(report => `<li>#${escape(report.id)} · ${escape(report.titulo)}</li>`).join('')}</ul>` : ''}
+      ${missing ? `<p>Falta: ${missing}. Puedes completar el reporte en esta conversación.</p>` : ''}
+      ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se creará el reporte en Fallas y quedará disponible para seguimiento en Mantenimiento.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y crear reporte</button>` : ''}
+      ${row.status === 'EXECUTED' ? `<p>Folio de falla: <strong>#${escape(row.report_id)}</strong>.</p>` : ''}`;
+  }
   function tool(call) {
     const wrapper = call.result || call.payload || {};
     const result = wrapper.result || {};
@@ -69,9 +83,10 @@
     const approval = call.status === 'approval_requested' || call.requires_approval === true;
     const complete = call.status === 'complete' && !error && !approval;
     const html = complete ? data(key,result) : '';
-    return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : approval ? 'approval_requested' : complete && result.status === 'out_of_scope' ? 'out_of_scope' : call.status)}</div>
+    const incidentStatus = key === 'incident.prepare' ? result.payload?.incident?.status : null;
+    return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : incidentStatus || (approval ? 'approval_requested' : complete && result.status === 'out_of_scope' ? 'out_of_scope' : call.status))}</div>
       ${error ? '<p>No se pudo completar esta consulta. Revisa tu acceso o intenta consultar nuevamente.</p>' : approval ? '<p>La acción requiere autorización; no se presenta como ejecutada.</p>' : html || `<p>${escape(call.summary || (complete ? 'El servidor registró el resultado.' : 'Esperando resultado del servidor.'))}</p>`}
       ${html ? source(result) : ''}</section>`;
   }
-  globalThis.ERPAgentView = {escape, date, badge, workflow, tool};
+  globalThis.ERPAgentView = {escape, date, badge, workflow, tool, incident};
 })();
