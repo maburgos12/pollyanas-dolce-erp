@@ -10,7 +10,7 @@ from django.db import close_old_connections
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
-from core.models import Sucursal
+from core.models import AuditLog, Sucursal
 from crm.models import Cliente, DireccionCliente, PedidoCliente
 from crm.services.point_delivery_auto_sync import PointDeliveryAutoSyncService
 from crm.services.point_order_link import (
@@ -90,7 +90,8 @@ class _FakeDeliveryService:
                 len(all_notes) + len(self.note_failures_by_branch.get(branch_id, ()))
             ),
             notes=tuple(item for item in all_notes if item.note.pk_nota not in excluded),
-            failures=tuple(self.note_failures_by_branch.get(branch_id, ())),
+            failures=tuple(f for f in self.note_failures_by_branch.get(branch_id, ())
+                           if f.point_note_id not in excluded),
         )
 
 
@@ -298,6 +299,7 @@ class PointDeliveryAutoSyncTests(TestCase):
                     PointDeliveryFailure(
                         point_note_id="999999",
                         error_code="POINT_CONTRACT",
+                        folio="16462",
                     ),
                 ],
             },
@@ -313,8 +315,29 @@ class PointDeliveryAutoSyncTests(TestCase):
             {"seen": 2, "created": 1, "existing": 0, "failed": 1},
         )
         self.assertEqual(PedidoCliente.objects.filter(point_note_id="887410").count(), 1)
+        log = PointSyncJob.objects.get().logs.get()
+        self.assertEqual(log.context, {
+            "point_note_id": "999999", "folio": "16462", "branch_id": "10",
+            "error_code": "POINT_CONTRACT",
+        })
+
+    def test_customer_failure_without_manual_capture_does_not_create_incomplete_order(self):
+        point = _FakeDeliveryService(note_failures_by_branch={"10": [PointDeliveryFailure(
+            point_note_id="887410", folio="15616", note=_delivery().note,
+            error_code="POINT_DELIVERY_CUSTOMER_UNAVAILABLE",
+        )]})
+        result = PointDeliveryAutoSyncService(delivery_service=point).run(today=date(2026, 8, 7))
+        self.assertEqual(result["counts"], {"seen": 1, "created": 0, "existing": 0, "failed": 1})
+        self.assertFalse(PedidoCliente.objects.exists())
+        self.assertFalse(SolicitudDomicilio.objects.exists())
 
     def test_run_reconciles_matching_manual_pending_capture_without_duplicate_or_partial(self):
+        self._assert_manual_pending_reconciliation(customer_unavailable=False)
+
+    def test_run_reconciles_audited_manual_capture_when_point_customer_endpoint_fails(self):
+        self._assert_manual_pending_reconciliation(customer_unavailable=True)
+
+    def _assert_manual_pending_reconciliation(self, *, customer_unavailable):
         delivery = _delivery()
         customer = Cliente.objects.create(
             nombre="Captura manual",
@@ -391,6 +414,11 @@ class PointDeliveryAutoSyncTests(TestCase):
             created_by=self.actor,
         )
         point = _FakeDeliveryService({"10": [delivery], "20": []})
+        if customer_unavailable:
+            point = _FakeDeliveryService(note_failures_by_branch={"10": [PointDeliveryFailure(
+                point_note_id=delivery.note.pk_nota, folio=delivery.note.folio, note=delivery.note,
+                error_code="POINT_DELIVERY_CUSTOMER_UNAVAILABLE",
+            )]})
 
         result = PointDeliveryAutoSyncService(delivery_service=point).run(
             today=date(2026, 8, 7),
@@ -412,6 +440,15 @@ class PointDeliveryAutoSyncTests(TestCase):
             order.solicitudes_domicilio.get().estatus,
             SolicitudDomicilio.ESTATUS_CONFIRMADO,
         )
+        replay = PointDeliveryAutoSyncService(delivery_service=point).run(today=date(2026, 8, 7))
+        self.assertEqual(replay["status"], PointSyncJob.STATUS_SUCCESS)
+        self.assertEqual(PedidoCliente.objects.count(), 1)
+        self.assertEqual(SolicitudDomicilio.objects.count(), 1)
+        delivery = order.solicitudes_domicilio.get()
+        self.assertEqual(delivery.revision, 1)
+        self.assertEqual(AuditLog.objects.filter(
+            action="STATUS_CHANGE", model="logistica.SolicitudDomicilio", object_id=str(delivery.pk),
+        ).count(), 1)
 
 
 class PointDeliveryAutoSyncConcurrencyTests(TransactionTestCase):

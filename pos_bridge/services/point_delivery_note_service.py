@@ -31,6 +31,12 @@ class PointDeliveryContractError(PointDeliveryError):
     """Point answered with an incompatible delivery payload."""
 
 
+class PointDeliveryCustomerUnavailableError(PointDeliveryUnavailableError):
+    def __init__(self, note):
+        super().__init__("Point no devolvió el cliente y domicilio de la nota.")
+        self.note = note
+
+
 @dataclass(frozen=True)
 class PointDeliveryNote:
     note: PointNote
@@ -47,6 +53,8 @@ class PointDeliveryNote:
 class PointDeliveryFailure:
     point_note_id: str
     error_code: str
+    folio: str = ""
+    note: PointNote | None = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +164,8 @@ class PointDeliveryNoteService:
                         PointDeliveryFailure(
                             point_note_id=point_note_id,
                             error_code=self._safe_error_code(exc),
+                            folio=self._optional_text(row.get("Folio")),
+                            note=getattr(exc, "note", None),
                         ),
                     )
             return PointDeliveryBatch(
@@ -186,12 +196,17 @@ class PointDeliveryNoteService:
                 "La bandeja y el detalle Point contienen datos incompatibles.",
             )
 
-        customer_payload = self._get_json(
-            session,
-            path=self.DELIVERY_CUSTOMER_PATH,
-            params={"id_nota": pk_nota},
-            label="cliente de domicilio",
-        )
+        try:
+            customer_payload = self._get_json(
+                session,
+                path=self.DELIVERY_CUSTOMER_PATH,
+                params={"id_nota": pk_nota},
+                label="cliente de domicilio",
+            )
+        except PointDeliveryUnavailableError as exc:
+            raise PointDeliveryCustomerUnavailableError(note) from exc
+        if isinstance(customer_payload, dict) and customer_payload.get("hasError") is True:
+            raise PointDeliveryCustomerUnavailableError(note)
         customer = self._one_row(customer_payload, label="cliente de domicilio")
         self._require_fields(
             customer,
@@ -199,6 +214,8 @@ class PointDeliveryNoteService:
             label="cliente de domicilio",
         )
         customer_id = self._required_text(customer["PK_Cliente"], field="PK_Cliente")
+        if note.customer_external_id and customer_id != note.customer_external_id:
+            raise PointDeliveryContractError("El cliente del domicilio no coincide con la nota Point.")
 
         catalog_payload = self._get_json(
             session,
@@ -403,6 +420,8 @@ class PointDeliveryNoteService:
 
     @staticmethod
     def _safe_error_code(exc: Exception) -> str:
+        if isinstance(exc, PointDeliveryCustomerUnavailableError):
+            return "POINT_DELIVERY_CUSTOMER_UNAVAILABLE"
         name = exc.__class__.__name__.upper()
         if "CONTRACT" in name or "INTEGRITY" in name:
             return "POINT_CONTRACT"
