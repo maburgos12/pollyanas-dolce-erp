@@ -2,6 +2,7 @@
 from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
+from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary
 
 from django.core.exceptions import SuspiciousOperation
 from django.urls import reverse
@@ -78,7 +79,7 @@ def _case_quantity(case, field):
         if field in {"difference", "expected_closing"}:
             return None
         source = {"opening_point": "opening", "point_closing": "closing"}.get(field)
-        if source and not case.source_trace.get(source):
+        if source and not has_documentary_boundary(case.source_trace, source):
             return None
     if field == "sales":
         comparison = (case.source_trace or {}).get("point_history", {}).get(

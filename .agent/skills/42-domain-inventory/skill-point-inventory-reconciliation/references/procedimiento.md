@@ -672,6 +672,25 @@ un contador recuperado no corrige automáticamente un job que omitió un registr
 
 ## 5. Verificación de resultado y cierre
 
+### Producto nuevo sin línea en el cierre anterior
+
+No consultar Point de nuevo si el original íntegro ya acredita el mes.
+`documentary_original_boundaries` sólo suplementa pares ausentes usando
+candidatos del manifiesto opuesto y `reconcile_many`: COMPLETE real, unknown0,
+membership/SHA/procedencia original válidos, corte y ecuación acreditados.
+No sustituye una línea existente no probada ni acepta vacío como cero.
+Conserva `line_id=null`, ID de importación tipado y evidencia independiente;
+jamás consultar ese ID en PointHistoricalInventoryClosingLine.
+`has_documentary_boundary` comparte esa presencia documental entre reporte,
+investigación, cierre y runtime; no concede permiso de cierre mensual.
+Tras publicación: materializar mediante InventoryAuditMaterializer.rebuild,
+refrescar narrativas afectadas por InventoryAuditAgent.run_month(notify=False),
+cerrar elegibles mediante ProductDocumentaryCloseService y comprobar segunda
+ejecución sin cambios. Después reconstruir el balance mensual por servicio
+oficial cuando corresponda, validar pantalla y exportaciones autenticadas.
+La clasificación comercial exacta existente se evalúa también en la traza;
+no inventa origen de pastel ni vuelve autoritativa una fuente incompleta.
+
 ### Producción de pruebas con ventas cero
 
 No eliminar un producto fabricado porque no tenga venta: conservar producción,

@@ -144,6 +144,12 @@ Cero ventas no elimina producción de pruebas. Comparar producción, merma y
 saldo del mismo dominio/período, y exigir motivo documental antes de afirmar
 «pruebas». Pan de Muerto PMH028 es preparación IsInsumo=true: no sumarlo como
 producto final ni llamar pérdida a producción menos merma sin revisar consumos.
+Un producto nuevo puede no tener línea en el cierre anterior. Reutilizar el
+historial original íntegro con cortes acreditados: contrato
+POINT_ORIGINAL_HISTORY_BOUNDARY_V1, sin inventar referencia de manifiesto ni
+alterar su cobertura. La prueba se comparte entre cálculo, pantalla y cierre.
+La traza también reutiliza la exclusión comercial exacta aprobada: Extra10 y
+accesorios acreditados no bloquean el cierre de pasteles de toda una sucursal.
 
 Alcance DG de 7 octubre para `Producido vs Vendido`: reutilizar
 `read_audit_report`; sólo producción en sucursales de venta y CEDIS. Devoluciones

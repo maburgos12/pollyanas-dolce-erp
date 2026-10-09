@@ -6,6 +6,7 @@ materializes, synchronizes, approves or notifies an inventory case.
 import json
 
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
+from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary
 from reportes.models import ProductInventoryAuditCase
 from reportes.services_inventory_audit_agent import InventoryAuditAgent
 from reportes.services_inventory_audit_report import _case_quantity, case_balance_status
@@ -65,7 +66,7 @@ def observe_review(goal, *, notes):
     closing = _case_quantity(case, 'point_closing')
     trace = case.source_trace or {}
     bounds_known = (opening is not None and closing is not None
-                    and bool(trace.get('opening')) and bool(trace.get('closing')))
+                    and all(has_documentary_boundary(trace, role) for role in ('opening', 'closing')))
     history_payload = history.as_dict(opening=opening, point_closing=closing) if bounds_known else {
         'coverage_status': history.coverage_status,
         'unknown_movement_ids': list(history.unknown_movement_ids),
@@ -97,7 +98,7 @@ def observe_review(goal, *, notes):
         missing.append(f'Remanente histórico {remainder}; una proyección anterior no lo explica.')
     if history.coverage_status != 'COMPLETE':
         missing.append(f'Cobertura histórica {history.coverage_status}; no equivale a cierre comprobado.')
-    eligible = (authoritative and bounds_known and bool(trace.get('opening')) and bool(trace.get('closing'))
+    eligible = (authoritative and bounds_known
                 and history.coverage_status == 'INCOMPLETE' and not unknown and not mismatch
                 and not findings
                 and commercial is not None and case.difference != 0

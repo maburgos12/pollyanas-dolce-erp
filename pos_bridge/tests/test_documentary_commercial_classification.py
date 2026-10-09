@@ -10,6 +10,7 @@ from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointConversionLine, PointDailySale, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob, PointWasteLine
 from pos_bridge.services.monthly_product_balance_service import MonthlyPointProductBalanceService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureService
+from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from reportes.models import ProductBusinessRule
 
 
@@ -65,6 +66,21 @@ class DocumentaryCommercialClassificationTests(TestCase):
         self.assertFalse(decision["execution_origin_verified"])
         self.assertFalse(decision["transactional_product_identity_verified"])
         self.assertEqual(meta, self._read("conversions")[1])
+
+        trace_service = BranchInventoryTraceabilityService()
+        self.conversion.refresh_from_db()
+        inputs = {key: {} for key in ('conversion_in', 'conversion_out',
+            'conversion_in_impacts', 'conversion_out_impacts')}
+        issues = []
+        trace_service._apply_conversions(rows=[self.conversion],
+            product_indexes=trace_service._build_product_indexes([]), issues=issues, **inputs)
+        self.assertEqual(issues, [])
+        self.assertTrue(all(not value for value in inputs.values()))
+        self.conversion.raw_payload['CANTIDAD'] = 99
+        self.conversion.save()
+        trace_service._apply_conversions(rows=[self.conversion],
+            product_indexes=trace_service._build_product_indexes([]), issues=issues, **inputs)
+        self.assertEqual(issues[0].code, 'MISSING_CONVERSION_DESTINATION')
 
     def test_classification_does_not_make_incomplete_source_authoritative(self):
         self.waste_job.result_summary = {"waste_lines_seen": 2}
@@ -151,6 +167,15 @@ class DocumentaryCommercialClassificationTests(TestCase):
         self.assertEqual(decision["classification"], "CARGO_ADICIONAL")
         self.assertFalse(decision["transactional_product_identity_verified"])
         self.assertFalse(decision["execution_origin_verified"])
+        self.conversion.refresh_from_db()
+        service = BranchInventoryTraceabilityService()
+        inputs = {key: {} for key in ('conversion_in', 'conversion_out',
+            'conversion_in_impacts', 'conversion_out_impacts')}
+        issues = []
+        service._apply_conversions(rows=[self.conversion],
+            product_indexes=service._build_product_indexes([]), issues=issues, **inputs)
+        self.assertEqual(issues, [])
+        self.assertTrue(all(not value for value in inputs.values()))
 
     def test_extra_sku_collision_and_unverified_raw_remain_unresolved(self):
         self._node("0227", "Extra 10", 267, "Otros Postres", "Otros Postres")

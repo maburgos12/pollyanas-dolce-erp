@@ -2,6 +2,15 @@
 
 ## Corrección DG8oct: Dot Cake fabricado y pruebas sin venta
 
+PR1524 publicado e205b819, aceptación5169/5170 igual/HTTP0/capture0/SHA14
+intactas. Dot visible con producción y merma; eso no acreditó todavía su saldo
+inicial. Causa: ausente en manifiesto de agosto, aunque20 originales completos
+acreditan extremos. Extender lectores con prueba independiente tipada, sin
+fabricar línea ni modificar manifiesto; materializar y refrescar narrativas.
+Extra10 conversion189/195 conserva clasificación comercial exacta existente
+APPROVED_EXTRA10_EXACT_NON_PRODUCED_CHARGE_V1, no ejecución de conversión de
+pastel: la traza no debe bloquear Matriz/Guamúchil por esos cargos.
+
 Chocolate4358/external1048/receta507 y Vainilla8734/external1047/receta509
 son FABRICADO. Se había excluido su categoría de vasos; la excepción acotada del
 lector conserva las demás exclusiones, sin modificar Point/maestros. Lectura
