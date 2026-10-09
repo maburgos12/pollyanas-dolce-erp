@@ -247,6 +247,20 @@ class AgentPilotTests(TransactionTestCase):
         self.assertEqual(AuditLog.objects.filter(action=pilot.ACTION).count(),0)
 
     @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True)
+    def test_limit_explanation_reserves_only_one_provider_cycle_and_replays_without_charge(self):
+        from orquestacion.tests_agent_read_runtime import call, response
+        provider = Mock(); provider.with_options.return_value = provider
+        provider.responses.create.return_value = response(call('erp_explain_read_limit', '{"operation":"READ"}'))
+        with patch('openai.OpenAI', return_value=provider):
+            result = execute_chat_turn(user=self.user, conversation=self.chat, user_message=self.messages[0], assistant_message=self.messages[1])
+            self.messages[1].refresh_from_db()
+            replay = execute_chat_turn(user=self.user, conversation=self.chat, user_message=self.messages[0], assistant_message=self.messages[1])
+        self.assertEqual(provider.responses.create.call_count, 1)
+        self.assertEqual(AuditLog.objects.filter(action=pilot.ACTION).count(), 1)
+        self.assertEqual(pilot.pilot_status(self.user)['turns'], 1)
+        self.assertEqual(replay.assistant_text, result.assistant_text)
+
+    @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True)
     def test_http_gateway_and_workflows_reject_nonparticipant(self):
         from rest_framework.test import APIClient
         from orquestacion.services.agent_workflows import create_workflow

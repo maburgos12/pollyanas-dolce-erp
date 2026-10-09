@@ -33,6 +33,13 @@ assert(!view.tool({status:'running',...call,status:'running'}).includes('OM1'));
 assert(view.escape(null)==='');
 assert(view.date('not-a-date')==='not-a-date');
 
+const outside = view.tool({tool_key:'read.explain_limit',status:'complete',result:{result:{status:'out_of_scope',payload:{message:`Las consultas de otros módulos aún no están habilitadas. ${hostile}`}}}});
+assert(outside.includes('Las consultas de otros módulos'));
+assert(outside.includes('Fuera del alcance'));
+assert(!outside.includes('Completada'));
+assert(outside.includes('&lt;img'));
+assert(!outside.includes('<img'));
+
 const emptyPlans = view.tool({tool_key:'erp.get_pending_maintenance',status:'complete',result:{result:{status:'no_data',payload:{fecha_hasta:'2026-10-31'}}}});
 assert(emptyPlans.includes('Hasta '));
 assert(emptyPlans.includes('ausencia de servicio'));
