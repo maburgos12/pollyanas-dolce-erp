@@ -4,9 +4,14 @@
 
 PR1524 publicado e205b819, aceptación5169/5170 igual/HTTP0/capture0/SHA14
 intactas. Dot visible con producción y merma; eso no acreditó todavía su saldo
-inicial. Causa: ausente en manifiesto de agosto, aunque20 originales completos
-acreditan extremos. Extender lectores con prueba independiente tipada, sin
-fabricar línea ni modificar manifiesto; materializar y refrescar narrativas.
+inicial. Causa: ausente en manifiesto de agosto. PR1525 publicado103c8f0b comparte
+fronteras originales tipadas:18 originales íntegros acreditados; dos canónicas
+viejas Bamoa no tienen membresía de archivo y sus aperturas siguen pendientes.
+No afirmar20 archivos probados ni fabricar línea/modificar manifiesto.
+Consolidación actualizó19 casos, cerró7 nuevos (149 acumulados); segunda0 cambios.
+Pantalla actualizada08oct20:09, cobertura847/857 inicial y848/857 final. Esto no
+acredita cierre mensual. Dot Chocolate final21/Vainilla18, 9/10 aperturas probadas
+en cada uno; Túnel Chocolate conserva diferencia comercial1 (Stock4/ventas5).
 Extra10 conversion189/195 conserva clasificación comercial exacta existente
 APPROVED_EXTRA10_EXACT_NON_PRODUCED_CHARGE_V1, no ejecución de conversión de
 pastel: la traza no debe bloquear Matriz/Guamúchil por esos cargos.
@@ -28,6 +33,14 @@ comprobación están en historias-dot-restantes-y-preparacion-20261008.jsonl y
 pan-preparacion-comprobacion-20261008.json. Ningún conteo físico inferido.
 
 ## Corrección DG8oct2026: Recibida es terminal, no falta finalización
+
+Diagnóstico posterior1525 READ ONLY/HTTP0 encontró83 candidatos hipotéticos al
+retirar advertencias de nombre/SKU/recepción. No son83 cierres autorizados: sólo
+el retorno administrativo con FK original y TODAS las comprobaciones pasa la
+excepción documental; identificaciones secundarias conservan su veto. Cambio
+local y pruebas no prueban publicación ni nueva ejecución. La custodia física
+continúa independiente de septiembre; los saltos de zanahoria quedan con nota
+de revisión por Mauricio con Point, sin imputar pieza o persona.
 
 La interpretación anterior de3911 («finalizaciones faltan realmente») queda
 superada: los cinco documentos recibidos completos no quedan pendientes por

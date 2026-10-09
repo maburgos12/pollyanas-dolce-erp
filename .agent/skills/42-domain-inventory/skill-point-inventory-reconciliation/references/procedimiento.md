@@ -721,6 +721,17 @@ ejecución idéntica no registra eventos; si la prueba deja de ser válida, se
 registra reapertura y se conserva el cierre anterior para auditoría. Esto no
 equivale a conteo físico, aprobación de expedientes ni `ProductMonthClosureService.lock`.
 
+Retorno administrativo acreditado: la advertencia TRANSFER_QUANTITY_MISMATCH no
+impide por sí sola el cierre individual si el original vigente/no cancelado es
+producto, recibido con fecha dentro del mes y 0≤recibido<enviado. Exigir
+FK_articulo exacta/isInsumo=false, ubicación origen o destino exacta y presencia
+de esa fila en la traza; en origen, también en transfer_in. Conservar enviado,
+recibido, retorno, fecha, hash y physical_custody_verified=false en el evento.
+Los controles anteriores siguen intactos: cortes, coverageCOMPLETE, unknown0,
+cadena continua, remanente0 y cada rubro contra canónica. Nunca admitir
+recibido>enviado, aliases secundarios, ausencia de recepción o fuente ambigua
+mediante esta excepción. La custodia y aprobación del expediente siguen aparte.
+
 Antes/después: IDs canónicos, filas por importación, FK_Movimiento/row_number duplicados, saldos, source_trace/investigation, avisos y fingerprints pertinentes. Segunda ejecución debe hacer cero HTTP, no agregar filas/importaciones/duplicados ni avisos. Probar con cliente que rechaza HTTP o `requests.Session.request` prohibido en el ámbito de la prueba, sin afectar procesos ajenos.
 
 Pantalla autenticada: ecuación, cantidades comerciales conservadas, diferencia, fuentes, Qué falta, trazabilidad y conteo separados; consola y solicitudes relevantes. No pulsar Guardar/Aprobar/Resolver para una verificación read-only. Si etiqueta contradice missing, no aceptar cierre.

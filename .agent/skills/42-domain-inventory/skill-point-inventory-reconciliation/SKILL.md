@@ -48,6 +48,14 @@ transferencia sin recepción sigue pendiente. El ejemplo39577 pertenece a
 octubre, nunca a septiembre: Snickers Mini2 enviadas/0 recibidas, salida1686766
 y retorno1687006 comprobados en CEDIS. Ver procedimiento y checkpoint.
 
+Septiembre es cierre documental contra Point, no aprobación de custodia física.
+Un retorno administrativo recibido, fechado en el mes y con FK original exacta
+puede permitir el cierre individual cuando ambos cortes, cadena y TODOS los
+rubros coinciden con el historial canónico. Conservar diferencia de recepción,
+advertencia y custodia pendiente en la evidencia, sin quitarla del expediente.
+Recibido mayor que enviado, identidad secundaria o retorno no registrado en las
+entradas del origen no pasa esta excepción. No ampliar el guard mensual.
+
 Leer [procedimiento](references/procedimiento.md) y
 [continuidad septiembre 2026](references/septiembre-2026.md). El runtime carga ambos
 archivos y [hallazgos fechados](references/hallazgos.json), además de este archivo,
