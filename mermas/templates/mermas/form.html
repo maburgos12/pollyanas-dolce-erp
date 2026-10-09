@@ -82,7 +82,7 @@
                     <button class="icon-btn" type="button" data-remove-product aria-label="Quitar producto">×</button>
                 </div>
             </div>
-            <button class="add-btn" type="button" id="add-product">Agregar producto</button>
+            <button class="add-btn" type="button" id="add-product">Agregar otro producto</button>
         </section>
 
         <section class="form-block">
@@ -107,6 +107,7 @@
     const form = document.getElementById("merma-capture-form");
     const wrapper = document.getElementById("productos-wrapper");
     const add = document.getElementById("add-product");
+    form.noValidate = true;
 
     form.addEventListener("formdata", (event) => {
         const cookieToken = document.cookie
@@ -123,6 +124,13 @@
     });
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        // Validar después de retirar sólo filas sin captura; conservar las incompletas.
+        wrapper.querySelectorAll(".product-row").forEach((row) => {
+            const producto = row.querySelector('select[name="receta_id[]"]').value;
+            const cantidad = row.querySelector('input[name="cantidad[]"]').value;
+            if (!producto && !cantidad && wrapper.children.length > 1) row.remove();
+        });
+        if (!form.reportValidity()) return;
         const submitButton = form.querySelector('button[type="submit"]');
         const originalLabel = submitButton.textContent;
         const productRows = Array.from(wrapper.querySelectorAll(".product-row")).map((row) => {

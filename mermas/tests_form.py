@@ -72,6 +72,21 @@ class MermaProductoFormularioTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(MermaProducto.objects.get().receta, receta)
 
+    def test_post_ignora_fila_vacia_y_conserva_producto_capturado(self):
+        receta = Receta.objects.create(nombre="Producto capturado", codigo_point="CAP-1")
+        response = self.client.post(reverse("mermas:app"), {
+            "sucursal": self.sucursal.pk,
+            "receta_id[]": [str(receta.pk), ""],
+            "producto_texto[]": [receta.nombre, ""],
+            "cantidad[]": ["2", ""],
+            "ticket_fotos": [SimpleUploadedFile("ticket.jpg", b"ticket", content_type="image/jpeg")],
+            "producto_fotos": [SimpleUploadedFile("producto.jpg", b"producto", content_type="image/jpeg")],
+        })
+        self.assertEqual(response.status_code, 302)
+        producto = MermaProducto.objects.get()
+        self.assertEqual(producto.receta, receta)
+        self.assertEqual(producto.cantidad_enviada, 2)
+
     def test_formulario_usa_selector_nativo_de_producto_en_moviles(self):
         receta = Receta.objects.create(
             nombre="Pastel de Fresas con Crema Chico",
