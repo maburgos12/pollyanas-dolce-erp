@@ -672,6 +672,21 @@ un contador recuperado no corrige automáticamente un job que omitió un registr
 
 ## 5. Verificación de resultado y cierre
 
+### Producción de pruebas con ventas cero
+
+No eliminar un producto fabricado porque no tenga venta: conservar producción,
+merma y movimientos de stock del mismo período y dominio. Dot Cake Chocolate4358
+y Vainilla8734 tienen excepción DG8oct al filtro de vasos, con receta única
+FABRICADO y código original coincidente; la excepción no modifica maestros.
+En septiembre2026, el4sep CEDIS produjo2 Chocolate/3 Vainilla y registró merma2/3 con motivo
+«pruebas y fotos»: esos documentos acreditan esas pruebas, no toda la producción
+mensual. La autorización DG para interpretar pruebas no convierte cualquier
+merma sin motivo en prueba. Para PMH028 Pan de Muerto Horneado, IsInsumo=true,
+conservar74PZA producción/34PZA merma documentada por separado y revisar consumos
+y saldo antes de conciliar preparación; no trasladarlos al Pan de Muerto final.
+Un salto acreditado por el original dentro del mes conserva pendiente de Point
+con motivo breve; no inventar un movimiento ni reutilizar saltos de otro período.
+
 Para cierre documental individual, evaluar cada producto final y sucursal con
 apertura y cierre originales de ese mismo par, autoridad de las fuentes del mes,
 historial Point COMPLETE sin movimientos desconocidos, remanente cero y

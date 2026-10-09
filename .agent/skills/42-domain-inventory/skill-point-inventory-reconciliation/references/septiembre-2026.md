@@ -1,5 +1,20 @@
 # Continuidad septiembre 2026 — corte 5 de octubre de 2026 UTC
 
+## Corrección DG8oct: Dot Cake fabricado y pruebas sin venta
+
+Chocolate4358/external1048/receta507 y Vainilla8734/external1047/receta509
+son FABRICADO. Se había excluido su categoría de vasos; la excepción acotada del
+lector conserva las demás exclusiones, sin modificar Point/maestros. Lectura
+original septiembre:113PZA Chocolate/142PZA Vainilla; merma25/36 respectivamente.
+El4sep producción22975 detalles86550/86551 registra2/3 y merma1461/1462
+movimiento1662740 registra2/3, motivo explícito «pruebas y fotos».
+No convertir esas cinco pruebas en explicación de toda la producción.
+
+PMH028/IsInsumo=true conserva74PZA producción de preparación y34PZA de merma
+1684716 con motivo pruebas del17–28sep. El dato no certifica saldo40 ni74 panes
+finales; producción del29sep y consumos permanecen separados. Actualización del
+conocimiento y pruebas locales no significan publicación ni cierre mensual.
+
 ## Corrección DG8oct2026: Recibida es terminal, no falta finalización
 
 La interpretación anterior de3911 («finalizaciones faltan realmente») queda

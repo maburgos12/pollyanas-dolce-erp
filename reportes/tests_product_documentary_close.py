@@ -56,6 +56,23 @@ class ProductDocumentaryCloseTests(TestCase):
         self.assertEqual(ProductInventoryDocumentaryEvent.objects.count(), 2)
         self.assertEqual(ProductInventoryDocumentaryEvent.objects.first().reason, pending["reason"])
 
+    def test_original_month_gap_has_plain_reason_but_prior_month_gap_does_not(self):
+        line = SimpleNamespace(source_trace={})
+        history = PointHistoryReconciliation(
+            coverage_status="COMPLETE",
+            movement_ids=(1668705,),
+            original_batch_evidence={"stock_chain_gaps": [{"movement_id": 1668705}]},
+        )
+        self.assertEqual(
+            self.service._pending_reason(line, history),
+            "Point presenta un salto de existencias sin movimiento intermedio. Pendiente de aclaración con Point.",
+        )
+        history.original_batch_evidence["stock_chain_gaps"][0]["movement_id"] = 1650279
+        self.assertEqual(
+            self.service._pending_reason(line, history),
+            "Falta comprobar el saldo inicial o el saldo final de Point.",
+        )
+
     def test_conversion_without_common_folio_can_be_proven_independently(self):
         zero = Decimal("0")
         values = {field: zero for field in (

@@ -137,6 +137,14 @@ El reporte `AGG` y Stock pueden tener distintos PK de `PointBranch` para la mism
 sucursal: cotejar FK ERP y nombre originales de ambos dominios; nunca sus PK
 Point entre sí ni una pareja de movimientos que no existe.
 
+Corrección DG8oct: Dot Cake Chocolate4358 y Vainilla8734 sí son productos
+fabricados, aunque estén clasificados en vasos. Incluirlos por receta única,
+código original coincidente y modo FABRICADO; no reincorporar todos los vasos.
+Cero ventas no elimina producción de pruebas. Comparar producción, merma y
+saldo del mismo dominio/período, y exigir motivo documental antes de afirmar
+«pruebas». Pan de Muerto PMH028 es preparación IsInsumo=true: no sumarlo como
+producto final ni llamar pérdida a producción menos merma sin revisar consumos.
+
 Alcance DG de 7 octubre para `Producido vs Vendido`: reutilizar
 `read_audit_report`; sólo producción en sucursales de venta y CEDIS. Devoluciones
 conserva su expediente y movimientos, pero sus saldos no son requisito de esta
