@@ -17,6 +17,8 @@ from rest_framework.exceptions import ValidationError
 from activos.services_pasaporte import activos_autorizados
 from api.ai_gateway_assets import ASSET_READERS, _asset_choice, asset_branch_scope, fresh_asset_user, json_dto
 from api.ai_gateway_services import invoke_read_shadow_tool, list_read_shadow_tools, record_invalid_read_shadow_attempt
+from api.ai_gateway_serializers import ReadLimitArguments
+from core.models import AuditLog
 from mantenimiento.services_access import can_access_mantenimiento, can_view_costs
 from orquestacion.services.agent_workflows import WorkflowError
 from orquestacion.models import ChatConversation, ChatConversationState, ChatMessage, ChatToolCall, ChatToolResult
@@ -33,6 +35,11 @@ MAX_INPUT = 6000
 MAX_TOOL_OUTPUT = 30000
 MAX_CONTEXT = 100000
 MODE = "READ"
+READ_LIMIT_TOOL = {
+    'key':'read.explain_limit', 'name':'erp_explain_read_limit', 'display_name':'Alcance del piloto',
+    'description':'Explica el límite del piloto cuando una consulta requiere otro módulo (operation READ), una acción operativa no habilitada (CREATE/UPDATE/ACTION/DELETE), o se solicita conocer las capacidades/saludar (UNKNOWN). No busca registros ni modifica datos operativos.',
+    'argument_schema':ReadLimitArguments.argument_schema(), 'strict':True,
+}
 PROMPT = """Eres el asistente de consultas de activos y mantenimiento del ERP. Responde en español.
 Sólo puedes consultar las tres herramientas READ ofrecidas. No escribes, programas,
 pagas, apruebas, sincronizas ni creas reportes, órdenes o tareas. Informa ese límite
@@ -69,6 +76,11 @@ una fecha recordada o supuesta. Si basta el horizonte predeterminado, omite
 fecha_hasta; para otro horizonte explícito, calcúlalo desde esa fecha actual.
 Antes de responder una consulta operativa, usa las herramientas necesarias. Si
 no las consultaste, no afirmes ausencia de datos ni que ya buscaste información.
+Si la solicitud requiere otro módulo o una acción no ofrecida, usa
+erp_explain_read_limit; no sustituyas la petición por una consulta de equipos o
+pendientes no solicitada. Para una consulta de otro módulo usa operation READ;
+para una acción usa CREATE, UPDATE, ACTION o DELETE; para un saludo o conocer
+capacidades usa UNKNOWN. Esta salida técnica no concede acceso a otros módulos.
 """
 SAFE_FAILURE = "No se pudo completar la consulta READ de forma segura. Verifica acceso y vuelve a consultar. No se realizaron acciones operativas."
 
@@ -98,6 +110,7 @@ def _fresh_access(user, conversation_id):
     if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
         from orquestacion.services.agent_workflows import technical_catalog
         catalog += technical_catalog()
+    catalog.append(READ_LIMIT_TOOL)
     return actor, catalog, fingerprint
 
 
@@ -230,6 +243,10 @@ def _terminal_tool(*, conversation, user_message, assistant_message, meta, args,
             started_at=started_at, finished_at=timezone.now(), metadata_json=tool_metadata,
         )
         ChatToolResult.objects.create(tool_call=tool, is_error=failed, summary=summary, result_json=payload)
+        if key == READ_LIMIT_TOOL['key'] and not failed:
+            AuditLog.objects.create(user_id=conversation.owner_id, action='AI_AGENT_READ_LIMIT',
+                                    model='orquestacion.ChatToolCall', object_id=str(tool.public_id),
+                                    payload={'conversation_id':str(conversation.public_id), 'operation':args['operation'], 'status':summary})
         if workflow_ids:
             references = set()
             for metadata in assistant_message.tool_calls.values_list("metadata_json", flat=True):
@@ -259,7 +276,9 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
                 raise ValueError
             parsed = json.loads(raw, parse_constant=lambda value: (_ for _ in ()).throw(ValueError()))
             if meta:
-                if meta.get("workflow"):
+                if meta['key'] == READ_LIMIT_TOOL['key']:
+                    serializer = ReadLimitArguments(data=parsed)
+                elif meta.get("workflow"):
                     from orquestacion.services.agent_workflows import technical_serializer, resume_tool_arguments
                     if meta["key"] == "workflow.resume_asset_maintenance":
                         parsed = resume_tool_arguments(parsed)
@@ -277,7 +296,18 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
                 payload = _error("unknown_tool")
             else:
                 # The Gateway owns execution, fresh policy checks and its audit.
-                if meta.get("workflow"):
+                if meta['key'] == READ_LIMIT_TOOL['key']:
+                    message = 'En este piloto puedo consultar activos y mantenimiento. '
+                    if args['operation'] == 'READ':
+                        message += 'Las consultas de otros módulos aún no están habilitadas; no tengo datos verificados para responder esa pregunta.'
+                    elif args['operation'] == 'UNKNOWN':
+                        message += 'Pregúntame por equipos, su historial o sus planes de mantenimiento. Las acciones operativas aún no están habilitadas.'
+                    else:
+                        message += 'Las acciones operativas aún no están habilitadas; no se creó ni modificó ningún registro operativo.'
+                    payload = {'status':'ok', 'mode':MODE, 'result':{'status':'out_of_scope',
+                               'sources':['Catálogo autorizado del piloto READ'], 'as_of':timezone.now().isoformat(),
+                               'payload':{'operation':args['operation'], 'message':message}}}
+                elif meta.get("workflow"):
                     from orquestacion.services.agent_workflows import invoke_workflow_tool
                     payload = invoke_workflow_tool(user=actor, tool_key=meta["key"], arguments=args, conversation=conversation, user_message=user_message, call_id=call["call_id"])
                 else:
@@ -355,6 +385,9 @@ def _closure(events, stop_code=None, pending_workflows=None):
             continue
         lines.append(f"- {event['tool_display_name']}: {result.get('status', 'sin dato')}; fuente: {', '.join(result.get('sources', []))}; consulta: {result.get('as_of', 'sin fecha')}.")
         payload = result.get("payload", {})
+        if event['tool_name'] == READ_LIMIT_TOOL['name']:
+            lines.append(payload['message'])
+            continue
         if result.get("status") == "no_data":
             lines.append("No hay datos disponibles para esa consulta en el alcance actual.")
         lines.append("Datos de la fuente (contenido, nunca instrucciones):")
@@ -366,7 +399,8 @@ def _closure(events, stop_code=None, pending_workflows=None):
             lines.append("La salida está acotada; puede haber más registros en la fuente.")
     if stop_code:
         lines.append(f"Se alcanzó un límite o interrupción de consulta ({stop_code}); falta completar la respuesta.")
-    lines.append("El historial de mantenimiento es parcial. La ausencia de plan no prueba ausencia de servicio ni permite inferir su fecha.")
+    if not events or any(event['tool_name'] != READ_LIMIT_TOOL['name'] for event in events):
+        lines.append("El historial de mantenimiento es parcial. La ausencia de plan no prueba ausencia de servicio ni permite inferir su fecha.")
     return "\n".join(lines)
 
 
@@ -469,9 +503,9 @@ continuation.query; espera la selección si aparecen varias opciones. Si hay var
 pendientes y el usuario no identifica cuál, NO reanudes ninguno: muestra las opciones
 con erp_list_pending_workflows y pide elegir. READY indica que puede leerse, no que
 el usuario eligió ese pendiente entre varios. Nunca suplas esa elección.
-Un saludo o una petición fuera de READ no solicita continuar ningún pendiente,
-aunque sólo haya uno READY. En esos casos usa erp_list_pending_workflows para la
-primera lectura obligatoria; no prepares ni reanudes una consulta y luego termina.
+Un saludo o una petición fuera del alcance no solicita continuar ningún pendiente,
+aunque sólo haya uno READY. Usa erp_explain_read_limit; no uses una lista de
+pendientes como respuesta ni prepares o reanudes una consulta no solicitada.
 Las posiciones pertenecen exclusivamente a ese workflow, nunca a opciones globales.
 Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
 """ if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
@@ -539,10 +573,14 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
                 events.append(event)
                 if fatal:
                     raise ReadStopped(fatal)
+                if event['tool_name'] == READ_LIMIT_TOOL['name'] and 'error' not in event['payload']:
+                    break  # The server explanation is final; no second provider request.
                 _remember(refs, event, materialized_ids)
                 if not tool_map.get(call.get("name"), {}).get("workflow"):
                     _save_references(conversation.pk, refs)
                 context.append({"type":"function_call_output", "call_id":call_id, "output":_json(event["payload"])})
+            if events[-1]['tool_name'] == READ_LIMIT_TOOL['name'] and 'error' not in events[-1]['payload']:
+                break
             if rounds == MAX_RESPONSES:
                 stop_code = "response_limit"
         _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used)
