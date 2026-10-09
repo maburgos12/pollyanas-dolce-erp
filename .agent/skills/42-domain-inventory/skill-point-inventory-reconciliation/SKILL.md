@@ -56,6 +56,13 @@ advertencia y custodia pendiente en la evidencia, sin quitarla del expediente.
 Recibido mayor que enviado, identidad secundaria o retorno no registrado en las
 entradas del origen no pasa esta excepción. No ampliar el guard mensual.
 
+Una merma asignada secundariamente puede corroborarse sin modificar aliases:
+exigir archivo original íntegro de ese producto/sucursal, membresía y receipt
+verificados, historial COMPLETE, FK de movimiento en waste y único detalle
+exacto con cantidad/unidad coincidentes. Guardar `corroborated_waste` y conservar
+la advertencia. Todos los cortes/rubros y la cadena siguen siendo obligatorios.
+No extenderlo a producción/SKU ni convertir merma en prueba sin motivo explícito.
+
 Leer [procedimiento](references/procedimiento.md) y
 [continuidad septiembre 2026](references/septiembre-2026.md). El runtime carga ambos
 archivos y [hallazgos fechados](references/hallazgos.json), además de este archivo,

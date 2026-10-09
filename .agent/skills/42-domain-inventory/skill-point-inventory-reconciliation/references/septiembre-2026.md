@@ -1,5 +1,29 @@
 # Continuidad septiembre 2026 — corte 5 de octubre de 2026 UTC
 
+## Corte posterior 8oct: retornos entregados y Dot Bamoa acreditado
+
+PR1526 publicado7ee8c0b1, CI37879577111/validate37879577149PASS. Cierre
+individual:19 nuevos/149 intactos; segunda0 nuevos/168 intactos.19 fuentes
+operativas protegidas sin cambios. Native5176/5177 igual/HTTP0/capture0.
+Galleta Lotus CEDIS visible cerrado documentalmente:30+249+2−260=21 Point21;
+custodia física pendiente independiente. Recursos propios retirados con respaldo.
+
+Dot Bamoa2628/2629: dos GET originales500 ya guardados/ingresados oficialmente,
+12/9 filas, imports827/828 conservados, segunda sin cambios/HTTP0/SHA14 intactas.
+Ambos cortes0; Chocolate7 entradas−5 ventas−2 merma=0, Vainilla7−7 merma=0.
+Son ahora20 archivos Dot acreditados y10/10 aperturas, sustituyen el faltante
+Bamoa del corte1525 debajo. Consolidación con mutex mensual antes de lecturas:
+0 actualizaciones/168 cierres intactos. Vainilla global0+142−88−36=18 Point18;
+Chocolate conserva desacuerdo comercial Túnel1, no inventar pérdida ni saldo.
+Reporte60 Conciliado/20 pendiente/8 falta información: no cierre mensual.
+
+Investigación de mermas existentes:94 referencias/57 pares coinciden con
+movimiento canónico y cantidad. El contrato de corroboración exige archivo
+íntegro, petición por producto/sucursal, receipt/membresía y detalle único exacto.
+No son57 cierres ya ejecutados; validar publicación y aceptación antes de contar.
+Los motivos explícitos «pruebas y fotos» acreditan sólo sus movimientos, no toda
+producción sin venta. Zanahoria conserva nota de salto que Mauricio revisa con Point.
+
 ## Corrección DG8oct: Dot Cake fabricado y pruebas sin venta
 
 PR1524 publicado e205b819, aceptación5169/5170 igual/HTTP0/capture0/SHA14

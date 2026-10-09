@@ -734,6 +734,18 @@ mediante esta excepción. La custodia y aprobación del expediente siguen aparte
 
 Antes/después: IDs canónicos, filas por importación, FK_Movimiento/row_number duplicados, saldos, source_trace/investigation, avisos y fingerprints pertinentes. Segunda ejecución debe hacer cero HTTP, no agregar filas/importaciones/duplicados ni avisos. Probar con cliente que rechaza HTTP o `requests.Session.request` prohibido en el ámbito de la prueba, sin afectar procesos ajenos.
 
+Merma con advertencia PRODUCT_RESOLVED_BY_NAME: no aceptar el nombre solo.
+Revalidar archivo original íntegro con `_original_batch` de la canónica existente
+y comparar su evidencia con la reconciliación. Petición y membresía acreditan
+producto/sucursal; header PK entero, movimiento externo y categoría waste deben
+coincidir. La fuente debe estar trazada, ser producto final y tener fecha dentro
+del mes. Exigir nombre exacto, un único detalle, cantidad igual en detalle/fila/
+historial y unidad exacta; ambigüedad o falta de archivo falla cerrado. Guardar
+hashes y evidencia original en corroborated_waste sin borrar la advertencia.
+No habilita otras fuentes secundarias ni omite cadena/cortes/unknown/rubros.
+La merma prueba su salida registrada, no motivo físico ni condición de prueba;
+para esto último conservar la justificación explícita. No inferir rendimientos.
+
 Pantalla autenticada: ecuación, cantidades comerciales conservadas, diferencia, fuentes, Qué falta, trazabilidad y conteo separados; consola y solicitudes relevantes. No pulsar Guardar/Aprobar/Resolver para una verificación read-only. Si etiqueta contradice missing, no aceptar cierre.
 
 Código autorizado: ficha de fuentes, worktree/branch registrados, PostgreSQL aislado, migraciones/checks, TDD de regresiones y revisión de consumidores, CI completo SHA actual, PR/merge, deploy_web_safe oficial sin pull manual previo, fresh VPS y UI autenticada, segunda ejecución idempotente y cierre exacto de la tarea. No copiar archivos al VPS. Pruebas locales no son publicación.
