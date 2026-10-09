@@ -30,8 +30,10 @@
     </div>
     {% endif %}
 
-    <form id="merma-capture-form" method="post" enctype="multipart/form-data">
+    <form id="merma-capture-form" data-draft-key="merma-producto:u{{ request.user.pk }}" method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        <input type="hidden" name="request_id" value="{{ request_id }}">
+        <p class="message" data-product-draft-status role="status" aria-live="polite"></p>
         <section class="form-block">
             <h2>Salida de sucursal</h2>
             <div class="field">
@@ -107,7 +109,88 @@
     const form = document.getElementById("merma-capture-form");
     const wrapper = document.getElementById("productos-wrapper");
     const add = document.getElementById("add-product");
+    const draftStatus = form.querySelector("[data-product-draft-status]");
+    const requestId = form.elements.namedItem("request_id");
+    const submitButton = form.querySelector('button[type="submit"]');
+    const photoNames = ["ticket_fotos", "producto_fotos"];
+    const photos = {ticket_fotos: [], producto_fotos: []};
+    let draftDb;
     form.noValidate = true;
+    submitButton.disabled = true;
+    function draftOperation(action, value) {
+        return new Promise((resolve, reject) => {
+            const transaction = draftDb.transaction("drafts", action === "get" ? "readonly" : "readwrite");
+            const store = transaction.objectStore("drafts");
+            const request = action === "put" ? store.put(value, form.dataset.draftKey) : store[action](form.dataset.draftKey);
+            transaction.oncomplete = () => resolve(request.result);
+            transaction.onerror = transaction.onabort = () => reject(transaction.error);
+        });
+    }
+    const draftReady = (async () => {
+        try {
+            draftDb = await new Promise((resolve, reject) => {
+                const request = indexedDB.open("pollyanas-mermas", 1);
+                request.onupgradeneeded = () => request.result.createObjectStore("drafts");
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+            const saved = await draftOperation("get");
+            if (saved) {
+                requestId.value = saved.requestId;
+                ["sucursal", "ticket_point", "nota_sucursal"].forEach((name) => {
+                    form.elements.namedItem(name).value = saved.fields[name];
+                });
+                const template = wrapper.querySelector(".product-row").cloneNode(true);
+                wrapper.replaceChildren();
+                saved.products.forEach((product) => {
+                    const row = template.cloneNode(true);
+                    row.querySelector('select[name="receta_id[]"]').value = product.receta_id;
+                    row.querySelector('input[name="cantidad[]"]').value = product.cantidad;
+                    wrapper.appendChild(row);
+                    wireRow(row);
+                });
+                photoNames.forEach((name) => {
+                    photos[name] = saved.photos[name] || [];
+                    form.elements.namedItem(name).required = !photos[name].length;
+                });
+                draftStatus.textContent = `Borrador recuperado en este dispositivo; incluye ${photos.ticket_fotos.length + photos.producto_fotos.length} fotos. Aún no se confirmó el guardado.`;
+            }
+        } catch (_) {
+            draftStatus.textContent = "No se pudo recuperar el borrador en este dispositivo. Mantén esta página abierta hasta confirmar el guardado.";
+        } finally {
+            submitButton.disabled = false;
+        }
+    })();
+    function productRows() {
+        return Array.from(wrapper.querySelectorAll(".product-row")).map((row) => {
+            syncProductText(row);
+            return {
+                receta_id: row.querySelector('select[name="receta_id[]"]')?.value || "",
+                producto_texto: row.querySelector('input[name="producto_texto[]"]')?.value || "",
+                cantidad: row.querySelector('input[name="cantidad[]"]')?.value || "",
+            };
+        });
+    }
+    async function saveDraft() {
+        await draftReady;
+        if (!draftDb) return;
+        const fields = {};
+        ["sucursal", "ticket_point", "nota_sucursal"].forEach((name) => { fields[name] = form.elements.namedItem(name).value; });
+        try {
+            await draftOperation("put", {requestId: requestId.value, fields, products: productRows(), photos});
+            draftStatus.textContent = "Borrador guardado en este dispositivo; incluye tus fotos. Aún no se ha enviado.";
+        } catch (_) {
+            draftStatus.textContent = "No se pudo conservar el borrador. Mantén la página abierta hasta confirmar el guardado.";
+        }
+    }
+    form.addEventListener("input", saveDraft);
+    form.addEventListener("change", (event) => {
+        if (photoNames.includes(event.target.name)) {
+            photos[event.target.name] = Array.from(event.target.files);
+            event.target.required = !photos[event.target.name].length;
+        }
+        saveDraft();
+    });
 
     form.addEventListener("formdata", (event) => {
         const cookieToken = document.cookie
@@ -124,6 +207,7 @@
     });
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (submitButton.disabled) return;
         // Validar después de retirar sólo filas sin captura; conservar las incompletas.
         wrapper.querySelectorAll(".product-row").forEach((row) => {
             const producto = row.querySelector('select[name="receta_id[]"]').value;
@@ -131,17 +215,9 @@
             if (!producto && !cantidad && wrapper.children.length > 1) row.remove();
         });
         if (!form.reportValidity()) return;
-        const submitButton = form.querySelector('button[type="submit"]');
         const originalLabel = submitButton.textContent;
-        const productRows = Array.from(wrapper.querySelectorAll(".product-row")).map((row) => {
-            syncProductText(row);
-            return {
-                receta_id: row.querySelector('select[name="receta_id[]"]')?.value || "",
-                producto_texto: row.querySelector('input[name="producto_texto[]"]')?.value || "",
-                cantidad: row.querySelector('input[name="cantidad[]"]')?.value || "",
-            };
-        }).filter((row) => row.receta_id || row.producto_texto || row.cantidad);
-        if (!productRows.length || productRows.some((row) => !row.receta_id || !row.cantidad)) {
+        const products = productRows().filter((row) => row.receta_id || row.producto_texto || row.cantidad);
+        if (!products.length || products.some((row) => !row.receta_id || !row.cantidad)) {
             window.ERPActionUI?.showToast({
                 type: "error",
                 message: "Selecciona cada producto y captura una cantidad mayor a cero.",
@@ -157,13 +233,22 @@
         const fieldToken = form.querySelector('[name="csrfmiddlewaretoken"]')?.value;
         const token = cookieToken ? decodeURIComponent(cookieToken) : fieldToken;
         const formData = new FormData(form);
-        formData.set("productos_json", JSON.stringify(productRows));
+        formData.set("productos_json", JSON.stringify(products));
+        photoNames.forEach((name) => {
+            if (photos[name].length) {
+                formData.delete(name);
+                photos[name].forEach((file) => formData.append(name, file, file.name));
+            }
+        });
         if (token) {
             formData.set("csrfmiddlewaretoken", token);
         }
         submitButton.disabled = true;
         submitButton.textContent = "Guardando…";
+        const controls = Array.from(form.elements).filter((field) => !field.disabled);
+        controls.forEach((field) => { field.disabled = true; });
         try {
+            await saveDraft();
             const response = await fetch(form.action || window.location.href, {
                 method: "POST",
                 body: formData,
@@ -174,22 +259,24 @@
                 credentials: "same-origin",
                 redirect: "follow",
             });
-            if (!response.ok) {
-                const payload = await response.json().catch(() => ({}));
-                throw new Error(payload.error || `HTTP ${response.status}`);
-            }
-            const finalPath = new URL(response.url || window.location.href).pathname;
-            if (response.redirected && (finalPath === "/mermas/app/" || finalPath === "/login/")) {
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(payload.error || `No se pudo guardar (HTTP ${response.status}). Tu captura se conserva.`);
+            if (response.redirected || !Number.isSafeInteger(payload.id) || payload.request_id !== requestId.value) {
                 throw new Error("La sesión del formulario expiró. Mantén esta página abierta; inicia sesión en otra pestaña del mismo navegador y vuelve a guardar.");
             }
-            window.location.assign(response.url || window.location.href);
+            const receipt = new URL(payload.redirect_url, window.location.origin);
+            if (receipt.origin !== window.location.origin || !/^\/mermas\/\d+\/$/.test(receipt.pathname)) throw new Error("No se recibió la confirmación del guardado. Tu captura se conserva; vuelve a intentar.");
+            if (draftDb) await draftOperation("delete").catch(() => {});
+            window.location.assign(receipt.href);
         } catch (error) {
             submitButton.disabled = false;
             submitButton.textContent = originalLabel;
             window.ERPActionUI?.showToast({
                 type: "error",
-                message: error.message || "No se pudo guardar la merma. Revisa tu conexión e inténtalo de nuevo.",
+                message: error instanceof TypeError ? "Se perdió la conexión. Tu captura se conserva; vuelve a guardar para confirmar el mismo envío." : error.message,
             });
+        } finally {
+            controls.forEach((field) => { field.disabled = false; });
         }
     });
     const syncProductText = (row) => {
@@ -200,7 +287,7 @@
     const wireRow = (row) => {
         const select = row.querySelector('select[name="receta_id[]"]');
         row.querySelector('[data-remove-product]').addEventListener("click", () => {
-            if (wrapper.querySelectorAll(".product-row").length > 1) row.remove();
+            if (wrapper.querySelectorAll(".product-row").length > 1) { row.remove(); saveDraft(); }
         });
         select.addEventListener("change", () => syncProductText(row));
         syncProductText(row);
@@ -211,6 +298,7 @@
         clone.querySelectorAll("input, select").forEach((input) => input.value = "");
         wrapper.appendChild(clone);
         wireRow(clone);
+        saveDraft();
     });
 })();
 </script>

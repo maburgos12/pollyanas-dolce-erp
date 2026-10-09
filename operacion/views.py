@@ -45,6 +45,7 @@ from inventario.models import ALMACEN_CHOICES, LoteProduccion
 from maestros.models import Insumo, UnidadMedida
 from maestros.utils.canonical_catalog import canonicalized_active_insumos
 from mermas.models import MermaInsumo, OrdenAjustePoint
+from mermas.captura import CapturaConflict, identificar_captura
 from mantenimiento.services_access import can_access_mantenimiento
 from mantenimiento.evidence_validation import EvidenceValidationError, validate_evidence_files
 from mermas.services_insumos import (
@@ -746,6 +747,7 @@ def mermas_insumos_catalogo_api(request):
 
 @login_required
 @require_POST
+@transaction.atomic
 def mermas_insumos_crear_api(request):
     sucursal = _sucursal_operativa_usuario(request.user)
     if not sucursal:
@@ -754,6 +756,24 @@ def mermas_insumos_crear_api(request):
         data = json.loads(request.body or "{}") if request.content_type == "application/json" else request.POST
     except json.JSONDecodeError:
         return JsonResponse({"error": "La solicitud no contiene JSON válido."}, status=400)
+    if not isinstance(data, dict) and request.content_type == "application/json":
+        return JsonResponse({"error": "La solicitud debe contener una captura."}, status=400)
+    try:
+        request_id, fingerprint, previous = identificar_captura(
+            MermaInsumo, request_id=data.get("request_id"), actor_id=request.user.pk,
+            sucursal_id=sucursal.pk,
+            payload={field: str(data.get(field) or "").strip() for field in
+                     ("codigo_point", "cantidad", "motivo", "comentario", "justificacion_sin_foto")},
+            files={"foto": request.FILES.getlist("foto_evidencia")},
+        )
+        if previous:
+            return _respuesta_creacion(request, payload={"id": previous.pk, "estatus": previous.estatus,
+                                                       "request_id": str(request_id)},
+                                       tab="mermas", anchor="merma-form", mensaje="Esta merma ya estaba registrada.")
+    except ValidationError as exc:
+        if isinstance(exc, CapturaConflict):
+            return JsonResponse({"error": exc.messages[0]}, status=409)
+        return _respuesta_error(request, error=exc.messages[0], tab="mermas", anchor="merma-form")
 
     rows, no_disponible = _cargar_insumos_sucursal(sucursal)
     if no_disponible:
@@ -813,6 +833,7 @@ def mermas_insumos_crear_api(request):
         )
         with transaction.atomic():
             merma = MermaInsumo(
+                request_id=request_id, payload_hash=fingerprint,
                 sucursal=sucursal, reportado_por=request.user, codigo_point=row.codigo_point,
                 nombre_point=row.nombre_point, unidad_point=row.unidad_point, cantidad_reportada=cantidad,
                 motivo=(data.get("motivo") or "").strip(), comentario=(data.get("comentario") or "").strip(),
@@ -837,7 +858,7 @@ def mermas_insumos_crear_api(request):
     else:
         _on_commit_seguro(lambda: _notificar_merma_sin_responsable(merma, request.user))
     return _respuesta_creacion(
-        request, payload={"id": merma.id, "estatus": merma.estatus}, tab="mermas", anchor="merma-form",
+        request, payload={"id": merma.id, "estatus": merma.estatus, "request_id": str(request_id) if request_id else None}, tab="mermas", anchor="merma-form",
         mensaje=(
             "Merma enviada a tu jefe inmediato."
             if merma.jefe_inmediato_id else "Merma registrada sin responsable; Dirección fue notificada."

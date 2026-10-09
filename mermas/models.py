@@ -3,7 +3,7 @@ from hashlib import sha256
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import models, transaction
+from django.db import connections, models, router, transaction
 from django.utils import timezone
 
 
@@ -22,6 +22,8 @@ class MermaRegistro(models.Model):
     ]
 
     folio = models.CharField(max_length=40, unique=True, blank=True)
+    request_id = models.UUIDField(null=True, blank=True, unique=True)
+    payload_hash = models.CharField(max_length=64, blank=True, default="")
     sucursal = models.ForeignKey("core.Sucursal", on_delete=models.PROTECT, related_name="mermas")
     ticket_point = models.CharField(max_length=80, blank=True, default="")
     estatus = models.CharField(max_length=24, choices=ESTATUS_CHOICES, default=ESTATUS_CAPTURA, db_index=True)
@@ -104,7 +106,13 @@ class MermaRegistro(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.folio:
-            self.folio = self._generate_folio()
+            using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+            with transaction.atomic(using=using):
+                # También protege el primer folio del día, cuando no hay fila que bloquear.
+                with connections[using].cursor() as cursor:
+                    cursor.execute("SELECT pg_advisory_xact_lock(%s)", [754202610080001])
+                self.folio = self._generate_folio()
+                return super().save(*args, **kwargs)
         super().save(*args, **kwargs)
 
     def marcar_enviado(self, repartidor, user):
@@ -261,6 +269,8 @@ class PersonalEnviosSucursal(models.Model):
 
 
 class MermaInsumo(models.Model):
+    request_id = models.UUIDField(null=True, blank=True, unique=True)
+    payload_hash = models.CharField(max_length=64, blank=True, default="")
     VALORIZACION_PENDIENTE = "PENDIENTE"
     VALORIZACION_CON_COSTO = "CON_COSTO"
     VALORIZACION_SIN_COSTO = "SIN_COSTO"

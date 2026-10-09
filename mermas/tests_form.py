@@ -60,7 +60,7 @@ class MermaProductoFormularioTests(TestCase):
 
         self.assertContains(response, '"X-Requested-With": "XMLHttpRequest"')
         self.assertContains(response, "payload.error")
-        self.assertContains(response, 'formData.set("productos_json", JSON.stringify(productRows))')
+        self.assertContains(response, 'formData.set("productos_json", JSON.stringify(products))')
 
     def test_post_acepta_respaldo_json_de_productos_para_safari(self):
         receta = Receta.objects.create(nombre="Producto Safari", codigo_point="SAF-1")

@@ -38,6 +38,13 @@
 
   const supply = document.querySelector("#codigo_point");
   const mermaForm = document.querySelector("#merma-form");
+  function captureUuid() {
+    const bytes = new Uint8Array(16); window.crypto.getRandomValues(bytes);
+    bytes[6] = (bytes[6] & 15) | 64; bytes[8] = (bytes[8] & 63) | 128;
+    const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  let captureId = mermaForm ? captureUuid() : null;
   let stockRequest = 0, stockReady = false, draftPhoto = null, restoredCode = "";
   const draftStatus = mermaForm?.querySelector("[data-draft-status]");
   let draftDb;
@@ -52,6 +59,7 @@
       });
       const saved = await draftOperation("get");
       if (saved) {
+        captureId = saved.requestId || captureId;
         Object.entries(saved.fields).forEach(([name, value]) => {
           const field = mermaForm.elements.namedItem(name);
           if (field) field.value = value;
@@ -82,7 +90,7 @@
       fields[name] = mermaForm.elements.namedItem(name).value;
     });
     try {
-      await draftOperation("put", {fields, photo: draftPhoto});
+      await draftOperation("put", {requestId: captureId, fields, photo: draftPhoto});
       draftStatus.textContent = "Borrador guardado en este dispositivo. Aún no se ha enviado.";
     } catch (_) {
       draftStatus.textContent = "No se pudo guardar el borrador. Mantén esta página abierta.";
@@ -298,10 +306,17 @@
       const original = button.textContent;
       button.disabled = true;
       button.textContent = "Procesando…";
+      let controls = [];
+      let invalidField;
       try {
         if (form.id === "merma-form") await saveDraft();
         const body = new FormData(form);
         if (form.id === "merma-form" && draftPhoto) body.set("foto_evidencia", draftPhoto);
+        if (form.id === "merma-form") {
+          body.set("request_id", captureId);
+          controls = Array.from(form.elements).filter((field) => !field.disabled);
+          controls.forEach((field) => { field.disabled = true; });
+        }
         const token = document.cookie.split("; ").find((row) => row.startsWith("csrftoken="))?.slice(10);
         if (token) body.set("csrfmiddlewaretoken", decodeURIComponent(token));
         if (button.name) body.set(button.name, button.value);
@@ -332,9 +347,14 @@
           await syncSupply();
           return;
         }
-        if (!response.ok || response.redirected || (form.id === "merma-form" && !payload.id)) throw new Error(payload.error || "No fue posible guardar. Revisa tu sesión; la captura se conserva.");
+        if (!response.ok || response.redirected || (form.id === "merma-form" && (!payload.id || payload.request_id !== captureId))) {
+          const fields = payload.fields || {};
+          invalidField = form.elements.namedItem(Object.keys(fields)[0]);
+          throw new Error(Object.values(fields).flat().join(" ") || payload.error || "No fue posible guardar. Revisa tu sesión; la captura se conserva.");
+        }
         if (form.id === "merma-form") {
           draftPhoto = null;
+          captureId = captureUuid();
           if (draftDb) {
             try { await draftOperation("delete"); }
             catch (_) {
@@ -355,8 +375,10 @@
         const sinRed = error instanceof TypeError || !navigator.onLine;
         showToast(sinRed ? "Se perdió la conexión. La captura se conserva; verifica el historial antes de reenviar, porque el servidor pudo haberla recibido." : error.message, "error");
       } finally {
+        controls.forEach((field) => { field.disabled = false; });
         button.disabled = form.id === "merma-form" && !stockReady;
         button.textContent = original;
+        invalidField?.focus();
       }
     });
   });
