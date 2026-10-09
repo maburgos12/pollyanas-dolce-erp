@@ -170,7 +170,7 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20261008-mermas-guardado-seguro-v2")
+        self.assertContains(pagina, "20261008-mermas-guardado-seguro-v3")
         self.assertContains(
             pagina,
             'navigator.serviceWorker.register("/app/sw.js?v=20260927-higiene-continuidad-v1"',

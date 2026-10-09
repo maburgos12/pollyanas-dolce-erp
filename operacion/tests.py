@@ -379,7 +379,7 @@ class OperacionAppTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "application/javascript")
         body = response.content.decode("utf-8")
-        self.assertIn("pollyanas-app-operativa-pwa-v55-mermas-guardado-seguro", body)
+        self.assertIn("pollyanas-app-operativa-pwa-v56-mermas-guardado-seguro", body)
         self.assertIn("/static/operacion/manifest.webmanifest?v=20260708-mobile-polish-v4", body)
         self.assertNotIn('"/app/"', body)
         self.assertIn('event.request.mode === "navigate"', body)
@@ -3209,7 +3209,7 @@ class ResponsiveDesignAndContentTests(TestCase):
         with open(sw_path, encoding="utf-8") as f:
             sw_content = f.read()
 
-        self.assertIn("v55-mermas-guardado-seguro", sw_content)
+        self.assertIn("v56-mermas-guardado-seguro", sw_content)
         self.assertIn('url.pathname.startsWith("/app/api/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/conteos/")', sw_content)
         self.assertIn('url.pathname.startsWith("/app/activos/")', sw_content)

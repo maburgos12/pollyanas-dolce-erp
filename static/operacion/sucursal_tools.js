@@ -307,6 +307,7 @@
       button.disabled = true;
       button.textContent = "Procesando…";
       let controls = [];
+      let invalidField;
       try {
         if (form.id === "merma-form") await saveDraft();
         const body = new FormData(form);
@@ -346,7 +347,11 @@
           await syncSupply();
           return;
         }
-        if (!response.ok || response.redirected || (form.id === "merma-form" && (!payload.id || payload.request_id !== captureId))) throw new Error(payload.error || "No fue posible guardar. Revisa tu sesión; la captura se conserva.");
+        if (!response.ok || response.redirected || (form.id === "merma-form" && (!payload.id || payload.request_id !== captureId))) {
+          const fields = payload.fields || {};
+          invalidField = form.elements.namedItem(Object.keys(fields)[0]);
+          throw new Error(Object.values(fields).flat().join(" ") || payload.error || "No fue posible guardar. Revisa tu sesión; la captura se conserva.");
+        }
         if (form.id === "merma-form") {
           draftPhoto = null;
           captureId = captureUuid();
@@ -373,6 +378,7 @@
         controls.forEach((field) => { field.disabled = false; });
         button.disabled = form.id === "merma-form" && !stockReady;
         button.textContent = original;
+        invalidField?.focus();
       }
     });
   });

@@ -161,3 +161,32 @@ class PointCountReferenceIntegrationTests(TestCase):
         self.assertEqual(result['estado'], 'SIN_REFERENCIA')
         self.assertFalse(result['corte_verificado'])
         self.assertEqual(result['lineas'], {})
+
+    def test_numeric_point_identity_with_newer_text_alias_preserves_reference(self):
+        self.point_branch.external_id = '1'
+        self.point_branch.save(update_fields=['external_id'])
+        original = self.snapshot(amount='0')
+        self.snapshot(insumo=True, amount='3')
+        PointBranch.objects.create(external_id='Matriz', name='Alias Matriz',
+            erp_branch=self.branch, last_seen_at=self.cutoff + timedelta(hours=1))
+        result = self.reference()
+        self.assertEqual(result['estado'], 'REFERENCIA')
+        self.assertEqual(result['sucursal_point_id'], self.point_branch.pk)
+        self.assertEqual(result['lineas'][str(self.product_line.pk)]['snapshot_id'], original.pk)
+        self.assertEqual(Decimal(result['lineas'][str(self.product_line.pk)]['cantidad']), 0)
+
+    def test_two_numeric_active_identities_still_require_review(self):
+        self.point_branch.external_id = '1'
+        self.point_branch.save(update_fields=['external_id'])
+        self.snapshot()
+        PointBranch.objects.create(external_id='2', name='Otra identidad', erp_branch=self.branch)
+        result = self.reference()
+        self.assertEqual(result['estado'], 'SIN_REFERENCIA')
+        self.assertEqual(result['lineas'], {})
+
+    def test_inactive_numeric_identity_cannot_override_active_reference(self):
+        self.snapshot()
+        self.snapshot(insumo=True)
+        PointBranch.objects.create(external_id='1', name='Inactiva', erp_branch=self.branch,
+                                  status=PointBranch.STATUS_INACTIVE)
+        self.assertEqual(self.reference()['sucursal_point_id'], self.point_branch.pk)
