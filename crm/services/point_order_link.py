@@ -629,6 +629,7 @@ def _reconcile_pending_delivery(
     note: PointNote,
     command: LinkPointOrderCommand,
     fingerprint: str,
+    actor,
 ) -> LinkPointOrderResult:
     pending_snapshot = (
         order.payload_snapshot.get("point_pending", {})
@@ -696,8 +697,11 @@ def _reconcile_pending_delivery(
         if command.channel == PedidoCliente.CANAL_OTRO
         else command.channel
     )
-    delivery.estatus = SolicitudDomicilio.ESTATUS_CONFIRMADO
-    delivery.save(update_fields=["canal_origen", "canal_detalle", "estatus"])
+    delivery.save(update_fields=["canal_origen", "canal_detalle"])
+    from logistica.services_domicilio_status import transition_domicilio_status
+    transition_domicilio_status(solicitud_id=delivery.pk,
+        requested_status=SolicitudDomicilio.ESTATUS_CONFIRMADO, audit_user=actor)
+    delivery.refresh_from_db()
     return LinkPointOrderResult(order=order, delivery=delivery, created=False)
 
 
@@ -804,6 +808,7 @@ def link_point_note(
                 note=note,
                 command=command,
                 fingerprint=fingerprint,
+                actor=actor,
             )
 
         customer = _find_or_create_customer(command)
