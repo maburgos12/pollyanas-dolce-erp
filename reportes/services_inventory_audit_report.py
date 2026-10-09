@@ -24,6 +24,9 @@ NON_PRODUCTION_CATEGORIES = {
     "vasos-mini", "vasos-grande", "vasos-preparados", "vasos-preparados-mini",
     "vasos-preparados-chico", "vasos-preparados-mediano", "vasos-preparados-grande",
 }
+# DG8oct2026: estos Dot Cake sí se fabrican, aunque Point los agrupe en vasos.
+MANUFACTURED_CUP_CODES = {"4358", "8734"}
+MANUFACTURED_CUP_CATEGORIES = {"vasos-grande", "vasos-preparados-grande"}
 QUANTITY_FIELDS = {
     "opening_point": "inventario_inicial", "production": "producido",
     "sales": "vendido", "waste": "merma_reportada",
@@ -45,7 +48,7 @@ def audit_report_version(month, branch=""):
             raise SuspiciousOperation("Sucursal de auditoría inválida")
         cases = cases.filter(branch__erp_branch_id=branch)
     revision = cases.aggregate(latest=Max("updated_at"), count=Count("id"))
-    return str(("production-scope-v1", runs, revision))
+    return str(("production-scope-v2", runs, revision))
 
 
 def audit_status(statuses):
@@ -102,7 +105,11 @@ def _confirmed_recipe_map():
 
 def _production_report_product(product, recipe, cases):
     categories = {slugify(product.category), slugify(recipe.categoria) if recipe else ""}
-    if categories & NON_PRODUCTION_CATEGORIES:
+    manufactured_cup = bool(recipe and recipe.modo_costeo == Receta.MODO_COSTEO_FABRICADO
+                            and (recipe.codigo_point or "").strip().upper() in MANUFACTURED_CUP_CODES
+                            and (product.sku or "").strip().upper() == recipe.codigo_point.strip().upper()
+                            and categories <= MANUFACTURED_CUP_CATEGORIES)
+    if categories & NON_PRODUCTION_CATEGORIES and not manufactured_cup:
         return False
     # Rebanadas/derivados fabricados conservan sus conversiones aunque no se capturen en producción.
     if recipe and recipe.modo_costeo != Receta.MODO_COSTEO_FABRICADO:

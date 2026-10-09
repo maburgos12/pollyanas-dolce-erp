@@ -81,6 +81,10 @@ class ProductDocumentaryCloseService:
 
     @staticmethod
     def _pending_reason(line, history) -> str:
+        batch = getattr(history, "original_batch_evidence", None) or {}
+        month_ids = set(getattr(history, "movement_ids", ()))
+        if any(gap["movement_id"] in month_ids for gap in batch.get("stock_chain_gaps", ())):
+            return "Point presenta un salto de existencias sin movimiento intermedio. Pendiente de aclaración con Point."
         boundary = line.source_trace.get("historical_boundary_evidence", {})
         if not (line.source_trace.get("opening") and line.source_trace.get("closing")):
             return "Falta comprobar el saldo inicial o el saldo final de Point."

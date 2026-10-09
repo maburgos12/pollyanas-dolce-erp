@@ -12,6 +12,38 @@ from reportes.tests_inventory_audit_agent import InventoryAuditAgentFixtures
 
 
 class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
+    def test_dot_cake_manufactured_trials_are_included_without_sales(self):
+        from recetas.models import Receta
+        for code, name, produced in (("4358", "Vaso Dot Cake Chocolate", 2),
+                                     ("8734", "Vaso Dot Cake Vainilla", 3)):
+            product = PointProduct.objects.create(external_id=code, sku=code, name=name,
+                                                 category="Vasos Grande")
+            Receta.objects.create(nombre=name, codigo_point=code, hash_contenido=code,
+                                  tipo=Receta.TIPO_PRODUCTO_FINAL, categoria="Vasos Preparados Grande",
+                                  modo_costeo=Receta.MODO_COSTEO_FABRICADO, pasa_modulo_produccion=True)
+            self.make_case(product=product, sales=0, production=produced, waste=produced)
+        rows = self.service().read_audit_report(self.month)["rows"]
+        self.assertEqual({row["receta"] for row in rows},
+                         {"Vaso Dot Cake Chocolate", "Vaso Dot Cake Vainilla"})
+        self.assertEqual(sum(row["producido"] for row in rows), 5)
+        self.assertEqual(sum(row["merma_reportada"] for row in rows), 5)
+        self.assertEqual(sum(row["vendido"] for row in rows), 0)
+
+    def test_dot_cake_exception_requires_manufactured_recipe_and_original_cup_category(self):
+        from recetas.models import Receta
+        product = PointProduct.objects.create(external_id="DOT", sku="4358", name="Vaso Dot Cake Chocolate",
+                                             category="Vasos Grande")
+        recipe = Receta.objects.create(nombre=product.name, codigo_point="4358", hash_contenido="DOT",
+                                       tipo=Receta.TIPO_PRODUCTO_FINAL, categoria="Vasos Preparados Grande",
+                                       modo_costeo=Receta.MODO_COSTEO_REVENTA)
+        self.make_case(product=product, production=2)
+        self.assertEqual(self.service().read_audit_report(self.month)["rows"], [])
+        recipe.modo_costeo = Receta.MODO_COSTEO_FABRICADO
+        recipe.save(update_fields=["modo_costeo"])
+        product.category = "Coca-cola"
+        product.save(update_fields=["category"])
+        self.assertEqual(self.service().read_audit_report(self.month)["rows"], [])
+
     def test_commercial_sales_are_preserved_in_legacy_history_projection(self):
         self.make_case(sales=Decimal("0"), source_trace={"point_history": {
             "aggregate_comparison": {"sales": {
@@ -96,7 +128,7 @@ class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(ProductInventoryAuditCase.objects.sold_products().count(), 2)
 
     def test_returns_location_does_not_hide_store_balances(self):
-        returns_erp = Sucursal.objects.get(codigo="DEVOLUCIONES")
+        returns_erp, _ = Sucursal.objects.get_or_create(codigo="DEVOLUCIONES", defaults={"nombre": "Devoluciones"})
         returns = PointBranch.objects.create(external_id="12", name="Devoluciones")
         self.make_case(difference=0, point_closing=10, movement_status="BALANCED")
         self.make_case(branch=returns, movement_status="SOURCE_INCOMPLETE",
