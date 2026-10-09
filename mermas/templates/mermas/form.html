@@ -234,12 +234,6 @@
         const token = cookieToken ? decodeURIComponent(cookieToken) : fieldToken;
         const formData = new FormData(form);
         formData.set("productos_json", JSON.stringify(products));
-        photoNames.forEach((name) => {
-            if (photos[name].length) {
-                formData.delete(name);
-                photos[name].forEach((file) => formData.append(name, file, file.name));
-            }
-        });
         if (token) {
             formData.set("csrfmiddlewaretoken", token);
         }
@@ -249,6 +243,17 @@
         controls.forEach((field) => { field.disabled = true; });
         try {
             await saveDraft();
+            // Safari puede enviar vacío todo el multipart con fotos de disco o IndexedDB (WebKit 319985).
+            for (const name of photoNames) {
+                if (photos[name].length) {
+                    formData.delete(name);
+                    for (const file of photos[name]) {
+                        const bytes = await file.arrayBuffer();
+                        if (bytes.byteLength !== file.size || !bytes.byteLength) throw new Error("No se pudo leer una foto completa. Tu captura se conserva; vuelve a seleccionar esa foto.");
+                        formData.append(name, new Blob([bytes], {type: file.type}), file.name);
+                    }
+                }
+            }
             const response = await fetch(form.action || window.location.href, {
                 method: "POST",
                 body: formData,

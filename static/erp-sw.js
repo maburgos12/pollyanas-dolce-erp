@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261008-mermas-guardado-seguro-v6";
+const CACHE_NAME = "pollyanas-erp-shell-20261009-mermas-fotos-safari-v7";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

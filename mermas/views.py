@@ -386,6 +386,8 @@ def crear_registro(request):
 
     if request.method == "POST":
         try:
+            if not request.POST and not request.FILES:
+                raise ValidationError("El navegador envió la captura vacía. Mantén esta página abierta y vuelve a guardar; tus datos y fotos se conservan.")
             rows = _producto_rows_from_post(request.POST)
             sucursal = get_object_or_404(Sucursal, pk=request.POST.get("sucursal"))
             ticket_files = request.FILES.getlist("ticket_fotos")
