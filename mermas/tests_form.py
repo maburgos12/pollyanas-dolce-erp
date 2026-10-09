@@ -47,6 +47,14 @@ class MermaProductoFormularioTests(TestCase):
         self.assertEqual(response.json()["error"], "Toma o sube la foto del ticket Point.")
         self.assertFalse(MermaRegistro.objects.exists())
 
+    def test_envio_vacio_de_safari_no_se_confunde_con_producto_faltante(self):
+        response = self.client.post(reverse("mermas:app") + "?modo=captura", data=b"",
+                                    content_type="multipart/form-data; boundary=Safari",
+                                    HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("navegador envió la captura vacía", response.json()["error"])
+        self.assertFalse(MermaRegistro.objects.exists())
+
     def test_post_sin_sesion_redirige_a_login_sin_crear_merma(self):
         self.client.logout()
         response = self.client.post(reverse("mermas:app"), {"cantidad[]": "2"},
