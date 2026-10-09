@@ -63,6 +63,12 @@ exacto con cantidad/unidad coincidentes. Guardar `corroborated_waste` y conserva
 la advertencia. Todos los cortes/rubros y la cadena siguen siendo obligatorios.
 No extenderlo a producción/SKU ni convertir merma en prueba sin motivo explícito.
 
+Producido vs Vendido puede mostrar cálculo comercial con discrepancia de ventas
+únicamente bajo el procedimiento estricto. Mostrar cantidades y explicación no
+autoriza cierre, no cambia case_balance_status ni la autoridad del goal. Un caso
+retirado de una reconstrucción exitosa completa conserva su expediente histórico,
+pero no se suma a la proyección vigente; publicación parcial conserva el pendiente.
+
 Leer [procedimiento](references/procedimiento.md) y
 [continuidad septiembre 2026](references/septiembre-2026.md). El runtime carga ambos
 archivos y [hallazgos fechados](references/hallazgos.json), además de este archivo,

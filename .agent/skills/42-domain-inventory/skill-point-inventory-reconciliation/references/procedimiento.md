@@ -748,6 +748,22 @@ para esto último conservar la justificación explícita. No inferir rendimiento
 
 Pantalla autenticada: ecuación, cantidades comerciales conservadas, diferencia, fuentes, Qué falta, trazabilidad y conteo separados; consola y solicitudes relevantes. No pulsar Guardar/Aprobar/Resolver para una verificación read-only. Si etiqueta contradice missing, no aceptar cierre.
 
+Para SALES_STOCK_EFFECT_UNVERIFIED, el reporte comparte _commercial_balance:
+exigir ambos cortes documentales, COMPLETE/unknown[]/residuo0, sólo comparación
+sales, sus tres cantidades coherentes, otros siete rubros iguales y ecuación Stock
+igual al final Point. Calcular inicio+producción+entradas−salidas−ventas−merma+
+ajuste con la venta comercial original; diferencia=final Point−calculado.
+Mostrar «Ventas registradas…; salidas por venta en inventario…» por sucursal.
+No llamarlo conciliado ni relajar cierre/estado/autoridad canónicos. Faltantes,
+NaN, contradicción adicional o un corte sin acreditar mantienen pendiente.
+CASE_MISSING_FROM_REBUILD sólo sale del reporte si hubo rebuild exitoso no parcial;
+su expediente y fuente no se borran. Sin rebuild o en publicación parcial permanece.
+Excepción en publicación parcial: _retired_nonproduction_case exige ausencia de
+cortes/historia y actividad propia, todas las referencias presentes, transferencia
+con FK/dominio/nombre/categoría original no producida y ámbito de mes/sucursal,
+o conversión clasificada por el contrato documental comercial ya publicado.
+No ampliar por semejanza de nombres ni excluir Dot fabricado. Preservar expediente.
+
 Código autorizado: ficha de fuentes, worktree/branch registrados, PostgreSQL aislado, migraciones/checks, TDD de regresiones y revisión de consumidores, CI completo SHA actual, PR/merge, deploy_web_safe oficial sin pull manual previo, fresh VPS y UI autenticada, segunda ejecución idempotente y cierre exacto de la tarea. No copiar archivos al VPS. Pruebas locales no son publicación.
 
 Cierre mensual se ejecuta por `ProductMonthClosureService` y sus guards reales:

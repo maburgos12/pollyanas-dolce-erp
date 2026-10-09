@@ -1,5 +1,29 @@
 # Continuidad septiembre 2026 — corte 5 de octubre de 2026 UTC
 
+## Corte posterior 8oct: 54 cierres corroborados y ecuaciones visibles
+
+PR1528 publicado685988866a3a0d85c0d9104552f6f43d34eebca4, CI37884417362
+completoPASS/validate37884417436PASS/deployexit0/freshHEAD/check0/migrate0.
+38 archivos faltantes ingresados oficialmente dos veces, sin HTTP ni modificar
+fuentes operativas. Cierre individual54 nuevos/168 intactos, segunda0 nuevos/
+222 intactos;19 tablas protegidas iguales. Native5179/5180 igual/context13/HTTP0.
+UI CEDIS2237 y Bamoa2629 cerrados documentalmente; Bamoa0+7−7=0 y explicación
+vieja de apertura ausente retirada. Tarea/entorno55603/6563 retirados con respaldo.
+Reporte88 productos:60 conciliados/20 pendientes/8 falta información, no mes cerrado.
+
+DotVainilla0+142−88−36=18 Point18. DotChocolate0+113−68−25=20 contraPoint21;
+ElTúnel2832 comercial5 frente Stock4. Reporte original categoría de30sept/job80502/
+sucursal11 acredita1Dot70pesos ese día; nota13653/mov1686395 es1oct, no septiembre.
+No desplazarla ni inventar enlace a pedido especial. Zanahoria2131 sólo nota,
+Mauricio lo revisa con Point; no volver a investigar ni atribuir a personas.
+
+Oreo2067/2422/3402 son proyecciones retiradas CASE_MISSING_FROM_REBUILD:
+sus raws49178/193 dicen VELA INDIVIDUAL, no producción de galleta. Mantener
+expediente histórico sin sumar a reporte de reconstrucción completa vigente.
+El cálculo comercial visible no equivale a saldo aprobado y no afecta otros guards.
+Decoración Bollo Patrio sin receta no se excluye por nombre. Pruebas explícitas
+acreditan sus movimientos, nunca todo producto sin venta ni consumos de preparación.
+
 ## Corte posterior 8oct: retornos entregados y Dot Bamoa acreditado
 
 PR1526 publicado7ee8c0b1, CI37879577111/validate37879577149PASS. Cierre
