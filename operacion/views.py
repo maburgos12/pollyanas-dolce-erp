@@ -52,7 +52,7 @@ from mermas.services_insumos import (
     insumos_recibidos_para_sucursal,
     reasignar_merma_sin_responsable, reenviar_merma_aclarada, simular_orden_ajuste_point,
 )
-from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryBusyError
 from recetas.models import Receta
 from recetas.utils.costeo_snapshot import resolve_preparation_recipe_for_insumo
 from rrhh.models import Empleado
@@ -698,14 +698,15 @@ def mermas_insumos_catalogo_api(request):
             row = consultar_existencia_insumo_point(sucursal, codigo_point)
         except ValidationError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
-        except PointLiveInventoryLookupError:
+        except PointLiveInventoryLookupError as exc:
             logger.exception(
                 "No fue posible consultar existencia en vivo para sucursal=%s codigo=%s",
                 sucursal.pk,
                 codigo_point,
             )
             return JsonResponse(
-                {"error": "No pudimos consultar la existencia vigente en Point. Reintenta."},
+                {"error": str(exc) if isinstance(exc, PointLiveInventoryBusyError) else "No pudimos consultar la existencia vigente en Point. Reintenta.",
+                 "code": "point_busy" if isinstance(exc, PointLiveInventoryBusyError) else "point_unavailable"},
                 status=503,
             )
         return JsonResponse(
@@ -779,7 +780,7 @@ def mermas_insumos_crear_api(request):
         return _respuesta_error(
             request, error=str(exc), tab="mermas", anchor="merma-form"
         )
-    except PointLiveInventoryLookupError:
+    except PointLiveInventoryLookupError as exc:
         logger.exception(
             "No fue posible revalidar existencia Point para sucursal=%s codigo=%s",
             sucursal.pk,
@@ -787,7 +788,8 @@ def mermas_insumos_crear_api(request):
         )
         if request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.content_type == "application/json":
             return JsonResponse(
-                {"error": "No pudimos validar la existencia vigente en Point. No se registró ninguna merma."},
+                {"error": str(exc) if isinstance(exc, PointLiveInventoryBusyError) else "No pudimos validar la existencia vigente en Point. No se registró ninguna merma.",
+                 "code": "point_busy" if isinstance(exc, PointLiveInventoryBusyError) else "point_unavailable"},
                 status=503,
             )
         messages.error(

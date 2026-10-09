@@ -11,6 +11,7 @@ from crm.services.pickup import PickupAvailability
 from maestros.models import Insumo
 from pos_bridge.models import PointBranch
 from pos_bridge.services.live_inventory_lookup_service import (
+    PointLiveInventoryBusyError,
     PointLiveInventoryLookupError,
     PointLiveInventoryLookupService,
 )
@@ -244,7 +245,7 @@ class PointLiveInventoryLookupServiceTests(TestCase):
     def test_live_lookup_does_not_open_a_session_while_monthly_sync_owns_point(self, session_lock):
         session_lock.return_value.__enter__.return_value = False
 
-        with self.assertRaisesMessage(PointLiveInventoryLookupError, "sincronización"):
+        with self.assertRaisesMessage(PointLiveInventoryBusyError, "sincronización"):
             self._service().get_stock(
                 product_codes=["PASTEL-1"],
                 sucursal=self.sucursal,

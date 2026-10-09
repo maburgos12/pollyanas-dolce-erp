@@ -36,13 +36,14 @@
                     <input type="hidden" name="next" value="{{ next }}">
                 {% endif %}
 
+                {% for message in messages %}<div class="alert alert-danger" role="alert">{{ message }}</div>{% endfor %}
                 {% if error %}
                     <div class="alert alert-danger">{{ error }}</div>
                 {% endif %}
 
                 <div class="form-group">
                     <label for="username">Usuario</label>
-                    <input type="text" id="username" name="username" autocomplete="username" required>
+                    <input type="text" id="username" name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required>
                 </div>
 
                 <div class="form-group">
@@ -57,7 +58,7 @@
     <script>
     // ponytail: installability only; no offline login/data cache.
     if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261008-permisos-direccion-v2').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261008-mermas-espera-v1').catch(function () {});
     }
     </script>
 </body>
