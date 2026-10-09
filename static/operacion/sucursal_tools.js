@@ -38,7 +38,61 @@
 
   const supply = document.querySelector("#codigo_point");
   const mermaForm = document.querySelector("#merma-form");
-  let stockRequest = 0;
+  let stockRequest = 0, stockReady = false, draftPhoto = null, restoredCode = "";
+  const draftStatus = mermaForm?.querySelector("[data-draft-status]");
+  let draftDb;
+  const draftReady = (async () => {
+    if (!mermaForm?.dataset.draftKey) return;
+    try {
+      draftDb = await new Promise((resolve, reject) => {
+        const request = indexedDB.open("pollyanas-mermas", 1);
+        request.onupgradeneeded = () => request.result.createObjectStore("drafts");
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const saved = await draftOperation("get");
+      if (saved) {
+        Object.entries(saved.fields).forEach(([name, value]) => {
+          const field = mermaForm.elements.namedItem(name);
+          if (field) field.value = value;
+        });
+        restoredCode = saved.fields.codigo_point || "";
+        draftPhoto = saved.photo;
+        draftStatus.textContent = "Borrador recuperado en este dispositivo" + (draftPhoto ? "; incluye tu foto." : ".");
+      }
+    } catch (_) {
+      draftStatus.textContent = "No se pudo conservar el borrador en este dispositivo. Mantén la página abierta hasta confirmar el envío.";
+    }
+  })();
+  function draftOperation(action, value) {
+    return new Promise((resolve, reject) => {
+      const transaction = draftDb.transaction("drafts", action === "get" ? "readonly" : "readwrite");
+      const store = transaction.objectStore("drafts");
+      // shortcut: un borrador por usuario y sucursal; separar por captura si se habilitan formularios simultáneos.
+      const request = action === "put" ? store.put(value, mermaForm.dataset.draftKey) : store[action](mermaForm.dataset.draftKey);
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = transaction.onabort = () => reject(transaction.error);
+    });
+  }
+  async function saveDraft() {
+    await draftReady;
+    if (!draftDb) return;
+    const fields = {};
+    ["codigo_point", "cantidad", "motivo", "comentario", "justificacion_sin_foto"].forEach((name) => {
+      fields[name] = mermaForm.elements.namedItem(name).value;
+    });
+    try {
+      await draftOperation("put", {fields, photo: draftPhoto});
+      draftStatus.textContent = "Borrador guardado en este dispositivo. Aún no se ha enviado.";
+    } catch (_) {
+      draftStatus.textContent = "No se pudo guardar el borrador. Mantén esta página abierta.";
+    }
+  }
+  mermaForm?.addEventListener("input", saveDraft);
+  mermaForm?.addEventListener("change", (event) => {
+    if (event.target.name === "foto_evidencia") draftPhoto = event.target.files[0] || null;
+    saveDraft();
+  });
   async function recoverSupplyCatalog() {
     const status = document.querySelector("[data-catalog-status]");
     if (!supply || !mermaForm?.dataset.stockUrl) {
@@ -56,9 +110,9 @@
         cache: "no-store",
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "No fue posible actualizar los insumos.");
+      if (!response.ok || response.redirected || !Array.isArray(payload.insumos)) throw new Error(payload.error || "No fue posible actualizar los insumos. Revisa tu sesión y reintenta.");
       const items = Array.isArray(payload.insumos) ? payload.insumos : [];
-      const selectedCode = supply.value;
+      const selectedCode = supply.value || restoredCode;
       const placeholder = supply.querySelector('option[value=""]') || document.createElement("option");
       placeholder.value = "";
       placeholder.textContent = "Selecciona un insumo";
@@ -74,6 +128,7 @@
       if (items.some((item) => item.codigo_point === selectedCode)) {
         supply.value = selectedCode;
       }
+      restoredCode = "";
       if (status) {
         status.hidden = items.length > 0;
         status.textContent = items.length
@@ -100,6 +155,7 @@
     const quantity = document.querySelector("#cantidad_merma");
     const submit = mermaForm?.querySelector('button[type="submit"]');
     if (quantity) quantity.removeAttribute("max");
+    stockReady = false;
     if (submit) submit.disabled = true;
     if (!code || !mermaForm?.dataset.stockUrl) {
       if (note) note.hidden = true;
@@ -112,18 +168,30 @@
     try {
       const url = new URL(mermaForm.dataset.stockUrl, window.location.origin);
       url.searchParams.set("codigo_point", code);
-      const response = await fetch(url, {
-        headers: { "X-Requested-With": "XMLHttpRequest" },
-        credentials: "same-origin",
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "No fue posible consultar Point.");
+      let response, payload;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        if (requestId !== stockRequest) return;
+        response = await fetch(url, {
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+          credentials: "same-origin", cache: "no-store",
+        });
+        payload = await response.json().catch(() => ({}));
+        if (requestId !== stockRequest) return;
+        if (response.status !== 503 || payload.code !== "point_busy") break;
+        if (note) note.textContent = "En espera de que Point termine la sincronización. Tu captura se conserva.";
+        if (attempt < 19) await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+      if (!response.ok) throw new Error(payload.code === "point_busy"
+        ? "Point sigue ocupado. Tu captura se conserva; vuelve a seleccionar el insumo para reintentar."
+        : payload.error || "No fue posible consultar Point.");
       if (requestId !== stockRequest) return;
-      const stock = payload.insumo?.existencia ?? "";
+      if (response.redirected || payload.insumo?.existencia == null) throw new Error("No recibimos la existencia de Point. Revisa tu sesión; tu captura se conserva.");
+      const stock = payload.insumo.existencia;
       const liveUnit = payload.insumo?.unidad || unit;
       if (unitLabel) unitLabel.textContent = liveUnit ? `(${liveUnit})` : "";
       if (quantity) quantity.max = stock;
       if (note) note.textContent = `Existencia disponible en Point: ${stock} ${liveUnit}`;
+      stockReady = true;
       if (submit) submit.disabled = false;
     } catch (error) {
       if (requestId !== stockRequest) return;
@@ -132,7 +200,7 @@
     }
   }
   supply?.addEventListener("change", syncSupply);
-  recoverSupplyCatalog().then(syncSupply);
+  draftReady.then(recoverSupplyCatalog).then(syncSupply);
 
   // Freno de duplicados. El servidor decide (409); esto sólo le da forma a la
   // decisión: abrir lo que ya existe o afirmar que es otro problema.
@@ -231,7 +299,11 @@
       button.disabled = true;
       button.textContent = "Procesando…";
       try {
+        if (form.id === "merma-form") await saveDraft();
         const body = new FormData(form);
+        if (form.id === "merma-form" && draftPhoto) body.set("foto_evidencia", draftPhoto);
+        const token = document.cookie.split("; ").find((row) => row.startsWith("csrftoken="))?.slice(10);
+        if (token) body.set("csrfmiddlewaretoken", decodeURIComponent(token));
         if (button.name) body.set(button.name, button.value);
         let response = await fetch(form.action, {
           method: "POST",
@@ -255,7 +327,25 @@
           });
           payload = await response.json().catch(() => ({}));
         }
-        if (!response.ok) throw new Error(payload.error || "No fue posible guardar la captura.");
+        if (form.id === "merma-form" && response.status === 503 && payload.code === "point_busy") {
+          showToast("Point está sincronizando. Tu captura se conserva; validaremos la existencia antes de volver a enviar.", "warning");
+          await syncSupply();
+          return;
+        }
+        if (!response.ok || response.redirected || (form.id === "merma-form" && !payload.id)) throw new Error(payload.error || "No fue posible guardar. Revisa tu sesión; la captura se conserva.");
+        if (form.id === "merma-form") {
+          draftPhoto = null;
+          if (draftDb) {
+            try { await draftOperation("delete"); }
+            catch (_) {
+              draftStatus.textContent = "Merma enviada, pero el borrador sigue en el dispositivo. No vuelvas a enviarlo.";
+              form.reset();
+              await syncSupply();
+              return;
+            }
+          }
+          draftStatus.textContent = "Merma enviada. Borrador retirado.";
+        }
         showToast(form.id === "falla-form" ? "Reporte enviado a Mantenimiento." : "Merma enviada correctamente.");
         if (form.dataset.resetOnSuccess !== "false") form.reset();
         if (form.id === "falla-form") syncFailureTarget();
@@ -263,9 +353,9 @@
         document.dispatchEvent(new CustomEvent("operacion:action-complete", { detail: payload }));
       } catch (error) {
         const sinRed = error instanceof TypeError || !navigator.onLine;
-        showToast(sinRed ? "No hay conexión; no se envió ningún reporte." : error.message, "error");
+        showToast(sinRed ? "Se perdió la conexión. La captura se conserva; verifica el historial antes de reenviar, porque el servidor pudo haberla recibido." : error.message, "error");
       } finally {
-        button.disabled = form.id === "merma-form" && !supply?.value;
+        button.disabled = form.id === "merma-form" && !stockReady;
         button.textContent = original;
       }
     });

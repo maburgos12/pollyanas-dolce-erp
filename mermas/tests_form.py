@@ -47,6 +47,14 @@ class MermaProductoFormularioTests(TestCase):
         self.assertEqual(response.json()["error"], "Toma o sube la foto del ticket Point.")
         self.assertFalse(MermaRegistro.objects.exists())
 
+    def test_post_sin_sesion_redirige_a_login_sin_crear_merma(self):
+        self.client.logout()
+        response = self.client.post(reverse("mermas:app"), {"cantidad[]": "2"},
+                                    HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login") + "?next="))
+        self.assertFalse(MermaRegistro.objects.exists())
+
     def test_formulario_envia_cabecera_ajax_y_muestra_error_del_servidor(self):
         response = self.client.get(reverse("mermas:app"))
 
@@ -71,6 +79,21 @@ class MermaProductoFormularioTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertEqual(MermaProducto.objects.get().receta, receta)
+
+    def test_post_ignora_fila_vacia_y_conserva_producto_capturado(self):
+        receta = Receta.objects.create(nombre="Producto capturado", codigo_point="CAP-1")
+        response = self.client.post(reverse("mermas:app"), {
+            "sucursal": self.sucursal.pk,
+            "receta_id[]": [str(receta.pk), ""],
+            "producto_texto[]": [receta.nombre, ""],
+            "cantidad[]": ["2", ""],
+            "ticket_fotos": [SimpleUploadedFile("ticket.jpg", b"ticket", content_type="image/jpeg")],
+            "producto_fotos": [SimpleUploadedFile("producto.jpg", b"producto", content_type="image/jpeg")],
+        })
+        self.assertEqual(response.status_code, 302)
+        producto = MermaProducto.objects.get()
+        self.assertEqual(producto.receta, receta)
+        self.assertEqual(producto.cantidad_enviada, 2)
 
     def test_formulario_usa_selector_nativo_de_producto_en_moviles(self):
         receta = Receta.objects.create(

@@ -13,7 +13,7 @@ from django.utils import timezone
 from core.models import Sucursal, UserModuleAccess, UserProfile
 from mermas.models import MermaInsumo, OrdenAjustePoint
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob, PointTransferLine
-from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError
+from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryBusyError
 from rrhh.models import Empleado
 
 
@@ -170,7 +170,7 @@ class OperacionMermasInsumosApiTests(TestCase):
             f'data-stock-url="{reverse("operacion:mermas_insumos_catalogo_api")}"',
         )
         self.assertContains(pagina, "data-catalog-status")
-        self.assertContains(pagina, "20260911-pasaporte-qr-v2")
+        self.assertContains(pagina, "20261008-mermas-espera-borrador-v1")
         self.assertContains(
             pagina,
             'navigator.serviceWorker.register("/app/sw.js?v=20260927-higiene-continuidad-v1"',
@@ -245,6 +245,23 @@ class OperacionMermasInsumosApiTests(TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertFalse(MermaInsumo.objects.exists())
+
+    def test_catalogo_sin_sesion_redirige_a_login(self):
+        self.client.logout()
+        response = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"), {"codigo_point": "INS-001"})
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(reverse("login") + "?next="))
+
+    @patch("operacion.views.consultar_existencia_insumo_point", side_effect=PointLiveInventoryBusyError("Point está sincronizando"))
+    def test_point_ocupado_informa_espera_sin_crear_merma(self, _mock):
+        response = self.client.post(reverse("operacion:mermas_insumos_crear_api"),
+            data=json.dumps(self.payload()), content_type="application/json")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "point_busy")
+        self.assertFalse(MermaInsumo.objects.exists())
+        response = self.client.get(reverse("operacion:mermas_insumos_catalogo_api"), {"codigo_point":"INS-001"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["code"], "point_busy")
 
     @patch("operacion.views.consultar_existencia_insumo_point")
     def test_cantidad_superior_a_point_no_registra_merma(self, mock_consultar):

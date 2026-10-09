@@ -108,8 +108,9 @@
         No pudimos cargar las existencias de Point. Reintenta en unos momentos; no se registró ninguna merma.
       </div>
       {% else %}
-      <form id="merma-form" data-async-action data-stock-url="{% url 'operacion:mermas_insumos_catalogo_api' %}" action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
+      <form id="merma-form" data-draft-key="merma-insumo:u{{ request.user.pk }}:s{{ sucursal.pk }}" data-async-action data-stock-url="{% url 'operacion:mermas_insumos_catalogo_api' %}" action="{% url 'operacion:mermas_insumos_crear_api' %}" method="post" enctype="multipart/form-data">
         {% csrf_token %}
+        <p data-draft-status role="status" aria-live="polite"></p>
         <label for="codigo_point">Insumo recibido</label>
         <select id="codigo_point" name="codigo_point" required>
           <option value="">Selecciona un insumo</option>
@@ -180,6 +181,6 @@
       }).catch(function () {});
     }
   </script>
-  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20260911-pasaporte-qr-v2" defer></script>
+  <script src="{% static 'operacion/sucursal_tools.js' %}?v=20261008-mermas-espera-borrador-v1" defer></script>
 </body>
 </html>
