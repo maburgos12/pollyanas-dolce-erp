@@ -113,6 +113,51 @@ class InventoryAuditReportTests(InventoryAuditAgentFixtures, TestCase):
         transfer.save(update_fields=["raw_payload", "registered_at"])
         self.assertEqual(len(self.service().read_audit_report(self.month)["rows"]), 1)
 
+    def test_retired_preparation_waste_does_not_remain_in_partial_report(self):
+        from django.utils import timezone
+        from recetas.models import Receta
+        from maestros.models import Insumo
+        from pos_bridge.models import PointWasteLine
+        recipe = Receta.objects.create(nombre=self.product.name, tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="report-preparation")
+        insumo = Insumo.objects.create(nombre=self.product.name, tipo_item=Insumo.TIPO_INTERNO)
+        waste = PointWasteLine.objects.create(branch=self.branch, receta=recipe, insumo=insumo,
+            movement_at=timezone.make_aware(datetime(2026, 8, 10)), movement_external_id="prep-waste",
+            source_hash="d"*64, item_name=self.product.name, quantity=42)
+        self.audit_run.partial_published = True
+        self.audit_run.save(update_fields=["partial_published"])
+        case = self.make_case(opening_point=0, point_closing=0, waste=42,
+            movement_status="SOURCE_INCOMPLETE", issue_codes=["CASE_MISSING_FROM_REBUILD", "PRODUCT_RESOLVED_BY_NAME"],
+            source_trace={"waste": [waste.pk]})
+        before = ProductInventoryAuditCase.objects.values().get(pk=case.pk)
+        self.assertEqual(self.service().read_audit_report(self.month)["rows"], [])
+        self.assertEqual(before, ProductInventoryAuditCase.objects.values().get(pk=case.pk))
+        for trace in ({"waste": [True]}, {"waste": [999999]},
+                      {"waste": [waste.pk], "opening": [1]},
+                      {"waste": [waste.pk], "point_history": {"coverage_status": "INCOMPLETE"}}):
+            with self.subTest(trace=trace):
+                case.source_trace = trace
+                case.save(update_fields=["source_trace"])
+                self.assertEqual(len(self.service().read_audit_report(self.month)["rows"]), 1)
+        case.source_trace = {"waste": [waste.pk]}
+        case.save(update_fields=["source_trace"])
+        for field, value in (("sales", 1), ("waste", 41), ("opening_point", 1)):
+            with self.subTest(field=field):
+                original = getattr(case, field)
+                setattr(case, field, value)
+                case.save(update_fields=[field])
+                self.assertEqual(len(self.service().read_audit_report(self.month)["rows"]), 1)
+                setattr(case, field, original)
+                case.save(update_fields=[field])
+        recipe.tipo = Receta.TIPO_PRODUCTO_FINAL
+        recipe.save(update_fields=["tipo"])
+        self.assertEqual(len(self.service().read_audit_report(self.month)["rows"]), 1)
+        recipe.tipo = Receta.TIPO_PREPARACION
+        recipe.save(update_fields=["tipo"])
+        waste.movement_at = timezone.make_aware(datetime(2025, 8, 10))
+        waste.save(update_fields=["movement_at"])
+        self.assertEqual(len(self.service().read_audit_report(self.month)["rows"]), 1)
+
     def test_sales_mismatch_equation_and_reason_reach_html_and_exports(self):
         from django.contrib.auth.models import AnonymousUser
         from django.template.loader import render_to_string

@@ -570,7 +570,7 @@ class BranchInventoryTraceabilityService:
                 movement_at__gte=lower_bound,
                 movement_at__lt=upper_bound,
             )
-            .select_related("branch", "sync_job")
+            .select_related("branch", "sync_job", "receta")
             .only(
                 "id",
                 "branch_id",
@@ -578,6 +578,7 @@ class BranchInventoryTraceabilityService:
                 "item_name",
                 "quantity",
                 "receta_id",
+                "receta__tipo",
                 "insumo_id",
                 "sync_job_id",
             )
@@ -738,7 +739,9 @@ class BranchInventoryTraceabilityService:
                 quantity=row.produced_quantity,
             )
         for row in waste_rows:
-            if row.receta_id is None and row.insumo_id is not None:
+            if row.insumo_id is not None and (
+                row.receta_id is None or row.receta.tipo == Receta.TIPO_PREPARACION
+            ):
                 continue
             product_id, issue_code = self._resolve_product(row, product_indexes)
             if (

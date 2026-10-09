@@ -38,6 +38,14 @@ Las capacidades externas declaradas en el catálogo no son ejecutadas por este g
 
 ## Conocimiento obligatorio
 
+Merma con FK insumo y receta PREPARACION pertenece a la preparación, no al
+producto final homónimo. No resolverla por nombre/código ni importar su historial
+INSUMO como PRODUCTO. Conservar la merma original y distinguir salidas de
+producción de ventas; PRODUCTO_FINAL con doble FK sí conserva su merma.
+Un caso retirado por esa confusión permanece como evidencia histórica, sin
+contaminar el reporte actual después del rebuild oficial. Ver ficha de fuentes
+`docs/data-reuse/ficha-merma-preparacion-producto-final.md`.
+
 Regla DG comprobada el 8oct2026: **Recibida es el estado terminal de una
 transferencia normal Point**. Exigir `is_received` y `received_at`, no
 `is_finalized` como otro paso. Conservar esa bandera original, sin generar

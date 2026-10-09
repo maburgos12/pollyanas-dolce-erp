@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import timedelta
 from decimal import Decimal
 from pos_bridge.services.monthly_product_balance_service import has_documentary_boundary, MonthlyPointProductBalanceService
-from pos_bridge.models import PointProduct, PointTransferLine, PointConversionLine
+from pos_bridge.models import PointProduct, PointTransferLine, PointConversionLine, PointWasteLine
 
 from django.core.exceptions import SuspiciousOperation
 from django.urls import reverse
@@ -178,6 +178,23 @@ def _case_pending_reason(case):
 
 def _retired_nonproduction_case(case):
     trace = case.source_trace or {}
+    if ("CASE_MISSING_FROM_REBUILD" in case.issue_codes
+            and "PRODUCT_RESOLVED_BY_NAME" in case.issue_codes
+            and trace.get("waste")
+            and not any(trace.get(key) for key in ("opening", "closing", "point_history", "production",
+                "sales", "adjustments", "transfers", "conversions", "transfer_in", "transfer_out",
+                "conversion_in", "conversion_out", "open_transfer_snapshot_in", "open_transfer_snapshot_out"))
+            and not any(getattr(case, field) for field in ("opening_point", "point_closing", "production",
+                "sales", "identified_adjustment", "transfer_in", "transfer_out", "conversion_in", "conversion_out"))):
+        ids = trace["waste"]
+        if not isinstance(ids, list) or any(type(pk) is not int or pk <= 0 for pk in ids):
+            return False
+        rows = list(PointWasteLine.objects.filter(pk__in=ids).select_related("receta"))
+        aliases, _ = canonical_point_branch_identity()
+        return (len(rows) == len(set(ids)) and sum((row.quantity for row in rows), ZERO) == case.waste
+            and all(row.insumo_id and row.receta_id and row.receta.tipo == Receta.TIPO_PREPARACION
+                and aliases.get(row.branch_id, row.branch_id) == aliases.get(case.branch_id, case.branch_id)
+                and timezone.localdate(row.movement_at).replace(day=1) == case.month for row in rows))
     if ("CASE_MISSING_FROM_REBUILD" not in case.issue_codes or trace.get("point_history")
             or any(trace.get(key) for key in ("opening", "closing", "production", "sales", "waste", "adjustments"))
             or any(getattr(case, field) for field in ("production", "sales", "waste", "identified_adjustment"))):

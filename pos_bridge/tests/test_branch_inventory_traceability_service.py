@@ -947,6 +947,21 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(line.source_trace["waste"], (finished_waste.id,))
         self.assertNotIn(ingredient_waste.id, line.source_trace["waste"])
 
+    def test_preparation_waste_cannot_borrow_finished_product_identity(self):
+        recipe = Receta.objects.create(nombre=self.product.name, tipo=Receta.TIPO_PREPARACION,
+            hash_contenido="traceability-preparation")
+        insumo = Insumo.objects.create(nombre=self.product.name, tipo_item=Insumo.TIPO_INTERNO)
+        self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
+        self._closing(date(2026, 8, 31), {self.centro: Decimal("10")})
+        for code in ("", self.product.external_id):
+            self._waste(item_code=code, receta=recipe, insumo=insumo, quantity="42")
+        result = self.service.build(month=date(2026, 8, 1))
+        self.assertTrue(result.source_complete)
+        self.assertEqual(result.lines[0].waste, Decimal("0"))
+        self.assertEqual(result.lines[0].source_trace["waste"], ())
+        self.assertEqual(result.lines[0].difference, Decimal("0"))
+        self.assertEqual(PointWasteLine.objects.filter(receta=recipe).count(), 2)
+
     def test_dual_mapped_waste_uses_exact_point_product_evidence(self):
         recipe = Receta.objects.create(
             nombre=self.product.name,
