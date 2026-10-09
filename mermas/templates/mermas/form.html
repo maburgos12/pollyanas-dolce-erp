@@ -5,7 +5,7 @@
 {% block body_class %}merma-app-body{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-form.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/mermas-templates-mermas-form.css?v=20261009-busqueda-productos-v1">
 <link rel="stylesheet" href="{% static 'operacion/app_theme.css' %}?v=20260702-home-icon-v1">
 {% endblock %}
 
@@ -69,7 +69,7 @@
                 <div class="product-row">
                     <div class="field">
                         <label>Producto</label>
-                        <select name="receta_id[]" data-native-select="true" required>
+                        <select name="receta_id[]" data-searchable-select="true" aria-label="Producto" data-placeholder="Buscar nombre o código" required>
                             <option value="">Selecciona un producto</option>
                             {% for producto in productos_iniciales %}
                             <option value="{{ producto.id }}" data-product-name="{{ producto.nombre }}">{{ producto.nombre }}{% if producto.codigo_point %} · Point {{ producto.codigo_point }}{% endif %}{% if producto.familia %} · {{ producto.familia }}{% endif %}{% if producto.categoria %} · {{ producto.categoria }}{% endif %}</option>
@@ -109,6 +109,7 @@
     const form = document.getElementById("merma-capture-form");
     const wrapper = document.getElementById("productos-wrapper");
     const add = document.getElementById("add-product");
+    const productTemplate = wrapper.querySelector(".product-row").cloneNode(true);
     const draftStatus = form.querySelector("[data-product-draft-status]");
     const requestId = form.elements.namedItem("request_id");
     const submitButton = form.querySelector('button[type="submit"]');
@@ -140,10 +141,9 @@
                 ["sucursal", "ticket_point", "nota_sucursal"].forEach((name) => {
                     form.elements.namedItem(name).value = saved.fields[name];
                 });
-                const template = wrapper.querySelector(".product-row").cloneNode(true);
                 wrapper.replaceChildren();
                 saved.products.forEach((product) => {
-                    const row = template.cloneNode(true);
+                    const row = productTemplate.cloneNode(true);
                     row.querySelector('select[name="receta_id[]"]').value = product.receta_id;
                     row.querySelector('input[name="cantidad[]"]').value = product.cantidad;
                     wrapper.appendChild(row);
@@ -212,7 +212,8 @@
         wrapper.querySelectorAll(".product-row").forEach((row) => {
             const producto = row.querySelector('select[name="receta_id[]"]').value;
             const cantidad = row.querySelector('input[name="cantidad[]"]').value;
-            if (!producto && !cantidad && wrapper.children.length > 1) row.remove();
+            const busqueda = row.querySelector('[role="combobox"]')?.value.trim();
+            if (!producto && !cantidad && !busqueda && wrapper.children.length > 1) row.remove();
         });
         if (!form.reportValidity()) return;
         const originalLabel = submitButton.textContent;
@@ -296,10 +297,11 @@
         });
         select.addEventListener("change", () => syncProductText(row));
         syncProductText(row);
+        window.PollyanaSearchableSelects?.enhanceAll(row);
     };
     wireRow(wrapper.querySelector(".product-row"));
     add.addEventListener("click", () => {
-        const clone = wrapper.querySelector(".product-row").cloneNode(true);
+        const clone = productTemplate.cloneNode(true);
         clone.querySelectorAll("input, select").forEach((input) => input.value = "");
         wrapper.appendChild(clone);
         wireRow(clone);

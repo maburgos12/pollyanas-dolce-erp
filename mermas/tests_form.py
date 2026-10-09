@@ -103,7 +103,7 @@ class MermaProductoFormularioTests(TestCase):
         self.assertEqual(producto.receta, receta)
         self.assertEqual(producto.cantidad_enviada, 2)
 
-    def test_formulario_usa_selector_nativo_de_producto_en_moviles(self):
+    def test_formulario_permite_buscar_y_seleccionar_producto_del_catalogo(self):
         receta = Receta.objects.create(
             nombre="Pastel de Fresas con Crema Chico",
             codigo_point="0101",
@@ -111,7 +111,8 @@ class MermaProductoFormularioTests(TestCase):
 
         response = self.client.get(reverse("mermas:app"))
 
-        self.assertContains(response, 'select name="receta_id[]" data-native-select="true"')
+        self.assertContains(response, 'select name="receta_id[]" data-searchable-select="true"')
+        self.assertContains(response, 'data-placeholder="Buscar nombre o código"')
         self.assertContains(response, f'value="{receta.pk}"')
         self.assertNotContains(response, 'list="productos-list"')
 

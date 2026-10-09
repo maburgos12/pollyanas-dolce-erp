@@ -32,3 +32,6 @@
         .product-grid-header, .product-row { grid-template-columns: minmax(0, 1fr) 86px 44px; }
         .icon-btn { width: 44px; }
     }
+
+    .product-row .pd-searchable-select__list { min-width: min(320px, calc(100vw - 86px)); }
+    .product-row .pd-searchable-select__option { white-space: normal; min-height: 44px; overflow-wrap: anywhere; }
