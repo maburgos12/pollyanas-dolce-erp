@@ -1,5 +1,20 @@
 # Procedimiento por expediente
 
+## Separar merma de preparación y producto final
+
+Antes de resolver una merma por nombre o código, leer sus FK receta/insumo y
+`Receta.tipo`. Con insumo y PREPARACION pertenece al dominio preparado: no
+sumarla al producto final homónimo. PRODUCTO_FINAL dualmente mapeado conserva
+su merma. No borrar ni reclasificar originales para corregir la proyección.
+
+Rebuild oficial primero; reporte parcial después. Una proyección retirada sólo
+sale del reporte si sus únicas fuentes son mermas preparadas comprobadas de ese
+mes/sucursal/cantidad y no hay actividad, fronteras ni historial propios.
+Retener el caso histórico y comprobar segunda ejecución sin cambios. El goal
+review no hace rebuild ni HTTP. Ejemplo original: INSUMO565/01GCHM01 no es
+PRODUCTO1039/01GCM01; 0+618−42−576=0 describe la preparación, no sus ventas.
+No deducir paquetes de seis ni fabricar cobertura del producto final vacío.
+
 ## 0. Plan de trabajo, sin reconstruir toda la investigación
 
 Antes de revisar muchos expedientes invocar reconciliation_guard con mode=plan_month
