@@ -88,6 +88,9 @@ class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
         self.assertTrue(AuditLog.objects.filter(user=self.user,action='AI_PURCHASE_REQUEST_CREATE',payload__solicitante_id=self.requester.pk).exists())
 
     def test_requirements_find_real_requester_without_contacts(self):
+        definitions=json.loads(json.dumps(purchases.catalog(self.user)))
+        schema=next(t['argument_schema'] for t in definitions if t['key']==purchases.KEY)
+        self.assertEqual(schema['properties']['items']['items']['properties']['cantidad']['minimum'],0.001)
         result=self.invoke({'q':'Carolina'},key='purchase.requirements')['result']['payload']
         self.assertEqual(result['solicitantes'],[{'id':self.requester.pk,'nombre':'Carolina Producción'}])
         self.assertFalse(result['presupuesto_requerido']);self.assertFalse(result['evidencia_requerida'])
