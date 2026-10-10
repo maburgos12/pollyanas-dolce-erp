@@ -101,6 +101,7 @@
   function purchase(row) {
     const values = row.fields || {};
     const completed = row.status === 'EXECUTED';
+    const identityKnown = Boolean(values.area_id && values.solicitante_id);
     const missing = {area_id:'Área',solicitante_id:'Solicitante',motivo:'Motivo',justificacion_extraordinaria:'Justificación extraordinaria',items:'Artículos'};
     return `<p><strong>${completed ? `Solicitud ${escape(row.folio)} creada y enviada a Compras` : 'Solicitud extraordinaria de compra'}</strong></p>
       <p>${escape(row.area || 'Área por identificar')} · Solicitante: ${escape(row.solicitante || 'Por identificar')}</p>
@@ -117,8 +118,9 @@
       ${row.missing_fields?.length ? `<p>Falta: ${row.missing_fields.map(k=>escape(missing[k] || k)).join(', ')}. Continúa esta misma propuesta en la conversación.</p>` : ''}
       ${row.status === 'REVIEW_REQUIRED' ? `<p>Ya existe una solicitud con estos artículos; revísala antes de duplicarla.</p><ul>${(row.existing_requests || []).map(r=>`<li>${escape(r.folio)}</li>`).join('')}</ul>` : ''}
       ${completed ? `<p><a href="${escape(row.url)}">Abrir solicitud ${escape(row.folio)}</a></p><p class="agent-source">Confirmada: ${date(row.confirmed_at)}</p>` : ['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row.status) ? `
-        <label>Evidencia opcional de esta compra<input type="file" multiple accept="image/jpeg,image/png,image/webp" data-followup-files="${escape(row.draft_id)}"></label>
-        <button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-domain="purchases" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Asociar captura</button>
+        ${identityKnown ? '' : '<p>Identifica el área y el solicitante en la conversación antes de asociar la evidencia.</p>'}
+        <label>Evidencia opcional de esta compra<input type="file" multiple accept="image/jpeg,image/png,image/webp" data-followup-files="${escape(row.draft_id)}"${identityKnown ? '' : ' disabled'}></label>
+        <button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-domain="purchases" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}"${identityKnown ? '' : ' disabled'}>Asociar captura</button>
         ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se crea la solicitud a nombre de ${escape(row.solicitante)}. No se ejecuta ningún pago ni recepción.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-domain="purchases" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y enviar solicitud</button>` : ''}` : ''}`;
   }
   function tool(call) {

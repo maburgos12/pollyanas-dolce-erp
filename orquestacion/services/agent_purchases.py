@@ -368,6 +368,8 @@ def attach(*,user,draft_id,arguments,files):
                 return response(dto)
             if dto['status'] not in ('WAITING_INFORMATION','AWAITING_CONFIRMATION') or dto['version']!=arguments['expected_version'] or dto['payload_hash']!=arguments['payload_hash']:
                 raise WorkflowError('purchase_version_conflict',409)
+            if not draft.arguments_json.get('area_id') or not draft.arguments_json.get('solicitante_id'):
+                raise WorkflowError('purchase_identity_missing',409,'Primero identifica el área y el solicitante para vincular la evidencia a la misma propuesta.')
             if meta.get('files'): raise WorkflowError('purchase_files_already_bound',409)
             from .agent_followups import pending_evidence
             pending=pending_evidence(actor)

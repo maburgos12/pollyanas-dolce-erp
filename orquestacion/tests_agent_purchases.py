@@ -194,6 +194,19 @@ class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
         result=purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])
         self.assertEqual(len(result['result']['payload']['incident']['files']),1)
 
+    def test_images_wait_for_identity_and_same_proposal_can_resume(self):
+        args={k:v for k,v in self.args.items() if k!='area_id'}
+        dto=self.prepare(args)
+        with self.assertRaises(WorkflowError) as error:
+            purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])
+        self.assertEqual(error.exception.code,'purchase_identity_missing')
+        self.assertFalse(list(Path(self.media.name).rglob('*.png')))
+        self.messages=create_user_turn(user=self.user,conversation=self.conversation,content='Es para Producción.')
+        ready=self.prepare({'draft_id':dto['draft_id'],'expected_version':dto['version'],'area_id':self.area.pk},call='resume')
+        attached=purchases.attach(user=self.user,draft_id=ready['draft_id'],arguments=self.command(ready),files=[self.photo()])
+        self.assertEqual(attached['result']['payload']['incident']['draft_id'],dto['draft_id'])
+        self.assertEqual(len(attached['result']['payload']['incident']['files']),1)
+
     def test_expired_and_altered_evidence_cannot_be_confirmed(self):
         dto=self.prepare()
         attached=purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])['result']['payload']['incident']

@@ -12,7 +12,7 @@ El runtime ofrece estas capacidades exclusivamente al participante activo del pi
 1. Requisitos resuelve áreas autorizadas y personas activas; no expone correo, teléfono ni datos de RH.
 2. Buscar solicitudes existentes por fragmentos útiles de artículos/folio antes de preparar.
 3. Preparar/resumir conserva JSON estructurado en ChatToolCall con UUID, versión, hash y caducidad de 24 horas. La continuación usa el mismo draft_id.
-4. Imágenes opcionales: hasta cinco JPG/PNG/WebP, 10 MB cada una, 20 MB total, validación de contenido y dimensiones. Subida idempotente, cuota de pendientes, acceso privado y hash de bytes. La evidencia queda ligada a persona y área y no se sirve por URL media.
+4. Imágenes opcionales: hasta cinco JPG/PNG/WebP, 10 MB cada una, 20 MB total, validación de contenido y dimensiones. Subida idempotente, cuota compartida de pendientes, acceso privado y hash de bytes. Primero se identifica persona y área; la selección se conserva si faltan, para adjuntarla al continuar la misma propuesta. La evidencia queda ligada a esas identidades y no se sirve por URL media.
 5. Confirmar mediante POST de sesión con CSRF, `confirm: true`, versión y hash. El modelo no recibe esta herramienta. Se valida de nuevo identidad, permisos, duplicados y archivos, y se crea y envía una solicitud EXTRAORDINARIA mediante el mismo servicio del formulario.
 6. El folio y recibo se revalidan al recargar historial. El solicitante autorizado puede consultar la evidencia desde la ficha de Compras después de confirmar.
 
