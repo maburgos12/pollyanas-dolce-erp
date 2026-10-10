@@ -181,6 +181,19 @@ class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
         self.assertTrue(all('confirm' not in t['name'] for t in purchases.catalog(self.user)))
         with self.assertRaises(ValidationError):purchases.confirm(user=self.user,draft_id=dto['draft_id'],arguments={**self.command(dto),'confirm':'true'})
 
+    def test_purchase_upload_counts_pending_followup_evidence(self):
+        dto=self.prepare()
+        pending=ChatToolCall.objects.create(conversation=self.conversation,request_message=self.messages[0],
+            assistant_message=self.messages[1],tool_key='incident.followup',
+            metadata_json={'incident_status':'AWAITING_CONFIRMATION','files':[{'bytes':100*1024*1024}]})
+        with self.assertRaises(WorkflowError) as error:
+            purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])
+        self.assertEqual(error.exception.code,'purchase_staging_limit')
+        self.assertFalse(list(Path(self.media.name).rglob('*.png')))
+        pending.metadata_json['incident_status']='EXECUTED';pending.save()
+        result=purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])
+        self.assertEqual(len(result['result']['payload']['incident']['files']),1)
+
     def test_expired_and_altered_evidence_cannot_be_confirmed(self):
         dto=self.prepare()
         attached=purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[self.photo()])['result']['payload']['incident']

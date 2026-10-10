@@ -369,8 +369,8 @@ def attach(*,user,draft_id,arguments,files):
             if dto['status'] not in ('WAITING_INFORMATION','AWAITING_CONFIRMATION') or dto['version']!=arguments['expected_version'] or dto['payload_hash']!=arguments['payload_hash']:
                 raise WorkflowError('purchase_version_conflict',409)
             if meta.get('files'): raise WorkflowError('purchase_files_already_bound',409)
-            pending=list(ChatToolCall.objects.filter(conversation__owner=actor,tool_key__in=['incident.followup',KEY])
-                .exclude(Q(metadata_json__purchase_status='EXECUTED')|Q(metadata_json__incident_status='EXECUTED')).values_list('metadata_json',flat=True)[:101])
+            from .agent_followups import pending_evidence
+            pending=pending_evidence(actor)
             if len(pending)>100 or sum(f['bytes'] for m in pending for f in m.get('files',[]))+sum(f.size for f in files)>100*1024*1024:
                 raise WorkflowError('purchase_staging_limit',409)
             for file,info in zip(files,uploads):

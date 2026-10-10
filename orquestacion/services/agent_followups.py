@@ -24,6 +24,13 @@ from orquestacion.services.agent_workflows import WorkflowError
 KEY = 'incident.followup'
 
 
+def pending_evidence(actor):
+    return list(ChatToolCall.objects.filter(conversation__owner=actor, tool_key__in=[KEY, 'purchase.prepare'])
+        .exclude(Q(tool_key=KEY, metadata_json__incident_status='EXECUTED')
+                 | Q(tool_key='purchase.prepare', metadata_json__purchase_status='EXECUTED'))
+        .values_list('metadata_json', flat=True)[:101])
+
+
 class ReportSearch(StrictArguments):
     q = StrictStringField(required=False, max_length=160)
     sucursal_id = StrictIntegerField(required=False, min_value=1)
@@ -295,8 +302,7 @@ def attach(*, user, draft_id, arguments, files):
                 raise WorkflowError('followup_files_already_bound', 409, 'Estas evidencias ya están asociadas; revisa la propuesta.')
             if len(files) < meta.get('expected_file_count', 0):
                 raise WorkflowError('followup_files_missing', 400, 'Selecciona todas las fotografías indicadas en la propuesta en una sola carga.')
-            pending = list(ChatToolCall.objects.filter(conversation__owner=actor, tool_key=KEY)
-                .exclude(metadata_json__incident_status='EXECUTED').values_list('metadata_json', flat=True)[:101])
+            pending = pending_evidence(actor)
             staged_bytes = sum(row['bytes'] for metadata in pending for row in metadata.get('files', []))
             if len(pending) > 100 or staged_bytes + sum(row['bytes'] for row in uploads) > 100 * 1024 * 1024:
                 raise WorkflowError('followup_staging_limit', 409, 'El espacio de propuestas pendientes está lleno. Revisa las evidencias existentes antes de adjuntar más.')
