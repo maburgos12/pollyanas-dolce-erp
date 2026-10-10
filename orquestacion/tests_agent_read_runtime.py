@@ -113,6 +113,28 @@ class AgentReadRuntimeTests(TestCase):
         self.messages[0].refresh_from_db()
         self.assertNotIn('PRIVATE QUOTATION', serialize_message(self.messages[0])['content'])
 
+    def test_failed_turn_keeps_user_context_without_failed_answer(self):
+        from orquestacion.services.agent_read_context import history_context
+        self.run_turn([RuntimeError('provider unavailable')])
+        request, answer = self.messages
+        self.assert_failed()
+        history, ids = history_context(self.conversation, answer.sequence + 1)
+        self.assertEqual(history, [{'role': 'user', 'content': request.content}])
+        self.assertEqual(ids, set())
+        self.messages = create_user_turn(user=self.user, conversation=self.conversation, content='Continúa con lo anterior')
+        self.run_turn()
+        self.assertEqual(self.requests[-1]['input'][2], history[0])
+
+    def test_failed_turn_context_still_hides_revoked_resources(self):
+        from orquestacion.services.agent_read_context import history_context
+        self.run_turn([response(call()), RuntimeError('provider unavailable')])
+        cutoff = self.messages[1].sequence + 1
+        history, ids = history_context(self.conversation, cutoff)
+        self.assertEqual(history, [{'role': 'user', 'content': self.messages[0].content}])
+        self.assertIn(self.asset.pk, ids)
+        Activo.objects.filter(pk=self.asset.pk).update(sucursal=self.other_branch)
+        self.assertEqual(history_context(self.conversation, cutoff), ([], set()))
+
     def test_history_is_bounded_and_excludes_other_chats_future_and_unproved_messages(self):
         from orquestacion.services.agent_read_context import history_context, MAX_HISTORY_MESSAGES, MAX_HISTORY_CHARS
         self.run_turn([response(call()), response()])

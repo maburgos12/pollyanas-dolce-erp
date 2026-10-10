@@ -52,19 +52,21 @@ def history_context(conversation, before_sequence):
                 role__in=['user', 'assistant']).order_by('-sequence')[:MAX_HISTORY_MESSAGES])
     by_sequence = {row.sequence: row for row in rows}
     history, asset_ids, size = [], set(), 0
-    # Admit complete pairs only; a user's quotation may repeat revoked ERP data.
+    # A failed answer must not erase user context; both still require current access.
     for answer in rows:
         request = by_sequence.get(answer.sequence - 1)
         proof = answer.metadata_json.get('agent_read', {}) if isinstance(answer.metadata_json, dict) else {}
-        if (answer.role != 'assistant' or answer.status != 'complete' or not proof
+        if (answer.role != 'assistant' or answer.status not in {'complete', 'error'} or not proof
                 or not request or request.role != 'user' or request.status != 'complete' or request.created_by_id != conversation.owner_id
                 or not _read_message_visible(answer)):
             continue
-        pair_size = len(request.content) + len(answer.content)
+        pair = [{'role': 'user', 'content': request.content}]
+        if answer.status == 'complete':
+            pair.append({'role': 'assistant', 'content': answer.content})
+        pair_size = sum(len(row['content']) for row in pair)
         if size + pair_size > MAX_HISTORY_CHARS:
             break
-        history[0:0] = [{'role': 'user', 'content': request.content},
-                        {'role': 'assistant', 'content': answer.content}]
+        history[0:0] = pair
         asset_ids.update(proof.get('asset_ids', []))
         size += pair_size
     return history, asset_ids
