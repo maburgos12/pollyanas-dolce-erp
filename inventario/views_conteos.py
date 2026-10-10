@@ -231,7 +231,11 @@ def _catalogo(tipo, query, sucursal=None, *, diario=False):
             monthly = Receta.objects.filter(modo_costeo__in=['REVENTA','SERVICIO_ACCESORIO']).exclude(codigo_point='').values('codigo_point')
             classified = PointProductCategory.objects.filter(category__in=['REVENTA','SERVICIO_ACCESORIO']).values('codigo_point')
             qs=qs.exclude(sku__in=monthly).exclude(sku__in=classified).exclude(inventory_consumption_filter())
-            qs=qs.exclude(sku__in=['0317','0318','COCA450','0313']).exclude(category__iregex=r'caf[eé]|bebida')
+            qs=qs.exclude(sku__in=['0317','0318','COCA450','0313']).exclude(category__iregex=r'caf[eé]|bebida|coca.?cola|accesori|vela|cake topper')
+            # Point also places unclassified candles/cards under supplier or dessert categories.
+            qs=qs.exclude(name__iregex=r'(^|\s)(velas?|pirotecnia|tarjetas?)(\s|$)')
+            qs=qs.exclude(category__in=['Alegría','Glow','Granmark','Pillines','Plásticos','Viva party'])
+            qs=qs.exclude(name__iregex=r'^(servicio|extra|recetario)(\s|$)').exclude(name__iexact='Litro crema')
     # Point replicas can carry multiple rows for one physical code. Prefer a
     # row with verified unit evidence, then the most recently refreshed one.
     products = sorted(qs, key=lambda x:(bool(unidad_conteo(x)[0]), x.updated_at, x.pk), reverse=True)
