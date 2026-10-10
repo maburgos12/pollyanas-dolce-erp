@@ -75,6 +75,18 @@ class _CompraDepartamentalBase:
         return intento.linea_orden if intento else None
 
 class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
+    def test_compra_sin_evidencia_es_opcional_y_avisa_sin_registrar_recepcion(self):
+        self.assertEqual(self.comprar(comprobante='').status_code,200)
+        compra=CompraRealizadaDepartamental.objects.get(item=self.item)
+        self.assertFalse(compra.comprobante)
+        self.assertEqual(AvisoCompraDepartamental.objects.filter(compra=compra).count(),2)
+        self.assertFalse(RecepcionItemDepartamental.objects.exists())
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estado,'COMPRADO')
+        self.assertEqual(self.item.monto_gastado,0)
+        self.assertEqual(self.client.get(reverse('compras:departamental_compra_comprobante',args=[compra.pk])).status_code,404)
+        self.assertContains(self.client.get(reverse('compras:departamental_detalle',args=[self.solicitud.pk])),'Sin evidencia adjunta (opcional).')
+
     def test_edicion_de_texto_audita_sin_perder_autorizacion(self):
         response=self.editar()
         self.assertEqual(response.status_code,200,response.content)
@@ -237,10 +249,10 @@ class EdicionCompraTests(_CompraDepartamentalBase, TestCase):
         self.assertGreaterEqual(self.comprar().status_code,400)
         self.assertEqual(CompraRealizadaDepartamental.objects.count(),1)
 
-    def test_compra_rechaza_monto_mayor_fecha_futura_y_falta_comprobante(self):
+    def test_compra_rechaza_monto_mayor_fecha_futura_y_comprobante_invalido(self):
         for data in ({'importe_final':'201'},{'importe_final':'0'},
                      {'fecha_compra':(timezone.localdate()+timedelta(days=1)).isoformat()},
-                     {'comprobante':''}):
+                     {'comprobante':SimpleUploadedFile('falso.pdf',b'no-es-pdf',content_type='application/pdf')}):
             with self.subTest(data=data):
                 self.assertGreaterEqual(self.comprar(**data).status_code,400)
         self.assertFalse(CompraRealizadaDepartamental.objects.exists())

@@ -1,4 +1,5 @@
 from django.urls import path
+from .ai_purchase_views import AIPurchaseConfirmationView, AIPurchaseEvidenceView
 from rest_framework_simplejwt.views import TokenRefreshView
 from .ai_gateway_views import (
     AIGatewayIncidentConfirmationView,
@@ -224,6 +225,9 @@ from .special_hours_views import (
 )
 
 urlpatterns = [
+    path('ai-gateway/purchases/<uuid:draft_id>/confirm/', AIPurchaseConfirmationView.as_view(), name='api_ai_purchase_confirm'),
+    path('ai-gateway/purchases/<uuid:draft_id>/evidence/', AIPurchaseEvidenceView.as_view(), name='api_ai_purchase_evidence_upload'),
+    path('ai-gateway/purchases/<uuid:draft_id>/evidence/<uuid:evidence_id>/', AIPurchaseEvidenceView.as_view(), name='api_ai_purchase_evidence'),
     path("public/v1/omnichannel/point-special-orders/", PublicPointSpecialOrdersView.as_view()),
     path("public/v1/omnichannel/deliveries/<int:solicitud_id>/point-link/", PublicWebPointLinkView.as_view()),
     path("ai-gateway/incidents/<uuid:draft_id>/confirm/", AIGatewayIncidentConfirmationView.as_view(), name="api_ai_incident_confirm"),

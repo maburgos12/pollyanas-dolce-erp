@@ -721,7 +721,7 @@ class CompraRealizadaDepartamental(models.Model):
     fecha_compra = models.DateField()
     importe_final = models.DecimalField(max_digits=14, decimal_places=2)
     numero_pedido = models.CharField(max_length=160, blank=True, default="")
-    comprobante = models.FileField(upload_to="compras/cotizaciones/compras/%Y/%m/")
+    comprobante = models.FileField(upload_to="compras/cotizaciones/compras/%Y/%m/", blank=True)
     registrado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     creado_en = models.DateTimeField(default=timezone.now)
 

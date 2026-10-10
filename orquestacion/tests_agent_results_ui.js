@@ -5,6 +5,17 @@ const context = vm.createContext({});
 vm.runInContext(fs.readFileSync('static/js/orquestacion/agent-results.js', 'utf8'), context);
 const view = context.ERPAgentView;
 const hostile = '<img src=x onerror="alert(1)">';
+const purchase = {kind:'purchase',draft_id:'purchase-test',status:'AWAITING_CONFIRMATION',version:1,payload_hash:'test-hash',area:'Producción',solicitante:'Carolina',
+  fields:{motivo:hostile,compra_reportada:true,envio_global:'129.00',total_reportado:'342.84'},
+  items:[{descripcion:'Glicerina',cantidad:'2',unidad:'frasco',costo_unitario_estimado:'40.42',precio_total:'80.84'}],missing_fields:[],files:[]};
+const purchaseHtml = view.incident(purchase);
+assert(purchaseHtml.includes('40.42'));
+assert(purchaseHtml.includes('sin repartir'));
+assert(purchaseHtml.includes('captura de compra es opcional'));
+assert(purchaseHtml.includes('data-domain="purchases"'));
+assert(purchaseHtml.includes('Confirmar y enviar solicitud'));
+assert(!purchaseHtml.includes('<img src=x'));
+assert(!view.incident({...purchase,status:'EXECUTED',folio:'SCD-TEST',url:'/compras/departamentales/1/'}).includes('data-incident-id'));
 const wf = {public_id:'a" onmouseover="alert(1)',status:'WAITING_SELECTION',version:3,query:hostile,missing_fields:['asset'], options:[{position:1,available:false},{position:2,available:true,asset:{nombre:hostile,codigo:'TEST'}}]};
 const html = view.workflow(wf,true);
 assert(!html.includes('<img'));

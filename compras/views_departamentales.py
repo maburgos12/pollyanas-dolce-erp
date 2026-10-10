@@ -138,55 +138,36 @@ def departamental_nueva(request):
     if not any(value.strip() for value in descripciones):
         return _error_nueva(request, "Agrega al menos un artículo.", areas)
 
-    with transaction.atomic():
-        solicitud = SolicitudCompraDepartamental(
-            area=area,
-            solicitante=request.user,
-            tipo=tipo,
-            periodo=periodo,
-            motivo=request.POST.get("motivo", "").strip(),
-            justificacion_extraordinaria=request.POST.get("justificacion_extraordinaria", "").strip(),
-            estado=(SolicitudCompraDepartamental.ESTADO_ENVIADA if accion == "enviar" else SolicitudCompraDepartamental.ESTADO_BORRADOR),
-            enviada_en=timezone.now() if accion == "enviar" else None,
-        )
-        try:
-            solicitud.full_clean()
-        except ValidationError as exc:
-            transaction.set_rollback(True)
-            return _error_nueva(request, "; ".join(exc.messages), areas)
-        solicitud.save()
-        cantidades = request.POST.getlist("cantidad")
-        unidades = request.POST.getlist("unidad")
-        categorias = request.POST.getlist("categoria")
-        estimados = request.POST.getlist("costo_unitario_estimado")
-        prioridades = request.POST.getlist("prioridad")
-        fechas = request.POST.getlist("fecha_requerida")
+    from .services_solicitudes import crear_solicitud
+    items = []
+    cantidades = request.POST.getlist("cantidad")
+    unidades = request.POST.getlist("unidad")
+    categorias = request.POST.getlist("categoria")
+    estimados = request.POST.getlist("costo_unitario_estimado")
+    prioridades = request.POST.getlist("prioridad")
+    fechas = request.POST.getlist("fecha_requerida")
+    try:
         for index, descripcion in enumerate(descripciones):
             if not descripcion.strip():
                 continue
-            try:
-                cantidad = Decimal(cantidades[index] or "1")
-                estimado = Decimal(estimados[index]) if index < len(estimados) and estimados[index] else None
-            except (InvalidOperation, IndexError):
-                transaction.set_rollback(True)
-                return _error_nueva(request, "Cantidad o costo estimado inválido.", areas)
-            if cantidad <= 0 or (estimado is not None and estimado < 0):
-                transaction.set_rollback(True)
-                return _error_nueva(request, "La cantidad debe ser mayor a cero y el costo no puede ser negativo.", areas)
-            item = ItemCompraDepartamental(
-                solicitud=solicitud,
-                descripcion=descripcion.strip(),
-                cantidad=cantidad,
-                unidad=unidades[index] if index < len(unidades) and unidades[index] else "pieza",
-                categoria=categorias[index].strip() if index < len(categorias) else "",
-                costo_unitario_estimado=estimado,
-                prioridad=prioridades[index] if index < len(prioridades) and prioridades[index] else ItemCompraDepartamental.PRIORIDAD_NORMAL,
-                fecha_requerida=date.fromisoformat(fechas[index]) if index < len(fechas) and fechas[index] else None,
-                imagen=request.FILES.get(f"imagen_{index}"),
-                estado=ItemCompraDepartamental.ESTADO_POR_REVISAR,
-            )
-            item.full_clean()
-            item.save()
+            items.append({
+                "descripcion": descripcion.strip(),
+                "cantidad": Decimal(cantidades[index] or "1"),
+                "unidad": unidades[index] if index < len(unidades) and unidades[index] else "pieza",
+                "categoria": categorias[index].strip() if index < len(categorias) else "",
+                "costo_unitario_estimado": Decimal(estimados[index]) if index < len(estimados) and estimados[index] else None,
+                "prioridad": prioridades[index] if index < len(prioridades) and prioridades[index] else ItemCompraDepartamental.PRIORIDAD_NORMAL,
+                "fecha_requerida": date.fromisoformat(fechas[index]) if index < len(fechas) and fechas[index] else None,
+                "imagen": request.FILES.get(f"imagen_{index}"),
+            })
+        solicitud = crear_solicitud(actor=request.user, solicitante=request.user, area=area,
+            periodo=periodo, tipo=tipo, motivo=request.POST.get("motivo", "").strip(),
+            justificacion_extraordinaria=request.POST.get("justificacion_extraordinaria", "").strip(),
+            items=items, enviar=accion == "enviar")
+    except (InvalidOperation, IndexError, ValueError):
+        return _error_nueva(request, "Cantidad, costo estimado o fecha inválida.", areas)
+    except ValidationError as exc:
+        return _error_nueva(request, "; ".join(exc.messages), areas)
     return _respuesta_accion(
         request,
         message=f"Solicitud {solicitud.folio} {'enviada a Administración' if accion == 'enviar' else 'guardada como borrador'}.",
@@ -409,9 +390,24 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
             "total_cotizado": total_cotizado,
             "total_comprometido": total_comprometido,
             "total_pagado": total_pagado,
+            "reportes_compra_ia": _reportes_compra_ia(solicitud),
         },
         status=status,
     )
+
+
+def _reportes_compra_ia(solicitud):
+    from core.models import AuditLog
+    from orquestacion.models import ChatToolCall
+    reports = []
+    for draft in ChatToolCall.objects.filter(tool_key='purchase.prepare', metadata_json__purchase_status='EXECUTED',
+            metadata_json__request_id=solicitud.pk).order_by('pk')[:20]:
+        if not AuditLog.objects.filter(action='AI_PURCHASE_REQUEST_CREATE', model='compras.SolicitudCompraDepartamental',
+                object_id=str(solicitud.pk), payload__draft_id=str(draft.public_id), payload__payload_hash=draft.metadata_json['payload_hash']).exists():
+            continue
+        reports.append({'data':draft.arguments_json,
+            'files':[{'nombre':f['nombre'],'url':reverse('api_ai_purchase_evidence',args=[draft.public_id,f['id']])} for f in draft.metadata_json.get('files',[])]})
+    return reports
 
 
 @login_required
