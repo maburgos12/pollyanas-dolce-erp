@@ -295,4 +295,3 @@ class FollowupConcurrencyTests(TransactionTestCase):
         self.assertEqual(BitacoraFalla.objects.count(),1)
         self.assertEqual(EvidenciaSeguimientoFalla.objects.count(),1)
         self.assertEqual(AuditLog.objects.filter(action='AI_FOLLOWUP_UPDATE').count(),1)
-
