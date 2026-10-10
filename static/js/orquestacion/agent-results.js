@@ -44,7 +44,8 @@
   }
   function data(key, result) {
     const p = result.payload || {};
-    if (key === 'incident.prepare') return incident(p.incident);
+    if (['incident.prepare','incident.followup'].includes(key)) return incident(p.incident);
+    if (['incident.search_reports','incident.get_report'].includes(key)) return table('Reportes encontrados', p.reports, [['Folio',r=>`#${escape(r.id)}`],['Reporte',r=>escape(r.titulo)],['Sucursal',r=>escape(r.sucursal)],['Estado',r=>escape(r.estatus_label)]]) + (p.truncated ? '<p>Hay más coincidencias; precisa la búsqueda.</p>' : '');
     if (key === 'incident.requirements') return `<p>Se necesita equipo, categoría, descripción y evidencia o justificación.</p><ul>${(p.categories || []).map(row => `<li>${escape(row.nombre)}</li>`).join('')}</ul>`;
     if (key === 'read.explain_limit') return `<p>${escape(p.message)}</p>`;
     if (result.status === 'no_data' && key !== 'erp.get_pending_maintenance') return '<p>No se encontraron registros con los filtros de esta consulta.</p>';
@@ -65,6 +66,7 @@
   }
   function incident(row) {
     if (!row || typeof row.draft_id !== 'string') return '';
+    if (row.kind === 'followup') return followup(row);
     if (row.status === 'EXECUTED') return `${asset(row.asset)}<p>Reporte creado · Folio de falla: <strong>#${escape(row.report_id)}</strong>.</p>${row.confirmed_at ? `<p class="agent-source">Confirmado: ${date(row.confirmed_at)}</p>` : ''}`;
     const fields = {activo_id:'Equipo', categoria_id:'Categoría', titulo:'Título', descripcion:'Qué ocurrió', prioridad:'Prioridad', justificacion_sin_foto:'Motivo de no adjuntar foto'};
     const missing = (row.missing_fields || []).map(key => escape(fields[key] || key)).join(', ');
@@ -75,6 +77,24 @@
       ${missing ? `<p>Falta: ${missing}. Puedes completar el reporte en esta conversación.</p>` : ''}
       ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se creará el reporte en Fallas y quedará disponible para seguimiento en Mantenimiento.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y crear reporte</button>` : ''}`;
   }
+  function followup(row) {
+    const report = row.report || {};
+    const values = row.fields || {};
+    const completed = row.status === 'EXECUTED';
+    return `<p><strong>#${escape(report.id || row.report_id || '')} · ${escape(report.titulo || 'Reporte pendiente de identificar')}</strong></p>
+      <p>${escape(report.sucursal)} · Proveedor: ${escape(report.proveedor || 'Sin proveedor registrado')}</p>
+      <dl class="agent-facts">
+        <div><dt>${completed ? 'Estado registrado' : 'Estado propuesto'}</dt><dd>${escape(values.estatus === 'resuelto' ? 'Finalizado' : 'En proceso')}</dd></div>
+        ${values.fecha_trabajo_finalizado ? `<div><dt>Trabajo finalizado</dt><dd>${date(values.fecha_trabajo_finalizado)}</dd></div>` : ''}
+        ${report.costo_estimado != null ? `<div><dt>Cotización base conservada (MXN)</dt><dd>${escape(report.costo_estimado)}</dd></div>` : ''}
+      </dl>
+      <p class="agent-answer">${escape(values.comentario)}</p>
+      <p>Esta acción conserva proveedor e importes. No registra ni autoriza pagos.</p>
+      ${row.missing_fields?.length ? `<p>Falta: ${row.missing_fields.map(k=>escape({report_id:'Identificar el reporte',comentario:'Comentario',fecha_trabajo_finalizado:'Fecha real del trabajo'}[k] || k)).join(', ')}.</p>` : ''}
+      ${row.status === 'REVIEW_REQUIRED' ? '<p>El reporte cambió. Consulta su ficha y prepara una nueva propuesta.</p>' : ''}
+      <div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener"><img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy"><span>${escape(f.nombre)}</span></a>`).join('')}</div>
+      ${completed ? `<p>Actualización registrada en el reporte #${escape(row.report_id)}.</p><p class="agent-source">Registrada: ${date(row.confirmed_at)}</p>` : row.status === 'AWAITING_CONFIRMATION' ? `<p>${row.files?.length ? `${escape(row.files.length)} fotografías asociadas.` : 'Puedes asociar fotografías antes de confirmar.'}</p><label>Fotografías de este reporte<input type="file" multiple accept="image/jpeg,image/png,image/webp" data-followup-files="${escape(row.draft_id)}"></label><button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Asociar fotografías</button><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}"${row.missing_fields?.length ? ' disabled' : ''}>Confirmar actualización del reporte</button>` : ''}`;
+  }
   function tool(call) {
     const wrapper = call.result || call.payload || {};
     const result = wrapper.result || {};
@@ -83,7 +103,7 @@
     const approval = call.status === 'approval_requested' || call.requires_approval === true;
     const complete = call.status === 'complete' && !error && !approval;
     const html = complete ? data(key,result) : '';
-    const incidentStatus = key === 'incident.prepare' ? result.payload?.incident?.status : null;
+    const incidentStatus = ['incident.prepare','incident.followup'].includes(key) ? result.payload?.incident?.status : null;
     return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : incidentStatus || (approval ? 'approval_requested' : complete && result.status === 'out_of_scope' ? 'out_of_scope' : call.status))}</div>
       ${error ? '<p>No se pudo completar esta consulta. Revisa tu acceso o intenta consultar nuevamente.</p>' : approval ? '<p>La acción requiere autorización; no se presenta como ejecutada.</p>' : html || `<p>${escape(call.summary || (complete ? 'El servidor registró el resultado.' : 'Esperando resultado del servidor.'))}</p>`}
       ${html ? source(result) : ''}</section>`;

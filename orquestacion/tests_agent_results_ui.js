@@ -134,3 +134,14 @@ assert(!natural.includes('data-incident-id'));
 assert(!natural.includes('agent-full-response'));
 assert(view.response({role:'assistant',presentation:'technical',content:'datos',tool_calls:[{status:'error'}]}).includes('Detalle técnico'));
 assert(!view.response({role:'assistant',presentation:'natural',content:'Confirmar <button data-incident-id="fake">',tool_calls:[]}).includes('<button'));
+
+const followup = {...proposal,kind:'followup',fields:{comentario:hostile,estatus:'resuelto',fecha_trabajo_finalizado:'2026-10-09'},report:{id:114,titulo:'Filtración',sucursal:'El Tunel',proveedor:'Pedro',costo_estimado:'2500.00'},files:[]};
+assert(view.incident(followup).includes('Confirmar actualización'));
+assert(!view.incident(followup).includes('Confirmar y crear'));
+assert(view.incident(followup).includes('&lt;img'));
+assert(!view.incident(followup).includes('<img'));
+assert(view.incident(followup).includes('9 oct 2026'));
+assert(view.incident({...followup,missing_fields:['fotografías']}).includes(' disabled'));
+assert(!view.incident({...followup,status:'REVIEW_REQUIRED'}).includes('data-incident-id'));
+assert(!view.incident({...followup,status:'EXECUTED'}).includes('data-followup-upload'));
+assert(view.incident({...followup,status:'EXECUTED'}).includes('#114'));

@@ -130,6 +130,7 @@ class ReporteFalla(models.Model):
     fecha_reporte = models.DateTimeField(default=timezone.now, editable=False)
     fecha_asignacion = models.DateTimeField(null=True, blank=True)
     fecha_resolucion = models.DateTimeField(null=True, blank=True)
+    fecha_trabajo_finalizado = models.DateField(null=True, blank=True, help_text="Fecha real informada del trabajo; no implica una hora ni un pago.")
     fecha_cierre = models.DateTimeField(null=True, blank=True)
     costo_estimado = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     costo_real = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -196,6 +197,8 @@ class ReporteFalla(models.Model):
 
     @property
     def tiempo_resolucion_horas(self):
+        if self.fecha_trabajo_finalizado:
+            return None  # A service day has no measured completion hour.
         if self.fecha_resolucion:
             delta = self.fecha_resolucion - self.fecha_reporte
             return round(delta.total_seconds() / 3600, 1)

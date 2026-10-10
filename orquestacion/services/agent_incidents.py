@@ -69,7 +69,8 @@ def enabled(user):
 def catalog(user):
     if not enabled(user):
         return []
-    return [
+    from .agent_followups import catalog as followup_catalog
+    return followup_catalog(fresh_asset_user(user)) + [
         {'key':'incident.requirements', 'name':'erp_incident_requirements', 'display_name':'Requisitos de un reporte de falla',
          'description':'Consulta categorías activas, prioridades y campos requeridos para reportar una falla de equipo.',
          'argument_schema':StrictArguments.argument_schema(), 'incident':True},
@@ -108,6 +109,9 @@ def _hash(args, branch_id):
 
 
 def project(draft, actor):
+    if draft.tool_key == 'incident.followup':
+        from .agent_followups import project as project_followup
+        return project_followup(draft, actor)
     _actor(actor, draft.conversation)
     asset = _asset(actor, draft.arguments_json)
     category = _category(draft.arguments_json)
@@ -141,6 +145,10 @@ def _response(dto):
 
 
 def invoke(*, user, tool_key, arguments, conversation, user_message, assistant_message, call_id):
+    from .agent_followups import SERIALIZERS, invoke as invoke_followup
+    if tool_key in SERIALIZERS:
+        return invoke_followup(user=user, tool_key=tool_key, arguments=arguments, conversation=conversation,
+                               user_message=user_message, assistant_message=assistant_message, call_id=call_id)
     actor = _actor(user, conversation)
     if tool_key == 'incident.requirements':
         return {'result':{'status':'ok', 'sources':['fallas.CategoriaFalla', 'fallas.ReporteFalla'], 'as_of':timezone.now().isoformat(),
@@ -202,6 +210,9 @@ def invoke(*, user, tool_key, arguments, conversation, user_message, assistant_m
 
 
 def confirm(*, user, draft_id, arguments):
+    if ChatToolCall.objects.filter(public_id=draft_id, conversation__owner=user, tool_key='incident.followup').exists():
+        from .agent_followups import confirm as confirm_followup
+        return confirm_followup(user=user, draft_id=draft_id, arguments=arguments)
     serializer = IncidentConfirmation(data=arguments)
     serializer.is_valid(raise_exception=True)
     body = serializer.validated_data

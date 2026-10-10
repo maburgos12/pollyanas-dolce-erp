@@ -289,3 +289,51 @@ class AIGatewayIncidentConfirmationView(APIView):
             import logging
             logging.getLogger(__name__).exception('Incident confirmation failed')
             return Response({'code':'incident_failed', 'detail':'No se pudo confirmar el resultado. Reintenta la misma propuesta.'}, status=503)
+
+
+class AIGatewayFollowupEvidenceView(APIView):
+    from rest_framework.authentication import SessionAuthentication
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, draft_id):
+        from orquestacion.services.agent_followups import attach
+        from orquestacion.services.agent_workflows import WorkflowError
+        from mantenimiento.evidence_validation import EvidenceValidationError
+        try:
+            if set(request.data) - {'expected_version', 'payload_hash', 'files'}:
+                raise ValueError
+            version = request.data.get('expected_version', '')
+            if not isinstance(version, str) or not version.isdecimal():
+                raise ValueError
+            arguments = {'expected_version': int(version), 'payload_hash': request.data.get('payload_hash'), 'confirm': True}
+            return Response(attach(user=request.user, draft_id=draft_id, arguments=arguments, files=request.FILES.getlist('files')))
+        except WorkflowError as exc:
+            return Response({'code': exc.code, 'detail': str(exc)}, status=exc.status)
+        except (ValueError, EvidenceValidationError):
+            return Response({'detail': 'Revisa la propuesta y adjunta hasta cinco fotografías válidas de hasta 10 MB cada una.'}, status=400)
+        except ValidationError:
+            raise
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('Followup evidence upload failed')
+            return Response({'detail': 'No se pudieron guardar las evidencias. Revisa la propuesta antes de reintentar.'}, status=503)
+
+    def get(self, request, draft_id, evidence_id):
+        from django.http import FileResponse, Http404
+        from django.core.files.storage import default_storage
+        from orquestacion.services.agent_followups import owned_draft, project
+        from orquestacion.services.agent_workflows import WorkflowError
+        try:
+            draft, actor = owned_draft(request.user, draft_id)
+            if project(draft, actor)['status'] not in ('AWAITING_CONFIRMATION', 'EXECUTED'):
+                raise Http404
+            info = next((row for row in draft.metadata_json.get('files', []) if row['id'] == str(evidence_id)), None)
+            if not info:
+                raise Http404
+            response = FileResponse(default_storage.open(info['path'], 'rb'), content_type=info['mime'], filename=info['nombre'])
+            response['Cache-Control'] = 'private, no-store'
+            response['X-Content-Type-Options'] = 'nosniff'
+            return response
+        except (WorkflowError, OSError):
+            raise Http404

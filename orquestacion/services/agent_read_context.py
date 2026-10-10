@@ -71,7 +71,7 @@ def history_context(conversation, before_sequence):
 def incident_context(conversation, actor):
     from orquestacion.services.agent_incidents import project
     rows = []
-    for draft in conversation.tool_calls.filter(tool_key='incident.prepare').select_related('conversation').order_by('-updated_at')[:10]:
+    for draft in conversation.tool_calls.filter(tool_key__in=['incident.prepare', 'incident.followup']).select_related('conversation').order_by('-updated_at')[:10]:
         try:
             dto = project(draft, actor)
         except WorkflowError:
@@ -127,7 +127,7 @@ def projected_receipts(message):
     except (ValueError, TypeError, AttributeError):
         return []
     receipts = []
-    for draft in ChatToolCall.objects.filter(conversation=message.conversation, tool_key='incident.prepare', public_id__in=ids).select_related('conversation'):
+    for draft in ChatToolCall.objects.filter(conversation=message.conversation, tool_key__in=['incident.prepare', 'incident.followup'], public_id__in=ids).select_related('conversation'):
         try:
             dto = project(draft, message.conversation.owner)
         except WorkflowError:

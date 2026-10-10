@@ -190,7 +190,7 @@ def serialize_tool_call(tool_call: ChatToolCall) -> dict[str, Any]:
     marked = isinstance(tool_call.metadata_json, dict) and tool_call.metadata_json.get("runtime") == "agent_read"
     visible = _read_message_visible(tool_call.assistant_message) if tool_call.assistant_message_id else not marked
     incident_payload = None
-    if visible and tool_call.tool_key == 'incident.prepare':
+    if visible and tool_call.tool_key in ('incident.prepare', 'incident.followup'):
         from orquestacion.services.agent_incidents import project, _response
         try:
             incident_payload = _response(project(tool_call, tool_call.conversation.owner))

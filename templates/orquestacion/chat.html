@@ -5,7 +5,7 @@
 {% block page_title %}Agente ERP{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261008-agent-results-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261010-seguimiento-v1">
 {% endblock %}
 
 {% block content %}
@@ -69,6 +69,9 @@
       <div class="erp-chat-composer">
         <label for="erp-chat-input" class="agent-input-label">Tu consulta</label>
         <textarea id="erp-chat-input" aria-describedby="erp-chat-status" maxlength="12000" class="erp-chat-textarea" placeholder="Escribe lo que necesitas; por ejemplo, consulta el mantenimiento de una batidora."></textarea>
+        <label for="erp-chat-photos">Fotografías de seguimiento (hasta cinco)</label>
+        <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
+        <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
         <div class="erp-chat-composer-actions">
           <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite">Haz una pregunta y te responderé con contexto del ERP.</div>
           <button type="button" class="erp-chat-send" id="erp-chat-send-btn" {% if not runtime_status.ready %}disabled{% endif %}>Enviar</button>
@@ -80,7 +83,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261009-continuidad-v2"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261010-seguimiento-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -110,6 +113,10 @@
   const sendBtn = document.getElementById("erp-chat-send-btn");
   const statusEl = document.getElementById("erp-chat-status");
 
+  const photoInput = document.getElementById('erp-chat-photos');
+  photoInput.addEventListener('change', () => {
+    document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} fotografías seleccionadas. Se asociarán a la propuesta antes de confirmar.`;
+  });
   const escapeHtml = view.escape;
 
   function formatTimestamp(value) {
@@ -319,7 +326,10 @@
   async function sendMessage() {
     const content = inputEl.value.trim();
     if (!content || state.sending || state.loading || state.creating || !runtimeStatus.ready) return;
+    const photos = Array.from(photoInput.files || []);
+    if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco fotos, 10 MB por foto y 20 MB en total.'; return;}
     state.sending = true;
+    photoInput.disabled = true;
     renderConversationList();
     document.getElementById("erp-chat-new-btn").disabled = true;
     document.getElementById("agent-process-list").querySelectorAll("button").forEach(button => { button.disabled = true; });
@@ -343,7 +353,7 @@
           "Content-Type": "application/json",
           "X-CSRFToken": csrfToken,
         },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content, attachment_count: photos.length }),
       });
 
       if (!response.ok) {
@@ -386,6 +396,18 @@
       if (!terminalEvent) throw new Error("La conexión se cerró antes de recibir el resultado. Abre la conversación antes de reenviar.");
       await loadConversation(conversationId, true);
       await refreshConversations();
+      if (photos.length) {
+        const proposals = (state.activeConversation.messages.at(-1)?.tool_calls || []).filter(call=>call.tool_key === 'incident.followup').map(call=>call.result?.result?.payload?.incident).filter(row=>row?.status === 'AWAITING_CONFIRMATION');
+        if (proposals.length !== 1) {statusEl.textContent = 'Las fotos siguen seleccionadas. Completa o identifica una sola propuesta para asociarlas.'; return;}
+        const draft = proposals[0];
+        const body = new FormData(); body.append('expected_version', String(draft.version)); body.append('payload_hash', draft.payload_hash);
+        photos.forEach(file=>body.append('files',file));
+        const upload = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(draft.draft_id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
+        const result = await upload.json();
+        if (!upload.ok) {statusEl.textContent = result.detail || 'No se asociaron las fotos. Revisa la propuesta antes de confirmar.'; return;}
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Fotografías asociadas a la propuesta.';
+        await loadConversation(conversationId, true);
+      }
       statusEl.textContent = state.activeConversation.messages.at(-1)?.status === "error" ? "La consulta no se completó. Revisa la respuesta." : "Respuesta lista.";
     } catch (error) {
       if (tempAssistant) markAssistantError(tempAssistant, {detail:"Se interrumpió la conexión. La ejecución puede haber terminado en el servidor; abre la conversación antes de volver a enviar."});
@@ -394,6 +416,7 @@
       state.sending = false;
       sendBtn.disabled = !runtimeStatus.ready;
       inputEl.disabled = false;
+      photoInput.disabled = false;
       document.getElementById("erp-chat-new-btn").disabled = false;
       renderConversationList();
       if (document.getElementById("agent-processes").open) refreshProcesses();
@@ -476,6 +499,38 @@
     statusEl.textContent = "Añade el dato o la selección que falta y envía tu mensaje. El proceso aún no se ha ejecutado.";
   });
   messageListEl.addEventListener("click", async event => {
+    const uploadButton = event.target.closest('[data-followup-upload]');
+    if (uploadButton && !uploadButton.disabled && !state.sending && !state.loading && !state.creating) {
+      const id = uploadButton.dataset.followupUpload;
+      const picker = messageListEl.querySelector(`[data-followup-files="${id}"]`);
+      if (!picker?.files?.length) { statusEl.textContent = 'Selecciona las fotografías de este reporte.'; return; }
+      const body = new FormData();
+      body.append('expected_version', uploadButton.dataset.version);
+      body.append('payload_hash', uploadButton.dataset.hash);
+      for (const file of picker.files) body.append('files', file);
+      uploadButton.disabled = true;
+      state.sending = true;
+      sendBtn.disabled = true;
+      messageListEl.querySelectorAll('[data-incident-id]').forEach(b => { b.disabled = true; });
+      statusEl.textContent = 'Asociando fotografías a la propuesta…';
+      try {
+        const res = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
+        const payload = await res.json();
+        if (!res.ok) throw new Error(payload.detail || 'No se asociaron las fotografías. Revisa la propuesta.');
+        await loadConversation(state.activeConversation.conversation.id, true);
+        statusEl.textContent = 'Fotografías asociadas. Revisa la propuesta antes de confirmar.';
+      } catch (error) {
+        statusEl.textContent = error instanceof TypeError ? 'No se recibió respuesta al enviar las fotografías. Revisa la propuesta antes de reintentar.' : error.message || 'Respuesta incierta. Abre la conversación antes de reintentar.';
+        uploadButton.disabled = false;
+        await loadConversation(state.activeConversation.conversation.id, true).catch(() => {});
+      } finally {
+        state.sending = false;
+        sendBtn.disabled = state.loading || !runtimeStatus.ready;
+        document.getElementById('erp-chat-new-btn').disabled = state.loading || state.creating;
+        renderConversationList();
+      }
+      return;
+    }
     const button = event.target.closest("[data-incident-id]");
     if (!button || button.disabled || state.sending || state.loading || state.creating) return;
     button.disabled = true;
@@ -489,7 +544,7 @@
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "No se pudo confirmar el reporte. Revisa los datos y tu acceso.");
       const report = payload.result?.payload?.incident;
-      statusEl.textContent = report?.status === 'EXECUTED' ? `Reporte creado: folio #${report.report_id}.` : "El servidor no confirmó la creación.";
+      statusEl.textContent = report?.status === 'EXECUTED' ? `Reporte ${report.kind === 'followup' ? 'actualizado' : 'creado'}: folio #${report.report_id}.` : "El servidor no confirmó la operación.";
       await loadConversation(state.activeConversation.conversation.id, true);
     } catch (error) {
       statusEl.textContent = error.message || "No se recibió confirmación. Puedes reintentar la misma propuesta; el servidor evita duplicados.";

@@ -438,6 +438,7 @@ async function abrirDetalle(id) {
       <hr class="fallas-divider">
       <div class="fallas-detail-grid">
         <div>
+          ${rep.fecha_trabajo_finalizado ? `<p>Trabajo finalizado: ${esc(rep.fecha_trabajo_finalizado)} (fecha real informada).</p>` : ''}
           <label class="pd-form-label">Cambiar estatus</label>
           <select id="nuevo-estatus" class="fallas-select-full">
             <option value="">Sin cambio</option>
