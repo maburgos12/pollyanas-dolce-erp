@@ -57,6 +57,61 @@ class BranchCountCatalogTests(TestCase):
         self.assertEqual(codigos_habituales(branch),set())
         self.assertEqual(codigos_habituales(None),set())
 
+    def test_daily_scope_does_not_use_old_sales_or_positive_stock_alone(self):
+        PointDailySale.objects.create(branch=self.point_branch, product=self.seasonal,
+                                     sale_date=timezone.localdate()-timedelta(days=10), quantity=1)
+        job=PointSyncJob.objects.create(job_type='inventory',status='SUCCESS')
+        PointInventorySnapshot.objects.create(branch=self.point_branch,product=self.seasonal,
+                                              sync_job=job,stock=5,captured_at=timezone.now())
+        self.assertNotIn(self.seasonal.sku,codigos_habituales(self.branch,diario=True))
+        self.assertIn(self.seasonal.sku,codigos_habituales(self.branch))
+
+    def test_daily_bread_counts_received_input_not_sale_presentations(self):
+        from maestros.models import Insumo, UnidadMedida
+        from recetas.models import Receta, LineaReceta
+        from pos_bridge.models import PointTransferLine
+        unit=UnidadMedida.objects.create(codigo='pza',nombre='Pieza')
+        bread=Insumo.objects.create(nombre='PAN DE MUERTO HORNEADO',codigo_point='PMH028',
+                                   tipo_item=Insumo.TIPO_INTERNO,unidad_base=unit)
+        PointTransferLine.objects.create(origin_branch=self.point_branch,destination_branch=self.point_branch,
+            erp_destination_branch=self.branch,registered_at=timezone.now(),received_at=timezone.now(),
+            transfer_external_id='bread',detail_external_id='bread-1',source_hash='bread',
+            item_code='PMH028',item_name=bread.nombre,is_insumo=True,is_received=True,received_quantity=8)
+        for code,name in [('0124','Pan de Muerto'),('02PANMUERTOL','Pan de Muerto Lotus')]:
+            recipe=Receta.objects.create(nombre=name,codigo_point=code,tipo=Receta.TIPO_PRODUCTO_FINAL,hash_contenido=code)
+            LineaReceta.objects.create(receta=recipe,insumo=bread,insumo_texto=bread.nombre,cantidad=1,unidad=unit)
+            product=PointProduct.objects.create(external_id=code,sku=code,name=name,metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':code,'Unidad':'PZA'})})
+            PointDailySale.objects.create(branch=self.point_branch,product=product,sale_date=timezone.localdate(),quantity=1)
+        self.client.force_login(self.operator)
+        response=self.client.get(reverse('operacion:conteos_app:preparar'))
+        codes={row['codigo'] for row in response.context['catalogo']}
+        self.assertIn('PMH028',codes)
+        self.assertNotIn('0124',codes)
+        self.assertNotIn('02PANMUERTOL',codes)
+        self.assertNotContains(response,'value="8"')
+        response=self.client.get(reverse('operacion:conteos_app:preparar'),{'q':'0124','tipo':'diario'})
+        self.assertNotIn('0124',{row['codigo'] for row in response.context['catalogo']})
+        response=self.client.get(reverse('operacion:conteos_app:preparar'),{'q':'muerto','tipo':'diario'})
+        self.assertEqual({row['codigo'] for row in response.context['catalogo']},{'PMH028'})
+
+    def test_daily_excludes_monthly_resale_but_search_keeps_it_available(self):
+        from pos_bridge.models import PointProductCategory
+        PointProductCategory.objects.create(codigo_point=self.product.sku,nombre=self.product.name,category='REVENTA')
+        self.client.force_login(self.operator)
+        response=self.client.get(reverse('operacion:conteos_app:preparar'))
+        self.assertFalse(response.context['catalogo'])
+        response=self.client.get(reverse('operacion:conteos_app:preparar'),{'tipo':'producto'})
+        self.assertIn(self.product.sku,{row['codigo'] for row in response.context['catalogo']})
+        response=self.client.get(reverse('operacion:conteos_app:preparar'),{'tipo':'diario','q':self.product.sku})
+        self.assertIn(self.product.sku,{row['codigo'] for row in response.context['catalogo']})
+
+    def test_new_slice_conversion_is_suggested_without_a_sale(self):
+        from pos_bridge.models import PointConversionLine
+        PointConversionLine.objects.create(branch=self.point_branch,erp_branch=self.branch,
+            movement_external_id='slice',source_hash='slice',movement_at=timezone.now(),
+            item_name='Rebanada nueva',item_code='NEW-SLICE',quantity=6)
+        self.assertIn('NEW-SLICE',codigos_habituales(self.branch,diario=True))
+
     def test_operator_cannot_request_another_branch_catalog(self):
         other=Sucursal.objects.create(codigo='OTHER',nombre='Otra')
         point=PointBranch.objects.create(external_id='other',name='Otra',erp_branch=other)

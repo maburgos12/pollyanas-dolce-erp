@@ -198,21 +198,40 @@ def accion(request, pk):
     return redirect(_url(request,'detalle',count.pk)+'#conteo-detail')
 
 
-def _catalogo(tipo, query, sucursal=None):
+def _catalogo(tipo, query, sucursal=None, *, diario=False):
     from .conteos_units import unidad_conteo
     from .conteos_catalog import codigos_habituales
     if sucursal is None:
         return []
-    habitual = codigos_habituales(sucursal) if not query else None
+    if tipo == 'diario':
+        return sorted(_catalogo('producto', query, sucursal, diario=True) +
+                      _catalogo('insumo', query, sucursal, diario=True), key=lambda x:x['nombre'].casefold())
+    habitual = codigos_habituales(sucursal, diario=diario) if not query else None
     if tipo == 'insumo':
         qs = Insumo.objects.filter(activo=True).exclude(codigo_point='').select_related('unidad_base')
         if query: qs=qs.filter(Q(nombre__icontains=query)|Q(codigo_point__icontains=query))
-        else: qs=qs.filter(codigo_point__in=habitual)
+        else:
+            qs=qs.filter(codigo_point__in=habitual)
+            if diario:
+                qs=qs.filter(tipo_item=Insumo.TIPO_INTERNO).exclude(nombre__icontains='crema')
         return [{'key':f'i{x.pk}','nombre':x.nombre,'codigo':x.codigo_point,'unidad':x.unidad_base.codigo if x.unidad_base_id else '',
                  'selected':not query and bool(x.unidad_base_id)} for x in qs.order_by('nombre')[:200]]
     qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True).exclude(codigo_point='').values('codigo_point'))
+    from recetas.models import Receta
+    # Branches receive and count the baked input, not the presentations made
+    # on sale. Keep this same identity rule in initial scope and live search.
+    bread = Receta.objects.filter(lineas__insumo__codigo_point='PMH028').exclude(codigo_point='').values('codigo_point')
+    qs=qs.exclude(sku__in=bread)
     if query: qs=qs.filter(Q(name__icontains=query)|Q(sku__icontains=query)|Q(category__icontains=query))
-    else: qs=qs.filter(sku__in=habitual)
+    else:
+        qs=qs.filter(sku__in=habitual)
+        if diario:
+            from pos_bridge.models import PointProductCategory
+            from pos_bridge.models.product import inventory_consumption_filter
+            monthly = Receta.objects.filter(modo_costeo__in=['REVENTA','SERVICIO_ACCESORIO']).exclude(codigo_point='').values('codigo_point')
+            classified = PointProductCategory.objects.filter(category__in=['REVENTA','SERVICIO_ACCESORIO']).values('codigo_point')
+            qs=qs.exclude(sku__in=monthly).exclude(sku__in=classified).exclude(inventory_consumption_filter())
+            qs=qs.exclude(sku__in=['0317','0318','COCA450','0313']).exclude(category__iregex=r'caf[eé]|bebida')
     # Point replicas can carry multiple rows for one physical code. Prefer a
     # row with verified unit evidence, then the most recently refreshed one.
     products = sorted(qs, key=lambda x:(bool(unidad_conteo(x)[0]), x.updated_at, x.pk), reverse=True)
@@ -274,7 +293,9 @@ def preparar(request):
         if str(branch_id or '').isdigit():
             catalog_branch = form.fields['sucursal'].queryset.filter(pk=branch_id).first()
             form.initial['sucursal'] = catalog_branch
-    tipo = request.GET.get('tipo','producto')
+    tipo = request.GET.get('tipo','diario' if es_app else 'producto')
+    if tipo not in ('diario','producto','insumo'):
+        return HttpResponse(status=400)
     query = request.GET.get('q','').strip()[:120]
     if request.method == 'POST' and form.is_valid():
         try:
