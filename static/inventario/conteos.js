@@ -60,7 +60,7 @@
     var total=0, complete=0;
     root.querySelectorAll('[data-count-line]').forEach(function(row){total++;var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value.trim()!==''||i.value.trim()!=='')complete++;});
     var text=root.querySelector('[data-count-progress]'),bar=root.querySelector('[role="progressbar"]');
-    if(text)text.textContent=complete+' de '+total+' contados';
+    if(text)text.textContent=complete+' de '+total+' registrados';
     if(bar){bar.setAttribute('aria-valuenow',complete);bar.value=complete;}
   }
   function bind() {
@@ -146,9 +146,28 @@
     });
     form.addEventListener('input',function(event){
       if(!event.target.name)return;
+      if(event.target.name.indexOf('cantidad_')===0&&event.target.value!==''){
+        var incidence=event.target.closest('[data-count-line]').querySelector('textarea');
+        incidence.value=incidence.value.replace(/^No se maneja en esta sucursal\.\s*/,'');
+      }
       // A changed body is a new intent; never reuse a receipt for different data.
       form.elements.request_id.value=uuid();persist();updateProgress(root);
       var preview=root.querySelector('[data-send-preview]');if(preview)preview.hidden=true;
+    });
+    root.querySelectorAll('[data-not-handled]').forEach(function(button){
+      button.addEventListener('click',function(){
+        var row=button.closest('[data-count-line]'),quantity=row.querySelector('input[name^="cantidad_"]'),incidence=row.querySelector('textarea');
+        if(quantity.value!==''){window.ERPActionUI.showToast({type:'warning',message:'Este artículo ya tiene una cantidad. Revísala antes de marcar que no se maneja.'});return;}
+        var marker='No se maneja en esta sucursal.';
+        if(incidence.value.trim()===marker)incidence.value='';
+        else if(incidence.value.indexOf(marker)<0){
+          var next=marker+(incidence.value.trim()?' '+incidence.value:'');
+          if(next.length>incidence.maxLength){window.ERPActionUI.showToast({type:'warning',message:'La incidencia ya ocupa el espacio disponible. Revísala para registrar que no se maneja.'});return;}
+          incidence.value=next;
+        }
+        row.querySelector('details').open=Boolean(incidence.value);
+        incidence.dispatchEvent(new Event('input',{bubbles:true}));
+      });
     });
     form.addEventListener('submit',function(event){
       if((!('onformdata' in form)&&form.elements.length>900)||new Blob([JSON.stringify(values(form))]).size>1800000){
@@ -173,13 +192,17 @@
     var catalogQuery=root.querySelector('[data-catalog-query]');
     var catalogResults=root.querySelector('[data-catalog-results]');
     var catalogSubmit=root.querySelector('[data-catalog-submit]');
+    var searchTimer, searchVersion=0;
     function selectType(type){
       activeType=type;
+      searchVersion++;window.clearTimeout(searchTimer);
+      catalogSubmit.disabled=false;
       typeTabs.forEach(function(tab){tab.setAttribute('aria-selected',String(tab.dataset.countTypeTab===type));});
       root.querySelectorAll('[data-count-group]').forEach(function(group){group.hidden=group.dataset.countGroup!==type;});
       var label=root.querySelector('[data-catalog-type-label]');if(label)label.textContent=type==='producto'?'producto':'insumo';
       if(catalogResults)catalogResults.replaceChildren();
       search.dispatchEvent(new Event('input'));
+      if(catalogQuery.value.trim())searchCatalog();
     }
     typeTabs.forEach(function(tab){tab.addEventListener('click',function(){selectType(tab.dataset.countTypeTab);});});
     function renderCatalog(items){
@@ -197,16 +220,18 @@
       });
     }
     function searchCatalog(){
-      var q=catalogQuery.value.trim();
-      if(!q){renderCatalog([]);return;}
+      window.clearTimeout(searchTimer);
+      var q=catalogQuery.value.trim(),version=++searchVersion;
+      if(!q){catalogResults.replaceChildren();catalogSubmit.disabled=false;return;}
       catalogSubmit.disabled=true;catalogResults.textContent='Buscando…';
       var url=new URL(form.dataset.catalogUrl,window.location.origin);url.searchParams.set('tipo',activeType);url.searchParams.set('q',q);
       fetch(url.toString(),{headers:{'Accept':'application/json'},credentials:'same-origin'})
         .then(function(response){return response.json().then(function(data){if(!response.ok)throw new Error(data.error||'No fue posible buscar.');return data;});})
-        .then(function(data){renderCatalog(data.resultados||[]);})
-        .catch(function(error){catalogResults.textContent=error.message;})
-        .finally(function(){catalogSubmit.disabled=false;});
+        .then(function(data){if(version===searchVersion&&root===activeRoot)renderCatalog(data.resultados||[]);})
+        .catch(function(error){if(version===searchVersion&&root===activeRoot)catalogResults.textContent=error.message;})
+        .finally(function(){if(version===searchVersion)catalogSubmit.disabled=false;});
     }
+    catalogQuery.addEventListener('input',function(){searchVersion++;window.clearTimeout(searchTimer);catalogResults.textContent=catalogQuery.value.trim()?'Buscando…':'';searchTimer=window.setTimeout(searchCatalog,250);});
     catalogSubmit.addEventListener('click',searchCatalog);
     catalogQuery.addEventListener('keydown',function(event){if(event.key==='Enter'){event.preventDefault();searchCatalog();}});
     if(old&&old.dataset.round===root.dataset.round){

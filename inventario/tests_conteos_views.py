@@ -88,6 +88,24 @@ class ConteoViewsTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('Completa cada cantidad',response.json()['toast']['message'])
 
+    def test_not_handled_is_retained_without_a_zero_or_numeric_difference(self):
+        from inventario.models_conteos import LecturaConteoSucursal
+        self.client.force_login(self.operator)
+        self.client.post(self.url('accion'),{'action':'iniciar','version':1,'request_id':str(uuid4())},HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        line=self.count.lineas.get()
+        self.count.referencia={'lineas':{str(line.pk):{'cantidad':'12'}}}
+        self.count.save(update_fields=['referencia'])
+        body={'action':'enviar','version':2,'request_id':str(uuid4()),
+              f'cantidad_{line.pk}':'',f'incidencia_{line.pk}':'No se maneja en esta sucursal.'}
+        response=self.client.post(self.url('accion'),body,HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code,200,response.content)
+        reading=LecturaConteoSucursal.objects.get(linea=line,ronda=1)
+        self.assertIsNone(reading.cantidad)
+        self.assertEqual(reading.incidencia,body[f'incidencia_{line.pk}'])
+        self.client.force_login(self.admin)
+        response=self.client.get(reverse('inventario:conteos_erp:detalle',args=[self.count.pk]))
+        self.assertIsNone(response.context['rows'][0]['diferencia'])
+
     def test_capture_operator_cannot_export_expected_values(self):
         self.client.force_login(self.operator)
         self.assertEqual(self.client.get(self.url('exportar')).status_code, 403)

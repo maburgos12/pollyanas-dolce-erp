@@ -17,4 +17,5 @@
     <label for="incidencia-{{ row.linea.pk }}">Explica si no fue posible contar o hay una observación</label>
     <textarea id="incidencia-{{ row.linea.pk }}" name="incidencia_{{ row.linea.pk }}" maxlength="2000" rows="2">{% if posted %}{{ row.posted_incidencia }}{% else %}{{ row.lectura.incidencia }}{% endif %}</textarea>
   </details>
+  <button type="button" class="count-button secondary" data-not-handled aria-label="No se maneja {{ row.linea.nombre }} en esta sucursal">No se maneja</button>
 </div>

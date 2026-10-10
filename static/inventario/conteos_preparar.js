@@ -34,6 +34,7 @@
       try{response=await fetch(url,{credentials:'same-origin',signal:controller.signal});}finally{window.clearTimeout(timeout);}
       if(!response.ok||response.redirected)throw new Error('No fue posible buscar. Revisa tu sesión y vuelve a intentar.');
       var html=new DOMParser().parseFromString(await response.text(),'text/html');
+      if(url.searchParams.get('q')!==search.elements.q.value||url.searchParams.get('tipo')!==search.elements.tipo.value||branch!==(form.elements.sucursal?form.elements.sucursal.value:catalogBranch)){pendingSearch=true;return;}
       var fresh=html.querySelector('#preparar-conteo tbody');
       if(!fresh)throw new Error('No se recibió el catálogo. Tus selecciones se conservan.');
       var body=form.querySelector('tbody'),selected=new Map();
@@ -45,10 +46,13 @@
       catalogBranch=branch;form.elements.request_id.value=uuid();
       body.replaceChildren(fragment);remember();summary();
       if(!body.children.length){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.textContent='No hay coincidencias. Cambia la búsqueda.';row.appendChild(cell);body.appendChild(row);}
-      window.ERPActionUI.showToast({type:'info',message:'Catálogo actualizado. Tus selecciones se conservan al buscar.'});
+      if(event.submitter)window.ERPActionUI.showToast({type:'info',message:'Catálogo actualizado. Tus selecciones se conservan al buscar.'});
     }catch(error){window.ERPActionUI.showToast({type:'error',message:error.name==='AbortError'?'La búsqueda tardó demasiado. Tus selecciones se conservan.':error.message,persistent:true});}
     finally{busy=false;button.disabled=false;button.textContent='Buscar artículos';if(pendingSearch){pendingSearch=false;search.requestSubmit();}}
   });
   if(form.elements.sucursal)form.elements.sucursal.addEventListener('change',function(){search.elements.q.value='';search.requestSubmit();});
+  var timer;
+  search.elements.q.addEventListener('input',function(){window.clearTimeout(timer);timer=window.setTimeout(function(){search.requestSubmit();},300);});
+  search.elements.tipo.addEventListener('change',function(){window.clearTimeout(timer);search.requestSubmit();});
   summary();
 })();

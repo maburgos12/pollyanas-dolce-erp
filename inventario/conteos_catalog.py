@@ -6,24 +6,33 @@ from django.utils import timezone
 
 from pos_bridge.models import (
     PointInventorySnapshot, PointInsumoInventorySnapshot,
-    PointTransferLine, PointSyncJob,
+    PointTransferLine, PointSyncJob, PointConversionLine,
 )
 from ventas.services.sales_read_service import sold_point_skus_for_range
 
 
-def codigos_habituales(sucursal, *, ahora=None):
+def codigos_habituales(sucursal, *, ahora=None, diario=False):
     if sucursal is None:
         return set()
     ahora = ahora or timezone.now()
     today = timezone.localdate(ahora)
     codes = sold_point_skus_for_range(
-        sucursal=sucursal, start_date=today-timedelta(days=30), end_date=today,
+        sucursal=sucursal, start_date=today-timedelta(days=2 if diario else 30), end_date=today,
     )
     receipts = PointTransferLine.objects.filter(
         Q(erp_destination_branch=sucursal)|Q(destination_branch__erp_branch=sucursal),
         is_received=True, is_cancelled=False, is_current_snapshot=True,
-        received_quantity__gt=0, received_at__range=(ahora-timedelta(days=30), ahora))
+        received_quantity__gt=0, received_at__range=(ahora-timedelta(days=7 if diario else 30), ahora))
     codes.update(receipts.order_by().values_list('item_code', flat=True).distinct())
+    if diario:
+        # A newly cut slice can exist before its first sale or transfer.
+        conversions=PointConversionLine.objects.filter(
+            Q(erp_branch=sucursal)|Q(branch__erp_branch=sucursal), quantity__gt=0,
+            movement_at__range=(ahora-timedelta(days=7),ahora))
+        codes.update(conversions.order_by().values_list('item_code',flat=True).distinct())
+        # Recent movements suggest scope; an old positive balance alone does
+        # not establish that a seasonal article is still handled by the store.
+        return {str(code).strip() for code in codes if code and str(code).strip()}
     for model, quantity, code in (
         (PointInventorySnapshot, 'stock', 'product__sku'),
         (PointInsumoInventorySnapshot, 'point_quantity', 'point_code'),
