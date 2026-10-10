@@ -39,7 +39,8 @@ class FollowupArguments(StrictArguments):
     report_id = StrictIntegerField(required=False, min_value=1)
     comentario = StrictStringField(required=False, allow_blank=True, max_length=3000)
     fecha_trabajo_finalizado = StrictDateField(required=False)
-    evidence_count = StrictIntegerField(required=False, min_value=0, max_value=5)
+    evidence_count = StrictIntegerField(required=False, min_value=0, max_value=5,
+        help_text='Total de fotos requeridas, incluidas las pendientes de adjuntar; cero seleccionadas no significa cero requeridas.')
     estatus = serializers.ChoiceField(required=False, choices=['en_proceso', 'resuelto'])
 
     def validate(self, attrs):
@@ -65,7 +66,7 @@ def catalog(actor):
     definitions = [
         ('incident.search_reports', 'erp_search_failure_reports', 'Buscar reportes de falla', 'Busca reportes existentes por fragmento de título, proveedor o sucursal. Incluye instalaciones sin equipo; no crea reportes.'),
         ('incident.get_report', 'erp_get_failure_report', 'Consultar reporte de falla', 'Obtiene una ficha fresca, cotización, proveedor y seguimiento del reporte autorizado.'),
-        (KEY, 'erp_prepare_failure_followup', 'Preparar actualización del reporte', 'Prepara seguimiento o finalización de un reporte existente sin ejecutarla. Conserva cotización, proveedor y costo real. Requiere comentario y, para finalizar, fecha real del trabajo. Las fotos se adjuntan en la interfaz; continúa el mismo draft_id y expected_version.'),
+        (KEY, 'erp_prepare_failure_followup', 'Preparar actualización del reporte', 'Prepara seguimiento o finalización de un reporte existente sin ejecutarla. Conserva cotización, proveedor y costo real. Requiere comentario y, para finalizar, fecha real del trabajo. evidence_count es el total de fotos requeridas, incluidas las que el usuario adjuntará después; no sólo las seleccionadas ahora. Las fotos se adjuntan en la interfaz; continúa el mismo draft_id y expected_version.'),
     ]
     return [{'key': key, 'name': name, 'display_name': label, 'description': description,
              'argument_schema': SERIALIZERS[key].argument_schema(), 'incident': True} for key, name, label, description in definitions]

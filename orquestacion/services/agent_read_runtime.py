@@ -573,8 +573,10 @@ real informada del trabajo (YYYY-MM-DD), sin inventar hora. Pago pendiente se co
 en comentario; la cotización y costo real no cambian. No aceptas pagos ni cierres
 financieros. Adjuntar fotos en la interfaz asocia evidencia a la propuesta; el modelo
 no ha leído las imágenes y no puede afirmar una verificación visual o funcional.
-selected_photo_count indica cuántas fotos seleccionó el usuario para esta petición.
-Úsalas como evidence_count de la propuesta; todavía deben asociarse y confirmarse.
+selected_photo_count es sólo el mínimo de fotos seleccionadas en esta petición,
+no el total de evidencias del proceso. evidence_count debe incluir también las fotos
+pendientes que el usuario indicó que adjuntará, aunque selected_photo_count sea 0.
+Conserva ese total al continuar la propuesta; las fotos deben asociarse antes de confirmar.
 Para reanudar usa draft_id y expected_version actuales de incident_drafts.
 También puedes preparar reportes de falla de EQUIPOS con las herramientas incident.
 Consulta erp_incident_requirements para obtener categorías y requisitos reales.
