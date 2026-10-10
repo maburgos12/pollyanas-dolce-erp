@@ -90,3 +90,11 @@
 @media (max-width:1000px) { .erp-chat-shell { grid-template-columns:220px minmax(0,1fr); gap:12px; } .erp-chat-main-head { flex-wrap:wrap; } }
 @media (max-width:700px) { .erp-chat-shell { grid-template-columns:minmax(0,1fr); height:auto; min-height:0; gap:12px; } .erp-chat-sidebar-head { padding:12px; display:flex; justify-content:space-between; align-items:center; gap:12px; } .erp-chat-sidebar-head .erp-chat-subtitle { display:none; } .erp-chat-title { font-size:1rem; margin:0; } .erp-chat-new-btn { width:auto; margin:0; font-size:.85rem; } .agent-history,.agent-processes { padding:8px 12px; } .erp-chat-main { height:calc(100dvh - 340px); min-height:450px; } .erp-chat-main-head { padding:12px 16px; gap:8px; } .erp-chat-main-title { font-size:1rem; } .erp-chat-main-subtitle { display:none; } .erp-chat-main-body { padding:16px 12px; } .erp-chat-avatar { display:none; } .erp-chat-bubble { max-width:100%; } .erp-chat-empty { margin:20px 0; } .erp-chat-empty h2 { font-size:1.35rem; } .erp-chat-composer-wrap { padding:12px; } .erp-chat-composer-actions { gap:8px; } .erp-chat-send { min-width:76px; } }
 @media (prefers-reduced-motion:reduce) { .erp-chat-shell button:not(:disabled):active { transform:none; } }
+
+.agent-evidence-list {display:flex;flex-wrap:wrap;gap:12px;margin-block:12px;}
+.agent-evidence-list a {display:flex;flex-direction:column;gap:6px;max-width:180px;overflow-wrap:anywhere;}
+.agent-evidence-list img {width:100%;height:130px;object-fit:contain;border-radius:8px;}
+.agent-tool label {display:block;margin-block:12px;}
+.agent-tool input[type="file"] {display:block;max-width:100%;margin-block:8px;}
+
+#erp-chat-photos { max-width: 100%; }

@@ -106,6 +106,9 @@ def stream_message_api(request, conversation_id):
     _ensure_ai_private_access(request.user)
     conversation = get_chat_conversation(request.user, conversation_id)
     payload = _parse_json_body(request)
+    count = payload.get('attachment_count', 0)
+    if type(count) is not int or not 0 <= count <= 5:
+        return JsonResponse({'detail':'Puedes seleccionar hasta cinco fotografías.'}, status=400)
     content = str(payload.get("content") or "").strip()
     if not content:
         return JsonResponse({"detail": "El mensaje no puede ir vacío."}, status=400)
@@ -116,6 +119,10 @@ def stream_message_api(request, conversation_id):
         content=content,
         session_key=request.session.session_key or "",
     )
+
+    if count:
+        user_message.metadata_json = {**user_message.metadata_json, 'expected_photo_count': count}
+        user_message.save(update_fields=['metadata_json', 'updated_at'])
 
     try:
         result = execute_chat_turn(

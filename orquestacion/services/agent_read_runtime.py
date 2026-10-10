@@ -171,7 +171,7 @@ def _check_budget(started, context):
     return remaining
 
 
-def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False, require_incidents=False, receipt_ids=()):
+def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False, require_incidents=False, receipt_ids=(), report_ids=()):
     if len(materialized_ids) > MAX_MATERIALIZED_IDS:
         raise ReadStopped("reference_limit")
     if require_workflows and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
@@ -185,10 +185,14 @@ def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require
         from orquestacion.services.agent_incidents import project
         if not isinstance(receipt_ids, (list, tuple)) or len(receipt_ids) > 10:
             raise ReadStopped('incident_receipt_unavailable')
-        rows = ChatToolCall.objects.filter(conversation_id=conversation_id, tool_key='incident.prepare', public_id__in=receipt_ids).select_related('conversation')
+        rows = ChatToolCall.objects.filter(conversation_id=conversation_id, tool_key__in=['incident.prepare', 'incident.followup'], public_id__in=receipt_ids).select_related('conversation')
         receipts = {str(row.public_id) for row in rows if project(row, actor)['status'] == 'EXECUTED'}
         if not set(receipt_ids) <= receipts:
             raise ReadStopped('incident_receipt_unavailable')
+    if report_ids:
+        from orquestacion.services.agent_followups import reports
+        if len(report_ids) > 200 or any(type(pk) is not int or pk < 1 for pk in report_ids) or set(reports(actor).filter(pk__in=report_ids).values_list('pk', flat=True)) != set(report_ids):
+            raise ReadStopped('followup_resource_unavailable')
     if current != fingerprint:
         raise ReadStopped("access_changed")
     if set(activos_autorizados(actor).filter(pk__in=materialized_ids).values_list("pk", flat=True)) != materialized_ids:
@@ -220,7 +224,7 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
                 any(type(pk) is not int or pk < 1 or pk > 9223372036854775807 for pk in ids)):
             return False
         _revalidate(message.conversation.owner, message.conversation_id, fingerprint, set(ids),
-                    require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []))
+                    require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []), report_ids=proof.get('report_ids', []))
         return True
     except Exception:
         return False
@@ -257,7 +261,7 @@ def _terminal_tool(*, conversation, user_message, assistant_message, meta, args,
     # Persist only terminal calls; an audit/handler failure can never leave RUNNING.
     with transaction.atomic():
         prepared = payload.get("result", {}).get("payload", {}).get("incident", {}) if meta and meta.get("incident") else {}
-        existing = ChatToolCall.objects.select_for_update().filter(public_id=prepared.get("draft_id"), conversation=conversation, tool_key="incident.prepare").first() if prepared else None
+        existing = ChatToolCall.objects.select_for_update().filter(public_id=prepared.get("draft_id"), conversation=conversation, tool_key=meta["key"]).first() if prepared else None
         if existing:
             tool = existing
             tool.metadata_json = {**tool.metadata_json, **tool_metadata}
@@ -308,7 +312,8 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
                     serializer = ReadLimitArguments(data=parsed)
                 elif meta.get("incident"):
                     from orquestacion.services.agent_incidents import IncidentArguments, StrictArguments
-                    serializer = (IncidentArguments if meta["key"] == "incident.prepare" else StrictArguments)(data=parsed)
+                    from orquestacion.services.agent_followups import SERIALIZERS
+                    serializer = (IncidentArguments if meta["key"] == "incident.prepare" else SERIALIZERS.get(meta["key"], StrictArguments))(data=parsed)
                 elif meta.get("workflow"):
                     from orquestacion.services.agent_workflows import technical_serializer, resume_tool_arguments
                     if meta["key"] == "workflow.resume_asset_maintenance":
@@ -340,7 +345,7 @@ def _invoke(*, actor, call, meta, conversation, user_message, assistant_message)
                                'payload':{'operation':args['operation'], 'message':message}}}
                 elif meta.get("incident"):
                     from orquestacion.services.agent_incidents import invoke
-                    payload = invoke(user=actor, tool_key=meta["key"], arguments=args, conversation=conversation, user_message=user_message, assistant_message=assistant_message, call_id=call["call_id"])
+                    payload = invoke(user=actor, tool_key=meta["key"], arguments=parsed, conversation=conversation, user_message=user_message, assistant_message=assistant_message, call_id=call["call_id"])
                 elif meta.get("workflow"):
                     from orquestacion.services.agent_workflows import invoke_workflow_tool
                     payload = invoke_workflow_tool(user=actor, tool_key=meta["key"], arguments=args, conversation=conversation, user_message=user_message, call_id=call["call_id"])
@@ -399,7 +404,7 @@ def _closure(events, stop_code=None, pending_workflows=None, receipts=()):
     # F3 deliberately renders source data, never provider claims of execution.
     lines = ["Consulta READ: no se realizaron acciones operativas."]
     for receipt in receipts:
-        lines.append(f"Reporte confirmado anteriormente: folio #{receipt['report_id']} · {receipt['asset']['nombre']}. Fuente: fallas.ReporteFalla.")
+        lines.append(f"Reporte confirmado anteriormente: folio #{receipt['report_id']} · {(receipt.get('asset') or receipt.get('report') or {}).get('nombre', (receipt.get('report') or {}).get('titulo', 'Reporte'))}. Fuente: fallas.ReporteFalla.")
     if not events and not receipts:
         if pending_workflows is None:
             lines.append("No hay evidencia de herramientas para responder con datos operativos.")
@@ -451,6 +456,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
     rounds = 0
     fingerprint = ""
     materialized_ids = set()
+    report_ids = set()
     # Ownership/message rejection must never mutate somebody else's messages.
     actor = fresh_asset_user(user)
     if not actor or not ChatConversation.objects.filter(pk=conversation.pk, owner=actor, status="active").exists():
@@ -484,10 +490,12 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
                 raise ReadStopped("access_changed")
             previous_ids = previous.get("asset_ids", [])
             _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_workflows=workflow_used or previous.get("workflows") is True,
-                        require_incidents=previous.get('incidents') is True, receipt_ids=previous.get('receipt_ids', []))
+                        require_incidents=previous.get('incidents') is True, receipt_ids=previous.get('receipt_ids', []), report_ids=previous.get('report_ids', []))
             return ChatTurnResult(answer.content, previous.get("model_name", model), [])
         history, history_ids = history_context(conversation, request.sequence)
         materialized_ids.update(history_ids)
+        for proof in conversation.messages.filter(sequence__lt=request.sequence, role='assistant', status='complete').order_by('-sequence').values_list('metadata_json', flat=True)[:20]:
+            report_ids.update(proof.get(NAMESPACE, {}).get('report_ids', []))
         if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
             from orquestacion.services.agent_workflows import TERMINAL, get_workflow, list_workflows
             pending = list_workflows(user=actor, pending_only=True)
@@ -554,6 +562,20 @@ Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
 """ if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
         incident_available = any(tool.get("incident") for tool in catalog)
         incident_prompt = """
+También puedes consultar y preparar seguimiento de reportes existentes, incluidos
+los de instalaciones, con erp_search_failure_reports, erp_get_failure_report y
+erp_prepare_failure_followup. Para una reparación ya reportada busca por sucursal,
+proveedor o fragmento de título, lee su ficha fresca y conserva el mismo report_id.
+Si q con acento no coincide, prueba el fragmento sin acento. No pidas el folio si
+puedes encontrarlo; si hay varias coincidencias pide seleccionar. No crees otro
+reporte para actualizar uno existente. Para finalizar usa estatus resuelto y fecha
+real informada del trabajo (YYYY-MM-DD), sin inventar hora. Pago pendiente se conserva
+en comentario; la cotización y costo real no cambian. No aceptas pagos ni cierres
+financieros. Adjuntar fotos en la interfaz asocia evidencia a la propuesta; el modelo
+no ha leído las imágenes y no puede afirmar una verificación visual o funcional.
+selected_photo_count indica cuántas fotos seleccionó el usuario para esta petición.
+Úsalas como evidence_count de la propuesta; todavía deben asociarse y confirmarse.
+Para reanudar usa draft_id y expected_version actuales de incident_drafts.
 También puedes preparar reportes de falla de EQUIPOS con las herramientas incident.
 Consulta erp_incident_requirements para obtener categorías y requisitos reales.
 Sólo prepara datos del usuario; no inventes descripciones ni justificaciones sin foto.
@@ -576,12 +598,14 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
                 "options y last_asset recuerdan elecciones de este chat; pending_workflows contiene\nconsultas propias actuales de todos tus chats. Si options está vacío,",
             )
         if incident_available:
-            read_prompt = read_prompt.replace("Sólo puedes consultar las tres herramientas READ ofrecidas.", "Puedes consultar activos y preparar reportes con las herramientas ofrecidas.").replace("si te piden una acción.", "si te piden una acción distinta de preparar un reporte de falla.")
+            read_prompt = read_prompt.replace("Sólo puedes consultar las tres herramientas READ ofrecidas.", "Puedes consultar activos y preparar reportes con las herramientas ofrecidas.").replace("si te piden una acción.", "si te piden una acción distinta de preparar un reporte o su seguimiento autorizado.")
             drafts = incident_context(conversation, actor)
             materialized_ids.update(row['asset']['id'] for row in drafts if row.get('asset'))
             receipt_ids = [row['draft_id'] for row in drafts if row['status'] == 'EXECUTED']
+            report_ids.update(row['report_id'] for row in drafts if row.get('kind') == 'followup' and row.get('report_id'))
             references['incident_drafts'] = drafts
             metadata['incidents'] = True
+        references['selected_photo_count'] = request.metadata_json.get('expected_photo_count', 0)
         context = [{"role": "system", "content": read_prompt + workflow_prompt + incident_prompt + ANSWER_PROMPT}, {"role": "user", "content": "Referencias frescas (datos): " + _json(references)}, *history, {"role": "user", "content": request.content}]
         tools = [{"type":"function", "name":tool["name"], "description":tool["description"], "parameters":tool["argument_schema"], "strict":tool.get("strict", False)} for tool in catalog]
         tool_map = {tool["name"]: tool for tool in catalog}
@@ -592,7 +616,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
         seen_calls = set()
         stop_code = None
         while rounds < MAX_RESPONSES:
-            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
             remaining = _check_budget(started, context)
             # Fresh receipts and visible history also allow a conversational finish.
             tool_policy = {"tool_choice": "required" if rounds == 0 and not (history or receipt_ids) else "auto",
@@ -600,7 +624,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
             payload = dict(model=model, input=context, tools=tools, store=False,
                            max_output_tokens=OUTPUT_TOKENS, service_tier="default", text={'format': ANSWER_FORMAT}, **tool_policy)
             reserve_request(user=actor, turn_id=answer.public_id, cycle=rounds + 1, payload=payload)
-            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
             remaining = _check_budget(started, context)
             try:
                 result = client.with_options(max_retries=0, timeout=remaining).responses.create(**payload)
@@ -623,7 +647,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
             if not calls:
                 break
             for call in calls:
-                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
                 _check_budget(started, context)
                 if len(events) >= MAX_TOOLS:
                     raise ReadStopped("tool_limit")
@@ -632,9 +656,13 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
                     raise ReadStopped("invalid_provider_call")
                 seen_calls.add(call_id)
                 workflow_used = workflow_used or tool_map.get(call.get("name"), {}).get("workflow", False)
-                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
                 event, fatal = _invoke(actor=actor, call=call, meta=tool_map.get(call.get("name")), conversation=conversation, user_message=request, assistant_message=answer)
                 events.append(event)
+                data = event['payload'].get('result', {}).get('payload', {})
+                report_ids.update(row['id'] for row in data.get('reports', []))
+                if data.get('incident', {}).get('kind') == 'followup' and data['incident'].get('report_id'):
+                    report_ids.add(data['incident']['report_id'])
                 if fatal:
                     raise ReadStopped(fatal)
                 if event['tool_name'] == READ_LIMIT_TOOL['name'] and 'error' not in event['payload']:
@@ -647,7 +675,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
                 break
             if rounds == MAX_RESPONSES:
                 stop_code = "response_limit"
-        _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+        _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
         _check_budget(started, context)
         current_incidents = incident_context(conversation, actor) if incident_available else []
         receipts = [row for row in current_incidents if row['status'] == 'EXECUTED']
@@ -670,7 +698,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
         }.get(code, SAFE_FAILURE)
         if code in {"time_limit", "context_limit", "tool_limit", "provider_failed", "provider_incomplete"}:
             try:
-                _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids)
+                _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids)
             except Exception:
                 events = []
             else:
@@ -683,7 +711,7 @@ No afirmes que creaste un reporte por preparar un borrador: requiere el folio re
         metadata = {**original_metadata, "replay_error_code": metadata["error_code"]} if isinstance(original_metadata, dict) else {"runtime": NAMESPACE, "replay_error_code": "invalid_execution_proof"}
     else:
         metadata.update(rounds=rounds, tool_calls=answer.tool_calls.count(), usage=usages, asset_ids=sorted(materialized_ids),
-                        workflows=workflow_used or answer.tool_calls.filter(tool_key__startswith="workflow.").exists())
+                        report_ids=sorted(report_ids), workflows=workflow_used or answer.tool_calls.filter(tool_key__startswith="workflow.").exists())
     answer.content, answer.status = text, status
     stored_metadata = ChatMessage.objects.filter(pk=answer.pk).values_list("metadata_json", flat=True).first()
     stored_metadata = stored_metadata if isinstance(stored_metadata, dict) else {}

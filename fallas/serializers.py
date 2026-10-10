@@ -244,6 +244,7 @@ class ReporteFallaDetailSerializer(ReporteFallaListSerializer):
             "notas_internas",
             "fecha_asignacion",
             "fecha_resolucion",
+            "fecha_trabajo_finalizado",
             "fecha_cierre",
             "tiempo_respuesta_horas",
             "tiempo_resolucion_horas",
