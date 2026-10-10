@@ -32,6 +32,8 @@ Vuelve a consultar si necesitas un dato operativo que sólo aparece en el histor
 Puedes responder un folio con incident_drafts EXECUTED: son recibos revalidados
 por el servidor. No necesitas otra herramienta para repetir ese folio confirmado.
 No confundas el reporte ya confirmado con una escritura realizada en este turno.
+Los recibos kind=purchase prueban una solicitud creada; compra_reportada no prueba
+registro de pago, autorización, aviso enviado ni recepción. Respeta esa distinción.
 No afirmes otras operaciones ejecutadas: no hay herramientas para realizarlas.
 Para la respuesta final usa el esquema erp_answer. evidence_ids identifica las
 tool_call_id de resultados consultados, o draft_id de incident_drafts actuales.
@@ -71,7 +73,7 @@ def history_context(conversation, before_sequence):
 def incident_context(conversation, actor):
     from orquestacion.services.agent_incidents import project
     rows = []
-    for draft in conversation.tool_calls.filter(tool_key__in=['incident.prepare', 'incident.followup']).select_related('conversation').order_by('-updated_at')[:10]:
+    for draft in conversation.tool_calls.filter(tool_key__in=['incident.prepare', 'incident.followup', 'purchase.prepare']).select_related('conversation').order_by('-updated_at')[:10]:
         try:
             dto = project(draft, actor)
         except WorkflowError:
@@ -127,7 +129,7 @@ def projected_receipts(message):
     except (ValueError, TypeError, AttributeError):
         return []
     receipts = []
-    for draft in ChatToolCall.objects.filter(conversation=message.conversation, tool_key__in=['incident.prepare', 'incident.followup'], public_id__in=ids).select_related('conversation'):
+    for draft in ChatToolCall.objects.filter(conversation=message.conversation, tool_key__in=['incident.prepare', 'incident.followup', 'purchase.prepare'], public_id__in=ids).select_related('conversation'):
         try:
             dto = project(draft, message.conversation.owner)
         except WorkflowError:

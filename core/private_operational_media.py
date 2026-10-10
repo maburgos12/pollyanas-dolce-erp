@@ -181,6 +181,9 @@ def _can_access_operational_media(user, path):
     if path.startswith(("logistica/reportes/", "servicios_unidad/", "reparaciones_unidad/")):
         return _can_access_logistica_media(user, path)
     if path.startswith(("compras/departamentales/", "compras/cotizaciones/")):
+        # Las propuestas sólo se sirven mediante su endpoint con propietario y versión.
+        if path.startswith('compras/departamentales/agente/'):
+            return False
         from compras.access_departamentales import puede_gestionar_compras_departamentales
         from compras.models import CotizacionCompraDepartamental, ItemCompraDepartamental
         from reportes.models import AreaPresupuestoResponsable

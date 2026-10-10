@@ -44,7 +44,9 @@
   }
   function data(key, result) {
     const p = result.payload || {};
-    if (['incident.prepare','incident.followup'].includes(key)) return incident(p.incident);
+    if (['incident.prepare','incident.followup','purchase.prepare'].includes(key)) return incident(p.incident);
+    if (['purchase.search','purchase.get'].includes(key)) return table('Solicitudes de compra', p.requests, [['Folio',r=>escape(r.folio)],['Área',r=>escape(r.area)],['Solicitante',r=>escape(r.solicitante)],['Estado',r=>escape(r.estado)],['Artículos',r=>escape((r.items || []).map(i=>`${i.cantidad} ${i.unidad} · ${i.descripcion}`).join('; '))]]) + (p.truncated ? '<p>Hay más solicitudes; precisa la búsqueda.</p>' : '');
+    if (key === 'purchase.requirements') return '<p>Se requiere área, solicitante, motivo y artículos. La cotización inicial y la evidencia son opcionales.</p>';
     if (['incident.search_reports','incident.get_report'].includes(key)) return table('Reportes encontrados', p.reports, [['Folio',r=>`#${escape(r.id)}`],['Reporte',r=>escape(r.titulo)],['Sucursal',r=>escape(r.sucursal)],['Estado',r=>escape(r.estatus_label)]]) + (p.truncated ? '<p>Hay más coincidencias; precisa la búsqueda.</p>' : '');
     if (key === 'incident.requirements') return `<p>Se necesita equipo, categoría, descripción y evidencia o justificación.</p><ul>${(p.categories || []).map(row => `<li>${escape(row.nombre)}</li>`).join('')}</ul>`;
     if (key === 'read.explain_limit') return `<p>${escape(p.message)}</p>`;
@@ -67,6 +69,7 @@
   function incident(row) {
     if (!row || typeof row.draft_id !== 'string') return '';
     if (row.kind === 'followup') return followup(row);
+    if (row.kind === 'purchase') return purchase(row);
     if (row.status === 'EXECUTED') return `${asset(row.asset)}<p>Reporte creado · Folio de falla: <strong>#${escape(row.report_id)}</strong>.</p>${row.confirmed_at ? `<p class="agent-source">Confirmado: ${date(row.confirmed_at)}</p>` : ''}`;
     const fields = {activo_id:'Equipo', categoria_id:'Categoría', titulo:'Título', descripcion:'Qué ocurrió', prioridad:'Prioridad', justificacion_sin_foto:'Motivo de no adjuntar foto'};
     const missing = (row.missing_fields || []).map(key => escape(fields[key] || key)).join(', ');
@@ -95,6 +98,31 @@
       <div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener"><img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy"><span>${escape(f.nombre)}</span></a>`).join('')}</div>
       ${completed ? `<p>Actualización registrada en el reporte #${escape(row.report_id)}.</p><p class="agent-source">Registrada: ${date(row.confirmed_at)}</p>` : row.status === 'AWAITING_CONFIRMATION' ? `<p>${row.files?.length ? `${escape(row.files.length)} fotografías asociadas.` : 'Puedes asociar fotografías antes de confirmar.'}</p><label>Fotografías de este reporte<input type="file" multiple accept="image/jpeg,image/png,image/webp" data-followup-files="${escape(row.draft_id)}"></label><button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Asociar fotografías</button><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}"${row.missing_fields?.length ? ' disabled' : ''}>Confirmar actualización del reporte</button>` : ''}`;
   }
+  function purchase(row) {
+    const values = row.fields || {};
+    const completed = row.status === 'EXECUTED';
+    const identityKnown = Boolean(values.area_id && values.solicitante_id);
+    const missing = {area_id:'Área',solicitante_id:'Solicitante',motivo:'Motivo',justificacion_extraordinaria:'Justificación extraordinaria',items:'Artículos'};
+    return `<p><strong>${completed ? `Solicitud ${escape(row.folio)} creada y enviada a Compras` : 'Solicitud extraordinaria de compra'}</strong></p>
+      <p>${escape(row.area || 'Área por identificar')} · Solicitante: ${escape(row.solicitante || 'Por identificar')}</p>
+      <p>${escape(values.motivo)}</p>
+      ${table('Artículos solicitados',row.items,[['Artículo',i=>escape(i.descripcion)],['Cantidad',i=>`${escape(i.cantidad)} ${escape(i.unidad)}`],['Unitario (MXN)',i=>escape(i.costo_unitario_estimado ?? 'Sin cotización')],['Total productos (MXN)',i=>escape(i.precio_total ?? 'Sin cotización')],['Vendedor informado',i=>escape(i.vendedor_reportado || 'Por identificar')]])}
+      ${values.compra_reportada ? '<p><strong>Compra reportada por el usuario.</strong> Pendiente de regularización; todavía no registra pago, autorización ni recepción.</p>' : ''}
+      <dl class="agent-facts">
+        ${values.envio_global != null ? `<div><dt>Envío global (MXN), sin repartir</dt><dd>${escape(values.envio_global)}</dd></div>` : ''}
+        ${values.total_reportado != null ? `<div><dt>Total reportado (MXN)</dt><dd>${escape(values.total_reportado)}</dd></div>` : ''}
+        ${values.entrega_estimada ? `<div><dt>Entrega estimada, pendiente de recibir</dt><dd>${date(values.entrega_estimada)}</dd></div>` : ''}
+      </dl>
+      <p>La captura de compra es opcional. No sustituye la factura; puedes incorporarla después.</p>
+      <div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener"><img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy"><span>${escape(f.nombre)}</span></a>`).join('')}</div>
+      ${row.missing_fields?.length ? `<p>Falta: ${row.missing_fields.map(k=>escape(missing[k] || k)).join(', ')}. Continúa esta misma propuesta en la conversación.</p>` : ''}
+      ${row.status === 'REVIEW_REQUIRED' ? `<p>Ya existe una solicitud con estos artículos; revísala antes de duplicarla.</p><ul>${(row.existing_requests || []).map(r=>`<li>${escape(r.folio)}</li>`).join('')}</ul>` : ''}
+      ${completed ? `<p><a href="${escape(row.url)}">Abrir solicitud ${escape(row.folio)}</a></p><p class="agent-source">Confirmada: ${date(row.confirmed_at)}</p>` : ['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row.status) ? `
+        ${identityKnown ? '' : '<p>Identifica el área y el solicitante en la conversación antes de asociar la evidencia.</p>'}
+        <label>Evidencia opcional de esta compra<input type="file" multiple accept="image/jpeg,image/png,image/webp" data-followup-files="${escape(row.draft_id)}"${identityKnown ? '' : ' disabled'}></label>
+        <button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-domain="purchases" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}"${identityKnown ? '' : ' disabled'}>Asociar captura</button>
+        ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se crea la solicitud a nombre de ${escape(row.solicitante)}. No se ejecuta ningún pago ni recepción.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-domain="purchases" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y enviar solicitud</button>` : ''}` : ''}`;
+  }
   function tool(call) {
     const wrapper = call.result || call.payload || {};
     const result = wrapper.result || {};
@@ -103,7 +131,7 @@
     const approval = call.status === 'approval_requested' || call.requires_approval === true;
     const complete = call.status === 'complete' && !error && !approval;
     const html = complete ? data(key,result) : '';
-    const incidentStatus = ['incident.prepare','incident.followup'].includes(key) ? result.payload?.incident?.status : null;
+    const incidentStatus = ['incident.prepare','incident.followup','purchase.prepare'].includes(key) ? result.payload?.incident?.status : null;
     return `<section class="agent-tool${error ? ' is-error' : ''}"><div class="agent-result-head"><strong>${escape(call.tool_display_name || 'Consulta del ERP')}</strong>${badge(error ? 'error' : incidentStatus || (approval ? 'approval_requested' : complete && result.status === 'out_of_scope' ? 'out_of_scope' : call.status))}</div>
       ${error ? '<p>No se pudo completar esta consulta. Revisa tu acceso o intenta consultar nuevamente.</p>' : approval ? '<p>La acción requiere autorización; no se presenta como ejecutada.</p>' : html || `<p>${escape(call.summary || (complete ? 'El servidor registró el resultado.' : 'Esperando resultado del servidor.'))}</p>`}
       ${html ? source(result) : ''}</section>`;

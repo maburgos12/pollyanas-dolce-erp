@@ -75,7 +75,7 @@ def departamental_compra_registrar(request, item_pk):
         'fecha_compra': timezone.localdate(), 'importe_final': seleccionada.total_adquisicion.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if seleccionada else None,
         'cotizacion_id': seleccionada.pk if seleccionada else None, 'version': seleccionada.version if seleccionada else None,
     })
-    config = {'titulo': 'Registrar compra realizada', 'explicacion': 'Registra una compra que ya realizaste y adjunta su comprobante. La entrega se registra por separado cuando llegue el artículo.'}
+    config = {'titulo': 'Registrar compra realizada', 'explicacion': 'Registra una compra que ya realizaste. La evidencia es opcional y puede agregarse después. La entrega y la factura se registran por separado.'}
     if request.method == 'POST':
         if form.is_valid():
             try:
@@ -121,6 +121,8 @@ def departamental_compra_comprobante(request, pk):
     compra = get_object_or_404(CompraRealizadaDepartamental.objects.select_related('item__solicitud'), pk=pk)
     if not _puede_ver_solicitud(request.user, compra.item.solicitud):
         raise PermissionDenied
+    if not compra.comprobante:
+        raise Http404('Esta compra aún no tiene evidencia adjunta.')
     try:
         response = FileResponse(compra.comprobante.open('rb'), as_attachment=True, filename=Path(compra.comprobante.name).name)
     except FileNotFoundError:

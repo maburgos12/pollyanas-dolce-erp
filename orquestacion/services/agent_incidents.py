@@ -109,6 +109,9 @@ def _hash(args, branch_id):
 
 
 def project(draft, actor):
+    if draft.tool_key == 'purchase.prepare':
+        from .agent_purchases import project as project_purchase
+        return project_purchase(draft, actor)
     if draft.tool_key == 'incident.followup':
         from .agent_followups import project as project_followup
         return project_followup(draft, actor)

@@ -221,6 +221,18 @@ class FollowupTests(TestCase):
         self.assertEqual(error.exception.code,'followup_staging_limit')
         self.assertEqual(len(list(Path(self.media.name).rglob('*.jpg'))),1)
 
+    def test_followup_upload_counts_pending_purchase_evidence(self):
+        from orquestacion.models import ChatToolCall
+        dto=self.prepare()
+        pending=ChatToolCall.objects.create(conversation=self.conversation,request_message=self.messages[0],
+            assistant_message=self.messages[1],tool_key='purchase.prepare',
+            metadata_json={'purchase_status':'AWAITING_CONFIRMATION','files':[{'bytes':100*1024*1024}]})
+        with self.assertRaises(WorkflowError) as error:self.attach(dto)
+        self.assertEqual(error.exception.code,'followup_staging_limit')
+        self.assertFalse(list(Path(self.media.name).rglob('*.jpg')))
+        pending.metadata_json['purchase_status']='EXECUTED';pending.save()
+        self.assertEqual(len(self.attach(dto)['files']),1)
+
     @override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
     def test_followup_receipt_is_reprojected_in_natural_runtime_history(self):
         import json

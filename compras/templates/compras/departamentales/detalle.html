@@ -26,6 +26,17 @@
   </section>
   {% if es_compras and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
   <section class="cd-items-detail">
+    {% for reporte in reportes_compra_ia %}
+    <article class="cd-card">
+      <h2>{% if reporte.data.compra_reportada %}Compra reportada · Pendiente de regularización{% else %}Evidencia de la solicitud{% endif %}</h2>
+      {% if reporte.data.compra_reportada %}<p>Esta información fue reportada por el usuario. No acredita autorización previa, pago registrado ni recepción de productos.</p>{% endif %}
+      {% if reporte.data.total_reportado %}<p>Total reportado: ${{ reporte.data.total_reportado }} MXN.</p>{% endif %}
+      {% if reporte.data.envio_global %}<p>Envío global: ${{ reporte.data.envio_global }} MXN. Pendiente de asignación por vendedor.</p>{% endif %}
+      {% if reporte.data.entrega_estimada %}<p>Entrega estimada: {{ reporte.data.entrega_estimada }}. Pendiente de recibir.</p>{% endif %}
+      {% for archivo in reporte.files %}<p><a href="{{ archivo.url }}" target="_blank" rel="noopener">Ver evidencia: {{ archivo.nombre }}</a></p>{% empty %}<p>Sin evidencia adjunta; es opcional.</p>{% endfor %}
+      <p>La captura de compra no sustituye la factura.</p>
+    </article>
+    {% endfor %}
     {% for item in solicitud.items.all %}<article class="cd-card cd-item-detail" id="item-{{ item.pk }}">
       <div class="cd-item-visual">{% if item.imagen %}<button type="button" class="cd-detail-image-trigger" data-image-preview="{{ item.imagen.url }}" data-image-alt="Imagen de referencia de {{ item.descripcion }}" aria-label="Ver imagen completa de {{ item.descripcion }}"><img src="{{ item.imagen.url }}" alt=""><span>Ver imagen completa</span></button>{% else %}<div class="cd-image-empty"><span>{{ item.descripcion|slice:":1" }}</span><small>Sin imagen de referencia</small></div>{% endif %}</div>
       <div class="cd-item-body">
@@ -78,7 +89,7 @@
                 {% endif %}
                 {% if intento.compra_visible %}
                 <div class="cd-attempt-links">
-                  <a href="{% url 'compras:departamental_compra_comprobante' intento.compra_visible.pk %}">Descargar comprobante de compra</a>
+                  {% if intento.compra_visible.comprobante %}<a href="{% url 'compras:departamental_compra_comprobante' intento.compra_visible.pk %}">Ver evidencia de compra</a>{% else %}<span>Sin evidencia adjunta (opcional).</span>{% endif %}
                   {% if es_compras %}<a href="{% url 'compras:departamental_compra_corregir' intento.compra_visible.pk %}">Corregir esta compra</a>{% endif %}
                 </div>
                 {% if intento.compra_visible.historial.all %}<details class="cd-quote-history"><summary>Correcciones ({{ intento.compra_visible.historial.all|length }})</summary>

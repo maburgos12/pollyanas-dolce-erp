@@ -5,7 +5,7 @@
 {% block page_title %}Agente ERP{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261010-seguimiento-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261010-compras-v1">
 {% endblock %}
 
 {% block content %}
@@ -69,7 +69,7 @@
       <div class="erp-chat-composer">
         <label for="erp-chat-input" class="agent-input-label">Tu consulta</label>
         <textarea id="erp-chat-input" aria-describedby="erp-chat-status" maxlength="12000" class="erp-chat-textarea" placeholder="Escribe lo que necesitas; por ejemplo, consulta el mantenimiento de una batidora."></textarea>
-        <label for="erp-chat-photos">Fotografías de seguimiento (hasta cinco)</label>
+        <label for="erp-chat-photos">Imágenes de evidencia (hasta cinco)</label>
         <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
         <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
         <div class="erp-chat-composer-actions">
@@ -83,7 +83,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261010-seguimiento-v1"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261010-compras-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -397,12 +397,12 @@
       await loadConversation(conversationId, true);
       await refreshConversations();
       if (photos.length) {
-        const proposals = (state.activeConversation.messages.at(-1)?.tool_calls || []).filter(call=>call.tool_key === 'incident.followup').map(call=>call.result?.result?.payload?.incident).filter(row=>row?.status === 'AWAITING_CONFIRMATION');
+        const proposals = (state.activeConversation.messages.at(-1)?.tool_calls || []).filter(call=>['incident.followup','purchase.prepare'].includes(call.tool_key)).map(call=>call.result?.result?.payload?.incident).filter(row=>['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row?.status));
         if (proposals.length !== 1) {statusEl.textContent = 'Las fotos siguen seleccionadas. Completa o identifica una sola propuesta para asociarlas.'; return;}
         const draft = proposals[0];
         const body = new FormData(); body.append('expected_version', String(draft.version)); body.append('payload_hash', draft.payload_hash);
         photos.forEach(file=>body.append('files',file));
-        const upload = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(draft.draft_id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
+        const upload = await fetch(`/api/ai-gateway/${draft.kind === 'purchase' ? 'purchases' : 'incidents'}/${encodeURIComponent(draft.draft_id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
         const result = await upload.json();
         if (!upload.ok) {statusEl.textContent = result.detail || 'No se asociaron las fotos. Revisa la propuesta antes de confirmar.'; return;}
         photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Fotografías asociadas a la propuesta.';
@@ -514,7 +514,7 @@
       messageListEl.querySelectorAll('[data-incident-id]').forEach(b => { b.disabled = true; });
       statusEl.textContent = 'Asociando fotografías a la propuesta…';
       try {
-        const res = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
+        const res = await fetch(`/api/ai-gateway/${uploadButton.dataset.domain === 'purchases' ? 'purchases' : 'incidents'}/${encodeURIComponent(id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
         const payload = await res.json();
         if (!res.ok) throw new Error(payload.detail || 'No se asociaron las fotografías. Revisa la propuesta.');
         await loadConversation(state.activeConversation.conversation.id, true);
@@ -536,15 +536,15 @@
     button.disabled = true;
     state.sending = true;
     sendBtn.disabled = true;
-    statusEl.textContent = "Confirmando el reporte con el servidor…";
+    statusEl.textContent = "Confirmando la propuesta con el servidor…";
     try {
-      const response = await fetch(`/api/ai-gateway/incidents/${encodeURIComponent(button.dataset.incidentId)}/confirm/`, {
+      const response = await fetch(`/api/ai-gateway/${button.dataset.domain === 'purchases' ? 'purchases' : 'incidents'}/${encodeURIComponent(button.dataset.incidentId)}/confirm/`, {
         method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json", "X-CSRFToken":csrfToken},
         body:JSON.stringify({confirm:true, expected_version:Number(button.dataset.version), payload_hash:button.dataset.hash})});
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.detail || "No se pudo confirmar el reporte. Revisa los datos y tu acceso.");
       const report = payload.result?.payload?.incident;
-      statusEl.textContent = report?.status === 'EXECUTED' ? `Reporte ${report.kind === 'followup' ? 'actualizado' : 'creado'}: folio #${report.report_id}.` : "El servidor no confirmó la operación.";
+      statusEl.textContent = report?.status !== 'EXECUTED' ? 'El servidor no confirmó la operación.' : report.kind === 'purchase' ? `Solicitud creada y enviada: ${report.folio}.` : `Reporte ${report.kind === 'followup' ? 'actualizado' : 'creado'}: folio #${report.report_id}.`;
       await loadConversation(state.activeConversation.conversation.id, true);
     } catch (error) {
       statusEl.textContent = error.message || "No se recibió confirmación. Puedes reintentar la misma propuesta; el servidor evita duplicados.";

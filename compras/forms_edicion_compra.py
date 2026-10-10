@@ -38,7 +38,8 @@ class RegistrarCompraDepartamentalForm(forms.ModelForm):
         model = CompraRealizadaDepartamental
         fields = ['fecha_compra', 'importe_final', 'numero_pedido', 'comprobante']
         labels = {'fecha_compra': 'Fecha de compra', 'importe_final': 'Importe final de la compra (MXN)',
-                  'numero_pedido': 'Número de pedido o referencia', 'comprobante': 'Comprobante de compra'}
+                  'numero_pedido': 'Número de pedido o referencia', 'comprobante': 'Evidencia de compra (opcional)'}
+        help_texts = {'comprobante': 'Puedes adjuntar una captura de la compra. No sustituye una factura; puedes agregarla después.'}
         widgets = {'fecha_compra': forms.DateInput(attrs={'type': 'date'}, format='%Y-%m-%d'),
                    'comprobante': forms.FileInput(attrs={'accept': '.pdf,.jpg,.jpeg,.png,.webp'}),
                    'importe_final': forms.NumberInput(attrs={'min': '0.01', 'step': '0.01'})}
