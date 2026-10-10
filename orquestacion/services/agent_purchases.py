@@ -122,7 +122,7 @@ def requests(actor):
 
 
 def request_dto(row):
-    items = list(row.items.order_by('pk')[:21])
+    items = sorted(row.items.all(), key=lambda item: item.pk)[:21]
     return {'id': row.pk, 'folio': row.folio, 'area': row.area.nombre,
             'solicitante': row.solicitante.get_full_name() or row.solicitante.username,
             'estado': row.get_estado_display(), 'motivo': row.motivo, 'periodo': row.periodo.isoformat(),
@@ -182,7 +182,8 @@ def duplicates(actor, data):
         .exclude(estado__in=['CANCELADA','COMPLETADA']).order_by('-pk')[:51])
     if len(candidates) > 50:
         raise WorkflowError('purchase_duplicate_search_limit', 409, 'Hay demasiadas solicitudes activas; revisa la bandeja antes de crear otra.')
-    return [{'id': r.pk, 'folio': r.folio} for r in candidates if signature(list(r.items.values('descripcion','cantidad','unidad'))) == signature(data['items'])]
+    return [{'id': r.pk, 'folio': r.folio} for r in candidates
+            if signature([{'descripcion':i.descripcion,'cantidad':i.cantidad,'unidad':i.unidad} for i in r.items.all()]) == signature(data['items'])]
 
 
 def project(draft, user):

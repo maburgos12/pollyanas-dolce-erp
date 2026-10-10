@@ -93,6 +93,13 @@ class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
         self.assertFalse(result['presupuesto_requerido']);self.assertFalse(result['evidencia_requerida'])
         self.assertNotIn('email',json.dumps(result))
 
+    def test_purchase_detail_reuses_prefetched_items(self):
+        self.confirm(self.prepare())
+        rows=list(purchases.requests(self.user))
+        with self.assertNumQueries(0):
+            result=[purchases.request_dto(row) for row in rows]
+        self.assertEqual(len(result[0]['items']),2)
+
     def test_missing_information_resume_and_unknown_estimate_stays_null(self):
         args=copy.deepcopy(self.args);args.pop('motivo');args['items'][0].pop('precio_total')
         dto=self.prepare(args)
