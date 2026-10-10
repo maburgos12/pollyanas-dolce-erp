@@ -112,7 +112,8 @@ def catalog(user):
         (KEY, 'erp_prepare_special_purchase', 'Preparar solicitud de compra especial', 'Prepara una solicitud extraordinaria sin escribirla. Continúa el mismo draft_id y expected_version. items.precio_total es el precio conjunto de esa cantidad; el servidor calcula el unitario exacto. Si ya compraron, conserva compra_reportada, vendedor y total como información reportada pendiente de regularización; nunca autoriza cotizaciones, pagos ni recepción. envio_global no se reparte por proveedor. Captura opcional en la interfaz; no la has leído. No inventes presupuesto, vendedor ni fecha. El mes de planeación es el actual.'),
     ]
     return [{'key': k, 'name': n, 'display_name': label, 'description': desc,
-             'argument_schema': SERIALIZERS[k].argument_schema(), 'purchase': True} for k,n,label,desc in definitions]
+             # Sólo los límites del schema se normalizan; los importes siguen como cadenas/Decimal.
+             'argument_schema': json.loads(json.dumps(SERIALIZERS[k].argument_schema(), default=float)), 'purchase': True} for k,n,label,desc in definitions]
 
 
 def requests(actor):
