@@ -80,6 +80,8 @@ class FollowupTests(TestCase):
         self.assertEqual(ReporteFalla.objects.count(), 1)
         self.assertEqual(self.report.estatus, 'resuelto')
         self.assertEqual(self.report.fecha_trabajo_finalizado.isoformat(), self.arguments['fecha_trabajo_finalizado'])
+        from mantenimiento.services_history import item_detail
+        self.assertEqual(item_detail(self.user, 'falla', self.report.pk)['fechas']['trabajo_finalizado'], self.arguments['fecha_trabajo_finalizado'])
         self.assertEqual(timezone.localtime(self.report.fecha_resolucion).date(), timezone.localdate())
         self.assertIsNone(self.report.tiempo_resolucion_horas)
         self.assertEqual(str(self.report.costo_estimado), '2500.00'); self.assertIsNone(self.report.costo_real)

@@ -550,7 +550,7 @@ def item_detail(user, kind, pk):
             },
             "fechas": {"reporte": _iso(report.fecha_reporte), "asignacion": _iso(report.fecha_asignacion),
                        "resolucion": _iso(report.fecha_resolucion), "cierre": _iso(report.fecha_cierre),
-                       "trabajo_finalizado": _iso(report.fecha_trabajo_finalizado)},
+                       "trabajo_finalizado": report.fecha_trabajo_finalizado.isoformat() if report.fecha_trabajo_finalizado else None},
             "responsables": {"asignado_a": _person(report.asignado_a), "cerrado_por": _person(report.cerrado_por)},
             "continuidad": continuidad,
             "constataciones_higiene": constataciones_payload,
