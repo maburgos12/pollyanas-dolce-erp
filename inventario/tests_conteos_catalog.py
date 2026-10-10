@@ -112,6 +112,26 @@ class BranchCountCatalogTests(TestCase):
             item_name='Rebanada nueva',item_code='NEW-SLICE',quantity=6)
         self.assertIn('NEW-SLICE',codigos_habituales(self.branch,diario=True))
 
+    def test_daily_excludes_unclassified_accessories_and_bottled_drinks(self):
+        from inventario.views_conteos import _catalogo
+        for code,name,category in [('CND00095','VELA ESPAGUETI COLORES','Alegría'),
+                                   ('0174','24 Velas en Caja','Alegría'),
+                                   ('0170','Pirotecnia Alegría Ch','Alegría'),
+                                   ('04524','Tarjeta Cumpleaños','Otros postres'),
+                                   ('0235','Coca Cola 450ml','Coca-cola'),
+                                   ('GLOW2','Glow 2','Glow'),
+                                   ('GRANMARK','ESPAGUETI ROSA PERLADO','Granmark'),
+                                   ('BOOK','Recetario Doña Cuca','Otros postres'),
+                                   ('DELIVERY','Servicio Domicilio 2','Otros postres'),
+                                   ('ADDON','EXTRA 100','Otros postres'),
+                                   ('CREAM','Litro crema','Vasos Preparados Grande')]:
+            product=PointProduct.objects.create(external_id=code,sku=code,name=name,category=category,
+                metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':code,'Unidad':'PZA'})})
+            PointDailySale.objects.create(branch=self.point_branch,product=product,sale_date=timezone.localdate(),quantity=1)
+            self.assertNotIn(code,{row['codigo'] for row in _catalogo('diario','',self.branch)})
+            self.assertIn(code,{row['codigo'] for row in _catalogo('producto','',self.branch)})
+            self.assertIn(code,{row['codigo'] for row in _catalogo('diario',code,self.branch)})
+
     def test_operator_cannot_request_another_branch_catalog(self):
         other=Sucursal.objects.create(codigo='OTHER',nombre='Otra')
         point=PointBranch.objects.create(external_id='other',name='Otra',erp_branch=other)
