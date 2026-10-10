@@ -269,6 +269,33 @@ class FollowupTests(TestCase):
         tools=provider.responses.create.call_args_list[0].kwargs['tools']
         self.assertFalse(any('confirm' in row['name'] for row in tools))
 
+    @override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
+    def test_promised_photos_remain_required_without_selected_files(self):
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from orquestacion.services.chat_service import execute_chat_turn
+        from orquestacion.models import ChatToolCall
+        self.messages[0].content = 'Pedro terminó ayer; adjuntaré tres fotos después.'
+        self.messages[0].save(update_fields=['content'])
+        provider=Mock();provider.with_options.return_value=provider
+        provider.responses.create.side_effect=[
+            SimpleNamespace(output=[{'type':'function_call','id':'fc1','call_id':'future-photos',
+                'name':'erp_prepare_failure_followup','arguments':json.dumps({**self.arguments,'evidence_count':3})}],output_text='',usage=None),
+            SimpleNamespace(output=[],output_text='',usage=None)]
+        with patch('openai.OpenAI',return_value=provider),patch('orquestacion.services.agent_pilot.reserve_request',return_value={}):
+            execute_chat_turn(user=self.user,conversation=self.conversation,user_message=self.messages[0],assistant_message=self.messages[1])
+        draft=ChatToolCall.objects.get(tool_key=followups.KEY)
+        dto=followups.project(draft,self.user)
+        self.assertEqual(draft.metadata_json['expected_file_count'],3)
+        self.assertIn('fotografías',dto['missing_fields'])
+        with self.assertRaises(WorkflowError): self.confirm(dto)
+        payload=provider.responses.create.call_args_list[0].kwargs
+        self.assertIn('aunque selected_photo_count sea 0',payload['input'][0]['content'])
+        definition=next(t for t in payload['tools'] if t['name']=='erp_prepare_failure_followup')
+        self.assertIn('pendientes',definition['parameters']['properties']['evidence_count']['description'])
+        self.report.refresh_from_db();self.assertEqual(self.report.estatus,'en_proceso')
+
 
 @override_settings(AI_AGENT_READ_ENABLED=True,AI_GATEWAY_ASSETS_ENABLED=True,AI_AGENT_INCIDENTS_ENABLED=True)
 class FollowupConcurrencyTests(TransactionTestCase):
