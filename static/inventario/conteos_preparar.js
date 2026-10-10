@@ -42,10 +42,10 @@
       else body.querySelectorAll('input[name="articulos"]:checked').forEach(function(box){selected.set(box.value,box.closest('tr'));});
       var fragment=document.createDocumentFragment();
       fresh.querySelectorAll('tr').forEach(function(row){var box=row.querySelector('input[name="articulos"]');if(box){if(states.has(box.value))box.checked=states.get(box.value)&&!box.disabled;selected.delete(box.value);fragment.appendChild(row);}});
-      selected.forEach(function(row){fragment.appendChild(row);});
+      selected.forEach(function(row){row.hidden=!!search.elements.q.value.trim();fragment.appendChild(row);});
       catalogBranch=branch;form.elements.request_id.value=uuid();
       body.replaceChildren(fragment);remember();summary();
-      if(!body.children.length){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.textContent='No hay coincidencias. Cambia la búsqueda.';row.appendChild(cell);body.appendChild(row);}
+      if(!body.querySelector('tr:not([hidden])')){var row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.textContent='No hay coincidencias. Cambia la búsqueda.';row.appendChild(cell);body.appendChild(row);}
       if(event.submitter)window.ERPActionUI.showToast({type:'info',message:'Catálogo actualizado. Tus selecciones se conservan al buscar.'});
     }catch(error){window.ERPActionUI.showToast({type:'error',message:error.name==='AbortError'?'La búsqueda tardó demasiado. Tus selecciones se conservan.':error.message,persistent:true});}
     finally{busy=false;button.disabled=false;button.textContent='Buscar artículos';if(pendingSearch){pendingSearch=false;search.requestSubmit();}}
