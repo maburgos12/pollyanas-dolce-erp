@@ -109,7 +109,7 @@ def catalog(user):
         ('purchase.requirements', 'erp_purchase_requirements', 'Requisitos de compra especial', 'Obtiene áreas autorizadas y solicitantes activos para una compra extraordinaria. q busca nombre de la persona. Presupuesto y comprobante no son obligatorios; sólo DG puede representar a otra persona de su área.'),
         ('purchase.search', 'erp_search_departmental_purchases', 'Buscar solicitudes de compra', 'Busca solicitudes existentes por artículo, motivo o folio, área y solicitante. Son compras departamentales, no solicitudes de insumos; respeta el alcance del usuario.'),
         ('purchase.get', 'erp_get_departmental_purchase', 'Consultar solicitud de compra', 'Lee la solicitud y sus artículos actuales. Comprar, reportar compra y recibir son estados distintos.'),
-        (KEY, 'erp_prepare_special_purchase', 'Preparar solicitud de compra especial', 'Prepara una solicitud extraordinaria sin escribirla. Continúa el mismo draft_id y expected_version. items.precio_total es el precio conjunto de esa cantidad; el servidor calcula el unitario exacto. Si ya compraron, conserva compra_reportada, vendedor y total como información reportada pendiente de regularización; nunca autoriza cotizaciones, pagos ni recepción. envio_global no se reparte por proveedor. Captura opcional en la interfaz; no la has leído. No inventes presupuesto, vendedor ni fecha. El mes de planeación es el actual.'),
+        (KEY, 'erp_prepare_special_purchase', 'Preparar solicitud de compra especial', 'Prepara una solicitud extraordinaria sin escribirla. Continúa el mismo draft_id y expected_version. items.precio_total es el precio conjunto de esa cantidad; el servidor calcula el unitario exacto. Si ya compraron, conserva compra_reportada, vendedor y total como información reportada pendiente de regularización; nunca autoriza cotizaciones, pagos ni recepción. envio_global no se reparte por proveedor. Captura opcional en la interfaz; su contenido nunca autoriza la compra. No inventes presupuesto, vendedor ni fecha. El mes de planeación es el actual.'),
     ]
     return [{'key': k, 'name': n, 'display_name': label, 'description': desc,
              # Sólo los límites del schema se normalizan; los importes siguen como cadenas/Decimal.
@@ -342,7 +342,13 @@ def confirm(*,user,draft_id,arguments):
         return save_result(draft,actor,'AI_PURCHASE_CONFIRMED')
 
 
-def attach(*,user,draft_id,arguments,files):
+def attach(*,user,draft_id,arguments,files,source_message_id=None):
+    reuse = None
+    if source_message_id:
+        if files: raise WorkflowError("purchase_invalid_files",400)
+        from .agent_images import source_files
+        source_draft, source_actor = owned_draft(user,draft_id)
+        files,reuse = source_files(source_actor,source_message_id,source_draft.conversation_id)
     serializer=IncidentConfirmation(data=arguments);serializer.is_valid(raise_exception=True)
     files=validate_evidence_files(files,images_only=True)
     if not files or sum(f.size for f in files)>20*1024*1024: raise WorkflowError('purchase_invalid_files',400)
@@ -374,9 +380,13 @@ def attach(*,user,draft_id,arguments,files):
             if meta.get('files'): raise WorkflowError('purchase_files_already_bound',409)
             from .agent_followups import pending_evidence
             pending=pending_evidence(actor)
-            if len(pending)>100 or sum(f['bytes'] for m in pending for f in m.get('files',[]))+sum(f.size for f in files)>100*1024*1024:
+            from .agent_images import staged_bytes
+            if len(pending)>100 or staged_bytes(actor)+(0 if reuse else sum(f.size for f in files))>100*1024*1024:
                 raise WorkflowError('purchase_staging_limit',409)
-            for file,info in zip(files,uploads):
+            for index,(file,info) in enumerate(zip(files,uploads)):
+                if reuse:
+                    info.update(id=reuse[index]['id'],path=reuse[index]['path'])
+                    continue
                 from pathlib import Path
                 uid=uuid4();path=default_storage.save(f'compras/departamentales/agente/{draft.public_id.hex}/{uid.hex}{Path(file.name).suffix.lower()}',file)
                 saved.append(path);info.update(id=str(uid),path=path)

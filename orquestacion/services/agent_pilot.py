@@ -79,7 +79,7 @@ def pilot_status(user) -> dict:
             "reserved_usd": str(total), "max_usd": str(MAX_USD)}
 
 
-def reserve_request(*, user, turn_id, cycle: int, payload: dict) -> dict:
+def reserve_request(*, user, turn_id, cycle: int, payload: dict, token_counter=None) -> dict:
     # Commit before network I/O; an outer transaction could erase a billed attempt.
     if connection.vendor != "postgresql" or connection.in_atomic_block:
         raise PilotStopped("pilot_transaction_boundary")
@@ -91,9 +91,29 @@ def reserve_request(*, user, turn_id, cycle: int, payload: dict) -> dict:
         raise PilotStopped("pilot_request_invalid")
     turn = str(UUID(str(turn_id)))
     size = len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-    if size > MAX_BYTES:
+    input_tokens = None
+    if token_counter is not None:
+        from .agent_images import text_size
+        if size > 32 * 1024 * 1024 or text_size(payload) > MAX_BYTES:
+            raise PilotStopped('pilot_request_limit')
+        pilot_status(user)
+        seen, turns, total = _ledger()
+        if (turn, cycle) in seen or (cycle > 1 and (turn, cycle - 1) not in seen):
+            raise PilotStopped('pilot_duplicate_request')
+        if turn not in turns and len(turns) >= MAX_TURNS:
+            raise PilotStopped('pilot_turn_limit')
+        if total + OUTPUT_TOKENS * OUTPUT_USD > MAX_USD:
+            raise PilotStopped('pilot_spend_limit')
+        try:
+            counted = token_counter(**{key:payload[key] for key in ('model', 'input', 'tools', 'text', 'tool_choice', 'parallel_tool_calls') if key in payload})
+            input_tokens = counted.input_tokens
+        except Exception:
+            raise PilotStopped('pilot_image_count_failed') from None
+        if type(input_tokens) is not int or not 1 <= input_tokens <= MAX_BYTES:
+            raise PilotStopped('pilot_request_limit')
+    elif size > MAX_BYTES:
         raise PilotStopped("pilot_request_limit")
-    amount = ((size + 4096) * INPUT_USD + OUTPUT_TOKENS * OUTPUT_USD).quantize(
+    amount = (((input_tokens if input_tokens is not None else size) + 4096) * INPUT_USD + OUTPUT_TOKENS * OUTPUT_USD).quantize(
         Decimal("0.00000001"), rounding=ROUND_CEILING)
     with transaction.atomic():
         with connection.cursor() as cursor:
@@ -109,6 +129,7 @@ def reserve_request(*, user, turn_id, cycle: int, payload: dict) -> dict:
             raise PilotStopped("pilot_spend_limit")
         AuditLog.objects.create(user=user, action=ACTION, model=LEDGER_MODEL, object_id=PILOT_ID,
             payload={"turn_id": turn, "cycle": cycle, "model": MODEL,
-                     "reserved_usd": str(amount), "request_bytes": size})
+                     "reserved_usd": str(amount), "request_bytes": size,
+                     **({'counted_input_tokens':input_tokens} if input_tokens is not None else {})})
     return {"reserved_usd": str(amount), "total_reserved_usd": str(total + amount),
             "turns": len(turns | {turn})}

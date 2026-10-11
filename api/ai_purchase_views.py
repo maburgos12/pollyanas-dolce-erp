@@ -38,13 +38,13 @@ class AIPurchaseEvidenceView(APIView):
 
     def post(self, request, draft_id):
         try:
-            if set(request.data)-{'expected_version','payload_hash','files'}:
+            if set(request.data)-{'expected_version','payload_hash','files','source_message_id'}:
                 raise ValueError
             version=request.data.get('expected_version','')
             if not isinstance(version,str) or not version.isascii() or not version.isdecimal() or len(version)>9:
                 raise ValueError
             args={'expected_version':int(version),'payload_hash':request.data.get('payload_hash'),'confirm':True}
-            return Response(purchases.attach(user=request.user,draft_id=draft_id,arguments=args,files=request.FILES.getlist('files')))
+            return Response(purchases.attach(user=request.user,draft_id=draft_id,arguments=args,files=request.FILES.getlist('files'),source_message_id=request.data.get('source_message_id')))
         except WorkflowError as exc:
             return Response({'code':exc.code,'detail':str(exc)},status=exc.status)
         except (ValueError,EvidenceValidationError):

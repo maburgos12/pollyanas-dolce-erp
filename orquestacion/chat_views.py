@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import io
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse, StreamingHttpResponse
+from django.http import FileResponse, Http404, JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_GET, require_POST
 
@@ -105,7 +106,10 @@ def conversation_detail_api(request, conversation_id):
 def stream_message_api(request, conversation_id):
     _ensure_ai_private_access(request.user)
     conversation = get_chat_conversation(request.user, conversation_id)
-    payload = _parse_json_body(request)
+    payload = request.POST if request.content_type == 'multipart/form-data' else _parse_json_body(request)
+    files = request.FILES.getlist('files')
+    if files:
+        payload = {'content':payload.get('content'), 'attachment_count':len(files)}
     count = payload.get('attachment_count', 0)
     if type(count) is not int or not 0 <= count <= 5:
         return JsonResponse({'detail':'Puedes seleccionar hasta cinco fotografías.'}, status=400)
@@ -113,12 +117,23 @@ def stream_message_api(request, conversation_id):
     if not content:
         return JsonResponse({"detail": "El mensaje no puede ir vacío."}, status=400)
 
-    user_message, assistant_message = create_user_turn(
-        user=request.user,
-        conversation=conversation,
-        content=content,
-        session_key=request.session.session_key or "",
-    )
+    if files:
+        from mantenimiento.evidence_validation import EvidenceValidationError
+        from .services.agent_images import create_image_turn
+        from .services.agent_workflows import WorkflowError
+        from .services.agent_pilot import PilotStopped
+        from .services.agent_read_runtime import ReadStopped
+        try:
+            user_message, assistant_message = create_image_turn(user=request.user, conversation=conversation,
+                content=content, files=files, session_key=request.session.session_key or '')
+        except (WorkflowError, EvidenceValidationError, ReadStopped, PilotStopped) as exc:
+            return JsonResponse({'detail':'No se admitieron las imágenes. Revisa archivos, permisos y límite del piloto.',
+                                 'code':getattr(exc, 'code', 'image_input_invalid')}, status=getattr(exc, 'status', 400))
+    else:
+        user_message, assistant_message = create_user_turn(
+            user=request.user, conversation=conversation, content=content,
+            session_key=request.session.session_key or '',
+        )
 
     if count:
         user_message.metadata_json = {**user_message.metadata_json, 'expected_photo_count': count}
@@ -177,3 +192,25 @@ def stream_message_api(request, conversation_id):
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
     return response
+
+
+@login_required
+@require_GET
+def message_image_api(request, conversation_id, message_id, image_id):
+    _ensure_ai_private_access(request.user)
+    from .models import ChatConversation
+    conversation = ChatConversation.objects.filter(owner=request.user, public_id=conversation_id, status='active').first()
+    if not conversation:
+        raise Http404
+    from .services.agent_images import source_files
+    try:
+        files, infos = source_files(request.user, message_id, conversation.pk)
+    except Exception:
+        raise Http404 from None
+    for file, info in zip(files, infos):
+        if info['id'] == str(image_id):
+            response = FileResponse(io.BytesIO(file.read()), content_type=info['mime'])
+            response['Cache-Control'] = 'private, no-store'
+            response['X-Content-Type-Options'] = 'nosniff'
+            return response
+    raise Http404

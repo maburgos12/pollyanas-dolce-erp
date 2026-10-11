@@ -22,6 +22,39 @@ from orquestacion.services.chat_service import create_chat_conversation, create_
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True,
                    AI_AGENT_READ_MODEL=pilot.MODEL, OPENAI_API_KEY='fake-test-key')
 class AgentPilotTests(TransactionTestCase):
+    def test_visual_input_count_reserves_exact_tokens_and_rejects_invalid_count(self):
+        counter = Mock(return_value=SimpleNamespace(input_tokens=3200))
+        payload = {**self.payload, 'input':[{'role':'user','content':[{'type':'input_image','detail':'high',
+            'image_url':'data:image/png;base64,' + 'A'*100000}]}]}
+        result = pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        expected = (Decimal(3200+4096)*pilot.INPUT_USD + pilot.OUTPUT_TOKENS*pilot.OUTPUT_USD)
+        self.assertEqual(Decimal(result['reserved_usd']), expected)
+        self.assertEqual(AuditLog.objects.get(action=pilot.ACTION).payload['counted_input_tokens'], 3200)
+        for count in (True, 0, -1, 60001, '123'):
+            counter.return_value = SimpleNamespace(input_tokens=count)
+            with self.assertRaises(pilot.PilotStopped):
+                pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        counter.side_effect = TimeoutError('provider-private-detail')
+        with self.assertRaises(pilot.PilotStopped) as caught:
+            pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        self.assertEqual(caught.exception.code, 'pilot_image_count_failed')
+        self.assertEqual(AuditLog.objects.filter(action=pilot.ACTION).count(), 1)
+
+    def test_exhausted_visual_turns_never_send_image_to_token_counter(self):
+        for _ in range(20): self.reserve()
+        counter = Mock()
+        with self.assertRaises(pilot.PilotStopped):
+            pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=self.payload, token_counter=counter)
+        counter.assert_not_called()
+
+    def test_revoked_participant_during_count_never_commits_reservation(self):
+        def count(**kwargs):
+            get_user_model().objects.filter(pk=self.user.pk).update(is_active=False)
+            return SimpleNamespace(input_tokens=3200)
+        with self.assertRaises(pilot.PilotStopped):
+            pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=self.payload, token_counter=count)
+        self.assertFalse(AuditLog.objects.filter(action=pilot.ACTION).exists())
+
     def setUp(self):
         self.user = get_user_model().objects.create_superuser(username='pilot', password='test')
         self.other = get_user_model().objects.create_superuser(username='outside', password='test')

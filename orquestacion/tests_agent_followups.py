@@ -22,6 +22,31 @@ from orquestacion.services.chat_service import create_chat_conversation, create_
 
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True)
 class FollowupTests(TestCase):
+    @override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
+    def test_chat_originals_fit_operational_fields_and_remain_readable_after_confirmation(self):
+        from orquestacion.services import agent_images
+        from orquestacion.services.agent_read_runtime import access_fingerprint
+        files=[]
+        for extension, format_name, mime in [('jpeg','JPEG','image/jpeg'),('png','PNG','image/png'),('webp','WEBP','image/webp')]:
+            out=BytesIO(); Image.new('RGB',(10,10),'blue').save(out,format_name)
+            files.append(SimpleUploadedFile(f'original.{extension}',out.getvalue(),content_type=mime))
+        request,answer=agent_images.create_image_turn(user=self.user,conversation=self.conversation,
+            content='Fotografías del trabajo reportado.',files=files)
+        answer.status='complete'; answer.metadata_json={'agent_read':{'runtime':'agent_read','mode':'READ',
+            'access_fingerprint':access_fingerprint(self.user),'asset_ids':[]}}; answer.save()
+        dto=self.prepare()
+        dto=followups.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[],
+            source_message_id=request.public_id)['result']['payload']['incident']
+        self.assertEqual(self.confirm(dto)['status'],'EXECUTED')
+        self.client.force_login(self.user)
+        for evidence in EvidenciaSeguimientoFalla.objects.order_by('pk'):
+            info=next(f for f in request.metadata_json['images'] if f['path']==evidence.archivo.name)
+            self.assertLessEqual(len(evidence.archivo.name),100)
+            response=self.client.get(f'/api/mantenimiento/v2/evidencias/seguimiento_falla/{evidence.pk}/')
+            self.assertEqual(response.status_code,200)
+            import hashlib
+            self.assertEqual(hashlib.sha256(b''.join(response.streaming_content)).hexdigest(),info['sha256'])
+
     def setUp(self):
         self.media = TemporaryDirectory(); self.addCleanup(self.media.cleanup)
         settings = override_settings(MEDIA_ROOT=self.media.name)
