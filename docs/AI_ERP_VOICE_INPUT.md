@@ -2,7 +2,7 @@
 
 ## Uso
 
-En IA privada: Grabar nota → Detener grabación → escuchar → Enviar. También puede adjuntarse WAV PCM de 16 bits, hasta tres minutos y 8 MB. Puede enviarse texto y hasta cinco imágenes con la voz, hasta 20 MB combinados. La transcripción automática aparece en el historial junto con el audio privado. Una corrección por texto continúa la misma conversación.
+En IA privada: Grabar nota → Detener grabación → escuchar → Enviar. Adjuntar abre el selector de imágenes y notas; se cierra al elegir un archivo. También puede adjuntarse WAV PCM de 16 bits, hasta tres minutos y 8 MB. Puede enviarse texto y hasta cinco imágenes con la voz, hasta 20 MB combinados. La transcripción automática aparece en el historial junto con el audio privado. Una corrección por texto continúa la misma conversación.
 
 El navegador solicita micrófono únicamente al pulsar Grabar nota. Al detener, llegar al límite o cambiar de pestaña, se detiene la captura y se liberan las pistas del dispositivo. AudioWorklet y HTTPS son necesarios para grabar; adjuntar WAV permite trabajar sin micrófono. No usa reconocimiento de voz de terceros en el navegador.
 

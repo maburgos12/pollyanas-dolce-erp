@@ -31,11 +31,13 @@ async function captureChecks() {
   vm.runInContext(fs.readFileSync('static/js/erp-agent-voice.js','utf8'),sandbox);
   const states=[];
   const voice=sandbox.ERPVoice.attach({button,input,preview,remove,status,worklet:'unit-worklet',onRecording:value=>states.push(value)});
+  voice.setBusy(false);assert.equal(remove.hidden,true);
   await button.listeners.click();assert.equal(button.textContent,'Detener grabación');
   processor.port.onmessage({data:new Float32Array(16000)});
   await button.listeners.click();assert(voice.file);assert.equal(voice.file.type,'audio/wav');
+  assert.equal(remove.hidden,false);
   assert.equal(tracksStopped,1);assert.equal(contextsClosed,1);assert.equal(states.at(-1),false);
-  voice.clear();assert.equal(voice.file,null);
+  voice.clear();assert.equal(voice.file,null);assert.equal(remove.hidden,true);
   sandbox.navigator.mediaDevices.getUserMedia=async()=>{const e=new Error('denied');e.name='NotAllowedError';throw e;};
   await button.listeners.click();assert(status.textContent.includes('no tiene permiso'));assert.equal(states.at(-1),false);
   assert.equal(contextsClosed,2);assert.equal(voice.file,null);
