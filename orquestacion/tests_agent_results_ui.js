@@ -115,6 +115,13 @@ async function controllerChecks() {
   mode='complete';element('erp-chat-input').value='Otra consulta';
   await sendMessage();
   assert.equal(element('erp-chat-status').textContent,'Respuesta lista.');
+  element('erp-chat-photos').files=[new File(['fixture'],'fixture.png',{type:'image/png'})];
+  element('erp-chat-photos').value='selected fixture';element('erp-chat-input').value='Analiza la imagen';
+  await sendMessage();
+  assert.equal(element('erp-chat-photos').value,'','Stored images must not remain staged for the next message');
+  assert.equal(element('erp-chat-photo-status').textContent,'');
+  assert.equal(element('erp-chat-status').textContent,'Respuesta lista.');
+  element('erp-chat-photos').files=[];
   const creating=element('erp-chat-new-btn').listeners.click();
   const before=requests.length;
   await element('erp-chat-new-btn').listeners.click();

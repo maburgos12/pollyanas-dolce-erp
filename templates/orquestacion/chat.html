@@ -5,7 +5,7 @@
 {% block page_title %}Agente ERP{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261011-vision-v1">
+<link rel="stylesheet" href="{% static 'css/template_modules/templates-orquestacion-chat.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -69,21 +69,24 @@
       <div class="erp-chat-composer">
         <label for="erp-chat-input" class="agent-input-label">Tu consulta</label>
         <textarea id="erp-chat-input" aria-describedby="erp-chat-status" maxlength="12000" class="erp-chat-textarea" placeholder="Escribe lo que necesitas; por ejemplo, consulta el mantenimiento de una batidora."></textarea>
-        <label for="erp-chat-photos">Imágenes y capturas (hasta cinco)</label>
-        <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
-        <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
         <div class="agent-voice-controls">
           <button type="button" class="erp-chat-prompt" id="erp-chat-record" aria-pressed="false">Grabar nota</button>
-          <label for="erp-chat-audio">Adjuntar nota WAV</label>
-          <input type="file" id="erp-chat-audio" accept="audio/wav,.wav">
-          <button type="button" class="erp-chat-prompt" id="erp-chat-audio-remove" disabled>Retirar nota</button>
-          <audio id="erp-chat-audio-preview" controls hidden preload="metadata" aria-label="Escuchar nota antes de enviar"></audio>
-          <p id="erp-chat-audio-status" role="status" aria-live="polite">Hasta 3 minutos. La transcripción aparecerá en el historial.</p>
-        </div>
-        <div class="erp-chat-composer-actions">
-          <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite">Haz una pregunta y te responderé con contexto del ERP.</div>
+          <details class="agent-input-files">
+            <summary aria-label="Adjuntar imágenes o nota WAV">Adjuntar</summary>
+            <div>
+              <label for="erp-chat-photos">Imágenes y capturas (hasta cinco)</label>
+              <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
+              <label for="erp-chat-audio">Adjuntar nota WAV</label>
+              <input type="file" id="erp-chat-audio" accept="audio/wav,.wav">
+            </div>
+          </details>
+          <button type="button" class="erp-chat-prompt" id="erp-chat-audio-remove" disabled hidden>Retirar nota</button>
           <button type="button" class="erp-chat-send" id="erp-chat-send-btn" {% if not runtime_status.ready %}disabled{% endif %}>Enviar</button>
         </div>
+        <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
+        <audio id="erp-chat-audio-preview" controls hidden preload="metadata" aria-label="Escuchar nota antes de enviar"></audio>
+        <p id="erp-chat-audio-status" role="status" aria-live="polite">Hasta 3 minutos. La transcripción aparecerá en el historial.</p>
+        <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite"></div>
       </div>
     </div>
   </section>
@@ -130,6 +133,10 @@
       document.getElementById('erp-chat-new-btn').disabled=value || state.sending; renderConversationList();}
   });
   voice.setBusy(!runtimeStatus.ready);
+  document.querySelector('.agent-input-files').addEventListener('change', () => {
+    document.querySelector('.agent-input-files').open=false;
+    document.querySelector('.agent-input-files summary').focus();
+  });
   photoInput.addEventListener('change', () => {
     document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} imágenes seleccionadas. El agente leerá lo visible y las conservará en el historial.`;
   });
@@ -438,13 +445,13 @@
 
       if (!terminalEvent) throw new Error("La conexión se cerró antes de recibir el resultado. Abre la conversación antes de reenviar.");
       await loadConversation(conversationId, true);
-      if (audio) {voice.clear(); document.getElementById('erp-chat-audio-status').textContent='Nota guardada en este mensaje. Revisa la transcripción en el historial.';}
+      if (audio) {voice.clear(); document.getElementById('erp-chat-audio-status').textContent='';}
       await refreshConversations();
       if (photos.length) {
         const reply = state.activeConversation.messages.find(message => message.id === tempAssistant.id);
         const proposals = (reply?.tool_calls || []).filter(call=>['incident.followup','purchase.prepare'].includes(call.tool_key)).map(call=>call.result?.result?.payload?.incident).filter(row=>['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row?.status));
-        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Imágenes guardadas en este mensaje.';
-        if (proposals.length !== 1) {statusEl.textContent = reply?.status === 'error' ? 'La lectura no se completó. Revisa la respuesta y el historial antes de reenviar.' : 'Respuesta lista. Las imágenes se conservan en el historial.'; return;}
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = '';
+        if (proposals.length !== 1) {statusEl.textContent = reply?.status === 'error' ? 'La lectura no se completó. Revisa la respuesta y el historial antes de reenviar.' : 'Respuesta lista.'; return;}
         const draft = proposals[0];
         const body = new FormData(); body.append('expected_version', String(draft.version)); body.append('payload_hash', draft.payload_hash);
         const source = state.activeConversation.messages.find(message => message.role === 'user' && message.images?.length && message.sequence === reply.sequence - 1);
@@ -498,7 +505,7 @@
   });
 
   statusEl.textContent = runtimeStatus.ready
-    ? "Pregunta al ERP con lenguaje natural y te responderé con contexto operativo."
+    ? ""
     : runtimeStatus.issue || "Conexión pendiente. Puedes consultar las conversaciones guardadas.";
 
   function showError(error) {

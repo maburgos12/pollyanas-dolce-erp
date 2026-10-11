@@ -22,6 +22,7 @@
       button.disabled=busy || starting;
       input.disabled=busy || !!recording || starting;
       remove.disabled=busy || !!recording || starting || !file;
+      remove.hidden=!file;
     }
     function clear() {
       if (url) URL.revokeObjectURL(url);
