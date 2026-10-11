@@ -43,3 +43,11 @@ Validación del catálogo real: Point conserva velas y pirotecnia bajo categorí
 Incidencia de fuente pendiente: la réplica activa de Point tiene dos nombres distintos para SKU 0318 (Pay de Queso 3 Sabores C y Vela Luminosa Blister Num 0-9). No son equivalentes ni se fusionan maestros. Ambos quedan fuera de la propuesta diaria; revisar la identidad canónica en Point antes de usarlos en el cierre mensual.
 
 La búsqueda de preparación conserva los artículos ya seleccionados en el formulario, pero oculta los que no coinciden mientras se busca. Siguen incluidos en el envío; al limpiar la búsqueda vuelven a mostrarse. Así no se pierde la selección ni se obliga a desplazar toda la lista para encontrar una coincidencia.
+
+## Revisión de artículos faltantes, 10 de octubre
+
+Lectura de producción bajo SET TRANSACTION READ ONLY: PointProduct 182 es Pastel de Fresas Con Crema Chico, SKU 0101, con unidad oficial PZA; Insumo 518 es CUBREBOCAS, código 0101, tipo MATERIA_PRIMA. Son registros distintos, no una equivalencia. También colisionan 0103 (Fresas rebanada / GOMA XANTANA), 0011 (Pay de guayaba rebanada / CHOCOLATE BLANCO) y 0015 (Pay de durazno rebanada / GRENETINA). La exclusión de cualquier SKU que exista en insumos ocultaba estos productos incluso al buscar. El identificador de captura sigue siendo modelo y PK; no se reclasifican ni fusionan maestros.
+
+Se limita esa exclusión al grupo de insumos internos para conservar la deduplicación existente; sus colisiones restantes, como códigos de productos históricos de San Valentín, no se declaran equivalencias y requieren revisión si vuelven a manejarse. Se conserva la exclusión explícita de presentaciones que consumen PMH028. No se modifican referencias, cantidades, unidades, permisos ni conteos abiertos. Las ventanas de actividad reciente permanecen: 0101 tuvo actividad en las diez sucursales; 0103 en nueve. Un artículo fuera de la propuesta sigue disponible al buscar.
+
+La búsqueda reutiliza nombre, código y categoría de los mismos registros, filtrando por cada palabra y reconociendo los términos operativos fresas/fresa y rebanadas/rebanada. Estos términos no crean alias entre maestros. Se verificaron los fallos de “fresas chico” y “rebanadas” en navegador de producción. Unidades sin evidencia oficial siguen pendientes y no se sustituyen por una unidad inventada.
