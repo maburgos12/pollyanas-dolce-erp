@@ -206,23 +206,27 @@ def _catalogo(tipo, query, sucursal=None, *, diario=False):
     if tipo == 'diario':
         return sorted(_catalogo('producto', query, sucursal, diario=True) +
                       _catalogo('insumo', query, sucursal, diario=True), key=lambda x:x['nombre'].casefold())
+    terms = [{'rebanadas':'rebanada','fresas':'fresa'}.get(word.casefold(),word) for word in query.split()]
     habitual = codigos_habituales(sucursal, diario=diario) if not query else None
     if tipo == 'insumo':
         qs = Insumo.objects.filter(activo=True).exclude(codigo_point='').select_related('unidad_base')
-        if query: qs=qs.filter(Q(nombre__icontains=query)|Q(codigo_point__icontains=query))
+        if query:
+            for term in terms: qs=qs.filter(Q(nombre__icontains=term)|Q(codigo_point__icontains=term))
         else:
             qs=qs.filter(codigo_point__in=habitual)
             if diario:
                 qs=qs.filter(tipo_item=Insumo.TIPO_INTERNO).exclude(nombre__icontains='crema')
         return [{'key':f'i{x.pk}','nombre':x.nombre,'codigo':x.codigo_point,'unidad':x.unidad_base.codigo if x.unidad_base_id else '',
                  'selected':not query and bool(x.unidad_base_id)} for x in qs.order_by('nombre')[:200]]
-    qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True).exclude(codigo_point='').values('codigo_point'))
+    # shortcut: internal-input code collisions retain legacy deduplication until their identities are reviewed.
+    qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True,tipo_item=Insumo.TIPO_INTERNO).exclude(codigo_point='').values('codigo_point'))
     from recetas.models import Receta
     # Branches receive and count the baked input, not the presentations made
     # on sale. Keep this same identity rule in initial scope and live search.
     bread = Receta.objects.filter(lineas__insumo__codigo_point='PMH028').exclude(codigo_point='').values('codigo_point')
     qs=qs.exclude(sku__in=bread)
-    if query: qs=qs.filter(Q(name__icontains=query)|Q(sku__icontains=query)|Q(category__icontains=query))
+    if query:
+        for term in terms: qs=qs.filter(Q(name__icontains=term)|Q(sku__icontains=term)|Q(category__icontains=term))
     else:
         qs=qs.filter(sku__in=habitual)
         if diario:

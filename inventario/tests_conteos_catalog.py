@@ -140,3 +140,49 @@ class BranchCountCatalogTests(TestCase):
         response=self.client.get(reverse('operacion:conteos_app:preparar'),{'sucursal':other.pk})
         self.assertNotContains(response,self.seasonal.name)
         self.assertEqual(response.context['catalogo_sucursal'],self.branch)
+
+    def test_finished_product_is_not_hidden_by_raw_material_code_collision(self):
+        from maestros.models import Insumo
+        product=PointProduct.objects.create(external_id='fresas-chico',sku='0101',
+            name='Pastel de Fresas Con Crema Chico',category='Pastel Chico',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'0101','Unidad':'PZA'})})
+        Insumo.objects.create(nombre='CUBREBOCAS',codigo_point='0101',tipo_item=Insumo.TIPO_MATERIA_PRIMA)
+        PointDailySale.objects.create(branch=self.point_branch,product=product,sale_date=timezone.localdate(),quantity=1)
+        self.client.force_login(self.operator)
+        response=self.client.get(reverse('operacion:conteos_app:preparar'))
+        self.assertIn(f'p{product.pk}',{row['key'] for row in response.context['catalogo']})
+        response=self.client.get(reverse('operacion:conteos_app:preparar'),{'q':'0101'})
+        self.assertIn(f'p{product.pk}',{row['key'] for row in response.context['catalogo']})
+        from uuid import uuid4
+        response=self.client.post(reverse('operacion:conteos_app:accion',args=[self.count.pk]),
+            {'action':'iniciar','version':self.count.version,'request_id':str(uuid4())},HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code,200)
+        response=self.client.get(reverse('operacion:conteos_app:catalogo',args=[self.count.pk]),
+            {'q':'fresas chico','tipo':'producto'})
+        self.assertEqual([(r['key'],r['unidad']) for r in response.json()['resultados']],[(f'p{product.pk}','PZA')])
+        self.client.force_login(self.admin)
+        response=self.client.get(reverse('inventario:conteos_erp:preparar'),
+            {'sucursal':self.branch.pk,'q':'fresas chico','tipo':'diario'})
+        self.assertIn(f'p{product.pk}',{row['key'] for row in response.context['catalogo']})
+
+    def test_search_accepts_rebanadas_and_separated_name_words(self):
+        from inventario.views_conteos import _catalogo
+        products=[]
+        for code,name,category in [('0101','Pastel de Fresas Con Crema Chico','Pastel Chico'),
+                                   ('0103','Pastel de Fresas Con Crema R','Rebanada')]:
+            products.append(PointProduct.objects.create(external_id=code,sku=code,name=name,category=category,
+                metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':code,'Unidad':'PZA'})}))
+        for query,product in [('fresas chico',products[0]),('FRESAS  CHICO',products[0]),('rebanadas',products[1]),('0103',products[1])]:
+            rows=_catalogo('diario',query,self.branch)
+            self.assertEqual({r['key'] for r in rows},{f'p{product.pk}'})
+            self.assertFalse(rows[0]['selected'])
+        self.assertFalse(_catalogo('diario','fresas chico inexistente',self.branch))
+
+    def test_internal_input_deduplication_is_preserved(self):
+        from maestros.models import Insumo
+        from inventario.views_conteos import _catalogo
+        product=PointProduct.objects.create(external_id='internal-cookie',sku='01GCM01',name='Galleta Chocolate Mini')
+        internal=Insumo.objects.create(nombre='Galleta Chispas Mini',codigo_point=product.sku,tipo_item=Insumo.TIPO_INTERNO)
+        self.assertNotIn(f'p{product.pk}',{r['key'] for r in _catalogo('producto',product.sku,self.branch)})
+        self.assertIn(f'i{internal.pk}',{r['key'] for r in _catalogo('insumo',product.sku,self.branch)})
+        self.assertEqual({r['key'] for r in _catalogo('insumo','galleta mini',self.branch)},{f'i{internal.pk}'})
