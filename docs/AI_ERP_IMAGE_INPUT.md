@@ -4,7 +4,7 @@
 
 Web → sesión y CSRF → validar/guardar original privado → mensaje existente → Agent Core Responses → herramientas autorizadas → respuesta e historial → vincular original a propuesta con versión/hash → confirmación humana existente.
 
-No cambia modelo, participantes, presupuesto, servicios financieros ni permisos. El piloto conserva sus 20 turnos y USD 5 acumulados. Sin migraciones, nuevas dependencias, voz, PDFs ni canales nuevos.
+No cambia modelo, participantes, presupuesto, servicios financieros ni permisos. Desde la ampliación aprobada el 2026-10-11, el piloto admite 40 turnos totales y conserva USD 5 acumulados, incluido el consumo anterior. Sin migraciones, nuevas dependencias, voz, PDFs ni canales nuevos.
 
 ## Contratos y límites
 

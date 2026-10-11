@@ -18,7 +18,7 @@ El SDK OpenAI instalado y la misma clave existente llaman `/v1/audio/transcripti
 
 Documentación consultada el 2026-10-11: [transcripción](https://developers.openai.com/api/docs/guides/speech-to-text) y [precios](https://developers.openai.com/api/docs/pricing). Tarifa publicada: USD 0.0045/minuto. Se reserva USD 0.03 por archivo antes de la llamada, con margen para hasta tres minutos y sobrecargo regional. Se reserva además capacidad suficiente para el siguiente request del Agent Core; su reserva efectiva se compromete antes de Responses. La reserva es conservadora, no la factura final.
 
-Ciclo 0 registra transcripción; ciclos 1–6 conservan Responses. Todos pertenecen al mismo UUID de turno y al mismo ledger de 20 turnos/USD 5. Una reserva fallida bloquea la llamada. Un timeout conserva la reserva: no se presume que no hubo facturación. No se aumentan límites ni participantes, ni se borra historial para restablecer saldo.
+Ciclo 0 registra transcripción; ciclos 1–6 conservan Responses. Todos pertenecen al mismo UUID de turno y al mismo ledger de 40 turnos/USD 5. Una reserva fallida bloquea la llamada. Un timeout conserva la reserva: no se presume que no hubo facturación. La ampliación de 20 a 40 turnos fue autorizada el 2026-10-11; conserva USD 5, participante y recibos previos. No se borra historial para restablecer saldo.
 
 ## Protección, validación y reversión
 
