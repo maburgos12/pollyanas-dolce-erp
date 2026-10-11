@@ -98,3 +98,5 @@
 .agent-tool input[type="file"] {display:block;max-width:100%;margin-block:8px;}
 
 #erp-chat-photos { max-width: 100%; }
+
+.agent-input-images{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}.agent-input-images a{display:flex;flex-direction:column;gap:4px;max-width:160px;color:var(--texto);overflow-wrap:anywhere}.agent-input-images img{width:160px;max-width:100%;height:110px;object-fit:contain;border-radius:8px;background:var(--gris-suave)}

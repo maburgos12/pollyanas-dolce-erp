@@ -259,7 +259,13 @@ def owned_draft(user, pk, *, lock=False):
     return draft, actor_for(user, draft.conversation)
 
 
-def attach(*, user, draft_id, arguments, files):
+def attach(*, user, draft_id, arguments, files, source_message_id=None):
+    reuse = None
+    if source_message_id:
+        if files: raise WorkflowError("followup_invalid_image",400)
+        from .agent_images import source_files
+        source_draft, source_actor = owned_draft(user,draft_id)
+        files,reuse = source_files(source_actor,source_message_id,source_draft.conversation_id)
     from .agent_incidents import IncidentConfirmation
     serializer = IncidentConfirmation(data=arguments)
     serializer.is_valid(raise_exception=True)
@@ -303,10 +309,14 @@ def attach(*, user, draft_id, arguments, files):
             if len(files) < meta.get('expected_file_count', 0):
                 raise WorkflowError('followup_files_missing', 400, 'Selecciona todas las fotografías indicadas en la propuesta en una sola carga.')
             pending = pending_evidence(actor)
-            staged_bytes = sum(row['bytes'] for metadata in pending for row in metadata.get('files', []))
-            if len(pending) > 100 or staged_bytes + sum(row['bytes'] for row in uploads) > 100 * 1024 * 1024:
+            from .agent_images import staged_bytes as input_staged_bytes
+            staged_bytes = input_staged_bytes(actor)
+            if len(pending) > 100 or staged_bytes + (0 if reuse else sum(row['bytes'] for row in uploads)) > 100 * 1024 * 1024:
                 raise WorkflowError('followup_staging_limit', 409, 'El espacio de propuestas pendientes está lleno. Revisa las evidencias existentes antes de adjuntar más.')
-            for file, info in zip(files, uploads):
+            for index, (file, info) in enumerate(zip(files, uploads)):
+                if reuse:
+                    info.update(id=reuse[index]['id'], path=reuse[index]['path'])
+                    continue
                 uid = uuid4()
                 name = default_storage.save(f'fallas/seguimiento/agente/{draft.public_id.hex}/{uid.hex}{file.name[file.name.rfind("."):].lower()}', file)
                 saved.append(name)

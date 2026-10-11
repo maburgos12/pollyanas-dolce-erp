@@ -220,6 +220,7 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
     visible = _read_message_visible(message)
     proof = message.metadata_json.get('agent_read', {}) if isinstance(message.metadata_json, dict) else {}
     from orquestacion.services.agent_read_context import projected_receipts
+    from orquestacion.services.agent_images import projected_images
     return {
         "id": str(message.public_id),
         "sequence": message.sequence,
@@ -230,6 +231,7 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
         "receipts": projected_receipts(message) if visible and message.role == 'assistant' else [],
         "created_at": message.created_at.isoformat(),
         "tool_calls": tool_calls,
+        'images': projected_images(message) if visible else [],
     }
 
 

@@ -66,6 +66,26 @@ class PurchaseAgentFixture:
 
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True, AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
 class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
+    def test_chat_image_binding_reuses_private_original_and_rejects_other_conversation(self):
+        from orquestacion.services import agent_images
+        request, answer = agent_images.create_image_turn(user=self.user, conversation=self.conversation,
+            content='Captura de compra reportada', files=[self.photo()])
+        from orquestacion.services.agent_read_runtime import access_fingerprint
+        answer.status='complete'; answer.metadata_json={'agent_read':{'runtime':'agent_read','mode':'READ',
+            'access_fingerprint':access_fingerprint(self.user),'asset_ids':[]}}
+        answer.save()
+        dto=self.prepare()
+        attached=purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[],source_message_id=request.public_id)
+        original=request.metadata_json['images'][0]
+        draft=ChatToolCall.objects.get(public_id=dto['draft_id'])
+        self.assertEqual(draft.metadata_json['files'][0]['path'], original['path'])
+        self.assertEqual(agent_images.staged_bytes(self.user), original['bytes'])
+        self.assertEqual(purchases.attach(user=self.user,draft_id=dto['draft_id'],arguments=self.command(dto),files=[],source_message_id=request.public_id)['result']['payload'], attached['result']['payload'])
+        other_chat=create_chat_conversation(user=self.user)
+        with self.assertRaises(WorkflowError):
+            agent_images.source_files(self.user,request.public_id,other_chat.pk)
+        self.assertFalse(SolicitudCompraDepartamental.objects.exists())
+
     def test_calculation_optional_evidence_and_confirm_receipt_are_separate_from_payment(self):
         dto=self.prepare()
         self.assertEqual(dto['items'][0]['costo_unitario_estimado'],'40.42')

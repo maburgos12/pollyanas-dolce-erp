@@ -5,7 +5,7 @@
 {% block page_title %}Agente ERP{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261010-compras-v1">
+<link rel="stylesheet" href="/static/css/template_modules/templates-orquestacion-chat.css?v=20261011-vision-v1">
 {% endblock %}
 
 {% block content %}
@@ -69,7 +69,7 @@
       <div class="erp-chat-composer">
         <label for="erp-chat-input" class="agent-input-label">Tu consulta</label>
         <textarea id="erp-chat-input" aria-describedby="erp-chat-status" maxlength="12000" class="erp-chat-textarea" placeholder="Escribe lo que necesitas; por ejemplo, consulta el mantenimiento de una batidora."></textarea>
-        <label for="erp-chat-photos">Imágenes de evidencia (hasta cinco)</label>
+        <label for="erp-chat-photos">Imágenes y capturas (hasta cinco)</label>
         <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
         <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
         <div class="erp-chat-composer-actions">
@@ -83,7 +83,7 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261010-compras-v1"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261011-vision-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -115,7 +115,7 @@
 
   const photoInput = document.getElementById('erp-chat-photos');
   photoInput.addEventListener('change', () => {
-    document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} fotografías seleccionadas. Se asociarán a la propuesta antes de confirmar.`;
+    document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} imágenes seleccionadas. El agente leerá lo visible y las conservará en el historial.`;
   });
   const escapeHtml = view.escape;
 
@@ -191,6 +191,16 @@
         </div>
         ${message.role === "user" ? avatar : ""}
       `;
+      if (message.images?.length) {
+        const gallery = document.createElement('div'); gallery.className = 'agent-input-images';
+        message.images.forEach(file => {
+          const link = document.createElement('a'); link.href = file.url; link.target = '_blank'; link.rel = 'noopener';
+          const image = document.createElement('img'); image.src = file.url; image.alt = ''; image.loading = 'lazy';
+          const name = document.createElement('span'); name.textContent = file.name;
+          link.append(image, name); gallery.appendChild(link);
+        });
+        row.querySelector('.erp-chat-bubble').appendChild(gallery);
+      }
       messageListEl.appendChild(row);
     });
 
@@ -346,16 +356,21 @@
       tempAssistant = appendOptimisticMessages(content);
       inputEl.value = "";
 
+      const imageBody = new FormData();
+      imageBody.append('content', content);
+      photos.forEach(file => imageBody.append('files', file));
       const response = await fetch(`${apiBase}/conversations/${conversationId}/stream/`, {
         method: "POST",
         credentials: "same-origin",
         headers: {
-          "Content-Type": "application/json",
+          ...(photos.length ? {} : {"Content-Type":"application/json"}),
+          "Accept":"text/event-stream, application/json",
           "X-CSRFToken": csrfToken,
         },
-        body: JSON.stringify({ content, attachment_count: photos.length }),
+        body: photos.length ? imageBody : JSON.stringify({ content }),
       });
 
+      if (response.redirected) throw new Error('La sesión del formulario caducó. Recarga la conversación antes de reenviar.');
       if (!response.ok) {
         let payload = {};
         try {
@@ -397,11 +412,15 @@
       await loadConversation(conversationId, true);
       await refreshConversations();
       if (photos.length) {
-        const proposals = (state.activeConversation.messages.at(-1)?.tool_calls || []).filter(call=>['incident.followup','purchase.prepare'].includes(call.tool_key)).map(call=>call.result?.result?.payload?.incident).filter(row=>['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row?.status));
-        if (proposals.length !== 1) {statusEl.textContent = 'Las fotos siguen seleccionadas. Completa o identifica una sola propuesta para asociarlas.'; return;}
+        const reply = state.activeConversation.messages.find(message => message.id === tempAssistant.id);
+        const proposals = (reply?.tool_calls || []).filter(call=>['incident.followup','purchase.prepare'].includes(call.tool_key)).map(call=>call.result?.result?.payload?.incident).filter(row=>['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row?.status));
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Imágenes guardadas en este mensaje.';
+        if (proposals.length !== 1) {statusEl.textContent = reply?.status === 'error' ? 'La lectura no se completó. Revisa la respuesta y el historial antes de reenviar.' : 'Respuesta lista. Las imágenes se conservan en el historial.'; return;}
         const draft = proposals[0];
         const body = new FormData(); body.append('expected_version', String(draft.version)); body.append('payload_hash', draft.payload_hash);
-        photos.forEach(file=>body.append('files',file));
+        const source = state.activeConversation.messages.find(message => message.role === 'user' && message.images?.length && message.sequence === reply.sequence - 1);
+        if (!source) throw new Error('No se pudo recuperar el mensaje con las imágenes. Revisa el historial.');
+        body.append('source_message_id', source.id);
         const upload = await fetch(`/api/ai-gateway/${draft.kind === 'purchase' ? 'purchases' : 'incidents'}/${encodeURIComponent(draft.draft_id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
         const result = await upload.json();
         if (!upload.ok) {statusEl.textContent = result.detail || 'No se asociaron las fotos. Revisa la propuesta antes de confirmar.'; return;}
