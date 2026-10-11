@@ -77,7 +77,8 @@ async function controllerChecks() {
   const requests=[];
   let mode='truncated';
   let releaseCreate;
-  const controller = vm.createContext({ERPAgentView:view,TextDecoder,Date,
+  const controller = vm.createContext({ERPAgentView:view,TextDecoder,Date,FormData,
+    ERPVoice:{attach:()=>({file:null,clear(){},setBusy(){}})},
     window:{matchMedia:()=>({matches:true})},
     document:{getElementById:element,querySelector:element,querySelectorAll:()=>[],createElement:()=>element(`node-${elements.size}`)},
     fetch:async (url,options={}) => {
@@ -103,7 +104,7 @@ async function controllerChecks() {
   assert.equal(state.activeConversation.messages.at(-1).status,'error');
   assert.equal(requests.filter(r=>r.method==='POST').length,1,'No automatic retry after incomplete SSE');
   assert.equal(element('erp-chat-send-btn').disabled,false);
-  for (const flag of ['loading','creating','sending']) {
+  for (const flag of ['loading','creating','sending','recording']) {
     state[flag]=true;
     element('erp-chat-input').value='Consulta durante bloqueo';
     const before=requests.length;

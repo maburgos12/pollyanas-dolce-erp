@@ -8,6 +8,8 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("chat/", chat_views.chat_home, name="chat_home"),
     path("chat/api/conversations/", chat_views.conversations_api, name="chat_conversations_api"),
+    path('chat/api/conversations/<uuid:conversation_id>/messages/<uuid:message_id>/audio/',
+         chat_views.message_audio_api, name='chat_message_audio_api'),
     path("chat/api/conversations/new/", chat_views.create_conversation_api, name="chat_conversation_create_api"),
     path('chat/api/conversations/<uuid:conversation_id>/messages/<uuid:message_id>/images/<uuid:image_id>/',
          chat_views.message_image_api, name='chat_message_image_api'),
