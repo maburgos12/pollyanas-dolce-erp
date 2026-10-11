@@ -18,7 +18,7 @@ from orquestacion.models import ChatMessage
 from .agent_workflows import WorkflowError
 
 MAX_TOTAL = 20 * 1024 * 1024
-PRIVATE_PREFIX = 'compras/departamentales/agente/inputs/'  # Already denied by public media delivery.
+PRIVATE_PREFIX = 'fallas/seguimiento/agente/'  # Private staging; UUID paths fit existing 100-character evidence fields.
 
 
 def validated(files):

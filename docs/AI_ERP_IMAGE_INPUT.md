@@ -18,7 +18,7 @@ No cambia modelo, participantes, presupuesto, servicios financieros ni permisos.
 
 ## Pruebas y aceptación
 
-PostgreSQL 16 aislado, proveedor doble: originales/SHA, formatos dañados, duplicados, cuotas, CSRF, propietario y revocación, historial y continuación, conteo visual, gasto, idempotencia y reutilización sin copia. Regresión del runtime y propuestas existentes. Navegador real con captura autorizada, recarga, respuesta sin inventar importes ausentes, consola/Network, imagen privada y móvil. La validación local no sustituye producción.
+PostgreSQL 16 aislado, proveedor doble: originales/SHA, formatos dañados, duplicados, cuotas, CSRF, propietario y revocación, historial y continuación, conteo visual, gasto, idempotencia y reutilización sin copia. Regresión del runtime y propuestas existentes, incluida confirmación sintética de seguimiento y lectura del original por mantenimiento. Las rutas UUID tienen máximo 100 caracteres, compatible con los campos de evidencia existentes. Navegador real con captura autorizada, recarga, respuesta sin inventar importes ausentes, consola/Network, imagen privada y móvil. La validación local no sustituye producción.
 
 ## Reversión y operación
 

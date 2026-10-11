@@ -25,7 +25,7 @@ Una imagen original aportada por el propietario de un mensaje. El mismo original
 
 ## Decisión
 
-Extender metadata_json de ChatMessage con referencias de imágenes privadas. Reutilizar Pillow, validación de evidencia, almacenamiento ya protegido, Responses, historial, ledger, confirmación, RBAC y servicios existentes. No añadir tablas, proveedor ni nuevo canal. El prefijo `compras/departamentales/agente/inputs/` hereda la denegación pública existente; la lectura ocurre exclusivamente mediante el endpoint del mensaje autenticado.
+Extender metadata_json de ChatMessage con referencias de imágenes privadas. Reutilizar Pillow, validación de evidencia, almacenamiento ya protegido, Responses, historial, ledger, confirmación, RBAC y servicios existentes. No añadir tablas, proveedor ni nuevo canal. El prefijo `fallas/seguimiento/agente/` hereda la protección del staging existente: sin evidencia operativa confirmada no existe acceso por `/media`; los endpoints del mensaje y propuesta exigen propietario. Una confirmación de seguimiento conserva el alcance de su reporte. UUID de mensaje y archivo conservan rutas de hasta 100 caracteres, compatibles con la evidencia operativa existente.
 
 Procedimiento reproducible: `inventario_fuentes_datos --term evidencia`, `--term archivo`, `--term ChatMessage`, `--term ChatToolCall`; candidatos léxicos revisados contra servicios reales y consulta acotada del caso existente. Evidencia íntegra en `.codex/task-artifacts/ai-erp-multimodal-preflight-20261011/`.
 
