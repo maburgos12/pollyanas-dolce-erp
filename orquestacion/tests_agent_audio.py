@@ -134,12 +134,12 @@ class AgentAudioTests(TransactionTestCase):
         self.assertIsNone(serialize_message(messages[0])['audio'])
         self.assertNotIn('Texto privado',messages[0].content)
 
-    def test_twentieth_audio_turn_allows_its_core_call_but_never_twentyfirst(self):
-        for _ in range(19):pilot.reserve_audio(user=self.user,turn_id=uuid4())
+    def test_last_audio_turn_allows_its_core_call_but_never_an_extra_turn(self):
+        for _ in range(pilot.MAX_TURNS - 1):pilot.reserve_audio(user=self.user,turn_id=uuid4())
         messages=self.ingest(); self.run_turn(messages,self.provider())
-        self.assertEqual(messages[1].status,'complete');self.assertEqual(pilot.pilot_status(self.user)['turns'],20)
+        self.assertEqual(messages[1].status,'complete');self.assertEqual(pilot.pilot_status(self.user)['turns'],pilot.MAX_TURNS)
         with self.assertRaises(WorkflowError):self.ingest(note(frames=16002))
-        self.assertEqual(pilot.pilot_status(self.user)['turns'],20)
+        self.assertEqual(pilot.pilot_status(self.user)['turns'],pilot.MAX_TURNS)
 
     def test_budget_duplicate_invalid_ledger_and_transaction_boundary(self):
         turn=uuid4();pilot.reserve_audio(user=self.user,turn_id=turn)

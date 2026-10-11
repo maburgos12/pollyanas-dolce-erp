@@ -41,7 +41,7 @@ class AgentPilotTests(TransactionTestCase):
         self.assertEqual(AuditLog.objects.filter(action=pilot.ACTION).count(), 1)
 
     def test_exhausted_visual_turns_never_send_image_to_token_counter(self):
-        for _ in range(20): self.reserve()
+        for _ in range(pilot.MAX_TURNS): self.reserve()
         counter = Mock()
         with self.assertRaises(pilot.PilotStopped):
             pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=self.payload, token_counter=counter)
@@ -118,20 +118,34 @@ class AgentPilotTests(TransactionTestCase):
         self.assertEqual(self.messages[1].metadata_json['agent_read']['error_code'], 'provider_failed')
         self.assertNotIn('private provider error', self.messages[1].content)
 
-    def test_twenty_turns_across_chats_then_no_provider_or_auto_renewal(self):
-        for _ in range(20): self.reserve()
+    def test_turn_limit_across_chats_then_no_provider_or_auto_renewal(self):
+        for _ in range(pilot.MAX_TURNS): self.reserve()
         provider, result = self.run_provider()
         provider.responses.create.assert_not_called()
-        self.assertIn('20 turnos', result.assistant_text)
+        self.assertIn(f'{pilot.MAX_TURNS} turnos', result.assistant_text)
         self.assertFalse(get_chat_runtime_status(self.user)['ready'])
         with self.assertRaises(pilot.PilotStopped) as caught: self.reserve()
         self.assertEqual(caught.exception.code, 'pilot_turn_limit')
-        self.assertEqual(pilot.pilot_status(self.user)['turns'], 20)
+        self.assertEqual(pilot.pilot_status(self.user)['turns'], pilot.MAX_TURNS)
 
     def test_last_admitted_turn_can_finish_its_cycles(self):
-        for _ in range(19): self.reserve()
+        for _ in range(pilot.MAX_TURNS - 1): self.reserve()
         turn=uuid4(); self.reserve(turn); self.reserve(turn, cycle=2)
+        self.assertEqual(pilot.pilot_status(self.user)['turns'], pilot.MAX_TURNS)
+
+    def test_approved_extension_admits_twenty_first_turn_without_resetting_receipts(self):
+        previous = [self.receipt('0.10') for _ in range(20)]
+        originals = {row.pk: row.payload.copy() for row in previous}
+        self.assertEqual(pilot.MAX_TURNS, 40)
+        self.assertEqual(pilot.MAX_USD, Decimal('5.00'))
         self.assertEqual(pilot.pilot_status(self.user)['turns'], 20)
+        provider, _ = self.run_provider()
+        provider.responses.create.assert_called_once()
+        status = pilot.pilot_status(self.user)
+        self.assertEqual(status['turns'], 21)
+        self.assertGreater(Decimal(status['reserved_usd']), Decimal('2.00'))
+        self.assertTrue(get_chat_runtime_status(self.user)['ready'])
+        self.assertEqual(dict(AuditLog.objects.filter(pk__in=originals).values_list('pk', 'payload')), originals)
 
     def test_dollar_limit_blocks_before_provider(self):
         near_limit = str(pilot.MAX_USD - Decimal('0.01'))
@@ -161,7 +175,7 @@ class AgentPilotTests(TransactionTestCase):
         self.assertEqual(pilot.pilot_status(self.user)['turns'], 1)
 
     def test_two_connections_compete_for_last_turn_only_one_wins(self):
-        for _ in range(19): self.reserve()
+        for _ in range(pilot.MAX_TURNS - 1): self.reserve()
         def attempt():
             close_old_connections()
             try:
@@ -171,7 +185,7 @@ class AgentPilotTests(TransactionTestCase):
         with ThreadPoolExecutor(max_workers=2) as pool:
             results=list(pool.map(lambda _:attempt(), range(2)))
         self.assertCountEqual(results, ['reserved','pilot_turn_limit'])
-        self.assertEqual(pilot.pilot_status(self.user)['turns'], 20)
+        self.assertEqual(pilot.pilot_status(self.user)['turns'], pilot.MAX_TURNS)
 
     def test_two_connections_compete_for_last_dollars_only_one_wins(self):
         amount=Decimal(self.reserve()['reserved_usd'])

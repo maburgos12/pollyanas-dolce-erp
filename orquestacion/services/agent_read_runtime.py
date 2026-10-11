@@ -463,7 +463,7 @@ def _closure(events, stop_code=None, pending_workflows=None, receipts=()):
 
 def execute_read_turn(*, user, conversation: ChatConversation, user_message: ChatMessage, assistant_message: ChatMessage) -> ChatTurnResult:
     from orquestacion.services.chat_service import ChatTurnResult
-    from orquestacion.services.agent_pilot import PilotStopped, OUTPUT_TOKENS, reserve_request
+    from orquestacion.services.agent_pilot import PilotStopped, MAX_TURNS, OUTPUT_TOKENS, reserve_request
     model = getattr(settings, "AI_AGENT_READ_MODEL", "")
     started = monotonic()
     events, usages = [], []
@@ -762,7 +762,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
         text = {
             "audio_transcription_failed": "No pude transcribir la nota de voz. El original se conserva en el historial; no se ejecutó ninguna acción. Puedes continuar escribiendo lo que necesitas.",
             "audio_transcription_invalid": "La nota no produjo una transcripción utilizable. El original se conserva; continúa por texto o con una nueva grabación clara.",
-            "pilot_turn_limit": "El piloto alcanzó sus 20 turnos. No se enviaron nuevas solicitudes a OpenAI; requiere revisión para ampliarlo.",
+            "pilot_turn_limit": f"El piloto alcanzó sus {MAX_TURNS} turnos. No se enviaron nuevas solicitudes a OpenAI; requiere revisión para ampliarlo.",
             "pilot_spend_limit": "El saldo reservado del piloto no alcanza para otra llamada. No se envió esa solicitud a OpenAI; requiere revisión para ampliarlo.",
         }.get(code, SAFE_FAILURE)
         if code in {"time_limit", "context_limit", "tool_limit", "provider_failed", "provider_incomplete"}:
