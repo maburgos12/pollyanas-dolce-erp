@@ -19,6 +19,9 @@ MAX_TURNS = 20
 MAX_USD = Decimal("5.00")
 MAX_BYTES = 60000
 MAX_ROUNDS = 6
+AUDIO_MODEL = "gpt-transcribe"
+# Three minutes at $0.0045/min plus regional premium and conservative headroom.
+AUDIO_RESERVE_USD = Decimal("0.03")
 OUTPUT_TOKENS = 1400
 # Standard input/cache-write ceiling and output, including 10% regional premium.
 INPUT_USD = Decimal("2.75") / 1000000
@@ -45,8 +48,8 @@ def is_pilot_participant(user) -> bool:
 
 def _ledger():
     rows = list(AuditLog.objects.filter(model=LEDGER_MODEL, object_id=PILOT_ID)
-                .order_by("id").values("action", "payload")[:MAX_TURNS * MAX_ROUNDS + 1])
-    if len(rows) > MAX_TURNS * MAX_ROUNDS:
+                .order_by("id").values("action", "payload")[:MAX_TURNS * (MAX_ROUNDS + 1) + 1])
+    if len(rows) > MAX_TURNS * (MAX_ROUNDS + 1):
         raise PilotStopped("pilot_ledger_invalid")
     seen, turns, total = set(), set(), Decimal("0")
     for row in rows:
@@ -55,8 +58,9 @@ def _ledger():
             turn = str(UUID(data["turn_id"]))
             cycle = data["cycle"]
             amount = Decimal(data["reserved_usd"])
-            valid = (row["action"] == ACTION and data["model"] == MODEL
-                     and type(cycle) is int and 1 <= cycle <= MAX_ROUNDS
+            valid = (row["action"] == ACTION and type(cycle) is int
+                     and ((1 <= cycle <= MAX_ROUNDS and data["model"] == MODEL)
+                          or (cycle == 0 and data["model"] == AUDIO_MODEL and amount == AUDIO_RESERVE_USD))
                      and type(data["reserved_usd"]) is str and amount.is_finite() and Decimal("0") < amount <= MAX_USD
                      and (turn, cycle) not in seen)
         except (TypeError, ValueError, KeyError, ArithmeticError):
@@ -133,3 +137,24 @@ def reserve_request(*, user, turn_id, cycle: int, payload: dict, token_counter=N
                      **({'counted_input_tokens':input_tokens} if input_tokens is not None else {})})
     return {"reserved_usd": str(amount), "total_reserved_usd": str(total + amount),
             "turns": len(turns | {turn})}
+
+
+def reserve_audio(*, user, turn_id):
+    if connection.vendor != "postgresql" or connection.in_atomic_block:
+        raise PilotStopped("pilot_transaction_boundary")
+    turn = str(UUID(str(turn_id)))
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL lock_timeout = '1500ms'")
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", [LOCK_ID])
+        pilot_status(user)
+        seen, turns, total = _ledger()
+        if any(key[0] == turn for key in seen):
+            raise PilotStopped("pilot_duplicate_request")
+        if len(turns) >= MAX_TURNS:
+            raise PilotStopped("pilot_turn_limit")
+        # Reserve enough room for the subsequent Agent Core request as well.
+        if total + AUDIO_RESERVE_USD + ((MAX_BYTES + 4096) * INPUT_USD + OUTPUT_TOKENS * OUTPUT_USD) > MAX_USD:
+            raise PilotStopped("pilot_spend_limit")
+        AuditLog.objects.create(user=user, action=ACTION, model=LEDGER_MODEL, object_id=PILOT_ID,
+            payload={"turn_id":turn, "cycle":0, "model":AUDIO_MODEL, "reserved_usd":str(AUDIO_RESERVE_USD)})

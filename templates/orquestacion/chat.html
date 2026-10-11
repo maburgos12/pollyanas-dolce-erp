@@ -72,6 +72,14 @@
         <label for="erp-chat-photos">Imágenes y capturas (hasta cinco)</label>
         <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
         <p id="erp-chat-photo-status" role="status" aria-live="polite"></p>
+        <div class="agent-voice-controls">
+          <button type="button" class="erp-chat-prompt" id="erp-chat-record" aria-pressed="false">Grabar nota</button>
+          <label for="erp-chat-audio">Adjuntar nota WAV</label>
+          <input type="file" id="erp-chat-audio" accept="audio/wav,.wav">
+          <button type="button" class="erp-chat-prompt" id="erp-chat-audio-remove" disabled>Retirar nota</button>
+          <audio id="erp-chat-audio-preview" controls hidden preload="metadata" aria-label="Escuchar nota antes de enviar"></audio>
+          <p id="erp-chat-audio-status" role="status" aria-live="polite">Hasta 3 minutos. La transcripción aparecerá en el historial.</p>
+        </div>
         <div class="erp-chat-composer-actions">
           <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite">Haz una pregunta y te responderé con contexto del ERP.</div>
           <button type="button" class="erp-chat-send" id="erp-chat-send-btn" {% if not runtime_status.ready %}disabled{% endif %}>Enviar</button>
@@ -83,6 +91,7 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="{% static 'js/erp-agent-voice.js' %}"></script>
 <script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261011-vision-v1"></script>
 <script>
 (() => {
@@ -114,6 +123,13 @@
   const statusEl = document.getElementById("erp-chat-status");
 
   const photoInput = document.getElementById('erp-chat-photos');
+  const voice = ERPVoice.attach({button:document.getElementById('erp-chat-record'), input:document.getElementById('erp-chat-audio'),
+    preview:document.getElementById('erp-chat-audio-preview'), remove:document.getElementById('erp-chat-audio-remove'),
+    status:document.getElementById('erp-chat-audio-status'), worklet:"{% static 'js/erp-agent-voice-worklet.js' %}",
+    onRecording(value) {state.recording=value; sendBtn.disabled=value || state.sending || !runtimeStatus.ready;
+      document.getElementById('erp-chat-new-btn').disabled=value || state.sending; renderConversationList();}
+  });
+  voice.setBusy(!runtimeStatus.ready);
   photoInput.addEventListener('change', () => {
     document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} imágenes seleccionadas. El agente leerá lo visible y las conservará en el historial.`;
   });
@@ -147,7 +163,7 @@
         <p class="erp-chat-conversation-preview">${escapeHtml(conversation.preview || "Sin mensajes todavía.")}</p>
         <div class="erp-chat-conversation-time">${formatTimestamp(conversation.last_message_at)}</div>
       `;
-      button.disabled = state.sending || state.loading || state.creating;
+      button.disabled = state.sending || state.loading || state.creating || state.recording;
       button.setAttribute("aria-current", active ? "true" : "false");
       button.addEventListener("click", () => loadConversation(conversation.id).catch(showError));
       listEl.appendChild(button);
@@ -201,6 +217,11 @@
         });
         row.querySelector('.erp-chat-bubble').appendChild(gallery);
       }
+      if (message.audio) {
+        const audio=document.createElement('audio'); audio.controls=true; audio.preload='none'; audio.src=message.audio.url;
+        audio.setAttribute('aria-label','Escuchar nota de voz'); audio.className='agent-input-audio';
+        row.querySelector('.erp-chat-bubble').appendChild(audio);
+      }
       messageListEl.appendChild(row);
     });
 
@@ -218,6 +239,7 @@
   async function createConversation() {
     if (state.creating) throw new Error("Espera a que se abra la conversación.");
     state.creating = true;
+    voice.setBusy(true);
     sendBtn.disabled = true;
     document.getElementById("erp-chat-new-btn").disabled = true;
     renderConversationList();
@@ -244,6 +266,7 @@
       return state.activeConversation.conversation.id;
     } finally {
       state.creating = false;
+      voice.setBusy(state.sending || !runtimeStatus.ready);
       sendBtn.disabled = state.sending || !runtimeStatus.ready;
       document.getElementById("erp-chat-new-btn").disabled = state.sending;
       renderConversationList();
@@ -251,8 +274,9 @@
   }
 
   async function loadConversation(id, afterSend = false) {
-    if (state.loading || state.creating || (state.sending && !afterSend)) return;
+    if (state.recording || state.loading || state.creating || (state.sending && !afterSend)) return;
     state.loading = true;
+    voice.setBusy(true);
     sendBtn.disabled = true;
     document.getElementById("erp-chat-new-btn").disabled = true;
     renderConversationList();
@@ -263,6 +287,7 @@
       renderMessages();
     } finally {
       state.loading = false;
+      voice.setBusy(state.sending || !runtimeStatus.ready);
       sendBtn.disabled = state.sending || !runtimeStatus.ready;
       document.getElementById("erp-chat-new-btn").disabled = state.sending;
       renderConversationList();
@@ -334,18 +359,20 @@
   }
 
   async function sendMessage() {
-    const content = inputEl.value.trim();
-    if (!content || state.sending || state.loading || state.creating || !runtimeStatus.ready) return;
+    const audio = voice.file;
+    const content = inputEl.value.trim() || (audio ? 'Nota de voz' : '');
+    if (!content || state.recording || state.sending || state.loading || state.creating || !runtimeStatus.ready) return;
     const photos = Array.from(photoInput.files || []);
-    if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco fotos, 10 MB por foto y 20 MB en total.'; return;}
+    if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)+(audio?.size || 0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco fotos, 10 MB por foto y 20 MB en total.'; return;}
     state.sending = true;
     photoInput.disabled = true;
+    voice.setBusy(true);
     renderConversationList();
     document.getElementById("erp-chat-new-btn").disabled = true;
     document.getElementById("agent-process-list").querySelectorAll("button").forEach(button => { button.disabled = true; });
     sendBtn.disabled = true;
     inputEl.disabled = true;
-    statusEl.textContent = "Procesando tu consulta…";
+    statusEl.textContent = audio ? "Transcribiendo la nota y procesando tu consulta…" : "Procesando tu consulta…";
 
     let tempAssistant = null;
     try {
@@ -359,15 +386,16 @@
       const imageBody = new FormData();
       imageBody.append('content', content);
       photos.forEach(file => imageBody.append('files', file));
+      if (audio) imageBody.append('audio', audio);
       const response = await fetch(`${apiBase}/conversations/${conversationId}/stream/`, {
         method: "POST",
         credentials: "same-origin",
         headers: {
-          ...(photos.length ? {} : {"Content-Type":"application/json"}),
+          ...((photos.length || audio) ? {} : {"Content-Type":"application/json"}),
           "Accept":"text/event-stream, application/json",
           "X-CSRFToken": csrfToken,
         },
-        body: photos.length ? imageBody : JSON.stringify({ content }),
+        body: (photos.length || audio) ? imageBody : JSON.stringify({ content }),
       });
 
       if (response.redirected) throw new Error('La sesión del formulario caducó. Recarga la conversación antes de reenviar.');
@@ -410,6 +438,7 @@
 
       if (!terminalEvent) throw new Error("La conexión se cerró antes de recibir el resultado. Abre la conversación antes de reenviar.");
       await loadConversation(conversationId, true);
+      if (audio) {voice.clear(); document.getElementById('erp-chat-audio-status').textContent='Nota guardada en este mensaje. Revisa la transcripción en el historial.';}
       await refreshConversations();
       if (photos.length) {
         const reply = state.activeConversation.messages.find(message => message.id === tempAssistant.id);
@@ -436,6 +465,7 @@
       sendBtn.disabled = !runtimeStatus.ready;
       inputEl.disabled = false;
       photoInput.disabled = false;
+      voice.setBusy(!runtimeStatus.ready);
       document.getElementById("erp-chat-new-btn").disabled = false;
       renderConversationList();
       if (document.getElementById("agent-processes").open) refreshProcesses();
@@ -444,7 +474,7 @@
   }
 
   document.getElementById("erp-chat-new-btn").addEventListener("click", async () => {
-    if (state.sending || state.loading || state.creating) return;
+    if (state.sending || state.loading || state.creating || state.recording) return;
     try {
       await createConversation();
     } catch (error) {
@@ -501,7 +531,7 @@
         document.getElementById("agent-process-page").textContent = `Página ${processPage}`;
         document.getElementById("agent-process-prev").disabled = processPage <= 1;
         document.getElementById("agent-process-next").disabled = processPage >= 1000;
-        list.querySelectorAll('button').forEach(button => {button.disabled = state.sending || state.loading || state.creating;});
+        list.querySelectorAll('button').forEach(button => {button.disabled = state.sending || state.loading || state.creating || state.recording;});
       }
     }
   }
@@ -512,7 +542,7 @@
   document.getElementById("agent-process-next").addEventListener("click", () => {if (processPage < 1000) {processPage++; refreshProcesses();}});
   document.getElementById("agent-process-list").addEventListener("click", event => {
     const button = event.target.closest("[data-workflow-id]");
-    if (!button || state.sending || state.loading || state.creating) return;
+    if (!button || state.sending || state.loading || state.creating || state.recording) return;
     inputEl.value = `Quiero continuar la consulta ${button.dataset.workflowId}. `;
     inputEl.focus();
     statusEl.textContent = "Añade el dato o la selección que falta y envía tu mensaje. El proceso aún no se ha ejecutado.";
@@ -551,7 +581,7 @@
       return;
     }
     const button = event.target.closest("[data-incident-id]");
-    if (!button || button.disabled || state.sending || state.loading || state.creating) return;
+    if (!button || button.disabled || state.sending || state.loading || state.creating || state.recording) return;
     button.disabled = true;
     state.sending = true;
     sendBtn.disabled = true;

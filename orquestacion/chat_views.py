@@ -108,16 +108,22 @@ def stream_message_api(request, conversation_id):
     conversation = get_chat_conversation(request.user, conversation_id)
     payload = request.POST if request.content_type == 'multipart/form-data' else _parse_json_body(request)
     files = request.FILES.getlist('files')
-    if files:
+    audios = request.FILES.getlist('audio')
+    if len(audios) > 1:
+        return JsonResponse({'detail':'Sólo una nota de voz por mensaje.'}, status=400)
+    audio = audios[0] if audios else None
+    if files or audio:
         payload = {'content':payload.get('content'), 'attachment_count':len(files)}
     count = payload.get('attachment_count', 0)
     if type(count) is not int or not 0 <= count <= 5:
         return JsonResponse({'detail':'Puedes seleccionar hasta cinco fotografías.'}, status=400)
     content = str(payload.get("content") or "").strip()
+    if audio and not content:
+        content = 'Nota de voz'
     if not content:
         return JsonResponse({"detail": "El mensaje no puede ir vacío."}, status=400)
 
-    if files:
+    if files or audio:
         from mantenimiento.evidence_validation import EvidenceValidationError
         from .services.agent_images import create_image_turn
         from .services.agent_workflows import WorkflowError
@@ -125,10 +131,13 @@ def stream_message_api(request, conversation_id):
         from .services.agent_read_runtime import ReadStopped
         try:
             user_message, assistant_message = create_image_turn(user=request.user, conversation=conversation,
-                content=content, files=files, session_key=request.session.session_key or '')
+                content=content, files=files, audio=audio, session_key=request.session.session_key or '')
         except (WorkflowError, EvidenceValidationError, ReadStopped, PilotStopped) as exc:
-            return JsonResponse({'detail':'No se admitieron las imágenes. Revisa archivos, permisos y límite del piloto.',
-                                 'code':getattr(exc, 'code', 'image_input_invalid')}, status=getattr(exc, 'status', 400))
+            code = getattr(exc, 'code', 'image_input_invalid')
+            detail = {'audio_input_duplicate':'La nota ya está en esta conversación. Revisa el historial antes de reenviarla.',
+                      'input_limit':'El texto que acompaña a la voz no puede exceder 6000 caracteres.'}.get(code,
+                'No se admitieron los archivos. Voz: WAV PCM de 16 bits, hasta 3 minutos y 8 MB. Revisa permisos y límite del piloto.')
+            return JsonResponse({'detail':detail, 'code':code}, status=getattr(exc, 'status', 400))
     else:
         user_message, assistant_message = create_user_turn(
             user=request.user, conversation=conversation, content=content,
@@ -214,3 +223,27 @@ def message_image_api(request, conversation_id, message_id, image_id):
             response['X-Content-Type-Options'] = 'nosniff'
             return response
     raise Http404
+
+
+@login_required
+@require_GET
+def message_audio_api(request, conversation_id, message_id):
+    _ensure_ai_private_access(request.user)
+    from .models import ChatMessage
+    from .services.agent_audio import read_file
+    from .services.agent_read_runtime import _fresh_access
+    from .services.chat_service import _read_message_visible
+    message = ChatMessage.objects.select_related('conversation').filter(public_id=message_id,
+        conversation__public_id=conversation_id, conversation__owner=request.user,
+        conversation__status='active', created_by=request.user, role='user').first()
+    if not message or not _read_message_visible(message):
+        raise Http404
+    try:
+        _fresh_access(request.user, message.conversation_id)
+        file = read_file(message)
+    except Exception:
+        raise Http404 from None
+    response = FileResponse(io.BytesIO(file.read()), content_type='audio/wav')
+    response['Cache-Control'] = 'private, no-store'
+    response['X-Content-Type-Options'] = 'nosniff'
+    return response

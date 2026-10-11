@@ -11,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import transaction
+from django.db.models import Q
 
 from core.models import AuditLog
 from mantenimiento.evidence_validation import validate_evidence_files
@@ -46,44 +47,62 @@ def validated(files):
 
 def staged_bytes(actor, *, new_message=False):
     from .agent_followups import pending_evidence
-    messages = list(ChatMessage.objects.filter(conversation__owner=actor, metadata_json__has_key='images')
+    messages = list(ChatMessage.objects.filter(Q(metadata_json__has_key='images') | Q(metadata_json__has_key='audio'), conversation__owner=actor)
                     .values_list('metadata_json', flat=True)[:101])
     drafts = pending_evidence(actor)
     if len(messages) + int(new_message) > 100 or len(drafts) > 100:
         raise WorkflowError('image_staging_limit', 409)
     files = [file for row in messages for file in row.get('images', [])]
+    files += [row['audio'] for row in messages if row.get('audio')]
     files += [file for row in drafts for file in row.get('files', [])]
     # A message and its proposal reference the same original, not two uploads.
     known = {file['path']: file for file in files if file.get('path')}
     return sum(file['bytes'] for file in known.values()) + sum(file['bytes'] for file in files if not file.get('path'))
 
 
-def create_image_turn(*, user, conversation, content, files, session_key=''):
-    from .agent_read_runtime import _fresh_access
+def create_image_turn(*, user, conversation, content, files, session_key='', audio=None):
+    from .agent_read_runtime import _fresh_access, MAX_INPUT
     from .agent_pilot import pilot_status, MAX_TURNS
     from .chat_service import create_user_turn
     actor, _, _ = _fresh_access(user, conversation.pk)
     status = pilot_status(actor)
     if status['turns'] >= MAX_TURNS:
         raise WorkflowError('pilot_turn_limit', 403)
-    files, infos = validated(files)
+    files, infos = validated(files) if files else ([], [])
+    from .agent_audio import validated as validate_audio
+    voice = validate_audio(audio) if audio else None
+    if voice and len(content) > MAX_INPUT:
+        raise WorkflowError('input_limit', 400)
+    if not infos and not voice:
+        raise WorkflowError('image_input_invalid', 400)
+    total_bytes = sum(info['bytes'] for info in infos) + (voice['bytes'] if voice else 0)
+    if total_bytes > MAX_TOTAL:
+        raise WorkflowError('image_input_invalid', 400)
     saved = []
     try:
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=actor.pk)
             _fresh_access(actor, conversation.pk)
-            if staged_bytes(actor, new_message=True) + sum(info['bytes'] for info in infos) > 100 * 1024 * 1024:
+            if staged_bytes(actor, new_message=True) + total_bytes > 100 * 1024 * 1024:
                 raise WorkflowError('image_staging_limit', 409)
+            if voice and ChatMessage.objects.filter(conversation=conversation, metadata_json__audio__sha256=voice['sha256']).exists():
+                raise WorkflowError('audio_input_duplicate', 409)
             request, answer = create_user_turn(user=actor, conversation=conversation, content=content, session_key=session_key)
             for file, info in zip(files, infos):
                 uid = uuid4()
                 path = default_storage.save(f'{PRIVATE_PREFIX}{request.public_id.hex}/{uid.hex}{Path(file.name).suffix.lower()}', file)
                 saved.append(path)
                 info.update(id=str(uid), path=path)
-            request.metadata_json = {**request.metadata_json, 'images': infos, 'expected_photo_count': len(infos)}
+            if voice:
+                path = default_storage.save(f'{PRIVATE_PREFIX}{request.public_id.hex}/{uuid4().hex}.wav', audio)
+                saved.append(path)
+                voice.update(path=path)
+            request.metadata_json = {**request.metadata_json, **({'images':infos, 'expected_photo_count':len(infos)} if infos else {}),
+                                     **({'audio':voice} if voice else {})}
             request.save(update_fields=['metadata_json', 'updated_at'])
-            AuditLog.objects.create(user=actor, action='AI_CHAT_IMAGE_INPUT', model='ChatMessage', object_id=str(request.public_id),
-                payload={'conversation_id':str(conversation.public_id), 'images':[{'id':f['id'], 'sha256':f['sha256'], 'bytes':f['bytes']} for f in infos]})
+            AuditLog.objects.create(user=actor, action='AI_CHAT_AUDIO_INPUT' if voice else 'AI_CHAT_IMAGE_INPUT', model='ChatMessage', object_id=str(request.public_id),
+                payload={'conversation_id':str(conversation.public_id), 'images':[{'id':f['id'], 'sha256':f['sha256'], 'bytes':f['bytes']} for f in infos],
+                         **({'audio':{'sha256':voice['sha256'], 'bytes':voice['bytes']}} if voice else {})})
             return request, answer
     except Exception:
         for path in saved:

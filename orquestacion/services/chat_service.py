@@ -221,6 +221,7 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
     proof = message.metadata_json.get('agent_read', {}) if isinstance(message.metadata_json, dict) else {}
     from orquestacion.services.agent_read_context import projected_receipts
     from orquestacion.services.agent_images import projected_images
+    from orquestacion.services.agent_audio import projected_audio
     return {
         "id": str(message.public_id),
         "sequence": message.sequence,
@@ -232,6 +233,7 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
         "created_at": message.created_at.isoformat(),
         "tool_calls": tool_calls,
         'images': projected_images(message) if visible else [],
+        'audio': projected_audio(message) if visible else None,
     }
 
 
@@ -438,6 +440,7 @@ def get_chat_runtime_status(user=None) -> dict[str, Any]:
 
 @transaction.atomic
 def create_user_turn(*, user, conversation: ChatConversation, content: str, session_key: str = "") -> tuple[ChatMessage, ChatMessage]:
+    conversation.title = ChatConversation.objects.select_for_update().get(pk=conversation.pk).title
     text = (content or "").strip()
     if not text:
         raise ValueError("El mensaje no puede ir vacío.")

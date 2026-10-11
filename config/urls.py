@@ -50,6 +50,8 @@ urlpatterns = [
     ),
     path("ia-privada/", ai_chat_views.chat_home, name="ai_private_hub"),
     path("ia-privada/api/conversations/", ai_chat_views.conversations_api, name="ai_private_conversations_api"),
+    path('ia-privada/api/conversations/<uuid:conversation_id>/messages/<uuid:message_id>/audio/',
+         ai_chat_views.message_audio_api, name='ai_private_message_audio_api'),
     path("ia-privada/api/conversations/new/", ai_chat_views.create_conversation_api, name="ai_private_conversation_create_api"),
     path('ia-privada/api/conversations/<uuid:conversation_id>/messages/<uuid:message_id>/images/<uuid:image_id>/',
          ai_chat_views.message_image_api, name='ai_private_message_image_api'),
