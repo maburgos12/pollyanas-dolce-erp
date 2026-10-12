@@ -275,6 +275,7 @@ NAV_GROUPS = [
             ("rrhh", "empleados", "Empleados", "/rrhh/empleados/", ["/rrhh/empleados/"]),
             ("rrhh", "empleados", "Gafetes", "/rrhh/gafetes/", ["/rrhh/gafetes/"]),
             ("rrhh", "cumpleanos", "Cumpleaños", "/rrhh/cumpleanos/", ["/rrhh/cumpleanos/"]),
+            ("rrhh", "clima", "Clima laboral", "/rrhh/clima/", ["/rrhh/clima/"]),
             ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
             ("rrhh", "suspensiones", "Suspensiones", "/rrhh/suspensiones/", ["/rrhh/suspensiones/"]),
             ("rrhh", "incapacidades", "Incapacidades", "/rrhh/incapacidades/", ["/rrhh/incapacidades/"]),
@@ -348,6 +349,11 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
+            if module == "rrhh" and submodule == "clima":
+                from core.access import can_manage_rrhh
+
+                if not can_manage_rrhh(user):
+                    continue
             if module == "rrhh" and submodule == "cumpleanos":
                 from rrhh.services_cumpleanos import puede_ver_cumpleanos
 

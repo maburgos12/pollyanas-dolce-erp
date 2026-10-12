@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}RR. HH. · {{ campana.titulo }}{% endblock %}
+{% block page_title %}{{ campana.titulo }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/clima.css' %}">{% endblock %}
+{% block content %}
+<div class="clima-page">
+  <p><a href="{% url 'rrhh:clima_campanas' %}">← Volver a campañas</a></p>
+  <div class="clima-status" role="status"><strong>Borrador interno</strong><span>Fecha límite prevista: {{ campana.fecha_cierre|date:"d/m/Y" }}. No se han generado accesos ni enviado invitaciones.</span></div>
+  <section class="clima-section" aria-labelledby="participantes"><h2 id="participantes">Padrón de la campaña</h2>
+    <p>{{ participantes.count }} persona{{ participantes.count|pluralize:"s" }}. Los datos de esta lista son una foto del padrón al crearla.</p>
+    <div class="clima-roster-list">{% for persona in participantes %}<div class="clima-persona"><span><strong>{{ persona.nombre }}</strong><small>{{ persona.departamento|default:"Sin departamento" }} · {{ persona.sucursal|default:"Sin sucursal" }}</small></span></div>{% endfor %}</div>
+  </section>
+  <section class="clima-section" aria-labelledby="preguntas"><h2 id="preguntas">Preguntas guardadas</h2>
+    {% for seccion in cuestionario.sections %}<details class="clima-questions"><summary>{{ seccion.title }} · {{ seccion.questions|length }} preguntas</summary><ol>{% for pregunta in seccion.questions %}<li>{{ pregunta.text }} <span>{% if pregunta.type == 'text' %}Respuesta abierta{% else %}Opciones: {{ pregunta.options|join:" · " }}{% endif %}</span></li>{% endfor %}</ol></details>{% endfor %}
+  </section>
+</div>
+{% endblock %}
