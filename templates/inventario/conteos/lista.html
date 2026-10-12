@@ -1,6 +1,6 @@
 {% extends base_template %}{% load static %}
 {% block title %}Conteos de sucursales · Pollyana's Dolce{% endblock %}
-{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20260907-2">{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'inventario/conteos.css' %}?v=20261012-mobile-review-v1">{% endblock %}
 {% block content %}<div class="conteos-page">
 <header class="conteos-heading"><div><h1>Conteos físicos</h1><p>{% if es_app and sucursal_asignada %}{{ sucursal_asignada.nombre }} · Mis conteos y asignaciones{% else %}Capturas de sucursal, revisiones y reconteos.{% endif %}</p></div>{% if puede_preparar %}<a class="count-button" href="{{ preparar_url }}">{% if es_app %}Nuevo conteo de mi sucursal{% else %}Preparar conteo{% endif %}</a>{% endif %}</header>
 {% if es_app and not sucursal_asignada %}<section class="count-empty"><h2>Sin sucursal asignada</h2><p>Tu cuenta no tiene una sucursal operativa asignada. Solicita a administración revisar tu perfil antes de capturar.</p>{% if puede_coordinar %}<a href="{% url 'inventario:conteos_erp:lista' %}">Abrir coordinación de conteos en el ERP</a>{% endif %}</section>{% else %}
