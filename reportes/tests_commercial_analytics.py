@@ -8,6 +8,7 @@ from django.template.loader import render_to_string
 from core.models import Sucursal
 from recetas.models import Receta
 from reportes.models import FactVentaDiaria
+from reportes.sales_confidence import selected_sales_facts
 from reportes.commercial_analytics import _build_panel, commercial_panel_from_request, decompose_products
 
 
@@ -151,3 +152,23 @@ class CommercialAnalyticsTests(TestCase):
         self.assertNotIn('Precio medio realizado',[r['label'] for r in panel['components']])
         self.assertNotIn('Cantidad por producto',[r['label'] for r in panel['components']])
         self.assertEqual(sum(r['amount'] for r in panel['components']),D(50))
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_future_facts_remain_excluded_from_current_panel(self, today):
+        self.fact(2026,11,amount=900)
+        self.fact(2025,11,amount=100)
+        panel = _build_panel(2026,11,None)
+        self.assertIsNone(panel['current'])
+        self.assertEqual(panel['previous'],D(100))
+        self.assertIsNone(panel['annual_current'])
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_monthly_groups_select_lineage_only_in_their_comparison_period(self, today):
+        self.fact(2025,9,amount=100)
+        self.fact(2026,9,amount=150)
+        with patch('reportes.commercial_analytics.selected_sales_facts', wraps=selected_sales_facts) as selected:
+            panel = _build_panel(2026,9,self.closed.id)
+        periods = [call.kwargs for call in selected.call_args_list]
+        self.assertIn({'start_date':date(2026,9,1),'end_date':date(2026,9,10)},periods)
+        self.assertIn({'start_date':date(2025,9,1),'end_date':date(2025,9,10)},periods)
+        self.assertEqual(panel['delta'],D(50))
