@@ -119,7 +119,10 @@ async function controllerChecks() {
     assert.equal(requests.filter(r=>r.method==='POST').length,previous+1);
     assert.equal(element('erp-chat-send-btn').disabled,true);
     assert.equal(element('erp-chat-recover-btn').hidden,false);
+    assert.equal(element('erp-chat-input').value,'Consulta incierta','Keep the original text while admission or completion is uncertain');
+    if (uncertain==='unrelated') element('erp-chat-input').value='Información adicional';
     mode='complete'; await element('erp-chat-recover-btn').listeners.click();
+    assert.equal(element('erp-chat-input').value,uncertain==='unrelated' ? 'Información adicional' : '','Clear only the acknowledged text, never later edits');
     assert.equal(element('erp-chat-send-btn').disabled,false);
     assert.equal(element('erp-chat-new-btn').disabled,false);
   }

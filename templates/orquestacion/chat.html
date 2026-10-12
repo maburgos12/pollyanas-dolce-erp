@@ -468,7 +468,8 @@
       await finishTurn({conversationId, assistantId:tempAssistant.id, audio, photos});
     } catch (error) {
       if (submitted) {
-        state.uncertainTurn = {conversationId, clientRequestId, audio, photos};
+        state.uncertainTurn = {conversationId, clientRequestId, content, audio, photos};
+        if (!inputEl.value) inputEl.value = content;
         try {if (await recoverTurn()) return;} catch (recoveryError) { /* Keep the original input and uncertainty until a fresh GET succeeds. */ }
         statusEl.textContent = 'No pude verificar el resultado. Consulta el resultado guardado antes de reenviar; no repetiré la nota ni la solicitud.';
       } else showError(error);
@@ -519,6 +520,7 @@
     const reply = state.activeConversation.messages.find(message => message.role === 'assistant' && message.client_request_id === pending.clientRequestId);
     if (!reply || !['complete','error'].includes(reply.status)) return false;
     state.uncertainTurn = null;
+    if (inputEl.value === pending.content) inputEl.value = '';
     try {await finishTurn({...pending, assistantId:reply.id}, true, true);}
     catch (error) {
       statusEl.textContent = 'La respuesta quedó guardada. No pude actualizar sus datos complementarios; revisa el historial y la evidencia antes de confirmar.';
