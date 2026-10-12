@@ -2801,7 +2801,16 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         return redirect("seguimiento:mi_seguimiento")
 
     if request.GET.get("source") == "pwa":
-        return redirect(mobile_resume_target(request))
+        target = mobile_resume_target(request)
+        if urlsplit(target).path == "/dashboard/":
+            path, _, fragment = target.partition("#")
+            target = path + ("&" if "?" in path else "?") + "dashboard_loading=1" + ("#" + fragment if fragment else "")
+        return redirect(target)
+    if request.GET.get("dashboard_loading") == "1":
+        query = request.GET.copy()
+        query.pop("dashboard_loading", None)
+        data_url = request.path + ("?" + query.urlencode() if query else "")
+        return render(request, "core/dashboard_loading.html", {"dashboard_loading": True, "dashboard_data_url": data_url})
     if request.GET.get("cut_refresh") == "1":
         if not can_manage_orquestacion(request.user):
             return HttpResponseForbidden()
@@ -2825,6 +2834,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 
     u = request.user
     ctx = {
+        "dashboard_base_template": "core/dashboard_fragment_base.html" if request.headers.get("X-ERP-Dashboard") == "fragment" else "base.html",
         "can_view_recetas": False,
         "can_import": False,
         "can_review_matching": False,

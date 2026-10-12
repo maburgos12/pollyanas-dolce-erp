@@ -11,7 +11,7 @@
     <link rel="apple-touch-icon" href="{% static 'apple-touch-icon.png' %}?v=20260525-logo-v1">
     <link rel="manifest" href="{% static 'manifest.webmanifest' %}?v=20260622-erp-pwa-v1">
     {% if request.user.is_authenticated %}
-    <script src="{% static 'js/erp_mobile_navigation.js' %}?v=20261011-mobile-v1" data-user="{{ request.user.pk }}" data-method="{{ request.method }}" defer></script>
+    <script src="{% static 'js/erp_mobile_navigation.js' %}?v=20261012-mobile-v2" data-user="{{ request.user.pk }}" data-method="{{ request.method }}" defer></script>
     {% endif %}
     <meta name="theme-color" content="#8B2252">
     <meta name="mobile-web-app-capable" content="yes">
@@ -20,11 +20,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet"{% if dashboard_loading %} media="print" onload="this.media='all'"{% endif %}>
     <!-- ponytail: CDN icons keep this Django UI useful without adding a frontend build; self-host if CSP/offline matters. -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
-    <script defer src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
+    <link rel="stylesheet"{% if dashboard_loading %} media="print" onload="this.media='all'"{% endif %} href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.44.0/dist/tabler-icons.min.css">
+    <link rel="stylesheet"{% if dashboard_loading %} media="print" onload="this.media='all'"{% endif %} href="https://fonts.googleapis.com/css2?family=Material+Symbols+Sharp:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
+    <script {% if dashboard_loading %}async{% else %}defer{% endif %} src="https://cdn.jsdelivr.net/npm/lucide@1.21.0/dist/umd/lucide.min.js"></script>
     <link rel="stylesheet" href="/static/css/styles.css?v=20260926-production-table-v3">
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
@@ -1240,7 +1240,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261011-mobile-continuity-v13').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261012-dashboard-loading-v14').catch(function () {});
         }
     })();
     </script>

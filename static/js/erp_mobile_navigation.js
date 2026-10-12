@@ -31,21 +31,23 @@
   var key = "erp_resume_" + user;
   var main = document.querySelector(".main-content");
   var sidebar = document.querySelector(".sidebar-nav");
+  var ready = !document.querySelector("[data-dashboard-loading]");
   var saved;
   try { saved = JSON.parse(localStorage.getItem(key)); } catch (_) {}
   var resume = current.hash === "#erp-resume";
   var navigation = performance.getEntriesByType("navigation")[0];
   if (resume) history.replaceState(null, "", current.pathname + current.search);
   if (saved && saved.url === url && (resume || (navigation && navigation.type === "reload"))) {
-    window.addEventListener("load", function () {
+    window.addEventListener(ready ? "load" : "erp:dashboard-ready", function () {
       window.scrollTo(0, Math.max(0, Number(saved.y) || 0));
       if (main) main.scrollTop = Math.max(0, Number(saved.mainY) || 0);
       if (sidebar) sidebar.scrollTop = Math.max(0, Number(saved.sidebarY) || 0);
     }, {once: true});
   }
   var closing = false;
+  window.addEventListener("erp:dashboard-ready", function () { ready = true; }, {once: true});
   function save() {
-    if (closing) return;
+    if (closing || !ready) return;
     try {
       localStorage.setItem(key, JSON.stringify({url: url, y: window.scrollY, mainY: main ? main.scrollTop : 0, sidebarY: sidebar ? sidebar.scrollTop : 0}));
       document.cookie = key + "=" + encodeURIComponent(url) + "; Max-Age=86400; Path=/; SameSite=Lax" + (location.protocol === "https:" ? "; Secure" : "");

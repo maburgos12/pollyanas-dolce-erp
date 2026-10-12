@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = name => fs.readFileSync(path.join(__dirname, '..', 'static/js', name), 'utf8');
-function mobile({url='https://erp.test/rrhh/gafetes/?page=2&q=private', user='7', standalone=true, saved, active='7', type='navigate'}={}) {
+function mobile({url='https://erp.test/rrhh/gafetes/?page=2&q=private', user='7', standalone=true, saved, active='7', type='navigate', loading=false}={}) {
   const storage = new Map();
   if (saved) storage.set('erp_resume_'+active, JSON.stringify(saved));
   storage.set('erp_resume_active', active);
@@ -14,10 +14,10 @@ function mobile({url='https://erp.test/rrhh/gafetes/?page=2&q=private', user='7'
     performance:{getEntriesByType:()=>[{type}]}, history:{replaceState(){}},
     document:{currentScript:{dataset:{user,method:'GET'}},cookie:'',hidden:false,
       querySelectorAll:()=>[{href:'https://erp.test/rrhh/gafetes/'}],
-      querySelector:s=>s==='.main-content'?main:sidebar,
+      querySelector:s=>s==='[data-dashboard-loading]'?(loading?{}:null):s==='.main-content'?main:sidebar,
       addEventListener:(n,f)=>events[n]=f},
     window:{matchMedia:()=>({matches:false}),scrollY:320,scrollTo:(x,y)=>context.window.scrollY=y,
-      location:new URL(url),setTimeout:fn=>fn(),clearTimeout(){},addEventListener:(n,f)=>events[n]=f}};
+      location:new URL(url),setTimeout:fn=>fn(),clearTimeout(){},addEventListener:(n,f)=>{const previous=events[n];events[n]=previous?()=>{previous();f()}:f}}};
   vm.runInNewContext(source('erp_mobile_navigation.js'), context);
   return {context,storage,events,main,sidebar};
 }
@@ -34,6 +34,13 @@ result=mobile({user:'8',active:'7',saved:{url:'/rrhh/gafetes/',y:880}});
 assert(!result.storage.has('erp_resume_7'));assert(result.storage.has('erp_resume_8'));
 result=mobile({standalone:false});assert(!result.storage.has('erp_resume_7'));
 result=mobile({user:'',saved:{url:'/rrhh/gafetes/',y:880}});assert(!result.storage.has('erp_resume_7'));
+
+result=mobile({loading:true,url:'https://erp.test/rrhh/gafetes/?page=2#erp-resume',saved:{url:'/rrhh/gafetes/?page=2',y:880,mainY:100}});
+result.context.document.hidden=true; result.events.visibilitychange();
+assert.equal(JSON.parse(result.storage.get('erp_resume_7')).y,880);
+assert.equal(result.events.load,undefined);
+result.events['erp:dashboard-ready']();
+assert.equal(result.context.window.scrollY,880);
 
 async function cut({hidden=false,busy=false,ok=true}={}) {
   const timers=new Map(),events={},replacements=[],toasts=[];let id=0,requests=0;

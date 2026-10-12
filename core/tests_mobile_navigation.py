@@ -25,10 +25,10 @@ class MobileNavigationTests(TestCase):
             with self.subTest(target=target):
                 self.client.cookies[f'erp_resume_{self.user.pk}'] = quote(target, safe='')
                 response = self.client.get('/dashboard/?source=pwa')
-                self.assertEqual(response['Location'], '/dashboard/')
+                self.assertEqual(response['Location'], '/dashboard/?dashboard_loading=1')
         self.client.cookies.pop(f'erp_resume_{self.user.pk}')
         self.client.cookies['erp_resume_999999'] = quote('/rrhh/gafetes/', safe='')
-        self.assertEqual(self.client.get('/dashboard/?source=pwa')['Location'], '/dashboard/')
+        self.assertEqual(self.client.get('/dashboard/?source=pwa')['Location'], '/dashboard/?dashboard_loading=1')
 
     def test_logout_clears_navigation_cookie(self):
         response = self.client.get('/logout/')
