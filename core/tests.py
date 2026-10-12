@@ -398,6 +398,7 @@ class NavigationActiveStateTests(TestCase):
                 "Catálogos",
                 "Empleados",
                 "Gafetes",
+                "Clima laboral",
                 "Permisos",
                 "Suspensiones",
                 "Incapacidades",
