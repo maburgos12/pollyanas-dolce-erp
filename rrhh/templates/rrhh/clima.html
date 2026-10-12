@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}RR. HH. · Clima laboral{% endblock %}
+{% block page_title %}Clima laboral{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/clima.css' %}">{% endblock %}
+{% block content %}
+<div class="clima-page">
+  <p class="clima-intro">Prepara una encuesta con el cuestionario acordado y una selección del padrón de RR. HH. Las campañas creadas aquí son borradores internos: cada persona tiene liga y QR, pero aún no se capturan respuestas ni se envían invitaciones.</p>
+  <section class="clima-section" aria-labelledby="nueva-campana">
+    <h2 id="nueva-campana">Nueva campaña</h2>
+    {% if not empleados %}<p>No hay empleados activos de Pollyana en este entorno. Cuando el padrón esté disponible, podrás preparar una campaña.</p>{% else %}
+    <form method="post">
+      {% csrf_token %}
+      {% if form.non_field_errors %}<div class="clima-error" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+      <div class="clima-fields">
+        {% for field in form %}<div class="clima-field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% if field.errors %}<div class="clima-error" role="alert">{{ field.errors }}</div>{% endif %}</div>{% endfor %}
+      </div>
+      <fieldset class="clima-roster">
+        <legend>Personas incluidas <span>({{ empleados|length }} activas)</span></legend>
+        <p>Selecciona a quienes participarán. El nombre y departamento se conservarán como estaban al crear la campaña. El estado de contacto solo indica formato registrado, no confirma que la persona lo controle.</p>
+        <div class="clima-roster-list">
+          {% for empleado in empleados %}<label class="clima-persona"><input type="checkbox" name="empleados" value="{{ empleado.pk }}" {% if empleado.seleccionado %}checked{% endif %}><span><strong>{{ empleado.nombre }}</strong><small>{{ empleado.get_departamento_display|default:"Sin departamento" }} · {{ empleado.sucursal_display|default:"Sin sucursal" }}</small><small>Contacto personal: {{ empleado.contacto_estado }}</small></span></label>{% endfor %}
+        </div>
+      </fieldset>
+      <button class="btn btn-primary" type="submit">Guardar campaña en borrador</button>
+    </form>{% endif %}
+  </section>
+  <section class="clima-section" aria-labelledby="cuestionario">
+    <h2 id="cuestionario">Cuestionario de esta etapa</h2>
+    <p>23 preguntas de escala y 3 abiertas. El departamento se tomará del padrón, sin pedirlo de nuevo.</p>
+    {% for seccion in cuestionario.sections %}<details class="clima-questions"><summary>{{ seccion.title }} · {{ seccion.questions|length }} preguntas</summary><ol>{% for pregunta in seccion.questions %}<li>{{ pregunta.text }} <span>{% if pregunta.type == 'text' %}Respuesta abierta{% else %}Opciones: {{ pregunta.options|join:" · " }}{% endif %}</span></li>{% endfor %}</ol></details>{% endfor %}
+  </section>
+  <section class="clima-section" aria-labelledby="campanas"><h2 id="campanas">Campañas en borrador</h2>
+    {% if campanas %}<ul class="clima-campanas">{% for campana in campanas %}<li><a href="{% url 'rrhh:clima_detalle' campana.pk %}">{{ campana.titulo }}</a><span>{{ campana.total }} personas · fecha prevista {{ campana.fecha_cierre|date:"d/m/Y" }}</span></li>{% endfor %}</ul>{% else %}<p>Aún no hay campañas preparadas.</p>{% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,310 @@
+{
+  "source_url": "https://forms.gle/xhg9hTXfJEJcevwg6",
+  "sections": [
+    {
+      "title": "Liderazgo y Supervisión",
+      "questions": [
+        {
+          "text": "Mi Jefe directo comunica claramente lo que espera de mi trabajo.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Recibo retroalimentación oportuna sobre mi desempeño.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Mi Jefe directo trata al equipo con respeto y justicia",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Confío en las decisiones que toma mi Jefe.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Relaciones y trabajo en equipo",
+      "questions": [
+        {
+          "text": "¿Existe un buen ambiente de colaboración entre compañeros?",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Me siento respetado/a por mis compañeros",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo Ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Los conflictos se manejan de manera adecuada.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Puedo expresar mis ideas sin temor a represalias.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Comunicación organizacional",
+      "questions": [
+        {
+          "text": "La información importante llega a tiempo.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Conozco los objetivos de la empresa.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "La comunicación entre áreas es efectiva.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Condiciones de trabajo",
+      "questions": [
+        {
+          "text": "Cuento con los recursos necesarios para hacer bien mi trabajo.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "La carga de trabajo es adecuada.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Mi lugar de trabajo es seguro y cómodo.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Desarrollo y crecimiento laboral",
+      "questions": [
+        {
+          "text": "Tengo oportunidades de aprendizaje y desarrollo profesional.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "La empresa promueve el crecimiento interno.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Recibo apoyo para mejorar mis habilidades.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Reconocimiento y Motivación",
+      "questions": [
+        {
+          "text": "Mi trabajo es valorado y reconocido.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Me siento motivado para dar lo mejor de mí.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "El esfuerzo adicional es reconocido de manera justa.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Compromiso y bienestar",
+      "questions": [
+        {
+          "text": "Me siento orgulloso de trabajar en esta empresa.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Recomendaría esta empresa como un buen lugar para trabajar.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        },
+        {
+          "text": "Existe un equilibrio adecuado entre trabajo y vida personal.",
+          "type": "choice",
+          "options": [
+            "Totalmente de acuerdo",
+            "De acuerdo",
+            "Ni de acuerdo ni en desacuerdo",
+            "En desacuerdo",
+            "Totalmente en desacuerdo"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Opinión abierta",
+      "questions": [
+        {
+          "text": "¿Qué es lo que más te gusta de trabajar aquí?",
+          "type": "text"
+        },
+        {
+          "text": "¿Qué mejorarías del ambiente laboral?",
+          "type": "text"
+        },
+        {
+          "text": "¿Qué acciones concretas propondrías para mejorar el clima laboral?",
+          "type": "text"
+        }
+      ]
+    }
+  ]
+}

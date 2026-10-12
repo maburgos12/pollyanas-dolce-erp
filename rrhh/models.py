@@ -2874,3 +2874,29 @@ class ImportacionNominaContpaq(models.Model):
 
     def __str__(self) -> str:
         return f"CONTPAQ {self.periodo_inicio} - {self.periodo_fin}"
+
+
+class CampanaClima(models.Model):
+    titulo = models.CharField(max_length=160)
+    fecha_cierre = models.DateField()
+    cuestionario = models.JSONField()
+    creada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    creada_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-creada_en"]
+
+    def __str__(self) -> str:
+        return self.titulo
+
+
+class ParticipanteClima(models.Model):
+    campana = models.ForeignKey(CampanaClima, on_delete=models.CASCADE, related_name="participantes")
+    empleado = models.ForeignKey(Empleado, on_delete=models.PROTECT)
+    nombre = models.CharField(max_length=180)
+    departamento = models.CharField(max_length=40, blank=True)
+    sucursal = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["campana", "empleado"], name="clima_participante_unico")]
+        ordering = ["nombre", "id"]

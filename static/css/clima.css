@@ -1,0 +1,28 @@
+.clima-page{max-width:1100px;margin:0 auto 3rem;color:var(--texto,#3d2b2b)}
+.clima-page a{color:var(--vino,#8b2252)}
+.clima-intro{max-width:70ch;line-height:1.6}
+.clima-section{margin:1.5rem 0;padding:1.5rem;background:#fff;border:1px solid #e9dedf;border-radius:12px}
+.clima-section h2{font-size:1.35rem;margin:0 0 .75rem}
+.clima-section p{line-height:1.55}
+.clima-fields{display:flex;flex-wrap:wrap;gap:1rem;margin:1.25rem 0}
+.clima-field{display:flex;flex-direction:column;gap:.4rem;min-width:min(100%,260px);flex:1}
+.clima-field label,.clima-roster legend{font-weight:700}
+.clima-field input{padding:.7rem;border:1px solid #8b787c;border-radius:8px;font:inherit}
+.clima-field input:focus-visible,.clima-persona input:focus-visible{outline:3px solid #c9a84c;outline-offset:2px}
+.clima-roster{border:0;padding:0;margin:1.5rem 0}
+.clima-roster legend span{font-weight:400;color:#66545a}
+.clima-roster-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:.5rem;max-height:400px;overflow:auto}
+.clima-persona{display:flex;align-items:flex-start;gap:.75rem;padding:.65rem .8rem;border:1px solid #e9dedf;border-radius:8px;cursor:pointer}
+.clima-persona input{margin-top:.25rem;accent-color:#8b2252}
+.clima-persona span{display:flex;flex-direction:column;gap:.15rem}
+.clima-persona small{color:#66545a;font-size:.85rem}
+.clima-error{color:#9b1732;margin:.35rem 0}
+.clima-questions{border-top:1px solid #e9dedf;padding:.8rem 0}
+.clima-questions summary{cursor:pointer;font-weight:700}
+.clima-questions li{padding:.35rem 0;line-height:1.45}
+.clima-questions li span{display:block;color:#66545a;font-size:.85rem}
+.clima-campanas{list-style:none;padding:0;margin:0}
+.clima-campanas li{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid #e9dedf;padding:.85rem 0}
+.clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
+.clima-qr{display:block;width:min(100%,240px);height:auto;margin:1rem 0}
+@media(max-width:600px){.clima-section{padding:1rem}.clima-campanas li{flex-direction:column}.clima-roster-list{max-height:500px}}

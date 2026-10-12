@@ -7,6 +7,7 @@ from . import (
     views,
     views_gafetes,
     views_cumpleanos,
+    views_clima,
     views_asistencia,
     views_documentos,
     views_incapacidades,
@@ -27,6 +28,10 @@ router.register(r"api/vacaciones", api_views.SolicitudVacacionesViewSet, basenam
 router.register(r"api/prestamos", api_views.PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
+    path("clima/", views_clima.campanas_clima, name="clima_campanas"),
+    path("clima/<int:pk>/", views_clima.detalle_clima, name="clima_detalle"),
+    path("clima/<int:pk>/participante/<int:participante_id>/acceso/", views_clima.acceso_individual_clima, name="clima_acceso_individual"),
+    path("clima/acceso/<str:token>/", views_clima.acceso_publico_clima, name="clima_acceso_publico"),
     path("", views.empleados, name="home"),
     path("api/me/", api_views.capital_humano_me, name="capital_humano_me"),
     path("api/mi-perfil/", api_views.mi_perfil, name="rrhh_mi_perfil"),
