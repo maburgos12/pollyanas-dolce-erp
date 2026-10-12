@@ -1,0 +1,14 @@
+{% load humanize %}
+    <article data-cut-fragment="tickets" class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value {% if not daily_sales_snapshot.tickets_available %}is-warning{% endif %}">
+        {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+      </div>
+      <div class="home-exec-kpi-label">Ticket promedio</div>
+      <div class="home-exec-note">
+        {% if daily_sales_snapshot.tickets_available %}
+          {{ daily_sales_snapshot.total_tickets|intcomma }} tickets confirmados
+        {% else %}
+          Point no entregó tickets válidos para el corte visible
+        {% endif %}
+      </div>
+    </article>
