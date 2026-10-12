@@ -6,6 +6,9 @@ from django.test import TestCase, SimpleTestCase
 
 from core.models import Sucursal
 from reportes.models import FactVentaDiaria
+from reportes.sales_confidence import _source_priority, selected_sales_facts
+from django.db.models import Exists, OuterRef, Value
+from django.db.models.functions import Coalesce
 from rentabilidad.views_rentabilidad import _build_productos_panel
 
 
@@ -58,6 +61,34 @@ class SalesConfidenceTests(TestCase):
         self.assertIsNone(result["margin"])
         self.assertEqual(result["days_observed"], 0)
         self.assertIsNone(result["net_sales"])
+
+
+    def test_grouped_selection_matches_old_precedence_for_days_branches_nulls_and_ties(self):
+        other = Sucursal.objects.create(codigo="OTHER-TEST", nombre="Otra")
+        for index, branch in enumerate((self.branch, other, None)):
+            for day in (10, 11):
+                sources = ("AUTHORITATIVE", "V2_FACT", "LEGACY", "OTHER")
+                if day == 11:
+                    sources = sources[index + 1:]
+                for source in sources:
+                    FactVentaDiaria.objects.create(fecha=date(2025,9,day), sucursal=branch,
+                        producto_clave=f"{index}-{day}-{source}", source_kind=source,
+                        venta_total=100, venta_neta=100, cantidad=1)
+        candidates = FactVentaDiaria.objects.filter(fecha__range=(date(2025,9,1),date(2025,9,30))).order_by().annotate(
+            priority=_source_priority(), identity=Coalesce("sucursal_id", Value(-1)))
+        preferred = candidates.filter(fecha=OuterRef("fecha"), identity=OuterRef("identity"), priority__lt=OuterRef("priority"))
+        expected = set(candidates.annotate(preferred=Exists(preferred)).filter(preferred=False).values_list("pk",flat=True))
+        actual = selected_sales_facts(start_date=date(2025,9,1), end_date=date(2025,9,30))
+        self.assertEqual(set(actual.values_list("pk",flat=True)), expected)
+        self.assertTrue(all(value is False for value in actual.values_list("has_preferred",flat=True)))
+        self.assertTrue(actual.filter(sucursal=None).exists())
+        self.assertTrue(actual.filter(source_kind="OTHER").exists())
+
+    def test_source_priority_is_for_the_day_not_an_alternate_product(self):
+        original = self.fact(key="official", source="AUTHORITATIVE")
+        self.fact(key="different-product", source="V2_FACT")
+        facts = selected_sales_facts(start_date=date(2025,9,1), end_date=date(2025,9,30))
+        self.assertEqual(list(facts.values_list("pk",flat=True)), [original.pk])
 
 
 class ReconciliationTests(SimpleTestCase):
