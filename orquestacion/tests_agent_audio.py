@@ -30,6 +30,19 @@ def note(frames=16000, rate=16000, channels=1):
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True,
                    AI_AGENT_READ_MODEL=pilot.MODEL, OPENAI_API_KEY='fake-test-key')
 class AgentAudioTests(TransactionTestCase):
+    @override_settings(AI_AGENT_READ_ENABLED=False)
+    def test_legacy_text_client_also_preserves_recovery_reference(self):
+        reference=str(uuid4())
+        request,answer=self.messages
+        answer.metadata_json={'client_request_id':reference};answer.save()
+        provider=Mock()
+        provider.chat.completions.create.return_value=SimpleNamespace(choices=[SimpleNamespace(
+            message=SimpleNamespace(content='Respuesta local.',tool_calls=[]))])
+        with patch('orquestacion.services.chat_service._model_client',return_value=provider):
+            execute_chat_turn(user=self.user,conversation=self.chat,user_message=request,assistant_message=answer)
+        answer.refresh_from_db()
+        self.assertEqual(serialize_message(answer)['client_request_id'],reference)
+
     def test_recovery_reference_is_validated_before_admission_and_projected_for_owner(self):
         from django.urls import reverse
         from orquestacion.services.chat_service import serialize_conversation_detail

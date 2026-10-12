@@ -554,6 +554,7 @@ def execute_chat_turn(*, user, conversation: ChatConversation, user_message: Cha
     assistant_message.content = final_text.strip()
     assistant_message.status = ChatMessage.STATUS_COMPLETE
     assistant_message.metadata_json = {
+        **(assistant_message.metadata_json if isinstance(assistant_message.metadata_json, dict) else {}),
         "model_name": model_name,
         "tool_events": [
             {
