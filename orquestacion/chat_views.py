@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import io
+from uuid import UUID
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
@@ -107,6 +108,13 @@ def stream_message_api(request, conversation_id):
     _ensure_ai_private_access(request.user)
     conversation = get_chat_conversation(request.user, conversation_id)
     payload = request.POST if request.content_type == 'multipart/form-data' else _parse_json_body(request)
+    client_request_id = payload.get('client_request_id')
+    if client_request_id is not None:
+        try:
+            if not isinstance(client_request_id, str): raise ValueError
+            client_request_id = str(UUID(client_request_id))
+        except ValueError:
+            return JsonResponse({'detail':'Referencia de envío inválida.'}, status=400)
     files = request.FILES.getlist('files')
     audios = request.FILES.getlist('audio')
     if len(audios) > 1:
@@ -144,6 +152,9 @@ def stream_message_api(request, conversation_id):
             session_key=request.session.session_key or '',
         )
 
+    if client_request_id:
+        assistant_message.metadata_json = {**assistant_message.metadata_json, 'client_request_id':client_request_id}
+        assistant_message.save(update_fields=['metadata_json', 'updated_at'])
     if count:
         user_message.metadata_json = {**user_message.metadata_json, 'expected_photo_count': count}
         user_message.save(update_fields=['metadata_json', 'updated_at'])

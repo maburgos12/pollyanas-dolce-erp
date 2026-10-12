@@ -75,6 +75,23 @@ class AgentReadRuntimeTests(TestCase):
         self.assertEqual(self.messages[1].status, ChatMessage.STATUS_ERROR)
         self.assertFalse(ChatToolCall.objects.filter(status=ChatToolCall.STATUS_RUNNING).exists())
 
+    def test_identical_read_reuses_evidence_without_repeating_gateway_or_context(self):
+        self.run_turn([response(call(arguments='{"q":"Horno"}')),
+            response(call(arguments=' { "q" : "Horno" } ',call_id='same-read')),response()])
+        self.assertEqual(ChatToolCall.objects.count(),1)
+        self.assertEqual(AuditLog.objects.filter(action='AI_GATEWAY_TOOL_INVOKE').count(),1)
+        reused=json.loads(self.requests[-1]['input'][-1]['output'])
+        self.assertEqual(reused['already_consulted'],True)
+        self.assertEqual(reused['tool_call_id'],str(ChatToolCall.objects.get().public_id))
+        self.assertNotIn('items',reused)
+
+    def test_reused_read_still_revalidates_resource_scope(self):
+        def move(round):
+            if round==2: Activo.objects.filter(pk=self.asset.pk).update(sucursal=self.other_branch)
+        self.run_turn([response(call()),response(call(call_id='again'))],hook=move)
+        self.assert_failed()
+        self.assertEqual(ChatToolCall.objects.count(),1)
+
     def test_natural_answer_keeps_server_evidence_and_history_in_next_turn(self):
         from orquestacion.services.chat_service import serialize_message
         from orquestacion.services.agent_read_context import ANSWER_FORMAT
@@ -397,10 +414,23 @@ class AgentReadRuntimeTests(TestCase):
         self.assertIn("límite", self.messages[1].__class__.objects.get(pk=self.messages[1].pk).content.lower())
 
     def test_ten_tool_budget_checked_before_each_handler(self):
-        self.run_turn([response(*(call(call_id=str(i)) for i in range(11)))])
+        self.run_turn([response(*(call(arguments=json.dumps({'q':f'Horno {i}'}),call_id=str(i)) for i in range(11)))])
         self.assertEqual(ChatToolCall.objects.count(), 10)
         self.assertEqual(AuditLog.objects.filter(action="AI_GATEWAY_TOOL_INVOKE").count(), 10)
         self.assert_failed()
+
+    def test_reused_reads_still_count_towards_tool_attempt_limit(self):
+        self.run_turn([response(*(call(call_id=str(i)) for i in range(11)))])
+        self.assert_failed()
+        self.assertEqual(ChatToolCall.objects.count(),1)
+        self.messages[1].refresh_from_db()
+        self.assertEqual(self.messages[1].metadata_json['agent_read']['reused_read_calls'],9)
+        self.assertEqual(self.messages[1].metadata_json['agent_read']['error_code'],'tool_limit')
+
+    def test_oversized_duplicate_arguments_are_not_accepted_through_reuse(self):
+        self.run_turn([response(call()),response(call(arguments=' '*6001+'{"q":"Horno"}',call_id='large')),response()])
+        self.assertEqual(ChatToolCall.objects.count(),2)
+        self.assertEqual(ChatToolCall.objects.latest('pk').result.result_json['error']['code'],'invalid_arguments')
 
     def test_provider_timeout_and_audit_failure_are_safe(self):
         self.run_turn([RuntimeError("secret API key traceback")])

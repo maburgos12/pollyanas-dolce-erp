@@ -39,6 +39,7 @@
       <div>
         <h1 class="erp-chat-main-title" id="erp-chat-main-title">Nueva conversación</h1>
         <p class="erp-chat-main-subtitle" id="erp-chat-main-subtitle">La información disponible depende de tus permisos y de las herramientas habilitadas.</p>
+        <p class="agent-source" id="erp-chat-budget" hidden></p>
       </div>
       <span class="erp-chat-badge {% if not runtime_status.ready %}is-warning{% endif %}" id="erp-chat-runtime-badge">
         {% if runtime_status.ready %}
@@ -87,6 +88,7 @@
         <audio id="erp-chat-audio-preview" controls hidden preload="metadata" aria-label="Escuchar nota antes de enviar"></audio>
         <p id="erp-chat-audio-status" role="status" aria-live="polite">Hasta 3 minutos. La transcripción aparecerá en el historial.</p>
         <div class="erp-chat-hint" id="erp-chat-status" role="status" aria-live="polite"></div>
+        <button type="button" class="erp-chat-prompt" id="erp-chat-recover-btn" hidden>Consultar resultado guardado</button>
       </div>
     </div>
   </section>
@@ -113,6 +115,7 @@
     sending: false,
     loading: false,
     creating: false,
+    uncertainTurn: null,
   };
 
   const listEl = document.getElementById("erp-chat-conversation-list");
@@ -124,6 +127,7 @@
   const inputEl = document.getElementById("erp-chat-input");
   const sendBtn = document.getElementById("erp-chat-send-btn");
   const statusEl = document.getElementById("erp-chat-status");
+  const recoverBtn = document.getElementById('erp-chat-recover-btn');
 
   const photoInput = document.getElementById('erp-chat-photos');
   const voice = ERPVoice.attach({button:document.getElementById('erp-chat-record'), input:document.getElementById('erp-chat-audio'),
@@ -155,6 +159,16 @@
   }
 
   function renderConversationList() {
+    const locked = state.sending || state.loading || state.creating || state.recording || Boolean(state.uncertainTurn);
+    sendBtn.disabled = locked || !runtimeStatus.ready;
+    photoInput.disabled = locked;
+    voice.setBusy(state.sending || state.loading || state.creating || Boolean(state.uncertainTurn) || !runtimeStatus.ready);
+    document.getElementById('erp-chat-new-btn').disabled = locked;
+    recoverBtn.hidden = !state.uncertainTurn;
+    recoverBtn.disabled = state.sending || state.loading || state.creating || state.recording;
+    const budget = document.getElementById('erp-chat-budget');
+    budget.hidden = !runtimeStatus.pilot;
+    if (runtimeStatus.pilot) budget.textContent = `Piloto: ${runtimeStatus.pilot.turns}/${runtimeStatus.pilot.max_turns} turnos · Límite USD ${runtimeStatus.pilot.max_usd} · Reserva preventiva USD ${runtimeStatus.pilot.reserved_usd}. Consulta el consumo estimado en cada respuesta.`;
     listEl.innerHTML = "";
     if (!state.conversations.length) {
       listEl.innerHTML = '<div class="erp-chat-conversation"><p class="erp-chat-conversation-preview">Todavía no hay conversaciones guardadas.</p></div>';
@@ -291,6 +305,7 @@
       const response = await fetch(`${apiBase}/conversations/${id}/`, { credentials: "same-origin" });
       if (!response.ok) throw new Error("No pude abrir la conversación. Intenta nuevamente.");
       state.activeConversation = await response.json();
+      if (state.activeConversation.runtime_status) Object.assign(runtimeStatus, state.activeConversation.runtime_status);
       renderMessages();
     } finally {
       state.loading = false;
@@ -368,7 +383,7 @@
   async function sendMessage() {
     const audio = voice.file;
     const content = inputEl.value.trim() || (audio ? 'Nota de voz' : '');
-    if (!content || state.recording || state.sending || state.loading || state.creating || !runtimeStatus.ready) return;
+    if (!content || state.recording || state.sending || state.loading || state.creating || state.uncertainTurn || !runtimeStatus.ready) return;
     const photos = Array.from(photoInput.files || []);
     if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)+(audio?.size || 0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco fotos, 10 MB por foto y 20 MB en total.'; return;}
     state.sending = true;
@@ -382,18 +397,24 @@
     statusEl.textContent = audio ? "Transcribiendo la nota y procesando tu consulta…" : "Procesando tu consulta…";
 
     let tempAssistant = null;
+    let conversationId = null;
+    let submitted = false;
+    let clientRequestId = null;
     try {
+      clientRequestId = crypto.randomUUID();
       if (!state.activeConversation || !state.activeConversation.conversation?.id) {
         await createConversation();
       }
-      const conversationId = state.activeConversation.conversation.id;
+      conversationId = state.activeConversation.conversation.id;
       tempAssistant = appendOptimisticMessages(content);
       inputEl.value = "";
 
       const imageBody = new FormData();
       imageBody.append('content', content);
+      imageBody.append('client_request_id', clientRequestId);
       photos.forEach(file => imageBody.append('files', file));
       if (audio) imageBody.append('audio', audio);
+      submitted = true;
       const response = await fetch(`${apiBase}/conversations/${conversationId}/stream/`, {
         method: "POST",
         credentials: "same-origin",
@@ -402,7 +423,7 @@
           "Accept":"text/event-stream, application/json",
           "X-CSRFToken": csrfToken,
         },
-        body: (photos.length || audio) ? imageBody : JSON.stringify({ content }),
+        body: (photos.length || audio) ? imageBody : JSON.stringify({ content, client_request_id: clientRequestId }),
       });
 
       if (response.redirected) throw new Error('La sesión del formulario caducó. Recarga la conversación antes de reenviar.');
@@ -444,11 +465,35 @@
       }
 
       if (!terminalEvent) throw new Error("La conexión se cerró antes de recibir el resultado. Abre la conversación antes de reenviar.");
-      await loadConversation(conversationId, true);
+      await finishTurn({conversationId, assistantId:tempAssistant.id, audio, photos});
+    } catch (error) {
+      if (submitted) {
+        state.uncertainTurn = {conversationId, clientRequestId, audio, photos};
+        try {if (await recoverTurn()) return;} catch (recoveryError) { /* Keep the original input and uncertainty until a fresh GET succeeds. */ }
+        statusEl.textContent = 'No pude verificar el resultado. Consulta el resultado guardado antes de reenviar; no repetiré la nota ni la solicitud.';
+      } else showError(error);
+    } finally {
+      state.sending = false;
+      sendBtn.disabled = !runtimeStatus.ready;
+      inputEl.disabled = false;
+      photoInput.disabled = false;
+      voice.setBusy(!runtimeStatus.ready);
+      document.getElementById("erp-chat-new-btn").disabled = false;
+      renderConversationList();
+      if (document.getElementById("agent-processes").open) refreshProcesses();
+      inputEl.focus();
+    }
+  }
+
+  async function finishTurn({conversationId, assistantId, audio, photos}, loaded = false, recovery = false) {
+      if (!loaded) await loadConversation(conversationId, true);
       if (audio) {voice.clear(); document.getElementById('erp-chat-audio-status').textContent='';}
       await refreshConversations();
-      if (photos.length) {
-        const reply = state.activeConversation.messages.find(message => message.id === tempAssistant.id);
+      if (photos.length && recovery) {
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Imágenes guardadas en el historial. Revisa su asociación a la propuesta antes de confirmar.';
+      }
+      if (photos.length && !recovery) {
+        const reply = state.activeConversation.messages.find(message => message.id === assistantId);
         const proposals = (reply?.tool_calls || []).filter(call=>['incident.followup','purchase.prepare'].includes(call.tool_key)).map(call=>call.result?.result?.payload?.incident).filter(row=>['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row?.status));
         photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = '';
         if (proposals.length !== 1) {statusEl.textContent = reply?.status === 'error' ? 'La lectura no se completó. Revisa la respuesta y el historial antes de reenviar.' : 'Respuesta lista.'; return;}
@@ -464,21 +509,33 @@
         await loadConversation(conversationId, true);
       }
       statusEl.textContent = state.activeConversation.messages.at(-1)?.status === "error" ? "La consulta no se completó. Revisa la respuesta." : "Respuesta lista.";
-    } catch (error) {
-      if (tempAssistant) markAssistantError(tempAssistant, {detail:"Se interrumpió la conexión. La ejecución puede haber terminado en el servidor; abre la conversación antes de volver a enviar."});
-      showError(error);
-    } finally {
-      state.sending = false;
-      sendBtn.disabled = !runtimeStatus.ready;
-      inputEl.disabled = false;
-      photoInput.disabled = false;
-      voice.setBusy(!runtimeStatus.ready);
-      document.getElementById("erp-chat-new-btn").disabled = false;
-      renderConversationList();
-      if (document.getElementById("agent-processes").open) refreshProcesses();
-      inputEl.focus();
-    }
   }
+
+  async function recoverTurn() {
+    const pending = state.uncertainTurn;
+    if (!pending) return false;
+    statusEl.textContent = 'Consultando el resultado guardado, sin reenviar…';
+    await loadConversation(pending.conversationId, true);
+    const reply = state.activeConversation.messages.find(message => message.role === 'assistant' && message.client_request_id === pending.clientRequestId);
+    if (!reply || !['complete','error'].includes(reply.status)) return false;
+    state.uncertainTurn = null;
+    try {await finishTurn({...pending, assistantId:reply.id}, true, true);}
+    catch (error) {
+      statusEl.textContent = 'La respuesta quedó guardada. No pude actualizar sus datos complementarios; revisa el historial y la evidencia antes de confirmar.';
+      return true;
+    }
+    statusEl.textContent = reply.status === 'complete' ? 'Respuesta recuperada del historial. No se repitió la solicitud.' : 'El servidor guardó una respuesta no completada. Revisa el detalle; no se repitió la solicitud.';
+    return true;
+  }
+
+  recoverBtn.addEventListener('click', async () => {
+    if (state.sending || state.loading || state.creating || state.recording) return;
+    state.sending = true; voice.setBusy(true); renderConversationList();
+    try {
+      if (!await recoverTurn()) statusEl.textContent = 'Todavía no hay un resultado final para este envío. Puedes volver a consultar; no se reenviará la solicitud.';
+    } catch (error) {showError(error);}
+    finally {state.sending=false; voice.setBusy(!runtimeStatus.ready); renderConversationList();}
+  });
 
   document.getElementById("erp-chat-new-btn").addEventListener("click", async () => {
     if (state.sending || state.loading || state.creating || state.recording) return;

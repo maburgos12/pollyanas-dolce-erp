@@ -22,6 +22,47 @@ from orquestacion.services.chat_service import create_chat_conversation, create_
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True,
                    AI_AGENT_READ_MODEL=pilot.MODEL, OPENAI_API_KEY='fake-test-key')
 class AgentPilotTests(TransactionTestCase):
+    def test_cost_reference_is_separate_from_reservation_and_never_refunds_it(self):
+        from orquestacion.services.chat_service import serialize_message
+        self.run_provider()
+        answer=self.messages[1]
+        answer.refresh_from_db()
+        answer.status='complete'
+        answer.metadata_json['agent_read']['usage']=[{'input_tokens':25290,'output_tokens':443,'total_tokens':25733}]
+        answer.save()
+        AuditLog.objects.filter(model=pilot.LEDGER_MODEL,payload__turn_id=str(answer.public_id)).delete()
+        self.receipt('0.51614775',turn=answer.public_id)
+        before=pilot.pilot_status(self.user)
+        cost=serialize_message(answer)['cost']
+        self.assertEqual(Decimal(cost['estimated_usd']),Decimal('0.055010'))
+        self.assertEqual(Decimal(cost['reserved_usd']),Decimal('0.51614775'))
+        self.assertEqual(cost['unmeasured_calls'],0)
+        self.assertEqual(pilot.pilot_status(self.user),before)
+
+    def test_missing_provider_usage_is_unknown_not_zero(self):
+        answer=self.messages[1]
+        self.receipt('0.10',turn=answer.public_id)
+        cost=pilot.estimate_turn(answer)
+        self.assertIsNone(cost['estimated_usd'])
+        self.assertEqual(cost['unmeasured_calls'],1)
+        for bad in (True,-1,'100',None):
+            answer.metadata_json={'agent_read':{'model_name':pilot.MODEL,'usage':[{'input_tokens':bad,'output_tokens':1}]}}
+            self.assertIsNone(pilot.estimate_turn(answer)['estimated_usd'])
+
+    def test_audio_duration_and_partial_usage_are_not_hidden(self):
+        request,answer=self.messages
+        request.metadata_json={'audio':{'state':'complete','model':pilot.AUDIO_MODEL,'duration_seconds':54.984}}
+        request.save()
+        answer.metadata_json={'agent_read':{'model_name':pilot.MODEL,'usage':[{'input_tokens':25290,'output_tokens':443}]}}
+        answer.save()
+        self.receipt('0.40',turn=answer.public_id)
+        AuditLog.objects.create(user=self.user,action=pilot.ACTION,model=pilot.LEDGER_MODEL,object_id=pilot.PILOT_ID,
+            payload={'turn_id':str(answer.public_id),'cycle':0,'model':pilot.AUDIO_MODEL,'reserved_usd':'0.03'})
+        self.receipt('0.02',turn=answer.public_id,cycle=2)
+        cost=pilot.estimate_turn(answer)
+        self.assertEqual(Decimal(cost['estimated_usd']),Decimal('0.059134'))
+        self.assertEqual(cost['unmeasured_calls'],1)
+
     def test_visual_input_count_reserves_exact_tokens_and_rejects_invalid_count(self):
         counter = Mock(return_value=SimpleNamespace(input_tokens=3200))
         payload = {**self.payload, 'input':[{'role':'user','content':[{'type':'input_image','detail':'high',

@@ -30,6 +30,30 @@ def note(frames=16000, rate=16000, channels=1):
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True,
                    AI_AGENT_READ_MODEL=pilot.MODEL, OPENAI_API_KEY='fake-test-key')
 class AgentAudioTests(TransactionTestCase):
+    def test_recovery_reference_is_validated_before_admission_and_projected_for_owner(self):
+        from django.urls import reverse
+        from orquestacion.services.chat_service import serialize_conversation_detail
+        self.client.force_login(self.user)
+        url=reverse('ai_private_message_stream_api',kwargs={'conversation_id':self.chat.public_id})
+        provider=self.provider()
+        with patch('openai.OpenAI',return_value=provider):
+            before=ChatMessage.objects.count()
+            invalid=self.client.post(url,{'content':'Consulta','client_request_id':'not-a-uuid'},content_type='application/json')
+            self.assertEqual(invalid.status_code,400)
+            self.assertEqual(ChatMessage.objects.count(),before)
+            provider.responses.create.assert_not_called()
+            reference=str(uuid4())
+            result=self.client.post(url,{'audio':note(),'client_request_id':reference})
+            self.assertEqual(result.status_code,200)
+            b''.join(result.streaming_content)
+        answer=self.chat.messages.filter(role='assistant').latest('sequence')
+        self.assertEqual(serialize_message(answer)['client_request_id'],reference)
+        self.assertIn('runtime_status',serialize_conversation_detail(self.chat))
+        from orquestacion.models import ChatConversation
+        from orquestacion.services.chat_service import get_chat_conversation
+        with self.assertRaises(ChatConversation.DoesNotExist):
+            get_chat_conversation(self.other,self.chat.public_id)
+
     def setUp(self):
         fixtures.AgentPilotTests.setUp(self)
         self.media=tempfile.TemporaryDirectory(); self.addCleanup(self.media.cleanup)

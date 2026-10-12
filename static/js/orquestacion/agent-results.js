@@ -143,7 +143,13 @@
     const prose = message.presentation === 'natural' || message.role === 'user' || (!tools && !receipts)
       ? `<p class="agent-answer">${content}</p>`
       : `<details class="agent-full-response"><summary>Detalle técnico de la consulta</summary><p>${content}</p></details>`;
-    return `${prose}${receipts}${tools}`;
+    const cost = message.cost;
+    const consumption = cost ? `<details class="agent-reference"><summary>Consumo estimado de esta consulta</summary>
+      <p>Consumo estimado: ${cost.estimated_usd == null ? 'no disponible' : `USD ${escape(cost.estimated_usd)}`}.</p>
+      <p>Reserva preventiva del piloto: ${cost.reserved_usd == null ? 'no disponible' : `USD ${escape(cost.reserved_usd)}`}.</p>
+      ${cost.unmeasured_calls ? `<p>Estimación parcial: ${escape(cost.unmeasured_calls)} llamadas sin consumo informado.</p>` : ''}
+      <p class="agent-source">Referencia a tarifa estándar, incluida la voz. No es un cargo confirmado de OpenAI; caché, escritura de caché y recargos pueden cambiar el importe. La reserva controla el límite del piloto y no se devuelve automáticamente.</p></details>` : '';
+    return `${prose}${receipts}${tools}${consumption}`;
   }
   globalThis.ERPAgentView = {escape, date, badge, workflow, tool, incident, response};
 })();
