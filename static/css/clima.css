@@ -24,4 +24,5 @@
 .clima-campanas{list-style:none;padding:0;margin:0}
 .clima-campanas li{display:flex;justify-content:space-between;gap:1rem;border-top:1px solid #e9dedf;padding:.85rem 0}
 .clima-status{display:flex;flex-wrap:wrap;gap:.75rem;padding:1rem;background:#f8e8ee;border-radius:8px}
+.clima-qr{display:block;width:min(100%,240px);height:auto;margin:1rem 0}
 @media(max-width:600px){.clima-section{padding:1rem}.clima-campanas li{flex-direction:column}.clima-roster-list{max-height:500px}}

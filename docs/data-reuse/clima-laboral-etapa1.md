@@ -4,7 +4,7 @@ Fecha y ambiente consultado: 12 de octubre de 2026, PostgreSQL local aislado par
 
 ## Necesidad y unidad de análisis
 
-Una campaña conserva el cuestionario acordado. Un participante representa un empleado elegible dentro de una campaña y guarda una foto de su área y sucursal. En esta etapa no existen respuestas, invitaciones ni enlaces.
+Una campaña conserva el cuestionario acordado. Un participante representa un empleado elegible dentro de una campaña y guarda una foto de su área y sucursal. En esta etapa se preparan ligas firmadas y QR individuales que vencen al cierre; todavía no se capturan respuestas ni se envían invitaciones.
 
 ## Fuentes candidatas
 

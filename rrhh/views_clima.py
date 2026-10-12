@@ -1,16 +1,23 @@
-"""Preparación interna de campañas de clima; todavía no emite accesos."""
+"""Preparación interna de campañas de clima y accesos individuales."""
 
+import base64
 import json
+from io import BytesIO
 from pathlib import Path
 
+import segno
 from django import forms
 from django.contrib.auth.decorators import login_required
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Count
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
 
 from core.access import can_manage_rrhh
 from core.contactos import normalizar_telefono
@@ -92,3 +99,30 @@ def detalle_clima(request, pk):
         "participantes": campana.participantes.select_related("empleado"),
         "cuestionario": campana.cuestionario,
     })
+
+
+@login_required
+def acceso_individual_clima(request, pk, participante_id):
+    if not can_manage_rrhh(request.user):
+        raise PermissionDenied
+    participante = get_object_or_404(ParticipanteClima, pk=participante_id, campana_id=pk)
+    token = signing.Signer(salt="rrhh.clima").sign(str(participante.pk))
+    liga = request.build_absolute_uri(reverse("rrhh:clima_acceso_publico", args=[token]))
+    qr = BytesIO()
+    segno.make_qr(liga, error="h").save(qr, kind="svg", scale=6, border=4)
+    return render(request, "rrhh/clima_acceso.html", {
+        "participante": participante, "liga": liga,
+        "qr_data": base64.b64encode(qr.getvalue()).decode("ascii"),
+    })
+
+
+@never_cache
+def acceso_publico_clima(request, token):
+    try:
+        pk = int(signing.Signer(salt="rrhh.clima").unsign(token))
+    except (signing.BadSignature, ValueError):
+        raise Http404
+    participante = get_object_or_404(ParticipanteClima.objects.select_related("campana"), pk=pk)
+    if participante.campana.fecha_cierre < timezone.localdate():
+        return HttpResponse("Esta liga ya venció.", status=410, headers={"X-Robots-Tag": "noindex"})
+    return HttpResponse("La encuesta todavía no está disponible. Conserva esta liga para cuando se abra la campaña.", headers={"X-Robots-Tag": "noindex"})
