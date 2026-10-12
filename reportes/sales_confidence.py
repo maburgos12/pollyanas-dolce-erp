@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import (
-    Case, Count, Exists, F, IntegerField, Max, OuterRef, Q, Sum, Value, When,
+    Case, Count, F, IntegerField, Max, Q, Sum, Value, When,
 )
 from django.db.models.functions import Coalesce, TruncMonth
 
@@ -27,8 +27,23 @@ def selected_sales_facts(*, start_date, end_date):
     candidates = FactVentaDiaria.objects.filter(fecha__range=(start_date, end_date)).order_by().annotate(
         priority=_source_priority(), identity=Coalesce("sucursal_id", Value(-1)),
     )
-    preferred = candidates.filter(fecha=OuterRef("fecha"), identity=OuterRef("identity"), priority__lt=OuterRef("priority"))
-    facts = candidates.annotate(has_preferred=Exists(preferred)).filter(has_preferred=False)
+    # Compute the same branch/day winner once instead of comparing every pair of sales rows.
+    selected_ids = RawSQL("""
+        WITH preferred_days AS MATERIALIZED (
+            SELECT fecha, COALESCE(sucursal_id, -1) branch_identity,
+                   MIN(CASE WHEN source_kind = %s THEN 0 WHEN source_kind = %s THEN 1 ELSE 2 END) priority
+            FROM reportes_factventadiaria
+            WHERE fecha BETWEEN %s AND %s
+            GROUP BY fecha, COALESCE(sucursal_id, -1)
+        )
+        SELECT f.id FROM reportes_factventadiaria f
+        JOIN preferred_days p ON p.fecha = f.fecha
+            AND p.branch_identity = COALESCE(f.sucursal_id, -1)
+            AND p.priority = CASE WHEN f.source_kind = %s THEN 0 WHEN f.source_kind = %s THEN 1 ELSE 2 END
+        WHERE f.fecha BETWEEN %s AND %s
+    """, (FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date,
+           FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date))
+    facts = candidates.annotate(has_preferred=Value(False)).filter(pk__in=selected_ids)
     # A derived import of the SAME export is not a second sale. This is lineage
     # selection, not a SKU/name equivalence or an edit to historical records.
     mirror_ids = RawSQL(
