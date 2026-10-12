@@ -218,10 +218,12 @@ class ConteoViewsTests(TestCase):
         line = self.count.lineas.get()
         response = self.client.post(self.url('accion'), {
             'action':'agregar','version':2,'request_id':str(uuid4()),
-            'articulo':f'p{candidate.pk}','observaciones':'',
+            'articulo':f'p{candidate.pk}','observaciones':'Movimiento durante el conteo',
             'lecturas_json':json.dumps({str(line.pk):{'cantidad':'4','incidencia':''}}),
         }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(response.status_code, 200, response.content)
         self.assertIn('Producto agregado', response.json()['html'])
         self.assertIn('value="4"', response.json()['html'])
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.observaciones, 'Movimiento durante el conteo')
         self.assertEqual(response.json()['result']['version'], 3)
