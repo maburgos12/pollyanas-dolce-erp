@@ -109,8 +109,12 @@ def _build_panel(year, month, branch_id):
     prev_start = date(previous_year, month or 1, 1)
     # Match elapsed calendar dates for a current partial period; full historical years remain full.
     prev_end = date(previous_year, end.month, min(end.day, monthrange(previous_year, end.month)[1])) if end >= start else date(previous_year, end_month, monthrange(previous_year, end_month)[1])
-    current = annual.filter(fecha__range=(start, end))
-    previous = annual.filter(fecha__range=(prev_start, prev_end))
+    # Source precedence and mirror lineage are day-local; do not rescan both years for each monthly grouping.
+    current = selected_sales_facts(start_date=start, end_date=min(end, today))
+    previous = selected_sales_facts(start_date=prev_start, end_date=prev_end)
+    if branch_id:
+        current = current.filter(sucursal_id=branch_id)
+        previous = previous.filter(sucursal_id=branch_id)
     def summary(q):
         return q.aggregate(amount=Sum('venta_total'), rows=Count('id'), updated=Max('actualizado_en'))
     now, before = summary(current), summary(previous)

@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261011-agent-recovery-v12";
+const CACHE_NAME = "pollyanas-erp-shell-20261011-mobile-continuity-v13";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
@@ -17,7 +17,7 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.filter((key) => key.startsWith("pollyanas-erp-shell-") && key !== CACHE_NAME).map((key) => caches.delete(key))
       ))
       .then(() => self.clients.claim())
   );

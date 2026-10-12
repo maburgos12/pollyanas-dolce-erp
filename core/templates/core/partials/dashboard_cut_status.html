@@ -1,0 +1,25 @@
+{% load humanize %}
+  {% if sales_refresh_status %}
+  <section data-cut-fragment="status" class="home-exec-card {% if sales_refresh_status.last_status == 'ERROR' %}is-danger{% elif sales_refresh_status.is_cut_delayed or sales_refresh_status.last_status == 'INCONSISTENCIA' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' %}is-warning{% else %}is-success{% endif %}">
+    <div class="home-exec-section-head">
+      <div>
+        <div class="home-exec-kicker">Frescura de ventas</div>
+        <h2 class="home-exec-title">{{ sales_refresh_status.status_title }}</h2>
+        <p class="home-exec-copy">{{ sales_refresh_status.status_message }}</p>
+      </div>
+      <div class="home-exec-pills">
+        <span class="home-exec-pill">Visible {{ sales_refresh_status.visible_cut_date_iso|default:"Sin fecha" }}</span>
+        <span class="home-exec-pill">Esperada {{ sales_refresh_status.expected_cut_date_iso|default:"Sin regla" }}</span>
+        {% if sales_refresh_status.is_cut_delayed %}
+          <span class="home-exec-pill">Rezago {{ sales_refresh_status.cut_lag_days }} día{{ sales_refresh_status.cut_lag_days|pluralize }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <div class="home-exec-inline-actions">
+      <a class="home-exec-inline-link" href="{% url 'reportes:ventas' %}">{{ sales_refresh_status.button_label }}</a>
+      {% if sales_refresh_status.schedule_label %}
+        <span class="home-exec-subtle">Scheduler {{ sales_refresh_status.schedule_label }}</span>
+      {% endif %}
+    </div>
+  </section>
+  {% endif %}

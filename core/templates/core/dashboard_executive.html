@@ -78,30 +78,7 @@
   </section>
   {% endif %}
 
-  {% if sales_refresh_status %}
-  <section class="home-exec-card {% if sales_refresh_status.last_status == 'ERROR' %}is-danger{% elif sales_refresh_status.is_cut_delayed or sales_refresh_status.last_status == 'INCONSISTENCIA' or sales_refresh_status.last_status == 'REZAGO' or sales_refresh_status.last_status == 'PENDIENTE_REZAGO' %}is-warning{% else %}is-success{% endif %}">
-    <div class="home-exec-section-head">
-      <div>
-        <div class="home-exec-kicker">Frescura de ventas</div>
-        <h2 class="home-exec-title">{{ sales_refresh_status.status_title }}</h2>
-        <p class="home-exec-copy">{{ sales_refresh_status.status_message }}</p>
-      </div>
-      <div class="home-exec-pills">
-        <span class="home-exec-pill">Visible {{ sales_refresh_status.visible_cut_date_iso|default:"Sin fecha" }}</span>
-        <span class="home-exec-pill">Esperada {{ sales_refresh_status.expected_cut_date_iso|default:"Sin regla" }}</span>
-        {% if sales_refresh_status.is_cut_delayed %}
-          <span class="home-exec-pill">Rezago {{ sales_refresh_status.cut_lag_days }} día{{ sales_refresh_status.cut_lag_days|pluralize }}</span>
-        {% endif %}
-      </div>
-    </div>
-    <div class="home-exec-inline-actions">
-      <a class="home-exec-inline-link" href="{% url 'reportes:ventas' %}">{{ sales_refresh_status.button_label }}</a>
-      {% if sales_refresh_status.schedule_label %}
-        <span class="home-exec-subtle">Scheduler {{ sales_refresh_status.schedule_label }}</span>
-      {% endif %}
-    </div>
-  </section>
-  {% endif %}
+  {% include "core/partials/dashboard_cut_status.html" %}
 
   <form class="bi-filterbar" method="get">
     <div class="bi-control">
@@ -132,57 +109,8 @@
   </div>
 
   <section class="home-exec-grid-top">
-    <article class="home-exec-card home-exec-kpi is-hero">
-      <div class="home-exec-kpi-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
-      <div class="home-exec-kpi-label">Venta último cierre</div>
-      <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
-      {% if can_manage_orquestacion %}
-      <div class="home-exec-kpi-actions">
-        <form
-          method="post"
-          action="{% url 'reportes:bi_force_refresh' %}"
-          class="home-exec-refresh-form"
-          {% if sales_refresh_status and sales_refresh_status.button_disabled %}data-cut-refresh-poll data-refresh-after-ms="10000"{% endif %}
-        >
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <input type="hidden" name="refresh_scope" value="cutoff">
-          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
-          <input type="hidden" name="lookback_days" value="1">
-          <button
-            type="submit"
-            class="btn btn-secondary home-exec-refresh-btn {% if sales_refresh_status and sales_refresh_status.button_disabled %}is-loading{% endif %}"
-            {% if sales_refresh_status and sales_refresh_status.button_disabled %}disabled aria-disabled="true" aria-busy="true"{% endif %}
-          >
-            {% if sales_refresh_status and sales_refresh_status.button_disabled %}
-              {{ sales_refresh_status.button_label|default:"Actualizando corte..." }}
-            {% else %}
-              Actualizar corte
-            {% endif %}
-          </button>
-          {% if sales_refresh_status and sales_refresh_status.button_disabled %}
-            <div class="home-exec-refresh-progress" aria-hidden="true"></div>
-            <div class="home-exec-refresh-caption">
-              Puede tardar unos minutos. Esta pantalla comprobará el resultado automáticamente.
-            </div>
-          {% endif %}
-        </form>
-      </div>
-      {% endif %}
-    </article>
-    <article class="home-exec-card home-exec-kpi is-hero">
-      <div class="home-exec-kpi-value {% if not daily_sales_snapshot.tickets_available %}is-warning{% endif %}">
-        {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
-      </div>
-      <div class="home-exec-kpi-label">Ticket promedio</div>
-      <div class="home-exec-note">
-        {% if daily_sales_snapshot.tickets_available %}
-          {{ daily_sales_snapshot.total_tickets|intcomma }} tickets confirmados
-        {% else %}
-          Point no entregó tickets válidos para el corte visible
-        {% endif %}
-      </div>
-    </article>
+    {% include "core/partials/dashboard_cut_sales.html" %}
+    {% include "core/partials/dashboard_cut_tickets.html" %}
     <article class="home-exec-card home-exec-kpi is-hero">
       <div class="home-exec-kpi-value is-success">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>
       <div class="home-exec-kpi-label">Pronóstico próxima semana</div>
@@ -606,7 +534,7 @@
 {% block extra_js %}
 {{ forecast_panel.weekly_rows|json_script:"home-forecast-weekly-data" }}
 {{ yoy_panel.rows|json_script:"home-yoy-data" }}
-<script src="{% static 'js/dashboard_cut_refresh.js' %}?v=20260913-cut-refresh-poll-v1" defer></script>
+<script src="{% static 'js/dashboard_cut_refresh.js' %}?v=20261011-mobile-cut-v2" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
 {{ commercial_analytics|json_script:"commercial-analytics-data" }}
 <script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>

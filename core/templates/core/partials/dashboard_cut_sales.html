@@ -1,0 +1,40 @@
+{% load humanize %}
+    <article data-cut-fragment="sales" class="home-exec-card home-exec-kpi is-hero">
+      <div class="home-exec-kpi-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
+      <div class="home-exec-kpi-label">Venta último cierre</div>
+      <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
+      {% if can_manage_orquestacion %}
+      <div class="home-exec-kpi-actions">
+        <form
+          method="post"
+          action="{% url 'reportes:bi_force_refresh' %}"
+          class="home-exec-refresh-form"
+          {% if sales_refresh_status and sales_refresh_status.button_disabled %}data-cut-refresh-poll data-refresh-after-ms="10000"{% endif %}
+        >
+          {% csrf_token %}
+          <input type="hidden" name="next" value="{{ cut_return_url|default:request.get_full_path }}">
+          <input type="hidden" name="refresh_scope" value="cutoff">
+          <input type="hidden" name="reference_date" value="{% if sales_refresh_status and sales_refresh_status.target_refresh_date_iso %}{{ sales_refresh_status.target_refresh_date_iso }}{% elif daily_sales_snapshot.date %}{{ daily_sales_snapshot.date|date:'Y-m-d' }}{% endif %}">
+          <input type="hidden" name="lookback_days" value="1">
+          <button
+            type="submit"
+            class="btn btn-secondary home-exec-refresh-btn {% if sales_refresh_status and sales_refresh_status.button_disabled %}is-loading{% endif %}"
+            {% if sales_refresh_status and sales_refresh_status.button_disabled %}disabled aria-disabled="true" aria-busy="true"{% endif %}
+          >
+            {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+              {{ sales_refresh_status.button_label|default:"Actualizando corte..." }}
+            {% else %}
+              Actualizar corte
+            {% endif %}
+          </button>
+          {% if sales_refresh_status and sales_refresh_status.button_disabled %}
+            <div class="home-exec-refresh-progress" aria-hidden="true"></div>
+            <div class="home-exec-refresh-caption">
+              Puede tardar unos minutos. Esta pantalla comprobará el resultado automáticamente.
+            </div>
+          {% endif %}
+          {% if cut_refreshed %}<p class="home-exec-subtle" role="status">Corte actualizado. <a href="{{ cut_return_url|default:request.get_full_path }}">Actualizar los demás paneles</a></p>{% endif %}
+        </form>
+      </div>
+      {% endif %}
+    </article>

@@ -24,6 +24,8 @@ from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_POST
+from django.template.loader import render_to_string
+from core.mobile_navigation import mobile_resume_target
 from compras.access_departamentales import puede_gestionar_compras_departamentales
 from core.access import (
     ACCESS_MODULES,
@@ -2774,8 +2776,11 @@ def login_view(request: HttpRequest) -> HttpResponse:
     return render(request, "core/login.html", {"next": next_url})
 
 def logout_view(request: HttpRequest) -> HttpResponse:
+    user_id = request.user.pk
     logout(request)
-    return redirect("login")
+    response = redirect("login")
+    response.delete_cookie(f"erp_resume_{user_id}", samesite="Lax")
+    return response
 
 
 def home_redirect(request: HttpRequest) -> HttpResponse:
@@ -2786,6 +2791,7 @@ def home_redirect(request: HttpRequest) -> HttpResponse:
     return redirect("login")
 
 
+@never_cache
 def dashboard(request: HttpRequest) -> HttpResponse:
     if not request.user.is_authenticated:
         return redirect("/login/")
@@ -2793,6 +2799,29 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         return _redirect_capture_module()
     if not _can_open_dashboard(request.user):
         return redirect("seguimiento:mi_seguimiento")
+
+    if request.GET.get("source") == "pwa":
+        return redirect(mobile_resume_target(request))
+    if request.GET.get("cut_refresh") == "1":
+        if not can_manage_orquestacion(request.user):
+            return HttpResponseForbidden()
+        sales = get_dashboard_sales_dataset(months=normalize_dashboard_months_window(request.GET.get("months")))
+        snapshot = dict(sales["daily_sales_snapshot"])
+        cut_date = snapshot.get("date")
+        if isinstance(cut_date, str):
+            cut_date = date.fromisoformat(cut_date)
+        snapshot["date"] = cut_date
+        status = _sales_refresh_status(visible_cut_date=cut_date)
+        return_query = request.GET.copy()
+        return_query.pop("cut_refresh", None)
+        cut_return_url = request.path + ("?" + return_query.urlencode() if return_query else "")
+        context = {"cut_return_url": cut_return_url, "daily_sales_snapshot": snapshot, "sales_refresh_status": status,
+                   "can_manage_orquestacion": True, "cut_refreshed": status.get("last_status") == "OK"}
+        html = "".join(render_to_string(f"core/partials/dashboard_cut_{part}.html", context, request=request)
+                       for part in ("status", "sales", "tickets"))
+        tone = "error" if status.get("last_status") == "ERROR" else "warning" if status.get("is_cut_delayed") else "info"
+        return JsonResponse({"busy": status["button_disabled"], "html": html,
+                             "toast": {"type": tone, "message": status.get("status_message", "Estado del corte actualizado.")}})
 
     u = request.user
     ctx = {
