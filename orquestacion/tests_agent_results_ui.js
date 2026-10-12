@@ -76,9 +76,13 @@ async function controllerChecks() {
   element('erp-chat-runtime-status').textContent='{"ready":true}';
   const requests=[];
   let mode='truncated';
+  let submittedId;
+  let audioFile = new File(['fixture'], 'nota.wav', {type:'audio/wav'});
+  let clears = 0;
   let releaseCreate;
   const controller = vm.createContext({ERPAgentView:view,TextDecoder,Date,FormData,
-    ERPVoice:{attach:()=>({file:null,clear(){},setBusy(){}})},
+    crypto:require('node:crypto').webcrypto,
+    ERPVoice:{attach:()=>({get file(){return audioFile;},clear(){audioFile=null;clears++;},setBusy(){}})},
     window:{matchMedia:()=>({matches:true})},
     document:{getElementById:element,querySelector:element,querySelectorAll:()=>[],createElement:()=>element(`node-${elements.size}`)},
     fetch:async (url,options={}) => {
@@ -86,11 +90,12 @@ async function controllerChecks() {
       if (mode==='offline') throw new TypeError('Failed to fetch');
       if (url.endsWith('/new/')) await new Promise(resolve => {releaseCreate=resolve;});
       if (url.endsWith('/stream/')) {
+        submittedId = options.body instanceof FormData ? options.body.get('client_request_id') : JSON.parse(options.body).client_request_id;
         let consumed=false;
-        const event = mode==='truncated' ? 'event: chunk\ndata: {"delta":"parcial"}\n\n' : 'event: done\ndata: {"content":"Lista"}\n\n';
+        const event = ['truncated','pending','unrelated','photo-recovery'].includes(mode) ? 'event: chunk\ndata: {"delta":"parcial"}\n\n' : 'event: done\ndata: {"content":"Lista"}\n\n';
         return {ok:true,body:{getReader:()=>({read:async()=>consumed ? {done:true} : (consumed=true,{value:Buffer.from(event),done:false})})}};
       }
-      return {ok:true,json:async()=>url.endsWith('/new/') ? {conversation:{id:'conversation-2'}} : url.endsWith('/conversations/') ? {items:[]} : {conversation:{id:'conversation-1'},messages:[{id:'a',role:'assistant',status:'complete',content:'Lista',tool_calls:[]}]}};
+      return {ok:true,json:async()=>url.endsWith('/new/') ? {conversation:{id:'conversation-2'}} : url.endsWith('/conversations/') ? {items:[]} : {conversation:{id:'conversation-1'},messages:[{id:'a',client_request_id:mode==='unrelated' ? 'other-request' : submittedId,role:'assistant',status:mode==='pending' ? 'streaming' : mode==='server-error' ? 'error' : 'complete',content:'Lista',tool_calls:mode==='photo-recovery' ? [{tool_key:'purchase.prepare',status:'complete',result:{result:{payload:{incident:purchase}}}}] : []}]}};
     },Buffer,
   });
   const template=fs.readFileSync('templates/orquestacion/chat.html','utf8');
@@ -100,10 +105,27 @@ async function controllerChecks() {
   assert.equal(element('.agent-history').open,false);
   element('erp-chat-input').value='Consulta';
   await sendMessage();
-  assert(element('erp-chat-status').textContent.includes('antes de reenviar'));
-  assert.equal(state.activeConversation.messages.at(-1).status,'error');
+  assert(element('erp-chat-status').textContent.includes('recuperada'));
+  assert.equal(state.activeConversation.messages.at(-1).status,'complete');
+  assert.equal(clears,1,'Accepted audio must not remain staged after recovery');
+  assert(submittedId,'Correlate recovery with the submitted turn, not another message');
   assert.equal(requests.filter(r=>r.method==='POST').length,1,'No automatic retry after incomplete SSE');
   assert.equal(element('erp-chat-send-btn').disabled,false);
+  for (const uncertain of ['pending','unrelated']) {
+    mode=uncertain; element('erp-chat-input').value='Consulta incierta';
+    // These modes simulate an interrupted response and a GET that is not final for this exact turn.
+    const previous=requests.filter(r=>r.method==='POST').length;
+    await sendMessage();
+    assert.equal(requests.filter(r=>r.method==='POST').length,previous+1);
+    assert.equal(element('erp-chat-send-btn').disabled,true);
+    assert.equal(element('erp-chat-recover-btn').hidden,false);
+    assert.equal(element('erp-chat-input').value,'Consulta incierta','Keep the original text while admission or completion is uncertain');
+    if (uncertain==='unrelated') element('erp-chat-input').value='Información adicional';
+    mode='complete'; await element('erp-chat-recover-btn').listeners.click();
+    assert.equal(element('erp-chat-input').value,uncertain==='unrelated' ? 'Información adicional' : '','Clear only the acknowledged text, never later edits');
+    assert.equal(element('erp-chat-send-btn').disabled,false);
+    assert.equal(element('erp-chat-new-btn').disabled,false);
+  }
   for (const flag of ['loading','creating','sending','recording']) {
     state[flag]=true;
     element('erp-chat-input').value='Consulta durante bloqueo';
@@ -122,6 +144,14 @@ async function controllerChecks() {
   assert.equal(element('erp-chat-photo-status').textContent,'');
   assert.equal(element('erp-chat-status').textContent,'Respuesta lista.');
   element('erp-chat-photos').files=[];
+  mode='photo-recovery';
+  element('erp-chat-photos').files=[new File(['fixture'],'fixture.png',{type:'image/png'})];
+  element('erp-chat-input').value='Imagen con propuesta';
+  const posts=requests.filter(r=>r.method==='POST').length;
+  await sendMessage();
+  assert.equal(requests.filter(r=>r.method==='POST').length,posts+1,'Recovery must never replay evidence writes either');
+  assert(element('erp-chat-photo-status').textContent.includes('Revisa su asociación'));
+  element('erp-chat-photos').files=[];mode='complete';
   const creating=element('erp-chat-new-btn').listeners.click();
   const before=requests.length;
   await element('erp-chat-new-btn').listeners.click();
@@ -134,6 +164,12 @@ async function controllerChecks() {
   mode='offline';await controller.testController.refreshProcesses();
   assert(element('agent-process-list').textContent.includes('usa Actualizar'));
   assert(!element('agent-process-list').textContent.includes('Failed to fetch'));
+  mode='complete'; controller.crypto={randomUUID(){throw new TypeError('UUID unavailable');}};
+  element('erp-chat-input').value='Consulta sin UUID';
+  const beforeUuid=requests.length;
+  await sendMessage();
+  assert.equal(requests.length,beforeUuid);
+  assert.equal(element('erp-chat-send-btn').disabled,false);
   console.log('Agent UI checks passed: safe projections, empty results, workflow fields, incomplete SSE, no retries, navigation locks and mobile history.');
 }
 controllerChecks().catch(error=>{console.error(error);process.exitCode=1;});
@@ -152,6 +188,11 @@ assert(natural.includes('&lt;img'));
 assert(natural.includes('#42'));
 assert(!natural.includes('data-incident-id'));
 assert(!natural.includes('agent-full-response'));
+const costHtml = view.response({role:'assistant',content:'Lista',cost:{estimated_usd:'0.059134',reserved_usd:'0.516148',unmeasured_calls:1}});
+assert(costHtml.includes('Consumo estimado'));
+assert(costHtml.includes('Reserva preventiva'));
+assert(costHtml.includes('No es un cargo confirmado'));
+assert(costHtml.includes('sin consumo informado'));
 assert(view.response({role:'assistant',presentation:'technical',content:'datos',tool_calls:[{status:'error'}]}).includes('Detalle técnico'));
 assert(!view.response({role:'assistant',presentation:'natural',content:'Confirmar <button data-incident-id="fake">',tool_calls:[]}).includes('<button'));
 

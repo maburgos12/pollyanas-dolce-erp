@@ -46,6 +46,56 @@ def is_pilot_participant(user) -> bool:
             and get_user_model().objects.filter(pk=user.pk, is_active=True).exists())
 
 
+def estimate_turn(message) -> dict | None:
+    """Read-only standard-price reference; never releases a committed reservation."""
+    from .agent_audio import MAX_SECONDS as max_audio_seconds
+    rows = list(AuditLog.objects.filter(model=LEDGER_MODEL, object_id=PILOT_ID, action=ACTION,
+        user_id=message.conversation.owner_id, payload__turn_id=str(message.public_id))
+        .values_list('payload', flat=True)[:MAX_ROUNDS + 2])
+    if not rows:
+        return None
+    try:
+        amounts = [Decimal(row['reserved_usd']) for row in rows]
+        if (len(rows) > MAX_ROUNDS + 1 or len({row['cycle'] for row in rows}) != len(rows)
+                or any(type(row['cycle']) is not int or not 0 <= row['cycle'] <= MAX_ROUNDS
+                       or row['model'] != (AUDIO_MODEL if row['cycle'] == 0 else MODEL)
+                       or type(row['reserved_usd']) is not str for row in rows)
+                or any(not amount.is_finite() or not 0 < amount <= MAX_USD for amount in amounts)):
+            return None
+        reserved = sum(amounts)
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return None
+    proof = message.metadata_json.get('agent_read', {}) if isinstance(message.metadata_json, dict) else {}
+    proof = proof if isinstance(proof, dict) else {}
+    usage = proof.get('usage', []) if isinstance(proof, dict) else []
+    known, estimate = 0, Decimal('0')
+    # Reference tariffs verified 2026-10-11; cache reads/writes and regional fees are not inferred.
+    providers = proof.get('provider', []) if isinstance(proof, dict) else []
+    standard = (proof.get('model_name') == MODEL and isinstance(providers, list)
+        and all(isinstance(row, dict) and row.get('model', MODEL) == MODEL
+                and row.get('service_tier', 'default') == 'default' for row in providers))
+    model_calls = sum(row.get('cycle', 0) != 0 for row in rows)
+    if standard and isinstance(usage, list) and len(usage) <= model_calls:
+        for item in usage:
+            if not isinstance(item, dict): continue
+            incoming, outgoing = item.get('input_tokens'), item.get('output_tokens')
+            if all(type(value) is int and 0 <= value <= 1000000 for value in (incoming, outgoing)):
+                estimate += (Decimal(incoming) * 2 + Decimal(outgoing) * 10) / 1000000
+                known += 1
+    audio_calls = sum(row.get('cycle') == 0 for row in rows)
+    if audio_calls == 1:
+        request = message.conversation.messages.filter(role='user', sequence=message.sequence - 1).first()
+        audio = request.metadata_json.get('audio', {}) if request and isinstance(request.metadata_json, dict) else {}
+        seconds = audio.get('duration_seconds')
+        if (audio.get('state') == 'complete' and audio.get('model') == AUDIO_MODEL
+                and type(seconds) in (int, float) and 0.5 <= seconds <= max_audio_seconds):
+            estimate += Decimal(str(seconds)) / 60 * Decimal('0.0045')
+            known += 1
+    return {'estimated_usd':str(estimate.quantize(Decimal('0.000001'), rounding=ROUND_CEILING)) if known else None,
+            'reserved_usd':str(reserved), 'unmeasured_calls':len(rows) - known,
+            'basis':'standard_reference', 'rates_verified_on':'2026-10-11'}
+
+
 def _ledger():
     rows = list(AuditLog.objects.filter(model=LEDGER_MODEL, object_id=PILOT_ID)
                 .order_by("id").values("action", "payload")[:MAX_TURNS * (MAX_ROUNDS + 1) + 1])

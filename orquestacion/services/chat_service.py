@@ -222,8 +222,10 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
     from orquestacion.services.agent_read_context import projected_receipts
     from orquestacion.services.agent_images import projected_images
     from orquestacion.services.agent_audio import projected_audio
+    from orquestacion.services.agent_pilot import estimate_turn
     return {
         "id": str(message.public_id),
+        'client_request_id': message.metadata_json.get('client_request_id') if isinstance(message.metadata_json, dict) else None,
         "sequence": message.sequence,
         "role": message.role,
         "status": message.status,
@@ -234,6 +236,7 @@ def serialize_message(message: ChatMessage) -> dict[str, Any]:
         "tool_calls": tool_calls,
         'images': projected_images(message) if visible else [],
         'audio': projected_audio(message) if visible else None,
+        'cost': estimate_turn(message) if visible and message.role == 'assistant' else None,
     }
 
 
@@ -264,6 +267,7 @@ def serialize_conversation_detail(conversation: ChatConversation) -> dict[str, A
             "last_message_at": conversation.last_message_at.isoformat(),
         },
         "messages": [serialize_message(message) for message in messages],
+        'runtime_status': get_chat_runtime_status(conversation.owner),
     }
 
 
@@ -550,6 +554,7 @@ def execute_chat_turn(*, user, conversation: ChatConversation, user_message: Cha
     assistant_message.content = final_text.strip()
     assistant_message.status = ChatMessage.STATUS_COMPLETE
     assistant_message.metadata_json = {
+        **(assistant_message.metadata_json if isinstance(assistant_message.metadata_json, dict) else {}),
         "model_name": model_name,
         "tool_events": [
             {
