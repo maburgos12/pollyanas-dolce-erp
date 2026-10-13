@@ -4,6 +4,7 @@ from copy import copy
 import json
 from io import BytesIO
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -14,6 +15,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 from openpyxl import Workbook
@@ -58,19 +60,31 @@ def _cantidad_visible(value):
 
 
 def _context(request, count, *, ack='', ack_version=None):
+    server_now = timezone.now()
     reviewer = puede_revisar(request.user, count)
     editable = puede_capturar(request.user, count) and count.estado in ('CAPTURA','RECONTEO')
     readings = (list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda=count.ronda).select_related('linea').order_by('linea__nombre')) if editable else lecturas_efectivas(count))
     rows = []
+    reconciliation = {}
+    if reviewer and not editable and count.conciliacion:
+        from .conteos_nocturna import huella_lecturas
+        if count.conciliacion.get('huella_lecturas') == huella_lecturas(lecturas_efectivas(count)):
+            reconciliation = {**count.conciliacion,
+                'cierre_visible':parse_datetime(count.conciliacion['cierre_en']),
+                'procesado_visible':parse_datetime(count.conciliacion['procesado_en'])}
     reference = count.referencia if reviewer and not editable else {}
     for reading in readings:
         line = reading.linea
         source = reference.get('lineas', {}).get(str(line.pk), {})
+        nightly = dict(reconciliation.get('lineas',{}).get(str(line.pk),{}))
+        for key in ('fisico_al_cierre','point_al_cierre','diferencia'):
+            nightly[key+'_visible'] = _cantidad_visible(Decimal(nightly[key])) if nightly.get(key) is not None else ''
         difference = None
         if source.get('cantidad') is not None and reading.cantidad is not None:
             difference = reading.cantidad - Decimal(source['cantidad'])
-        rows.append({'lectura':reading, 'linea':line, 'referencia':source, 'diferencia':difference,
+        rows.append({'lectura':reading, 'linea':line, 'referencia':source, 'conciliacion':nightly, 'diferencia':difference,
                      'cantidad_visible':_cantidad_visible(reading.cantidad),
+                     'contado_en_input':reading.contado_en.astimezone(ZoneInfo('America/Mazatlan')).strftime('%Y-%m-%dT%H:%M:%S') if reading.contado_en else '',
                      'diferencia_visible':_cantidad_visible(difference)})
     captured = sum(r.cantidad is not None or bool(r.incidencia) for r in readings)
     total_productos = sum(bool(r['linea'].producto_id) for r in rows)
@@ -88,8 +102,9 @@ def _context(request, count, *, ack='', ack_version=None):
         for item in snapshot:
             historical_rows.append({'nombre':names.get(str(item['linea_id']), str(item['linea_id'])), **item})
         history.append({'evento':event,'motivo':summary,'lecturas':historical_rows})
-    return {'base_template':_base(request),'conteo':count,'rows':rows,'editable':editable,
-            'revisor':reviewer,'referencia':reference,'historial':history,
+    return {'server_now':server_now.isoformat(), 'server_offset_minutes':int(server_now.astimezone(ZoneInfo('America/Mazatlan')).utcoffset().total_seconds()/60),
+            'base_template':_base(request),'conteo':count,'rows':rows,'editable':editable,
+            'revisor':reviewer,'referencia':reference,'conciliacion':reconciliation,'historial':history,
             'motivo_reconteo':(count.eventos.filter(action='reconteo').order_by('-pk').values_list('payload__motivo',flat=True).first() or '') if editable and count.ronda > 1 else '',
             'capturados':captured,'total':len(readings),'total_productos':total_productos,'total_insumos':total_insumos,
             'avance':round(captured*100/len(readings)) if readings else 0,
@@ -144,6 +159,9 @@ def _payload(request, action):
         ids = {key.removeprefix('cantidad_') for key in request.POST if key.startswith('cantidad_')}
         ids.update(key.removeprefix('incidencia_') for key in request.POST if key.startswith('incidencia_'))
         payload = {'lecturas':{key:{'cantidad':request.POST.get('cantidad_'+key,''),'incidencia':request.POST.get('incidencia_'+key,'')} for key in ids},'observaciones':request.POST.get('observaciones','')}
+        for key in ids:
+            if 'contado_en_'+key in request.POST:
+                payload['lecturas'][key]['contado_en'] = request.POST['contado_en_'+key]
         if action == 'agregar':
             payload['articulo'] = request.POST.get('articulo','')
         return payload
@@ -165,6 +183,7 @@ def _error(request, count, error, status=400):
     if context['editable'] and request.POST.get('action') in ('guardar','enviar','agregar'):
         for row in context['rows']:
             row['posted_cantidad'] = request.POST.get(f"cantidad_{row['linea'].pk}", '')
+            row['posted_contado_en'] = request.POST.get(f"contado_en_{row['linea'].pk}", '')
             row['posted_incidencia'] = request.POST.get(f"incidencia_{row['linea'].pk}", '')
         context['posted'] = True
         context['posted_observaciones'] = request.POST.get('observaciones','')
@@ -351,7 +370,7 @@ def exportar(request, pk):
     wb = Workbook()
     sheet=wb.active
     sheet.title='Conteo físico'
-    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada'])
+    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada'])
     for r in lecturas_efectivas(count):
         line=r.linea
         ref=count.referencia.get('lineas',{}).get(str(line.pk),{})
@@ -361,11 +380,11 @@ def exportar(request, pk):
                       _excel_number(r.cantidad-qty) if r.cantidad is not None and qty is not None else None,ref.get('capturado_en',''),
                       'Declaración de corte por revisor' if count.referencia.get('corte_verificado') else 'Pendiente de conciliación temporal',
                       count.iniciado_en.isoformat() if count.iniciado_en else '',count.enviado_en.isoformat() if count.enviado_en else '',
-                      _excel_text(count.observaciones),_excel_text(line.fuente_unidad),ref.get('sync_job_id'),ref.get('snapshot_id'),r.actualizado_en.isoformat()])
+                      _excel_text(count.observaciones),_excel_text(line.fuente_unidad),ref.get('sync_job_id'),ref.get('snapshot_id'),r.actualizado_en.isoformat(),r.contado_en.isoformat() if r.contado_en else ''])
     history=wb.create_sheet('Historial')
     history.append(['Fecha','Acción','Usuario','Detalle'])
     readings=wb.create_sheet('Lecturas históricas')
-    readings.append(['Evento','Fecha','Acción','Usuario','Artículo','Código','Ronda','Cantidad','Incidencia'])
+    readings.append(['Evento','Fecha','Acción','Usuario','Artículo','Código','Ronda','Cantidad','Incidencia','Hora física declarada'])
     references=wb.create_sheet('Referencias históricas')
     references.append(['Evento','Fecha','Artículo','Código','Cantidad','Unidad','Ciclo Point','Snapshot Point','Extracción','Estado','Corte declarado','Error'])
     lines={str(line.pk):line for line in count.lineas.all()}
@@ -378,11 +397,21 @@ def exportar(request, pk):
         historical=e.payload.get('snapshot') or [{'linea_id':key,'ronda':e.payload.get('resultado',{}).get('ronda'),**value} for key,value in e.payload.get('lecturas',{}).items()]
         for item in historical:
             line=lines.get(str(item['linea_id']))
-            readings.append([e.pk,e.creado_en.isoformat(),e.action,_excel_text(e.actor.username),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),item.get('ronda'),_excel_text(item.get('cantidad')),_excel_text(item.get('incidencia'))])
+            readings.append([e.pk,e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),item.get('ronda'),_excel_text(item.get('cantidad')),_excel_text(item.get('incidencia')),_excel_text(item.get('contado_en',''))])
         for key,item in reference.get('lineas',{}).items():
             line=lines.get(str(key))
             references.append([e.pk,e.creado_en.isoformat(),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),_excel_text(item.get('cantidad')),_excel_text(item.get('unidad')),item.get('sync_job_id'),item.get('snapshot_id'),item.get('capturado_en'),reference.get('estado'),bool(reference.get('corte_verificado')),_excel_text(item.get('error'))])
-        history.append([e.creado_en.isoformat(),e.action,_excel_text(e.actor.username),_excel_text(json.dumps(safe_payload,ensure_ascii=False))])
+        history.append([e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(json.dumps(safe_payload,ensure_ascii=False))])
+    nightly=wb.create_sheet('Conciliación nocturna')
+    nightly.append(['Código','Artículo','Hora física declarada','Cierre','Estado','Físico al cierre','Point al cierre','Diferencia','Motivo pendiente','Movimientos físicos','Movimientos Point','Posteriores al cierre','Snapshot','Ciclo Point','Historial','SHA historial'])
+    context = _context(request,count)
+    for row in context['rows']:
+        r, line, result = row['lectura'],row['linea'],row['conciliacion']
+        number = lambda key: _excel_number(Decimal(result[key])) if result.get(key) is not None else None
+        nightly.append([_excel_text(line.codigo),_excel_text(line.nombre),r.contado_en.isoformat() if r.contado_en else '',context['conciliacion'].get('cierre_en',''),
+            result.get('estado','PENDIENTE'),number('fisico_al_cierre'),number('point_al_cierre'),number('diferencia'),_excel_text(result.get('motivo','Conciliación nocturna aún no ejecutada.')),
+            json.dumps(result.get('movimientos_fisico',[])),json.dumps(result.get('movimientos_point',[])),json.dumps(result.get('posteriores_cierre',[])),
+            result.get('snapshot_id'),result.get('sync_job_id'),result.get('historial_id'),result.get('historial_sha256','')])
     for ws in wb:
         ws.freeze_panes='A2'
         ws.auto_filter.ref=ws.dimensions

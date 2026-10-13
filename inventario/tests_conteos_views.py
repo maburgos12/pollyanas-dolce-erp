@@ -227,3 +227,44 @@ class ConteoViewsTests(TestCase):
         self.count.refresh_from_db()
         self.assertEqual(self.count.observaciones, 'Movimiento durante el conteo')
         self.assertEqual(response.json()['result']['version'], 3)
+
+    def test_physical_time_survives_notes_and_legacy_save_without_point(self):
+        import json
+        from datetime import timedelta
+        from unittest.mock import patch
+        from django.utils import timezone
+
+        self.client.force_login(self.operator)
+        start = timezone.now() + timedelta(minutes=1)
+        counted = start + timedelta(minutes=2)
+        with patch('django.utils.timezone.now', return_value=start):
+            response = self.client.post(self.url('accion'), {
+                'action':'iniciar','version':1,'request_id':str(uuid4()),
+            }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200)
+        line = self.count.lineas.get()
+        with patch('django.utils.timezone.now', return_value=counted + timedelta(minutes=1)):
+            response = self.client.post(self.url('accion'), {
+                'action':'guardar','version':2,'request_id':str(uuid4()),
+                'lecturas_json':json.dumps({str(line.pk):{
+                    'cantidad':'3','incidencia':'','contado_en':counted.isoformat(),
+                }}),
+            }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200, response.content)
+        reading = line.lecturas.get()
+        self.assertEqual(reading.contado_en, counted)
+        last_edit = reading.actualizado_en
+        with patch('django.utils.timezone.now', return_value=counted + timedelta(minutes=5)):
+            response = self.client.post(self.url('accion'), {
+                'action':'enviar','version':3,'request_id':str(uuid4()),
+                'observaciones':'Movimiento anotado después de contar',
+                'lecturas_json':json.dumps({str(line.pk):{'cantidad':'3','incidencia':''}}),
+            }, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code, 200, response.content)
+        reading.refresh_from_db()
+        self.assertEqual(reading.contado_en, counted)
+        self.assertGreater(reading.actualizado_en, last_edit)
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.estado, 'ENVIADO')
+        self.assertEqual(self.count.referencia, {})
+        self.assertEqual(self.count.eventos.get(action='enviar').payload['snapshot'][0]['contado_en'], counted.isoformat())

@@ -16,6 +16,7 @@ class ConteoSucursal(models.Model):
     ronda = models.PositiveIntegerField(default=1)
     observaciones = models.TextField(blank=True, default='')
     referencia = models.JSONField(default=dict, blank=True)
+    conciliacion = models.JSONField(default=dict, blank=True)
     request_id = models.UUIDField(unique=True)
     payload_hash = models.CharField(max_length=64)
     creado_en = models.DateTimeField(auto_now_add=True)
@@ -57,6 +58,7 @@ class LecturaConteoSucursal(models.Model):
     incidencia = models.TextField(blank=True, default='')
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     actualizado_en = models.DateTimeField(auto_now=True)
+    contado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['linea','ronda'],name='cs_lectura_ronda_unica'), models.CheckConstraint(check=Q(cantidad__isnull=True)|Q(cantidad__gte=0),name='cs_cantidad_no_negativa')]
@@ -64,13 +66,17 @@ class LecturaConteoSucursal(models.Model):
 
 class EventoConteoSucursal(models.Model):
     conteo = models.ForeignKey(ConteoSucursal, on_delete=models.PROTECT, related_name='eventos')
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True)
     action = models.CharField(max_length=40)
     payload = models.JSONField(default=dict)
     creado_en = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['pk']
+        constraints = [models.CheckConstraint(
+            check=Q(actor__isnull=False) | Q(action='conciliacion_nocturna'),
+            name='cs_evento_actor_o_sistema',
+        )]
 
     def save(self, *args, **kwargs):
         if not self._state.adding:

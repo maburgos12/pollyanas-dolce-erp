@@ -15,7 +15,7 @@
   }
   function values(form) {
     var out={};
-    form.querySelectorAll('input[name^="cantidad_"],textarea[name^="incidencia_"],textarea[name="observaciones"]').forEach(function(el){out[el.name]=el.value;});
+    form.querySelectorAll('input[name^="cantidad_"],input[name^="contado_en_"],textarea[name^="incidencia_"],textarea[name="observaciones"]').forEach(function(el){out[el.name]=el.value;});
     return out;
   }
   var inspected={};
@@ -104,7 +104,7 @@
         var pending=document.createElement('ul');
         Object.keys(draft.values||{}).forEach(function(name){
           var ident=name.split('_').pop(),row=root.querySelector('[data-line-id="'+ident+'"]');
-          var label=name==='observaciones'?'Observaciones':(name.indexOf('incidencia_')===0?'Incidencia':'Cantidad')+' · '+(row?row.querySelector('strong').textContent:ident);
+          var label=name==='observaciones'?'Observaciones':(name.indexOf('incidencia_')===0?'Incidencia':name.indexOf('contado_en_')===0?'Hora del conteo':'Cantidad')+' · '+(row?row.querySelector('strong').textContent:ident);
           var item=document.createElement('li');item.textContent=label+': '+(draft.values[name]===''?'(vacío)':draft.values[name]);pending.appendChild(item);
         });retained.appendChild(pending);
         var dismiss=document.createElement('button');dismiss.type='button';dismiss.className='count-button secondary';dismiss.textContent='Ya comparé y resguardé estos cambios';dismiss.addEventListener('click',function(){remove(key(root));retained.hidden=true;});retained.appendChild(dismiss);
@@ -140,14 +140,21 @@
     }
     form.addEventListener('formdata',function(event){
       var data=event.formData,readings={};
-      form.querySelectorAll('input[name^="cantidad_"]').forEach(function(input){var id=input.name.slice(9);readings[id]={cantidad:input.value,incidencia:form.elements.namedItem('incidencia_'+id).value};});
-      Array.from(data.keys()).forEach(function(name){if(name.indexOf('cantidad_')===0||name.indexOf('incidencia_')===0)data.delete(name);});
+      form.querySelectorAll('input[name^="cantidad_"]').forEach(function(input){var id=input.name.slice(9);readings[id]={cantidad:input.value,incidencia:form.elements.namedItem('incidencia_'+id).value,contado_en:form.elements.namedItem('contado_en_'+id).value};});
+      Array.from(data.keys()).forEach(function(name){if(name.indexOf('cantidad_')===0||name.indexOf('incidencia_')===0||name.indexOf('contado_en_')===0)data.delete(name);});
       data.set('lecturas_json',JSON.stringify(readings));
     });
+    var serverClock=Date.parse(root.dataset.serverNow), wallStart=Date.now(), monoStart=performance.now();
     form.addEventListener('input',function(event){
       if(!event.target.name)return;
-      if(event.target.name.indexOf('cantidad_')===0&&event.target.value!==''){
-        var incidence=event.target.closest('[data-count-line]').querySelector('textarea');
+      if(event.target.name.indexOf('cantidad_')===0){
+        var row=event.target.closest('[data-count-line]'), declared=row.querySelector('input[name^="contado_en_"]');
+        var elapsed=Date.now()-wallStart;
+        if(event.target.value==='')declared.value='';
+        if(event.target.value!==''&&!declared.value&&Number.isFinite(serverClock)&&Math.abs(elapsed-(performance.now()-monoStart))<60000){
+          declared.value=new Date(serverClock+elapsed+Number(root.dataset.serverOffset)*60000).toISOString().slice(0,19);
+        }
+        var incidence=row.querySelector('textarea');
         incidence.value=incidence.value.replace(/^No se maneja en esta sucursal\.\s*/,'');
       }
       // A changed body is a new intent; never reuse a receipt for different data.

@@ -62,22 +62,26 @@ def _cycle(branch, cutoff, *, insumos=False):
     return snapshot.sync_job if snapshot else None
 
 
-def referencia_conteo(conteo, *, now=None):
-    now = now or timezone.now()
-    cutoff = conteo.iniciado_en or conteo.creado_en
-    result = {'estado': 'SIN_REFERENCIA', 'corte_verificado': False,
-              'consultado_en': now.isoformat(), 'corte_conteo': cutoff.isoformat(),
-              'advertencias': ['La hora de extracción no certifica un corte físico.'], 'lineas': {}}
+def sucursal_point_conteo(conteo):
     branches = list(PointBranch.objects.filter(erp_branch_id=conteo.sucursal_id, status=PointBranch.STATUS_ACTIVE))
     if len(branches) > 1:
         # Point usa IDs numéricos; ventas también conserva alias de texto de la misma sucursal.
         numeric = [branch for branch in branches if str(branch.external_id or '').strip().isdigit()]
         if len(numeric) == 1:
             branches = numeric
-    if len(branches) != 1:
+    return branches[0] if len(branches) == 1 else None
+
+
+def referencia_conteo(conteo, *, now=None):
+    now = now or timezone.now()
+    cutoff = conteo.iniciado_en or conteo.creado_en
+    result = {'estado': 'SIN_REFERENCIA', 'corte_verificado': False,
+              'consultado_en': now.isoformat(), 'corte_conteo': cutoff.isoformat(),
+              'advertencias': ['La hora de extracción no certifica un corte físico.'], 'lineas': {}}
+    branch = sucursal_point_conteo(conteo)
+    if branch is None:
         result['advertencias'].append('Sucursal Point sin correspondencia única.')
         return result
-    branch = branches[0]
     result['sucursal_point_id'] = branch.pk
     lines = list(conteo.lineas.all())
     # A count uses one cycle only. Missing source rows stay partial.
