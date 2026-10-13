@@ -3,6 +3,11 @@
 # fuera; estas vigencias son las que la factura sí prueba.
 #
 # evidencia: emisor del CFDI y meses en que aparece con ese importe.
+#
+# CRUCERO no aparece a propósito: esa sucursal no pagaba renta. La hoja CRUCERO
+# del presupuesto autorizado trae «Arrendamiento local» en blanco los doce meses,
+# y el rubro agregado de renta de la cadena suma exactamente las otras 8
+# sucursales. No agregarle un importe tomado de Bamoa ni de ningún otro local.
 centro_costo,vigencia_inicio,vigencia_fin,monto,evidencia
 GUAMUCHIL,2026-01,,9367.50,RAQUEL GONZALEZ LOPEZ · idéntico ene-oct
 COLOSIO,2026-01,,4371.50,RAMSES ABDEL SANDOVAL SOTO · idéntico ene-oct
@@ -11,6 +16,5 @@ PAYAN,2026-01,,4500.00,MARLETH GAMEZ MORENO · sólo enero
 PAYAN,2026-02,,4665.87,MARLETH GAMEZ MORENO · «Blvd Romualdo Ruiz» feb-oct
 EL_TUNEL,2026-01,,6244.98,ISELA ABIGAIL ROJO MONTOYA · los 6960 de ene-may traían 715.02 de limpieza
 LEYVA,2026-01,,3960.00,Sin factura · importe confirmado por Dirección General
-CRUCERO,2026-01,2026-06-30,4000.00,Sin factura · local anterior hasta junio
 BAMOA,2026-07,,4000.00,Sin factura · importe confirmado por Dirección General
 PLAZA_NIO,2026-03,,20990.66,PATRIMONIO Y CAPITAL · mar-jul; faltan ene feb ago sep
