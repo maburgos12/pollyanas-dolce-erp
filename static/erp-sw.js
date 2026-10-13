@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261012-agent-pdf-v15";
+const CACHE_NAME = "pollyanas-erp-shell-20261012-agent-knowledge-v16";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",
