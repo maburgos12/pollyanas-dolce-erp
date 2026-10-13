@@ -8,7 +8,7 @@
   <p><a href="{% url 'rrhh:clima_detalle' participante.campana_id %}">← Volver a la campaña</a></p>
   <section class="clima-section" aria-labelledby="acceso-persona">
     <h2 id="acceso-persona">{{ participante.nombre }}</h2>
-    <p>Este acceso es individual. La encuesta aún no está abierta y no acepta respuestas. Entrégalo únicamente a esta persona cuando la campaña esté lista.</p>
+    <p>Este acceso es individual. {% if participante.campana.recepcion_habilitada %}La recepción está habilitada.{% else %}La encuesta aún no está abierta y no acepta respuestas.{% endif %} Entrégalo únicamente a esta persona cuando se autorice el envío.</p>
     <p><strong>Liga:</strong> <a href="{{ liga }}" rel="noreferrer">{{ liga }}</a></p>
     <img class="clima-qr" src="data:image/svg+xml;base64,{{ qr_data }}" alt="Código QR individual para {{ participante.nombre }}">
     <p>Fecha límite prevista: {{ participante.campana.fecha_cierre|date:"d/m/Y" }}.</p>

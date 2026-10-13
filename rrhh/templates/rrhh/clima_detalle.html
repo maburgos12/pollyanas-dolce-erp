@@ -6,10 +6,15 @@
 {% block content %}
 <div class="clima-page">
   <p><a href="{% url 'rrhh:clima_campanas' %}">← Volver a campañas</a></p>
-  <div class="clima-status" role="status"><strong>Borrador interno</strong><span>Fecha límite prevista: {{ campana.fecha_cierre|date:"d/m/Y" }}. Las ligas y QR aún no aceptan respuestas; no se han enviado invitaciones.</span></div>
+  <div class="clima-status" role="status"><strong>{% if cerrada %}Campaña cerrada{% else %}Recepción habilitada{% endif %}</strong><span>Fecha límite prevista: {{ campana.fecha_cierre|date:"d/m/Y" }}. {% if cerrada %}Las ligas y QR no aceptan respuestas.{% endif %} No se envían invitaciones desde este módulo.</span></div>
   <section class="clima-section" aria-labelledby="participantes"><h2 id="participantes">Padrón de la campaña</h2>
-    <p>{{ participantes.count }} persona{{ participantes.count|pluralize:"s" }}. Los datos de esta lista son una foto del padrón al crearla.</p>
-    <div class="clima-roster-list">{% for persona in participantes %}<div class="clima-persona"><span><strong>{{ persona.nombre }}</strong><small>{{ persona.departamento|default:"Sin departamento" }} · {{ persona.sucursal|default:"Sin sucursal" }}</small><a href="{% url 'rrhh:clima_acceso_individual' campana.pk persona.pk %}">Ver liga y QR</a></span></div>{% endfor %}</div>
+    <p>{{ respondieron }} de {{ participantes.count }} respondieron. Los datos de esta lista son una foto del padrón al crearla.</p>
+    <div class="clima-roster-list">{% for persona in participantes %}<div class="clima-persona"><span><strong>{{ persona.nombre }}</strong><small>{{ persona.departamento|default:"Sin departamento" }} · {{ persona.sucursal|default:"Sin sucursal" }} · {% if persona.respondio %}Respondió{% else %}Pendiente{% endif %}</small><a href="{% url 'rrhh:clima_acceso_individual' campana.pk persona.pk %}">Ver liga y QR</a></span></div>{% endfor %}</div>
+  </section>
+  <section class="clima-section" aria-labelledby="resultados"><h2 id="resultados">Resultados agregados</h2>
+    {% if resultados %}{% for grupo in resultados %}<details class="clima-questions"><summary>{{ grupo.nombre }} · {{ grupo.total }} respuestas</summary>
+      <ol>{% for pregunta in grupo.preguntas %}<li>{{ pregunta.texto }}<ul>{% for opcion in pregunta.opciones %}<li>{{ opcion.texto }}: {{ opcion.total }} ({{ opcion.porcentaje }} %) <progress value="{{ opcion.porcentaje }}" max="100" aria-label="{{ opcion.texto }}: {{ opcion.porcentaje }} por ciento"></progress></li>{% endfor %}</ul></li>{% endfor %}</ol>
+    </details>{% endfor %}{% else %}<p>Los resultados se mostrarán al cerrar la recepción y reunir al menos cinco respuestas. Las respuestas abiertas requieren revisión de privacidad antes de publicarse.</p>{% endif %}
   </section>
   <section class="clima-section" aria-labelledby="preguntas"><h2 id="preguntas">Preguntas guardadas</h2>
     {% for seccion in cuestionario.sections %}<details class="clima-questions"><summary>{{ seccion.title }} · {{ seccion.questions|length }} preguntas</summary><ol>{% for pregunta in seccion.questions %}<li>{{ pregunta.text }} <span>{% if pregunta.type == 'text' %}Respuesta abierta{% else %}Opciones: {{ pregunta.options|join:" · " }}{% endif %}</span></li>{% endfor %}</ol></details>{% endfor %}
