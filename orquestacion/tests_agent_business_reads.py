@@ -394,6 +394,25 @@ class BusinessReadTests(TestCase):
         self.assertEqual(result['payload']['freshness']['source_latest_capture'],captured.isoformat())
         self.assertTrue(result['payload']['freshness']['source_snapshots_available'])
 
+    def test_inventory_freshness_is_scoped_and_uses_bounded_index_lookup(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        point=PointBranch.objects.create(external_id='bk-fast',name='Centro',erp_branch=self.branch)
+        other=PointBranch.objects.create(external_id='bk-fast-other',name='Centro norte',erp_branch=self.other)
+        product=PointProduct.objects.create(external_id='bk-fast-product',name='Con stock')
+        job=PointSyncJob.objects.create()
+        captured=timezone.now()-timedelta(days=2)
+        for branch,stamp in [(point,captured-timedelta(days=1)),(point,captured),(other,timezone.now())]:
+            PointInventorySnapshot.objects.create(branch=branch,product=product,stock=5,min_stock=2,captured_at=stamp,sync_job=job)
+        with CaptureQueriesContext(connection) as queries:
+            result=self.invoke('erp.get_inventory_low_stock',{'branch':'Centro'})['result']
+        self.assertEqual(result['payload']['freshness']['source_latest_capture'],captured.isoformat())
+        snapshot_queries=[q['sql'] for q in queries if 'pos_bridge_inventory_snapshots' in q['sql']]
+        freshness=snapshot_queries[-1]
+        self.assertIn('LIMIT 1',freshness)
+        self.assertNotIn('MAX(',freshness)
+        self.assertEqual(freshness.count('SELECT'),1)
+
     def test_limit_explanation_reports_permitted_business_capabilities(self):
         result=self.run_turn('¿Qué puedes consultar?',[response(call('erp_explain_read_limit',{'operation':'UNKNOWN'}))])
         self.assertIn('ventas',result.assistant_text.lower())
