@@ -129,3 +129,38 @@ class PreparacionClimaTests(TestCase):
         self.assertContains(response, "Toda la campaña · 6 respuestas")
         self.assertNotContains(response, "Producción · 5 respuestas")
         self.assertNotContains(response, "Ventas · 1 respuesta")
+
+    def test_cobertura_actual_detecta_contactos_compartidos_sin_mostrarlos(self):
+        self.active.email = "Compartido@Example.com"
+        self.active.save(update_fields=["email"])
+        segundo = Empleado.objects.create(nombre="Segunda persona", email="compartido@example.com")
+        tercero = Empleado.objects.create(nombre="Tercera persona", telefono="667 123 4567")
+        sin_contacto = Empleado.objects.create(nombre="Cuarta persona")
+        self.client.force_login(self.admin)
+        principal = self.client.get(self.url)
+        self.assertContains(principal, "1 de 4 personas")
+        self.assertContains(principal, "1 no tiene contacto utilizable")
+        self.assertContains(principal, "2 comparten correo o teléfono")
+        campana = CampanaClima.objects.create(
+            titulo="Ensayo", fecha_cierre=timezone.localdate() + timedelta(days=14),
+            cuestionario=QUESTIONNAIRE, creada_por=self.admin,
+        )
+        for empleado in [self.active, segundo, tercero, sin_contacto, self.inactive]:
+            ParticipanteClima.objects.create(
+                campana=campana, empleado=empleado, nombre=empleado.nombre,
+                departamento=empleado.departamento,
+            )
+        detalle = reverse("rrhh:clima_detalle", args=[campana.pk])
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.get(detalle).status_code, 403)
+        self.client.force_login(self.admin)
+        response = self.client.get(detalle)
+        self.assertContains(response, "5 personas pendientes: 1 con contacto")
+        self.assertContains(response, "2 con dato compartido")
+        self.assertContains(response, "1 que ya no están activas")
+        self.assertNotContains(response, "Compartido@Example.com")
+        self.assertNotContains(response, "667 123 4567")
+        segundo.email = "unico@example.com"
+        segundo.save(update_fields=["email"])
+        self.assertContains(self.client.get(detalle), "5 personas pendientes: 3 con contacto")
+        self.assertFalse(CampanaClima.objects.get(pk=campana.pk).recepcion_habilitada)

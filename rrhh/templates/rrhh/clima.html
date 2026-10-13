@@ -6,6 +6,10 @@
 {% block content %}
 <div class="clima-page">
   <p class="clima-intro">Prepara una encuesta con el cuestionario acordado y una selección del padrón de RR. HH. Las campañas creadas aquí permanecen cerradas: cada persona tiene liga y QR, pero no se aceptan respuestas ni se envían invitaciones hasta una apertura posterior.</p>
+  <section class="clima-section" aria-labelledby="cobertura"><h2 id="cobertura">Cobertura del padrón actual</h2>
+    <p>{{ cobertura.listos }} de {{ cobertura.total }} personas tienen un contacto personal con formato utilizable que no aparece compartido en este padrón. {{ cobertura.sin_contacto }} {% if cobertura.sin_contacto == 1 %}no tiene{% else %}no tienen{% endif %} contacto utilizable y {{ cobertura.compartidos }} {% if cobertura.compartidos == 1 %}comparte{% else %}comparten{% endif %} correo o teléfono con otra persona. Estos grupos pueden coincidir.</p>
+    <p>El formato no confirma que el correo o teléfono pertenezca a la persona. Esta revisión no envía mensajes ni abre encuestas.</p>
+  </section>
   <section class="clima-section" aria-labelledby="nueva-campana">
     <h2 id="nueva-campana">Nueva campaña</h2>
     {% if not empleados %}<p>No hay empleados activos de Pollyana en este entorno. Cuando el padrón esté disponible, podrás preparar una campaña.</p>{% else %}
@@ -19,7 +23,7 @@
         <legend>Personas incluidas <span>({{ empleados|length }} activas)</span></legend>
         <p>Selecciona a quienes participarán. El nombre y departamento se conservarán como estaban al crear la campaña. El estado de contacto solo indica formato registrado, no confirma que la persona lo controle.</p>
         <div class="clima-roster-list">
-          {% for empleado in empleados %}<label class="clima-persona"><input type="checkbox" name="empleados" value="{{ empleado.pk }}" {% if empleado.seleccionado %}checked{% endif %}><span><strong>{{ empleado.nombre }}</strong><small>{{ empleado.get_departamento_display|default:"Sin departamento" }} · {{ empleado.sucursal_display|default:"Sin sucursal" }}</small><small>Contacto personal: {{ empleado.contacto_estado }}</small></span></label>{% endfor %}
+          {% for empleado in empleados %}<label class="clima-persona"><input type="checkbox" name="empleados" value="{{ empleado.pk }}" {% if empleado.seleccionado %}checked{% endif %}><span><strong>{{ empleado.nombre }}</strong><small>{{ empleado.get_departamento_display|default:"Sin departamento" }} · {{ empleado.sucursal_display|default:"Sin sucursal" }}</small><small>Contacto personal: {{ empleado.contacto_estado }}{% if empleado.contacto_compartido %} · Compartido; revisar{% endif %}</small></span></label>{% endfor %}
         </div>
       </fieldset>
       <button class="btn btn-primary" type="submit">Guardar campaña en borrador</button>

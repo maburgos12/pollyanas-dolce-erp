@@ -2,6 +2,7 @@
 
 import base64
 import json
+from collections import Counter
 from io import BytesIO
 from pathlib import Path
 
@@ -59,6 +60,33 @@ class RespuestasClimaForm(forms.Form):
                 )
 
 
+def _cobertura_contacto(pares, solo_pendientes=False):
+    filas = []
+    for persona, empleado in pares:
+        correo = (empleado.email or "").strip().lower()
+        try:
+            validate_email(correo)
+        except ValidationError:
+            correo = ""
+        telefono = normalizar_telefono(empleado.telefono)
+        persona.contacto_estado = "Correo y teléfono" if correo and telefono else "Correo" if correo else "Teléfono" if telefono else "Sin contacto"
+        persona.contacto_inactivo = not empleado.activo
+        filas.append((persona, correo, telefono))
+    correos = Counter(correo for _, correo, _ in filas if correo)
+    telefonos = Counter(telefono for _, _, telefono in filas if telefono)
+    for persona, correo, telefono in filas:
+        persona.contacto_compartido = (bool(correo) and correos[correo] > 1) or (bool(telefono) and telefonos[telefono] > 1)
+        persona.contacto_listo = persona.contacto_estado != "Sin contacto" and not persona.contacto_compartido and not persona.contacto_inactivo
+    contadas = [persona for persona, _, _ in filas if not solo_pendientes or not persona.respondio]
+    return {
+        "total": len(contadas),
+        "listos": sum(persona.contacto_listo for persona in contadas),
+        "sin_contacto": sum(persona.contacto_estado == "Sin contacto" for persona in contadas),
+        "compartidos": sum(persona.contacto_compartido for persona in contadas),
+        "inactivos": sum(persona.contacto_inactivo for persona in contadas),
+    }
+
+
 @login_required
 def campanas_clima(request):
     if not can_manage_rrhh(request.user):
@@ -69,15 +97,9 @@ def campanas_clima(request):
     )
     form = CampanaClimaForm(request.POST or None)
     selected = set(request.POST.getlist("empleados")) if request.method == "POST" else {str(e.pk) for e in empleados}
+    cobertura = _cobertura_contacto((empleado, empleado) for empleado in empleados)
     for empleado in empleados:
         empleado.seleccionado = str(empleado.pk) in selected
-        try:
-            validate_email(empleado.email)
-            correo = True
-        except ValidationError:
-            correo = False
-        telefono = bool(normalizar_telefono(empleado.telefono))
-        empleado.contacto_estado = "Correo y teléfono" if correo and telefono else "Correo" if correo else "Teléfono" if telefono else "Sin contacto"
     if request.method == "POST" and form.is_valid():
         eligible = {str(e.pk): e for e in empleados}
         if not selected or not selected <= eligible.keys():
@@ -100,6 +122,7 @@ def campanas_clima(request):
             return redirect("rrhh:clima_detalle", pk=campana.pk)
     return render(request, "rrhh/clima.html", {
         "form": form, "empleados": empleados, "selected": selected,
+        "cobertura": cobertura,
         "campanas": CampanaClima.objects.select_related("creada_por").annotate(total=Count("participantes"))[:20],
         "cuestionario": QUESTIONNAIRE,
     })
@@ -110,8 +133,9 @@ def detalle_clima(request, pk):
     if not can_manage_rrhh(request.user):
         raise PermissionDenied
     campana = get_object_or_404(CampanaClima, pk=pk)
-    participantes = campana.participantes.all()
-    respondieron = participantes.filter(respondio=True).count()
+    participantes = list(campana.participantes.select_related("empleado"))
+    cobertura = _cobertura_contacto(((persona, persona.empleado) for persona in participantes), solo_pendientes=True)
+    respondieron = len(participantes) - cobertura["total"]
     respuestas = list(campana.respuestas.values("departamento", "respuestas"))
     # No publicar un desglose que permita deducir el grupo pequeño por diferencia.
     areas = {}
@@ -135,6 +159,7 @@ def detalle_clima(request, pk):
     return render(request, "rrhh/clima_detalle.html", {
         "campana": campana,
         "participantes": participantes,
+        "cobertura": cobertura,
         "respondieron": respondieron,
         "cerrada": cerrada,
         "resultados": resultados,
