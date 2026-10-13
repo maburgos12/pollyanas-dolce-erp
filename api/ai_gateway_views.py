@@ -311,7 +311,7 @@ class AIGatewayFollowupEvidenceView(APIView):
         except WorkflowError as exc:
             return Response({'code': exc.code, 'detail': str(exc)}, status=exc.status)
         except (ValueError, EvidenceValidationError):
-            return Response({'detail': 'Revisa la propuesta y adjunta hasta cinco fotografías válidas de hasta 10 MB cada una.'}, status=400)
+            return Response({'detail': 'Revisa la propuesta y adjunta hasta cinco imágenes o PDFs de hasta 10 MB cada uno.'}, status=400)
         except ValidationError:
             raise
         except Exception:
@@ -331,7 +331,7 @@ class AIGatewayFollowupEvidenceView(APIView):
             info = next((row for row in draft.metadata_json.get('files', []) if row['id'] == str(evidence_id)), None)
             if not info:
                 raise Http404
-            response = FileResponse(default_storage.open(info['path'], 'rb'), content_type=info['mime'], filename=info['nombre'])
+            response = FileResponse(default_storage.open(info['path'], 'rb'), content_type=info['mime'], filename=info['nombre'], as_attachment=info['mime'] == 'application/pdf')
             response['Cache-Control'] = 'private, no-store'
             response['X-Content-Type-Options'] = 'nosniff'
             return response

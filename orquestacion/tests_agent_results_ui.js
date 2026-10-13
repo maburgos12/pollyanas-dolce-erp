@@ -43,6 +43,12 @@ assert(view.tool({tool_key:'workflow.resume_asset_maintenance',status:'complete'
 assert(view.tool({status:'complete',tool_key:'read_unavailable',result:{}}).includes('El servidor registró el resultado'));
 assert(!view.tool({status:'running',...call,status:'running'}).includes('OM1'));
 assert(view.escape(null)==='');
+const documentEvidence = {mime:'application/pdf', nombre:hostile, url:'/private/factura/'};
+const pdfEvidenceHtml = view.incident({...purchase, files:[documentEvidence]});
+assert(pdfEvidenceHtml.includes('PDF'));
+assert(!pdfEvidenceHtml.includes('<img'));
+assert(pdfEvidenceHtml.includes('&lt;img'));
+assert(pdfEvidenceHtml.includes('application/pdf'));
 assert(view.date('not-a-date')==='not-a-date');
 
 const outside = view.tool({tool_key:'read.explain_limit',status:'complete',result:{result:{status:'out_of_scope',payload:{message:`Las consultas de otros módulos aún no están habilitadas. ${hostile}`}}}});

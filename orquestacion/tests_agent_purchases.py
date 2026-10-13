@@ -66,6 +66,14 @@ class PurchaseAgentFixture:
 
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True, AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
 class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
+    def test_pdf_purchase_evidence_can_reuse_original_without_registering_payment(self):
+        from orquestacion.tests_agent_images import pdf_file
+        dto = self.prepare()
+        attached = purchases.attach(user=self.user, draft_id=dto['draft_id'], arguments=self.command(dto),
+            files=[pdf_file()])['result']['payload']['incident']
+        self.assertEqual(attached['files'][0]['mime'], 'application/pdf')
+        self.assertFalse(CompraRealizadaDepartamental.objects.exists())
+
     def test_chat_image_binding_reuses_private_original_and_rejects_other_conversation(self):
         from orquestacion.services import agent_images
         request, answer = agent_images.create_image_turn(user=self.user, conversation=self.conversation,

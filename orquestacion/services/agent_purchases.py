@@ -20,7 +20,6 @@ from compras.access_departamentales import _areas_usuario, _areas_lectura_solici
 from compras.models import SolicitudCompraDepartamental, EventoCompraDepartamental
 from compras.services_solicitudes import crear_solicitud
 from core.models import AuditLog
-from mantenimiento.evidence_validation import validate_evidence_files
 from orquestacion.models import ChatConversation, ChatMessage, ChatToolCall, ChatToolResult
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable
 from .agent_incidents import IncidentConfirmation
@@ -214,7 +213,7 @@ def project(draft, user):
             'request_id':row.pk if row else None, 'folio':meta.get('folio'),
             'url':reverse('compras:departamental_detalle', args=[row.pk]) if row else None,
             'confirmed_at':meta.get('confirmed_at'), 'expires_at':meta['expires_at'],
-            'files':[{'id':f['id'], 'nombre':f['nombre'], 'bytes':f['bytes'], 'sha256':f['sha256'],
+            'files':[{'id':f['id'], 'nombre':f['nombre'], 'bytes':f['bytes'], 'sha256':f['sha256'], 'mime':f['mime'],
                       'url':reverse('api_ai_purchase_evidence',args=[draft.public_id,f['id']])} for f in meta.get('files',[])]}
 
 
@@ -350,20 +349,8 @@ def attach(*,user,draft_id,arguments,files,source_message_id=None):
         source_draft, source_actor = owned_draft(user,draft_id)
         files,reuse = source_files(source_actor,source_message_id,source_draft.conversation_id)
     serializer=IncidentConfirmation(data=arguments);serializer.is_valid(raise_exception=True)
-    files=validate_evidence_files(files,images_only=True)
-    if not files or sum(f.size for f in files)>20*1024*1024: raise WorkflowError('purchase_invalid_files',400)
-    from PIL import Image
-    uploads=[]
-    for file in files:
-        try:
-            with Image.open(file) as image:
-                if image.width*image.height>25000000: raise ValueError
-                image.verify()
-        except Exception: raise WorkflowError('purchase_invalid_image',400) from None
-        finally: file.seek(0)
-        blob=file.read();file.seek(0)
-        uploads.append({'nombre':file.name,'bytes':file.size,'sha256':hashlib.sha256(blob).hexdigest(),'mime':file.content_type})
-    if len({i['sha256'] for i in uploads})!=len(uploads): raise WorkflowError('purchase_duplicate_files',400)
+    from .agent_images import validated
+    files,uploads=validated(files)
     upload_hash=digest(uploads)
     saved=[]
     try:

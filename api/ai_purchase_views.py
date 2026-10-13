@@ -48,12 +48,12 @@ class AIPurchaseEvidenceView(APIView):
         except WorkflowError as exc:
             return Response({'code':exc.code,'detail':str(exc)},status=exc.status)
         except (ValueError,EvidenceValidationError):
-            return Response({'detail':'Adjunta hasta cinco imágenes JPG, PNG o WebP válidas, máximo 10 MB cada una y 20 MB en total.'},status=400)
+            return Response({'detail':'Adjunta hasta cinco imágenes JPG, PNG, WebP o PDFs válidos, máximo 10 MB cada una y 20 MB en total.'},status=400)
         except ValidationError:
             raise
         except Exception:
             logger.exception('Purchase evidence upload failed')
-            return Response({'detail':'No se pudieron asociar las imágenes. Revisa la propuesta antes de reintentar.'},status=503)
+            return Response({'detail':'No se pudieron asociar los archivos. Revisa la propuesta antes de reintentar.'},status=503)
 
     def get(self, request, draft_id, evidence_id):
         draft=purchases.ChatToolCall.objects.select_related('conversation').filter(public_id=draft_id,tool_key=purchases.KEY).first()
@@ -72,7 +72,7 @@ class AIPurchaseEvidenceView(APIView):
                         payload__payload_hash=draft.metadata_json['payload_hash']).exists(): raise Http404
             info=next((f for f in draft.metadata_json.get('files',[]) if f['id']==str(evidence_id)),None)
             if not info: raise Http404
-            result=FileResponse(default_storage.open(info['path'],'rb'),content_type=info['mime'],filename=info['nombre'])
+            result=FileResponse(default_storage.open(info['path'],'rb'),content_type=info['mime'],filename=info['nombre'],as_attachment=info['mime']=='application/pdf')
             result['Cache-Control']='private, no-store'
             result['X-Content-Type-Options']='nosniff'
             return result
