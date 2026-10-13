@@ -285,9 +285,12 @@ def _sales_source_label(selection: dict[str, Any]) -> tuple[str, str]:
     return "SinFuente", "EMPTY"
 
 
-def _handle_sales_summary(_user, arguments: dict[str, Any]) -> dict[str, Any]:
+def _handle_sales_summary(_user, arguments: dict[str, Any], *, branch_ids=None, exact_scope=False) -> dict[str, Any]:
     start_date, end_date = _resolve_sales_period(arguments)
-    branch_ids = _resolve_sales_branch_scope(arguments)
+    if not exact_scope:
+        branch_ids = _resolve_sales_branch_scope(arguments)
+    elif branch_ids == []:
+        raise PermissionDenied("Alcance de sucursal vacío.")
     selection = get_sales_range(
         start_date=start_date,
         end_date=end_date,
@@ -326,6 +329,7 @@ def _handle_sales_summary(_user, arguments: dict[str, Any]) -> dict[str, Any]:
             "branches_count": len(grouped_branches["rows"]),
             "products_count": len(grouped_products["rows"]),
             "days_count": int(selection.get("coverage_days") or 0),
+            **({key: selection.get(key) for key in ("coverage_accepted", "coverage_reason", "reason", "source_detail", "coverage_days")} if exact_scope else {}),
             "limitations": {
                 "ticket_amount_distribution_available": False,
                 "use_for_ticket_threshold_questions": False,
@@ -537,7 +541,7 @@ def _handle_ticket_amount_threshold(_user, arguments: dict[str, Any]) -> dict[st
     }
 
 
-def _latest_inventory_qs(arguments: dict[str, Any]):
+def _latest_inventory_qs(arguments: dict[str, Any], *, branch_ids=None, exact_scope=False):
     from django.db.models import OuterRef, Subquery
 
     latest_snapshot_id = (
@@ -552,7 +556,12 @@ def _latest_inventory_qs(arguments: dict[str, Any]):
         id=Subquery(latest_snapshot_id)
     )
     branch = str(arguments.get("branch") or "").strip()
-    if branch:
+    if exact_scope:
+        if branch_ids == []:
+            raise PermissionDenied("Alcance de sucursal vacío.")
+        if branch_ids is not None:
+            qs = qs.filter(branch__erp_branch_id__in=branch_ids)
+    elif branch:
         qs = qs.filter(
             Q(branch__name__icontains=branch)
             | Q(branch__external_id__iexact=branch)
@@ -561,8 +570,8 @@ def _latest_inventory_qs(arguments: dict[str, Any]):
     return qs
 
 
-def _handle_inventory_low_stock(_user, arguments: dict[str, Any]) -> dict[str, Any]:
-    qs = _latest_inventory_qs(arguments).filter(stock__lt=models.F("min_stock"), min_stock__gt=0).order_by(
+def _handle_inventory_low_stock(_user, arguments: dict[str, Any], *, branch_ids=None, exact_scope=False) -> dict[str, Any]:
+    qs = _latest_inventory_qs(arguments, branch_ids=branch_ids, exact_scope=exact_scope).filter(stock__lt=models.F("min_stock"), min_stock__gt=0).order_by(
         "branch__name",
         "product__name",
         "id",
@@ -813,7 +822,7 @@ def _score_input_candidate(*, insumo: Insumo, query: str, exact_alias_ids: set[i
     return score
 
 
-def _resolve_input_cost_candidates(query: str, *, limit: int) -> list[Insumo]:
+def _resolve_input_cost_candidates(query: str, *, limit: int, include_search_metadata=False) -> list[Insumo] | tuple[list[Insumo], bool]:
     normalized_query = normalizar_nombre(query)
     exact_alias_ids = set(
         InsumoAlias.objects.filter(nombre_normalizado=normalized_query, insumo__activo=True).values_list("insumo_id", flat=True)
@@ -829,18 +838,20 @@ def _resolve_input_cost_candidates(query: str, *, limit: int) -> list[Insumo]:
     tokens = _input_cost_search_tokens(query)
     for token in tokens:
         q_filter |= Q(nombre_normalizado__icontains=token) | Q(nombre_point__icontains=token)
+    scan_limit = max(limit * 8, 40)
     candidates = list(
         Insumo.objects.select_related("unidad_base", "proveedor_principal")
         .filter(q_filter, activo=True)
-        .distinct()[: max(limit * 8, 40)]
+        .distinct()[: scan_limit + int(include_search_metadata)]
     )
     ranked = [
         (candidate, _score_input_candidate(insumo=candidate, query=query, exact_alias_ids=exact_alias_ids))
-        for candidate in candidates
+        for candidate in candidates[:scan_limit]
     ]
     ranked = [(candidate, score) for candidate, score in ranked if score > 0]
     ranked.sort(key=lambda item: (-item[1], item[0].nombre.lower(), item[0].id))
-    return [candidate for candidate, _score in ranked[:limit]]
+    result = [candidate for candidate, _score in ranked[:limit]]
+    return (result, len(candidates) > scan_limit or len(ranked) > limit) if include_search_metadata else result
 
 
 def _serialize_input_cost_candidate(insumo: Insumo) -> dict[str, Any]:

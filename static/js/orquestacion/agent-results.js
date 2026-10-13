@@ -42,8 +42,40 @@
     if (!Array.isArray(rows) || !rows.length) return `<p class="agent-no-data">${escape(title)}: sin registros en esta consulta.</p>`;
     return `<div class="agent-table-scroll" tabindex="0" role="region" aria-label="${escape(title)}"><table><caption>${escape(title)}</caption><thead><tr>${columns.map(([label]) => `<th scope="col">${escape(label)}</th>`).join('')}</tr></thead><tbody>${rows.map(row => `<tr>${columns.map(([,render]) => `<td>${render(row)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   }
+  const available = value => escape(value ?? 'No disponible');
+  const money = (value, currency = 'MXN') => value == null ? 'No disponible' : `${escape(value)} ${escape(currency || 'Moneda no indicada')}`;
+  const facts = rows => `<dl class="agent-facts">${rows.map(([label,value])=>`<div><dt>${escape(label)}</dt><dd>${value}</dd></div>`).join('')}</dl>`;
   function data(key, result) {
     const p = result.payload || {};
+    if (key === 'knowledge.discover') return `<p>Consultas disponibles para esta conversación:</p><ul>${(p.tools || []).map(row=>`<li>${escape(row.display_name)}</li>`).join('')}</ul>`;
+    if (['erp.get_sales_summary','erp.get_inventory_low_stock'].includes(key) && result.status === 'ambiguous' && p.selection_required) return `<p>Indica la sucursal que necesitas:</p><ul>${(p.items || []).map(row=>`<li>${escape(row.name)}</li>`).join('')}</ul>`;
+    if (key === 'erp.get_sales_summary') {
+      const f = result.filters || {};
+      return `<p>Periodo: ${date(f.start_date)} a ${date(f.end_date)}${f.branch ? ` · ${escape(f.branch)}` : ''}.</p>
+        ${facts([['Venta registrada',money(p.total_sales)],['Cantidad registrada',available(p.total_quantity)],['Tickets',available(p.total_tickets)]])}
+        <p class="agent-source">Días con cobertura: ${available(p.coverage_days ?? p.days_count)}. ${p.coverage_accepted === true ? 'Cobertura aceptada por la fuente.' : p.coverage_accepted === false ? 'La fuente no confirma cobertura completa.' : 'Cobertura completa no indicada.'}</p>
+        <p>La consulta conserva los límites de la fuente; no informa distribución de importes por ticket.${p.total_tickets == null ? ' El conteo de tickets no está disponible.' : ''}</p>`;
+    }
+    if (key === 'erp.get_inventory_low_stock') {
+      const f = p.freshness || {};
+      const rows = p.items || [];
+      return `${rows.length ? table('Existencias por debajo del mínimo',rows,[['Producto',r=>escape(r.product_name)],['Sucursal',r=>escape(r.branch_name)],['Existencias',r=>available(r.current_stock)],['Mínimo',r=>available(r.min_stock)],['Capturado',r=>date(r.captured_at)]]) : `<p>${f.source_snapshots_available === true ? 'No hay alertas de stock bajo en las capturas consultadas.' : 'No hay capturas de inventario disponibles para confirmar existencias.'}</p>`}
+        ${p.truncated ? '<p>Hay más alertas; precisa la consulta.</p>' : ''}
+        <p class="agent-source">Última captura de la fuente: ${date(f.source_latest_capture)} · Antigüedad al consultar: ${f.source_age_seconds == null ? 'No disponible' : `${escape(Math.floor(f.source_age_seconds / 3600))} horas`}. La fecha de consulta no es la fecha de captura.</p>`;
+    }
+    if (key === 'erp.get_current_input_cost') {
+      if (result.status === 'ambiguous') return `<p>Hay varias opciones o la búsqueda está acotada. Indica el nombre y la unidad que necesitas.</p>${table('Insumos encontrados',p.candidates,[['Insumo',r=>escape(r.insumo)],['Unidad base',r=>escape(r.unidad_base || 'No disponible')]])}${p.truncated ? '<p>Hay más opciones fuera de esta búsqueda; precisa el nombre.</p>' : ''}`;
+      if (!p.insumo) return '<p>No se encontró un insumo con esta búsqueda.</p>';
+      return `<p><strong>${escape(p.insumo)}</strong> · Unidad base: ${escape(p.unidad_base || 'No disponible')}</p>
+        ${facts([['Costo de compra por unidad base',p.costo_unitario == null ? 'Sin costo registrado' : money(p.costo_unitario,p.moneda)],['Fecha del costo',date(p.fecha)],['Proveedor',escape(p.proveedor || 'No disponible')]])}
+        <p>El costo corresponde a su fecha registrada; no es el costo de una receta. Se excluyen costos con fecha futura.</p>`;
+    }
+    if (['erp.get_purchase_requests','erp.get_purchase_orders'].includes(key)) {
+      const request = key === 'erp.get_purchase_requests';
+      const labels = {BORRADOR:'Borrador',EN_REVISION:'En revisión',APROBADA:'Aprobada',RECHAZADA:'Rechazada',ENVIADA:'Enviada',CONFIRMADA:'Confirmada',PARCIAL:'Parcial',CERRADA:'Cerrada'};
+      const columns = request ? [['Folio',r=>escape(r.folio)],['Área',r=>escape(r.area)],['Solicitante',r=>escape(r.solicitante)],['Insumo',r=>escape(r.insumo)],['Cantidad',r=>available(r.cantidad)],['Requerida',r=>date(r.fecha_requerida)],['Estado',r=>escape(labels[r.estatus] || r.estatus)]] : [['Folio',r=>escape(r.folio)],['Proveedor',r=>escape(r.proveedor)],['Solicitud',r=>escape(r.solicitud_folio || 'Sin solicitud vinculada')],['Emisión',r=>date(r.fecha_emision)],['Entrega estimada',r=>date(r.fecha_entrega_estimada)],['Monto estimado (MXN)',r=>money(r.monto_estimado)],['Estado',r=>escape(labels[r.estatus] || r.estatus)]];
+      return `${table(request ? 'Solicitudes clásicas de compra' : 'Órdenes clásicas de compra',p.items,columns)}${p.truncated ? '<p>Hay más registros; precisa la consulta.</p>' : ''}<p>${(p.limitations || ['Compras clásicas únicamente; no incluye compras departamentales ni especiales.']).map(escape).join(' ')}</p>`;
+    }
     if (['incident.prepare','incident.followup','purchase.prepare'].includes(key)) return incident(p.incident);
     if (['purchase.search','purchase.get'].includes(key)) return table('Solicitudes de compra', p.requests, [['Folio',r=>escape(r.folio)],['Área',r=>escape(r.area)],['Solicitante',r=>escape(r.solicitante)],['Estado',r=>escape(r.estado)],['Artículos',r=>escape((r.items || []).map(i=>`${i.cantidad} ${i.unidad} · ${i.descripcion}`).join('; '))]]) + (p.truncated ? '<p>Hay más solicitudes; precisa la búsqueda.</p>' : '');
     if (key === 'purchase.requirements') return '<p>Se requiere área, solicitante, motivo y artículos. La cotización inicial y la evidencia son opcionales.</p>';
