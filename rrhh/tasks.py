@@ -7,6 +7,13 @@ from celery import shared_task
 from django.utils import timezone
 
 
+@shared_task(name="rrhh.procesar_avisos_clima")
+def procesar_avisos_clima_diario():
+    from .services_clima_avisos import procesar_avisos_clima
+
+    return procesar_avisos_clima()
+
+
 @shared_task(bind=True, max_retries=3)
 def avisar_cumpleanos(self, fecha_envio=None):
     """Avisos de hoy; reintentos confirmados sólo durante el mismo día local."""

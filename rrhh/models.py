@@ -2898,10 +2898,24 @@ class ParticipanteClima(models.Model):
     departamento = models.CharField(max_length=40, blank=True)
     sucursal = models.CharField(max_length=120, blank=True)
     respondio = models.BooleanField(default=False)
+    envio_whatsapp_autorizado = models.BooleanField(default=False)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["campana", "empleado"], name="clima_participante_unico")]
         ordering = ["nombre", "id"]
+
+
+class AvisoClima(models.Model):
+    INVITACION = "INVITACION"
+    RECORDATORIO = "RECORDATORIO"
+    participante = models.ForeignKey(ParticipanteClima, on_delete=models.CASCADE, related_name="avisos")
+    tipo = models.CharField(max_length=20, choices=[(INVITACION, "Invitación"), (RECORDATORIO, "Recordatorio")])
+    estado = models.CharField(max_length=20, default="PENDIENTE")
+    referencia_externa = models.CharField(max_length=180, blank=True)
+    intentado_en = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["participante", "tipo"], name="clima_aviso_unico")]
 
 
 class RespuestaClima(models.Model):

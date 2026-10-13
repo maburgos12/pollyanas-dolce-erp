@@ -351,6 +351,7 @@ CELERY_VISIBILITY_TIMEOUT = 24 * 60 * 60
 CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_TASK_ROUTES = {
+    "rrhh.procesar_avisos_clima": {"queue": "notificaciones"},
     "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
     "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
@@ -361,6 +362,10 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
+    "rrhh-clima-avisos-diarios": {
+        "task": "rrhh.procesar_avisos_clima",
+        "schedule": crontab(hour=10, minute=0),
+    },
     "inventario: conciliacion conteos nocturna": {
         "task": "inventario.conciliar_conteos_nocturnos",
         "schedule": crontab(hour=2, minute=0),

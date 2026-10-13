@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core import signing
@@ -6,8 +7,10 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from .models import CampanaClima, Empleado, ParticipanteClima, RespuestaClima
+from .models import AvisoClima, CampanaClima, Empleado, ParticipanteClima, RespuestaClima
 from .views_clima import QUESTIONNAIRE
+from .services_clima_avisos import procesar_avisos_clima
+from core.whatsapp import ResultadoWhatsApp
 
 
 class PreparacionClimaTests(TestCase):
@@ -164,3 +167,79 @@ class PreparacionClimaTests(TestCase):
         segundo.save(update_fields=["email"])
         self.assertContains(self.client.get(detalle), "5 personas pendientes: 3 con contacto")
         self.assertFalse(CampanaClima.objects.get(pk=campana.pk).recepcion_habilitada)
+
+
+class AvisosClimaTests(TestCase):
+    def setUp(self):
+        admin = get_user_model().objects.create_superuser("clima_aviso_admin", "admin@example.com", "pass")
+        self.campana = CampanaClima.objects.create(
+            titulo="Prueba", fecha_cierre=timezone.localdate() + timedelta(days=14),
+            cuestionario=QUESTIONNAIRE, creada_por=admin,
+        )
+        empleado = Empleado.objects.create(nombre="Ana Ejemplo", telefono="6671234567")
+        self.persona = ParticipanteClima.objects.create(
+            campana=self.campana, empleado=empleado, nombre=empleado.nombre,
+            envio_whatsapp_autorizado=True,
+        )
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_cerrada_o_flag_apagado_nunca_envia(self, enviar):
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": ""}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_not_called()
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_invitacion_una_vez_y_recordatorio_solo_si_sigue_pendiente(self, enviar):
+        enviar.return_value = ResultadoWhatsApp("ENVIADO", referencia="wamid.test")
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+            invitacion = AvisoClima.objects.get(tipo=AvisoClima.INVITACION)
+            invitacion.intentado_en = timezone.now() - timedelta(days=4)
+            invitacion.save(update_fields=["intentado_en"])
+            self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        self.assertEqual(enviar.call_count, 2)
+        self.assertEqual(enviar.call_args.kwargs["plantilla"], "clima_laboral_recordatorio_v1")
+        self.assertEqual(AvisoClima.objects.count(), 2)
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_no_recuerda_si_respondio_y_no_reintenta_incierto(self, enviar):
+        enviar.return_value = ResultadoWhatsApp("INCIERTO")
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+            AvisoClima.objects.filter(participante=self.persona).update(
+                estado="ENVIADO", intentado_en=timezone.now() - timedelta(days=4))
+            self.persona.respondio = True
+            self.persona.save(update_fields=["respondio"])
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_called_once()
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_contacto_compartido_o_no_autorizado_se_omite(self, enviar):
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        empleado = Empleado.objects.create(nombre="Otra persona", telefono="6671234567")
+        ParticipanteClima.objects.create(campana=self.campana, empleado=empleado, nombre=empleado.nombre)
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_not_called()
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla", side_effect=TimeoutError)
+    def test_excepcion_conserva_estado_incierto_y_no_renvia(self, enviar):
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        self.assertEqual(AvisoClima.objects.get().estado, "INCIERTO")
+        enviar.assert_called_once()
