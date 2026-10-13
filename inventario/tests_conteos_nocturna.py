@@ -145,6 +145,18 @@ class NightlyCountTests(TestCase):
         with self.assertRaises(AuditStockHistoryError):
             _historial(service,self.point,self.product)
 
+    def test_duplicate_snapshot_in_one_cycle_is_pending_without_point_contact(self):
+        self.snapshot.pk=None
+        self.snapshot.save(force_insert=True)
+        with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
+            summary=conciliar_conteos_nocturnos()
+            client.assert_not_called()
+        self.count.refresh_from_db()
+        result=self.count.conciliacion['lineas'][str(self.line.pk)]
+        self.assertIn('duplicado',result['motivo'])
+        self.assertIsNone(result['diferencia'])
+        self.assertFalse(summary['reintentar'])
+
     def test_publish_rejects_recount_and_other_job_races(self):
         stale=ConteoSucursal.objects.get(pk=self.count.pk)
         readings=lecturas_efectivas(stale)

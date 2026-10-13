@@ -111,6 +111,11 @@ def conciliar_conteos_nocturnos():
                             sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
                             sync_job__finished_at__lte=now,
                         ).select_related('sync_job').order_by('-captured_at','-pk').first()
+                        if snapshot and PointInventorySnapshot.objects.filter(
+                                branch=branch,product_id=reading.linea.producto_id,sync_job_id=snapshot.sync_job_id,
+                        ).exclude(pk=snapshot.pk).exists():
+                            lines[str(reading.linea_id)] = _pendiente('Artículo duplicado en el ciclo Point; no hay snapshot único.')
+                            continue
                         key = (branch.pk,reading.linea.producto_id)
                         try:
                             if key not in batches:
