@@ -46,7 +46,7 @@ No se cambian identidad piloto, modelo, presupuesto, flags, límites de herramie
 
 ## Presentación y verificación
 
-La interfaz usa tablas, escape de texto, fechas y fuentes existentes. Descubrimiento muestra nombres; las consultas muestran hechos y límites, incluso con prosa natural. No se imprime JSON, SQL, contratos, hashes ni identificadores técnicos de selección. La elección de una opción se precisa por nombre y unidad en la conversación. No se añaden botones de ejecución. `chat.html` y `erp-sw.js` versionan juntos el cambio visible.
+La interfaz usa tablas, escape de texto, fechas y fuentes existentes. Descubrimiento muestra nombres; las consultas muestran hechos y límites, incluso con prosa natural. No se imprime JSON, SQL, contratos, hashes ni identificadores técnicos de selección. La elección de una opción se precisa por nombre y unidad en la conversación. No se añaden botones de ejecución. `chat.html` versiona el renderizador; `erp-sw.js`, `templates/base.html` y `core/templates/core/login.html` mantienen sincronizada la versión del shell.
 
 Pruebas locales: `orquestacion.tests_agent_business_reads`, `orquestacion.tests_erp_system_map`, `orquestacion/tests_agent_results_ui.js` y `orquestacion/tests_agent_voice_ui.js`. Las pruebas de mapa usan `SimpleTestCase` y no permiten consultas de filas; incluyen rutas recursivas, FK/M2M, referencias de esquema y ausencia de defaults. Las de UI cubren null/moneda exacta, límites, captura antigua, XSS y conservación del controlador de conversación/voz/evidencias. La prueba de Compras usa ACL VIEW explícita, actor sin DG y sucursal asignada, con candado o revocación durante el proveedor y supresión posterior de contenido/evidencia en historial.
 
