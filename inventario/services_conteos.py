@@ -4,6 +4,7 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from uuid import UUID
+from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -128,7 +129,23 @@ def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, reque
 
 
 def lecturas_efectivas(conteo):
-    return list(LecturaConteoSucursal.objects.filter(linea__conteo=conteo).order_by('linea_id','-ronda').distinct('linea_id'))
+    return list(LecturaConteoSucursal.objects.filter(linea__conteo=conteo).select_related('linea','linea__producto').order_by('linea_id','-ronda').distinct('linea_id'))
+
+
+def _hora_conteo(value, conteo):
+    if value in (None, ''):
+        return None
+    value = _text(value, 64)
+    try:
+        stamp = parse_datetime(value)
+        if stamp and timezone.is_naive(stamp):
+            stamp = timezone.make_aware(stamp, ZoneInfo('America/Mazatlan'))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    # A valid quantity still saves; an unproven time leaves reconciliation pending.
+    if not stamp or not conteo.iniciado_en or not conteo.iniciado_en.replace(microsecond=0) <= stamp <= timezone.now():
+        return None
+    return stamp
 
 
 def _guardar(conteo, actor, payload):
@@ -138,9 +155,16 @@ def _guardar(conteo, actor, payload):
     current = {str(r.linea_id):r for r in LecturaConteoSucursal.objects.filter(linea__conteo=conteo,ronda=conteo.ronda)}
     if set(values)-set(current): raise ConteoError('Artículo ajeno al conteo o a la ronda actual.')
     for key, value in values.items():
-        if not isinstance(value,dict) or set(value)-{'cantidad','incidencia'}: raise ConteoError('Lectura inválida.')
+        if not isinstance(value,dict) or set(value)-{'cantidad','incidencia','contado_en'}: raise ConteoError('Lectura inválida.')
         reading = current[key]
-        reading.cantidad = _cantidad(value.get('cantidad'))
+        amount = _cantidad(value.get('cantidad'))
+        if amount is None:
+            reading.contado_en = None
+        elif 'contado_en' in value:
+            reading.contado_en = _hora_conteo(value['contado_en'], conteo)
+        elif amount != reading.cantidad:
+            reading.contado_en = None
+        reading.cantidad = amount
         reading.incidencia = _text(value.get('incidencia',''),2000)
         reading.actor = actor
         reading.save()
@@ -181,7 +205,8 @@ def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
             if any(r.cantidad is None and not r.incidencia.strip() for r in effective): raise ConteoError('Completa cada cantidad o registra una incidencia.')
             count.estado='ENVIADO'
             count.enviado_en=timezone.now()
-            event_payload['snapshot']=[{'linea_id':r.linea_id,'ronda':r.ronda,'cantidad':str(r.cantidad) if r.cantidad is not None else None,'incidencia':r.incidencia} for r in effective]
+            event_payload['snapshot']=[{'linea_id':r.linea_id,'ronda':r.ronda,'cantidad':str(r.cantidad) if r.cantidad is not None else None,'incidencia':r.incidencia,
+                                       'contado_en':r.contado_en.isoformat() if r.contado_en else None} for r in effective]
     elif action == 'agregar':
         if count.estado not in {'CAPTURA','RECONTEO'}:
             raise ConteoConflict('El conteo no está abierto a captura.')
@@ -216,6 +241,7 @@ def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
         count.estado='RECONTEO'
         count.iniciado_en = None
         count.referencia = {}
+        count.conciliacion = {}
         for ident in ids: LecturaConteoSucursal.objects.create(linea_id=ident,ronda=count.ronda,actor=actor)
     elif action in {'aceptar','cancelar'}:
         if set(payload)-{'motivo'}: raise ConteoError('Campos no admitidos.')

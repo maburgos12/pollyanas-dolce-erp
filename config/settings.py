@@ -361,6 +361,10 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_IMPORTS = ("pos_bridge.tasks", "sat_client.tasks")
 CELERY_BEAT_SCHEDULE = {
+    "inventario: conciliacion conteos nocturna": {
+        "task": "inventario.conciliar_conteos_nocturnos",
+        "schedule": crontab(hour=2, minute=0),
+    },
     "rrhh-cumpleanos-diario": {
         "task": "rrhh.tasks.avisar_cumpleanos",
         "schedule": crontab(hour=8, minute=0),

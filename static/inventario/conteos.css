@@ -178,3 +178,12 @@
   .count-evidence .count-button,
   .count-cancel .count-button { width: 100%; }
 }
+
+.count-time {grid-column:1 / -1;min-width:0;color:var(--count-muted)}
+.count-time input {display:block;width:100%;max-width:24rem;box-sizing:border-box;min-height:44px;margin-top:.4rem;padding:.5rem;font:inherit}
+
+.count-close-line {padding:1rem 0;border-top:1px solid var(--count-line)}
+.count-close-line h3 {margin:0 0 .5rem;font:700 1rem Nunito,sans-serif}
+.count-close-line dl {display:flex;flex-wrap:wrap;gap:1rem 2rem;margin:.5rem 0}
+.count-close-line dd {margin:0;font-weight:700}
+.count-close-line p {overflow-wrap:anywhere}

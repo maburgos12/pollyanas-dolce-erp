@@ -23,3 +23,12 @@ def generar_consumos_bom_dia_anterior():
         "omitidos_unidad_incompatible": summary.omitidos_unidad_incompatible,
         "omitidos_sin_insumo_reventa": summary.omitidos_sin_insumo_reventa,
     }
+
+
+@shared_task(bind=True, name='inventario.conciliar_conteos_nocturnos', max_retries=16)
+def conciliar_conteos_nocturnos(self):
+    from .conteos_nocturna import conciliar_conteos_nocturnos as conciliar
+    summary = conciliar()
+    if summary['reintentar'] and self.request.retries < self.max_retries:
+        raise self.retry(countdown=1800)
+    return summary
