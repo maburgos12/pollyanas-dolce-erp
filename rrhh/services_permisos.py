@@ -6,12 +6,37 @@ from django.contrib.auth.models import AbstractBaseUser
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from core.access import ROLE_DG, group_name_variants
+from core.access import ROLE_DG, can_view_rrhh, group_name_variants
 from recetas.utils.normalizacion import normalizar_nombre
 
 from .models import Empleado, PermisoSalida
+from .services_identidad import empleado_de_usuario
+
+
+def permisos_empleados_usuario(user):
+    empleados = Empleado.objects.filter(activo=True)
+    if not user or not user.is_authenticated or not user.is_active:
+        return empleados.none()
+    if can_view_rrhh(user):
+        return empleados
+    empleado = empleado_de_usuario(user)
+    return empleados.filter(Q(pk=getattr(empleado, "pk", None)) | Q(jefe_directo__usuario_erp=user))
+
+
+def permisos_visibles_usuario(user):
+    permisos = PermisoSalida.objects.select_related(
+        "empleado__jefe_directo__usuario_erp", "autorizado_por",
+        "autorizado_jefe_por", "autorizado_direccion_por",
+    )
+    if not user or not user.is_authenticated or not user.is_active:
+        return permisos.none()
+    if can_view_rrhh(user):
+        return permisos
+    empleado = empleado_de_usuario(user)
+    return permisos.filter(Q(empleado=empleado) | Q(empleado__jefe_directo__usuario_erp=user))
 
 
 def _fecha_local(valor) -> date:

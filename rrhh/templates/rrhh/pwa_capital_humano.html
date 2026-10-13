@@ -477,6 +477,7 @@
           </article>
         `).join("") || `<div class="muted">Sin permisos registrados.</div>`;
         app.innerHTML = shell(`
+          <p><a href="/rrhh/permisos/">Abrir bandeja de permisos propios y de mi equipo</a></p>
           <section class="panel">
             <form id="form_permiso" onsubmit="enviarPermiso(event)">
               <div class="talon-header">TALÓN DE PERMISOS</div>

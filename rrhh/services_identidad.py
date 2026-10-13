@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.contrib.auth.models import Group
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from core.models import Sucursal, UserProfile
@@ -12,6 +13,29 @@ from .models import Empleado, EmpleadoIdentidadPendiente
 
 
 _UNSET = object()
+
+
+def empleado_de_usuario(user) -> Empleado | None:
+    if not user or not user.is_authenticated:
+        return None
+    candidates = Empleado.objects.filter(activo=True)
+    empleado = getattr(user, "empleado_rrhh", None)
+    if empleado and empleado.activo:
+        return empleado
+    if user.email:
+        empleado = candidates.filter(email__iexact=user.email).first()
+        if empleado:
+            return empleado
+    empleado = candidates.filter(Q(codigo__iexact=user.username) | Q(nombre__iexact=user.get_full_name())).first()
+    if empleado:
+        return empleado
+
+    user_tokens = set(normalizar_nombre(user.get_full_name() or "").split())
+    if user_tokens:
+        for empleado in candidates.only("id", "nombre", "nombre_normalizado", "activo"):
+            if set((empleado.nombre_normalizado or normalizar_nombre(empleado.nombre)).split()) == user_tokens:
+                return empleado
+    return None
 
 
 def normalizar_codigo_empleado(codigo: str | None) -> str:

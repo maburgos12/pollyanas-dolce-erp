@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Permisos{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20260623-history-toggle-v8">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-permisos-list.css?v=20261013-equipo-v9">
 {% endblock %}
 
 {% block content %}
@@ -19,8 +19,13 @@
     <div>
       <div class="permisos-title">Gestión de permisos</div>
       <div class="permisos-copy">
+        {% if es_bandeja_equipo %}
+        Consulta tus solicitudes y las de tu equipo directo. Puedes crear permisos y resolver los de tu equipo;
+        tus solicitudes deben ser autorizadas por tu superior.
+        {% else %}
         Bandeja de escritorio para RRHH: recibe solicitudes desde Bonos, Producción y Capital Humano,
         conserva el expediente y muestra la autorización del jefe directo o Dirección.
+        {% endif %}
       </div>
     </div>
     <div class="permisos-stats">
@@ -31,6 +36,38 @@
       <div class="permisos-stat"><strong>{{ stats.aprobados }}</strong><span>Aprobados</span></div>
     </div>
   </div>
+
+  <details class="permisos-history-card" {% if errores_captura %}open{% endif %}>
+    <summary class="permisos-history-toggle">Crear permiso</summary>
+    <form method="post" class="permisos-captura">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="crear">
+      {% if errores_captura %}
+      <div class="permisos-captura-errores" role="alert">
+        <strong>Revisa la solicitud:</strong>
+        <ul>{% for campo, errores in errores_captura.items %}{% for error in errores %}<li>{{ error }}</li>{% endfor %}{% endfor %}</ul>
+      </div>
+      {% endif %}
+      <label for="permiso-empleado">Empleado
+        <select id="permiso-empleado" name="empleado" required>
+          <option value="">Selecciona un empleado</option>
+          {% for empleado in empleados %}<option value="{{ empleado.pk }}" {% if captura.empleado == empleado.pk|stringformat:"s" %}selected{% endif %}>{{ empleado.nombre }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Tipo de permiso
+        <select name="tipo" required>
+          {% for value, label in tipos_permiso %}<option value="{{ value }}" {% if captura.tipo == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>Desde <input type="datetime-local" name="fecha_inicio" value="{{ captura.fecha_inicio }}" required></label>
+      <label>Hasta (opcional) <input type="datetime-local" name="fecha_fin" value="{{ captura.fecha_fin }}"></label>
+      <label class="permisos-captura-motivo">Motivo <textarea name="motivo" rows="3" required>{{ captura.motivo }}</textarea></label>
+      <label>Goce de sueldo
+        <select name="goce_sueldo"><option value="true" {% if captura.goce_sueldo != "false" %}selected{% endif %}>Con goce de sueldo</option><option value="false" {% if captura.goce_sueldo == "false" %}selected{% endif %}>Sin goce de sueldo</option></select>
+      </label>
+      <div><p class="permisos-copy">La solicitud quedará pendiente. Crear un permiso no lo autoriza.</p><button class="btn btn-primary" type="submit">Registrar solicitud</button></div>
+    </form>
+  </details>
 
   <section class="permisos-worktable" aria-label="Permisos por estado">
     <div class="permisos-status-strip" role="tablist" aria-label="Filtrar permisos por estado">
