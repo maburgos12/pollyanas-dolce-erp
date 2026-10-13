@@ -594,7 +594,7 @@ def _has_rrhh_task_access(user, tab_key: str) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
     if tab_key == "permisos":
-        return permisos_empleados_usuario(user).exists()
+        return Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=user).exists()
     if tab_key == "vacantes":
         return bool(
             can_solicitar_vacantes(user)
@@ -628,6 +628,7 @@ def _module_tabs(active: str, user=None) -> list[dict]:
             continue
         if user is not None and not (
             tab["key"] == "catalogos"
+            or (active == tab["key"] == "permisos" and permisos_empleados_usuario(user).exists())
             or can_view_submodule(user, "rrhh", tab["submodule"])
             or _has_rrhh_task_access(user, tab["key"])
         ):
