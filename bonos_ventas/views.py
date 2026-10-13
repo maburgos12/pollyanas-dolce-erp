@@ -204,7 +204,13 @@ class RegistroDiarioVentasViewSet(viewsets.ModelViewSet):
         _recalcular_desde_registros(instance.bono)
 
     def perform_update(self, serializer):
-        instance = serializer.save()
+        campos_asistencia = ("tiene_asistencia", "tiene_puntualidad")
+        captura_manual = any(
+            campo in serializer.validated_data
+            and serializer.validated_data[campo] != getattr(serializer.instance, campo)
+            for campo in campos_asistencia
+        )
+        instance = serializer.save(**({"capturado_por": self.request.user} if captura_manual else {}))
         _recalcular_desde_registros(instance.bono)
 
 
