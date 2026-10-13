@@ -294,7 +294,7 @@ class RegistroDiarioCapturaViewSet(
         bono_id = self.request.query_params.get("bono")
         if bono_id:
             qs = qs.filter(bono_id=bono_id)
-        return qs.order_by("dia")
+        return qs.order_by("fecha", "dia")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

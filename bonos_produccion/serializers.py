@@ -1,5 +1,6 @@
 from datetime import timedelta
 
+from django.utils import timezone
 from rest_framework import serializers
 
 from rrhh.models import Empleado
@@ -22,12 +23,50 @@ class ConfigBonoPeriodoSerializer(serializers.ModelSerializer):
         read_only_fields = ["creado_por", "creado_en", "actualizado_en"]
 
 
-class RegistroDiarioSerializer(serializers.ModelSerializer):
+class FechaRegistroMixin:
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        bono = attrs.get("bono") or getattr(self.instance, "bono", None)
+        dia = attrs.get("dia", getattr(self.instance, "dia", None))
+        fecha = attrs.get("fecha", getattr(self.instance, "fecha", None))
+        if self.instance and (
+            bono.pk != self.instance.bono_id or dia != self.instance.dia
+            or fecha != self.instance.fecha
+        ):
+            raise serializers.ValidationError("No se puede cambiar la identidad de un registro diario.")
+        inicio, fin = bono.periodo.rango_fechas()
+        if fecha is None:
+            coincidencias = []
+            candidata = inicio
+            while candidata <= fin:
+                if candidata.day == dia:
+                    coincidencias.append(candidata)
+                candidata += timedelta(days=1)
+            if len(coincidencias) != 1:
+                # Los históricos ambiguos siguen editables por ID, sin inventar su fecha.
+                if self.instance and "fecha" not in attrs:
+                    return attrs
+                raise serializers.ValidationError({"fecha": "Indica la fecha completa; el día es ambiguo o está fuera del corte."})
+            fecha = coincidencias[0]
+        if not inicio <= fecha <= fin or fecha.day != dia:
+            raise serializers.ValidationError({"fecha": "Fecha y día deben coincidir y estar dentro del corte."})
+        if fecha > timezone.localdate():
+            raise serializers.ValidationError({"fecha": "No se permite capturar una fecha futura."})
+        existentes = RegistroDiarioProduccion.objects.filter(bono=bono, fecha=fecha)
+        if self.instance:
+            existentes = existentes.exclude(pk=self.instance.pk)
+        if existentes.exists():
+            raise serializers.ValidationError({"fecha": "Ya existe un registro para esta fecha."})
+        attrs["fecha"] = fecha
+        return attrs
+
+
+class RegistroDiarioSerializer(FechaRegistroMixin, serializers.ModelSerializer):
     class Meta:
         model = RegistroDiarioProduccion
+        validators = []
         fields = "__all__"
         read_only_fields = [
-            "fecha",
             "estado_rrhh",
             "motivo_rrhh",
             "falta_penalizable",
@@ -138,9 +177,10 @@ class BonoProduccionCapturaSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
+class RegistroDiarioCapturaSerializer(FechaRegistroMixin, serializers.ModelSerializer):
     class Meta:
         model = RegistroDiarioProduccion
+        validators = []
         fields = [
             "id",
             "bono",
@@ -158,7 +198,6 @@ class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "id",
-            "fecha",
             "estado_rrhh",
             "motivo_rrhh",
             "falta_penalizable",
@@ -187,4 +226,4 @@ class RegistroDiarioCapturaSerializer(serializers.ModelSerializer):
                 fecha += timedelta(days=1)
             if dia not in dias_validos:
                 raise serializers.ValidationError({"dia": "Día fuera del rango del corte."})
-        return attrs
+        return super().validate(attrs)
