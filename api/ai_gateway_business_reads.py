@@ -7,7 +7,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
-from django.db.models import Max, Q
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
@@ -18,7 +18,7 @@ from core.models import Sucursal
 from compras.models import SolicitudCompra, OrdenCompra
 from maestros.models import CostoInsumo
 from maestros.utils.canonical_catalog import canonical_insumo, canonical_insumo_by_id, canonical_member_ids
-from pos_bridge.models import PointBranch
+from pos_bridge.models import PointBranch, PointInventorySnapshot
 
 
 class SalesArguments(StrictArguments):
@@ -287,7 +287,11 @@ def invoke(*, user, tool_key, arguments):
                     data.update(items=rows[:safe['limit']],returned=min(len(rows),safe['limit']),truncated=len(rows)>safe['limit'])
                     result['status']='ok' if rows else 'no_data'
                     if key=='erp.get_inventory_low_stock':
-                        latest = gateway._latest_inventory_qs(safe, branch_ids=ids, exact_scope=True).aggregate(last=Max('captured_at'))['last']
+                        snapshots = PointInventorySnapshot.objects.all()
+                        if ids is not None:
+                            snapshots = snapshots.filter(branch__erp_branch_id__in=ids)
+                        # The newest capture overall is also among the newest per product.
+                        latest = snapshots.order_by('-captured_at').values_list('captured_at', flat=True).first()
                         data['freshness']={'captured_at':[row['captured_at'] for row in data['items']], 'query_is_capture_time':False,
                                            'source_latest_capture':latest.isoformat() if latest else None,
                                            'source_age_seconds':int((timezone.now()-latest).total_seconds()) if latest else None,
