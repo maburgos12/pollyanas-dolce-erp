@@ -114,7 +114,11 @@ def conciliar_conteos_nocturnos():
                         if snapshot and PointInventorySnapshot.objects.filter(
                                 branch=branch,product_id=reading.linea.producto_id,sync_job_id=snapshot.sync_job_id,
                         ).exclude(pk=snapshot.pk).exists():
-                            lines[str(reading.linea_id)] = _pendiente('Artículo duplicado en el ciclo Point; no hay snapshot único.')
+                            lines[str(reading.linea_id)] = _pendiente('Artículo duplicado en el ciclo Point; no hay snapshot único.',reintentar=True)
+                            continue
+                        result = calcular_cierre_linea(reading,snapshot=snapshot,batch=None,cierre=close,branch_id=branch.pk)
+                        if not result['consultar_historial']:
+                            lines[str(reading.linea_id)] = result
                             continue
                         key = (branch.pk,reading.linea.producto_id)
                         try:
@@ -125,7 +129,7 @@ def conciliar_conteos_nocturnos():
                                     batches[key] = None
                             batch = batches[key]
                             result = calcular_cierre_linea(reading,snapshot=snapshot,batch=batch,cierre=close,branch_id=branch.pk)
-                            if snapshot and result['reintentar']:
+                            if result.get('consultar_historial'):
                                 if not attempted:
                                     attempted = True
                                     if stack.enter_context(point_account_session_lock(wait=False)):

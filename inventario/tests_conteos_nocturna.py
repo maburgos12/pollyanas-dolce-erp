@@ -135,6 +135,29 @@ class NightlyCountTests(TestCase):
             client.assert_not_called()
         self.assertEqual(second['calculados'],1)
 
+    def test_newer_cycle_can_resolve_saturated_coverage_without_changing_count(self):
+        from contextlib import nullcontext
+        boundary=movement(100,self.when-timedelta(hours=1),'VENTA','3','3')
+        self.rows=[boundary]*497+self.rows
+        self.fake.get_stock_history.return_value=self.rows
+        self.acquire()
+        self.job.started_at=self.when-timedelta(hours=8)
+        self.job.finished_at=self.job.started_at+timedelta(minutes=2)
+        self.job.save()
+        self.snapshot.captured_at=self.job.started_at+timedelta(minutes=1)
+        self.snapshot.save()
+        with patch('inventario.conteos_nocturna.point_account_session_lock',return_value=nullcontext(False)):
+            self.assertTrue(conciliar_conteos_nocturnos()['reintentar'])
+        fresh=PointSyncJob.objects.create(status='SUCCESS',job_type='inventory',
+            started_at=self.close+timedelta(minutes=29),finished_at=self.close+timedelta(minutes=31))
+        PointInventorySnapshot.objects.create(branch=self.point,product=self.product,stock=3,sync_job=fresh,
+            captured_at=self.close+timedelta(minutes=30),raw_payload=self.snapshot.raw_payload)
+        with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
+            summary=conciliar_conteos_nocturnos()
+            client.assert_not_called()
+        self.assertEqual(summary['calculados'],1)
+        self.assertEqual(self.line.lecturas.get().cantidad,3)
+
     def test_corrupt_archive_is_not_treated_as_complete(self):
         self.acquire()
         service=AuditStockHistoryService()
@@ -146,6 +169,7 @@ class NightlyCountTests(TestCase):
             _historial(service,self.point,self.product)
 
     def test_duplicate_snapshot_in_one_cycle_is_pending_without_point_contact(self):
+        self.acquire()
         self.snapshot.pk=None
         self.snapshot.save(force_insert=True)
         with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
@@ -155,7 +179,27 @@ class NightlyCountTests(TestCase):
         result=self.count.conciliacion['lineas'][str(self.line.pk)]
         self.assertIn('duplicado',result['motivo'])
         self.assertIsNone(result['diferencia'])
-        self.assertFalse(summary['reintentar'])
+        self.assertTrue(summary['reintentar'])
+        fresh=PointSyncJob.objects.create(status='SUCCESS',job_type='inventory',
+            started_at=self.close+timedelta(minutes=39),finished_at=self.close+timedelta(minutes=41))
+        PointInventorySnapshot.objects.create(branch=self.point,product=self.product,stock=3,sync_job=fresh,
+            captured_at=self.close+timedelta(minutes=40),raw_payload=self.snapshot.raw_payload)
+        with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
+            self.assertEqual(conciliar_conteos_nocturnos()['calculados'],1)
+            client.assert_not_called()
+
+    def test_incomplete_snapshot_retries_without_reading_point_until_unit_is_proven(self):
+        self.acquire()
+        self.snapshot.raw_payload['row'][2]=''
+        self.snapshot.save()
+        with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
+            self.assertTrue(conciliar_conteos_nocturnos()['reintentar'])
+            client.assert_not_called()
+        self.snapshot.raw_payload['row'][2]='PZA'
+        self.snapshot.save()
+        with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
+            self.assertEqual(conciliar_conteos_nocturnos()['calculados'],1)
+            client.assert_not_called()
 
     def test_publish_rejects_recount_and_other_job_races(self):
         stale=ConteoSucursal.objects.get(pk=self.count.pk)

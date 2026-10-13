@@ -107,7 +107,9 @@ class DailyCountCalculationTests(SimpleTestCase):
 
     def test_saturated_response_without_lower_boundary_is_pending(self):
         self.batch['evidence']['original_count']=500
-        self.assertEqual(self.calculate()['estado'],'PENDIENTE')
+        result=self.calculate()
+        self.assertEqual(result['estado'],'PENDIENTE')
+        self.assertTrue(result['reintentar'])
 
     def test_stock_gap_or_snapshot_extraction_movement_is_pending(self):
         original=deepcopy(self.batch)
