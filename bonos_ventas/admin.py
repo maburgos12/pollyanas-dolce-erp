@@ -41,7 +41,7 @@ class BonoVentasEmpleadoAdmin(admin.ModelAdmin):
 
 @admin.register(RegistroDiarioVentas)
 class RegistroDiarioVentasAdmin(admin.ModelAdmin):
-    list_display = ["bono", "dia", "tiene_asistencia", "tiene_uniforme", "tiene_puntualidad"]
+    list_display = ["bono", "fecha", "dia", "tiene_asistencia", "tiene_uniforme", "tiene_puntualidad"]
     list_filter = ["tiene_asistencia", "tiene_uniforme", "tiene_puntualidad"]
 
 # Register your models here.

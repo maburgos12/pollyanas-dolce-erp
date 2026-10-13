@@ -17,7 +17,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Playfair+Display:ital,wght@0,700;1,400&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<link rel="stylesheet" href="/static/css/template_modules/bonos-ventas-templates-bonos-ventas-index.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/bonos-ventas-templates-bonos-ventas-index.css?v=20261013-fechas-completas">
 </head>
 <body>
 <div id="root"></div>
@@ -50,24 +50,22 @@ function initials(n){ return (n||'').split(' ').filter(Boolean).slice(0,2).map(w
 function esDom(d,m,a){ return new Date(a,m-1,d).getDay()===0; }
 function diasEnMes(m,a){ return new Date(a,m,0).getDate(); }
 const MESES_CORTO_BV=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+function fechaKey(fecha){
+  return `${fecha.getFullYear()}-${String(fecha.getMonth()+1).padStart(2,'0')}-${String(fecha.getDate()).padStart(2,'0')}`;
+}
+function fechaHoy(){
+  const partes=new Intl.DateTimeFormat('en-CA',{timeZone:'America/Mazatlan',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());
+  const valor=tipo=>partes.find(p=>p.type===tipo).value;
+  return `${valor('year')}-${valor('month')}-${valor('day')}`;
+}
 function buildDiasCal(periodo,mes,anio){
-  // Si el período tiene fecha_inicio/fin, construir el rango real.
-  // Devuelve array de {dia:N, date:Date|null, label:string, showMes:bool}
-  if(periodo&&periodo.fecha_inicio){
-    const ini=new Date(periodo.fecha_inicio+'T12:00:00');
-    const fin=periodo.fecha_fin?new Date(periodo.fecha_fin+'T12:00:00'):new Date(anio,mes,0);
-    const days=[];let cur=new Date(ini);let prevM=-1;let idx=1;
-    while(cur<=fin){
-      const showMes=cur.getMonth()!==prevM;
-      if(showMes)prevM=cur.getMonth();
-      days.push({dia:idx,date:new Date(cur),label:String(cur.getDate()),mes:MESES_CORTO_BV[cur.getMonth()],showMes});
-      cur.setDate(cur.getDate()+1);idx++;
-    }
-    return days;
+  const ini=periodo?.fecha_inicio?new Date(periodo.fecha_inicio+'T12:00:00'):new Date(anio,mes-1,1,12);
+  const fin=periodo?.fecha_fin?new Date(periodo.fecha_fin+'T12:00:00'):new Date(anio,mes,0,12);
+  const days=[];
+  for(let cur=new Date(ini);cur<=fin;cur.setDate(cur.getDate()+1)){
+    days.push({dia:cur.getDate(),key:fechaKey(cur),label:String(cur.getDate()),mes:MESES_CORTO_BV[cur.getMonth()]});
   }
-  // Sin rango: comportamiento original (día = número de día del mes)
-  const total=diasEnMes(mes,anio);
-  return Array.from({length:total},(_,i)=>({dia:i+1,date:null,label:String(i+1),mes:null,showMes:false}));
+  return days;
 }
 function normalizeText(v){ return String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim(); }
 const REPARTIDORES_KEY = 'REPARTIDORES';
@@ -473,6 +471,8 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
   const [selDia, setSelDia] = React.useState(null);
   const [savingDia, setSavingDia] = React.useState(null);
   const [loadingReg, setLoadingReg] = React.useState(false);
+  const bonoVisible=React.useRef(null);
+  bonoVisible.current=selBono?.id;
 
   const sucursales = React.useMemo(()=>{
     return gruposVentasFromBonos(bonos);
@@ -494,44 +494,46 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
   },[bonosSucIds,selBono?.id]);
 
   function cargarReg(id){
+    if(bonoVisible.current!==id)return;
     setLoadingReg(true);
     api(`/api/bonos-ventas/registros-diarios/?bono=${id}`)
-      .then(r=>{ setRegistros(r.results||r); setLoadingReg(false); })
-      .catch(()=>setLoadingReg(false));
+      .then(r=>{if(bonoVisible.current!==id)return;setRegistros(r.results||r);setLoadingReg(false);})
+      .catch(err=>{if(bonoVisible.current!==id)return;setLoadingReg(false);showStatus(err.message,'err');});
   }
 
-  function togDia(dia){
-    if(!selBono) return;
-    if(savingDia) return;
-    const r = registros.find(x=>+x.dia===dia);
+  function togDia(fecha){
+    if(!selBono||bonoVisible.current!==selBono.id||loadingReg||savingDia||fecha>hoy||fechaPendiente) return;
+    const r = registros.find(x=>x.fecha===fecha);
     const nextWorked=!(r&&r.tiene_asistencia);
-    setSavingDia(dia);
+    setSavingDia(fecha);
     if(r){
-      api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked})})
-        .then(()=>{ cargarReg(selBono.id); setSelDia(nextWorked?dia:null); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
+      api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({fecha,tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked})})
+        .then(()=>{if(bonoVisible.current!==selBono.id)return;cargarReg(selBono.id);setSelDia(nextWorked?r.id:null);}).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
     } else {
       api('/api/bonos-ventas/registros-diarios/',{method:'POST',body:JSON.stringify({
-        bono:selBono.id,dia,tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,puntos_de_vista:''
-      })}).then(()=>{ cargarReg(selBono.id); setSelDia(dia); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
+        bono:selBono.id,fecha,dia:+fecha.slice(-2),tiene_uniforme:true,tiene_puntualidad:true,tiene_asistencia:true,puntos_de_vista:''
+      })}).then(nuevo=>{if(bonoVisible.current!==selBono.id)return;cargarReg(selBono.id);setSelDia(nuevo.id);}).catch(err=>showStatus(err.message,'err')).finally(()=>setSavingDia(null));
     }
   }
 
   function togConcepto(dia,campo){
-    const r = registros.find(x=>+x.dia===dia);
-    if(!r) return;
-    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({[campo]:!r[campo]})})
+    const r = registros.find(x=>x.id===dia);
+    if(!r?.fecha||r.fecha>hoy) return;
+    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({fecha:r.fecha,[campo]:!r[campo]})})
       .then(()=>cargarReg(selBono.id)).catch(err=>showStatus(err.message,'err'));
   }
 
   function guardarNota(dia,val){
-    const r = registros.find(x=>+x.dia===dia);
+    const r = registros.find(x=>x.id===dia);
     if(!r) return;
-    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({puntos_de_vista:val})}).catch(()=>{});
+    api(`/api/bonos-ventas/registros-diarios/${r.id}/`,{method:'PATCH',body:JSON.stringify({...(r.fecha?{fecha:r.fecha}:{}),puntos_de_vista:val})}).catch(()=>{});
   }
 
   const diasCal = buildDiasCal(periodo,mes,anio);
-  const regActivos = registros.filter(r=>r.tiene_asistencia);
-  const diaActual = selDia && registros.find(x=>+x.dia===selDia);
+  const hoy=fechaHoy();
+  const fechaPendiente=registros.some(r=>!r.fecha);
+  const regActivos = registros.filter(r=>r.tiene_asistencia&&(!r.fecha||r.fecha<=hoy));
+  const diaActual = selDia && registros.find(x=>x.id===selDia);
   const rangoLabel = (periodo&&periodo.fecha_inicio)
     ? `${new Date(periodo.fecha_inicio+'T12:00:00').toLocaleDateString('es-MX',{day:'2-digit',month:'short'})} → ${periodo.fecha_fin?new Date(periodo.fecha_fin+'T12:00:00').toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}):''}`
     : null;
@@ -548,7 +550,7 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
       h('div',{className:'card-body'},
         bonosSuc.length===0
           ? h('div',{className:'empty'},'Sin empleadas en esta sucursal')
-          : h(EmployeeSearchList,{items:bonosSuc,selected:selBono,onSelect:setSelBono,placeholder:'Teclea nombre o apellido...',rightText:b=>money(b.total_a_pagar)})
+          : h(EmployeeSearchList,{items:bonosSuc,selected:selBono,onSelect:b=>{if(selBono?.id===b.id)return;bonoVisible.current=b.id;setRegistros([]);setSelDia(null);setLoadingReg(true);setSelBono(b);},placeholder:'Teclea nombre o apellido...',rightText:b=>money(b.total_a_pagar)})
       )
     ),
 
@@ -570,17 +572,19 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
       ),
       h('div',{className:'card-body'},
         rangoLabel&&h('div',{className:'sec-title tight-sec-title'},`Fecha ${rangoLabel} · ${diasCal.length} días`),
+        fechaPendiente&&h('div',{className:'alert-box'},'Hay capturas históricas con fecha pendiente de revisión. Se conservan sus valores; el calendario queda bloqueado para evitar duplicarlas.'),
         h('div',{className:'sec-title'},'Clic en el día para registrar asistencia'),
         h('div',{className:'days-grid'},
-          diasCal.map(({dia,label,mes:dMes,showMes})=>{
-            const r = registros.find(x=>+x.dia===dia);
-            const worked = r?.tiene_asistencia;
-            return h('div',{key:dia,
-              className:`day-cell ${worked?'worked':''} ${savingDia===dia?'saving':''}`,
-              onClick:()=>togDia(dia)
+          diasCal.map(({key,label,mes:dMes})=>{
+            const r = registros.find(x=>x.fecha===key);
+            const futura=key>hoy;
+            const worked = !futura&&r?.tiene_asistencia;
+            return h('button',{type:'button',key,title:key,disabled:futura||fechaPendiente||loadingReg,
+              className:`day-cell ${worked?'worked':''} ${savingDia===key?'saving':''}`,
+              onClick:()=>togDia(key)
             },
               h('span',{className:'dn'},label),
-              showMes&&dMes?h('span',{className:'ds day-month'},dMes):h('span',{className:'ds'},worked?'OK':'')
+              h('span',{className:'ds'},futura?`${dMes} · Futuro`:worked?`OK · ${dMes}`:dMes)
             );
           })
         ),
@@ -590,16 +594,16 @@ function CapturaTab({bonos,mes,anio,periodo,showStatus}){
           h('div',{className:'div'}),
           h('div',{className:'sec-title'},'Detalle por día'),
           h('div',{className:'chips'},
-            regActivos.map(r=>h('button',{key:r.dia,
-              className:`chip ${selDia===+r.dia?'on':''}`,
-              onClick:()=>setSelDia(+r.dia)
-            },r.dia))
+            regActivos.map(r=>h('button',{key:r.id,
+              className:`chip ${selDia===r.id?'on':''}`,
+              onClick:()=>setSelDia(r.id)
+            },r.fecha?new Date(r.fecha+'T12:00:00').toLocaleDateString('es-MX'):`Día capturado ${r.dia} · Fecha pendiente`))
           ),
           diaActual && h('div',null,
             ['tiene_uniforme','tiene_puntualidad'].map(campo=>{
               const labels={tiene_uniforme:'Uniforme',tiene_puntualidad:'Puntualidad'};
               return h('div',{key:campo,className:'concepto-row'},
-                h('div',{className:`toggle-btn ${diaActual[campo]?'on':''}`,onClick:()=>togConcepto(selDia,campo)},
+                h('button',{type:'button','aria-label':labels[campo],'aria-pressed':!!diaActual[campo],disabled:!diaActual.fecha||diaActual.fecha>hoy,className:`toggle-btn ${diaActual[campo]?'on':''}`,onClick:()=>togConcepto(selDia,campo)},
                   diaActual[campo] && h(IconCheck)
                 ),
                 h('span',{className:'concepto-lbl'},labels[campo]),

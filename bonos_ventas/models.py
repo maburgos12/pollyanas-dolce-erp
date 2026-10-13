@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -307,7 +307,22 @@ class BonoVentasEmpleado(models.Model):
         )
 
 
+def fecha_registro_legacy(periodo, dia, captura_manual=False):
+    try:
+        fecha = date(periodo.anio, periodo.mes, dia)
+    except ValueError:
+        return None
+    inicio, fin = periodo.rango_fechas()
+    if not inicio <= fecha <= fin:
+        return None
+    # RRHH usaba día del mes; la captura usaba posición desde el inicio del corte.
+    if captura_manual and inicio + timedelta(days=dia - 1) != fecha:
+        return None
+    return fecha
+
+
 class RegistroDiarioVentas(models.Model):
+    fecha = models.DateField(null=True, blank=True)
     bono = models.ForeignKey(BonoVentasEmpleado, on_delete=models.CASCADE, related_name="registros")
     dia = models.PositiveSmallIntegerField()
     tiene_uniforme = models.BooleanField(default=True)
@@ -325,8 +340,12 @@ class RegistroDiarioVentas(models.Model):
     actualizado_en = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("bono", "dia")
-        ordering = ["dia"]
+        constraints = [
+            models.UniqueConstraint(fields=["bono", "fecha"], name="bv_registro_bono_fecha_unique"),
+            models.UniqueConstraint(fields=["bono", "dia"], condition=models.Q(fecha__isnull=True),
+                                    name="bv_registro_legacy_dia_unique"),
+        ]
+        ordering = ["fecha", "dia"]
 
     def __str__(self) -> str:
         return f"{self.bono.empleado.nombre} - día {self.dia}"
