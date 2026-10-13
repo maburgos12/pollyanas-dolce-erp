@@ -5,7 +5,7 @@
 {% block extra_css %}<link rel="stylesheet" href="{% static 'css/clima.css' %}">{% endblock %}
 {% block content %}
 <div class="clima-page">
-  <p class="clima-intro">Prepara una encuesta con el cuestionario acordado y una selección del padrón de RR. HH. Las campañas creadas aquí son borradores internos: cada persona tiene liga y QR, pero aún no se capturan respuestas ni se envían invitaciones.</p>
+  <p class="clima-intro">Prepara una encuesta con el cuestionario acordado y una selección del padrón de RR. HH. Las campañas creadas aquí permanecen cerradas: cada persona tiene liga y QR, pero no se aceptan respuestas ni se envían invitaciones hasta una apertura posterior.</p>
   <section class="clima-section" aria-labelledby="nueva-campana">
     <h2 id="nueva-campana">Nueva campaña</h2>
     {% if not empleados %}<p>No hay empleados activos de Pollyana en este entorno. Cuando el padrón esté disponible, podrás preparar una campaña.</p>{% else %}

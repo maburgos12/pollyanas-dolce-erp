@@ -2880,6 +2880,7 @@ class CampanaClima(models.Model):
     titulo = models.CharField(max_length=160)
     fecha_cierre = models.DateField()
     cuestionario = models.JSONField()
+    recepcion_habilitada = models.BooleanField(default=False)
     creada_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     creada_en = models.DateTimeField(auto_now_add=True)
 
@@ -2896,7 +2897,15 @@ class ParticipanteClima(models.Model):
     nombre = models.CharField(max_length=180)
     departamento = models.CharField(max_length=40, blank=True)
     sucursal = models.CharField(max_length=120, blank=True)
+    respondio = models.BooleanField(default=False)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["campana", "empleado"], name="clima_participante_unico")]
         ordering = ["nombre", "id"]
+
+
+class RespuestaClima(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    campana = models.ForeignKey(CampanaClima, on_delete=models.CASCADE, related_name="respuestas")
+    departamento = models.CharField(max_length=40, blank=True)
+    respuestas = models.JSONField()

@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Encuesta de clima laboral</title>
+<style>body{font:1rem/1.5 system-ui,sans-serif;color:#3d2b2b;background:#fffaf5;max-width:48rem;margin:auto;padding:1.5rem}fieldset{border:1px solid #dbc9d0;border-radius:.5rem;margin:1.5rem 0;padding:1rem}legend{font-weight:700}label{display:block;padding:.3rem}textarea{width:100%;box-sizing:border-box}button{background:#8b2252;color:white;border:0;border-radius:.4rem;padding:.8rem 1.2rem;font:inherit}.errorlist{color:#a40000}</style></head>
+<body><main><h1>Encuesta de clima laboral</h1><p>Tu acceso permite responder una sola vez. Tus respuestas se guardan separadas del registro de participación.</p>
+<form method="post">{% csrf_token %}{% for field in form %}<fieldset><legend>{{ forloop.counter }}. {{ field.label }}</legend>{{ field.errors }}{{ field }}</fieldset>{% endfor %}<button type="submit">Enviar respuestas</button></form></main></body></html>
