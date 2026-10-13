@@ -95,6 +95,7 @@ class MovimientoNormalizado:
     saldo: Decimal | None
     fila: int
     raw: dict[str, Any]
+    cuenta_numero: str = ""
 
     @property
     def monto_firmado(self) -> Decimal:
@@ -124,6 +125,7 @@ class MovimientoNormalizado:
             saldo=_decimal(saldo_raw) if saldo_raw not in (None, "") else None,
             fila=int(payload.get("fila") or 0),
             raw=payload.get("raw") if isinstance(payload.get("raw"), dict) else {},
+            cuenta_numero=str(payload.get("cuenta_numero") or ""),
         )
 
 
@@ -206,6 +208,7 @@ def generar_preview(*, cuenta: CuentaBancaria, uploaded_file) -> PreviewImportac
 @transaction.atomic
 def confirmar_importacion(*, preview: PreviewImportacion, user) -> ImportacionBancaria:
     cuenta = CuentaBancaria.objects.select_for_update().get(pk=preview.cuenta_id)
+    cuentas_por_numero = _cuentas_relacionadas_por_numero(cuenta)
     importacion = ImportacionBancaria.objects.create(
         cuenta=cuenta,
         fuente=preview.fuente,
@@ -221,12 +224,18 @@ def confirmar_importacion(*, preview: PreviewImportacion, user) -> ImportacionBa
 
     nuevos = 0
     duplicados = 0
+    movimientos_importados: list[MovimientoBancario] = []
     for movimiento in preview.movimientos:
-        id_transaction = _manual_transaction_id(cuenta=cuenta, movimiento=movimiento)
-        _, created = MovimientoBancario.objects.get_or_create(
+        cuenta_movimiento = _cuenta_para_movimiento(
+            cuenta_default=cuenta,
+            movimiento=movimiento,
+            cuentas_por_numero=cuentas_por_numero,
+        )
+        id_transaction = _manual_transaction_id(cuenta=cuenta_movimiento, movimiento=movimiento)
+        movimiento_db, created = MovimientoBancario.objects.get_or_create(
             id_transaction=id_transaction,
             defaults={
-                "cuenta": cuenta,
+                "cuenta": cuenta_movimiento,
                 "descripcion": movimiento.descripcion,
                 "monto": movimiento.monto,
                 "tipo": movimiento.tipo,
@@ -237,6 +246,7 @@ def confirmar_importacion(*, preview: PreviewImportacion, user) -> ImportacionBa
                     "source": preview.fuente,
                     "archivo_hash": preview.archivo_hash,
                     "archivo_nombre": preview.archivo_nombre,
+                    "cuenta_numero": movimiento.cuenta_numero,
                     "referencia": movimiento.referencia,
                     "saldo": str(movimiento.saldo) if movimiento.saldo is not None else "",
                     "raw": movimiento.raw,
@@ -247,11 +257,112 @@ def confirmar_importacion(*, preview: PreviewImportacion, user) -> ImportacionBa
             nuevos += 1
         else:
             duplicados += 1
+        movimientos_importados.append(movimiento_db)
+
+    _emparejar_traspasos_propios(
+        movimientos=movimientos_importados,
+        cuentas_por_numero=cuentas_por_numero,
+    )
 
     importacion.movimientos_nuevos = nuevos
     importacion.movimientos_duplicados = duplicados
     importacion.save(update_fields=["movimientos_nuevos", "movimientos_duplicados", "actualizado_en"])
     return importacion
+
+
+def _cuentas_relacionadas_por_numero(cuenta: CuentaBancaria) -> dict[str, CuentaBancaria]:
+    principal_id = cuenta.cuenta_principal_id or cuenta.pk
+    cuentas = CuentaBancaria.objects.select_for_update().filter(
+        Q(pk=principal_id) | Q(cuenta_principal_id=principal_id),
+        banco=cuenta.banco,
+        activa=True,
+    )
+    return {
+        _numero_cuenta_normalizado(item.numero_cuenta): item
+        for item in cuentas
+        if _numero_cuenta_normalizado(item.numero_cuenta)
+    }
+
+
+def _cuenta_para_movimiento(
+    *,
+    cuenta_default: CuentaBancaria,
+    movimiento: MovimientoNormalizado,
+    cuentas_por_numero: dict[str, CuentaBancaria],
+) -> CuentaBancaria:
+    numero = _numero_cuenta_normalizado(movimiento.cuenta_numero)
+    if not numero:
+        return cuenta_default
+    cuenta = cuentas_por_numero.get(numero)
+    if cuenta is None:
+        raise ImportacionBancariaError(
+            f"La cuenta {movimiento.cuenta_numero} detectada en el estado no esta registrada como cuenta propia."
+        )
+    return cuenta
+
+
+def _numero_cuenta_normalizado(value: Any) -> str:
+    digits = re.sub(r"\D", "", str(value or ""))
+    return digits.lstrip("0")
+
+
+def _cuenta_destino_en_descripcion(
+    movimiento: MovimientoBancario,
+    cuentas_por_numero: dict[str, CuentaBancaria],
+) -> CuentaBancaria | None:
+    descripcion = _numero_cuenta_normalizado(movimiento.descripcion)
+    for numero, cuenta in cuentas_por_numero.items():
+        if cuenta.pk != movimiento.cuenta_id and numero and numero in descripcion:
+            return cuenta
+    return None
+
+
+def _emparejar_traspasos_propios(
+    *,
+    movimientos: list[MovimientoBancario],
+    cuentas_por_numero: dict[str, CuentaBancaria],
+) -> None:
+    candidatos: list[tuple[MovimientoBancario, CuentaBancaria]] = []
+    for movimiento in movimientos:
+        destino = _cuenta_destino_en_descripcion(movimiento, cuentas_por_numero)
+        if destino is None:
+            continue
+        movimiento.tipo_conciliacion = MovimientoBancario.CONCILIACION_TRASPASO
+        movimiento.nota_conciliacion = "Traspaso entre cuentas propias detectado por numero de cuenta."
+        movimiento.save(update_fields=["tipo_conciliacion", "nota_conciliacion"])
+        candidatos.append((movimiento, destino))
+
+    paired_ids: set[int] = set()
+    for movimiento, destino in candidatos:
+        if movimiento.pk in paired_ids:
+            continue
+        origen_numero = _numero_cuenta_normalizado(movimiento.cuenta.numero_cuenta)
+        contraparte = next(
+            (
+                candidate
+                for candidate, candidate_destino in candidatos
+                if candidate.pk not in paired_ids
+                and candidate.pk != movimiento.pk
+                and candidate.cuenta_id == destino.pk
+                and candidate_destino.pk == movimiento.cuenta_id
+                and candidate.tipo != movimiento.tipo
+                and candidate.monto == movimiento.monto
+                and candidate.fecha_transaccion.date() == movimiento.fecha_transaccion.date()
+                and origen_numero in _numero_cuenta_normalizado(candidate.descripcion)
+            ),
+            None,
+        )
+        if contraparte is None:
+            continue
+        movimiento.movimiento_relacionado = contraparte
+        movimiento.conciliado = True
+        movimiento.conciliado_en = timezone.now()
+        contraparte.movimiento_relacionado = movimiento
+        contraparte.conciliado = True
+        contraparte.conciliado_en = movimiento.conciliado_en
+        movimiento.save(update_fields=["movimiento_relacionado", "conciliado", "conciliado_en"])
+        contraparte.save(update_fields=["movimiento_relacionado", "conciliado", "conciliado_en"])
+        paired_ids.update({movimiento.pk, contraparte.pk})
 
 
 def resumen_conciliacion() -> dict[str, Any]:
@@ -290,8 +401,18 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         fecha_min=Min("fecha_transaccion"),
         fecha_max=Max("fecha_transaccion"),
     )
-    cargos = _aggregate_tipo_movimiento(movimientos_qs, MovimientoBancario.TIPO_CARGO)
-    abonos = _aggregate_tipo_movimiento(movimientos_qs, MovimientoBancario.TIPO_ABONO)
+    traspasos_qs = movimientos_qs.filter(
+        tipo_conciliacion=MovimientoBancario.CONCILIACION_TRASPASO,
+        movimiento_relacionado__isnull=False,
+    )
+    movimientos_externos_qs = movimientos_qs.exclude(pk__in=traspasos_qs.values("pk"))
+    cargos = _aggregate_tipo_movimiento(movimientos_externos_qs, MovimientoBancario.TIPO_CARGO)
+    abonos = _aggregate_tipo_movimiento(movimientos_externos_qs, MovimientoBancario.TIPO_ABONO)
+    traspasos_internos = {
+        "conteo": traspasos_qs.count(),
+        "cargos": _aggregate_tipo_movimiento(traspasos_qs, MovimientoBancario.TIPO_CARGO),
+        "abonos": _aggregate_tipo_movimiento(traspasos_qs, MovimientoBancario.TIPO_ABONO),
+    }
     dias_banco = _resumen_diario_movimientos(movimientos_qs)
     fuentes = _resumen_fuentes_movimientos(movimientos_qs)
     cuentas = _resumen_cuentas_movimientos(movimientos_qs)
@@ -302,8 +423,15 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cargos_por_tipo = _aggregate_cargos_por_conciliacion(movimientos_qs)
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
     alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
-    canales_comparativo = _resumen_comparativo_canales(movimientos_qs=movimientos_qs, cfdi_qs=cfdi_qs)
-    mesa_ingresos = _mesa_ingresos_sucursal(inicio=inicio, fin=fin, movimientos_qs=movimientos_qs)
+    canales_comparativo = _resumen_comparativo_canales(
+        movimientos_qs=movimientos_externos_qs,
+        cfdi_qs=cfdi_qs,
+    )
+    mesa_ingresos = _mesa_ingresos_sucursal(
+        inicio=inicio,
+        fin=fin,
+        movimientos_qs=movimientos_externos_qs,
+    )
     resumen_ejecutivo = _resumen_ejecutivo_periodo(
         movimientos_abonos=abonos,
         movimientos_cargos=cargos,
@@ -343,6 +471,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         "movimientos_dias": len(dias_banco),
         "movimientos_cargos": cargos,
         "movimientos_abonos": abonos,
+        "traspasos_internos": traspasos_internos,
         "movimientos_fuentes": fuentes,
         "movimientos_cuentas": cuentas,
         "movimientos_diarios": dias_banco,
@@ -1274,6 +1403,9 @@ def _read_pdf_dataframe(content: bytes) -> pd.DataFrame:
     try:
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             pages_text = [page.extract_text(x_tolerance=1, y_tolerance=3) or "" for page in pdf.pages]
+            banbajio_rows = _pdf_rows_from_banbajio_consolidado(pdf)
+            if not banbajio_rows.empty:
+                return banbajio_rows
             rows.extend(_pdf_rows_from_bbva_maestra(pages_text))
             rows.extend(_pdf_rows_from_amex_business(pages_text))
             if rows:
@@ -1290,6 +1422,114 @@ def _read_pdf_dataframe(content: bytes) -> pd.DataFrame:
             "Si el archivo es escaneado, descarga una version con texto seleccionable o usa CSV/Excel."
         )
     return pd.DataFrame(rows)
+
+
+def _pdf_rows_from_banbajio_consolidado(pdf) -> pd.DataFrame:
+    period_start: date | None = None
+    period_end: date | None = None
+    current_account = ""
+    rows: list[dict[str, Any]] = []
+
+    for page_number, page in enumerate(pdf.pages, start=1):
+        lines = page.extract_text_lines() or []
+        for line_number, line in enumerate(lines, start=1):
+            text = re.sub(r"\s+", " ", str(line.get("text") or "")).strip()
+            if not text:
+                continue
+
+            if period_start is None:
+                period = _banbajio_pdf_period(text)
+                if period is not None:
+                    period_start, period_end = period
+
+            account_match = re.search(r"DETALLE DE LA CUENTA:.*?#\s*(\d{10,18})", text, flags=re.IGNORECASE)
+            if account_match:
+                current_account = account_match.group(1)
+                continue
+
+            if not current_account or period_start is None or period_end is None:
+                continue
+            row = _banbajio_pdf_movement_row(
+                line=line,
+                text=text,
+                account_number=current_account,
+                period_start=period_start,
+                period_end=period_end,
+                page_number=page_number,
+                line_number=line_number,
+            )
+            if row is not None:
+                rows.append(row)
+
+    return pd.DataFrame(rows)
+
+
+def _banbajio_pdf_period(text: str) -> tuple[date, date] | None:
+    match = re.search(
+        r"PERIODO:\s*(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚ]+)\s+AL\s+(\d{1,2})\s+DE\s+([A-ZÁÉÍÓÚ]+)\s+DE\s+(\d{4})",
+        _compact(text).upper(),
+    )
+    if not match:
+        return None
+    start_month = PDF_MONTHS.get(_compact(match.group(2)).upper())
+    end_month = PDF_MONTHS.get(_compact(match.group(4)).upper())
+    if start_month is None or end_month is None:
+        return None
+    year = int(match.group(5))
+    return date(year, start_month, int(match.group(1))), date(year, end_month, int(match.group(3)))
+
+
+def _banbajio_pdf_movement_row(
+    *,
+    line: dict[str, Any],
+    text: str,
+    account_number: str,
+    period_start: date,
+    period_end: date,
+    page_number: int,
+    line_number: int,
+) -> dict[str, Any] | None:
+    movement_match = re.match(
+        r"^(\d{1,2})\s+([A-ZÁÉÍÓÚ]{3,})\s+(?:(\d{4,})\s*)?(.+)$",
+        re.sub(r"\s+", " ", str(text or "").strip()),
+        flags=re.IGNORECASE,
+    )
+    if not movement_match:
+        return None
+    month = PDF_MONTHS.get(_compact(movement_match.group(2)).upper())
+    if month is None:
+        return None
+    movement_date = date(period_end.year, month, int(movement_match.group(1)))
+    if not period_start <= movement_date <= period_end:
+        return None
+
+    amounts = list(re.finditer(r"\$\s*([\d,]+\.\d{2})", text))
+    dollar_chars = [char for char in line.get("chars", []) if char.get("text") == "$"]
+    if len(amounts) < 2 or len(dollar_chars) < 2:
+        return None
+    movement_amount = _decimal(amounts[-2].group(1))
+    balance = _decimal(amounts[-1].group(1))
+    amount_x = float(dollar_chars[-2].get("x0") or 0)
+    description = movement_match.group(4)
+    description_end = amounts[-2].start() - movement_match.start(4)
+    description = description[:description_end].strip(" -")
+    if not description or movement_amount == 0:
+        return None
+
+    row = {
+        "fecha": movement_date.isoformat(),
+        "descripcion": description,
+        "referencia": movement_match.group(3) or "",
+        "saldo": str(balance),
+        "cuenta_numero": account_number,
+        "pagina_pdf": page_number,
+        "linea_pdf": line_number,
+    }
+    if amount_x < 470:
+        row["abono"] = str(movement_amount)
+    else:
+        row["cargo"] = str(movement_amount)
+    return row
 
 
 def _pdf_rows_from_bbva_maestra(pages_text: list[str]) -> list[dict[str, Any]]:
@@ -1578,9 +1818,13 @@ def _read_xml_dataframe(content: bytes) -> pd.DataFrame:
         root = ET.fromstring(content)
     except ET.ParseError as exc:
         raise ImportacionBancariaError("XML invalido.") from exc
-    if _is_bajio_statement_cfdi(root):
-        return _read_bajio_statement_cfdi_dataframe(root)
     if _is_cfdi_xml(root):
+        if _is_bajio_statement_cfdi(root):
+            raise ImportacionBancariaError(
+                "Este XML de BanBajio es evidencia fiscal de comisiones o bonificaciones; "
+                "no debe importarse como movimientos bancarios. El CFDI se concilia desde SAT "
+                "contra los cargos o abonos del PDF/CSV para evitar duplicados."
+            )
         raise ImportacionBancariaError(
             "Este XML es un CFDI/factura, no un estado de cuenta bancario. "
             "Para conciliar, descarga movimientos de la cuenta en CSV, XLS, XLSX o XML tabular."
@@ -1914,6 +2158,7 @@ def _normalizar_movimiento(*, row: dict[str, Any], fila: int) -> MovimientoNorma
         saldo=_decimal_or_none(_first_decimal_value(row, "saldo", "balance")),
         fila=fila,
         raw={str(key): _stringify(value) for key, value in row.items()},
+        cuenta_numero=str(_first(row, "cuenta_numero", "numero_cuenta") or "").strip(),
     )
 
 
