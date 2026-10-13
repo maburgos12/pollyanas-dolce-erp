@@ -519,7 +519,7 @@ class BonosProduccionTests(TestCase):
         self.assertIn(".day-cell.dom.worked", css)
         self.assertIn(".day-cell.saving", css)
         self.assertIn("savingDia", content)
-        self.assertIn("onClick:()=>togDia(d)", content)
+        self.assertIn("onClick:()=>togDia(fecha.key)", content)
         self.assertNotIn("togDia(d);setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
         self.assertIn("no-store", response["Cache-Control"])
@@ -568,7 +568,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v29-contexto-rrhh", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v30-fechas-completas", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 

@@ -442,8 +442,12 @@ class RegistroDiarioProduccion(models.Model):
     actualizado_en = models.DateTimeField(auto_now=True)
 
     class Meta:
-        unique_together = ("bono", "dia")
-        ordering = ["dia"]
+        constraints = [
+            models.UniqueConstraint(fields=["bono", "fecha"], name="bp_registro_bono_fecha_unique"),
+            models.UniqueConstraint(fields=["bono", "dia"], condition=models.Q(fecha__isnull=True),
+                                    name="bp_registro_legacy_dia_unique"),
+        ]
+        ordering = ["fecha", "dia"]
 
     def __str__(self) -> str:
         return f"{self.bono.empleado.nombre} - día {self.dia}"
