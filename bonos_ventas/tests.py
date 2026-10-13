@@ -243,7 +243,7 @@ class BonosVentasTests(TestCase):
         self.assertIn(".day-cell.saving", css)
         self.assertIn("savingDia", content)
         self.assertIn("const nextWorked=!(r&&r.tiene_asistencia);", content)
-        self.assertIn("{tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked}", content)
+        self.assertIn("{fecha,tiene_asistencia:nextWorked,tiene_uniforme:nextWorked,tiene_puntualidad:nextWorked}", content)
         self.assertIn("onClick:()=>togDia(key)", content)
         self.assertNotIn("togDia(d); setSelDia(d);", content)
         self.assertNotIn("pd_logistica_access", content)
