@@ -22,6 +22,22 @@ from orquestacion.services.chat_service import create_chat_conversation, create_
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True,
                    AI_AGENT_READ_MODEL=pilot.MODEL, OPENAI_API_KEY='fake-test-key')
 class AgentPilotTests(TransactionTestCase):
+    def test_pdf_input_uses_counted_tokens_and_stops_when_budget_or_counter_fails(self):
+        payload = {**self.payload, 'input':[{'role':'user','content':[{'type':'input_file',
+            'filename':'factura.pdf','detail':'high','file_data':'data:application/pdf;base64,'+'A'*100000}]}]}
+        counter = Mock(return_value=SimpleNamespace(input_tokens=4200))
+        result = pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        self.assertEqual(Decimal(result['reserved_usd']), Decimal(4200+4096)*pilot.INPUT_USD+pilot.OUTPUT_TOKENS*pilot.OUTPUT_USD)
+        counter.side_effect = TimeoutError('private error')
+        with self.assertRaises(pilot.PilotStopped):
+            pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        self.assertEqual(AuditLog.objects.filter(action=pilot.ACTION).count(), 1)
+        self.receipt(str(pilot.MAX_USD-Decimal(result['reserved_usd'])))
+        counter.reset_mock()
+        with self.assertRaises(pilot.PilotStopped):
+            pilot.reserve_request(user=self.user, turn_id=uuid4(), cycle=1, payload=payload, token_counter=counter)
+        counter.assert_not_called()
+
     def test_cost_reference_is_separate_from_reservation_and_never_refunds_it(self):
         from orquestacion.services.chat_service import serialize_message
         self.run_provider()

@@ -16,7 +16,6 @@ from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntege
 from core.models import AuditLog
 from fallas.models import ReporteFalla, BitacoraFalla, EvidenciaSeguimientoFalla
 from fallas.views import _puede_cambiar_estatus_fallas
-from mantenimiento.evidence_validation import validate_evidence_files
 from mantenimiento.services_access import authorized_fallas, can_view_costs
 from orquestacion.models import ChatConversation, ChatMessage, ChatToolCall, ChatToolResult
 from orquestacion.services.agent_workflows import WorkflowError
@@ -47,7 +46,7 @@ class FollowupArguments(StrictArguments):
     comentario = StrictStringField(required=False, allow_blank=True, max_length=3000)
     fecha_trabajo_finalizado = StrictDateField(required=False)
     evidence_count = StrictIntegerField(required=False, min_value=0, max_value=5,
-        help_text='Total de fotos requeridas, incluidas las pendientes de adjuntar; cero seleccionadas no significa cero requeridas.')
+        help_text='Total de fotos requeridas, incluidas las pendientes de adjuntar; los PDFs no sustituyen fotos requeridas.')
     estatus = serializers.ChoiceField(required=False, choices=['en_proceso', 'resuelto'])
 
     def validate(self, attrs):
@@ -73,7 +72,7 @@ def catalog(actor):
     definitions = [
         ('incident.search_reports', 'erp_search_failure_reports', 'Buscar reportes de falla', 'Busca reportes existentes por fragmento de título, proveedor o sucursal. Incluye instalaciones sin equipo; no crea reportes.'),
         ('incident.get_report', 'erp_get_failure_report', 'Consultar reporte de falla', 'Obtiene una ficha fresca, cotización, proveedor y seguimiento del reporte autorizado.'),
-        (KEY, 'erp_prepare_failure_followup', 'Preparar actualización del reporte', 'Prepara seguimiento o finalización de un reporte existente sin ejecutarla. Conserva cotización, proveedor y costo real. Requiere comentario y, para finalizar, fecha real del trabajo. evidence_count es el total de fotos requeridas, incluidas las que el usuario adjuntará después; no sólo las seleccionadas ahora. Las fotos se adjuntan en la interfaz; continúa el mismo draft_id y expected_version.'),
+        (KEY, 'erp_prepare_failure_followup', 'Preparar actualización del reporte', 'Prepara seguimiento o finalización de un reporte existente sin ejecutarla. Conserva cotización, proveedor y costo real. Requiere comentario y, para finalizar, fecha real del trabajo. evidence_count es el total de fotos requeridas, incluidas las pendientes de adjuntar; un PDF no sustituye una foto. Las imágenes o PDFs se adjuntan en la interfaz; continúa el mismo draft_id y expected_version.'),
     ]
     return [{'key': key, 'name': name, 'display_name': label, 'description': description,
              'argument_schema': SERIALIZERS[key].argument_schema(), 'incident': True} for key, name, label, description in definitions]
@@ -158,9 +157,12 @@ def project(draft, actor):
     elif report and digest(snapshot(report)) != metadata['resource_hash']:
         state = 'REVIEW_REQUIRED'
     missing = list(metadata['missing_fields'])
-    if state != 'EXECUTED' and len(metadata.get('files', [])) < metadata.get('expected_file_count', 0):
+    files_meta = metadata.get('files', [])
+    photos = sum(row['mime'].startswith('image/') for row in files_meta)
+    if state != 'EXECUTED' and (photos < metadata.get('expected_file_count', 0)
+            or len(files_meta) < metadata.get('expected_attachment_count', 0)):
         missing.append('fotografías')
-    files = [{'id': row['id'], 'nombre': row['nombre'], 'bytes': row['bytes'], 'sha256': row['sha256'],
+    files = [{'id': row['id'], 'nombre': row['nombre'], 'bytes': row['bytes'], 'sha256': row['sha256'], 'mime': row['mime'],
               'url': reverse('api_ai_followup_evidence', args=[draft.public_id, row['id']])} for row in metadata.get('files', [])]
     return {'kind': 'followup', 'draft_id': str(draft.public_id), 'version': metadata['version'], 'status': state,
             'payload_hash': metadata['payload_hash'], 'fields': data, 'report': display_report,
@@ -185,6 +187,7 @@ def save_result(draft, actor, action):
 def payload_hash(data, metadata):
     return digest({'fields': data, 'resource_hash': metadata['resource_hash'],
                    'expected_file_count': metadata.get('expected_file_count', 0),
+                   **({'expected_attachment_count':metadata['expected_attachment_count']} if 'expected_attachment_count' in metadata else {}),
                    'files': [{k: row[k] for k in ('id', 'nombre', 'bytes', 'sha256')} for row in metadata.get('files', [])]})
 
 
@@ -236,6 +239,7 @@ def invoke(*, user, tool_key, arguments, conversation, user_message, assistant_m
             'incident_status': 'WAITING_INFORMATION' if missing else 'AWAITING_CONFIRMATION', 'missing_fields': missing,
             'resource_hash': digest(snapshot(report)) if report else None,
             'expected_file_count': max((draft.metadata_json.get('expected_file_count', 0) if draft else 0), user_message.metadata_json.get('expected_photo_count', 0), data.get('evidence_count', 0)),
+            'expected_attachment_count': max((draft.metadata_json.get('expected_attachment_count', 0) if draft else 0), user_message.metadata_json.get('expected_attachment_count', 0)),
             'last_request_id': origin, 'last_request_hash': command_hash,
             'expires_at': (timezone.now() + timedelta(hours=24)).isoformat()}
         metadata['payload_hash'] = payload_hash(data, metadata)
@@ -269,27 +273,8 @@ def attach(*, user, draft_id, arguments, files, source_message_id=None):
     from .agent_incidents import IncidentConfirmation
     serializer = IncidentConfirmation(data=arguments)
     serializer.is_valid(raise_exception=True)
-    files = validate_evidence_files(files, images_only=True)
-    if sum(file.size for file in files) > 20 * 1024 * 1024:
-        raise WorkflowError('followup_files_too_large', 400, 'El conjunto de fotografías no puede exceder 20 MB.')
-    if not files:
-        raise WorkflowError('followup_no_files', 400)
-    uploads = []
-    for file in files:
-        from PIL import Image
-        try:
-            with Image.open(file) as image:
-                if image.width * image.height > 25000000:
-                    raise ValueError('image limit')
-                image.verify()
-        except Exception:
-            raise WorkflowError('followup_invalid_image', 400, 'La fotografía no pudo validarse.') from None
-        finally:
-            file.seek(0)
-        data = file.read(); file.seek(0)
-        uploads.append({'nombre': file.name, 'bytes': file.size, 'sha256': hashlib.sha256(data).hexdigest(), 'mime': file.content_type})
-    if len({f['sha256'] for f in uploads}) != len(uploads):
-        raise WorkflowError('followup_duplicate_files', 400)
+    from .agent_images import validated
+    files, uploads = validated(files)
     upload_hash = digest(uploads)
     saved = []
     try:
@@ -306,8 +291,9 @@ def attach(*, user, draft_id, arguments, files, source_message_id=None):
                 raise WorkflowError('incident_version_conflict', 409)
             if meta.get('files'):
                 raise WorkflowError('followup_files_already_bound', 409, 'Estas evidencias ya están asociadas; revisa la propuesta.')
-            if len(files) < meta.get('expected_file_count', 0):
-                raise WorkflowError('followup_files_missing', 400, 'Selecciona todas las fotografías indicadas en la propuesta en una sola carga.')
+            if (sum(f['mime'].startswith('image/') for f in uploads) < meta.get('expected_file_count', 0)
+                    or len(files) < meta.get('expected_attachment_count', 0)):
+                raise WorkflowError('followup_files_missing', 400, 'Selecciona todas las evidencias indicadas en la propuesta en una sola carga.')
             pending = pending_evidence(actor)
             from .agent_images import staged_bytes as input_staged_bytes
             staged_bytes = input_staged_bytes(actor)

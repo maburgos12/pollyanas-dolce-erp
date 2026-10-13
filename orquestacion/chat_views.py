@@ -124,10 +124,12 @@ def stream_message_api(request, conversation_id):
         payload = {'content':payload.get('content'), 'attachment_count':len(files)}
     count = payload.get('attachment_count', 0)
     if type(count) is not int or not 0 <= count <= 5:
-        return JsonResponse({'detail':'Puedes seleccionar hasta cinco fotografías.'}, status=400)
+        return JsonResponse({'detail':'Puedes seleccionar hasta cinco imágenes o PDFs.'}, status=400)
     content = str(payload.get("content") or "").strip()
     if audio and not content:
         content = 'Nota de voz'
+    if files and not content:
+        content = 'Analiza los archivos adjuntos.'
     if not content:
         return JsonResponse({"detail": "El mensaje no puede ir vacío."}, status=400)
 
@@ -143,8 +145,9 @@ def stream_message_api(request, conversation_id):
         except (WorkflowError, EvidenceValidationError, ReadStopped, PilotStopped) as exc:
             code = getattr(exc, 'code', 'image_input_invalid')
             detail = {'audio_input_duplicate':'La nota ya está en esta conversación. Revisa el historial antes de reenviarla.',
+                      'pdf_input_invalid':'Revisa el PDF: hasta diez páginas en total, sin contraseña y 10 MB por archivo.',
                       'input_limit':'El texto que acompaña a la voz no puede exceder 6000 caracteres.'}.get(code,
-                'No se admitieron los archivos. Voz: WAV PCM de 16 bits, hasta 3 minutos y 8 MB. Revisa permisos y límite del piloto.')
+                'No se admitieron los archivos. Imágenes/PDF: hasta cinco archivos, 10 MB cada uno, 20 MB en total. Voz: WAV PCM, hasta 3 minutos y 8 MB. Revisa permisos y límite del piloto.')
             return JsonResponse({'detail':detail, 'code':code}, status=getattr(exc, 'status', 400))
     else:
         user_message, assistant_message = create_user_turn(
@@ -155,7 +158,7 @@ def stream_message_api(request, conversation_id):
     if client_request_id:
         assistant_message.metadata_json = {**assistant_message.metadata_json, 'client_request_id':client_request_id}
         assistant_message.save(update_fields=['metadata_json', 'updated_at'])
-    if count:
+    if count and not files:
         user_message.metadata_json = {**user_message.metadata_json, 'expected_photo_count': count}
         user_message.save(update_fields=['metadata_json', 'updated_at'])
 
@@ -229,7 +232,8 @@ def message_image_api(request, conversation_id, message_id, image_id):
         raise Http404 from None
     for file, info in zip(files, infos):
         if info['id'] == str(image_id):
-            response = FileResponse(io.BytesIO(file.read()), content_type=info['mime'])
+            response = FileResponse(io.BytesIO(file.read()), content_type=info['mime'], filename=info['nombre'],
+                                    as_attachment=info['mime'] == 'application/pdf')
             response['Cache-Control'] = 'private, no-store'
             response['X-Content-Type-Options'] = 'nosniff'
             return response

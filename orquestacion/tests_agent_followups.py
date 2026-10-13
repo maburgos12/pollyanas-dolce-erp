@@ -23,6 +23,54 @@ from orquestacion.services.chat_service import create_chat_conversation, create_
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True)
 class FollowupTests(TestCase):
     @override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
+    def test_received_pdf_must_be_associated_before_confirmation(self):
+        from orquestacion.tests_agent_images import pdf_file
+        from orquestacion.services import agent_images
+        request, answer = agent_images.create_image_turn(user=self.user, conversation=self.conversation,
+            content='Factura del trabajo; pago pendiente.', files=[pdf_file()])
+        dto = followups.invoke(user=self.user, tool_key=followups.KEY, arguments=self.arguments,
+            conversation=self.conversation, user_message=request, assistant_message=answer, call_id='document-required')['result']['payload']['incident']
+        self.assertTrue(dto['missing_fields'])
+        with self.assertRaises(WorkflowError):
+            self.confirm(dto)
+        attached = self.attach(dto, [pdf_file()])
+        self.assertFalse(attached['missing_fields'])
+
+    def test_pdf_cannot_replace_promised_photos(self):
+        from orquestacion.tests_agent_images import pdf_file
+        dto = self.prepare({**self.arguments, 'evidence_count':1})
+        with self.assertRaises(WorkflowError):
+            followups.attach(user=self.user, draft_id=dto['draft_id'], arguments=self.command(dto), files=[pdf_file()])
+        dto = self.attach(dto, [pdf_file(), self.photo()])
+        self.assertFalse(dto['missing_fields'])
+
+    def test_pdf_evidence_reuses_original_and_confirms_only_work_not_payment(self):
+        from orquestacion.tests_agent_images import pdf_file
+        from orquestacion.services import agent_images
+        from orquestacion.services.agent_read_runtime import access_fingerprint
+        with override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key'):
+            request, answer = agent_images.create_image_turn(user=self.user, conversation=self.conversation,
+                content='Factura del trabajo; pago pendiente.', files=[pdf_file()])
+            answer.status='complete'; answer.metadata_json={'agent_read':{'runtime':'agent_read','mode':'READ',
+                'access_fingerprint':access_fingerprint(self.user),'asset_ids':[]}}
+            answer.save()
+            dto = self.prepare()
+            attached = followups.attach(user=self.user, draft_id=dto['draft_id'], arguments=self.command(dto),
+                files=[], source_message_id=request.public_id)['result']['payload']['incident']
+            self.assertEqual(attached['files'][0]['mime'], 'application/pdf')
+            original = request.metadata_json['images'][0]
+            self.assertEqual(agent_images.staged_bytes(self.user), original['bytes'])
+            self.assertEqual(followups.attach(user=self.user, draft_id=dto['draft_id'], arguments=self.command(dto),
+                files=[], source_message_id=request.public_id)['result']['payload']['incident'], attached)
+            self.confirm(attached)
+            self.report.refresh_from_db()
+            self.assertEqual(self.report.estatus, 'resuelto')
+            self.assertEqual(str(self.report.costo_estimado), '2500.00')
+            self.assertIsNone(self.report.costo_real)
+            evidence = EvidenciaSeguimientoFalla.objects.get(bitacora__reporte=self.report)
+            self.assertEqual(evidence.archivo.name, original['path'])
+
+    @override_settings(AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
     def test_chat_originals_fit_operational_fields_and_remain_readable_after_confirmation(self):
         from orquestacion.services import agent_images
         from orquestacion.services.agent_read_runtime import access_fingerprint

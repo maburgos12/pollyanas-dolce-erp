@@ -73,10 +73,10 @@
         <div class="agent-voice-controls">
           <button type="button" class="erp-chat-prompt" id="erp-chat-record" aria-pressed="false">Grabar nota</button>
           <details class="agent-input-files">
-            <summary aria-label="Adjuntar imágenes o nota WAV">Adjuntar</summary>
+            <summary aria-label="Adjuntar imágenes, PDF o nota WAV">Adjuntar</summary>
             <div>
-              <label for="erp-chat-photos">Imágenes y capturas (hasta cinco)</label>
-              <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp">
+              <label for="erp-chat-photos">Imágenes y PDFs (hasta cinco archivos)</label>
+              <input type="file" id="erp-chat-photos" multiple accept="image/jpeg,image/png,image/webp,application/pdf">
               <label for="erp-chat-audio">Adjuntar nota WAV</label>
               <input type="file" id="erp-chat-audio" accept="audio/wav,.wav">
             </div>
@@ -97,7 +97,7 @@
 
 {% block extra_js %}
 <script src="{% static 'js/erp-agent-voice.js' %}"></script>
-<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261011-vision-v1"></script>
+<script src="{% static 'js/orquestacion/agent-results.js' %}?v=20261012-pdf-v1"></script>
 <script>
 (() => {
   const apiBase = "{{ chat_api_base }}";
@@ -142,7 +142,7 @@
     document.querySelector('.agent-input-files summary').focus();
   });
   photoInput.addEventListener('change', () => {
-    document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco fotos.' : `${photoInput.files.length} imágenes seleccionadas. El agente leerá lo visible y las conservará en el historial.`;
+    document.getElementById('erp-chat-photo-status').textContent = photoInput.files.length > 5 ? 'Selecciona hasta cinco archivos.' : `Archivos seleccionados: ${photoInput.files.length}. El agente leerá su contenido y los conservará en el historial.`;
   });
   const escapeHtml = view.escape;
 
@@ -232,7 +232,9 @@
         const gallery = document.createElement('div'); gallery.className = 'agent-input-images';
         message.images.forEach(file => {
           const link = document.createElement('a'); link.href = file.url; link.target = '_blank'; link.rel = 'noopener';
-          const image = document.createElement('img'); image.src = file.url; image.alt = ''; image.loading = 'lazy';
+          const image = document.createElement(file.mime === 'application/pdf' ? 'span' : 'img');
+          if (file.mime === 'application/pdf') image.textContent = 'PDF';
+          else {image.src = file.url; image.alt = ''; image.loading = 'lazy';}
           const name = document.createElement('span'); name.textContent = file.name;
           link.append(image, name); gallery.appendChild(link);
         });
@@ -382,10 +384,10 @@
 
   async function sendMessage() {
     const audio = voice.file;
-    const content = inputEl.value.trim() || (audio ? 'Nota de voz' : '');
+    const content = inputEl.value.trim() || (audio ? 'Nota de voz' : photoInput.files.length ? 'Analiza los archivos adjuntos.' : '');
     if (!content || state.recording || state.sending || state.loading || state.creating || state.uncertainTurn || !runtimeStatus.ready) return;
     const photos = Array.from(photoInput.files || []);
-    if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)+(audio?.size || 0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco fotos, 10 MB por foto y 20 MB en total.'; return;}
+    if (photos.length > 5 || photos.some(f=>f.size > 10*1024*1024) || photos.reduce((size,f)=>size+f.size,0)+(audio?.size || 0)>20*1024*1024) {statusEl.textContent = 'Hasta cinco imágenes o PDFs, 10 MB por archivo y 20 MB en total. Hasta diez páginas PDF.'; return;}
     state.sending = true;
     photoInput.disabled = true;
     voice.setBusy(true);
@@ -491,7 +493,7 @@
       if (audio) {voice.clear(); document.getElementById('erp-chat-audio-status').textContent='';}
       await refreshConversations();
       if (photos.length && recovery) {
-        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Imágenes guardadas en el historial. Revisa su asociación a la propuesta antes de confirmar.';
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Archivos guardados en el historial. Revisa su asociación a la propuesta antes de confirmar.';
       }
       if (photos.length && !recovery) {
         const reply = state.activeConversation.messages.find(message => message.id === assistantId);
@@ -501,12 +503,12 @@
         const draft = proposals[0];
         const body = new FormData(); body.append('expected_version', String(draft.version)); body.append('payload_hash', draft.payload_hash);
         const source = state.activeConversation.messages.find(message => message.role === 'user' && message.images?.length && message.sequence === reply.sequence - 1);
-        if (!source) throw new Error('No se pudo recuperar el mensaje con las imágenes. Revisa el historial.');
+        if (!source) throw new Error('No se pudo recuperar el mensaje con los archivos. Revisa el historial.');
         body.append('source_message_id', source.id);
         const upload = await fetch(`/api/ai-gateway/${draft.kind === 'purchase' ? 'purchases' : 'incidents'}/${encodeURIComponent(draft.draft_id)}/evidence/`, {method:'POST',credentials:'same-origin',headers:{'X-CSRFToken':csrfToken},body});
         const result = await upload.json();
-        if (!upload.ok) {statusEl.textContent = result.detail || 'No se asociaron las fotos. Revisa la propuesta antes de confirmar.'; return;}
-        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Fotografías asociadas a la propuesta.';
+        if (!upload.ok) {statusEl.textContent = result.detail || 'No se asociaron los archivos. Revisa la propuesta antes de confirmar.'; return;}
+        photoInput.value = ''; document.getElementById('erp-chat-photo-status').textContent = 'Archivos asociados a la propuesta.';
         await loadConversation(conversationId, true);
       }
       statusEl.textContent = state.activeConversation.messages.at(-1)?.status === "error" ? "La consulta no se completó. Revisa la respuesta." : "Respuesta lista.";
