@@ -659,13 +659,16 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         from rrhh.models import Empleado
 
         user_id = getattr(user, "pk", None)
-        tiene_equipo_permisos = bool(user_id and Empleado.objects.filter(activo=True, jefe_directo__usuario_erp_id=user_id).exists())
+        tiene_equipo_permisos = bool(
+            empleado_actual and user_id and not can_view_rrhh(user)
+            and Empleado.objects.filter(activo=True, jefe_directo__usuario_erp_id=user_id).exists()
+        )
         if ((user.is_superuser or has_any_role(user, ROLE_DG)) and can_view_rrhh(user)) or tiene_equipo_permisos:
             match_len = len("/rrhh/permisos/") if current_path.startswith("/rrhh/permisos/") else 0
             best_match_len = max(best_match_len, match_len)
             mi_trabajo["items"].append(
                 {
-                    "label": "Permisos de mi equipo" if tiene_equipo_permisos and not can_view_rrhh(user) else "Permisos por autorizar",
+                    "label": "Permisos de mi equipo" if tiene_equipo_permisos else "Permisos por autorizar",
                     "url": "/rrhh/permisos/",
                     "active": False,
                     "_match_len": match_len,
