@@ -90,7 +90,7 @@ class BusinessReadTests(TestCase):
 
     def test_catalog_contains_only_approved_keys_and_safe_versioned_projection(self):
         knowledge = self.bridge().knowledge(self.actor)
-        self.assertEqual(len(knowledge['capabilities']), 5)
+        self.assertEqual(len(knowledge['capabilities']), 7)
         self.assertEqual(len(knowledge['version']), 64)
         self.assertEqual(knowledge, self.bridge().knowledge(self.actor))
         serialized = json.dumps(knowledge)
@@ -207,6 +207,47 @@ class BusinessReadTests(TestCase):
                 self.messages[1].refresh_from_db()
                 self.assertEqual(self.messages[1].status,'complete')
                 self.assertEqual(self.messages[1].tool_calls.count(),2)
+
+    def test_recipe_investigation_discovers_search_then_context_and_revokes_history(self):
+        from recetas.models import Receta
+        from api import ai_gateway_recipe_reads
+        recipe=Receta.objects.create(nombre='Pastel prueba de investigación',nombre_normalizado='pastel prueba de investigacion',hash_contenido='bk-recipe')
+        result=self.run_turn('Investiga los ingredientes y costos de ese pastel',[
+            response(call('erp_discover_capabilities',{'keys':['erp.search_recipes','erp.get_recipe_context']})),
+            response(call('erp_search_recipes',{'q':'investigacion'},2)),
+            response(call('erp_get_recipe_context',{'receta_id':recipe.pk},3)), 'natural'])
+        self.assertEqual(result.assistant_text,'Consulta verificada.')
+        self.messages[1].refresh_from_db()
+        self.assertEqual(self.messages[1].tool_calls.count(),3)
+        with patch.object(ai_gateway_recipe_reads,'can_view_recetas',return_value=False):
+            projected=serialize_message(self.messages[1])
+        self.assertNotEqual(projected['content'],'Consulta verificada.')
+        self.assertTrue(all(row['result']=={} for row in projected['tool_calls']))
+
+    def test_history_capacity_tracks_registered_readers_not_old_fixed_limit(self):
+        from api.ai_gateway_business_reads import SERIALIZERS, DISCOVERY_KEY
+        from orquestacion.services.agent_read_runtime import can_project_read_message
+        self.run_turn('Busca una receta',[response(call('erp_discover_capabilities',{'keys':['erp.search_recipes']})),response(call('erp_search_recipes',{'q':'prueba'},2)),'natural'])
+        answer=self.messages[1]; answer.refresh_from_db()
+        answer.metadata_json['agent_read']['business_keys']=[DISCOVERY_KEY,*SERIALIZERS]
+        answer.save(update_fields=['metadata_json'])
+        self.assertTrue(can_project_read_message(answer))
+        answer.metadata_json['agent_read']['business_keys'].append(DISCOVERY_KEY)
+        answer.save(update_fields=['metadata_json'])
+        self.assertFalse(can_project_read_message(answer))
+
+    def test_legacy_history_survives_additive_catalog_but_not_revocation(self):
+        from api.ai_gateway_business_reads import LEGACY_CATALOG_KEYS, allowed_keys, access_fingerprint
+        from orquestacion.services.agent_read_runtime import can_project_read_message
+        self.run_turn('Órdenes',[response(call('erp_discover_capabilities',{'keys':['erp.get_purchase_orders']})),response(call('erp_get_purchase_orders',{},2)),'natural'])
+        answer=self.messages[1]; answer.refresh_from_db()
+        proof=answer.metadata_json['agent_read']
+        proof.pop('business_catalog_keys')
+        proof['business_fingerprint']=access_fingerprint(self.actor,catalog_keys=[key for key in allowed_keys(self.actor) if key in LEGACY_CATALOG_KEYS])
+        answer.save(update_fields=['metadata_json'])
+        self.assertTrue(can_project_read_message(answer))
+        with patch('api.ai_gateway_business_reads.allowed_keys',return_value=['erp.search_recipes']):
+            self.assertFalse(can_project_read_message(answer))
 
     def test_undiscovered_reader_and_disallowed_discovery_never_execute(self):
         self.run_turn('Ventas',[response(call('erp_get_sales_summary',{})),response()])
