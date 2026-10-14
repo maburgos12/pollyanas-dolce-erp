@@ -64,13 +64,13 @@ def ensure_sales_dashboard_freshness(
     )
     target_date = closed_reference
     fact_latest_date_before = (
-        FactVentaDiaria.objects.filter(fecha__lte=reference_date)
+        FactVentaDiaria.objects.filter(fecha__lte=closed_reference)
         .order_by("-fecha")
         .values_list("fecha", flat=True)
         .first()
     )
     visible_cut_date_before = _visible_cut_for(timezone.localdate())
-    lag_days_before = max(_lag_days(target_date=target_date, fact_date=fact_latest_date_before),
+    lag_days_before = max(_lag_days(target_date=point_latest_date, fact_date=fact_latest_date_before),
         _lag_days(target_date=target_date, fact_date=visible_cut_date_before))
 
     result = SalesDashboardFreshnessResult(
@@ -110,13 +110,13 @@ def ensure_sales_dashboard_freshness(
     refresh_incremental(reference_date=target_date, lookback_days=catchup_lookback_days)
 
     fact_latest_date_after = (
-        FactVentaDiaria.objects.filter(fecha__lte=reference_date)
+        FactVentaDiaria.objects.filter(fecha__lte=closed_reference)
         .order_by("-fecha")
         .values_list("fecha", flat=True)
         .first()
     )
     visible_cut_date_after = _visible_cut_for(timezone.localdate())
-    lag_days_after = max(_lag_days(target_date=target_date, fact_date=fact_latest_date_after),
+    lag_days_after = max(_lag_days(target_date=point_latest_date, fact_date=fact_latest_date_after),
         _lag_days(target_date=target_date, fact_date=visible_cut_date_after))
 
     result.fact_latest_date_after = fact_latest_date_after
