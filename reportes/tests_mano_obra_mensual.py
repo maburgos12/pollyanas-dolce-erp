@@ -82,6 +82,13 @@ class ManoObraMensualTests(TestCase):
         self.assertTrue(any('todos los días' in x for x in calcular('2026-09')['pendientes']))
         self.assertTrue(calcular('2026-08')['pendientes'])
 
+    def test_nomina_ausente_o_sin_clasificar_no_es_mano_obra_cero(self):
+        NominaPeriodo.objects.filter(pk=self.periodo.pk).update(estatus='BORRADOR')
+        self.assertIsNone(calcular('2026-09')['productos'][0]['mo'])
+        NominaPeriodo.objects.filter(pk=self.periodo.pk).update(estatus='PAGADA')
+        Empleado.objects.filter(pk=self.persona.pk).update(puesto='Sin clasificación')
+        self.assertIsNone(calcular('2026-09')['productos'][0]['mo'])
+
     def test_rechaza_fuente_cambiada_y_preserva_revision(self):
         data = calcular('2026-09')
         first = aprobar('2026-09', data['fingerprint'], self.user)

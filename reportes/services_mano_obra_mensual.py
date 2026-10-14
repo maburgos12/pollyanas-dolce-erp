@@ -181,7 +181,7 @@ def calcular(periodo, fuentes=None):
         rows.append(r)
     base = sum((r['base'] or Decimal('0') for r in rows), Decimal('0'))
     # Un costo ausente no debe cargar su cuota a los productos que sí tienen costo.
-    repartible = bool(rows) and base > 0 and all(r['mp'] is not None and r['mp'] > 0 and r['cantidad'] >= 0 for r in rows)
+    repartible = bool(personas) and fondo > 0 and pendiente_nomina == 0 and bool(rows) and base > 0 and all(r['mp'] is not None and r['mp'] > 0 and r['cantidad'] >= 0 for r in rows)
     if not repartible:
         pendientes.append('No se puede repartir hasta completar la base de todos los productos.')
     asignado = Decimal('0')
