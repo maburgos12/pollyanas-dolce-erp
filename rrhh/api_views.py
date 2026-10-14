@@ -18,8 +18,9 @@ from core.notificaciones import (
     notificar_hora_extra_solicitada,
     notificar_prestamo_aprobado,
     notificar_prestamo_para_direccion,
+    notificar_permiso_solicitado,
 )
-from recetas.utils.normalizacion import normalizar_nombre
+from .services_identidad import empleado_de_usuario
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
 from .serializers import (
     AsistenciaSerializer,
@@ -38,7 +39,7 @@ from .services_prestamos import (
     crear_solicitud_prestamo,
     prestamos_por_autorizar_q,
 )
-from .services_permisos import resolver_permiso_direccion
+from .services_permisos import permisos_empleados_usuario, permisos_visibles_usuario, resolver_permiso_direccion, resolver_permiso_jefe
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
     can_gestionar_vacaciones_jefe,
@@ -58,29 +59,6 @@ from .services_vacaciones_saldos import (
 
 
 AUTH_CLASSES = [JWTAuthentication, TokenAuthentication, SessionAuthentication]
-
-
-def empleado_de_usuario(user) -> Empleado | None:
-    if not user or not user.is_authenticated:
-        return None
-    candidates = Empleado.objects.filter(activo=True)
-    empleado = getattr(user, "empleado_rrhh", None)
-    if empleado and empleado.activo:
-        return empleado
-    if user.email:
-        empleado = candidates.filter(email__iexact=user.email).first()
-        if empleado:
-            return empleado
-    empleado = candidates.filter(Q(codigo__iexact=user.username) | Q(nombre__iexact=user.get_full_name())).first()
-    if empleado:
-        return empleado
-
-    user_tokens = set(normalizar_nombre(user.get_full_name() or "").split())
-    if user_tokens:
-        for empleado in candidates.only("id", "nombre", "nombre_normalizado", "activo"):
-            if set((empleado.nombre_normalizado or normalizar_nombre(empleado.nombre)).split()) == user_tokens:
-                return empleado
-    return None
 
 
 class _CapitalHumanoAccessMixin:
@@ -250,12 +228,7 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = PermisoSalidaSerializer
 
     def get_queryset(self):
-        qs = PermisoSalida.objects.select_related("empleado", "autorizado_por")
-        scope = self._employee_scope()
-        if scope == "none":
-            return qs.none()
-        if isinstance(scope, Empleado):
-            qs = qs.filter(empleado=scope)
+        qs = permisos_visibles_usuario(self.request.user)
         estado = self.request.query_params.get("estado")
         if estado:
             qs = qs.filter(estado=estado)
@@ -265,9 +238,22 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
         if not empleado:
             raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
-        if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
+        if not permisos_empleados_usuario(self.request.user).filter(pk=empleado.pk).exists():
             raise PermissionDenied("No puedes solicitar permisos para otro empleado.")
-        serializer.save(empleado=empleado)
+        permiso = serializer.save(empleado=empleado, creado_por=self.request.user)
+        notificar_permiso_solicitado(permiso, actor=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="autorizar-jefe")
+    def autorizar_jefe(self, request, pk=None):
+        permiso = self.get_object()
+        resolver_permiso_jefe(permiso, request.user, aprobar=True)
+        return Response(self.get_serializer(permiso).data)
+
+    @action(detail=True, methods=["post"], url_path="rechazar-jefe")
+    def rechazar_jefe(self, request, pk=None):
+        permiso = self.get_object()
+        resolver_permiso_jefe(permiso, request.user, aprobar=False)
+        return Response(self.get_serializer(permiso).data)
 
     def update(self, request, *args, **kwargs):
         raise PermissionDenied("Las correcciones de permisos deben registrarse desde el flujo auditado de permisos de equipo.")

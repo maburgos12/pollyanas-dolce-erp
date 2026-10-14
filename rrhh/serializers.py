@@ -6,6 +6,7 @@ from core.access import can_view_rrhh
 
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
 from .services_prestamos import can_autorizar_prestamo_direccion, can_autorizar_prestamo_jefe
+from .services_permisos import permisos_empleados_usuario
 
 
 class AsistenciaSerializer(serializers.ModelSerializer):
@@ -112,12 +113,15 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
 
     def validate_empleado(self, empleado: Empleado) -> Empleado:
         request = self.context.get("request")
-        if request and can_view_rrhh(request.user):
-            return empleado
-        if request and not request.user.is_staff and empleado.email and request.user.email:
-            if empleado.email.lower() != request.user.email.lower():
-                raise serializers.ValidationError("No puedes solicitar permisos para otro empleado.")
+        if request and not permisos_empleados_usuario(request.user).filter(pk=empleado.pk).exists():
+            raise serializers.ValidationError("Empleado fuera de tu equipo o inactivo.")
         return empleado
+
+    def validate(self, attrs):
+        inicio, fin = attrs.get("fecha_inicio"), attrs.get("fecha_fin")
+        if inicio and fin and fin < inicio:
+            raise serializers.ValidationError({"fecha_fin": "La fecha final no puede ser anterior al inicio."})
+        return attrs
 
 
 class SolicitudVacacionesSerializer(serializers.ModelSerializer):

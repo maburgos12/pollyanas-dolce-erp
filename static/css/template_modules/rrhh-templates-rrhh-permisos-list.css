@@ -1,5 +1,11 @@
 /* Extracted from rrhh/templates/rrhh/permisos_list.html */
 .permisos-page { display: grid; gap: 16px; }
+  .permisos-captura { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; padding: 18px; }
+  .permisos-captura label { display: grid; gap: 6px; color: var(--texto); font-weight: 700; }
+  .permisos-captura input, .permisos-captura select, .permisos-captura textarea { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--texto-light); border-radius: 6px; font: inherit; color: var(--texto); background: var(--blanco); }
+  .permisos-captura input:focus-visible, .permisos-captura select:focus-visible, .permisos-captura textarea:focus-visible { outline: 2px solid var(--vino); outline-offset: 2px; }
+  .permisos-captura-motivo, .permisos-captura-errores { grid-column: 1 / -1; }
+  .permisos-captura-errores { color: #a51c1c; }
   .permisos-head {
     background: #fff;
     border: 1px solid var(--rosa);

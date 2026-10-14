@@ -25,6 +25,7 @@ from django.contrib.auth import get_user_model
 from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.audit import log_event
+from core.notificaciones import notificar_permiso_solicitado
 from core.models import Sucursal
 
 from .models import (
@@ -111,7 +112,10 @@ from .services_permisos import (
     can_resolver_permiso_jefe,
     resolver_permiso_direccion,
     resolver_permiso_jefe,
+    permisos_empleados_usuario,
+    permisos_visibles_usuario,
 )
+from .serializers import PermisoSalidaSerializer
 from .api_views import empleado_de_usuario
 from .services_vacaciones import (
     aprobar_solicitud_vacaciones_rrhh,
@@ -589,6 +593,8 @@ def _identity_map_context(limit: int = 80) -> dict:
 def _has_rrhh_task_access(user, tab_key: str) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False
+    if tab_key == "permisos":
+        return Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=user).exists()
     if tab_key == "vacantes":
         return bool(
             can_solicitar_vacantes(user)
@@ -622,6 +628,7 @@ def _module_tabs(active: str, user=None) -> list[dict]:
             continue
         if user is not None and not (
             tab["key"] == "catalogos"
+            or (active == tab["key"] == "permisos" and permisos_empleados_usuario(user).exists())
             or can_view_submodule(user, "rrhh", tab["submodule"])
             or _has_rrhh_task_access(user, tab["key"])
         ):
@@ -3147,33 +3154,37 @@ def horas_extra_list(request):
 
 @login_required
 def permisos_list(request):
-    if not can_view_rrhh(request.user):
+    empleados = permisos_empleados_usuario(request.user).order_by("nombre")
+    if not can_view_rrhh(request.user) and not empleados.exists():
         raise PermissionDenied("No tienes permisos para ver permisos")
 
+    permisos_qs = permisos_visibles_usuario(request.user).order_by("-creado_en")
+    errores_captura = None
     if request.method == "POST":
-        permiso = get_object_or_404(PermisoSalida, pk=request.POST.get("permiso_id"))
         action = (request.POST.get("action") or "").strip()
-        if action in {"preautorizar_jefe", "rechazar_jefe"}:
+        if action == "crear":
+            serializer = PermisoSalidaSerializer(data=request.POST, context={"request": request})
+            if serializer.is_valid() and serializer.validated_data.get("empleado"):
+                with transaction.atomic():
+                    permiso = serializer.save(creado_por=request.user)
+                    notificar_permiso_solicitado(permiso, actor=request.user)
+                messages.success(request, f"Solicitud {permiso.folio} registrada; pendiente de autorización.")
+                return redirect("rrhh:rrhh_permisos_list")
+            errores_captura = serializer.errors or {"empleado": ["Selecciona un empleado."]}
+        elif action in {"preautorizar_jefe", "rechazar_jefe"}:
+            permiso = get_object_or_404(permisos_qs, pk=request.POST.get("permiso_id"))
             resolver_permiso_jefe(permiso, request.user, aprobar=action == "preautorizar_jefe")
             estado = "autorizado" if action == "preautorizar_jefe" else "rechazado"
             messages.success(request, f"Permiso {permiso.folio} {estado} por jefe directo.")
         elif action in {"autorizar_direccion", "rechazar_direccion"}:
+            permiso = get_object_or_404(permisos_qs, pk=request.POST.get("permiso_id"))
             resolver_permiso_direccion(permiso, request.user, aprobar=action == "autorizar_direccion")
             estado = "autorizado" if action == "autorizar_direccion" else "rechazado"
             messages.success(request, f"Permiso {permiso.folio} {estado} por Dirección.")
         else:
             raise PermissionDenied("Capital Humano captura, consulta y archiva permisos; no los autoriza.")
-        return redirect("rrhh:rrhh_permisos_list")
-
-    permisos_qs = (
-        PermisoSalida.objects.select_related(
-            "empleado",
-            "autorizado_por",
-            "autorizado_jefe_por",
-            "autorizado_direccion_por",
-        )
-        .order_by("-creado_en")
-    )
+        if not errores_captura:
+            return redirect("rrhh:rrhh_permisos_list")
     permisos = permisos_qs[:500]
     puede_direccion = can_authorize_direccion(request.user)
     anteriores = Q(fecha_fin__date__lt=timezone.localdate()) | Q(
@@ -3258,6 +3269,11 @@ def permisos_list(request):
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "can_authorize_direccion": puede_direccion,
             "bandeja_activa": bandeja_activa,
+            "empleados": empleados,
+            "tipos_permiso": PermisoSalida.TIPO_CHOICES,
+            "errores_captura": errores_captura,
+            "captura": request.POST if errores_captura else {},
+            "es_bandeja_equipo": not can_view_rrhh(request.user),
         },
     )
 
