@@ -6,6 +6,7 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.utils import timezone
 from django.db import close_old_connections
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
@@ -228,7 +229,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             triggered_by=None,
             trigger="point_daily_sales_sync",
         )
-        quality_loop_mock.assert_called_once_with(reference_date=date(2025, 9, 5))
+        quality_loop_mock.assert_called_once_with(reference_date=timezone.localdate())
         self.assertEqual(
             fake_job.result_summary["analytics_refresh"],
             {
@@ -963,3 +964,42 @@ class VisibleCutRefreshTaskTests(SimpleTestCase):
         args, kwargs = log_mock.call_args
         self.assertEqual(args[1], "INTEGRATIONS_OPERATIONAL_REFRESH_FAILED")
         self.assertIn("Visible cut mismatch after sync", kwargs["payload"]["error"])
+
+
+class SalesPublicationRetryTests(SimpleTestCase):
+    def test_daily_publication_gap_retries_the_original_task(self):
+        from pos_bridge.tasks.celery_tasks import task_daily_sales_sync
+        from reportes.sales_dashboard_freshness import SalesPublicationPending
+        from celery.exceptions import Retry
+
+        with (patch("pos_bridge.tasks.celery_tasks._run_with_optional_user", side_effect=SalesPublicationPending("Missing Leyva")),
+              patch.object(task_daily_sales_sync, "retry", side_effect=Retry()) as retry):
+            with self.assertRaises(Retry):
+                task_daily_sales_sync.run(days=3, lag_days=1)
+        self.assertIsInstance(retry.call_args.kwargs["exc"], SalesPublicationPending)
+
+    def test_failed_extraction_does_not_end_the_daily_task_successfully(self):
+        from pos_bridge.tasks.celery_tasks import task_daily_sales_sync
+        from celery.exceptions import Retry
+
+        with (patch("pos_bridge.tasks.celery_tasks._run_with_optional_user", return_value={"status": PointSyncJob.STATUS_FAILED}),
+              patch.object(task_daily_sales_sync, "retry", side_effect=Retry()) as retry):
+            with self.assertRaises(Retry):
+                task_daily_sales_sync.run(days=3, lag_days=1)
+        retry.assert_called_once()
+
+    def test_partial_indicators_do_not_override_official_sales_total(self):
+        from pos_bridge.tasks.celery_tasks import _validate_visible_cut_refresh
+        from decimal import Decimal
+
+        with (patch("pos_bridge.tasks.celery_tasks.FactVentaDiaria.objects") as facts,
+              patch("pos_bridge.tasks.celery_tasks.PointDailyBranchIndicator.objects") as indicators,
+              patch("pos_bridge.tasks.celery_tasks._read_materialized_visible_cut", return_value={
+                  "date": date(2026, 10, 12), "total_amount": Decimal("100"), "tickets_complete": False}),
+              patch("pos_bridge.tasks.celery_tasks.refresh_dashboard_full_materialized_view") as refresh):
+            facts.filter.return_value.aggregate.return_value = {"total": Decimal("100")}
+            indicators.filter.return_value.aggregate.return_value = {"total": Decimal("80")}
+            result = _validate_visible_cut_refresh(reference_date=date(2026, 10, 12))
+        self.assertEqual(result["fact_total"], "100.00")
+        self.assertEqual(result["indicator_total"], "80.00")
+        refresh.assert_not_called()

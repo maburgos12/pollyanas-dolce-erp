@@ -4,12 +4,14 @@ from datetime import date
 
 import logging
 
+from django.utils import timezone
+
 from core.audit import log_event
 from orquestacion.services.quality_guard_runner import run_sales_publication_quality_loop
 from pos_bridge.management.commands.sync_product_facts_from_daily_sales import sync_product_facts_for_range
 from pos_bridge.models import PointSyncJob
 from reportes.analytics_service import refresh_incremental
-from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
+from reportes.sales_dashboard_freshness import SalesPublicationPending, ensure_sales_dashboard_freshness
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from pos_bridge.utils.dates import resolve_incremental_window
 
@@ -110,16 +112,19 @@ def run_daily_sales_sync(
             "lag_days_after": int(freshness.lag_days_after or 0),
         }
         try:
-            # The guard's reference date means "today". Passing the closed
-            # end_date would make the dashboard correctly exclude that same
-            # date as still open and report a false one-day publication gap.
-            quality_summary = run_sales_publication_quality_loop(reference_date=anchor_date)
+            # A historical sync anchor is not the current operational day.
+            quality_summary = run_sales_publication_quality_loop(reference_date=timezone.localdate())
         except Exception as exc:
             logger.warning("sales publication quality loop falló (no crítico): %s", exc)
             quality_summary = {"error": str(exc)}
         result_summary["sales_publication_quality_loop"] = quality_summary
         sync_job.result_summary = result_summary
         sync_job.save(update_fields=["result_summary", "updated_at"])
+        if not freshness.catchup_succeeded:
+            error = f"Corte visible {freshness.visible_cut_date_after}; esperado {freshness.target_date}. Sigue pendiente la evidencia de ventas Point."
+            log_event(triggered_by, "INTEGRATIONS_ANALYTICS_REFRESH_FAILED",
+                "reportes.AnalyticRefreshWindow", end_date.isoformat(), payload={**payload, "error": error})
+            raise SalesPublicationPending(error)
         log_event(
             triggered_by,
             "INTEGRATIONS_ANALYTICS_REFRESH_COMPLETED",

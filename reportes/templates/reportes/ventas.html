@@ -53,7 +53,7 @@
         </article>
         <article class="bi-status-card">
           <span class="bi-status-label">Tickets</span>
-          <strong>{{ daily_sales_snapshot.total_tickets|intcomma }}</strong>
+          <strong>{{ daily_sales_snapshot.total_tickets|default_if_none:"N/D"|intcomma }}</strong>
         </article>
         <article class="bi-status-card">
           <span class="bi-status-label">Sucursales</span>
@@ -198,7 +198,7 @@
         {% if daily_sales_snapshot.tickets_available %}${{ daily_sales_snapshot.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
       </div>
       <div class="bi-kpi-label">Ticket promedio</div>
-      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_tickets|intcomma }} tickets · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias</div>
+      <div class="bi-kpi-note">{{ daily_sales_snapshot.total_tickets|default_if_none:"N/D"|intcomma }} tickets · {{ daily_sales_snapshot.present_required_branch_count|intcomma }}/{{ daily_sales_snapshot.required_branch_count|intcomma }} sucursales obligatorias</div>
     </article>
     <article class="bi-kpi-card">
       <div class="bi-kpi-value success">${{ forecast_panel.forecast_amount|floatformat:2|intcomma }}</div>

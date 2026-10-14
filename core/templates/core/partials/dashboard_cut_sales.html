@@ -3,6 +3,7 @@
       <div class="home-exec-kpi-value">{% if daily_sales_snapshot.date %}${{ daily_sales_snapshot.total_amount|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</div>
       <div class="home-exec-kpi-label">Venta último cierre</div>
       <div class="home-exec-note">{{ daily_sales_snapshot.date_label|default:"Sin fecha" }} · {{ daily_sales_snapshot.source_label|default:"Sin fuente" }}</div>
+      {% if daily_sales_snapshot.missing_ticket_branches %}<p class="home-exec-note" role="status">{{ daily_sales_snapshot.detail }}</p>{% endif %}
       {% if can_manage_orquestacion %}
       <div class="home-exec-kpi-actions">
         <form

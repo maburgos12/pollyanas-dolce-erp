@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
+
+from django.utils import timezone
 
 from core.audit import log_event
 from pos_bridge.models import PointDailySale
+from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
+from reportes.closed_sales import closed_indicator_evidence, official_backfill_evidence, required_sales_branches
 from reportes.analytics_service import refresh_incremental
 from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
 from reportes.models import FactVentaDiaria
+
+
+class SalesPublicationPending(RuntimeError):
+    pass
 
 
 @dataclass(slots=True)
@@ -28,7 +36,7 @@ def _lag_days(*, target_date: date | None, fact_date: date | None) -> int:
     if not target_date:
         return 0
     if not fact_date:
-        return 0
+        return 999
     if fact_date >= target_date:
         return 0
     return (target_date - fact_date).days
@@ -47,21 +55,23 @@ def ensure_sales_dashboard_freshness(
     triggered_by=None,
     trigger: str,
 ) -> SalesDashboardFreshnessResult:
+    closed_reference = min(reference_date, timezone.localdate() - timedelta(days=1))
     point_latest_date = (
-        PointDailySale.objects.filter(sale_date__lte=reference_date)
+        PointDailySale.objects.filter(sale_date__lte=closed_reference)
         .order_by("-sale_date")
         .values_list("sale_date", flat=True)
         .first()
     )
-    target_date = min(point_latest_date, reference_date) if point_latest_date else None
+    target_date = closed_reference
     fact_latest_date_before = (
         FactVentaDiaria.objects.filter(fecha__lte=reference_date)
         .order_by("-fecha")
         .values_list("fecha", flat=True)
         .first()
     )
-    visible_cut_date_before = _visible_cut_for(reference_date)
-    lag_days_before = _lag_days(target_date=target_date, fact_date=fact_latest_date_before)
+    visible_cut_date_before = _visible_cut_for(timezone.localdate())
+    lag_days_before = max(_lag_days(target_date=target_date, fact_date=fact_latest_date_before),
+        _lag_days(target_date=target_date, fact_date=visible_cut_date_before))
 
     result = SalesDashboardFreshnessResult(
         target_date=target_date,
@@ -79,8 +89,24 @@ def ensure_sales_dashboard_freshness(
     if not target_date or lag_days_before == 0:
         return result
 
-    catchup_lookback_days = max(int(lookback_days or 1), lag_days_before + 1)
+    measured_lag = max(
+        ((target_date - day).days for day in (fact_latest_date_before, visible_cut_date_before) if day and day < target_date),
+        default=0,
+    )
+    catchup_lookback_days = max(int(lookback_days or 1), measured_lag + 1)
     result.catchup_attempted = True
+    if _lag_days(target_date=target_date, fact_date=visible_cut_date_before):
+        from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
+
+        required = {row["branch_id"] for row in required_sales_branches(target_date)}
+        present = set(closed_indicator_evidence().filter(indicator_date=target_date)
+            .values_list("branch__erp_branch_id", flat=True))
+        present.update(branch_id for _, branch_id in official_backfill_evidence([target_date], required, closed_only=True))
+        for branch in PointSalesBranchIndicatorService.canonical_branches():
+            if branch.erp_branch_id not in required - present:
+                continue
+            run_sales_history_sync(start_date=target_date, end_date=target_date,
+                branch_filter=branch.external_id, triggered_by=triggered_by)
     refresh_incremental(reference_date=target_date, lookback_days=catchup_lookback_days)
 
     fact_latest_date_after = (
@@ -89,8 +115,9 @@ def ensure_sales_dashboard_freshness(
         .values_list("fecha", flat=True)
         .first()
     )
-    visible_cut_date_after = _visible_cut_for(reference_date)
-    lag_days_after = _lag_days(target_date=target_date, fact_date=fact_latest_date_after)
+    visible_cut_date_after = _visible_cut_for(timezone.localdate())
+    lag_days_after = max(_lag_days(target_date=target_date, fact_date=fact_latest_date_after),
+        _lag_days(target_date=target_date, fact_date=visible_cut_date_after))
 
     result.fact_latest_date_after = fact_latest_date_after
     result.visible_cut_date_after = visible_cut_date_after

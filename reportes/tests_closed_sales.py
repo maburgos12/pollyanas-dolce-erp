@@ -46,6 +46,58 @@ class ClosedSalesTests(TestCase):
         self.close_day(date(2026, 9, 6), self.branches[:1])
         self.assertEqual(self.cutoff(), date(2026, 9, 5))
 
+    def official_report(self, day, branch, *, status=PointSyncJob.STATUS_SUCCESS, downloaded=1, started_day=None):
+        start = timezone.make_aware(datetime.combine(started_day or day + timedelta(days=1), datetime.min.time()))
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=status, started_at=start, finished_at=start + timedelta(minutes=1))
+        PointExtractionLog.objects.create(sync_job=job, level=PointExtractionLog.LEVEL_INFO,
+            message=f'Backfill oficial {branch.external_id} {day.isoformat()}', context={
+                'branch_external_id': branch.external_id, 'sale_date': day.isoformat(),
+                'rows_imported': 0, 'reports_downloaded': downloaded,
+            })
+        return job
+
+    def test_official_report_without_indicator_can_accredit_sales_but_not_tickets(self):
+        day = date(2026, 9, 6)
+        self.close_day(day, self.branches[:1])
+        self.official_report(day, self.branches[1])
+        self.assertEqual(self.cutoff(), day)
+        snapshot = get_dashboard_sales_dataset(today=self.today, months=1)['daily_sales_snapshot']
+        self.assertFalse(snapshot['tickets_available'])
+        self.assertIsNone(snapshot['avg_ticket'])
+        self.assertIsNone(snapshot['total_tickets'])
+        self.assertIn(self.branches[1].erp_branch.nombre, snapshot['detail'])
+        self.assertFalse(PointDailyBranchIndicator.objects.filter(branch=self.branches[1], indicator_date=day).exists())
+
+    def test_incomplete_indicator_amount_cannot_replace_official_sales(self):
+        from reportes.models import FactVentaDiaria
+        day = date(2026, 9, 6)
+        self.close_day(day, self.branches[:1])
+        self.official_report(day, self.branches[1])
+        for branch in self.branches:
+            FactVentaDiaria.objects.create(fecha=day, sucursal=branch.erp_branch,
+                producto_clave="TEST", cantidad=1, venta_total=Decimal("100"),
+                source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE)
+        snapshot = get_dashboard_sales_dataset(today=self.today, months=1)['daily_sales_snapshot']
+        self.assertEqual(snapshot['total_amount'], Decimal('200'))
+        self.assertIsNone(snapshot['avg_ticket'])
+
+    def test_official_evidence_alone_can_close_a_reported_day(self):
+        day = date(2026, 9, 6)
+        for branch in self.branches:
+            self.official_report(day, branch)
+        self.assertEqual(self.cutoff(), day)
+
+    def test_failed_undownloaded_or_intraday_official_report_cannot_close_day(self):
+        day = date(2026, 9, 6)
+        self.close_day(date(2026, 9, 5))
+        self.close_day(day, self.branches[:1])
+        for kwargs in ({'status': PointSyncJob.STATUS_FAILED}, {'downloaded': 0}, {'started_day': day}):
+            with self.subTest(kwargs=kwargs):
+                job = self.official_report(day, self.branches[1], **kwargs)
+                self.assertEqual(self.cutoff(), date(2026, 9, 5))
+                job.delete()
+
     def test_intraday_capture_is_not_a_closure_next_morning(self):
         self.close_day(date(2026, 9, 5))
         self.close_day(date(2026, 9, 6), started_day=date(2026, 9, 6))

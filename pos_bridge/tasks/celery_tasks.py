@@ -34,6 +34,7 @@ from pos_bridge.tasks.run_weekly_cost_snapshot import run_weekly_cost_snapshot
 from reportes.analytics_service import refresh_dashboard_full_materialized_view
 from reportes.dashboard_full_dataset import get_materialized_dashboard_full_payload
 from reportes.models import AnalyticAuditLog, FactVentaDiaria
+from reportes.sales_dashboard_freshness import SalesPublicationPending
 
 
 @shared_task(name="pos_bridge.canonical_insumo_inventory_sync", acks_late=True)
@@ -108,6 +109,7 @@ def _read_materialized_visible_cut(*, months_window: int = 6) -> dict[str, objec
     return {
         "date": _coerce_snapshot_date(snapshot.get("date")),
         "total_amount": _decimal_total(snapshot.get("total_amount")),
+        "tickets_complete": snapshot.get("tickets_complete", True),
     }
 
 
@@ -124,7 +126,7 @@ def _validate_visible_cut_refresh(*, reference_date: date) -> dict[str, object]:
         refresh_dashboard_full_materialized_view(months_windows=(6,), concurrently=False)
         snapshot = _read_materialized_visible_cut()
 
-    if indicator_total > 0 and not _totals_match(fact_total, indicator_total):
+    if snapshot.get("tickets_complete", True) and indicator_total > 0 and not _totals_match(fact_total, indicator_total):
         raise RuntimeError(
             "Visible cut mismatch after sync: "
             f"fact={fact_total} indicator={indicator_total} date={reference_date.isoformat()}"
@@ -169,13 +171,20 @@ def _record_visible_cut_audit(
 
 @shared_task(name="pos_bridge.daily_sales_sync", bind=True, max_retries=2, default_retry_delay=300, acks_late=True)
 def task_daily_sales_sync(self, *, days: int = 3, lag_days: int = 1, branch_filter: str | None = None, triggered_by_id: int | None = None):
-    return _run_with_optional_user(
-        run_daily_sales_sync,
-        triggered_by_id=triggered_by_id,
-        branch_filter=branch_filter,
-        lookback_days=days,
-        lag_days=lag_days,
-    )
+    try:
+        result = _run_with_optional_user(
+            run_daily_sales_sync,
+            triggered_by_id=triggered_by_id,
+            branch_filter=branch_filter,
+            lookback_days=days,
+            lag_days=lag_days,
+        )
+        if result.get("status") == PointSyncJob.STATUS_FAILED:
+            raise SalesPublicationPending(result.get("error") or "Falló la extracción de ventas Point.")
+        return result
+    except SalesPublicationPending as exc:
+        raise self.retry(exc=exc)
+
 
 
 @shared_task(
@@ -915,6 +924,8 @@ def task_visible_cut_refresh_cycle(
             reference_date.isoformat(),
             payload={**payload, "error": str(exc)},
         )
+        if isinstance(exc, SalesPublicationPending):
+            raise self.retry(exc=exc)
         raise
     finally:
         cache.delete(BI_FORCE_REFRESH_LOCK_KEY)

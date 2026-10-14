@@ -11,7 +11,7 @@ from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointExtractionLog, PointSyncJob
 from ventas.services.sales_read_service import get_daily_sales_bulk
 
-CLOSED_SALES_VERSION = 'closed-sales-v5-branch-opening'
+CLOSED_SALES_VERSION = 'closed-sales-v6-official-cut-tickets'
 MONTHS = ('', 'ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
 
 
@@ -32,7 +32,7 @@ def closed_indicator_evidence():
     ).exclude(branch__erp_branch_id__isnull=True)
 
 
-def official_backfill_evidence(days: list[date], expected_branch_ids: set[int]) -> set[tuple[date, int]]:
+def official_backfill_evidence(days: list[date], expected_branch_ids: set[int], *, closed_only: bool = False) -> set[tuple[date, int]]:
     """Return branch-days proven by a successfully downloaded official report."""
     if not days or not expected_branch_ids:
         return set()
@@ -44,21 +44,25 @@ def official_backfill_evidence(days: list[date], expected_branch_ids: set[int]) 
     }
     if not branch_ids_by_external:
         return set()
-    contexts = PointExtractionLog.objects.filter(
+    logs = PointExtractionLog.objects.filter(
         sync_job__job_type=PointSyncJob.JOB_TYPE_SALES,
         level=PointExtractionLog.LEVEL_INFO,
         message__startswith="Backfill oficial ",
         context__sale_date__in=[day.isoformat() for day in days],
         context__has_key="rows_imported",
-    ).values_list("context", flat=True)
+    )
+    if closed_only:
+        logs = logs.filter(sync_job__status=PointSyncJob.STATUS_SUCCESS, sync_job__finished_at__isnull=False)
     evidence: set[tuple[date, int]] = set()
-    for context in contexts:
+    for context, started_at in logs.values_list("context", "sync_job__started_at"):
         payload = context or {}
         branch_id = branch_ids_by_external.get(str(payload.get("branch_external_id") or "").strip())
         try:
             sale_date = date.fromisoformat(str(payload.get("sale_date") or ""))
             reports_downloaded = int(payload.get("reports_downloaded") or 0)
         except (TypeError, ValueError):
+            continue
+        if closed_only and (started_at is None or timezone.localdate(started_at) <= sale_date):
             continue
         if branch_id is not None and reports_downloaded > 0:
             evidence.add((sale_date, branch_id))
@@ -70,12 +74,40 @@ def latest_closed_sales_date(*, today: date | None = None) -> date | None:
     evidence = (closed_indicator_evidence().filter(indicator_date__lt=today)
       .order_by('-indicator_date')
       .values_list('indicator_date', 'branch__erp_branch_id'))
-    for day, rows in groupby(evidence.iterator(), key=lambda row: row[0]):
+    indicator_days = {}
+    complete_day = None
+    for day, rows in groupby(evidence, key=lambda row: row[0]):
         present = {branch_id for _, branch_id in rows}
+        indicator_days[day] = present
         expected = {row['branch_id'] for row in required_sales_branches(day)}
         if expected and expected <= present:
+            complete_day = day
+            break
+
+    # An official report certifies sales coverage independently of ticket data.
+    logs = PointExtractionLog.objects.filter(
+        sync_job__job_type=PointSyncJob.JOB_TYPE_SALES,
+        sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        sync_job__finished_at__isnull=False,
+        level=PointExtractionLog.LEVEL_INFO,
+        message__startswith="Backfill oficial ",
+        context__sale_date__lt=today.isoformat(),
+    )
+    if complete_day:
+        logs = logs.filter(context__sale_date__gt=complete_day.isoformat())
+    days = []
+    for value in logs.order_by().values_list('context__sale_date', flat=True).distinct():
+        try:
+            days.append(date.fromisoformat(str(value)))
+        except ValueError:
+            continue
+    required = {day: {row['branch_id'] for row in required_sales_branches(day)} for day in days}
+    official = official_backfill_evidence(days, set().union(*required.values()), closed_only=True)
+    for day in sorted(days, reverse=True):
+        present = indicator_days.get(day, set()) | {branch_id for report_day, branch_id in official if report_day == day}
+        if required[day] and required[day] <= present:
             return day
-    return None
+    return complete_day
 
 
 def closed_month_comparison(*, cutoff: date, previous_totals: dict | None = None) -> dict:
