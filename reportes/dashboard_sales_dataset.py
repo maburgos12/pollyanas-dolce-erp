@@ -16,6 +16,7 @@ from ventas.services.sales_canonical_source import (
     point_sales_month_total,
 )
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
+from reportes.models import CorteOficialDiario
 
 
 MONTH_NAMES = {
@@ -451,7 +452,8 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
         .values_list("branch__erp_branch_id", flat=True)) if raw["latest_date"] else set()
     missing_tickets = [row["branch_name"] for row in required if row["branch_id"] not in ticket_branch_ids]
     tickets_complete = not missing_tickets or raw["cut_tickets"] > 0
-    total_amount = raw["cut_amount"] if raw["cut_amount"] > 0 and tickets_complete else raw["raw_day_amount"]
+    official_cut = not tickets_complete and CorteOficialDiario.objects.filter(corte_date=raw["latest_date"]).exists()
+    total_amount = raw["cut_amount"] if raw["cut_amount"] > 0 and (tickets_complete or official_cut) else raw["raw_day_amount"]
     total_tickets = raw["cut_tickets"] if raw["cut_tickets"] > 0 else raw["raw_day_tickets"]
     comparison_label = "Base inicial"
     comparison_tone = "warning"

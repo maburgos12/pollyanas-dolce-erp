@@ -81,6 +81,10 @@ class ClosedSalesTests(TestCase):
         snapshot = get_dashboard_sales_dataset(today=self.today, months=1)['daily_sales_snapshot']
         self.assertEqual(snapshot['total_amount'], Decimal('200'))
         self.assertIsNone(snapshot['avg_ticket'])
+        CorteOficialDiario.objects.create(corte_date=day, total_amount=250)
+        snapshot = get_dashboard_sales_dataset(today=self.today, months=1)['daily_sales_snapshot']
+        self.assertEqual(snapshot['total_amount'], Decimal('250'))
+        self.assertIsNone(snapshot['total_tickets'])
 
     def test_official_evidence_alone_can_close_a_reported_day(self):
         day = date(2026, 9, 6)
