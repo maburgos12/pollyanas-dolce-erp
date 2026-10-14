@@ -63,6 +63,17 @@
         ${p.truncated ? '<p>Hay más alertas; precisa la consulta.</p>' : ''}
         <p class="agent-source">Última captura de la fuente: ${date(f.source_latest_capture)} · Antigüedad al consultar: ${f.source_age_seconds == null ? 'No disponible' : `${escape(Math.floor(f.source_age_seconds / 3600))} horas`}. La fecha de consulta no es la fecha de captura.</p>`;
     }
+    if (key === 'erp.search_recipes') return `${table('Recetas encontradas',p.items,[['Receta',r=>escape(r.nombre)],['Código',r=>available(r.codigo_point || null)],['Rendimiento',r=>`${available(r.rendimiento_cantidad)} ${escape(r.rendimiento_unidad || '')}`]])}${p.selection_required ? '<p>Hay varias opciones; precisa la receta o presentación.</p>' : ''}${p.truncated ? '<p>Hay más coincidencias fuera de esta consulta.</p>' : ''}`;
+    if (key === 'erp.get_recipe_context') {
+      if (!p.recipe) return '<p>No se encontró la receta solicitada.</p>';
+      const labels = {AUTO_APPROVED:'Automático',NEEDS_REVIEW:'Pendiente de revisión',REJECTED:'Sin aprobar'};
+      return `<p><strong>${escape(p.recipe.nombre)}</strong> · Rendimiento: ${available(p.recipe.rendimiento_cantidad)} ${escape(p.recipe.rendimiento_unidad || '')}</p>
+        ${table('Ingredientes registrados',p.items,[['Ingrediente',r=>escape(r.insumo || r.texto_original)],['Cantidad',r=>available(r.cantidad)],['Unidad',r=>available(r.unidad || r.unidad_original || null)],['Vinculación',r=>escape(labels[r.estado_vinculacion] || 'No disponible')],['Componente',r=>r.tipo_linea === 'SUBSECCION' ? 'Desglose; no sumar otra vez' : 'Principal']])}
+        ${p.truncated ? '<p>La lista de ingredientes está acotada.</p>' : ''}
+        ${p.saved_cost_available ? table('Versiones guardadas de costo',p.cost_versions,[['Fecha',r=>date(r.creado_en)],['Materia prima',r=>money(r.costo_mp)],['Mano de obra',r=>money(r.costo_mo)],['Indirectos',r=>money(r.costo_indirecto)],['Total de la versión',r=>money(r.costo_total)],['Por unidad de rendimiento',r=>`${money(r.costo_por_unidad_rendimiento)} / ${escape(r.rendimiento_unidad || 'unidad no indicada')}`]]) : '<p>No hay versiones de costo guardadas; no equivale a costo cero.</p>'}
+        ${p.costs_truncated ? '<p>Hay más versiones de costo fuera de esta consulta.</p>' : ''}
+        <p class="agent-source">${(p.limitations || []).map(escape).join(' ')}</p>`;
+    }
     if (key === 'erp.get_current_input_cost') {
       if (result.status === 'ambiguous') return `<p>Hay varias opciones o la búsqueda está acotada. Indica el nombre y la unidad que necesitas.</p>${table('Insumos encontrados',p.candidates,[['Insumo',r=>escape(r.insumo)],['Unidad base',r=>escape(r.unidad_base || 'No disponible')]])}${p.truncated ? '<p>Hay más opciones fuera de esta búsqueda; precisa el nombre.</p>' : ''}`;
       if (!p.insumo) return '<p>No se encontró un insumo con esta búsqueda.</p>';
