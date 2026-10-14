@@ -55,7 +55,7 @@ from core.views import (
 )
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo
 from maestros.models import CostoInsumo, Insumo, PointPendingMatch, UnidadMedida
-from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
+from pos_bridge.models import PointSyncJob, PointBranch, PointDailyBranchIndicator, PointDailySale, PointProduct, PointSalesDailyCategoryFact, PointSalesDailyProductFact
 from recetas.models import LineaReceta, PlanProduccion, PlanProduccionItem, PoliticaStockSucursalProducto, Receta, VentaHistorica
 from reportes.models import CentroCosto
 from rrhh.models import Empleado, PermisoSalida, Prestamo
@@ -1639,7 +1639,10 @@ class DashboardHomologacionContextTests(TestCase):
             total_impuestos=Decimal("0"),
             total_venta_neta=Decimal("600"),
         )
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS, started_at=timezone.now(), finished_at=timezone.now())
         PointDailyBranchIndicator.objects.create(
+            sync_job=closed_job,
             branch=point_branch,
             indicator_date=latest_day,
             total_amount=Decimal("610"),

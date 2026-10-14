@@ -1273,7 +1273,10 @@ class ReportesBITests(TestCase):
             total_amount=Decimal("1000"),
             source_endpoint="/Report/PrintReportes?idreporte=3",
         )
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS, started_at=timezone.now(), finished_at=timezone.now())
         PointDailyBranchIndicator.objects.create(
+            sync_job=closed_job,
             branch=point_branch,
             indicator_date=fecha_actual,
             total_amount=Decimal("1200"),
@@ -1281,6 +1284,7 @@ class ReportesBITests(TestCase):
             total_avg_ticket=Decimal("240"),
         )
         PointDailyBranchIndicator.objects.create(
+            sync_job=closed_job,
             branch=point_branch,
             indicator_date=fecha_comparable,
             total_amount=Decimal("1000"),
@@ -1612,7 +1616,10 @@ class ReportesBITests(TestCase):
             total_cantidad=Decimal("6"),
             total_venta=Decimal("600"),
         )
+        closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
+            status=PointSyncJob.STATUS_SUCCESS, started_at=timezone.now(), finished_at=timezone.now())
         PointDailyBranchIndicator.objects.create(
+            sync_job=closed_job,
             branch=point_branch,
             indicator_date=latest_day,
             total_amount=Decimal("610"),

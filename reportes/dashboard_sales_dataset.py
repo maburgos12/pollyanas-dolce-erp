@@ -9,13 +9,14 @@ from django.db import connection
 from django.utils import timezone
 
 from core.cache_versions import get_or_set_versioned_cache
-from reportes.closed_sales import CLOSED_SALES_VERSION, latest_closed_sales_date
+from reportes.closed_sales import CLOSED_SALES_VERSION, closed_indicator_evidence, latest_closed_sales_date, required_sales_branches
 from ventas.services.sales_canonical_source import (
     SALES_CANONICAL_CACHE_GENERATION,
     canonical_point_previous_dates,
     point_sales_month_total,
 )
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
+from reportes.models import CorteOficialDiario
 
 
 MONTH_NAMES = {
@@ -446,7 +447,13 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
     current_month_row = next((row for row in monthly_rows if row["periodo"] == current_month_key), None)
     current_month_amount = current_month_row["value"] if current_month_row else raw["month_amount"]
 
-    total_amount = raw["cut_amount"] if raw["cut_amount"] > 0 else raw["raw_day_amount"]
+    required = required_sales_branches(raw["latest_date"]) if raw["latest_date"] else []
+    ticket_branch_ids = set(closed_indicator_evidence().filter(indicator_date=raw["latest_date"])
+        .values_list("branch__erp_branch_id", flat=True)) if raw["latest_date"] else set()
+    missing_tickets = [row["branch_name"] for row in required if row["branch_id"] not in ticket_branch_ids]
+    tickets_complete = not missing_tickets or raw["cut_tickets"] > 0
+    official_cut = not tickets_complete and CorteOficialDiario.objects.filter(corte_date=raw["latest_date"]).exists()
+    total_amount = raw["cut_amount"] if raw["cut_amount"] > 0 and (tickets_complete or official_cut) else raw["raw_day_amount"]
     total_tickets = raw["cut_tickets"] if raw["cut_tickets"] > 0 else raw["raw_day_tickets"]
     comparison_label = "Base inicial"
     comparison_tone = "warning"
@@ -490,17 +497,18 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
         for row in raw["top_products"]
     ]
 
-    tickets_available = total_tickets > 0
-    month_tickets_available = raw["month_tickets"] > 0
+    tickets_available = total_tickets > 0 and tickets_complete
+    month_tickets_available = raw["month_tickets"] > 0 and tickets_complete
     return {
         "latest_date": raw["latest_date"],
         "prev_date": raw["prev_date"],
         "present_branch_ids": raw["present_branch_ids"],
         "monthly_sales_rows": monthly_rows,
         "daily_sales_snapshot": {
-            "status": "Cierre completo" if raw["latest_date"] else "Cierre pendiente",
-            "tone": "success" if raw["latest_date"] else "warning",
-            "detail": "Resumen del último cierre de ventas. Fuente canónica Point bridge.",
+            "status": ("Cierre completo" if tickets_complete else "Ventas reportadas · tickets pendientes") if raw["latest_date"] else "Cierre pendiente",
+            "tone": "success" if raw["latest_date"] and tickets_complete else "warning",
+            "detail": ("Resumen del último cierre de ventas. Fuente canónica Point bridge." if tickets_complete else
+                "Ventas respaldadas por reportes oficiales Point. Tickets pendientes de: " + ", ".join(missing_tickets) + "."),
             "date": raw["latest_date"],
             "date_label": raw["latest_date"].isoformat() if raw["latest_date"] else "",
             "month_label": f"{raw['latest_date'].year}-{raw['latest_date'].month:02d}" if raw["latest_date"] else "",
@@ -508,9 +516,11 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
             "total_units": raw["day_units"],
             "total_amount": total_amount if raw["latest_date"] else None,
             "raw_total_amount": raw["raw_day_amount"],
-            "total_tickets": total_tickets,
+            "total_tickets": total_tickets if tickets_complete else None,
             "raw_total_tickets": raw["raw_day_tickets"],
             "tickets_available": tickets_available,
+            "tickets_complete": tickets_complete,
+            "missing_ticket_branches": missing_tickets,
             "branch_count": raw["branch_count"],
             "recipe_count": raw["recipe_count"],
             "avg_ticket": (total_amount / Decimal(total_tickets)).quantize(Decimal("0.01")) if tickets_available else None,

@@ -167,7 +167,7 @@ def build_dashboard_full_payload(*, months_window: int) -> dict[str, object]:
         },
         "kpi_summary": {
             "sales_amount": daily_sales_snapshot.get("total_amount") or "0",
-            "sales_tickets": daily_sales_snapshot.get("total_tickets") or 0,
+            "sales_tickets": daily_sales_snapshot.get("total_tickets"),
             "forecast_amount": (executive_panels.get("forecast_panel") or {}).get("forecast_amount") or "0",
             "yoy_delta_pct": ((executive_panels.get("yoy_panel") or {}).get("hero_row") or {}).get("amount_delta_pct"),
             "criticos_count": int(inventory_metrics.get("criticos_count") or 0),

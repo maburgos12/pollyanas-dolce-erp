@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -411,7 +411,7 @@ class VentasRefreshUiTests(TestCase):
         self.assertFalse(status["is_cut_delayed"])
 
 
-class SalesDashboardFreshnessTests(SimpleTestCase):
+class SalesDashboardFreshnessTests(TestCase):
     def test_ensure_sales_dashboard_freshness_retries_when_fact_layer_lags_point_sales(self):
         refresh_summary = SimpleNamespace(
             sales_rows=100,
@@ -446,6 +446,62 @@ class SalesDashboardFreshnessTests(SimpleTestCase):
         self.assertEqual(result.lag_days_after, 0)
         refresh_mock.assert_called_once_with(reference_date=date(2026, 4, 10), lookback_days=4)
         log_mock.assert_called_once()
+
+    def test_visible_gap_recovers_only_the_missing_canonical_branch(self):
+        with (
+            patch("reportes.sales_dashboard_freshness.PointDailySale.objects") as point_manager,
+            patch("reportes.sales_dashboard_freshness.FactVentaDiaria.objects") as fact_manager,
+            patch("reportes.sales_dashboard_freshness._visible_cut_for", side_effect=[date(2026, 4, 9), date(2026, 4, 10)]),
+            patch("reportes.sales_dashboard_freshness.required_sales_branches", return_value=[{"branch_id": 8}]),
+            patch("reportes.sales_dashboard_freshness.official_backfill_evidence", return_value=set()),
+            patch("reportes.sales_dashboard_freshness.PointSalesBranchIndicatorService.canonical_branches", return_value=[
+                SimpleNamespace(erp_branch_id=8, external_id="6"), SimpleNamespace(erp_branch_id=1, external_id="1")]),
+            patch("pos_bridge.tasks.run_sales_history_sync.run_sales_history_sync") as extract,
+            patch("reportes.sales_dashboard_freshness.refresh_incremental"),
+            patch("reportes.sales_dashboard_freshness.log_event"),
+        ):
+            point_manager.filter.return_value.order_by.return_value.values_list.return_value.first.return_value = date(2026, 4, 10)
+            fact_manager.filter.return_value.order_by.return_value.values_list.return_value.first.return_value = date(2026, 4, 10)
+            result = ensure_sales_dashboard_freshness(reference_date=date(2026, 4, 10), lookback_days=2,
+                triggered_by=None, trigger="point_daily_sales_sync")
+        extract.assert_called_once_with(start_date=date(2026, 4, 10), end_date=date(2026, 4, 10),
+            branch_filter="6", triggered_by=None)
+        self.assertTrue(result.catchup_succeeded)
+
+    def test_open_day_facts_do_not_prove_the_closed_day_was_published(self):
+        today = timezone.localdate()
+        closed = today - timedelta(days=1)
+        FactVentaDiaria.objects.create(fecha=today, producto_clave="OPEN", cantidad=1,
+            venta_total=100, source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE)
+        with (
+            patch("reportes.sales_dashboard_freshness.PointDailySale.objects") as point,
+            patch("reportes.sales_dashboard_freshness._visible_cut_for", return_value=closed),
+            patch("reportes.sales_dashboard_freshness.refresh_incremental") as refresh,
+            patch("reportes.sales_dashboard_freshness.log_event"),
+        ):
+            point.filter.return_value.order_by.return_value.values_list.return_value.first.return_value = closed
+            result = ensure_sales_dashboard_freshness(reference_date=today, lookback_days=2,
+                triggered_by=None, trigger="point_daily_sales_sync")
+        refresh.assert_called_once_with(reference_date=closed, lookback_days=2)
+        self.assertFalse(result.catchup_succeeded)
+
+    def test_fresh_facts_do_not_hide_a_stale_visible_cut(self):
+        with (
+            patch("reportes.sales_dashboard_freshness.PointDailySale.objects") as point_manager,
+            patch("reportes.sales_dashboard_freshness.FactVentaDiaria.objects") as fact_manager,
+            patch("reportes.sales_dashboard_freshness._visible_cut_for", return_value=date(2026, 4, 9)),
+            patch("reportes.sales_dashboard_freshness.refresh_incremental") as refresh,
+            patch("reportes.sales_dashboard_freshness.log_event") as log,
+        ):
+            point_manager.filter.return_value.order_by.return_value.values_list.return_value.first.return_value = date(2026, 4, 10)
+            fact_manager.filter.return_value.order_by.return_value.values_list.return_value.first.return_value = date(2026, 4, 10)
+            result = ensure_sales_dashboard_freshness(reference_date=date(2026, 4, 10), lookback_days=2,
+                triggered_by=None, trigger="point_daily_sales_sync")
+        self.assertFalse(result.catchup_succeeded)
+        self.assertTrue(result.catchup_attempted)
+        self.assertEqual(result.lag_days_after, 1)
+        self.assertEqual(log.call_args.args[1], "INTEGRATIONS_SALES_DASHBOARD_CATCHUP_FAILED")
+        refresh.assert_called_once()
 
     def test_ensure_sales_dashboard_freshness_skips_retry_when_visible_cut_is_current(self):
         with (

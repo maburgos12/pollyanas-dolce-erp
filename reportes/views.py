@@ -1088,10 +1088,10 @@ def _bi_daily_sales_snapshot() -> dict[str, object]:
     missing_branch_names = [str(branch.get("branch_name") or branch.get("branch_code") or "Sucursal") for branch in missing_required_branches]
     official_cut = _official_daily_cut_for_date(latest_date)
 
-    source_label = "Point directo"
-    status = "Corte cargado"
-    tone = "success"
-    detail = "Resumen del último corte disponible. Fuente canónica Point bridge."
+    source_label = snapshot.get("source_label") or "Point directo"
+    status = snapshot.get("status") or "Corte cargado"
+    tone = snapshot.get("tone") or "success"
+    detail = snapshot.get("detail") or "Resumen del último corte disponible. Fuente canónica Point bridge."
     if official_cut:
         source_label = official_cut.source_label or "Corte oficial diario"
         status = "Corte oficial conciliado"
