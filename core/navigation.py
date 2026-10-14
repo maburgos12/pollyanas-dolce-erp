@@ -119,6 +119,7 @@ NAV_GROUPS = [
             ("direccion", "dashboard", "Dashboard", "/dashboard/", ["/dashboard/"]),
             ("direccion", "operacion_dg", "Operación DG", "/recetas/dg-operacion/", ["/recetas/dg-operacion/"]),
             ("direccion", "bi", "BI ejecutivo", "/reportes/bi/", ["/reportes/bi/"]),
+            ("reportes", "financiero", "Mano de obra mensual", "/reportes/mano-obra-mensual/", ["/reportes/mano-obra-mensual/"]),
             ("direccion", "cierre_diario", "Cierre diario", "/reportes/cierre-operativo/", ["/reportes/cierre-operativo/"]),
             ("direccion", "producido_vendido", "Producido vs Vendido", "/reportes/produccion/", ["/reportes/produccion/"]),
             ("direccion", "proyectos_inversion", "Proyectos inversión", "/inversiones/", ["/inversiones/"]),
@@ -349,6 +350,10 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
+            if url == '/reportes/mano-obra-mensual/':
+                from reportes.services_mano_obra_mensual import puede_revisar
+                if not puede_revisar(user):
+                    continue
             if module == "rrhh" and submodule == "clima":
                 from core.access import can_manage_rrhh
 
