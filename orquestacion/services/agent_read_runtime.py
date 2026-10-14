@@ -181,7 +181,7 @@ def _check_budget(started, context):
     return remaining
 
 
-def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False, require_incidents=False, receipt_ids=(), report_ids=(), purchase_fingerprint=None, business_fingerprint=None):
+def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False, require_incidents=False, receipt_ids=(), report_ids=(), purchase_fingerprint=None, business_fingerprint=None, business_catalog_keys=None):
     if len(materialized_ids) > MAX_MATERIALIZED_IDS:
         raise ReadStopped("reference_limit")
     if require_workflows and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
@@ -189,7 +189,7 @@ def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require
     actor, catalog, current = _fresh_access(user, conversation_id)
     if business_fingerprint is not None:
         from api.ai_gateway_business_reads import access_fingerprint as business_access, record_denied
-        if business_access(actor) != business_fingerprint:
+        if business_access(actor, catalog_keys=business_catalog_keys) != business_fingerprint:
             record_denied(user=actor)
             raise ReadStopped('business_access_changed')
     if purchase_fingerprint is not None:
@@ -227,15 +227,21 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
         proof = message.metadata_json.get(NAMESPACE)
         if not isinstance(proof, dict) or proof.get("runtime") != NAMESPACE or proof.get("mode") != MODE:
             return False
-        from api.ai_gateway_business_reads import SERIALIZERS, DISCOVERY_KEY
+        from api.ai_gateway_business_reads import SERIALIZERS, DISCOVERY_KEY, LEGACY_CATALOG_KEYS, allowed_keys
+        historical_catalog = proof.get("business_catalog_keys")
+        if historical_catalog is None:
+            historical_catalog = [key for key in allowed_keys(message.conversation.owner) if key in LEGACY_CATALOG_KEYS]
+        if not isinstance(historical_catalog, list) or any(not isinstance(key, str) for key in historical_catalog):
+            return False
         used_business = set(message.tool_calls.filter(tool_key__in=[*SERIALIZERS, DISCOVERY_KEY]).values_list('tool_key', flat=True))
         if used_business or 'knowledge_version' in proof:
             business_keys = proof.get('business_keys')
             if (not isinstance(proof.get('business_fingerprint'), str) or not re.fullmatch(r'[0-9a-f]{64}', proof['business_fingerprint'])
                     or not isinstance(proof.get('knowledge_version'), str) or not re.fullmatch(r'[0-9a-f]{64}', proof['knowledge_version'])
-                    or not isinstance(business_keys, list) or len(business_keys)>6
+                    or not isinstance(business_keys, list) or len(business_keys)>len(SERIALIZERS)+1
                     or any(not isinstance(key, str) or key not in {*SERIALIZERS,DISCOVERY_KEY} for key in business_keys)
-                    or len(set(business_keys))!=len(business_keys) or not used_business<=set(business_keys)):
+                    or len(set(business_keys))!=len(business_keys) or not used_business<=set(business_keys)
+                    or not used_business <= {*historical_catalog, DISCOVERY_KEY}):
                 return False
         uses_workflows = message.tool_calls.filter(tool_key__startswith="workflow.").exists()
         if uses_workflows and (proof.get("workflows") is not True or getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True):
@@ -253,7 +259,7 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
                 any(type(pk) is not int or pk < 1 or pk > 9223372036854775807 for pk in ids)):
             return False
         _revalidate(message.conversation.owner, message.conversation_id, fingerprint, set(ids),
-                    require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []), report_ids=proof.get('report_ids', []), purchase_fingerprint=proof.get('purchase_fingerprint'), business_fingerprint=proof.get('business_fingerprint'))
+                    require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []), report_ids=proof.get('report_ids', []), purchase_fingerprint=proof.get('purchase_fingerprint'), business_fingerprint=proof.get('business_fingerprint'), business_catalog_keys=historical_catalog)
         return True
     except Exception:
         return False
@@ -551,6 +557,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
         if system_knowledge:
             business_fingerprint = business_access(actor)
             metadata['business_fingerprint'] = business_fingerprint
+            metadata['business_catalog_keys'] = allowed_keys(actor)
             metadata['knowledge_version'] = system_knowledge['version']
             metadata['business_keys'] = []
         from orquestacion.services.agent_purchases import enabled as purchase_enabled, access_fingerprint as purchase_access

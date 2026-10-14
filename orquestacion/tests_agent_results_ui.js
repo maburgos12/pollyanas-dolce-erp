@@ -258,3 +258,11 @@ assert(view.incident({...followup,missing_fields:['fotografías']}).includes(' d
 assert(!view.incident({...followup,status:'REVIEW_REQUIRED'}).includes('data-incident-id'));
 assert(!view.incident({...followup,status:'EXECUTED'}).includes('data-followup-upload'));
 assert(view.incident({...followup,status:'EXECUTED'}).includes('#114'));
+const recipeView = (key, result) => view.tool({tool_key:key,status:'complete',result:{result}});
+const recipeHtml = recipeView('erp.get_recipe_context',{payload:{recipe:{nombre:hostile,rendimiento_cantidad:null},items:[{texto_original:hostile,cantidad:null,tipo_linea:'SUBSECCION',estado_vinculacion:'REJECTED'}],saved_cost_available:false,limitations:[hostile],truncated:true}});
+assert(!recipeHtml.includes('<img src=x'));
+assert(recipeHtml.includes('No disponible'));
+assert(recipeHtml.includes('no equivale a costo cero'));
+assert(recipeHtml.includes('Desglose; no sumar otra vez'));
+assert(recipeHtml.includes('Sin aprobar'));
+assert(recipeView('erp.search_recipes',{payload:{items:[],selection_required:true,truncated:true}}).includes('precisa la receta'));

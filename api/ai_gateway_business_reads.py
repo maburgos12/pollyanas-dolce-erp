@@ -13,6 +13,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
 from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, can_read_assets, fresh_asset_user, json_dto
+from api import ai_gateway_recipe_reads as recipe_reads
 from core.audit import log_event
 from core.models import Sucursal
 from compras.models import SolicitudCompra, OrdenCompra
@@ -68,6 +69,9 @@ SERIALIZERS = {
     'erp.get_purchase_requests': RequestsArguments,
     'erp.get_purchase_orders': OrdersArguments,
 }
+# Historic proofs predate recipe discovery; keep this original catalog stable.
+LEGACY_CATALOG_KEYS = tuple(SERIALIZERS)
+SERIALIZERS.update(recipe_reads.SERIALIZERS)
 DISCOVERY_KEY = 'knowledge.discover'
 
 
@@ -96,9 +100,13 @@ RELATIONSHIPS = {
 }
 
 
+UNITS.update(recipe_reads.UNITS)
+RELATIONSHIPS.update(recipe_reads.RELATIONSHIPS)
+
+
 def _registry():
     from api.ai_gateway_services import TOOLS
-    return TOOLS
+    return {**TOOLS, **recipe_reads.definitions()}
 
 
 def allowed_keys(actor):
@@ -122,13 +130,21 @@ def _branches(actor):
     return Sucursal.objects.filter(pk__in=ids) if ids is not None else Sucursal.objects.all()
 
 
-def access_fingerprint(actor):
+def access_fingerprint(actor, *, catalog_keys=None):
     actor = fresh_asset_user(actor)
     if not actor:
         raise PermissionDenied('Actor no disponible.')
+    permitted = allowed_keys(actor)
+    if catalog_keys is not None:
+        if (not isinstance(catalog_keys, list) or len(catalog_keys) > len(SERIALIZERS)
+                or any(not isinstance(key, str) for key in catalog_keys)
+                or len(set(catalog_keys)) != len(catalog_keys)
+                or not set(catalog_keys) <= set(permitted)):
+            raise PermissionDenied('El catálogo histórico ya no está autorizado.')
+        permitted = [key for key in permitted if key in catalog_keys]
     profile = getattr(actor, 'userprofile', None)
     return hashlib.sha256(json.dumps({
-        'allowed_keys':allowed_keys(actor), 'branch_ids':_scope_ids(actor),
+        'allowed_keys':permitted, 'branch_ids':_scope_ids(actor),
         'capture':bool(profile and profile.modo_captura_sucursal),
         'permissions':sorted(actor.get_all_permissions()),
         'branches':list(_branches(actor).order_by('pk').values_list('pk','codigo','nombre')),
@@ -151,7 +167,7 @@ def knowledge(actor):
             'required_fields':tool['argument_schema'].get('required',[]),
             'unit_of_analysis':UNITS[key], 'relationships':RELATIONSHIPS[key],
             'freshness':'Lectura nueva al consultar; fecha de captura/costo separada de la consulta.',
-            'source':'Servicio canónico de ventas' if key.endswith('sales_summary') else 'Snapshots Point' if key.endswith('low_stock') else 'Catálogo y costos de compra' if key.endswith('input_cost') else 'Compras clásicas; no incluye compras departamentales ni especiales.',
+            'source':recipe_reads.SOURCE if key in recipe_reads.SERIALIZERS else 'Servicio canónico de ventas' if key.endswith('sales_summary') else 'Snapshots Point' if key.endswith('low_stock') else 'Catálogo y costos de compra' if key.endswith('input_cost') else 'Compras clásicas; no incluye compras departamentales ni especiales.',
             'risk':'Sólo lectura; datos parciales y límites de fuente se conservan.'})
     # Source contents version the projection independently of a deploy machine or Git HEAD.
     files = {Path(__file__), Path(inspect.getsourcefile(canonical_insumo))}
@@ -280,6 +296,7 @@ def invoke(*, user, tool_key, arguments):
                     data['freshness']={'coverage_days':data.get('coverage_days'),'coverage_accepted':data.get('coverage_accepted'),'source_detail':data.get('source_detail'),'coverage_reason':data.get('coverage_reason'),'reason':data.get('reason')}
                     data['truncated']=False
                 elif key=='erp.get_current_input_cost': result=_cost(safe)
+                elif key in recipe_reads.SERIALIZERS: result=tool.handler(actor,safe)
                 else:
                     bounded = {**safe,'limit':safe['limit']+1}
                     result = gateway._handle_inventory_low_stock(actor,bounded,branch_ids=ids,exact_scope=True) if key=='erp.get_inventory_low_stock' else tool.handler(actor,bounded)
