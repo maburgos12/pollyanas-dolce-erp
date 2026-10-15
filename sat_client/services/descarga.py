@@ -312,7 +312,9 @@ def extraer_metadata(paquete_base64: str, *, rfc: str, direccion: str) -> list[d
             io.BytesIO(base64.b64decode(paquete_base64, validate=True))
         ) as archive:
             names = [
-                name for name in archive.namelist() if name.lower().endswith(".txt")
+                name for name in archive.namelist()
+                if name.lower().endswith(".txt")
+                and not name.lower().endswith("_tercero.txt")
             ]
             if not names:
                 raise ValueError("Paquete sin TXT metadata")

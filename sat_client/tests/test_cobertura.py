@@ -31,6 +31,20 @@ class SatCoberturaTests(TestCase):
         s.refresh_from_db()
         self.assertEqual(s.estado, 2)
 
+    def test_missing_request_with_zero_state_is_expired(self):
+        from sat_client.services.verificacion import verificar_solicitud
+
+        s = self.request(id_solicitud="expired", estado=1)
+        with patch("sat_client.services.verificacion._build_verificacion_envelope"), patch(
+            "sat_client.services.verificacion.post_soap", return_value=b"response"
+        ), patch("sat_client.services.verificacion.find_result_attributes", return_value={
+            "CodEstatus": "5004", "EstadoSolicitud": "0", "NumeroCFDIs": "0",
+            "Mensaje": "No se encontro la informacion",
+        }):
+            verificar_solicitud(s, token="token")
+        s.refresh_from_db()
+        self.assertEqual(s.estado, SolicitudDescarga.ESTADO_VENCIDA)
+
     def test_legacy_timeout_is_reused(self):
         s = self.request(
             id_solicitud="old",
@@ -101,6 +115,7 @@ class SatMetadataTests(TestCase):
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as z:
             z.writestr("metadata.txt", data)
+            z.writestr("metadata_tercero.txt", "Uuid~RfcACuentaTerceros~NombreACuentaTerceros\n")
         rows = descarga.extraer_metadata(
             base64.b64encode(b.getvalue()).decode(),
             rfc="AAA010101AAA",
@@ -108,12 +123,25 @@ class SatMetadataTests(TestCase):
         )
         self.assertEqual(rows[0]["uuid"], "550E8400-E29B-41D4-A716-446655440000")
         self.assertEqual(rows[0]["estatus"], "vigente")
+        self.assertEqual(len(rows), 1)
         with self.assertRaises(Exception):
             descarga.extraer_metadata(
                 base64.b64encode(b.getvalue()).decode(),
                 rfc="OTHER",
                 direccion="emitidos",
             )
+
+    def test_auxiliary_metadata_without_main_inventory_is_rejected(self):
+        import base64, io, zipfile
+        from sat_client.services.descarga import extraer_metadata
+        from sat_client.services.base import SatServiceError
+
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            z.writestr("metadata_tercero.txt", "Uuid~RfcACuentaTerceros~NombreACuentaTerceros\n")
+        with self.assertRaises(SatServiceError):
+            extraer_metadata(base64.b64encode(b.getvalue()).decode(),
+                             rfc="AAA010101AAA", direccion="emitidos")
 
     def test_metadata_request_does_not_filter_cancelled(self):
         from lxml import etree
