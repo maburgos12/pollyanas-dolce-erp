@@ -16,6 +16,7 @@ from django.utils import timezone
 from core.access import ROLE_ADMIN, ROLE_DG, can_view_reportes, has_any_role
 from core.models import AuditLog
 from pos_bridge.models import PointProductionLine, PointDailySale
+from recetas.models import RecetaCodigoPointAlias
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual
 from rrhh.models import NominaLinea, NominaPeriodo
 
@@ -72,6 +73,9 @@ def leer_fuentes(periodo):
             'receta_id', 'insumo_id', 'item_code', 'item_name', 'unit', 'produced_quantity', 'is_insumo',
             'receta__nombre', 'receta__tipo', 'receta__codigo_point', 'receta__rendimiento_cantidad',
             'receta__rendimiento_unidad__codigo'),
+        'aliases_receta': RecetaCodigoPointAlias.objects.filter(activo=True, codigo_point__in=PointProductionLine.objects.filter(production_date__range=(inicio, fin), receta__isnull=True).values('item_code')).values(
+            'id', 'codigo_point', 'receta_id', 'receta__nombre', 'receta__tipo', 'receta__codigo_point',
+            'receta__rendimiento_cantidad', 'receta__rendimiento_unidad__codigo'),
         'costos': RecetaCostoHistoricoMensual.objects.filter(periodo=inicio).values(
             'id', 'receta_id', 'costo_total', 'costo_por_unidad_rendimiento', 'coverage_pct', 'metadata'),
     }
@@ -135,12 +139,18 @@ def calcular(periodo, fuentes=None):
     costos = {c['receta_id']: c for c in fuentes['costos']}
     productos, claves = {}, set()
     internas, sin_vinculo = 0, 0
+    aliases = {a['codigo_point']: a for a in fuentes['aliases_receta']}
+    resueltas_alias = 0
     for p in fuentes['produccion']:
         clave = (p['branch_id'], p['production_external_id'], p['detail_external_id'])
         if clave in claves:
             pendientes.append('Hay claves de producción duplicadas.')
             continue
         claves.add(clave)
+        if not p['receta_id'] and p['item_code'] in aliases:
+            alias = aliases[p['item_code']]
+            p = {**p, **{k: v for k, v in alias.items() if k == 'receta_id' or k.startswith('receta__')}}
+            resueltas_alias += 1
         if not p['receta_id']:
             sin_vinculo += 1
             continue
@@ -154,9 +164,11 @@ def calcular(periodo, fuentes=None):
         r['cantidad'] += cantidad
         if cantidad < 0 or p['is_insumo'] or p['unit'].upper() not in {'PZA', 'U'} or p['item_code'] != r['codigo']:
             r['errores'].append('Revisar identidad, unidad o cantidad en Point.')
-        if not p['receta__rendimiento_cantidad'] or Decimal(str(p['receta__rendimiento_cantidad'])) <= 0 or not p['receta__rendimiento_unidad__codigo']:
-            r['errores'].append('Confirmar rendimiento de receta.')
-        elif p['receta__rendimiento_unidad__codigo'].upper() not in {'PZA', 'U'}:
+        rendimiento = p['receta__rendimiento_cantidad']
+        unidad = p['receta__rendimiento_unidad__codigo']
+        if rendimiento is not None and Decimal(str(rendimiento)) <= 0:
+            r['errores'].append('El rendimiento explícito debe ser positivo.')
+        elif (unidad and unidad.upper() not in {'PZA', 'U'}) or (rendimiento is not None and Decimal(str(rendimiento)) != 1 and not unidad):
             r['errores'].append('Conciliar unidad de rendimiento con Point.')
     if sin_vinculo:
         pendientes.append(f'{sin_vinculo} líneas de producción sin receta vinculada.')
@@ -195,10 +207,13 @@ def calcular(periodo, fuentes=None):
             r['con_despacho'] = r['mp'] + r['mo']
             r['componentes'] = [{'nombre': COMPONENTES[k], 'unitario': v / r['cantidad'], 'monto': v} for k, v in importes.items()]
             asignado += r['asignado']
+    notas.append('Las recetas de producto terminado sin rendimiento explícito corresponden a una pieza, según confirmación de Dirección del 14/10/2026; no representan rendimiento por batida ni productividad diaria.')
+    if resueltas_alias:
+        notas.append(f'{resueltas_alias} líneas históricas reconocidas mediante alias de receta ya registrados en el ERP; sin modificar la producción original.')
     notas.append('Puestos actuales contrastados con nómina histórica; confirmar cobertura y clasificación al aprobar.')
     notas.append('Reparto por materia prima. No mide tiempos, cargas patronales completas, inventario intermedio ni costo de ventas.')
     notas.append('El costo mensual puede usar estructura actual de receta; verificar su vigencia en el mes.')
-    fingerprint = hashlib.sha256(json.dumps({'version': 1, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'version': 2, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
     return {'periodo': periodo, 'fingerprint': fingerprint, 'fondo': fondo, 'fondos': [{'nombre': COMPONENTES[k], 'monto': v} for k, v in fondos.items()],
         'personas': list(personas.values()), 'productos': rows, 'unidades': sum((r['cantidad'] for r in rows), Decimal('0')),
         'base': base, 'asignado': asignado, 'pendiente_nomina': pendiente_nomina,
