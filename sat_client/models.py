@@ -32,12 +32,17 @@ class SolicitudDescarga(models.Model):
     fecha_inicial = models.DateField()
     fecha_final = models.DateField()
     rfc_solicitante = models.CharField(max_length=13)
-    tipo_solicitud = models.CharField(max_length=10, choices=TIPO_CHOICES, default=TIPO_CFDI)
+    tipo_solicitud = models.CharField(
+        max_length=10, choices=TIPO_CHOICES, default=TIPO_CFDI
+    )
     direccion = models.CharField(max_length=10, choices=DIRECCION_CHOICES)
     estado = models.IntegerField(choices=ESTADO_CHOICES, default=ESTADO_ACEPTADA)
     codigo_estado = models.CharField(max_length=10, null=True, blank=True)
     numero_cfdis = models.IntegerField(null=True, blank=True)
     ids_paquetes = models.JSONField(default=list, blank=True)
+    folio = models.CharField(max_length=36, blank=True, default="", db_index=True)
+    paquetes_procesados = models.JSONField(default=dict, blank=True)
+    metadata = models.JSONField(null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
     error_detalle = models.TextField(null=True, blank=True)

@@ -66,6 +66,21 @@ def verificar_solicitud(
         transport=transport,
     )
     attrs = find_result_attributes(content, "VerificaSolicitudDescargaResult")
+    if attrs.get("CodEstatus") == "5004" and not attrs.get("EstadoSolicitud"):
+        solicitud.estado = SolicitudDescarga.ESTADO_VENCIDA
+        solicitud.codigo_estado = "5004"
+        solicitud.error_detalle = (
+            attrs.get("Mensaje") or "Solicitud ya no disponible en SAT"
+        )
+        solicitud.save(
+            update_fields=["estado", "codigo_estado", "error_detalle", "actualizado_en"]
+        )
+        return solicitud
+    if attrs.get("CodEstatus") not in (None, "", "5000"):
+        raise SatServiceError(
+            attrs.get("Mensaje") or "Error de verificacion SAT",
+            code=attrs.get("CodEstatus"),
+        )
     root = parse_xml(content)
     ids_paquetes = find_all_text(root, "IdsPaquetes")
     estado = attrs.get("EstadoSolicitud")
@@ -73,12 +88,27 @@ def verificar_solicitud(
 
     if estado:
         solicitud.estado = int(estado)
-    solicitud.codigo_estado = attrs.get("CodigoEstadoSolicitud") or attrs.get("CodEstatus") or solicitud.codigo_estado
-    solicitud.numero_cfdis = int(numero_cfdis) if numero_cfdis not in (None, "") else solicitud.numero_cfdis
+    solicitud.codigo_estado = (
+        attrs.get("CodigoEstadoSolicitud")
+        or attrs.get("CodEstatus")
+        or solicitud.codigo_estado
+    )
+    solicitud.numero_cfdis = (
+        int(numero_cfdis) if numero_cfdis not in (None, "") else solicitud.numero_cfdis
+    )
     if ids_paquetes:
         solicitud.ids_paquetes = ids_paquetes
     solicitud.error_detalle = attrs.get("Mensaje") or solicitud.error_detalle
-    solicitud.save(update_fields=["estado", "codigo_estado", "numero_cfdis", "ids_paquetes", "error_detalle", "actualizado_en"])
+    solicitud.save(
+        update_fields=[
+            "estado",
+            "codigo_estado",
+            "numero_cfdis",
+            "ids_paquetes",
+            "error_detalle",
+            "actualizado_en",
+        ]
+    )
     return solicitud
 
 
@@ -110,7 +140,9 @@ def verificar_hasta_terminar(
         if intento < max_intentos - 1:
             sleep_func(intervalo_segundos)
 
-    solicitud.estado = SolicitudDescarga.ESTADO_ERROR
-    solicitud.error_detalle = "Timeout esperando terminacion de solicitud SAT"
-    solicitud.save(update_fields=["estado", "error_detalle", "actualizado_en"])
+    # Agotar nuestra espera no cambia el estado del tramite en el SAT.
+    solicitud.error_detalle = (
+        "Pendiente: se agotaron las verificaciones de esta ejecucion"
+    )
+    solicitud.save(update_fields=["error_detalle", "actualizado_en"])
     return solicitud

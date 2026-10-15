@@ -5,6 +5,7 @@ import time
 from datetime import date, timedelta
 
 from django.core.management.base import BaseCommand, CommandError
+from django.utils import timezone
 
 from sat_client.models import SolicitudDescarga
 from sat_client.services.base import SatServiceError
@@ -19,7 +20,7 @@ def _rango_mes(mes: str) -> tuple[date, date]:
     except (ValueError, TypeError) as exc:
         raise CommandError(f"Mes invalido '{mes}': usar formato YYYY-MM") from exc
     fin = date(anio, numero, calendar.monthrange(anio, numero)[1])
-    ayer = date.today() - timedelta(days=1)
+    ayer = timezone.localdate() - timedelta(days=1)
     if fin > ayer:
         # No cubrir el dia en curso: quedaria marcado como resuelto y la
         # descarga nocturna lo saltaria aunque lleguen CFDIs mas tarde.
@@ -62,7 +63,10 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         direcciones = (
-            [SolicitudDescarga.DIRECCION_EMITIDOS, SolicitudDescarga.DIRECCION_RECIBIDOS]
+            [
+                SolicitudDescarga.DIRECCION_EMITIDOS,
+                SolicitudDescarga.DIRECCION_RECIBIDOS,
+            ]
             if options["direccion"] == "ambas"
             else [options["direccion"]]
         )
@@ -71,8 +75,12 @@ class Command(BaseCommand):
         for mes in options["mes"]:
             inicio, fin = _rango_mes(mes)
             for direccion in direcciones:
-                if not options["forzar"] and _solicitud_periodo_registrada(inicio, fin, direccion):
-                    self.stdout.write(f"{mes} {direccion}: ya registrado, se omite (usa --forzar)")
+                if not options["forzar"] and _solicitud_periodo_registrada(
+                    inicio, fin, direccion
+                ):
+                    self.stdout.write(
+                        f"{mes} {direccion}: ya registrado, se omite (usa --forzar)"
+                    )
                     continue
                 self.stdout.write(f"{mes} {direccion}: solicitando {inicio} a {fin}...")
                 resultados = None
@@ -90,6 +98,16 @@ class Command(BaseCommand):
                 if resultados is None:
                     fallidos.append(f"{mes} {direccion}")
                     continue
+                if any(
+                    r.get("estado") in ("pendiente", "bloqueada") for r in resultados
+                ):
+                    fallidos.append(
+                        f"{mes} {direccion} (pendiente SAT, reanudar mismo ID)"
+                    )
+                    self.stderr.write(
+                        f"{mes} {direccion}: pendiente; no se declara completo"
+                    )
+                    continue
                 descargados = sum(int(r["descargados"]) for r in resultados)
                 nuevos = sum(int(r["nuevos"]) for r in resultados)
                 total_nuevos += nuevos
@@ -99,7 +117,9 @@ class Command(BaseCommand):
                         f"({len(resultados)} solicitud(es))"
                     )
                 )
-        self.stdout.write(self.style.SUCCESS(f"Backfill terminado: {total_nuevos} CFDIs nuevos"))
+        self.stdout.write(
+            f"Backfill {'parcial' if fallidos else 'terminado'}: {total_nuevos} CFDIs nuevos"
+        )
         if fallidos:
             self.stderr.write(
                 "Periodos fallidos (reintentar mas tarde): " + ", ".join(fallidos)

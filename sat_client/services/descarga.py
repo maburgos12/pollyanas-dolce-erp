@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import csv
+from uuid import UUID
 import io
 import zipfile
 from dataclasses import dataclass
@@ -8,6 +10,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import dateparse, timezone
 from lxml import etree
 
@@ -186,6 +189,7 @@ def extraer_xmls_de_zip_base64(paquete_base64: str) -> list[bytes]:
         raise SatServiceError("Paquete SAT no es un ZIP valido") from exc
 
 
+@transaction.atomic
 def guardar_cfdis_xml(
     xml_documents: list[bytes | str],
     *,
@@ -219,26 +223,36 @@ def guardar_cfdis_xml(
                 "fecha_timbrado": parsed.fecha_timbrado,
                 "estatus": parsed.estatus,
                 "xml_raw": (
-                    xml_content.decode("utf-8", errors="replace")
-                    if isinstance(xml_content, bytes)
-                    else xml_content
-                )
-                if guardar_xml_raw
-                else "",
+                    (
+                        xml_content.decode("utf-8", errors="replace")
+                        if isinstance(xml_content, bytes)
+                        else xml_content
+                    )
+                    if guardar_xml_raw
+                    else ""
+                ),
             },
         )
-        cfdi.pagos_detalle.all().delete()
+        if not created and not cfdi.xml_raw and guardar_xml_raw:
+            cfdi.xml_raw = (
+                xml_content.decode("utf-8")
+                if isinstance(xml_content, bytes)
+                else xml_content
+            )
+            cfdi.save(update_fields=["xml_raw"])
         for pago in parsed.pagos:
-            CfdiPagoRelacionado.objects.create(
+            CfdiPagoRelacionado.objects.update_or_create(
                 cfdi_pago=cfdi,
                 uuid_relacionado=pago.uuid_relacionado,
-                fecha_pago=pago.fecha_pago,
-                monto=pago.monto,
-                moneda=pago.moneda,
-                forma_pago=pago.forma_pago,
                 num_parcialidad=pago.num_parcialidad,
-                importe_saldo_anterior=pago.importe_saldo_anterior,
-                importe_saldo_insoluto=pago.importe_saldo_insoluto,
+                defaults=dict(
+                    fecha_pago=pago.fecha_pago,
+                    monto=pago.monto,
+                    moneda=pago.moneda,
+                    forma_pago=pago.forma_pago,
+                    importe_saldo_anterior=pago.importe_saldo_anterior,
+                    importe_saldo_insoluto=pago.importe_saldo_insoluto,
+                ),
             )
         total += 1
         if created:
@@ -288,3 +302,63 @@ def descargar_paquete(
         message = result.get("Mensaje") or "SAT no devolvio Paquete"
         raise SatServiceError(message, code=code)
     raise SatServiceError("Respuesta SAT de descarga sin Paquete")
+
+
+def extraer_metadata(paquete_base64: str, *, rfc: str, direccion: str) -> list[dict]:
+    """Inventario SAT fechado; no crea facturas sin su XML original."""
+    rows = []
+    try:
+        with zipfile.ZipFile(
+            io.BytesIO(base64.b64decode(paquete_base64, validate=True))
+        ) as archive:
+            names = [
+                name for name in archive.namelist() if name.lower().endswith(".txt")
+            ]
+            if not names:
+                raise ValueError("Paquete sin TXT metadata")
+            for name in names:
+                reader = csv.DictReader(
+                    io.StringIO(archive.read(name).decode("utf-8-sig")), delimiter="~"
+                )
+                required = {
+                    "Uuid",
+                    "RfcEmisor",
+                    "RfcReceptor",
+                    "FechaEmision",
+                    "EfectoComprobante",
+                    "Estatus",
+                }
+                if not required.issubset(reader.fieldnames or []):
+                    raise ValueError("Cabecera metadata incompleta")
+                for row in reader:
+                    if None in row or any(row[k] is None for k in required):
+                        raise ValueError("Fila metadata incompleta")
+                    uuid = str(UUID(row["Uuid"].strip())).upper()
+                    side = "RfcEmisor" if direccion == "emitidos" else "RfcReceptor"
+                    if row[side].strip().upper() != rfc.upper():
+                        raise ValueError("RFC metadata ajeno a la solicitud")
+                    status = {
+                        "1": "vigente",
+                        "0": "cancelado",
+                        "Vigente": "vigente",
+                        "Cancelado": "cancelado",
+                    }.get(row["Estatus"].strip())
+                    if (
+                        status is None
+                        or row["EfectoComprobante"].strip() not in {"I", "E", "N", "P", "T"}
+                    ):
+                        raise ValueError("Estado o tipo metadata desconocido")
+                    fecha = _datetime(row["FechaEmision"].strip())
+                    if fecha is None:
+                        raise ValueError("Metadata sin fecha de emision")
+                    rows.append(
+                        {
+                            "uuid": uuid,
+                            "estatus": status,
+                            "fecha_emision": fecha.isoformat(),
+                            "datos": row,
+                        }
+                    )
+    except (ValueError, UnicodeError, zipfile.BadZipFile, csv.Error) as exc:
+        raise SatServiceError(f"Metadata SAT invalida: {exc}") from exc
+    return rows

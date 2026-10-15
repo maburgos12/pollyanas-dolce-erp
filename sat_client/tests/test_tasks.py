@@ -151,6 +151,14 @@ class SatTaskRechazoDefinitivoTests(TestCase):
 
 
 class SatTaskEnabledFlagTests(TestCase):
+    def setUp(self):
+        patcher = patch(
+            "sat_client.tasks.actualizar_cobertura_sat",
+            return_value={"faltantes": 0, "pendientes": [], "errores": []},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @override_settings(SAT_DESCARGA_ENABLED=False)
     def test_task_exits_without_logs_when_disabled(self):
         result = ejecutar_descarga_sat_nocturna.run()
@@ -158,9 +166,17 @@ class SatTaskEnabledFlagTests(TestCase):
         self.assertEqual(result, {"status": "deshabilitada"})
         self.assertEqual(LogDescargaSat.objects.count(), 0)
 
-    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1, SAT_RFC="AAA010101AAA")
-    @patch("sat_client.tasks.periodos_diarios_a_descargar", return_value=[(date(2026, 6, 7), date(2026, 6, 7))])
-    @patch("sat_client.tasks._procesar_con_split", return_value=[{"solicitud_id": "new", "descargados": 0, "nuevos": 0}])
+    @override_settings(
+        SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1, SAT_RFC="AAA010101AAA"
+    )
+    @patch(
+        "sat_client.tasks.periodos_diarios_a_descargar",
+        return_value=[(date(2026, 6, 7), date(2026, 6, 7))],
+    )
+    @patch(
+        "sat_client.tasks._procesar_con_split",
+        return_value=[{"solicitud_id": "new", "descargados": 0, "nuevos": 0}],
+    )
     def test_task_skips_registered_daily_request(self, procesar, _periodos):
         solicitud = SolicitudDescarga.objects.create(
             id_solicitud="emitidos-ya",
@@ -189,10 +205,15 @@ class SatTaskEnabledFlagTests(TestCase):
             SolicitudDescarga.DIRECCION_RECIBIDOS,
         )
 
-    @override_settings(SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1, SAT_RFC="AAA010101AAA")
+    @override_settings(
+        SAT_DESCARGA_ENABLED=True, SAT_DESCARGA_MESES_ATRAS=1, SAT_RFC="AAA010101AAA"
+    )
     @patch(
         "sat_client.tasks.periodos_diarios_a_descargar",
-        return_value=[(date(2026, 6, 7), date(2026, 6, 7)), (date(2026, 6, 8), date(2026, 6, 8))],
+        return_value=[
+            (date(2026, 6, 7), date(2026, 6, 7)),
+            (date(2026, 6, 8), date(2026, 6, 8)),
+        ],
     )
     @patch("sat_client.tasks._alertar_error")
     @patch("sat_client.tasks._procesar_con_split")
@@ -208,7 +229,7 @@ class SatTaskEnabledFlagTests(TestCase):
 
         result = ejecutar_descarga_sat_nocturna.run()
 
-        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status"], "parcial")
         self.assertEqual(result["fallidos"], 1)
         self.assertEqual(result["descargados"], 6)
         self.assertEqual(procesar.call_count, 4)
