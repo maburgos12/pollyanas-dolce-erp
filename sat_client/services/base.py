@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from lxml import etree
+from requests.exceptions import RequestException
 
 if TYPE_CHECKING:
     from zeep.transports import Transport
@@ -107,14 +108,23 @@ def post_soap(
             raise SatConfigurationError(
                 "Zeep no esta disponible en este interprete; instala dependencias en un runtime compatible."
             ) from exc
-        client_transport = Transport(timeout=timeout_seconds, operation_timeout=timeout_seconds)
+        client_transport = Transport(
+            timeout=timeout_seconds, operation_timeout=timeout_seconds
+        )
     else:
         client_transport = transport
-    response = client_transport.post_xml(url, envelope, headers)
+    try:
+        response = client_transport.post_xml(url, envelope, headers)
+    except RequestException as exc:
+        raise SatServiceError(
+            "Error temporal de transporte SAT", code="transporte"
+        ) from exc
     status_code = getattr(response, "status_code", 200)
     content = getattr(response, "content", b"")
     if status_code >= 400:
-        raise SatServiceError(f"SAT respondio HTTP {status_code}", code=str(status_code))
+        raise SatServiceError(
+            f"SAT respondio HTTP {status_code}", code=str(status_code)
+        )
     return content
 
 
