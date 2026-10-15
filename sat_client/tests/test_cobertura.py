@@ -31,6 +31,20 @@ class SatCoberturaTests(TestCase):
         s.refresh_from_db()
         self.assertEqual(s.estado, 2)
 
+    def test_missing_request_with_zero_state_is_expired(self):
+        from sat_client.services.verificacion import verificar_solicitud
+
+        s = self.request(id_solicitud="expired", estado=1)
+        with patch("sat_client.services.verificacion._build_verificacion_envelope"), patch(
+            "sat_client.services.verificacion.post_soap", return_value=b"response"
+        ), patch("sat_client.services.verificacion.find_result_attributes", return_value={
+            "CodEstatus": "5004", "EstadoSolicitud": "0", "NumeroCFDIs": "0",
+            "Mensaje": "No se encontro la informacion",
+        }):
+            verificar_solicitud(s, token="token")
+        s.refresh_from_db()
+        self.assertEqual(s.estado, SolicitudDescarga.ESTADO_VENCIDA)
+
     def test_legacy_timeout_is_reused(self):
         s = self.request(
             id_solicitud="old",
@@ -101,6 +115,7 @@ class SatMetadataTests(TestCase):
         b = io.BytesIO()
         with zipfile.ZipFile(b, "w") as z:
             z.writestr("metadata.txt", data)
+            z.writestr("metadata_tercero.txt", "Uuid~RfcACuentaTerceros~NombreACuentaTerceros\n")
         rows = descarga.extraer_metadata(
             base64.b64encode(b.getvalue()).decode(),
             rfc="AAA010101AAA",
@@ -108,12 +123,25 @@ class SatMetadataTests(TestCase):
         )
         self.assertEqual(rows[0]["uuid"], "550E8400-E29B-41D4-A716-446655440000")
         self.assertEqual(rows[0]["estatus"], "vigente")
+        self.assertEqual(len(rows), 1)
         with self.assertRaises(Exception):
             descarga.extraer_metadata(
                 base64.b64encode(b.getvalue()).decode(),
                 rfc="OTHER",
                 direccion="emitidos",
             )
+
+    def test_auxiliary_metadata_without_main_inventory_is_rejected(self):
+        import base64, io, zipfile
+        from sat_client.services.descarga import extraer_metadata
+        from sat_client.services.base import SatServiceError
+
+        b = io.BytesIO()
+        with zipfile.ZipFile(b, "w") as z:
+            z.writestr("metadata_tercero.txt", "Uuid~RfcACuentaTerceros~NombreACuentaTerceros\n")
+        with self.assertRaises(SatServiceError):
+            extraer_metadata(base64.b64encode(b.getvalue()).decode(),
+                             rfc="AAA010101AAA", direccion="emitidos")
 
     def test_metadata_request_does_not_filter_cancelled(self):
         from lxml import etree
@@ -143,6 +171,77 @@ class SatMetadataTests(TestCase):
 
 
 class SatPackageProgressTests(TestCase):
+    def test_failed_parse_reuses_downloaded_payload(self):
+        from sat_client import tasks
+        from sat_client.services.base import SatServiceError
+
+        s = SolicitudDescarga.objects.create(
+            fecha_inicial=date(2026, 9, 1), fecha_final=date(2026, 9, 30),
+            rfc_solicitante="AAA010101AAA", direccion="recibidos",
+            tipo_solicitud="Metadata", estado=3, id_solicitud="cached",
+            numero_cfdis=1, ids_paquetes=["p"],
+        )
+        rows = [{"uuid": "550E8400-E29B-41D4-A716-446655440000"}]
+        with patch("sat_client.tasks.obtener_token", return_value="token"), patch(
+            "sat_client.tasks.descargar_paquete", return_value="payload"
+        ) as download, patch("sat_client.tasks.extraer_metadata", side_effect=[
+            SatServiceError("parser failure"), rows
+        ]):
+            with self.assertRaises(SatServiceError):
+                tasks.procesar_solicitud(s)
+            s.refresh_from_db()
+            self.assertEqual(s.paquetes_pendientes, {"p": "payload"})
+            self.assertEqual(s.paquetes_procesados, {})
+            result = tasks.procesar_solicitud(s)
+        self.assertEqual(download.call_count, 1)
+        s.refresh_from_db()
+        self.assertEqual(result["estado"], "completa")
+        self.assertEqual(s.metadata, rows)
+        self.assertEqual(s.paquetes_pendientes, {})
+
+    def test_exhausted_package_becomes_unavailable(self):
+        from sat_client import tasks
+        from sat_client.services.base import SatServiceError
+
+        s = SolicitudDescarga.objects.create(
+            fecha_inicial=date(2026, 9, 1), fecha_final=date(2026, 9, 30),
+            rfc_solicitante="AAA010101AAA", direccion="recibidos",
+            tipo_solicitud="Metadata", estado=3, id_solicitud="exhausted",
+            numero_cfdis=1, ids_paquetes=["p"],
+        )
+        with patch("sat_client.tasks.obtener_token", return_value="token"), patch(
+            "sat_client.tasks.descargar_paquete",
+            side_effect=SatServiceError("Maximo de descargas permitidas", code="5008"),
+        ):
+            result = tasks.procesar_solicitud(s)
+        s.refresh_from_db()
+        self.assertEqual(s.estado, SolicitudDescarga.ESTADO_VENCIDA)
+        self.assertEqual(s.codigo_estado, "5008")
+        self.assertEqual(result["estado"], "bloqueada")
+
+    def test_expired_metadata_is_renewed_even_if_recent(self):
+        from sat_client import tasks
+
+        old = SolicitudDescarga.objects.create(
+            fecha_inicial=date(2026, 9, 1), fecha_final=date(2026, 9, 1),
+            rfc_solicitante="AAA010101AAA", direccion="emitidos",
+            tipo_solicitud="Metadata", estado=6, id_solicitud="expired",
+        )
+        SolicitudDescarga.objects.create(
+            fecha_inicial=old.fecha_inicial, fecha_final=old.fecha_final,
+            rfc_solicitante=old.rfc_solicitante, direccion="recibidos",
+            tipo_solicitud="Metadata", estado=3, id_solicitud="complete",
+            numero_cfdis=0, metadata=[],
+        )
+        with override_settings(SAT_RFC=old.rfc_solicitante), patch(
+            "sat_client.tasks.timezone.localdate", return_value=date(2026, 9, 2)
+        ), patch("sat_client.tasks.obtener_token", return_value="token"), patch(
+            "sat_client.tasks.solicitar_descarga_periodo", return_value=old
+        ) as request:
+            tasks.actualizar_cobertura_sat(desde=old.fecha_inicial)
+        request.assert_called_once()
+        self.assertEqual(request.call_args.kwargs["direccion"], "emitidos")
+
     def test_resume_does_not_download_imported_package(self):
         from sat_client import tasks
 

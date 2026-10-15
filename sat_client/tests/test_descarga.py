@@ -76,6 +76,18 @@ CFDI_PAGO_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 class SatDescargaServiceTests(TestCase):
+    def test_download_reads_sat_response_header_error(self):
+        from sat_client.services.descarga import descargar_paquete
+        from sat_client.services.base import SatServiceError
+
+        body = b'<Envelope><Header><respuesta CodEstatus="5008" Mensaje="Maximo de descargas permitidas."/></Header><Body/></Envelope>'
+        with patch("sat_client.services.descarga._build_descarga_envelope"), patch(
+            "sat_client.services.descarga.post_soap", return_value=body
+        ):
+            with self.assertRaises(SatServiceError) as caught:
+                descargar_paquete("package", token="token")
+        self.assertEqual(caught.exception.code, "5008")
+
     def test_build_descarga_envelope_uses_current_sat_contract(self):
         credentials = SatCredentials(
             cer_path="/tmp/fiel.cer",

@@ -66,7 +66,7 @@ def verificar_solicitud(
         transport=transport,
     )
     attrs = find_result_attributes(content, "VerificaSolicitudDescargaResult")
-    if attrs.get("CodEstatus") == "5004" and not attrs.get("EstadoSolicitud"):
+    if attrs.get("CodEstatus") == "5004" and attrs.get("EstadoSolicitud") in (None, "", "0"):
         solicitud.estado = SolicitudDescarga.ESTADO_VENCIDA
         solicitud.codigo_estado = "5004"
         solicitud.error_detalle = (

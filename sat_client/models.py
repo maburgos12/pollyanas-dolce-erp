@@ -42,6 +42,7 @@ class SolicitudDescarga(models.Model):
     ids_paquetes = models.JSONField(default=list, blank=True)
     folio = models.CharField(max_length=36, blank=True, default="", db_index=True)
     paquetes_procesados = models.JSONField(default=dict, blank=True)
+    paquetes_pendientes = models.JSONField(default=dict, blank=True)
     metadata = models.JSONField(null=True, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
