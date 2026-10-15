@@ -11,7 +11,7 @@ from openpyxl import load_workbook
 
 from maestros.models import UnidadMedida
 from pos_bridge.models import PointBranch, PointProductionLine
-from recetas.models import Receta
+from recetas.models import Receta, RecetaCodigoPointAlias
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual
 from reportes.services_mano_obra_mensual import calcular, leer_fuentes, aprobar, analisis_aprobado
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
@@ -57,13 +57,37 @@ class ManoObraMensualTests(TestCase):
         self.assertTrue(all(p['mo'] is None for p in data['productos']))
         self.assertEqual(data['pendiente_reparto'], Decimal('100.01'))
 
-    def test_rendimiento_faltante_simula_pero_bloquea(self):
-        Receta.objects.filter(pk=self.receta.pk).update(rendimiento_cantidad=None)
+    def test_receta_por_pieza_no_exige_rendimiento_batida(self):
+        Receta.objects.filter(pk=self.receta.pk).update(rendimiento_cantidad=None, rendimiento_unidad=None)
+        RecetaCostoHistoricoMensual.objects.filter(pk=self.costo.pk).update(costo_por_unidad_rendimiento=None)
         data = calcular('2026-09')
-        self.assertIsNotNone(data['productos'][0]['mo'])
-        with self.assertRaises(ValidationError):
-            aprobar('2026-09', data['fingerprint'], self.user)
-        self.assertFalse(CierreManoObraMensual.objects.exists())
+        self.assertEqual(data['pendientes'], [])
+        self.assertEqual(data['productos'][0]['mp'], Decimal('20'))
+        self.assertEqual(data['productos'][0]['mo'], Decimal('10.001'))
+        aprobar('2026-09', data['fingerprint'], self.user)
+        self.receta.refresh_from_db()
+        self.assertIsNone(self.receta.rendimiento_cantidad)
+
+    def test_rendimiento_explicito_invalido_bloquea(self):
+        for rendimiento in (0, -1):
+            Receta.objects.filter(pk=self.receta.pk).update(rendimiento_cantidad=rendimiento)
+            data = calcular('2026-09')
+            with self.assertRaises(ValidationError):
+                aprobar('2026-09', data['fingerprint'], self.user)
+
+    def test_alias_existente_resuelve_preparacion_sin_modificar_fuente(self):
+        receta = Receta.objects.create(nombre='Pan horneado', tipo='PREPARACION', codigo_point='PMH028', hash_contenido='pmh')
+        alias = RecetaCodigoPointAlias.objects.create(receta=receta, codigo_point='PMH028')
+        linea = PointProductionLine.objects.create(branch=self.branch, production_external_id='MO-2', detail_external_id='MO-D2', source_hash='mo-2', production_date=date(2026, 9, 15), item_name='Pan horneado', item_code='PMH028', unit='PZA', produced_quantity=26, is_insumo=True)
+        data = calcular('2026-09')
+        self.assertEqual(data['pendientes'], [])
+        self.assertEqual(data['preparaciones'], 1)
+        self.assertEqual(data['unidades'], 10)
+        linea.refresh_from_db()
+        self.assertIsNone(linea.receta_id)
+        alias.activo = False
+        alias.save()
+        self.assertEqual(calcular('2026-09')['sin_vinculo'], 1)
 
     def test_costo_lote_se_divide_por_rendimiento(self):
         Receta.objects.filter(pk=self.receta.pk).update(rendimiento_cantidad=5)
