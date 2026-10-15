@@ -55,6 +55,15 @@
       });
     }catch(_){}
   }
+  var reported={};
+  function report(root,code) {
+    if(!root||!root.dataset.diagnosticUrl||reported[root.dataset.count+':'+code])return;
+    var token=root.querySelector('[name="csrfmiddlewaretoken"]');if(!token)return;
+    reported[root.dataset.count+':'+code]=true;
+    var data=new FormData();data.set('csrfmiddlewaretoken',token.value);data.set('code',code);
+    fetch(root.dataset.diagnosticUrl,{method:'POST',body:data,credentials:'same-origin'}).catch(function(){});
+  }
+  window.addEventListener('error',function(event){if(/\/(conteos|erp_actions)\.js/.test(event.filename||''))report(activeRoot,'error_javascript');});
   function state(root,text) {var el=root.querySelector('[data-save-state]');if(el)el.textContent=text;}
   function updateProgress(root) {
     var total=0, complete=0;
@@ -82,6 +91,7 @@
     }
     if(old){try{var scroll=sessionStorage.getItem('conteos.scroll:'+key(root));if(scroll)window.scrollTo(0,Number(scroll));}catch(_) {}}
     var form=root.querySelector('[data-count-form]'),draft=read(key(root));
+    var serverValues=form?JSON.stringify(values(form)):null;
     if(draft&&draft.choices){
       var picker=root.querySelector('[data-draft-warning]');picker.hidden=false;
       picker.textContent='Hay varios borradores de este conteo en el dispositivo. Elige cuál revisar antes de continuar.';
@@ -133,9 +143,97 @@
       var reconcile=document.createElement('button');reconcile.type='button';reconcile.className='count-button secondary';reconcile.textContent='He revisado y combinado los datos';
       reconcile.addEventListener('click',function(){conflict=false;warning.hidden=true;form.elements.request_id.value=uuid();persist();});warning.appendChild(reconcile);
     }
+    var saveTimer, saving=false, stopped=Boolean(draft), pending=draft&&draft.pending;
+    var confirmed=serverValues;
+    form.noValidate=true;
+    function notice(message) {
+      state(root,message);
+      window.ERPActionUI.showToast({type:'warning',message:message,persistent:true});
+    }
+    function reveal(input) {
+      var row=input.closest('[data-count-line]');
+      if(row){selectType(row.dataset.countType);search.value='';search.dispatchEvent(new Event('input'));}
+      var details=input.closest('details');if(details)details.open=true;
+      input.scrollIntoView({block:'center'});input.focus({preventScroll:true});
+    }
+    function valid(show) {
+      var invalid=Array.from(form.elements).find(function(el){return el.willValidate&&!el.validity.valid;});
+      if(!invalid)return true;
+      if(show){reveal(invalid);invalid.reportValidity();notice('Revisa el campo señalado antes de guardar. Tu borrador se conserva.');}
+      return false;
+    }
+    function scheduleSave() {
+      window.clearTimeout(saveTimer);
+      if(!stopped&&!conflict&&!saving&&navigator.onLine&&JSON.stringify(values(form))!==confirmed){
+        saveTimer=window.setTimeout(function(){save('guardar',true);},2000);
+      }
+    }
+    async function save(action,automatic) {
+      window.clearTimeout(saveTimer);
+      if(root!==activeRoot)return;
+      if(saving){if(!automatic)notice('Hay un guardado en curso. Espera su confirmación antes de continuar.');return;}
+      if(conflict){warning.scrollIntoView({block:'center'});return;}
+      if(!pending&&!valid(!automatic))return;
+      if((!('onformdata' in form)&&form.elements.length>900)||new Blob([JSON.stringify(values(form))]).size>1800000){
+        stopped=true;notice('La captura es demasiado grande para este navegador. Conserva el borrador y reduce las notas extensas antes de guardar.');return;
+      }
+      try{sessionStorage.setItem('conteos.scroll:'+key(root),String(window.scrollY));}catch(_){}
+      if(!navigator.onLine){persist();state(root,'Sin conexión. El borrador sigue pendiente de guardar.');return;}
+      if(!pending){
+        var body=new FormData(form);body.set('action',action);
+        pending={entries:Array.from(body.entries()).filter(function(pair){return pair[0]!=='csrfmiddlewaretoken';}),values:values(form)};
+      }
+      var attempt=pending, data=new FormData();
+      attempt.entries.forEach(function(pair){data.append(pair[0],pair[1]);});
+      var csrfCookie=document.cookie.split('; ').find(function(item){return item.indexOf('csrftoken=')===0;});
+      data.set('csrfmiddlewaretoken',csrfCookie?decodeURIComponent(csrfCookie.slice(10)):form.elements.csrfmiddlewaretoken.value);
+      var sentAction=data.get('action'),sentId=data.get('request_id');
+      persist();saving=true;state(root,'Guardando en el servidor…');
+      // Manual actions can replace the form; prevent edits that replacement would discard.
+      var locked=sentAction!=='guardar'?Array.from(form.elements).filter(function(el){return !el.disabled;}):[];
+      locked.forEach(function(el){el.disabled=true;});
+      var controller=new AbortController(),timeout=window.setTimeout(function(){controller.abort();},25000);
+      try{
+        var response=await fetch(form.getAttribute('action'),{method:'POST',body:data,credentials:'same-origin',
+          headers:{Accept:'application/json','X-Requested-With':'XMLHttpRequest'},signal:controller.signal});
+        if(response.redirected||!(response.headers.get('content-type')||'').includes('application/json')){
+          throw new Error('No se confirmó el guardado. Si tu sesión venció, inicia sesión en otra pestaña y pulsa Guardar avance.');
+        }
+        var result=await response.json();
+        if(!response.ok||!result.ok){
+          if([400,403,404,409].includes(response.status))pending=null;
+          throw new Error(result.toast&&result.toast.message||'No se confirmó el guardado. Revisa tu conexión y pulsa Guardar avance.');
+        }
+        var received=new DOMParser().parseFromString(result.html||'','text/html').querySelector('[data-count-root]');
+        if(!received||received.dataset.ack!==sentId||received.dataset.count!==root.dataset.count){throw new Error('La confirmación no corresponde a esta captura. Conserva la página y pulsa Guardar avance.');}
+        pending=null;stopped=false;
+        if(sentAction==='guardar'){
+          // The receipt may be replayed after another tab advanced: never adopt a newer version silently.
+          if(String(result.result.version)!==received.dataset.version){throw new Error('El conteo cambió en otra pestaña. Vuelve a abrirlo para comparar tu borrador.');}
+          root.dataset.version=received.dataset.version;
+          root.querySelectorAll('input[name="version"]').forEach(function(el){el.value=received.dataset.version;});
+          form.elements.request_id.value=uuid();confirmed=JSON.stringify(attempt.values);
+          if(JSON.stringify(values(form))===confirmed){remove(key(root));state(root,'Guardado en servidor · '+new Date().toLocaleTimeString());}
+          else persist();
+        }else{
+          if(JSON.stringify(values(form))===JSON.stringify(attempt.values))remove(key(root));
+          else persist();
+          root.outerHTML=result.html;window.ERPActionUI.bind(document);bind();
+          window.ERPActionUI.showToast(result.toast||{type:'success',message:'Captura confirmada.'});
+        }
+      }catch(error){
+        stopped=true;persist();notice(error.name==='AbortError'?'No llegó la confirmación a tiempo. El borrador se conserva; pulsa Guardar avance para verificar el mismo intento.':error.message||'No se confirmó el guardado. Conserva esta página y pulsa Guardar avance.');
+        report(root,'guardado_no_confirmado');
+      }finally{
+        window.clearTimeout(timeout);saving=false;locked.forEach(function(el){el.disabled=false;});
+        if(root===activeRoot)scheduleSave();
+      }
+    }
     function persist() {
       if(conflict)return;
-      write(root,{version:root.dataset.version,request_id:form.elements.request_id.value,values:values(form)});
+      if(!pending&&JSON.stringify(values(form))===confirmed){remove(key(root));return;}
+      write(root,{version:root.dataset.version,request_id:form.elements.request_id.value,values:values(form),pending:pending});
+      scheduleSave();
       state(root,'Cambios pendientes de guardar en el servidor.');
     }
     form.addEventListener('formdata',function(event){
@@ -177,21 +275,10 @@
       });
     });
     form.addEventListener('submit',function(event){
-      if((!('onformdata' in form)&&form.elements.length>900)||new Blob([JSON.stringify(values(form))]).size>1800000){
-        event.preventDefault();event.stopImmediatePropagation();
-        window.ERPActionUI.showToast({type:'error',message:!('onformdata' in form)?'Actualiza el navegador para enviar un conteo de este tamaño. El borrador se conserva.':'La captura contiene demasiadas notas para un envío. Conserva las notas extensas como evidencia y reduce el texto antes de guardar. El borrador se conserva.',persistent:true});
-        return;
-      }
-      if(conflict){event.preventDefault();event.stopImmediatePropagation();warning.scrollIntoView({block:'center'});return;}
-      var button=event.submitter;
-      var data={version:root.dataset.version,request_id:form.elements.request_id.value,values:values(form),action:button?button.value:'guardar'};
-      var prior=read(key(root));
-      // Retrying the same body/action retains its UUID. Changing action uses a new one.
-      if(prior && prior.action && prior.action!==data.action){data.request_id=uuid();form.elements.request_id.value=data.request_id;}
-      write(root,data);
-      try{sessionStorage.setItem('conteos.scroll:'+key(root),String(window.scrollY));}catch(_){}
-      state(root,'Esperando confirmación del servidor…');
+      event.preventDefault();event.stopImmediatePropagation();
+      save(event.submitter?event.submitter.value:'guardar',false);
     },true);
+    form.addEventListener('change',function(){persist();updateProgress(root);});
     var search=root.querySelector('[data-count-search]');
     search.addEventListener('input',function(){var q=search.value.toLocaleLowerCase();root.querySelectorAll('[data-count-line]').forEach(function(row){row.hidden=row.dataset.search.toLocaleLowerCase().indexOf(q)<0;});});
     var activeType='producto';
@@ -249,13 +336,16 @@
       old.querySelectorAll('details[open] textarea[id]').forEach(function(el){var current=document.getElementById(el.id);if(current)current.closest('details').open=true;});
     }
     root.querySelector('[data-review-send]').addEventListener('click',function(){
-      if(!form.reportValidity())return;
-      var preview=root.querySelector('[data-send-preview]'),lines=root.querySelector('[data-preview-lines]');lines.replaceChildren();var missing=false;
-      root.querySelectorAll('[data-count-line]').forEach(function(row){var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value===''&&!i.value.trim())missing=true;var entry=document.createElement('div');entry.className='count-preview-row';var name=document.createElement('span');name.textContent=row.querySelector('.count-product label').textContent;var amount=document.createElement('strong');amount.textContent=q.value!==''?q.value+' '+row.querySelector('.count-unit').textContent:(i.value.trim()?'Incidencia registrada':'Sin contar');entry.append(name,amount);lines.appendChild(entry);});
-      if(missing){window.ERPActionUI.showToast({type:'error',message:'Completa las cantidades o registra una incidencia en cada artículo.',persistent:true});return;}
+      if(!valid(true))return;
+      var preview=root.querySelector('[data-send-preview]'),lines=root.querySelector('[data-preview-lines]');lines.replaceChildren();var missing=null;
+      root.querySelectorAll('[data-count-line]').forEach(function(row){var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value===''&&!i.value.trim()&&!missing)missing=q;var entry=document.createElement('div');entry.className='count-preview-row';var name=document.createElement('span');name.textContent=row.querySelector('.count-product label').textContent;var amount=document.createElement('strong');amount.textContent=q.value!==''?q.value+' '+row.querySelector('.count-unit').textContent:(i.value.trim()?'Incidencia registrada':'Sin contar');entry.append(name,amount);lines.appendChild(entry);});
+      if(missing){reveal(missing);notice('Falta registrar: '+missing.closest('[data-count-line]').querySelector('.count-product label').textContent+'. Captura su cantidad o marca «No se maneja».');report(root,'captura_incompleta');return;}
       preview.hidden=false;preview.scrollIntoView({block:'center',behavior:'auto'});
     });
     root.querySelector('[data-close-preview]').addEventListener('click',function(){root.querySelector('[data-send-preview]').hidden=true;});
+    root.savePending=function(){persist();};
+    root.resumeCapture=function(){if(read(key(root)))state(root,'Revisa tu captura pendiente. Pulsa Guardar avance para confirmar.');};
+    if(draft)state(root,'Borrador recuperado. Revisa los datos y pulsa Guardar avance.');
     updateProgress(root);
   }
   bind();
@@ -275,7 +365,14 @@
     if(capture && read(key(activeRoot))){event.preventDefault();event.stopImmediatePropagation();window.ERPActionUI.showToast({type:'warning',message:'Guarda primero las cantidades pendientes antes de adjuntar evidencia.',persistent:true});}
   },true);
   window.addEventListener('offline',function(){if(activeRoot)state(activeRoot,'Sin conexión. La captura no se ha enviado.');});
-  window.addEventListener('online',function(){if(activeRoot && read(key(activeRoot)))state(activeRoot,'Conexión recuperada. Pulsa Guardar para enviar tu borrador.');});
+  window.addEventListener('online',function(){if(activeRoot&&activeRoot.resumeCapture)activeRoot.resumeCapture();});
+  document.addEventListener('visibilitychange',function(){
+    if(!activeRoot)return;
+    if(document.visibilityState==='hidden'&&activeRoot.savePending)activeRoot.savePending();
+    else if(activeRoot.resumeCapture)activeRoot.resumeCapture();
+  });
+  window.addEventListener('pagehide',function(){if(activeRoot&&activeRoot.savePending)activeRoot.savePending();});
+  window.addEventListener('pageshow',function(event){if(event.persisted&&activeRoot&&activeRoot.resumeCapture)activeRoot.resumeCapture();});
   window.addEventListener('beforeunload',function(event){
     if(activeRoot && document.querySelector('[data-count-form]') && read(key(activeRoot))){event.preventDefault();event.returnValue='';}
   });

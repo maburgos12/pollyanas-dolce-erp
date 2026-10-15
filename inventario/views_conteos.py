@@ -2,12 +2,14 @@
 from decimal import Decimal
 from copy import copy
 import json
+import logging
 from io import BytesIO
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
 from django.http import HttpResponse, JsonResponse
@@ -112,6 +114,7 @@ def _context(request, count, *, ack='', ack_version=None):
             'lista_url':_url(request,'lista'),'accion_url':_url(request,'accion',count.pk),
             'detalle_url':_url(request,'detalle',count.pk),'export_url':_url(request,'exportar',count.pk),
             'catalogo_url':_url(request,'catalogo',count.pk),
+            'diagnostico_url':_url(request,'diagnostico',count.pk),
             'evidencia_url':_url(request,'evidencia',count.pk), 'usuario_id':request.user.pk,
             'evidencias':_evidence_links(request,count,editable)}
 
@@ -349,6 +352,27 @@ def preparar(request):
         if _async(request):
             return JsonResponse({'ok':False,'toast':{'type':'error','message':' '.join(str(e) for errors in form.errors.values() for e in errors),'persistent':True}},status=400)
     return render(request,'inventario/conteos/preparar.html',{'base_template':_base(request),'es_app':es_app,'sucursal_asignada':assigned,'catalogo_sucursal':catalog_branch,'form':form,'catalogo':catalog,'tipo':tipo,'q':query,'lista_url':_url(request,'lista')})
+
+
+@login_required
+@never_cache
+@require_POST
+def diagnostico(request, pk):
+    count = _count(request, pk)
+    if not puede_capturar(request.user, count):
+        raise PermissionDenied
+    code = request.POST.get('code', '')
+    if code not in {'captura_incompleta', 'guardado_no_confirmado', 'error_javascript'}:
+        return HttpResponse(status=400)
+    # Browser reports are diagnostic claims, not evidence of a completed count.
+    key = f'conteos-diagnostico:{request.user.pk}:{count.pk}:{code}'
+    if cache.add(key, True, 60):
+        logging.getLogger(__name__).warning('conteo_cliente %s', json.dumps({
+            'code': code, 'conteo_id': count.pk, 'user_id': request.user.pk,
+            'version': count.version, 'estado': count.estado,
+            'browser': request.headers.get('User-Agent', '')[:300],
+        }, ensure_ascii=True))
+    return HttpResponse(status=204)
 
 
 def _excel_text(value):

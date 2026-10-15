@@ -31,6 +31,50 @@ class ConteoViewsTests(TestCase):
     def url(self, name='detalle'):
         return reverse('operacion:conteos_app:' + name, args=[self.count.pk])
 
+    def test_diagnostics_are_scoped_throttled_and_exclude_capture_data(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client.force_login(self.operator)
+        before = self.count.version
+        with self.assertLogs('inventario.views_conteos', level='WARNING') as logs:
+            response = self.client.post(self.url('diagnostico'), {
+                'code': 'captura_incompleta', 'cantidad': '98765',
+                'observaciones': 'nota privada',
+            }, HTTP_USER_AGENT='Safari test')
+            self.assertEqual(response.status_code, 204)
+            self.assertEqual(self.client.post(self.url('diagnostico'), {
+                'code': 'captura_incompleta'}).status_code, 204)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn('Safari test', logs.output[0])
+        self.assertNotIn('98765', logs.output[0])
+        self.assertNotIn('nota privada', logs.output[0])
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.version, before)
+        self.assertEqual(self.client.post(self.url('diagnostico'), {'code':'arbitrary'}).status_code, 400)
+        self.client.force_login(self.other)
+        self.assertEqual(self.client.post(self.url('diagnostico'), {'code':'error_javascript'}).status_code, 404)
+
+    def test_partial_save_replay_keeps_state_and_rejects_stale_overwrite(self):
+        import json
+        from inventario.models_conteos import LecturaConteoSucursal
+        self.client.force_login(self.operator)
+        headers = {'HTTP_X_REQUESTED_WITH':'XMLHttpRequest'}
+        self.client.post(self.url('accion'), {'action':'iniciar','version':1,'request_id':str(uuid4())}, **headers)
+        line = self.count.lineas.get()
+        body = {'action':'guardar','version':2,'request_id':str(uuid4()),
+                'lecturas_json':json.dumps({str(line.pk):{'cantidad':'2.5','incidencia':'','contado_en':''}})}
+        first = self.client.post(self.url('accion'), body, **headers)
+        self.assertEqual(first.status_code, 200)
+        replay = self.client.post(self.url('accion'), body, **headers)
+        self.assertEqual(replay.json()['result'], first.json()['result'])
+        body['request_id'] = str(uuid4())
+        body['lecturas_json'] = json.dumps({str(line.pk):{'cantidad':'9','incidencia':''}})
+        self.assertEqual(self.client.post(self.url('accion'), body, **headers).status_code, 409)
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.estado, 'CAPTURA')
+        self.assertEqual(self.count.version, 3)
+        self.assertEqual(str(LecturaConteoSucursal.objects.get(linea=line).cantidad), '2.500000')
+
     def test_assigned_capture_is_blind_no_reference_data(self):
         self.client.force_login(self.operator)
         self.count.referencia = {'secret_expected_stock':'314159', 'lineas':{}}
