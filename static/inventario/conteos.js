@@ -185,7 +185,8 @@
       }
       var attempt=pending, data=new FormData();
       attempt.entries.forEach(function(pair){data.append(pair[0],pair[1]);});
-      data.set('csrfmiddlewaretoken',form.elements.csrfmiddlewaretoken.value);
+      var csrfCookie=document.cookie.split('; ').find(function(item){return item.indexOf('csrftoken=')===0;});
+      data.set('csrfmiddlewaretoken',csrfCookie?decodeURIComponent(csrfCookie.slice(10)):form.elements.csrfmiddlewaretoken.value);
       var sentAction=data.get('action'),sentId=data.get('request_id');
       persist();saving=true;state(root,'Guardando en el servidor…');
       // Manual actions can replace the form; prevent edits that replacement would discard.

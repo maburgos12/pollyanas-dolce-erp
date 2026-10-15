@@ -18,7 +18,7 @@ function setup() {
     set(k,v) { this.data.set(k,v); } append(k,v) { this.set(k,v); } get(k) { return this.data.get(k); } entries() { return this.data.entries(); }
   }
   const context = { root, form, activeRoot: root, saveTimer:null, saving:false, stopped:false, conflict:false, pending:null,
-    navigator:{onLine:true}, confirmed:null, valid:()=>true, values:()=>({...current}),
+    document:{cookie:'csrftoken=renewed-session-token'}, navigator:{onLine:true}, confirmed:null, valid:()=>true, values:()=>({...current}),
     window:{clearTimeout(){},setTimeout(){return 1;},scrollY:0}, sessionStorage:{setItem(){}},
     state:(_,message)=>stateChanges.push(message), notice:message=>notices.push(message),
     persist(){}, scheduleSave(){}, remove(){}, key:()=>'', uuid:()=> 'next-intent', report(){},
@@ -36,6 +36,7 @@ function setup() {
 }
 (async()=>{
   const normal=setup();await normal.context.save('guardar',true);
+  assert.equal(normal.requests[0].body.csrfmiddlewaretoken,'renewed-session-token');
   assert.equal(normal.requests[0].url,'/app/conteos/44/accion/'); // form.action is shadowed by named controls in Safari too.
   assert.equal(normal.context.root.dataset.version,'3');assert.equal(normal.context.pending,null);
   assert.match(normal.stateChanges.at(-1),/Guardado en servidor/);
