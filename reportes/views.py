@@ -4087,6 +4087,8 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
         q=selected_q,
     )
     profitability_panel = finance_context["profitability_panel"]
+    from reportes.services_mano_obra_mensual import analisis_aprobado, puede_revisar
+    mano_obra_mensual = analisis_aprobado(selected_budget_period.strftime('%Y-%m'))
     budget_vs_actual = BudgetVsActualSnapshotService().build_snapshot(
         period_start=selected_budget_period,
         dry_run=True,
@@ -4100,6 +4102,8 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
         "margen_pct": margen_pct,
         "selected_budget_period": selected_budget_period.strftime("%Y-%m"),
         "budget_vs_actual": budget_vs_actual,
+        "mano_obra_mensual": mano_obra_mensual,
+        "puede_revisar_mano_obra": puede_revisar(request.user),
         "dashboard_charts_year": selected_budget_period.year,
         "hero_delta_pct": hero_delta_pct.quantize(Decimal("0.01")) if hero_delta_pct is not None else None,
         "module_tabs": _reportes_module_tabs("financiero"),

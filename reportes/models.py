@@ -410,6 +410,21 @@ class CargaGastoOperativoArchivo(models.Model):
         return f"{self.original_filename} [{self.status}]"
 
 
+class CierreManoObraMensual(models.Model):
+    """Revisión aprobada, con sus fuentes; nunca reemplaza nómina o costos MP."""
+
+    periodo = models.DateField(db_index=True)
+    revision = models.PositiveIntegerField()
+    fingerprint = models.CharField(max_length=64)
+    resultado = models.JSONField()
+    aprobado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    aprobado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['-periodo', '-revision']
+        constraints = [models.UniqueConstraint(fields=['periodo', 'revision'], name='mo_mes_revision_unica')]
+
+
 class ProductoCostoOperativoMensual(models.Model):
     periodo = models.DateField(db_index=True)
     receta = models.ForeignKey(

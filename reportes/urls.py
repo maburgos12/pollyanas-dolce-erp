@@ -4,6 +4,7 @@ from . import views
 from . import investment_views
 from . import views_inventory_traceability
 from . import views_mano_obra_area
+from . import views_mano_obra_mensual
 from . import views_presupuesto_real
 from . import views_presupuesto_catalogos
 from . import views_planeacion_personal
@@ -12,6 +13,7 @@ from .views_produccion import ProducidoVsVendidoMermaView
 app_name = "reportes"
 
 urlpatterns = [
+    path('mano-obra-mensual/', views_mano_obra_mensual.mensual, name='mano_obra_mensual'),
     path(
         "auditoria-inventario/",
         views_inventory_traceability.dashboard,

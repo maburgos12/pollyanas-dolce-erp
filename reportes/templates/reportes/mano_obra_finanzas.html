@@ -1,0 +1,13 @@
+{% load humanize %}
+<section class="card" id="mano-obra-aprobada" style="padding:24px;margin-bottom:24px">
+ <h2>Mano de obra mensual · {{ mano_obra_mensual.periodo }}</h2>
+ {% if puede_revisar_mano_obra %}<p><a href="{% url 'reportes:mano_obra_mensual' %}?periodo={{ mano_obra_mensual.periodo }}">Revisar simulación y cierre mensual</a></p>{% endif %}
+ {% if mano_obra_mensual.cierre %}
+ <p>Revisión aprobada {{ mano_obra_mensual.cierre.revision }} · {{ mano_obra_mensual.cierre.aprobado_en|date:"d/m/Y" }}. Precio promedio de ventas vinculadas a receta en Point, del mismo mes. Diferencia por unidad, no utilidad contable ni costo real de ventas.</p>
+ <details><summary>Comparar fabricación y despacho de {{ mano_obra_mensual.filas|length }} productos</summary>
+ <div class="table-responsive" style="overflow-x:auto"><table class="table"><thead><tr><th>Producto</th><th>Precio promedio</th><th>Materia prima / u.</th><th>Fabricación / u.</th><th>Con despacho / u.</th><th>Diferencia por unidad</th></tr></thead><tbody>
+ {% for p in mano_obra_mensual.filas %}<tr><td>{{ p.nombre }}</td><td>{% if p.precio is not None %}${{ p.precio|floatformat:2|intcomma }}{% else %}Sin venta vinculada{% endif %}</td><td>${{ p.mp|floatformat:2|intcomma }}</td><td>${{ p.fabricacion|floatformat:2|intcomma }}</td><td>${{ p.con_despacho|floatformat:2|intcomma }}</td><td>{% if p.margen is not None %}${{ p.margen|floatformat:2|intcomma }}{% else %}Pendiente{% endif %}</td></tr>{% endfor %}
+ </tbody></table></div></details>
+ <p>Este análisis usa el cierre aprobado. No modifica el margen MP mostrado abajo ni descuenta nuevamente la nómina en el estado de resultados.</p>
+ {% else %}<p><strong>Mano de obra pendiente.</strong> No hay cierre aprobado para este mes. Los márgenes MP de esta pantalla todavía no incluyen personal ni despacho.</p>{% endif %}
+</section>
