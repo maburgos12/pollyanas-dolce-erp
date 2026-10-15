@@ -297,6 +297,8 @@ def descargar_paquete(
     if paquete is not None and paquete.text:
         return paquete.text.strip()
     result = find_first_element(root, "DescargarResult")
+    if result is None:
+        result = find_first_element(root, "respuesta")
     if result is not None:
         code = result.get("CodEstatus")
         message = result.get("Mensaje") or "SAT no devolvio Paquete"

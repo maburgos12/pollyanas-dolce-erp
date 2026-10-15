@@ -153,7 +153,28 @@ def procesar_solicitud(solicitud: SolicitudDescarga) -> dict:
             )
             if paquete in solicitud.paquetes_procesados:
                 continue
-            contenido = descargar_paquete(paquete, token=obtener_token())
+            if paquete not in solicitud.paquetes_pendientes:
+                try:
+                    contenido = descargar_paquete(paquete, token=obtener_token())
+                except SatServiceError as exc:
+                    if exc.code != "5008":
+                        raise
+                    solicitud.estado = SolicitudDescarga.ESTADO_VENCIDA
+                    solicitud.codigo_estado = exc.code
+                    solicitud.error_detalle = str(exc)
+                    solicitud.save(update_fields=[
+                        "estado", "codigo_estado", "error_detalle", "actualizado_en"
+                    ])
+                    result["estado"] = "bloqueada"
+                    return result
+                solicitud.paquetes_pendientes[paquete] = contenido
+                solicitud.save(update_fields=["paquetes_pendientes", "actualizado_en"])
+        # Guardar el paquete antes de interpretar: SAT limita sus descargas.
+        with transaction.atomic():
+            solicitud = SolicitudDescarga.objects.select_for_update().get(pk=solicitud.pk)
+            if paquete in solicitud.paquetes_procesados:
+                continue
+            contenido = solicitud.paquetes_pendientes[paquete]
             if solicitud.tipo_solicitud == "Metadata":
                 rows = extraer_metadata(
                     contenido,
@@ -183,8 +204,9 @@ def procesar_solicitud(solicitud: SolicitudDescarga) -> dict:
                     tipo_cfdi=_tipo_cfdi_desde_direccion(solicitud.direccion),
                 )
             solicitud.paquetes_procesados[paquete] = total
+            del solicitud.paquetes_pendientes[paquete]
             solicitud.save(
-                update_fields=["paquetes_procesados", "metadata", "actualizado_en"]
+                update_fields=["paquetes_procesados", "paquetes_pendientes", "metadata", "actualizado_en"]
             )
             result["descargados"] += total
             result["nuevos"] += nuevos
@@ -346,7 +368,7 @@ def actualizar_cobertura_sat(*, desde: date | None = None) -> dict:
                     fecha_inicial=inicio,
                     folio="",
                 ).first()
-                reciente = latest and latest.creado_en >= timezone.now() - timedelta(
+                reciente = latest and latest.estado != 6 and latest.creado_en >= timezone.now() - timedelta(
                     days=7
                 )
                 reanudable = latest and (

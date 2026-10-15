@@ -24,6 +24,8 @@ UUID del XML y Uuid de metadata representan el mismo folio fiscal, validando RFC
 
 Reutilizar CfdiDescargado como único archivo de originales. Extender SolicitudDescarga con folio consultado, avance por paquete e inventario metadata de esa consulta. El inventario es evidencia fechada del SAT, no otra tabla maestra de facturas. La consulta por UUID no cuenta como cobertura de un día. Metadata permite distinguir cancelaciones sin borrar XML ni convertir documentos sin XML en facturas completas. Conservar vínculos existentes y conciliado; reimportar pagos mediante actualización por su clave en una transacción.
 
+Los paquetes descargados pendientes de interpretar se conservan en la misma solicitud, en `paquetes_pendientes`, antes de procesarlos. Se retiran de ese campo solamente al confirmar su importación. La respuesta real 5008 limita la descarga del paquete; un error de parser no debe perder el contenido ni volver a descargarlo. El TXT auxiliar `_tercero.txt` no es el inventario de CFDI. Una solicitud no disponible (5004/estado0) o con paquetes agotados (5008) queda vencida; el inventario metadata se puede renovar respetando las cuotas de solicitudes existentes.
+
 El cambio añade columnas, no altera ni elimina migraciones previas. Los consumidores existentes mantienen el contrato del XML y sus PK/UUID. No cambia nómina, gastos, reparto o reglas contables.
 
 ## Procedimiento y límites
