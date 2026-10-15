@@ -187,3 +187,10 @@
 .count-close-line dl {display:flex;flex-wrap:wrap;gap:1rem 2rem;margin:.5rem 0}
 .count-close-line dd {margin:0;font-weight:700}
 .count-close-line p {overflow-wrap:anywhere}
+
+/* Keep iOS focus readable without input zoom or clipping the home indicator. */
+@media (max-width: 640px) {
+  .conteos-page input, .conteos-page textarea { font-size: 16px; }
+  .count-sticky { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+.count-line input { scroll-margin-block: 100px; }

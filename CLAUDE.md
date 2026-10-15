@@ -694,3 +694,24 @@ andamio para arrancar donde no había facturas, y se va retirando conforme cada
 rubro consigue su fuente viva. Un dato inventado que entre al ERP contamina
 justo aquello que lo hace confiable, y a diferencia de un error de código,
 nadie lo detecta después.
+
+## Capturas móviles: iPhone y Safari como plataforma principal
+
+El personal utiliza principalmente iPhone. Todo cambio en formularios y flujos
+operativos móviles debe considerar Safari y la app instalada en iOS desde el diseño:
+
+- Verificar WebKit además del navegador de escritorio: teclado decimal, fechas,
+  campos ocultos, foco en el error, controles de al menos 44 px y áreas seguras.
+- Conservar borradores por usuario, registro y ronda hasta confirmación del servidor.
+  Un estado local o HTTP 200 sin recibo válido no significa guardado confirmado.
+- Probar conexión interrumpida, respuesta perdida, sesión vencida, cambio de pestaña,
+  suspensión/retorno y ediciones durante guardado. No depender solo de beforeunload.
+- Reutilizar control de versiones e idempotencia. Ante resultado incierto, conservar
+  el intento exacto; no sobrescribir ni reenviar automáticamente datos operativos.
+- Indicar el campo concreto que bloquea y hacerlo visible, aunque esté en otra pestaña.
+- Mantener diagnóstico acotado de fallos sin cantidades, notas, credenciales ni fotos.
+- Distinguir pruebas automatizadas WebKit, Safari de Mac y un iPhone físico. Declarar
+  qué se verificó; la emulación no prueba teclado, suspensión ni almacenamiento de iOS.
+
+Estas reglas aplican al código que se cree o modifique; no autorizan cambios masivos
+ni alteración de capturas existentes.
