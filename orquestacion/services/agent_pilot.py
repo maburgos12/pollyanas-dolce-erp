@@ -46,6 +46,11 @@ def is_pilot_participant(user) -> bool:
             and get_user_model().objects.filter(pk=user.pk, is_active=True).exists())
 
 
+def can_use_read_agent(user) -> bool:
+    return (getattr(settings, "AI_AGENT_READ_ENABLED", False) is True
+            and is_pilot_participant(user))
+
+
 def estimate_turn(message) -> dict | None:
     """Read-only standard-price reference; never releases a committed reservation."""
     from .agent_audio import MAX_SECONDS as max_audio_seconds

@@ -42,7 +42,8 @@ def _assistant_error_payload(*, assistant_message, detail: str, technical_error:
 def _ensure_ai_private_access(user) -> None:
     if not user or not user.is_authenticated:
         raise PermissionDenied("La sesión no está autenticada.")
-    if not can_view_orquestacion(user):
+    from .services.agent_pilot import can_use_read_agent
+    if not (can_view_orquestacion(user) or can_use_read_agent(user)):
         raise PermissionDenied("No tienes permisos para consultar la IA privada.")
 
 

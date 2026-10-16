@@ -15,7 +15,7 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import serializers
 
-from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, fresh_asset_user, can_read_assets, json_dto
+from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, fresh_asset_user, json_dto
 from compras.access_departamentales import _areas_usuario, _areas_lectura_solicitudes, _es_direccion, _puede_ver_solicitud, puede_gestionar_compras_departamentales
 from compras.models import SolicitudCompraDepartamental, EventoCompraDepartamental
 from compras.services_solicitudes import crear_solicitud
@@ -23,7 +23,7 @@ from core.models import AuditLog
 from orquestacion.models import ChatConversation, ChatMessage, ChatToolCall, ChatToolResult
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable
 from .agent_incidents import IncidentConfirmation
-from .agent_pilot import is_pilot_participant
+from .agent_pilot import is_pilot_participant, can_use_read_agent
 from .agent_workflows import WorkflowError
 
 KEY = 'purchase.prepare'
@@ -81,9 +81,8 @@ SERIALIZERS = {'purchase.requirements': SearchArguments, 'purchase.search': Sear
 
 def enabled(user):
     actor = fresh_asset_user(user)
-    return bool(actor and getattr(settings, 'AI_AGENT_READ_ENABLED', False) is True
-        and getattr(settings, 'AI_AGENT_INCIDENTS_ENABLED', False) is True and can_read_assets(actor)
-        and is_pilot_participant(actor)
+    return bool(can_use_read_agent(actor)
+        and getattr(settings, 'AI_AGENT_INCIDENTS_ENABLED', False) is True
         and (puede_gestionar_compras_departamentales(actor) or _areas_usuario(actor).exists()))
 
 

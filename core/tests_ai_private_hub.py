@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from unittest.mock import patch
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from core.access import ROLE_DG, ROLE_PRODUCCION
@@ -68,6 +68,21 @@ class AIPrivateHubViewTests(TestCase):
         self.assertContains(response, "requiere revisión de sus controles")
         self.assertContains(response, 'id="erp-chat-send-btn" disabled')
         status.assert_called_once_with(response.wsgi_request.user)
+
+    def test_pilot_participant_can_open_agent_without_governance_access(self):
+        from core.access import can_view_orquestacion
+        from core.navigation import build_nav_groups
+        self.client.force_login(self.produccion)
+        with override_settings(AI_AGENT_READ_ENABLED=True, AI_AGENT_PILOT_USER_ID=self.produccion.pk):
+            self.assertFalse(can_view_orquestacion(self.produccion))
+            response = self.client.get(reverse('ai_private_hub'))
+            self.assertEqual(response.status_code, 200)
+            urls = [item['url'] for group in build_nav_groups(self.produccion, '/ia-privada/') for item in group['items']]
+            self.assertIn('/ia-privada/', urls)
+            self.assertNotIn('/orquestacion/', urls)
+            response = self.client.get(reverse('orquestacion:chat_conversations_api'))
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get(reverse('ai_private_hub')).status_code, 403)
 
     def test_ai_private_hub_forbidden_for_non_governance_role(self):
         self.client.force_login(self.produccion)
