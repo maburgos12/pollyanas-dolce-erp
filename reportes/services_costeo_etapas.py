@@ -91,7 +91,7 @@ def leer_logistica(inicio, fin, mo):
         if duracion is None or duracion <= 0 or duracion > 24 or r['estatus'] != 'COMPLETADA':
             r['pendiente'] = 'Duración pendiente de validar'
     for p in personal.values():
-        propias = [r for r in rutas if p['usuario_id'] in
+        propias = [r for r in rutas if p['usuario_id'] is not None and p['usuario_id'] in
                    {usuarios.get(r['repartidor_id']), usuarios.get(r['acompanante_id'])}]
         validas = [r for r in propias if not r['pendiente']]
         # Intervalos superpuestos no se cobran dos veces al mismo empleado.

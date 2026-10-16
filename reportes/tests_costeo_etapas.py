@@ -54,6 +54,13 @@ class LogisticaTests(SimpleTestCase):
         self.assertEqual(d['pendiente'], Decimal('80'))
         self.assertEqual(d['exclusiones'], {2: Decimal('100')})
 
+    def test_usuario_erp_ausente_no_coincide_con_acompanante_vacio(self):
+        r, t, n = self.datos()
+        n['empleado__usuario_erp_id'] = None
+        d = self.calcular([r], [t], [n])
+        self.assertIsNone(d['rutas'][0]['nomina'])
+        self.assertEqual(d['personal'][0]['pendiente'], Decimal('100'))
+
     def test_odometro_faltante_no_redistribuye_a_otras_rutas(self):
         r, t, n = self.datos()
         incompleta = {**t, 'id': 2, 'folio': 'B2', 'km_llegada': None}
