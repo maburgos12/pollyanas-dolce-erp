@@ -210,13 +210,26 @@ def importar_lista_raya_nomina(
                     empleados_to_create.append(empleado)
             else:
                 empleados_to_update.append(empleado)
+            if not empleado._state.adding:
+                # Un código reutilizado no autoriza reemplazar la identidad de RRHH.
+                for campo in ("nombre", "rfc", "curp", "nss"):
+                    anterior = normalizar_nombre(getattr(empleado, campo))
+                    entrante = normalizar_nombre(getattr(row, campo))
+                    if campo != "nombre":
+                        anterior = re.sub(r"[^a-z0-9]", "", anterior)
+                        entrante = re.sub(r"[^a-z0-9]", "", entrante)
+                    if anterior and entrante and anterior != entrante:
+                        raise ValueError(
+                            f"El código {row.codigo} tiene una discrepancia de identidad "
+                            f"en {campo}. Revisa la ficha RRHH y CONTPAQi antes de importar."
+                        )
             empleados_by_row_codigo[row.codigo] = empleado
             empleado.nombre = row.nombre
             empleado.nombre_normalizado = normalizar_nombre(row.nombre)
             empleado.rfc = row.rfc
             empleado.curp = row.curp
             empleado.nss = row.nss
-            empleado.area = row.area
+            empleado.area = empleado.area or row.area
             if empleado._state.adding or empleado.activo:
                 empleado.fecha_ingreso = row.fecha_ingreso or timezone.localdate()
             empleado.salario_diario = row.salario_diario
