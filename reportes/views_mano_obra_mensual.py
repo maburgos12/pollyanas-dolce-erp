@@ -13,6 +13,7 @@ from django.views.decorators.http import require_http_methods
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
+from reportes.services_costeo_etapas import calcular_etapas
 from reportes.models import CierreManoObraMensual
 from reportes.services_mano_obra_mensual import aprobar, calcular, limites, puede_revisar
 
@@ -40,6 +41,7 @@ def mensual(request):
                 messages.error(request, ' '.join(exc.messages))
         return redirect(f"{reverse('reportes:mano_obra_mensual')}?periodo={periodo}")
     datos = calcular(periodo)
+    datos['etapas'] = calcular_etapas(datos)
     if request.GET.get('exportar') == 'xlsx':
         return exportar(datos)
     historial = CierreManoObraMensual.objects.filter(periodo=inicio).select_related('aprobado_por').order_by('-revision')
@@ -76,6 +78,26 @@ def exportar(datos):
         fuente.append(row)
     for nota in datos['pendientes'] + datos['notas']:
         fuente.append([nota])
+    etapas = datos.get('etapas')
+    if etapas:
+        distribucion = wb.create_sheet('Distribucion provisional')
+        distribucion.append(['Ruta', 'Horas de apertura', 'Nómina de referencia', 'Combustible asignado', 'Pendiente'])
+        for r in etapas['logistica']['rutas']:
+            distribucion.append([r['folio'], r['horas'], r['nomina'], r['combustible'], r['pendiente']])
+        distribucion.append(['Fondo conocido', etapas['logistica']['fondo']])
+        distribucion.append(['Asignado a rutas', etapas['logistica']['asignado']])
+        distribucion.append(['Sin asignar a rutas', etapas['logistica']['pendiente']])
+        distribucion.append(['No equivale a costo completo ni asignación por producto/sucursal.'])
+        venta = wb.create_sheet('Venta por sucursal')
+        venta.append(['Sucursal', 'Ventas', 'Fabricación identificada', 'Gasto de venta parcial', 'Nómina retirada a otras etapas', 'Productos sin costo'])
+        for s in etapas['sucursales']:
+            venta.append([s['nombre'], s['ventas'], s['fabricacion'], s['gasto_venta'], s['nomina_retirada'], s['pendientes_producto']])
+        detalle = wb.create_sheet('Costo vendido provisional')
+        detalle.append(['Sucursal', 'Producto', 'Cantidad vendida', 'Venta', 'Fabricación por unidad', 'Fabricación vendida', 'Gasto de venta por unidad', 'Contribución parcial antes de distribución'])
+        for s in etapas['sucursales']:
+            for p in s['productos']:
+                detalle.append([s['nombre'], p['product_name'], p['total_quantity'], p['total_sales'], p['fabricacion_unitaria'], p['fabricacion'], p['gasto_venta_unitario'], p['contribucion_parcial']])
+        venta.append(['Distribución por sucursal pendiente; no es utilidad neta. Costeo mensual, no FIFO.'])
     for ws in wb:
         ws.freeze_panes = 'C4' if ws == sheet else 'A2'
         for cells in ws:

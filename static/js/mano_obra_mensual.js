@@ -2,7 +2,9 @@
   const panels = [...document.querySelectorAll('.mo-panel')];
   const tabs = [...document.querySelectorAll('.mo-tabs a')];
   function showTab(id) {
-    if (!panels.some(panel => panel.id === id)) id = 'productos';
+    const target = document.getElementById(id);
+    if (target?.tagName === 'DETAILS') target.open = true;
+    id = target?.closest('.mo-panel')?.id || 'productos';
     panels.forEach(panel => { panel.hidden = panel.id !== id; });
     tabs.forEach(tab => { tab.classList.toggle('active', tab.dataset.openTab === id); tab.setAttribute('aria-current', tab.dataset.openTab === id ? 'page' : 'false'); });
   }
