@@ -90,9 +90,9 @@ class MiEquipoTests(TestCase):
             self.emp.save()
 
     def test_validacion_fechas_horas_identificadores_y_motivo(self):
-        for overrides in ({"fecha_fin": "invalida"}, {"fecha_fin": f"{self.fecha}T09:00:00-07:00"}, {"motivo": " "}, {"empleado": "x"}, {"empleado": None}):
+        for overrides in ({"motivo": 123}, {"fecha_fin": "invalida"}, {"fecha_fin": f"{self.fecha}T09:00:00-07:00"}, {"motivo": " "}, {"empleado": "x"}, {"empleado": None}):
             self.assertEqual(self.api.post(self.permisos, {**self.permiso(), **overrides}, format="json").status_code, 400)
-        for overrides in ({"horas": "NaN"}, {"horas": "Infinity"}, {"horas": "-1"}, {"horas": "100"}, {"fecha": "2026-02-30"}, {"notas": " "}, {"empleado": "x"}):
+        for overrides in ({"notas": 123}, {"horas": "NaN"}, {"horas": "Infinity"}, {"horas": "-1"}, {"horas": "100"}, {"fecha": "2026-02-30"}, {"notas": " "}, {"empleado": "x"}):
             self.assertEqual(self.api.post(self.extras, {**self.extra(), **overrides}, format="json").status_code, 400)
         self.assertFalse(PermisoSalida.objects.exists())
         self.assertFalse(HoraExtra.objects.exists())

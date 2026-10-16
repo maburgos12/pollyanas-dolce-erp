@@ -27,6 +27,12 @@ def mi_equipo(request):
     return render(request, "rrhh/mi_equipo.html", {"tipos_permiso": PermisoSalida.TIPO_CHOICES})
 
 
+def validar_texto(request, campo):
+    valor = request.data.get(campo)
+    if not isinstance(valor, str) or not valor.strip():
+        raise serializers.ValidationError({campo: "Captura un texto obligatorio."})
+
+
 class PermisosMiEquipoViewSet(BasePermisosEquipoViewSet):
     def empleados_queryset(self):
         return empleados_equipo(self.request.user)
@@ -34,7 +40,7 @@ class PermisosMiEquipoViewSet(BasePermisosEquipoViewSet):
     def _validar(self, request):
         datos = PermisoSalidaSerializer(data=request.data, context={"request": request})
         datos.is_valid(raise_exception=True)
-        serializers.CharField(allow_blank=False).run_validation(request.data.get("motivo"))
+        validar_texto(request, "motivo")
 
     @transaction.atomic
     def create(self, request):
@@ -45,6 +51,7 @@ class PermisosMiEquipoViewSet(BasePermisosEquipoViewSet):
     @transaction.atomic
     def editar(self, request, pk=None):
         self.get_object()
+        validar_texto(request, "motivo_cambio")
         self._validar(request)
         return super().editar(request, pk=pk)
 
@@ -56,7 +63,7 @@ class HorasExtraMiEquipoViewSet(BaseHorasExtraEquipoViewSet):
     def _validar(self, request):
         serializers.DateField().run_validation(request.data.get("fecha"))
         serializers.DecimalField(max_digits=4, decimal_places=2, min_value=Decimal("0.01")).run_validation(request.data.get("horas"))
-        serializers.CharField(allow_blank=False).run_validation(request.data.get("notas"))
+        validar_texto(request, "notas")
 
     def create(self, request):
         serializers.IntegerField(min_value=1).run_validation(request.data.get("empleado"))
@@ -69,6 +76,7 @@ class HorasExtraMiEquipoViewSet(BaseHorasExtraEquipoViewSet):
     @transaction.atomic
     def editar(self, request, pk=None):
         original = self.get_object()
+        validar_texto(request, "motivo_cambio")
         self._validar(request)
         destino = serializers.DateField().run_validation(request.data.get("fecha"))
         original, _ = bloquear_hora_extra(original.pk, jornadas_adicionales=[(original.empleado_id, destino)])
