@@ -106,6 +106,7 @@ NAV_GROUPS = [
         "label": "Mi trabajo",
         "url": "/seguimiento/",
         "items": [
+            ("rrhh", "mi_equipo", "Mi equipo", "/rrhh/mi-equipo/", ["/rrhh/mi-equipo/"]),
             ("seguimiento", "minutas", "Minutas", "/seguimiento/minutas/", ["/seguimiento/minutas/"]),
             ("seguimiento", "proyectos", "Proyectos", "/seguimiento/proyectos/", ["/seguimiento/proyectos/"]),
             ("seguimiento", "compromisos", "Compromisos", "/seguimiento/compromisos/", ["/seguimiento/compromisos/"]),
@@ -364,7 +365,14 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
 
                 if not puede_ver_cumpleanos(user):
                     continue
+            if module == "rrhh" and submodule == "mi_equipo":
+                from rrhh.views_equipo import empleados_equipo
+
+                if not (user and user.is_authenticated and empleados_equipo(user).exists()):
+                    continue
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
+            if module == "rrhh" and submodule == "mi_equipo":
+                tiene_acceso_personal = True
             if module == "rrhh" and submodule == "cumpleanos":
                 tiene_acceso_personal = True
             tiene_acceso_departamental = False

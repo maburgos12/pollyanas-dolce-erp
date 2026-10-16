@@ -1,0 +1,20 @@
+.equipo-page { max-width: 1100px; margin: 0 auto; }
+.equipo-page h1 { font-size: 1.6rem; }
+.equipo-page h2 { font-size: 1.2rem; }
+.equipo-page p { max-width: 72ch; color: var(--texto, #3D2B2B); }
+.equipo-toolbar, .equipo-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .75rem; }
+.equipo-toolbar h2 { margin-right: auto; }
+.equipo-form, .equipo-form fieldset { display: grid; gap: 1rem; }
+.equipo-form fieldset { grid-template-columns: repeat(2, minmax(0, 1fr)); border: 0; padding: 0; }
+.equipo-form label { display: grid; gap: .35rem; }
+.equipo-form input, .equipo-form select, .equipo-form textarea { width: 100%; min-height: 44px; padding: .65rem; border: 1px solid #7A6565; border-radius: 6px; color: #3D2B2B; background: #fff; font: inherit; box-sizing: border-box; }
+.equipo-wide { grid-column: 1 / -1; }
+#equipo-editor { padding: 1.25rem 0; border-block: 1px solid #d7c7ce; margin-block: 1rem; }
+.equipo-registro { padding: 1.25rem 0; border-bottom: 1px solid #d7c7ce; }
+.equipo-registro h3 { margin: 0 0 .5rem; font-size: 1rem; font-weight: 700; }
+.equipo-registro p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.equipo-page [hidden] { display: none !important; }
+.equipo-page button:focus-visible, .equipo-page a:focus-visible { outline: 3px solid #8B2252; outline-offset: 3px; }
+.equipo-page button:disabled { opacity: .6; cursor: wait; }
+#equipo-status[data-error="true"] { color: #a51b1b; }
+@media (max-width: 600px) { .equipo-form fieldset { grid-template-columns: 1fr; } .equipo-actions .btn { width: 100%; } }

@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Mi equipo · Permisos y horas extra{% endblock %}
+{% block page_title %}Mi equipo{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/mi-equipo.css' %}">{% endblock %}
+{% block content %}
+<section id="mi-equipo" class="equipo-page">
+  <header><h1>Permisos y horas extra</h1><p>Registra y corrige solicitudes de tus colaboradores directos. Cada solicitud conserva su autorización correspondiente.</p><a href="/rrhh/app/permisos/">Mis solicitudes personales</a></header>
+  <nav class="module-tabs rrhh-tabs" aria-label="Registros de mi equipo">
+    <button type="button" class="module-tab active" data-recurso="permisos" aria-pressed="true">Permisos</button>
+    <button type="button" class="module-tab" data-recurso="horas-extra" aria-pressed="false">Horas extra</button>
+  </nav>
+  <p id="equipo-status" role="status" aria-live="polite">Cargando registros…</p>
+  <div class="equipo-toolbar"><h2 id="equipo-list-title">Permisos de mi equipo</h2><button type="button" class="btn btn-primary" id="equipo-nuevo" disabled>Crear permiso</button><button type="button" class="btn" id="equipo-recargar">Actualizar</button></div>
+  <section id="equipo-editor" hidden aria-labelledby="equipo-form-title">
+    <h2 id="equipo-form-title" tabindex="-1">Nueva solicitud</h2>
+    <form id="equipo-form" class="equipo-form">
+      {% csrf_token %}
+      <label>Colaborador<select name="empleado" required></select></label>
+      <fieldset id="equipo-permiso"><legend>Detalle del permiso</legend>
+        <label>Tipo<select name="tipo">{% for value,label in tipos_permiso %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
+        <label>Desde<input type="datetime-local" name="fecha_inicio" required></label>
+        <label>Hasta (opcional)<input type="datetime-local" name="fecha_fin"></label>
+        <label>Goce de sueldo<select name="goce_sueldo"><option value="true">Con goce de sueldo</option><option value="false">Sin goce de sueldo</option></select></label>
+        <label class="equipo-wide">Motivo<textarea name="motivo" rows="3" required></textarea></label>
+      </fieldset>
+      <fieldset id="equipo-extra" hidden disabled><legend>Detalle de las horas extra</legend>
+        <label>Fecha<input type="date" name="fecha" required></label>
+        <label>Horas<input type="number" name="horas" min="0.01" max="99.99" step="0.01" required></label>
+        <label class="equipo-wide">Motivo y notas<textarea name="notas" rows="4" required></textarea></label>
+      </fieldset>
+      <label id="equipo-correccion" hidden>Motivo de la corrección<textarea name="motivo_cambio" rows="2" disabled></textarea></label>
+      <p>Registrar una solicitud no la autoriza. Las correcciones quedan registradas con tu usuario y motivo.</p>
+      <div class="equipo-actions"><button type="submit" class="btn btn-primary">Guardar solicitud</button><button type="button" class="btn" id="equipo-cancelar">Cerrar sin guardar</button></div>
+    </form>
+  </section>
+  <div id="equipo-registros" aria-labelledby="equipo-list-title" aria-busy="true"></div>
+</section>
+{% endblock %}
+{% block extra_js %}<script src="{% static 'js/mi-equipo.js' %}" defer></script>{% endblock %}

@@ -5,6 +5,7 @@ from . import (
     api_receptor,
     api_views,
     views,
+    views_equipo,
     views_gafetes,
     views_cumpleanos,
     views_clima,
@@ -28,6 +29,7 @@ router.register(r"api/vacaciones", api_views.SolicitudVacacionesViewSet, basenam
 router.register(r"api/prestamos", api_views.PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
+    path("mi-equipo/", views_equipo.mi_equipo, name="mi_equipo"),
     path("clima/", views_clima.campanas_clima, name="clima_campanas"),
     path("clima/<int:pk>/", views_clima.detalle_clima, name="clima_detalle"),
     path("clima/<int:pk>/participante/<int:participante_id>/acceso/", views_clima.acceso_individual_clima, name="clima_acceso_individual"),
@@ -137,3 +139,12 @@ urlpatterns = [
     path("prestamos/importar-contpaq/", views_prestamos.importar_contpaq, name="rrhh_importar_contpaq"),
     path("prestamos/quincena/", views_prestamos.quincena_cobros, name="rrhh_quincena_cobros"),
 ]
+
+# Solo las acciones de captura, corrección y resolución; sin borrado de registros.
+for recurso, vista, aprobar in [
+    ("permisos", views_equipo.PermisosMiEquipoViewSet, "preautorizar"),
+    ("horas-extra", views_equipo.HorasExtraMiEquipoViewSet, "autorizar"),
+]:
+    urlpatterns.append(path(f"api/mi-equipo/{recurso}/", vista.as_view({"get": "list", "post": "create"})))
+    for accion in ("editar", aprobar, "rechazar"):
+        urlpatterns.append(path(f"api/mi-equipo/{recurso}/<int:pk>/{accion}/", vista.as_view({"post": accion})))
