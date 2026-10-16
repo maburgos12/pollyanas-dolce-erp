@@ -52,10 +52,21 @@ def exportar(datos):
     sheet.title = 'Simulacion'
     sheet.append(['SIMULACIÓN — ' + datos['periodo'], 'No aplicada a los análisis'])
     sheet.append(['Fondo', datos['fondo'], 'Asignado', datos['asignado']])
-    sheet.append(['Producto', 'Código', 'Elaborado', 'Materia prima por unidad', 'Elaboración por unidad', 'Supervisión por unidad', 'Despacho por unidad', 'Mano de obra por unidad', 'Fabricación por unidad', 'Con despacho por unidad', 'Pendientes'])
+    sheet.append(['Producto', 'Código', 'Elaborado', 'Materia prima por unidad', 'Elaboración por unidad', 'Supervisión por unidad', 'Despacho por unidad', 'Mano de obra por unidad', 'Fabricación por unidad', 'Con despacho por unidad', 'Pendientes', 'Servicios por unidad', 'Fabricación con servicios', 'Con servicios y despacho'])
     for r in datos['productos']:
         componentes = [c['unitario'] for c in r['componentes']] or [None] * 3
-        sheet.append([r['nombre'], r['codigo'], r['cantidad'], r['mp'], *componentes, r['mo'], r['fabricacion'], r['con_despacho'], ' '.join(r['errores'])])
+        sheet.append([r['nombre'], r['codigo'], r['cantidad'], r['mp'], *componentes, r['mo'], r['fabricacion'], r['con_despacho'], ' '.join(r['errores']), r['servicios'], r['fabricacion_servicios'], r['con_despacho_servicios']])
+    servicios = wb.create_sheet('Servicios')
+    servicios.append(['Servicio', 'Real de Producción'])
+    for s in datos['servicios']['fondos']:
+        servicios.append([s['nombre'], s['monto']])
+    servicios.append(['Total', datos['servicios']['fondo']])
+    servicios.append(['Asignado', datos['servicios']['asignado']])
+    servicios.append(['Pendiente', datos['servicios']['pendiente']])
+    servicios.append(['Producto', 'Servicio', 'Asignado mensual', 'Por unidad'])
+    for r in datos['productos']:
+        for s in r['servicios_detalle']:
+            servicios.append([r['nombre'], s['nombre'], s['monto'], s['unitario']])
     personal = wb.create_sheet('Personal')
     personal.append(['Nombre', 'Puesto', 'Componente', 'Percepciones'])
     for p in datos['personas']:

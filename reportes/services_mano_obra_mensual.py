@@ -5,7 +5,7 @@ import json
 import unicodedata
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
@@ -17,7 +17,7 @@ from core.access import ROLE_ADMIN, ROLE_DG, can_view_reportes, has_any_role
 from core.models import AuditLog
 from pos_bridge.models import PointProductionLine, PointDailySale
 from recetas.models import RecetaCodigoPointAlias
-from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual
+from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, LineaPresupuestoMensual
 from rrhh.models import NominaLinea, NominaPeriodo
 
 COMPONENTES = {
@@ -26,6 +26,7 @@ COMPONENTES = {
     'despacho': 'Coordinación de despacho',
 }
 CENTAVO = Decimal('0.01')
+SERVICIOS = ('Agua potable', 'Energía eléctrica', 'Gas')
 
 
 def puede_revisar(user):
@@ -63,6 +64,12 @@ def leer_fuentes(periodo):
     inicio, fin = limites(periodo)
     periodos = NominaPeriodo.objects.filter(fecha_fin__range=(inicio, fin))
     queries = {
+        # El real consolidado ya contiene el reparto entre Matriz y Producción.
+        'servicios': LineaPresupuestoMensual.objects.filter(
+            periodo=inicio, version='ORIGINAL', rubro__activo=True,
+            rubro__area__codigo='produccion', rubro__sucursal__isnull=True,
+            rubro__concepto__in=SERVICIOS).values(
+                'id', 'rubro_id', 'rubro__concepto', 'monto_real', 'fuente_real', 'metadata'),
         'periodos': periodos.values('id', 'fecha_inicio', 'fecha_fin', 'estatus'),
         'nomina': NominaLinea.objects.filter(periodo_id__in=periodos.values('id'), departamento_snapshot='PRODUCCION').values(
             'id', 'periodo_id', 'empleado_id', 'total_percepciones', 'departamento_snapshot',
@@ -89,6 +96,48 @@ def leer_fuentes(periodo):
         cursor.execute('SELECT jsonb_build_object(' + ','.join(parts) + ')::text', params)
         result = json.loads(cursor.fetchone()[0], parse_float=Decimal)
         return {name: [{aliases[name][key]: value for key, value in row.items()} for row in rows] for name, rows in result.items()}
+
+
+def repartir_servicios(rows, fuentes, pendientes):
+    servicios = []
+    for nombre in SERVICIOS:
+        candidatos = [s for s in fuentes.get('servicios', []) if s['rubro__concepto'] == nombre]
+        s = candidatos[0] if len(candidatos) == 1 else None
+        monto = Decimal(str(s['monto_real'])) if s and s['monto_real'] is not None else None
+        if monto is None or monto < 0 or s['fuente_real'] != 'AUTO:GASTO_OPERATIVO':
+            pendientes.append(f'{nombre}: falta un real único consolidado desde gastos de Producción.')
+            monto = None
+        servicios.append({'nombre': nombre, 'monto': monto, 'linea_id': s['id'] if s else None})
+    completo = all(s['monto'] is not None for s in servicios)
+    fondo = sum((s['monto'] for s in servicios), Decimal('0')) if completo else None
+    base = sum((r['base'] or Decimal('0') for r in rows), Decimal('0'))
+    repartible = completo and bool(rows) and base > 0 and all(
+        not r['errores'] and r['mp'] is not None and r['mp'] > 0 and r['cantidad'] >= 0 for r in rows)
+    for r in rows:
+        r.update(servicios=None, servicios_asignados=None, servicios_detalle=[],
+                 fabricacion_servicios=None, con_despacho_servicios=None)
+    if repartible:
+        positivos = [r for r in rows if r['cantidad'] > 0]
+        for s in servicios:
+            cuotas = {r['id']: s['monto'] * r['base'] / base for r in positivos}
+            importes = {key: cuota.quantize(CENTAVO, rounding=ROUND_DOWN) for key, cuota in cuotas.items()}
+            # Mayores restos: conservar cada centavo sin cargar el ajuste a un solo producto.
+            centavos = int((s['monto'] - sum(importes.values())) / CENTAVO)
+            orden = sorted(cuotas, key=lambda key: (-(cuotas[key] - importes[key]), key))
+            for key in orden[:centavos]:
+                importes[key] += CENTAVO
+            for r in positivos:
+                monto = importes[r['id']]
+                r['servicios_detalle'].append({'nombre': s['nombre'], 'monto': monto, 'unitario': monto / r['cantidad']})
+        for r in positivos:
+            r['servicios_asignados'] = sum((s['monto'] for s in r['servicios_detalle']), Decimal('0'))
+            r['servicios'] = r['servicios_asignados'] / r['cantidad']
+            if r['fabricacion'] is not None:
+                r['fabricacion_servicios'] = r['fabricacion'] + r['servicios']
+                r['con_despacho_servicios'] = r['con_despacho'] + r['servicios']
+    asignado = sum((r['servicios_asignados'] or Decimal('0') for r in rows), Decimal('0'))
+    return {'fondos': servicios, 'fondo': fondo, 'asignado': asignado,
+            'pendiente': fondo - asignado if fondo is not None else None, 'completo': completo}
 
 
 def calcular(periodo, fuentes=None):
@@ -213,14 +262,17 @@ def calcular(periodo, fuentes=None):
     notas.append('Puestos actuales contrastados con nómina histórica; confirmar cobertura y clasificación al aprobar.')
     notas.append('Reparto por materia prima. No mide tiempos, cargas patronales completas, inventario intermedio ni costo de ventas.')
     notas.append('El costo mensual puede usar estructura actual de receta; verificar su vigencia en el mes.')
-    fingerprint = hashlib.sha256(json.dumps({'version': 2, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
+    servicios = repartir_servicios(rows, fuentes, pendientes)
+    notas.append('Servicios: agua potable, energía eléctrica y gas del real consolidado de Producción (versión Original). Ya incluyen el reparto entre centros; no se vuelve a aplicar 65%. No se suma agua purificada ni se duplican facturas, pagos o gastos.')
+    notas.append('Servicios por participación en materia prima, con centavos distribuidos por mayores restos. Se conservan los importes registrados, incluidos impuestos cuando formen parte del gasto; no es costo neto fiscal ni medición de consumo por producto. No incluye renta ni otros indirectos.')
+    fingerprint = hashlib.sha256(json.dumps({'version': 3, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
     return {'periodo': periodo, 'fingerprint': fingerprint, 'fondo': fondo, 'fondos': [{'nombre': COMPONENTES[k], 'monto': v} for k, v in fondos.items()],
         'personas': list(personas.values()), 'productos': rows, 'unidades': sum((r['cantidad'] for r in rows), Decimal('0')),
         'base': base, 'asignado': asignado, 'pendiente_nomina': pendiente_nomina,
         'redondeo': sum(fondos.values()) - asignado if repartible else None,
         'pendiente_reparto': Decimal('0') if repartible else sum(fondos.values()),
         'pendientes': sorted(set(pendientes)), 'notas': notas, 'lineas_produccion': len(fuentes['produccion']),
-        'preparaciones': internas, 'sin_vinculo': sin_vinculo, 'fuentes': fuentes}
+        'preparaciones': internas, 'sin_vinculo': sin_vinculo, 'fuentes': fuentes, 'servicios': servicios}
 
 
 @transaction.atomic
@@ -258,6 +310,9 @@ def analisis_aprobado(periodo):
     for p in cierre.resultado['productos']:
         venta = ventas.get(p['id'])
         precio = venta['importe'] / venta['cantidad'] if venta and venta['cantidad'] > 0 else None
-        costo = Decimal(p['con_despacho']) if p['con_despacho'] is not None else None
-        filas.append({**p, 'precio': precio, 'margen': precio - costo if precio is not None and costo is not None else None})
+        # Los cierres anteriores conservan su alcance y sus importes originales.
+        valor = p.get('con_despacho_servicios', p['con_despacho'])
+        costo = Decimal(valor) if valor is not None else None
+        filas.append({**p, 'fabricacion': p.get('fabricacion_servicios', p['fabricacion']),
+            'costo_comparado': costo, 'precio': precio, 'margen': precio - costo if precio is not None and costo is not None else None})
     return {'cierre': cierre, 'filas': filas, 'periodo': periodo}
