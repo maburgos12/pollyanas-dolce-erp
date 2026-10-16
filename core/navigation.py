@@ -348,6 +348,19 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
         "compromisos": "/seguimiento/panel/?tab=COMPROMISO",
     }
     seguimiento_asignado = _seguimiento_asignado_submodules(user)
+    empleado_actual = None
+    tiene_equipo = False
+    if user and user.is_authenticated and getattr(user, "pk", None):
+        try:
+            from rrhh.api_views import empleado_de_usuario
+
+            empleado_actual = empleado_de_usuario(user)
+        except Exception:
+            empleado_actual = None
+        if empleado_actual:
+            from rrhh.views_equipo import empleados_equipo
+
+            tiene_equipo = empleados_equipo(user).exists()
     for group in NAV_GROUPS:
         items = []
         for module, submodule, label, url, prefixes in group["items"]:
@@ -365,11 +378,8 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
 
                 if not puede_ver_cumpleanos(user):
                     continue
-            if module == "rrhh" and submodule == "mi_equipo":
-                from rrhh.views_equipo import empleados_equipo
-
-                if not (user and user.is_authenticated and getattr(user, "pk", None) and empleados_equipo(user).exists()):
-                    continue
+            if module == "rrhh" and submodule == "mi_equipo" and not tiene_equipo:
+                continue
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
             if module == "rrhh" and submodule == "mi_equipo":
                 tiene_acceso_personal = True
@@ -559,12 +569,6 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 "badge_count": notificaciones_pendientes,
             },
         )
-        try:
-            from rrhh.api_views import empleado_de_usuario
-
-            empleado_actual = empleado_de_usuario(user)
-        except Exception:
-            empleado_actual = None
         if empleado_actual:
             match_len = len("/rrhh/app/") if current_path.startswith("/rrhh/app/") else 0
             best_match_len = max(best_match_len, match_len)
@@ -669,13 +673,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                     "badge_count": vacaciones_por_autorizar,
                 }
             )
-        from rrhh.models import Empleado
-
-        user_id = getattr(user, "pk", None)
-        tiene_equipo_permisos = bool(
-            empleado_actual and user_id and not can_view_rrhh(user)
-            and Empleado.objects.filter(activo=True, jefe_directo__usuario_erp_id=user_id).exists()
-        )
+        tiene_equipo_permisos = tiene_equipo and not can_view_rrhh(user)
         if ((user.is_superuser or has_any_role(user, ROLE_DG)) and can_view_rrhh(user)) or tiene_equipo_permisos:
             match_len = len("/rrhh/permisos/") if current_path.startswith("/rrhh/permisos/") else 0
             best_match_len = max(best_match_len, match_len)
