@@ -367,6 +367,8 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
             if module == "rrhh" and submodule == "cumpleanos":
                 tiene_acceso_personal = True
+            from orquestacion.services.agent_pilot import can_use_read_agent
+            tiene_acceso_agente = module == "sistema" and submodule == "ia" and can_use_read_agent(user)
             tiene_acceso_departamental = False
             if module == "compras" and submodule == "departamentales":
                 from compras.access_departamentales import puede_gestionar_compras_departamentales
@@ -376,6 +378,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 can_view_submodule(user, module, submodule)
                 or tiene_acceso_personal
                 or tiene_acceso_departamental
+                or tiene_acceso_agente
             ):
                 continue
             if es_revisor_seguimiento and module == "seguimiento" and submodule in rutas_panel_dg:

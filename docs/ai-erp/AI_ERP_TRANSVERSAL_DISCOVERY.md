@@ -32,3 +32,23 @@ Este documento no declara completados esos pasos ni activada cobertura total del
 ## Validación y reversión
 
 Pruebas PostgreSQL y JS, revisión de diff, CI del PR, deploy oficial y validación de catálogo/resultado servido. Rollback: revertir el commit de este corte y desplegar por el flujo oficial. Conservar conversaciones, costos, evidencia y auditoría; no hay migraciones que revertir. Recursos locales pertenecen exclusivamente a `erp_ai_transversal_20261013`; su registro y cierre se conservan en artefactos de la tarea.
+
+## Separación de acceso por dominio — 2026-10-16
+
+La admisión READ requiere usuario activo, participante configurado y flag READ exacto.
+El catálogo añade únicamente capacidades autorizadas por el módulo; activos deja
+de ser prerrequisito de recetas y compras. La navegación y API de conversación
+aceptan al participante sin conceder permisos de Orquestación.
+
+| Superficie | Control conservado |
+| --- | --- |
+| Recetas y demás lectores empresariales | Permiso de cada lector, alcance y huella fresca |
+| Compras departamentales | Responsable de área o gestor; confirmación e idempotencia existentes |
+| Activos, incidencias y workflows de mantenimiento | Flag y permiso de activos; sucursal y controles propios |
+| Audio, imágenes y PDF | Admisión común; validación de archivos y propiedad existentes |
+| Historial y referencias | Revalidación de módulos y recursos; también lecturas vacías de activos |
+| Consumo | Participante y reserva acumulativa existentes; sin cambios de límites |
+
+Sin migraciones, altas de participantes, ampliación de presupuesto ni nuevas capacidades
+empresariales. Pruebas con PostgreSQL sintético y proveedor simulado; conexiones externas
+bloqueadas. Esto valida integración y controles, no calidad del modelo real.

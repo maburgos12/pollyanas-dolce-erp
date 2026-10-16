@@ -88,6 +88,48 @@ class BusinessReadTests(TestCase):
     def invoke(self, key, args):
         return self.bridge().invoke(user=self.actor, tool_key=key, arguments=args)
 
+    @override_settings(AI_AGENT_WORKFLOWS_ENABLED=True)
+    def test_recipe_participant_without_assets_completes_read_and_revokes_history(self):
+        from api.ai_gateway_assets import can_read_assets
+        from orquestacion.services.agent_read_runtime import can_project_read_message
+        self.actor.is_superuser = False
+        self.actor.is_staff = False
+        self.actor.save()
+        UserProfile.objects.filter(user=self.actor).update(sucursal=None)
+        permission = UserModuleAccess.objects.create(user=self.actor, module='recetas', access='view')
+        self.assertFalse(can_read_assets(self.actor))
+        self.assertIn('erp.search_recipes', self.bridge().allowed_keys(self.actor))
+        result = self.run_turn('Busca pastel', [
+            response(call('erp_discover_capabilities', {'keys':['erp.search_recipes']})),
+            response(call('erp_search_recipes', {'q':'pastel'}, 2)), 'natural'])
+        self.assertEqual(result.assistant_text, 'Consulta verificada.')
+        names = {tool['name'] for tool in self.requests[0]['tools']}
+        self.assertNotIn('erp_search_assets', names)
+        self.assertNotIn('erp_prepare_asset_maintenance', names)
+        answer = self.messages[1]; answer.refresh_from_db()
+        self.assertTrue(can_project_read_message(answer))
+        permission.access = 'none'; permission.save()
+        self.assertFalse(can_project_read_message(answer))
+        with self.assertRaises(PermissionDenied):
+            self.invoke('erp.search_recipes', {'q':'pastel'})
+
+    @override_settings(AI_GATEWAY_ASSETS_ENABLED=False)
+    def test_assets_flag_does_not_disable_business_but_participant_and_read_flags_do(self):
+        self.assertIn('erp.search_recipes', self.bridge().allowed_keys(self.actor))
+        with override_settings(AI_AGENT_PILOT_USER_ID=0):
+            self.assertEqual(self.bridge().allowed_keys(self.actor), [])
+        with override_settings(AI_AGENT_READ_ENABLED=False):
+            self.assertEqual(self.bridge().allowed_keys(self.actor), [])
+        get_user_model().objects.filter(pk=self.actor.pk).update(is_active=False)
+        self.assertEqual(self.bridge().allowed_keys(self.actor), [])
+
+    @override_settings(AI_GATEWAY_ASSETS_ENABLED=False, AI_AGENT_WORKFLOWS_ENABLED=True)
+    def test_asset_workflow_remains_denied_with_active_business_conversation(self):
+        from orquestacion.services.agent_workflows import list_workflows, WorkflowError
+        create_chat_conversation(user=self.actor)
+        with self.assertRaises(WorkflowError):
+            list_workflows(user=self.actor)
+
     def test_catalog_contains_only_approved_keys_and_safe_versioned_projection(self):
         knowledge = self.bridge().knowledge(self.actor)
         self.assertEqual(len(knowledge['capabilities']), 7)
