@@ -12,7 +12,7 @@ from openpyxl import load_workbook
 from maestros.models import UnidadMedida
 from pos_bridge.models import PointBranch, PointProductionLine
 from recetas.models import Receta, RecetaCodigoPointAlias
-from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual
+from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 from reportes.services_mano_obra_mensual import calcular, leer_fuentes, aprobar, analisis_aprobado
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
 
@@ -30,6 +30,74 @@ class ManoObraMensualTests(TestCase):
         cls.receta = Receta.objects.create(nombre='Pastel prueba', codigo_point='MO-P1', tipo='PRODUCTO_FINAL', hash_contenido='mo-p1', rendimiento_cantidad=1, rendimiento_unidad=cls.unidad)
         cls.linea = PointProductionLine.objects.create(branch=cls.branch, receta=cls.receta, production_external_id='MO-1', detail_external_id='MO-D1', source_hash='mo-1', production_date=date(2026, 9, 15), item_name='Pastel prueba', item_code='MO-P1', unit='PZA', produced_quantity=10)
         cls.costo = RecetaCostoHistoricoMensual.objects.create(periodo=date(2026, 9, 1), receta=cls.receta, costo_total=20, costo_por_unidad_rendimiento=20, coverage_pct=100)
+        area, _ = AreaPresupuesto.objects.get_or_create(codigo='produccion', defaults={'nombre': 'Producción'})
+        for nombre in ('Agua potable', 'Energía eléctrica', 'Gas'):
+            rubro = RubroPresupuesto.objects.create(area=area, concepto=nombre, tipo='EGRESO')
+            LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=date(2026, 9, 1),
+                monto_real=0, fuente_real='AUTO:GASTO_OPERATIVO')
+
+    def test_servicios_conservan_centavos_y_reparten_por_mp(self):
+        fuentes = leer_fuentes('2026-09')
+        for s in fuentes['servicios']:
+            s['monto_real'] = '1.01'
+        # Dos productos con igual base: no perder centavos por redondeo.
+        produccion = fuentes['produccion'][0]
+        fuentes['produccion'].append({**produccion, 'id': 999, 'receta_id': 999,
+            'production_external_id': 'otra', 'detail_external_id': 'otra',
+            'receta__nombre': 'Otro producto'})
+        fuentes['costos'].append({**fuentes['costos'][0], 'receta_id': 999})
+        data = calcular('2026-09', fuentes)
+        self.assertEqual(data['servicios']['fondo'], Decimal('3.03'))
+        self.assertEqual(data['servicios']['asignado'], Decimal('3.03'))
+        self.assertEqual(data['servicios']['pendiente'], 0)
+        self.assertEqual(sorted(p['servicios_asignados'] for p in data['productos']), [Decimal('1.50'), Decimal('1.53')])
+        for p in data['productos']:
+            self.assertEqual(p['con_despacho_servicios'], p['con_despacho'] + p['servicios'])
+
+    def test_servicio_faltante_no_se_convierte_en_cero(self):
+        LineaPresupuestoMensual.objects.filter(rubro__concepto='Gas').update(monto_real=None)
+        data = calcular('2026-09')
+        self.assertIsNone(data['servicios']['fondo'])
+        self.assertIsNone(data['productos'][0]['con_despacho_servicios'])
+        self.assertIsNotNone(data['productos'][0]['mo'])
+        with self.assertRaises(ValidationError):
+            aprobar('2026-09', data['fingerprint'], self.user)
+
+    def test_servicios_no_duplican_version_ni_area_y_cambio_invalida_huella(self):
+        linea = LineaPresupuestoMensual.objects.get(rubro__concepto='Gas')
+        LineaPresupuestoMensual.objects.create(rubro=linea.rubro, periodo=linea.periodo,
+            version='REVISADO', monto_real=900, fuente_real='AUTO:GASTO_OPERATIVO')
+        antes = calcular('2026-09')
+        self.assertEqual(antes['servicios']['fondo'], 0)
+        linea.monto_real = 10
+        linea.save()
+        with self.assertRaises(ValidationError):
+            aprobar('2026-09', antes['fingerprint'], self.user)
+        data = calcular('2026-09')
+        self.assertEqual(data['servicios']['fondo'], 10)
+        aprobar('2026-09', data['fingerprint'], self.user)
+        self.assertEqual(analisis_aprobado('2026-09')['filas'][0]['costo_comparado'], Decimal('31.001'))
+
+    def test_servicios_rechazan_ambiguedad_negativos_y_fuente_no_real(self):
+        for cambio in ({'monto_real': '-1'}, {'fuente_real': 'PRESUPUESTO'}):
+            fuentes = leer_fuentes('2026-09')
+            fuentes['servicios'][0].update(cambio)
+            self.assertIsNone(calcular('2026-09', fuentes)['servicios']['fondo'])
+        fuentes = leer_fuentes('2026-09')
+        fuentes['servicios'].append(fuentes['servicios'][0].copy())
+        self.assertIsNone(calcular('2026-09', fuentes)['servicios']['fondo'])
+
+    def test_cierre_previo_no_gana_servicios_retroactivos(self):
+        from django.core.serializers.json import DjangoJSONEncoder
+        import json
+        data = calcular('2026-09')
+        data.pop('servicios')
+        for r in data['productos']:
+            r.pop('con_despacho_servicios')
+        CierreManoObraMensual.objects.create(periodo=date(2026, 9, 1), revision=1,
+            fingerprint='historico', aprobado_por=self.user,
+            resultado=json.loads(json.dumps(data, cls=DjangoJSONEncoder)))
+        self.assertEqual(analisis_aprobado('2026-09')['filas'][0]['costo_comparado'], Decimal('30.001'))
 
     def test_fuentes_y_cargo_alternativo(self):
         fuentes = leer_fuentes('2026-09')
