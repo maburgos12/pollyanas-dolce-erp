@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from activos.services_pasaporte import activos_autorizados
-from api.ai_gateway_assets import ASSET_READERS, _asset_choice, asset_branch_scope, fresh_asset_user, json_dto
+from api.ai_gateway_assets import ASSET_READERS, _asset_choice, asset_branch_scope, can_read_assets, fresh_asset_user, json_dto
 from api.ai_gateway_services import invoke_read_shadow_tool, list_read_shadow_tools, record_invalid_read_shadow_attempt
 from api.ai_gateway_serializers import ReadLimitArguments
 from core.models import AuditLog
@@ -109,10 +109,11 @@ def _fresh_access(user, conversation_id):
     if not actor or not ChatConversation.objects.filter(pk=conversation_id, owner=actor, status="active").exists():
         raise PermissionDenied("Conversación no disponible para esta consulta.")
     catalog = list_read_shadow_tools(user=actor, mode=MODE)
-    if not catalog or getattr(settings, "AI_AGENT_READ_ENABLED", False) is not True:
+    from orquestacion.services.agent_pilot import can_use_read_agent
+    if not can_use_read_agent(actor):
         raise ReadStopped("access_denied")
     fingerprint = access_fingerprint(actor)
-    if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
+    if can_read_assets(actor) and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
         from orquestacion.services.agent_workflows import technical_catalog
         catalog += technical_catalog()
     from orquestacion.services.agent_incidents import catalog as incident_catalog
@@ -122,6 +123,8 @@ def _fresh_access(user, conversation_id):
     from api.ai_gateway_business_reads import allowed_keys, discovery_tool
     if allowed_keys(actor):
         catalog.append(discovery_tool(actor))
+    if not catalog:
+        raise ReadStopped("access_denied")
     catalog.append(READ_LIMIT_TOOL)
     return actor, catalog, fingerprint
 
@@ -151,7 +154,7 @@ def _references(conversation_id, actor):
             (last is not None and (type(last) is not int or last < 1 or last > 9223372036854775807))):
         raise ReadStopped("invalid_reference_state")
     requested = ids + ([last] if last else [])
-    rows = {asset.pk: asset for asset in activos_autorizados(actor).select_related("sucursal").filter(pk__in=requested)}
+    rows = {asset.pk: asset for asset in activos_autorizados(actor).select_related("sucursal").filter(pk__in=requested)} if can_read_assets(actor) else {}
     options = []
     for position, pk in enumerate(ids, 1):
         item = {"position": position, "available": pk in rows}
@@ -181,10 +184,10 @@ def _check_budget(started, context):
     return remaining
 
 
-def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_workflows=False, require_incidents=False, receipt_ids=(), report_ids=(), purchase_fingerprint=None, business_fingerprint=None, business_catalog_keys=None):
+def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require_assets=False, require_workflows=False, require_incidents=False, receipt_ids=(), report_ids=(), purchase_fingerprint=None, business_fingerprint=None, business_catalog_keys=None):
     if len(materialized_ids) > MAX_MATERIALIZED_IDS:
         raise ReadStopped("reference_limit")
-    if require_workflows and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True:
+    if require_workflows and (not can_read_assets(user) or getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is not True):
         raise ReadStopped("workflow_access_denied")
     actor, catalog, current = _fresh_access(user, conversation_id)
     if business_fingerprint is not None:
@@ -214,6 +217,8 @@ def _revalidate(user, conversation_id, fingerprint, materialized_ids, *, require
             raise ReadStopped('followup_resource_unavailable')
     if current != fingerprint:
         raise ReadStopped("access_changed")
+    if (require_assets or materialized_ids) and not can_read_assets(actor):
+        raise ReadStopped("asset_access_changed")
     if set(activos_autorizados(actor).filter(pk__in=materialized_ids).values_list("pk", flat=True)) != materialized_ids:
         raise ReadStopped("asset_access_changed")
     return actor, catalog
@@ -259,7 +264,7 @@ def can_project_read_message(message: ChatMessage | None) -> bool:
                 any(type(pk) is not int or pk < 1 or pk > 9223372036854775807 for pk in ids)):
             return False
         _revalidate(message.conversation.owner, message.conversation_id, fingerprint, set(ids),
-                    require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []), report_ids=proof.get('report_ids', []), purchase_fingerprint=proof.get('purchase_fingerprint'), business_fingerprint=proof.get('business_fingerprint'), business_catalog_keys=historical_catalog)
+                    require_assets=message.tool_calls.filter(tool_key__in=ASSET_READERS).exists(), require_workflows=proof.get("workflows") is True, require_incidents=proof.get('incidents') is True, receipt_ids=proof.get('receipt_ids', []), report_ids=proof.get('report_ids', []), purchase_fingerprint=proof.get('purchase_fingerprint'), business_fingerprint=proof.get('business_fingerprint'), business_catalog_keys=historical_catalog)
         return True
     except Exception:
         return False
@@ -543,6 +548,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             answer.save(update_fields=["status", "metadata_json", "updated_at"])
     answer_metadata = answer.metadata_json if isinstance(answer.metadata_json, dict) else {}
     original_metadata = answer_metadata.get(NAMESPACE)
+    asset_used = answer.tool_calls.filter(tool_key__in=ASSET_READERS).exists()
     workflow_used = answer.tool_calls.filter(tool_key__startswith="workflow.").exists()
     incident_available = False
     purchase_fingerprint = None
@@ -572,7 +578,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
             if not can_project_read_message(answer):
                 raise ReadStopped('invalid_execution_proof')
             previous_ids = previous.get("asset_ids", [])
-            _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_workflows=workflow_used or previous.get("workflows") is True,
+            _revalidate(actor, conversation.pk, fingerprint, set(previous_ids), require_assets=asset_used, require_workflows=workflow_used or previous.get("workflows") is True,
                         require_incidents=previous.get('incidents') is True, receipt_ids=previous.get('receipt_ids', []), report_ids=previous.get('report_ids', []), purchase_fingerprint=previous.get('purchase_fingerprint'), business_fingerprint=previous.get('business_fingerprint'))
             return ChatTurnResult(answer.content, previous.get("model_name", model), [])
         if request.metadata_json.get('audio'):
@@ -583,7 +589,7 @@ def execute_read_turn(*, user, conversation: ChatConversation, user_message: Cha
         materialized_ids.update(history_ids)
         for proof in conversation.messages.filter(sequence__lt=request.sequence, role='assistant', status='complete').order_by('-sequence').values_list('metadata_json', flat=True)[:20]:
             report_ids.update(proof.get(NAMESPACE, {}).get('report_ids', []))
-        if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
+        if can_read_assets(actor) and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True:
             from orquestacion.services.agent_workflows import TERMINAL, get_workflow, list_workflows
             pending = list_workflows(user=actor, pending_only=True)
             # At most 20 DTOs; no narrative, costs or copies in conversation state.
@@ -646,7 +652,7 @@ aunque sólo haya uno READY. Usa erp_explain_read_limit; no uses una lista de
 pendientes como respuesta ni prepares o reanudes una consulta no solicitada.
 Las posiciones pertenecen exclusivamente a ese workflow, nunca a opciones globales.
 Reanudar no programa servicios: ejecuta una nueva lectura autorizada y parcial.
-""" if getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
+""" if can_read_assets(actor) and getattr(settings, "AI_AGENT_WORKFLOWS_ENABLED", False) is True else ""
         incident_available = any(tool.get("incident") for tool in catalog)
         incident_prompt = """
 También puedes consultar y preparar seguimiento de reportes existentes, incluidos
@@ -747,7 +753,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
         read_results = {}
         stop_code = None
         while rounds < MAX_RESPONSES:
-            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
             remaining = _check_budget(started, context)
             # Fresh receipts and visible history also allow a conversational finish.
             tool_policy = {"tool_choice": "required" if rounds == 0 and not (history or receipt_ids or images or request.metadata_json.get('audio')) else "auto",
@@ -758,7 +764,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
                 read_files(image_message)
             counter = client.with_options(max_retries=0, timeout=remaining).responses.input_tokens.count if images else None
             reserve_request(user=actor, turn_id=answer.public_id, cycle=rounds + 1, payload=payload, **({'token_counter':counter} if counter else {}))
-            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+            actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
             remaining = _check_budget(started, context)
             try:
                 result = client.with_options(max_retries=0, timeout=remaining).responses.create(**payload)
@@ -782,7 +788,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
                 break
             discovered_tools = []
             for call in calls:
-                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
                 _check_budget(started, context)
                 if len(events) + metadata.get('reused_read_calls', 0) >= MAX_TOOLS:
                     raise ReadStopped("tool_limit")
@@ -790,8 +796,9 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
                 if not isinstance(call_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", call_id) or call_id in seen_calls:
                     raise ReadStopped("invalid_provider_call")
                 seen_calls.add(call_id)
+                asset_used = asset_used or tool_map.get(call.get("name"), {}).get("key") in ASSET_READERS
                 workflow_used = workflow_used or tool_map.get(call.get("name"), {}).get("workflow", False)
-                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+                actor, _ = _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
                 meta = tool_map.get(call.get('name'), {})
                 read_key = None
                 if meta.get('key') in {*ASSET_READERS, 'purchase.requirements', 'incident.requirements'} or (meta.get('business') and meta.get('key') != 'knowledge.discover'):
@@ -844,7 +851,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
                 break
             if rounds == MAX_RESPONSES:
                 stop_code = "response_limit"
-        _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+        _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
         _check_budget(started, context)
         if image_message:
             read_files(image_message)
@@ -874,7 +881,7 @@ No confundas crear esa solicitud con registrar financieramente una compra ya rea
         }.get(code, SAFE_FAILURE)
         if code in {"time_limit", "context_limit", "tool_limit", "provider_failed", "provider_incomplete"}:
             try:
-                _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
+                _revalidate(actor, conversation.pk, fingerprint, materialized_ids, require_assets=asset_used, require_workflows=workflow_used, require_incidents=incident_available, receipt_ids=receipt_ids, report_ids=report_ids, purchase_fingerprint=purchase_fingerprint, business_fingerprint=business_fingerprint)
             except Exception:
                 events = []
             else:

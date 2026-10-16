@@ -13,7 +13,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from activos.services_pasaporte import activos_autorizados
-from api.ai_gateway_assets import _asset_choice, fresh_asset_user
+from api.ai_gateway_assets import _asset_choice, can_read_assets, fresh_asset_user
 from api.ai_gateway_services import invoke_read_shadow_tool
 from core.models import AuditLog
 from orquestacion.models import AgentWorkflow, ChatConversation, validate_workflow_state
@@ -39,7 +39,7 @@ def _access(user, conversation_id=None):
     # Reuse F3's complete ACL fingerprint, even when the origin chat is archived.
     from orquestacion.services.agent_read_runtime import _fresh_access
     actor = fresh_asset_user(user)
-    if not actor or getattr(settings, 'AI_AGENT_WORKFLOWS_ENABLED', False) is not True:
+    if not can_read_assets(actor) or getattr(settings, 'AI_AGENT_WORKFLOWS_ENABLED', False) is not True:
         raise WorkflowError('workflow_access_denied', 403)
     if conversation_id is None:
         chat = ChatConversation.objects.filter(owner=actor, status='active').first()

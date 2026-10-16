@@ -66,6 +66,14 @@ class PurchaseAgentFixture:
 
 @override_settings(AI_AGENT_READ_ENABLED=True, AI_GATEWAY_ASSETS_ENABLED=True, AI_AGENT_INCIDENTS_ENABLED=True, AI_AGENT_READ_MODEL='gpt-6.1-sol', OPENAI_API_KEY='fake-test-key')
 class PurchaseAgentTests(PurchaseAgentFixture, TestCase):
+    @override_settings(AI_GATEWAY_ASSETS_ENABLED=False)
+    def test_purchase_area_participant_does_not_require_assets(self):
+        with override_settings(AI_AGENT_PILOT_USER_ID=self.requester.pk):
+            self.assertTrue(purchases.enabled(self.requester))
+            self.assertIn('purchase.prepare', [tool['key'] for tool in purchases.catalog(self.requester)])
+            AreaPresupuestoResponsable.objects.filter(usuario=self.requester).delete()
+            self.assertFalse(purchases.enabled(self.requester))
+
     def test_pdf_purchase_evidence_can_reuse_original_without_registering_payment(self):
         from orquestacion.tests_agent_images import pdf_file
         dto = self.prepare()

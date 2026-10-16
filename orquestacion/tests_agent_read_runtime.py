@@ -295,6 +295,25 @@ class AgentReadRuntimeTests(TestCase):
         self.assertNotIn("SECRET", json.dumps(list(ChatToolCall.objects.values()) + list(ChatToolResult.objects.values()), default=str))
         self.assertEqual(AuditLog.objects.filter(action="AI_GATEWAY_TOOL_INVOKE").count(), 3)
 
+    def test_empty_asset_result_history_is_hidden_when_asset_access_is_disabled(self):
+        from orquestacion.services.agent_read_runtime import can_project_read_message
+        UserModuleAccess.objects.create(user=self.user, module='recetas', access='view')
+        self.run_turn([response(call(arguments='{"q":"does-not-exist"}')), response()])
+        self.messages[1].refresh_from_db()
+        self.assertTrue(can_project_read_message(self.messages[1]))
+        with override_settings(AI_GATEWAY_ASSETS_ENABLED=False):
+            self.assertFalse(can_project_read_message(self.messages[1]))
+
+    def test_asset_flag_revocation_during_empty_read_stops_response_with_other_domain_access(self):
+        UserModuleAccess.objects.create(user=self.user, module='recetas', access='view')
+        disabled = override_settings(AI_GATEWAY_ASSETS_ENABLED=False)
+        self.addCleanup(disabled.disable)
+        def revoke(round_number):
+            if round_number == 2:
+                disabled.enable()
+        self.run_turn([response(call(arguments='{"q":"does-not-exist"}')), response()], hook=revoke)
+        self.assert_failed()
+
     def test_gate_denied_never_falls_back(self):
         with override_settings(AI_GATEWAY_ASSETS_ENABLED=False):
             self.run_turn()

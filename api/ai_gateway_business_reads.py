@@ -12,7 +12,7 @@ from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
-from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, can_read_assets, fresh_asset_user, json_dto
+from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, fresh_asset_user, json_dto
 from api import ai_gateway_recipe_reads as recipe_reads
 from core.audit import log_event
 from core.models import Sucursal
@@ -111,7 +111,8 @@ def _registry():
 
 def allowed_keys(actor):
     actor = fresh_asset_user(actor)
-    if not actor or not can_read_assets(actor) or getattr(settings, 'AI_AGENT_READ_ENABLED', False) is not True:
+    from orquestacion.services.agent_pilot import can_use_read_agent
+    if not can_use_read_agent(actor):
         return []
     return [key for key in SERIALIZERS if _registry()[key].access_check(actor)]
 
