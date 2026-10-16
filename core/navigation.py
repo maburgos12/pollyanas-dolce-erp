@@ -368,7 +368,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             if module == "rrhh" and submodule == "mi_equipo":
                 from rrhh.views_equipo import empleados_equipo
 
-                if not (user and user.is_authenticated and empleados_equipo(user).exists()):
+                if not (user and user.is_authenticated and getattr(user, "pk", None) and empleados_equipo(user).exists()):
                     continue
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
             if module == "rrhh" and submodule == "mi_equipo":
