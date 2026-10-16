@@ -120,9 +120,8 @@
     const data = Object.fromEntries(new FormData(form));
     delete data.csrfmiddlewaretoken;
     if (esPermiso()) {
-      // Las capturas se interpretan en la zona operativa, independientemente del dispositivo.
-      data.fecha_inicio += ':00-07:00';
-      data.fecha_fin = data.fecha_fin ? `${data.fecha_fin}:00-07:00` : null;
+      // El servidor interpreta las fechas sin offset en America/Mazatlan.
+      data.fecha_fin = data.fecha_fin || null;
     }
     lock(true);
     try {
