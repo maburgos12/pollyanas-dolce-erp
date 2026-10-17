@@ -20,6 +20,10 @@ class CargasCosteoTests(SimpleTestCase):
         self.assertEqual(clasificar_detalle(self.detalle(), {35: 'Coordinación de despacho'}), ('logistica', None))
         self.assertEqual(clasificar_detalle(self.detalle(empleado=None), {}), ('sin_asignar', None))
 
+    def test_isn_usa_departamento_snapshot_y_mapa_fiscal_existente(self):
+        self.assertEqual(clasificar_detalle(self.detalle(area_codigo='VENTAS'), {}, es_isn=True), ('gastos-venta', 1))
+        self.assertEqual(clasificar_detalle(self.detalle(area_codigo='RRHH'), {}, es_isn=True), ('administracion', None))
+
     def test_no_infiere_fecha_de_pago_en_otros_meses(self):
         self.assertFalse(leer_cargas_pagadas(date(2026, 10, 1), [])['confirmado'])
 

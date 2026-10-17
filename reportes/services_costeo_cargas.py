@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from .models import ExpedienteCedulaIMSS, ExpedienteISN
+from .services_cedula_imss import DEPARTAMENTO_A_AREA, AREA_RESPALDO
 from .services_rentabilidad_personal import _normalizar_registro_patronal, REGISTRO_PATRONAL_AUTORIZADO
 
 ZERO = Decimal('0')
@@ -11,7 +12,7 @@ ZERO = Decimal('0')
 PAGOS_CONFIRMADOS = {date(2026, 9, 1): date(2026, 8, 1)}
 
 
-def clasificar_detalle(detalle, produccion):
+def clasificar_detalle(detalle, produccion, *, es_isn=False):
     empleado = detalle.empleado
     if empleado is None:
         return 'sin_asignar', None
@@ -20,10 +21,11 @@ def clasificar_detalle(detalle, produccion):
     if empleado.puesto_operativo == 'REPARTIDOR':
         return 'logistica', None
     # El área y sucursal del documento preservan la distribución histórica.
-    if detalle.area_codigo == 'gastos-venta' and detalle.sucursal_id:
+    area = DEPARTAMENTO_A_AREA.get(detalle.area_codigo, AREA_RESPALDO) if es_isn else detalle.area_codigo
+    if area == 'gastos-venta' and detalle.sucursal_id:
         return 'gastos-venta', detalle.sucursal_id
-    if detalle.area_codigo in {'produccion', 'administracion', 'logistica'}:
-        return detalle.area_codigo, None
+    if area in {'produccion', 'administracion', 'logistica'}:
+        return area, None
     return 'sin_asignar', detalle.sucursal_id
 
 
@@ -68,7 +70,7 @@ def leer_cargas_pagadas(periodo, personas):
         importes = defaultdict(lambda: ZERO)
         sucursales = {d.sucursal_id: d.sucursal.nombre for d in detalles if d.sucursal_id}
         for detalle in detalles:
-            importes[clasificar_detalle(detalle, produccion)] += getattr(detalle, campo)
+            importes[clasificar_detalle(detalle, produccion, es_isn=campo == 'monto_isn')] += getattr(detalle, campo)
         origen = 'ISN' if concepto == 'ISN' else 'CEDULA_IMSS'
         resultado['fuentes'].append({'concepto': concepto, 'origen': origen, 'expediente_id': expediente.pk,
             'periodo_pago': periodo, 'cobertura': cobertura, 'monto': total, 'soporte': soporte})
