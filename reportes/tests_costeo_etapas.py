@@ -99,6 +99,7 @@ class VentaEtapasTests(SimpleTestCase):
             {'recipe_id': None, 'product_name': 'Sin vínculo', 'total_sales': Decimal('100'), 'total_quantity': Decimal('1')}]}
         logistica = {'exclusiones': {1: Decimal('20')}, 'fondo': Decimal('20'), 'pendiente': Decimal('20')}
         with patch('reportes.services_costeo_etapas.leer_logistica', return_value=logistica), \
+             patch('reportes.services_costeo_etapas.leer_reparto_logistico', return_value={'destinos': []}), \
              patch('reportes.services_costeo_etapas.leer_gastos_mensuales', return_value={'filas': [], 'pendientes': []}), \
              patch('reportes.services_costeo_etapas.leer_personal_mensual', return_value={'filas': [], 'pendientes': []}), \
              patch('reportes.services_costeo_etapas.leer_cargas_pagadas', return_value={'confirmado': False, 'filas': []}), \
@@ -129,10 +130,11 @@ class CostosExistentesTests(SimpleTestCase):
     def test_receta_fuera_de_produccion_y_reventa_no_pagan_dos_veces_elaboracion(self):
         from types import SimpleNamespace as S
         from reportes.services_costeo_etapas import calcular_etapas
-        nombres = ['leer_logistica', 'leer_gastos_mensuales', 'leer_personal_mensual', 'leer_cargas_pagadas',
+        nombres = ['leer_reparto_logistico', 'leer_logistica', 'leer_gastos_mensuales', 'leer_personal_mensual', 'leer_cargas_pagadas',
             'get_sales_range_grouped', 'Sucursal', 'ReglaAsignacionGasto', 'PointSalesDailyProductFact',
             'SolicitudDomicilio', 'RecetaCostoHistoricoMensual', 'ProductoReventaCostoHistoricoMensual']
         m = {n: MagicMock() for n in nombres}
+        m['leer_reparto_logistico'].return_value = {'destinos': []}
         m['leer_logistica'].return_value = {'exclusiones': {}, 'fondo': Decimal(0), 'pendiente': Decimal(0)}
         for n in ['leer_gastos_mensuales', 'leer_personal_mensual']:
             m[n].return_value = {'filas': [], 'pendientes': []}
