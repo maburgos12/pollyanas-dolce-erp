@@ -154,6 +154,10 @@
       <span class="seg-next-label">Acuerdo finalizado</span>
       <h2 id="seg-next-title">Sin acciones pendientes</h2>
       <p>Este acuerdo permanece disponible únicamente para consulta.</p>
+    {% elif puede_cerrar_minuta_dg %}
+      <h2 id="seg-next-title">Minuta lista para cierre</h2>
+      <p>Todos los puntos están completos. Revisa el resultado y confirma el cierre definitivo como Dirección General.</p>
+      <a class="btn btn-primary" href="#seg-decision">Revisar cierre</a>
     {% elif puede_resolver_dg %}
       <h2 id="seg-next-title">Entrega por revisar</h2>
       <p>Revisa el resultado y los pendientes antes de decidir.</p>
@@ -260,6 +264,32 @@
     {% endif %}
   </aside>
   </div>
+
+  <!-- Revisión DG: aprobar o devolver -->
+  {% if puede_resolver_dg or puede_cerrar_minuta_dg %}
+  <div class="bi-panel seg-panel-gap seg-status-panel is-review" id="seg-decision">
+    <p class="seg-section-title">{% if puede_cerrar_minuta_dg %}Cierre definitivo de minuta{% else %}Revisión — acción requerida{% endif %}</p>
+    <div class="seg-entregar-box">
+      <p class="seg-review-copy">
+        {% if puede_cerrar_minuta_dg %}
+        Al confirmar, aprobarás esta minuta como completada. Se registrarán tu usuario y la fecha de cierre, sin registrar una entrega del colaborador.
+        {% else %}
+        Este acuerdo está esperando tu aprobación. Puedes aprobarlo como completado o devolverlo con observaciones.
+        {% endif %}
+        {% if checklist_done < checklist_total %}<strong>Atención: esta entrega tiene {{ checklist_done }} de {{ checklist_total }} puntos completos. La entrega no demuestra que los pendientes estén resueltos.</strong>{% endif %}
+      </p>
+      <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" data-async-action class="seg-form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="detalle">
+        <textarea name="comentario" class="seg-form-textarea" aria-label="Observación de la revisión" placeholder="{% if puede_cerrar_minuta_dg %}Comentario de cierre (opcional){% else %}Observación (obligatoria si devuelves, opcional si apruebas){% endif %}">{{ revision_comentario }}</textarea>
+        <div class="seg-entregar-actions">
+          <button class="btn btn-primary" type="submit" name="accion" value="aprobar">{% if puede_cerrar_minuta_dg %}Dar cierre definitivo{% else %}Aprobar como completado{% endif %}</button>
+          {% if puede_resolver_dg %}<button class="btn btn-secondary" type="submit" name="accion" value="devolver">Devolver para corrección</button>{% endif %}
+        </div>
+      </form>
+    </div>
+  </div>
+  {% endif %}
 
   <!-- Conversación y cierre -->
   <details class="seg-collapsible seg-panel-gap" {% if item.esta_cerrado or ultimo_comentario_dg %}open{% endif %}>
@@ -369,28 +399,6 @@
         </div>
       </div>
       {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  <!-- Revisión DG: aprobar o devolver -->
-  {% if puede_resolver_dg %}
-  <div class="bi-panel seg-panel-gap seg-status-panel is-review" id="seg-decision">
-    <p class="seg-section-title">Revisión — acción requerida</p>
-    <div class="seg-entregar-box">
-      <p class="seg-review-copy">
-        Este acuerdo está esperando tu aprobación. Puedes aprobarlo como completado o devolverlo con observaciones.
-        {% if checklist_done < checklist_total %}<strong>Atención: esta entrega tiene {{ checklist_done }} de {{ checklist_total }} puntos completos. La entrega no demuestra que los pendientes estén resueltos.</strong>{% endif %}
-      </p>
-      <form method="post" action="{% url 'seguimiento:resolver_revision' item.pk %}" data-async-action class="seg-form-grid">
-        {% csrf_token %}
-        <input type="hidden" name="next" value="detalle">
-        <textarea name="comentario" class="seg-form-textarea" aria-label="Observación de la revisión" placeholder="Observación (obligatoria si devuelves, opcional si apruebas)">{{ revision_comentario }}</textarea>
-        <div class="seg-entregar-actions">
-          <button class="btn btn-primary" type="submit" name="accion" value="aprobar">Aprobar como completado</button>
-          <button class="btn btn-secondary" type="submit" name="accion" value="devolver">Devolver para corrección</button>
-        </div>
-      </form>
     </div>
   </div>
   {% endif %}

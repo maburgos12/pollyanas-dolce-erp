@@ -295,6 +295,7 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
         and not item.es_historico_agente_dg
         and not item.devuelto_para_corregir
     )
+    item.puede_cerrar_minuta_dg = item.tipo == SeguimientoItem.TIPO_MINUTA and item.listo_para_cerrar
     if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
         item.estado_operativo_label = item.get_estatus_display()
         item.estado_operativo_tone = item.estatus.lower()
@@ -1010,16 +1011,19 @@ def resolver_revision(request, pk):
         return redirect("seguimiento:bandeja_revision")
     _lock_revision(pk)
     item = get_object_or_404(SeguimientoItem, pk=pk)
-    if item.estatus != SeguimientoItem.ESTATUS_EN_REVISION:
-        return _revision_response(request, item, "El acuerdo ya no está en revisión. Consulta su estado actual.", status=409)
     accion = (request.POST.get("accion") or "").strip()
+    _aplicar_estado_visual_seguimiento(item)
+    if item.estatus != SeguimientoItem.ESTATUS_EN_REVISION and not (
+        accion == "aprobar" and item.puede_cerrar_minuta_dg
+    ):
+        return _revision_response(request, item, "El acuerdo no está disponible para esta decisión. Consulta su estado actual.", status=409)
     comentario_texto = (request.POST.get("comentario") or "").strip()
     if accion == "aprobar":
         try:
             _writeback_agente_dg_item(item, accion="aprobar", comentario=comentario_texto)
         except (AgenteDGError, RequestException) as exc:
             logger.warning("Write-back cierre Agente DG falló (item %s): %s", item.pk, exc)
-            return _revision_response(request, item, "No se pudo confirmar el cierre en Agente DG. La entrega sigue en revisión; intenta de nuevo.", status=502)
+            return _revision_response(request, item, "No se pudo confirmar el cierre en Agente DG. El acuerdo conserva su estado; intenta de nuevo.", status=502)
         _guardar_revision(item, SeguimientoItem.ESTATUS_COMPLETADO, request.user)
         item.aprobado_por = request.user
         item.aprobado_at = timezone.now()
@@ -1724,6 +1728,7 @@ def detalle_item_dg(request, pk, *, fragment=False):
         "pasos_a_aprobar": [],      # DG no aprueba pasos individuales
         "es_vista_dg": True,
         "puede_resolver_dg": item.estatus == SeguimientoItem.ESTATUS_EN_REVISION,
+        "puede_cerrar_minuta_dg": item.puede_cerrar_minuta_dg,
     })
 
 

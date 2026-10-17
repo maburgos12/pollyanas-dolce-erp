@@ -70,12 +70,73 @@ class RevisionFlujoTests(TestCase):
         self.assertContains(page,'Enviar a revisión')
         self.assertNotContains(page,f'action="/seguimiento/{self.item.pk}/completar/"')
 
-    def test_dg_no_resuelve_si_no_esta_en_revision(self):
+    def test_dg_no_resuelve_minuta_incompleta_sin_entrega(self):
+        self.check.completado = False
+        self.check.save()
         self.client.force_login(self.dg)
         response=self.post('resolver', {'accion':'aprobar','next':'detalle'})
         self.assertEqual(response.status_code,409)
         self.item.refresh_from_db()
         self.assertEqual(self.item.estatus,'PENDIENTE')
+
+    def test_dg_cierra_minuta_completa_sin_entrega_desde_detalle(self):
+        self.client.force_login(self.dg)
+        page = self.client.get(f'/seguimiento/panel/{self.item.pk}/')
+        self.assertContains(page, 'Dar cierre definitivo')
+        self.assertContains(page, 'Revisar cierre')
+        self.assertNotContains(page, 'Devolver para corrección')
+        with patch.dict(os.environ, {'AGENTE_DG_WRITEBACK_ENABLED': 'true'}), \
+             patch('seguimiento.agente_dg_client.is_configured', return_value=True), \
+             patch('seguimiento.agente_dg_client.patch_minute_agreement') as remote:
+            response = self.post('resolver', {'accion': 'aprobar', 'comentario': 'Resultado verificado'})
+            self.assertEqual(response.status_code, 200)
+            remote.assert_called_once_with(86, status='COMPLETED', completion_note='Resultado verificado')
+            self.assertEqual(self.post('resolver', {'accion': 'aprobar'}).status_code, 409)
+            self.assertEqual(remote.call_count, 1)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, 'COMPLETADO')
+        self.assertEqual(self.item.aprobado_por, self.dg)
+        self.assertIsNotNone(self.item.aprobado_at)
+        self.assertEqual(AuditLog.objects.filter(action='seguimiento.aprobar').count(), 1)
+        self.assertFalse(AuditLog.objects.filter(action='seguimiento.entrega').exists())
+        self.assertIn('Cierre establecido', response.json()['html'])
+        self.sync()
+        self.assertEqual(self.item.estatus, 'COMPLETADO')
+
+    def test_cierre_directo_no_amplia_permisos_ni_otros_estados(self):
+        response = self.post('resolver', {'accion': 'aprobar'})
+        self.assertEqual(response.status_code, 302)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, 'PENDIENTE')
+        self.client.force_login(self.dg)
+        self.assertEqual(self.post('resolver', {'accion': 'devolver', 'comentario': 'Prueba'}).status_code, 409)
+        for tipo, estatus, metadata in [
+            ('COMPROMISO', 'PENDIENTE', {}),
+            ('PROYECTO', 'PENDIENTE', {}),
+            ('MINUTA', 'CANCELADO', {}),
+            ('MINUTA', 'EN_PROCESO', {'revision_erp': {'accion': 'devolver'}}),
+        ]:
+            with self.subTest(tipo=tipo, estatus=estatus):
+                self.item.tipo, self.item.estatus, self.item.metadata = tipo, estatus, metadata
+                self.item.save()
+                self.assertEqual(self.post('resolver', {'accion': 'aprobar'}).status_code, 409)
+        self.item.tipo, self.item.estatus, self.item.metadata = 'MINUTA', 'PENDIENTE', {}
+        self.item.save()
+        self.check.delete()
+        self.assertEqual(self.post('resolver', {'accion': 'aprobar'}).status_code, 409)
+
+    def test_cierre_directo_conserva_minuta_si_falla_sincronizacion(self):
+        from seguimiento.agente_dg_client import AgenteDGError
+        self.client.force_login(self.dg)
+        with patch.dict(os.environ, {'AGENTE_DG_WRITEBACK_ENABLED': 'true'}), \
+             patch('seguimiento.agente_dg_client.is_configured', return_value=True), \
+             patch('seguimiento.agente_dg_client.patch_minute_agreement', side_effect=AgenteDGError('fallo')):
+            response = self.post('resolver', {'accion': 'aprobar'})
+        self.assertEqual(response.status_code, 502)
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.estatus, 'PENDIENTE')
+        self.assertIsNone(self.item.aprobado_at)
+        self.assertFalse(AuditLog.objects.filter(action='seguimiento.aprobar').exists())
 
     def test_devolucion_exige_motivo_y_conserva_revision(self):
         self.post('entregar')
