@@ -61,3 +61,8 @@ class RepartoLogisticoTests(SimpleTestCase):
         otro=S(pk=4,costo_promedio=D(40))
         self.assertIsNone(valorar_carga(linea,{}, {'1055':otro})[0])
         self.assertEqual(valorar_carga(linea,{}, {'1056':otro})[0],D(40))
+
+    def test_payload_malformado_conserva_costo_pendiente(self):
+        for raw in [None, [], 'invalid', {'detail': []}]:
+            linea=S(unit='PZA',point_transfer_line=S(pk=1,is_insumo=False,is_cancelled=False,unit='PZA',unit_cost=D(0),receta_id=None,raw_payload=raw))
+            self.assertIsNone(valorar_carga(linea,{}, {})[0])

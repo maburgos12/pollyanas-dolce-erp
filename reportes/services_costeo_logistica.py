@@ -28,6 +28,12 @@ def repartir_centavos(fondo, bases):
     return cuotas
 
 
+def _articulo_id(transferencia):
+    raw = transferencia.raw_payload
+    detalle = raw.get('detail') if isinstance(raw, dict) else None
+    return str(detalle.get('FK_articulo') or '') if isinstance(detalle, dict) else ''
+
+
 def valorar_carga(linea, recetas, reventa):
     t = linea.point_transfer_line
     if not t or t.is_cancelled or not misma_unidad(linea.unit, t.unit):
@@ -44,8 +50,7 @@ def valorar_carga(linea, recetas, reventa):
             if costo and costo > 0:
                 return costo, f'Receta mensual #{c.pk}'
     # SKU no es único: FK_articulo identifica la variante exacta de Point.
-    detalle = (t.raw_payload or {}).get('detail') or {}
-    external_id = str(detalle.get('FK_articulo', ''))
+    external_id = _articulo_id(t)
     c = reventa.get(external_id)
     if c and not t.is_insumo and misma_unidad(linea.unit, 'PZA'):
         return c.costo_promedio, f'Reventa mensual #{c.pk}'
@@ -139,7 +144,7 @@ def leer_reparto_logistico(periodo, logistica):
         t = l.point_transfer_line
         identidad = f'linea:{l.pk}'
         if t:
-            external_id = ((t.raw_payload or {}).get('detail') or {}).get('FK_articulo', '')
+            external_id = _articulo_id(t)
             if t.receta_id:
                 identidad = f'receta:{t.receta_id}'
             elif t.is_insumo:
