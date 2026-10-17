@@ -94,6 +94,26 @@ def exportar(datos):
                 fuentes_gastos.append([s['nombre'], f['concepto'], f['origen'], f['registro_id'], f['monto_mensual'], f['cobertura_inicio'], f['cobertura_fin']])
         for f in etapas['adicionales_fabricacion']:
             fuentes_gastos.append(['Producción adicional', f['concepto'], f['origen'], f['registro_id'], f['monto_mensual'], f['cobertura_inicio'], f['cobertura_fin']])
+        reparto = etapas['logistica']['reparto']
+        rutas = wb.create_sheet('Logistica por ruta')
+        rutas.append(['Ruta', 'Km base', 'Fuente kilómetros', 'Valor carga conocido', 'Logística asignada', 'Pendiente a productos'])
+        for r in reparto['rutas']:
+            rutas.append([r['folio'], r['km_reparto'], r['fuente_km'], r['valor'], r['monto'], r['pendiente']])
+        rutas.append(['Fondo mensual', reparto['fondo']])
+        destinos = wb.create_sheet('Logistica por sucursal')
+        destinos.append(['Sucursal', 'Logística recibida'])
+        for d in reparto['destinos']:
+            destinos.append([d['nombre'], d['monto']])
+        destinos.append(['Sin destino asignado', reparto['pendiente_destinos']])
+        productos_log = wb.create_sheet('Logistica por producto')
+        productos_log.append(['Sucursal', 'Código', 'Producto', 'Identidad', 'Unidad', 'Cantidad cargada costeada', 'Valor carga', 'Logística', 'Logística por unidad', 'Fuentes'])
+        for p in reparto['productos']:
+            productos_log.append([p['sucursal'], p['codigo'], p['nombre'], p['identidad'], p['unidad'], p['cantidad'], p['valor'], p['monto'], p['unitario'], '; '.join(p['fuentes'])])
+        productos_log.append(['Pendiente de repartir', reparto['pendiente_productos']])
+        incidencias = wb.create_sheet('Carga sin valor de reparto')
+        incidencias.append(['Línea carga', 'Ruta', 'Sucursal', 'Código', 'Nombre', 'Unidad', 'Cantidad', 'Transferencia ID', 'Motivo'])
+        for p in reparto['sin_valor']:
+            incidencias.append([p['id'], p['ruta'], p['sucursal'], p['codigo'], p['nombre'], p['unidad'], p['cantidad'], p['transferencia_id'], p['fuente']])
         distribucion = wb.create_sheet('Distribucion provisional')
         distribucion.append(['Ruta', 'Horas de apertura', 'Nómina de referencia', 'Combustible asignado', 'Pendiente', 'Km programados'])
         for r in etapas['logistica']['rutas']:
@@ -101,7 +121,7 @@ def exportar(datos):
         distribucion.append(['Fondo conocido', etapas['logistica']['fondo']])
         distribucion.append(['Asignado a rutas', etapas['logistica']['asignado']])
         distribucion.append(['Sin asignar a rutas', etapas['logistica']['pendiente']])
-        distribucion.append(['No equivale a costo completo ni asignación por producto/sucursal.'])
+        distribucion.append(['Referencia previa: no sumar al reparto gerencial de las hojas Logistica.'])
         carga = wb.create_sheet('Carga por destino')
         carga.append(['Destino', 'Estado', 'Unidad física', 'Cantidad cargada'])
         for c in etapas['logistica']['carga']:
@@ -115,7 +135,7 @@ def exportar(datos):
         for s in etapas['sucursales']:
             for p in s['productos']:
                 detalle.append([s['nombre'], p['product_name'], p['total_quantity'], p['total_sales'], p['fabricacion_unitaria'], p['fabricacion'], p['gasto_venta_unitario'], p['contribucion_parcial'], p['fuente_costo']])
-        venta.append(['Distribución por sucursal pendiente; no es utilidad neta. Costeo mensual, no FIFO.'])
+        venta.append(['Logística recibida en hojas separadas; no equivale a logística vendida ni utilidad neta. Costeo mensual, no FIFO.'])
     for ws in wb:
         ws.freeze_panes = 'C4' if ws == sheet else 'A2'
         for cells in ws:

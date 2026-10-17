@@ -10,6 +10,7 @@ from logistica.models import (BitacoraSalidaLlegada, CargaCombustibleUnidad,
 from pos_bridge.models import PointSalesDailyProductFact
 from reportes.models import LineaPresupuestoMensual, ReglaAsignacionGasto, RecetaCostoHistoricoMensual, ProductoReventaCostoHistoricoMensual
 from reportes.services_costeo_cargas import leer_cargas_pagadas
+from reportes.services_costeo_logistica import leer_reparto_logistico
 from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
 from reportes.services_rentabilidad_personal import leer_personal_mensual
 from reportes.services_mano_obra_mensual import limites
@@ -154,6 +155,8 @@ def calcular_etapas(mo):
     logistica['cargas_patronales'] = cargas_logistica
     logistica['fondo'] += cargas_logistica
     logistica['pendiente'] += cargas_logistica
+    logistica['reparto'] = leer_reparto_logistico(inicio, logistica)
+    por_destino = {d['id']: d['monto'] for d in logistica['reparto']['destinos']}
     adicionales = [f for f in gastos['filas'] if f['area'] == 'produccion'
                    and f['familia'] in {'renta', 'mantenimiento'}]
     adicionales += [f for f in cargas['filas'] if f['area'] == 'produccion']
@@ -228,6 +231,7 @@ def calcular_etapas(mo):
             p['gasto_venta_unitario'] = cuotas[i] / p['total_quantity'] if i in cuotas and p['total_quantity'] > 0 else None
             p['contribucion_parcial'] = p['total_sales'] - p['fabricacion'] - cuotas[i] if p['fabricacion'] is not None and i in cuotas else None
         sucursales.append({'id': s.id, 'nombre': s.nombre, 'ventas': v['total_sales'],
+            'logistica_recibida': por_destino.get(s.id),
             'gasto_venta': gasto_venta if gasto_venta >= 0 else None, 'nomina_retirada': retiro,
             'fabricacion': costo_fabricacion, 'productos': filas, 'venta_sin_asignar': resto_venta, 'costos': gasto,
             'pendientes_producto': sum(p['fabricacion'] is None and not p['es_servicio'] for p in filas), 'ventas_conciliadas': conciliado})
