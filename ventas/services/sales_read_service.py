@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Count, Max, Q, Sum
+from django.db.models import Count, Max, Min, Q, Sum
 from django.db.models.functions import TruncMonth
 
 from core.cache_versions import get_or_set_versioned_cache
@@ -1424,12 +1424,19 @@ def _grouped_rows_from_analytic_facts(
         ]
     if dimension == "product":
         rows = queryset.values("receta_id", "receta__nombre", "producto_nombre").annotate(
+            point_id_min=Min("point_product_id"), point_id_max=Max("point_product_id"),
+            code_min=Min("producto_clave"), code_max=Max("producto_clave"),
+            source_rows=Count("id"), linked_rows=Count("point_product_id"),
             total_sales=Sum("venta_total"),
             total_quantity=Sum("cantidad"),
         )
         return [
             {
                 "recipe_id": row["receta_id"],
+                "product_code": (row["code_min"] if source_kind == FactVentaDiaria.SOURCE_AUTHORITATIVE
+                                 and row["code_min"] == row["code_max"] else None),
+                "point_product_id": (row["point_id_min"] if row["point_id_min"] == row["point_id_max"]
+                                     and row["source_rows"] == row["linked_rows"] else None),
                 "recipe_name": row["receta__nombre"] or "",
                 "product_name": row["producto_nombre"] or row["receta__nombre"] or "",
                 "total_sales": _as_decimal(row["total_sales"]),
@@ -1494,6 +1501,7 @@ def _grouped_rows_from_authoritative(
         return [
             {
                 "recipe_id": row["product_id"],
+                "product_code": row["product_code"],
                 "recipe_name": row["product__nombre"] or "",
                 "product_name": row["point_name"] or row["product__nombre"] or row["product_code"] or "",
                 "total_sales": _as_decimal(row["total_sales"]),

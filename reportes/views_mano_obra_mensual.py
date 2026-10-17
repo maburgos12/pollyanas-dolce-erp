@@ -80,23 +80,41 @@ def exportar(datos):
         fuente.append([nota])
     etapas = datos.get('etapas')
     if etapas:
+        cargas = wb.create_sheet('Cargas y fuentes')
+        cargas.append(['Concepto', 'Área', 'Sucursal ID', 'Origen', 'Expediente', 'Periodo fiscal', 'Mes de pago confirmado', 'Importe', 'Evidencia'])
+        for f in etapas['cargas']['filas']:
+            cargas.append([f['concepto'], f['area'], f['sucursal_id'], f['origen'], f['registro_id'],
+                           f['cobertura_inicio'], f['periodo_pago'], f['monto_mensual'], f['detalle']])
+        for pendiente in etapas['cargas']['pendientes']:
+            cargas.append([pendiente])
+        fuentes_gastos = wb.create_sheet('Gastos incluidos')
+        fuentes_gastos.append(['Sucursal / etapa', 'Concepto', 'Origen', 'Registro', 'Importe', 'Cobertura inicio', 'Cobertura fin'])
+        for s in etapas['sucursales']:
+            for f in s['costos']['filas']:
+                fuentes_gastos.append([s['nombre'], f['concepto'], f['origen'], f['registro_id'], f['monto_mensual'], f['cobertura_inicio'], f['cobertura_fin']])
+        for f in etapas['adicionales_fabricacion']:
+            fuentes_gastos.append(['Producción adicional', f['concepto'], f['origen'], f['registro_id'], f['monto_mensual'], f['cobertura_inicio'], f['cobertura_fin']])
         distribucion = wb.create_sheet('Distribucion provisional')
-        distribucion.append(['Ruta', 'Horas de apertura', 'Nómina de referencia', 'Combustible asignado', 'Pendiente'])
+        distribucion.append(['Ruta', 'Horas de apertura', 'Nómina de referencia', 'Combustible asignado', 'Pendiente', 'Km programados'])
         for r in etapas['logistica']['rutas']:
-            distribucion.append([r['folio'], r['horas'], r['nomina'], r['combustible'], r['pendiente']])
+            distribucion.append([r['folio'], r['horas'], r['nomina'], r['combustible'], r['pendiente'], r['km_programados']])
         distribucion.append(['Fondo conocido', etapas['logistica']['fondo']])
         distribucion.append(['Asignado a rutas', etapas['logistica']['asignado']])
         distribucion.append(['Sin asignar a rutas', etapas['logistica']['pendiente']])
         distribucion.append(['No equivale a costo completo ni asignación por producto/sucursal.'])
+        carga = wb.create_sheet('Carga por destino')
+        carga.append(['Destino', 'Estado', 'Unidad física', 'Cantidad cargada'])
+        for c in etapas['logistica']['carga']:
+            carga.append([c['erp_destination_branch__nombre'], c['estatus'], c['unit'], c['cantidad']])
         venta = wb.create_sheet('Venta por sucursal')
-        venta.append(['Sucursal', 'Ventas', 'Fabricación identificada', 'Gasto de venta parcial', 'Nómina retirada a otras etapas', 'Productos sin costo'])
+        venta.append(['Sucursal', 'Ventas', 'Fabricación identificada', 'Gasto de venta identificado', 'Nómina retirada a otras etapas', 'Productos sin costo'])
         for s in etapas['sucursales']:
             venta.append([s['nombre'], s['ventas'], s['fabricacion'], s['gasto_venta'], s['nomina_retirada'], s['pendientes_producto']])
         detalle = wb.create_sheet('Costo vendido provisional')
-        detalle.append(['Sucursal', 'Producto', 'Cantidad vendida', 'Venta', 'Fabricación por unidad', 'Fabricación vendida', 'Gasto de venta por unidad', 'Contribución parcial antes de distribución'])
+        detalle.append(['Sucursal', 'Producto', 'Cantidad vendida', 'Venta', 'Fabricación por unidad', 'Fabricación vendida', 'Gasto de venta por unidad', 'Contribución parcial antes de distribución', 'Fuente del costo'])
         for s in etapas['sucursales']:
             for p in s['productos']:
-                detalle.append([s['nombre'], p['product_name'], p['total_quantity'], p['total_sales'], p['fabricacion_unitaria'], p['fabricacion'], p['gasto_venta_unitario'], p['contribucion_parcial']])
+                detalle.append([s['nombre'], p['product_name'], p['total_quantity'], p['total_sales'], p['fabricacion_unitaria'], p['fabricacion'], p['gasto_venta_unitario'], p['contribucion_parcial'], p['fuente_costo']])
         venta.append(['Distribución por sucursal pendiente; no es utilidad neta. Costeo mensual, no FIFO.'])
     for ws in wb:
         ws.freeze_panes = 'C4' if ws == sheet else 'A2'

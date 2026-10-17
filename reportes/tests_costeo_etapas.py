@@ -85,7 +85,7 @@ class LogisticaTests(SimpleTestCase):
         d = self.calcular([r], [t], [n])
         self.assertEqual(d['personal'], [])
         self.assertEqual(d['exclusiones'], {})
-        self.assertEqual(len(d['candidatos']), 1)
+        self.assertEqual(d['candidatos'], [])
 
 
 class VentaEtapasTests(SimpleTestCase):
@@ -97,9 +97,13 @@ class VentaEtapasTests(SimpleTestCase):
         product = {**branch, 'rows': [
             {'recipe_id': 7, 'product_name': 'Pastel', 'total_sales': Decimal('200'), 'total_quantity': Decimal('2')},
             {'recipe_id': None, 'product_name': 'Sin vínculo', 'total_sales': Decimal('100'), 'total_quantity': Decimal('1')}]}
-        logistica = {'exclusiones': {1: Decimal('20')}}
+        logistica = {'exclusiones': {1: Decimal('20')}, 'fondo': Decimal('20'), 'pendiente': Decimal('20')}
         with patch('reportes.services_costeo_etapas.leer_logistica', return_value=logistica), \
-             patch('reportes.services_costeo_etapas.leer_costos_mensuales', return_value={}), \
+             patch('reportes.services_costeo_etapas.leer_gastos_mensuales', return_value={'filas': [], 'pendientes': []}), \
+             patch('reportes.services_costeo_etapas.leer_personal_mensual', return_value={'filas': [], 'pendientes': []}), \
+             patch('reportes.services_costeo_etapas.leer_cargas_pagadas', return_value={'confirmado': False, 'filas': []}), \
+             patch('reportes.services_costeo_etapas.RecetaCostoHistoricoMensual'), \
+             patch('reportes.services_costeo_etapas.ProductoReventaCostoHistoricoMensual'), \
              patch('reportes.services_costeo_etapas.costos_de_sucursal', return_value={'total': Decimal('120.01')}), \
              patch('reportes.services_costeo_etapas.get_sales_range_grouped', side_effect=[branch, product]), \
              patch('reportes.services_costeo_etapas.Sucursal') as suc, \
@@ -110,7 +114,7 @@ class VentaEtapasTests(SimpleTestCase):
             regla.objects.filter.return_value.values.return_value = [{'id': 1, 'base_reparto': 'VENTAS'}]
             fact.objects.filter.return_value.values.return_value.annotate.return_value = []
             solicitud.objects.filter.return_value.exclude.return_value.values.return_value = []
-            out = calcular_etapas({'periodo': '2026-09', 'productos': [{'id': 7, 'fabricacion_servicios': Decimal('50'), 'con_despacho_servicios': Decimal('60')}]})
+            out = calcular_etapas({'periodo': '2026-09', 'personas': [], 'base': Decimal('100'), 'fondos': [], 'servicios': {'fondo': Decimal('0')}, 'pendiente_reparto': Decimal('0'), 'productos': [{'id': 7, 'mp': Decimal('50'), 'fabricacion_servicios': Decimal('50'), 'con_despacho_servicios': Decimal('60')}]})
         s = out['sucursales'][0]
         self.assertEqual(s['fabricacion'], Decimal('100'))
         self.assertEqual(s['gasto_venta'], Decimal('100.01'))
@@ -119,3 +123,40 @@ class VentaEtapasTests(SimpleTestCase):
         self.assertEqual(s['productos'][0]['contribucion_parcial'], Decimal('33.33'))
         self.assertIsNone(s['productos'][1]['contribucion_parcial'])
         self.assertEqual(sum(p['gasto_venta'] for p in s['productos']) + s['venta_sin_asignar'], s['gasto_venta'])
+
+
+class CostosExistentesTests(SimpleTestCase):
+    def test_receta_fuera_de_produccion_y_reventa_no_pagan_dos_veces_elaboracion(self):
+        from types import SimpleNamespace as S
+        from reportes.services_costeo_etapas import calcular_etapas
+        nombres = ['leer_logistica', 'leer_gastos_mensuales', 'leer_personal_mensual', 'leer_cargas_pagadas',
+            'get_sales_range_grouped', 'Sucursal', 'ReglaAsignacionGasto', 'PointSalesDailyProductFact',
+            'SolicitudDomicilio', 'RecetaCostoHistoricoMensual', 'ProductoReventaCostoHistoricoMensual']
+        m = {n: MagicMock() for n in nombres}
+        m['leer_logistica'].return_value = {'exclusiones': {}, 'fondo': Decimal(0), 'pendiente': Decimal(0)}
+        for n in ['leer_gastos_mensuales', 'leer_personal_mensual']:
+            m[n].return_value = {'filas': [], 'pendientes': []}
+        m['leer_cargas_pagadas'].return_value = {'confirmado': False, 'filas': []}
+        m['Sucursal'].objects.all.return_value.order_by.return_value = [S(id=1, nombre='Sucursal')]
+        m['ReglaAsignacionGasto'].objects.filter.return_value.values.return_value = [{'id': 1, 'base_reparto': 'VENTAS'}]
+        m['RecetaCostoHistoricoMensual'].objects.filter.return_value.select_related.return_value = [
+            S(receta_id=7, receta=S(rendimiento_unidad=None, rendimiento_cantidad=None),
+              costo_por_unidad_rendimiento=Decimal(10), costo_total=Decimal(10))]
+        m['ProductoReventaCostoHistoricoMensual'].objects.filter.return_value.select_related.return_value = [
+            S(producto_point_id=9, producto_point=S(sku='1005'), costo_promedio=Decimal(3))]
+        base = {'coverage_accepted': True, 'source': 'authoritative', 'source_detail': 'Point'}
+        m['get_sales_range_grouped'].side_effect = [
+            {**base, 'rows': [{'branch_id': 1, 'total_sales': Decimal(100)}]},
+            {**base, 'rows': [
+                {'recipe_id': 7, 'total_quantity': Decimal(2), 'total_sales': Decimal(80)},
+                {'recipe_id': None, 'product_code': '1005', 'total_quantity': Decimal(2), 'total_sales': Decimal(20)}]}]
+        mo = {'periodo': '2026-09', 'personas': [], 'productos': [], 'base': Decimal(100),
+              'fondos': [{'nombre': 'Elaboración y apoyo', 'monto': Decimal(50)},
+                         {'nombre': 'Coordinación de despacho', 'monto': Decimal(90)}],
+              'servicios': {'fondo': Decimal(10)}, 'pendiente_reparto': 0}
+        with patch.multiple('reportes.services_costeo_etapas', **m):
+            d = calcular_etapas(mo)
+        filas = d['sucursales'][0]['productos']
+        self.assertEqual(filas[0]['fabricacion_unitaria'], Decimal(16))
+        self.assertEqual(filas[1]['fabricacion_unitaria'], Decimal(3))
+        self.assertEqual(d['sucursales'][0]['fabricacion'], Decimal(38))
