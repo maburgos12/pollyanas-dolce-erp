@@ -12,7 +12,8 @@ FAMILIAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "manteni
 # Códigos existentes en el catálogo ERP; no se clasifica por fragmentos de texto.
 FAMILIA_CODIGO = {"RENTA": "renta", "RENTA_SUC": "renta", "LUZ_SUC": "electricidad",
                   "TELEFONO_SUC": "telefono", "SISTEMAS_CORP": "sistemas",
-                  "MANTENIMIENTO": "mantenimiento", "AGUA_SUC": "otros"}
+                  "MANTENIMIENTO": "mantenimiento", "AGUA_SUC": "otros",
+                  "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros"}
 FAMILIA_CONCEPTO = {"arrendamiento local": "renta", "energía eléctrica": "electricidad",
                     "teléfono e internet": "telefono", "mantenimiento equipo/maquinaria": "mantenimiento",
                     "licencias y servicios de sistemas": "sistemas",
@@ -80,7 +81,7 @@ def _repartir(monto, centro, reglas):
     return asignaciones, total != 100
 
 
-def _asignar_cobertura(monto, centro, reglas, inicio, fin, periodo):
+def _asignar_cobertura(monto, centro, reglas, inicio, fin, periodo, reparto_documentado=None):
     """Conserva el recibo completo, incluso si cambia su reparto entre meses."""
     meses = [date((inicio.year * 12 + inicio.month - 1 + n) // 12,
                   (inicio.year * 12 + inicio.month - 1 + n) % 12 + 1, 1)
@@ -93,7 +94,10 @@ def _asignar_cobertura(monto, centro, reglas, inicio, fin, periodo):
         for regla in vigentes:
             directo = centro.tipo == "SUCURSAL_VENTA" and centro.sucursal_id == _sucursal(regla)
             if not directo and not (regla.filtros or {}).get("desde") and regla.actualizado_en.date().replace(day=1) > inicio:
-                raise ValueError("Sin historia verificable para aplicar el reparto actual.")
+                documentado = (reparto_documentado or {}).get(regla.pk)
+                esperado = _repartir(monto, centro, [regla])[0][0][2]
+                if inicio != fin or documentado != esperado:
+                    raise ValueError("Sin historia verificable para aplicar el reparto actual.")
         juegos[mes] = _repartir(monto, centro, vigentes)
     # Cambiar solo la identidad/version de una regla no cambia sus proporciones.
     def firma(asignaciones):
@@ -151,7 +155,7 @@ def _importe_mensual(monto, inicio, fin, periodo):
     return monto - base * (meses - 1) if periodo == fin else base
 
 
-def leer_gastos_mensuales(periodo):
+def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
     """Devuelve filas económicas y pendientes; importes originales siempre intactos.
 
     ``filas`` contiene importes sumables COMPLETO/PARCIAL. ``pendientes`` nunca
@@ -160,6 +164,25 @@ def leer_gastos_mensuales(periodo):
     """
     periodo = periodo.replace(day=1)
     resultado = {"filas": [], "pendientes": []}
+    reparto_documentado = {}
+    if usar_reparto_consolidado:
+        # El desglose guardado prueba el reparto del mes, no una vigencia inventada.
+        for linea in LineaPresupuestoMensual.objects.filter(
+                periodo=periodo, version="ORIGINAL", rubro__activo=True,
+                fuente_real="AUTO:GASTO_OPERATIVO", monto_real__isnull=False):
+            meta = linea.metadata or {}
+            partes = meta.get("real_breakdown", [])
+            if meta.get("sin_datos_fuente") or not isinstance(partes, list) or not partes:
+                continue
+            try:
+                montos = [Decimal(str(p["monto"])) for p in partes]
+                if any(not m.is_finite() or m < 0 for m in montos) or sum(montos) != linea.monto_real:
+                    continue
+                for parte, monto in zip(partes, montos):
+                    if parte.get("tipo_fuente") == "GASTO_OPERATIVO":
+                        reparto_documentado[int(parte["regla_id"])] = monto
+            except (KeyError, TypeError, ValueError, InvalidOperation):
+                continue
     reglas = list(ReglaFuenteRubro.objects.filter(activa=True, rubro__activo=True)
                   .select_related("rubro__area", "rubro__sucursal", "categoria_gasto", "centro_costo"))
     personal_rubros = {r.rubro_id for r in reglas if r.tipo_fuente in PERSONAL_FUENTES}
@@ -257,7 +280,7 @@ def leer_gastos_mensuales(periodo):
         else:
             try:
                 asignaciones, asignacion_mensualizada, reparto_incompleto = _asignar_cobertura(
-                    monto, centro, historicas, inicio, fin, periodo)
+                    monto, centro, historicas, inicio, fin, periodo, reparto_documentado)
             except ValueError as exc:
                 _pendiente_destinos(resultado, fila, str(exc), candidatas)
                 continue

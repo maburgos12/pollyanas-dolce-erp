@@ -376,3 +376,20 @@ class LectorGastosMensualesTests(TestCase):
         resultado = self.leer()
         self.assertEqual(len(resultado["filas"]), 1)
         self.assertEqual(resultado["pendientes"], [])
+
+
+class RepartoDocumentadoCosteoTests(LectorGastosMensualesTests):
+    def test_costeo_acepta_reparto_guardado_sin_inventar_vigencia(self):
+        from .services_rentabilidad_gastos import leer_gastos_mensuales
+        self.gasto(centro_costo=self.compartido, monto=Decimal('100'))
+        regla = self.regla(centro_costo=self.compartido, filtros={'porcentaje': 100})
+        linea = LineaPresupuestoMensual.objects.create(
+            periodo=self.mes, rubro=self.rubro, version='ORIGINAL', monto_real=100,
+            fuente_real='AUTO:GASTO_OPERATIVO', metadata={'real_breakdown': [
+                {'regla_id': regla.pk, 'tipo_fuente': 'GASTO_OPERATIVO', 'monto': '100'}]})
+        self.assertEqual(self.leer()['filas'], [])
+        filas = leer_gastos_mensuales(self.mes, usar_reparto_consolidado=True)['filas']
+        self.assertEqual(sum(f['monto_mensual'] for f in filas), Decimal('100'))
+        linea.metadata['sin_datos_fuente'] = True
+        linea.save(update_fields=['metadata'])
+        self.assertEqual(leer_gastos_mensuales(self.mes, usar_reparto_consolidado=True)['filas'], [])
