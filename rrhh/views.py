@@ -17,6 +17,7 @@ from django.db import transaction
 from django.db.models import Avg, Count, Prefetch, Q, Sum
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
 
@@ -3043,6 +3044,7 @@ def horas_extra_list(request):
     if not can_view_rrhh(request.user) and not tiene_asignadas:
         raise PermissionDenied("No tienes permisos para ver horas extra")
 
+    inline_result = None
     if request.method == "POST":
         status_error = 400
         try:
@@ -3080,13 +3082,16 @@ def horas_extra_list(request):
             messages.error(request, error)
             return redirect(redirect_url)
 
-        if progressive:
+        if progressive and request.headers.get("X-Horas-Extra-Inline") == "1":
+            inline_result = (hora_extra_id, message)
+        elif progressive:
             return JsonResponse({
                 "ok": True, "toast": {"type": "success", "message": message},
                 "redirect": redirect_url, "reload": True,
             })
-        messages.success(request, message)
-        return redirect(redirect_url)
+        else:
+            messages.success(request, message)
+            return redirect(f'{reverse("rrhh:rrhh_he_list")}?estado={he.estado}#hora-extra-{hora_extra_id}')
 
     horas_extra = HoraExtra.objects.select_related(
         "empleado__jefe_directo__usuario_erp", "jefe_directo", "autorizado_por",
@@ -3139,17 +3144,36 @@ def horas_extra_list(request):
         he.saldo_detectado_label = formatear_duracion_horas(saldo_detectado) if saldo_detectado is not None else ""
         grupos[he.estado].append(he)
     columnas = [(estado, label, grupos[estado]) for estado, label in estados]
-    return render(
-        request,
-        "rrhh/horas_extra_list.html",
-        {
-            "module_tabs": _module_tabs("horas_extra", request.user),
-            "columnas": columnas,
-            "can_view_rrhh": can_view_rrhh(request.user),
-            "user_id": request.user.id,
-            "is_superuser": request.user.is_superuser,
-        },
-    )
+    estado_actual = request.GET.get("estado", HoraExtra.ESTADO_PENDIENTE)
+    if estado_actual not in grupos:
+        estado_actual = HoraExtra.ESTADO_PENDIENTE
+    context = {
+        "module_tabs": _module_tabs("horas_extra", request.user),
+        "columnas": columnas,
+        "estado_actual": estado_actual,
+        "estado_label": dict(estados)[estado_actual],
+        "horas_visibles": grupos[estado_actual],
+        "can_view_rrhh": can_view_rrhh(request.user),
+        "user_id": request.user.id,
+        "is_superuser": request.user.is_superuser,
+    }
+    if inline_result:
+        hora_extra_id, message = inline_result
+        hora = next(he for he in horas_extra if he.pk == hora_extra_id)
+        from core.notificaciones_bandeja import contar_grupos_pendientes
+        nav_pendientes = HoraExtra.objects.filter(estado=HoraExtra.ESTADO_PENDIENTE)
+        if not request.user.is_superuser:
+            nav_pendientes = nav_pendientes.filter(jefe_directo=request.user)
+        return JsonResponse({
+            "ok": True, "estado": hora.estado, "message": message,
+            "html": render_to_string("rrhh/_hora_extra_fila.html" if hora.estado == HoraExtra.ESTADO_PENDIENTE else "rrhh/_hora_extra_resuelta.html", {
+                **context, "he": hora, "key": hora.estado, "label": hora.get_estado_display(),
+            }, request=request),
+            "conteos": {estado: len(items) for estado, _label, items in columnas},
+            "nav_pendientes": nav_pendientes.count(),
+            "notificaciones_pendientes": contar_grupos_pendientes(request.user),
+        })
+    return render(request, "rrhh/horas_extra_list.html", context)
 
 
 @login_required

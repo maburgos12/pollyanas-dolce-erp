@@ -1,0 +1,78 @@
+      <article class="ch-row-item" id="hora-extra-{{ he.id }}" data-extra-row data-estado="{{ he.estado }}">
+        <div>
+          <strong>{{ he.empleado.nombre }}</strong>
+          <p class="ch-identity">{{ he.fecha|date:"d/m/Y" }} · Solicitud #{{ he.id }} · {{ he.duracion_label }}</p>
+          <details class="ch-evidence"><summary>Ver cálculo y evidencia</summary>
+          <dl class="ch-calculation-context" aria-label="Contexto del cálculo">
+            <div><dt>Modalidad</dt><dd>{{ he.contexto_calculo.modalidad }}</dd></div>
+            <div><dt>Comida</dt><dd>{{ he.contexto_calculo.comida }}</dd></div>
+            <div><dt>Turno</dt><dd>{{ he.contexto_calculo.turno }}</dd></div>
+            <div><dt>Resultado</dt><dd>{{ he.contexto_calculo.estado }}</dd></div>
+          </dl>
+          </details>
+          {% if key == "pendiente" and not he.contexto_calculo.puede_autorizar %}
+            <p class="ch-calculation-warning" id="hora-extra-aviso-{{ he.id }}" role="status">{{ he.contexto_calculo.motivo_bloqueo }}</p>
+          {% endif %}
+          {% if key == "pendiente" and not he.jefatura_actualizada %}
+            <p class="ch-calculation-warning" role="status">La jefatura cambió. Sincroniza esta detección antes de resolverla.</p>
+          {% endif %}
+          {% if he.notas %}<p>{{ he.notas|truncatechars:140 }}</p>{% endif %}
+          {% if he.movimiento_prenomina %}
+            <p class="ch-payroll-status">Pago: {{ he.movimiento_prenomina.corte.folio }} · {{ he.movimiento_prenomina.corte.fecha_inicio|date:"d/m/Y" }}–{{ he.movimiento_prenomina.corte.fecha_fin|date:"d/m/Y" }}</p>
+          {% elif he.requiere_aplicacion_prenomina and key == "pendiente" %}
+            <p class="ch-payroll-status">Pendiente de autorizar · siguiente corte</p>
+          {% elif he.requiere_aplicacion_prenomina and key == "autorizado" %}
+            <p class="ch-payroll-status">Autorizada · sin corte de prenómina asignado</p>
+          {% endif %}
+        </div>
+        <div>{% if he.autorizado_por %}<p>{% if key == "rechazado" %}Rechazó{% else %}Autorizó{% endif %}: {{ he.autorizado_por.get_full_name|default:he.autorizado_por.username }}</p>{% if he.fecha_autorizacion_jefe %}<p>{{ he.fecha_autorizacion_jefe|date:"d/m/Y H:i" }}</p>{% endif %}{% endif %}</div>
+        <div>{% if he.jefe_directo %}Jefe directo: {{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
+        <div class="ch-row-badges">
+          <span class="ch-badge">{{ he.duracion_label }}</span>
+          <span class="ch-badge">{{ label }}</span>
+          {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
+        </div>
+        {% if key == "pendiente" %}
+          {% if he.jefatura_actualizada %}
+          {% if he.jefe_directo_id == user_id or is_superuser %}
+            <form method="post" class="ch-actions" data-extra-action>
+              {% csrf_token %}
+              <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+              <button class="btn btn-primary" type="submit" name="action" value="autorizar" data-pending-label="Autorizando…"{% if not he.contexto_calculo.puede_autorizar %} disabled aria-disabled="true" aria-describedby="hora-extra-aviso-{{ he.id }}"{% endif %}>Autorizar</button>
+              <button class="btn btn-secondary" type="submit" name="action" value="rechazar" data-pending-label="Rechazando…">Rechazar</button>
+            </form>
+            {% if he.asistencia_id %}
+            <details class="ch-time-editor">
+              <summary>Editar tiempo</summary>
+              <div class="ch-time-evidence">
+                <span>Tiempo detectado</span>
+                <strong>{{ he.saldo_detectado_label|default:"No calculable" }}</strong>
+              </div>
+              <form method="post" class="ch-time-form" data-extra-action>
+                {% csrf_token %}
+                <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
+                <div class="ch-time-fields">
+                  <label>Horas
+                    <input type="number" name="horas_enteras" min="0" max="24" step="1" inputmode="numeric" required>
+                  </label>
+                  <label>Minutos
+                    <select name="minutos" required>
+                      <option value="">Selecciona</option>
+                      <option value="0">0 min</option>
+                      <option value="30">30 min</option>
+                    </select>
+                  </label>
+                </div>
+                <label>Motivo del ajuste
+                  <textarea name="motivo_ajuste" rows="2" maxlength="500" required placeholder="Indica el tiempo acordado y por qué se corrige"></textarea>
+                </label>
+                <p class="ch-time-help">El tiempo autorizado se registra en bloques de 30 minutos.</p>
+                <button class="btn btn-secondary" type="submit" name="action" value="ajustar" data-pending-label="Guardando…">Guardar ajuste</button>
+              </form>
+            </details>
+            {% endif %}
+          {% endif %}
+          {% endif %}
+        {% endif %}
+        <p class="ch-action-feedback" role="status" tabindex="-1" data-extra-feedback></p>
+      </article>

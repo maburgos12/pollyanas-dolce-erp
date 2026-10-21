@@ -4902,7 +4902,7 @@ class RRHHViewsTests(TestCase):
         })
         hora.refresh_from_db()
         self.assertEqual(hora.estado, HoraExtra.ESTADO_AUTORIZADO)
-        self.assertEqual(response.url, f'{reverse("rrhh:rrhh_he_list")}#hora-extra-{hora.pk}')
+        self.assertEqual(response.url, f'{reverse("rrhh:rrhh_he_list")}?estado=autorizado#hora-extra-{hora.pk}')
 
     def test_hora_automatica_con_saldo_obsoleto_no_se_autoriza_ni_muta(self):
         from datetime import time
@@ -5005,7 +5005,7 @@ class RRHHViewsTests(TestCase):
             with self.subTest(estado=estado):
                 HoraExtra.objects.filter(pk=hora.pk).update(estado=estado)
                 antes = HoraExtra.objects.filter(pk=hora.pk).values().get()
-                response = self.client.get(reverse("rrhh:rrhh_he_list"))
+                response = self.client.get(reverse("rrhh:rrhh_he_list"), {"estado": estado})
                 self.assertContains(response, "Revisión recomendada")
                 self.assertEqual(HoraExtra.objects.filter(pk=hora.pk).values().get(), antes)
 
@@ -5019,7 +5019,7 @@ class RRHHViewsTests(TestCase):
         }, follow=True)
         hora.refresh_from_db()
         self.assertEqual(hora.estado, HoraExtra.ESTADO_CANCELADO)
-        self.assertContains(response, "Saldo automático cubierto o checada corregida")
+        self.assertContains(self.client.get(reverse("rrhh:rrhh_he_list"), {"estado": "cancelado"}), "Saldo automático cubierto o checada corregida")
 
     def test_horas_extra_contexto_semantico_y_acciones_progresivas(self):
         hora = self._hora_extra_para_autorizacion()
@@ -5028,10 +5028,10 @@ class RRHHViewsTests(TestCase):
             f'id="hora-extra-{hora.pk}"', 'aria-label="Contexto del cálculo"',
             "<dt>Modalidad</dt>", "<dt>Comida</dt>", "<dt>Turno</dt>", "<dt>Resultado</dt>",
             "Ruta", "Comida no observable", "Sin turno asignado", "No calculable",
-            'disabled aria-disabled="true"', 'data-async-action data-reset-on-success="false"',
+            'disabled aria-disabled="true"', 'data-extra-action',
             'data-pending-label="Autorizando…"', 'data-pending-label="Rechazando…"',
             'class="ch-calculation-warning"', 'role="status"', "Asigna el turno",
-            "?v=20260930-corte-prenomina",
+            "?v=20261021-estados-v1",
         ):
             self.assertContains(response, contenido)
 
