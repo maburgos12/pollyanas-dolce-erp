@@ -224,7 +224,7 @@ class ManoObraMensualTests(TestCase):
                 sale_date=fecha, quantity=cantidad, total_amount=importe, gross_amount=999999)
         with self.assertNumQueries(2):
             fila = analisis_aprobado('2026-09')['filas'][0]
-        self.assertEqual(fila['precio'], Decimal('40'))
+        self.assertEqual(fila['precio'], Decimal(40))
         self.assertEqual(fila['margen'], Decimal('9.999'))
         cierre.refresh_from_db()
         self.assertEqual(cierre.resultado, original)
@@ -281,7 +281,8 @@ class ManoObraMensualTests(TestCase):
 class ManoObraSalesBoundaryTests(SimpleTestCase):
     def test_analisis_usa_servicio_sin_excepcion_en_guard(self):
         from orquestacion.services.pointdailysale_guard import (
-            is_allowed_pointdailysale_path, scan_pointdailysale_usage,
+            is_allowed_pointdailysale_path,
+            scan_pointdailysale_usage,
         )
         path = 'reportes/services_mano_obra_mensual.py'
         self.assertFalse(is_allowed_pointdailysale_path(path))
