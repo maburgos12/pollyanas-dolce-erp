@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261021-horas-extra-estados-v1";
+const CACHE_NAME = "pollyanas-erp-shell-20261021-ai-product-margin-v2";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

@@ -48,13 +48,22 @@
   function data(key, result) {
     const p = result.payload || {};
     if (key === 'knowledge.discover') return `<p>Consultas disponibles para esta conversación:</p><ul>${(p.tools || []).map(row=>`<li>${escape(row.display_name)}</li>`).join('')}</ul>`;
-    if (['erp.get_sales_summary','erp.get_inventory_low_stock'].includes(key) && result.status === 'ambiguous' && p.selection_required) return `<p>Indica la sucursal que necesitas:</p><ul>${(p.items || []).map(row=>`<li>${escape(row.name)}</li>`).join('')}</ul>`;
+    if (['erp.get_sales_summary','erp.get_inventory_low_stock','erp.get_product_sales','erp.get_product_monthly_margin'].includes(key) && result.status === 'ambiguous' && p.selection_required) return `<p>Indica la sucursal que necesitas:</p><ul>${(p.items || []).map(row=>`<li>${escape(row.name)}</li>`).join('')}</ul>`;
     if (key === 'erp.get_sales_summary') {
       const f = result.filters || {};
       return `<p>Periodo: ${date(f.start_date)} a ${date(f.end_date)}${f.branch ? ` · ${escape(f.branch)}` : ''}.</p>
         ${facts([['Venta registrada',money(p.total_sales)],['Cantidad registrada',available(p.total_quantity)],['Tickets',available(p.total_tickets)]])}
         <p class="agent-source">Días con cobertura: ${available(p.coverage_days ?? p.days_count)}. ${p.coverage_accepted === true ? 'Cobertura aceptada por la fuente.' : p.coverage_accepted === false ? 'La fuente no confirma cobertura completa.' : 'Cobertura completa no indicada.'}</p>
         <p>La consulta conserva los límites de la fuente; no informa distribución de importes por ticket.${p.total_tickets == null ? ' El conteo de tickets no está disponible.' : ''}</p>`;
+    }
+    if (key === 'erp.get_product_sales') return `${table('Ventas por producto',p.items,[['Producto',r=>escape(r.product_name)],['Venta registrada',r=>money(r.total_sales)],['Cantidad',r=>available(r.total_quantity)],['Precio promedio vendido',r=>money(r.average_sale_price)]])}${p.truncated ? '<p>Hay más productos; precisa la búsqueda. Esta lista no representa el total.</p>' : ''}<p class="agent-source">${p.coverage_accepted === true ? 'Cobertura aceptada por la fuente.' : 'La fuente no confirma cobertura completa.'} ${(p.limitations || []).map(escape).join(' ')}</p>`;
+    if (key === 'erp.get_product_monthly_margin') {
+      if (!p.recipe) return '<p>No se encontró la receta solicitada.</p>';
+      const cost = p.cost;
+      return `<p><strong>${escape(p.recipe.nombre)}</strong> · Periodo: ${date(p.period)}</p>
+        ${cost ? facts([['Materia prima por unidad',money(cost.materials)],['Mano de obra por unidad',money(cost.labor)],['Indirectos por unidad',money(cost.overhead)],['Empaque por unidad',money(cost.packaging)],['Fabricación por unidad',money(cost.manufacturing)],['Costo calculado',date(cost.actualizado_en)]]) : '<p>No hay costo mensual disponible; no equivale a costo cero.</p>'}
+        ${table('Contribución mensual registrada',p.items,[['Sucursal',r=>escape(r.branch_name)],['Venta',r=>money(r.sales)],['Contribución',r=>money(r.contribution)],['Margen de contribución',r=>r.margin_percent == null ? 'No disponible' : `${escape(r.margin_percent)} %`],['Calculado',r=>date(r.actualizado_en)],['Limitaciones',r=>(r.warnings || []).map(escape).join(' ') ]])}
+        ${p.truncated ? '<p>Hay más sucursales; precisa la consulta.</p>' : ''}<p class="agent-source">${(p.limitations || []).map(escape).join(' ')}</p>`;
     }
     if (key === 'erp.get_inventory_low_stock') {
       const f = p.freshness || {};

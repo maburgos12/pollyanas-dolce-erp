@@ -132,7 +132,7 @@ class BusinessReadTests(TestCase):
 
     def test_catalog_contains_only_approved_keys_and_safe_versioned_projection(self):
         knowledge = self.bridge().knowledge(self.actor)
-        self.assertEqual(len(knowledge['capabilities']), 7)
+        self.assertEqual(len(knowledge['capabilities']), 9)
         self.assertEqual(len(knowledge['version']), 64)
         self.assertEqual(knowledge, self.bridge().knowledge(self.actor))
         serialized = json.dumps(knowledge)
@@ -249,6 +249,22 @@ class BusinessReadTests(TestCase):
                 self.messages[1].refresh_from_db()
                 self.assertEqual(self.messages[1].status,'complete')
                 self.assertEqual(self.messages[1].tool_calls.count(),2)
+
+    def test_native_product_margin_discovery_and_history_revocation(self):
+        from recetas.models import Receta
+        from orquestacion.services.agent_read_runtime import can_project_read_message
+        recipe=Receta.objects.create(nombre='Pastel margen', hash_contenido='bk-margin')
+        key='erp.get_product_monthly_margin'
+        result=self.run_turn('Investiga el margen del pastel en septiembre',[
+            response(call('erp_discover_capabilities',{'keys':[key]})),
+            response(call('erp_get_product_monthly_margin',{'receta_id':recipe.pk,'period':'2026-09-01'},2)), 'natural'])
+        self.assertEqual(result.assistant_text,'Consulta verificada.')
+        self.assertIn('erp_get_product_monthly_margin',[tool['name'] for tool in self.requests[1]['tools']])
+        answer=self.messages[1];answer.refresh_from_db()
+        self.assertTrue(can_project_read_message(answer))
+        self.actor.is_superuser=False;self.actor.is_staff=False;self.actor.save()
+        UserModuleAccess.objects.create(user=self.actor,module='recetas',access='view')
+        self.assertFalse(can_project_read_message(answer))
 
     def test_recipe_investigation_discovers_search_then_context_and_revokes_history(self):
         from recetas.models import Receta

@@ -14,6 +14,7 @@ from rest_framework.exceptions import ValidationError
 
 from api.ai_gateway_assets import StrictArguments, StrictDateField, StrictIntegerField, StrictStringField, fresh_asset_user, json_dto
 from api import ai_gateway_recipe_reads as recipe_reads
+from api import ai_gateway_product_reads as product_reads
 from core.audit import log_event
 from core.models import Sucursal
 from compras.models import SolicitudCompra, OrdenCompra
@@ -72,6 +73,7 @@ SERIALIZERS = {
 # Historic proofs predate recipe discovery; keep this original catalog stable.
 LEGACY_CATALOG_KEYS = tuple(SERIALIZERS)
 SERIALIZERS.update(recipe_reads.SERIALIZERS)
+SERIALIZERS.update(product_reads.SERIALIZERS)
 DISCOVERY_KEY = 'knowledge.discover'
 
 
@@ -102,11 +104,13 @@ RELATIONSHIPS = {
 
 UNITS.update(recipe_reads.UNITS)
 RELATIONSHIPS.update(recipe_reads.RELATIONSHIPS)
+UNITS.update(product_reads.UNITS)
+RELATIONSHIPS.update(product_reads.RELATIONSHIPS)
 
 
 def _registry():
     from api.ai_gateway_services import TOOLS
-    return {**TOOLS, **recipe_reads.definitions()}
+    return {**TOOLS, **recipe_reads.definitions(), **product_reads.definitions()}
 
 
 def allowed_keys(actor):
@@ -168,7 +172,7 @@ def knowledge(actor):
             'required_fields':tool['argument_schema'].get('required',[]),
             'unit_of_analysis':UNITS[key], 'relationships':RELATIONSHIPS[key],
             'freshness':'Lectura nueva al consultar; fecha de captura/costo separada de la consulta.',
-            'source':recipe_reads.SOURCE if key in recipe_reads.SERIALIZERS else 'Servicio canónico de ventas' if key.endswith('sales_summary') else 'Snapshots Point' if key.endswith('low_stock') else 'Catálogo y costos de compra' if key.endswith('input_cost') else 'Compras clásicas; no incluye compras departamentales ni especiales.',
+            'source':product_reads.SOURCES[key] if key in product_reads.SERIALIZERS else recipe_reads.SOURCE if key in recipe_reads.SERIALIZERS else 'Servicio canónico de ventas' if key.endswith('sales_summary') else 'Snapshots Point' if key.endswith('low_stock') else 'Catálogo y costos de compra' if key.endswith('input_cost') else 'Compras clásicas; no incluye compras departamentales ni especiales.',
             'risk':'Sólo lectura; datos parciales y límites de fuente se conservan.'})
     # Source contents version the projection independently of a deploy machine or Git HEAD.
     files = {Path(__file__), Path(inspect.getsourcefile(canonical_insumo))}
@@ -298,6 +302,7 @@ def invoke(*, user, tool_key, arguments):
                     data['truncated']=False
                 elif key=='erp.get_current_input_cost': result=_cost(safe)
                 elif key in recipe_reads.SERIALIZERS: result=tool.handler(actor,safe)
+                elif key in product_reads.SERIALIZERS: result=tool.handler(actor,safe,branch_ids=ids)
                 else:
                     bounded = {**safe,'limit':safe['limit']+1}
                     result = gateway._handle_inventory_low_stock(actor,bounded,branch_ids=ids,exact_scope=True) if key=='erp.get_inventory_low_stock' else tool.handler(actor,bounded)
