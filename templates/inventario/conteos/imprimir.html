@@ -1,0 +1,63 @@
+{% load static tz %}<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CF-{{ conteo.pk }} · {{ conteo.sucursal.nombre }} · Comparativa al cierre</title>
+  <link rel="stylesheet" href="{% static 'inventario/conteos_imprimir.css' %}?v=20261021">
+  <script src="{% static 'inventario/conteos_imprimir.js' %}?v=20261021" defer></script>
+</head>
+<body>
+  <nav class="print-toolbar" aria-label="Opciones del reporte">
+    <a href="{{ detalle_url }}">← Volver al conteo</a>
+    <button type="button" id="print-report">Imprimir / Guardar PDF</button>
+    <p>Elige tu impresora o «Guardar como PDF» en el diálogo de impresión.</p>
+    <noscript><p>Usa la opción Imprimir del navegador (Ctrl+P o ⌘P).</p></noscript>
+  </nav>
+  <main>
+    <header class="report-header">
+      <p class="brand">Pollyana's Dolce</p>
+      <h1>Comparativa de inventario al cierre</h1>
+      <p class="identity"><strong>CF-{{ conteo.pk }} · {{ conteo.sucursal.nombre }}</strong> · {{ conteo.fecha|date:'d/m/Y' }}</p>
+      <p>{{ conteo.titulo }} · {{ conteo.get_estado_display }}</p>
+      <p>Responsable: {{ conteo.responsable.get_full_name|default:conteo.responsable.username }}</p>
+    </header>
+    {% timezone 'America/Mazatlan' %}
+    <section class="reconciliation" aria-label="Estado de conciliación">
+      {% if conciliacion %}
+      <p><strong>Conciliación: {{ conciliacion.estado }}</strong></p>
+      <p>Cierre: {{ conciliacion.cierre_visible|date:'d/m/Y H:i' }} · Procesado: {{ conciliacion.procesado_visible|date:'d/m/Y H:i' }} (hora de Mazatlán).</p>
+      {% else %}
+      <p><strong>Pendiente de procesamiento nocturno.</strong></p>
+      {% endif %}
+      <p>El conteo y Point se comparan al mismo cierre, considerando los movimientos comprobados según su hora. Diferencia = físico al cierre − Point al cierre. Este reporte no ajusta existencias.</p>
+    </section>
+    {% endtimezone %}
+    <div class="table-scroll" role="region" aria-label="Comparativas por artículo" tabindex="0">
+      <table>
+        <thead><tr><th scope="col">Artículo / Código</th><th scope="col">Unidad</th><th scope="col" class="number">Físico al cierre</th><th scope="col" class="number">Point al cierre</th><th scope="col" class="number">Diferencia al cierre</th><th scope="col">Estado / Observación</th></tr></thead>
+        <tbody>
+        {% for row in rows %}
+          <tr>
+            <th scope="row">{{ row.linea.nombre }}<small>{{ row.linea.codigo }}</small></th>
+            <td>{{ row.linea.unidad }}</td>
+            {% if row.conciliacion.estado == 'CALCULADA' %}
+            <td class="number">{{ row.conciliacion.fisico_al_cierre_visible }}</td>
+            <td class="number">{{ row.conciliacion.point_al_cierre_visible }}</td>
+            <td class="number difference">{{ row.conciliacion.diferencia_visible }}</td>
+            <td>Calculada{% if row.lectura.incidencia %}<small>{{ row.lectura.incidencia }}</small>{% endif %}</td>
+            {% else %}
+            <td class="number">—</td><td class="number">—</td><td class="number">—</td>
+            <td><strong>Pendiente</strong><small>{{ row.conciliacion.motivo|default:'Pendiente de procesamiento nocturno.' }}</small>{% if row.lectura.incidencia %}<small>{{ row.lectura.incidencia }}</small>{% endif %}</td>
+            {% endif %}
+          </tr>
+        {% empty %}<tr><td colspan="6">No hay artículos registrados.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="legend">— indica que no hay una comparación disponible; no equivale a cero.</p>
+    {% if conteo.observaciones %}<section class="observations"><h2>Observaciones del conteo</h2><p>{{ conteo.observaciones }}</p></section>{% endif %}
+    <footer>CF-{{ conteo.pk }} · {{ conteo.sucursal.nombre }} · {{ conteo.fecha|date:'d/m/Y' }}</footer>
+  </main>
+</body>
+</html>

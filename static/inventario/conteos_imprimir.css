@@ -1,0 +1,49 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #f5f0eb; color: #30252a; font: 15px/1.5 Arial, sans-serif; }
+main, .print-toolbar { max-width: 1100px; margin: 24px auto; padding: 28px; }
+main { background: #fff; border: 1px solid #d9cbd1; }
+.print-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding-top: 0; padding-bottom: 0; }
+.print-toolbar p { flex-basis: 100%; margin: 0; }
+a { color: #8b2252; }
+button { background: #8b2252; color: #fff; border: 0; border-radius: 6px; padding: 12px 18px; font: inherit; font-weight: bold; cursor: pointer; }
+button:active { transform: scale(.97); }
+:focus-visible { outline: 3px solid #8b2252; outline-offset: 4px; }
+h1 { font-size: 26px; line-height: 1.2; margin: 8px 0 18px; }
+h2 { font-size: 16px; }
+p { margin: 6px 0; }
+.brand { color: #8b2252; font: bold 22px Georgia, serif; }
+.report-header { border-bottom: 2px solid #8b2252; padding-bottom: 18px; }
+.reconciliation { padding: 16px 0; }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; min-width: 680px; border-collapse: collapse; table-layout: fixed; font-size: 13px; }
+th, td { padding: 10px 8px; border-bottom: 1px solid #ccc; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+thead th { background: #f8e8ee; border-top: 1px solid #8b2252; border-bottom: 2px solid #8b2252; }
+th:first-child { width: 27%; }
+th:nth-child(2) { width: 8%; }
+th:last-child { width: 26%; }
+.number { text-align: right; font-variant-numeric: tabular-nums; }
+.difference { font-weight: bold; }
+small { display: block; font-size: 12px; font-weight: normal; margin-top: 3px; }
+.legend, footer { font-size: 12px; }
+.legend { margin-top: 12px; }
+.observations p { white-space: pre-wrap; overflow-wrap: anywhere; }
+footer { margin-top: 20px; padding-top: 10px; border-top: 1px solid #ccc; }
+@media (max-width: 640px) { main, .print-toolbar { margin: 16px 8px; padding: 16px; } h1 { font-size: 22px; } }
+@page { size: auto; margin: 12mm; }
+@media print {
+  body { background: white; color: #000; font-size: 10pt; }
+  .print-toolbar { display: none; }
+  main { max-width: none; margin: 0; padding: 0; border: 0; }
+  h1 { font-size: 18pt; }
+  .brand { font-size: 15pt; }
+  .report-header { padding-bottom: 8pt; }
+  .reconciliation { padding: 8pt 0; }
+  .table-scroll { overflow: visible; }
+  table { min-width: 0; font-size: 9pt; }
+  th, td { padding: 6pt 4pt; }
+  small, .legend, footer { font-size: 8pt; }
+  thead { display: table-header-group; }
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, .report-header { break-after: avoid; }
+  p { orphans: 3; widows: 3; }
+}

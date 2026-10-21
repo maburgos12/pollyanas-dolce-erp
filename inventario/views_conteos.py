@@ -149,7 +149,12 @@ def lista(request):
 @never_cache
 @require_GET
 def detalle(request, pk):
-    return render(request,'inventario/conteos/detalle.html',_context(request,_count(request,pk)))
+    context = _context(request, _count(request, pk))
+    if request.GET.get('imprimir') == '1':
+        if not context['revisor'] or context['editable']:
+            raise PermissionDenied
+        return render(request, 'inventario/conteos/imprimir.html', context)
+    return render(request, 'inventario/conteos/detalle.html', context)
 
 
 def _payload(request, action):
