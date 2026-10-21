@@ -213,6 +213,52 @@ class NightlyCountTests(TestCase):
         self.assertFalse(_publicar(stale,readings,result))
         self.assertEqual(self.line.lecturas.get(ronda=1).cantidad,3)
 
+    def test_print_reuses_closing_comparison_without_mutations(self):
+        self.acquire()
+        conciliar_conteos_nocturnos()
+        self.count.refresh_from_db()
+        before = (self.count.version, self.count.conciliacion, self.count.eventos.count())
+        self.client.force_login(self.admin)
+        url = reverse('inventario:conteos_erp:detalle', args=[self.count.pk])
+        self.assertContains(self.client.get(url), url + '?imprimir=1')
+        response = self.client.get(url, {'imprimir': '1'})
+        self.assertTemplateUsed(response, 'inventario/conteos/imprimir.html')
+        self.assertContains(response, 'Físico al cierre')
+        self.assertContains(response, '<td class="number">4</td>', count=2, html=True)
+        self.assertContains(response, '<td class="number difference">0</td>', html=True)
+        self.assertContains(response, 'Nota conservada')
+        self.assertNotContains(response, 'Solicitar reconteo')
+        self.assertIn('no-store', response['Cache-Control'])
+        self.count.refresh_from_db()
+        self.assertEqual(before, (self.count.version, self.count.conciliacion, self.count.eventos.count()))
+
+    def test_print_pending_and_stale_results_never_show_zero_comparison(self):
+        self.client.force_login(self.admin)
+        url = reverse('inventario:conteos_erp:detalle', args=[self.count.pk])
+        response = self.client.get(url, {'imprimir': '1'})
+        self.assertContains(response, 'Pendiente de procesamiento nocturno.')
+        self.assertContains(response, '<td class="number">—</td>', count=3, html=True)
+        self.acquire()
+        conciliar_conteos_nocturnos()
+        self.count.refresh_from_db()
+        self.count.conciliacion['huella_lecturas'] = 'obsolete'
+        self.count.save(update_fields=['conciliacion'])
+        response = self.client.get(url, {'imprimir': '1'})
+        self.assertContains(response, '<td class="number">—</td>', count=3, html=True)
+        self.assertNotContains(response, '<td class="number">4</td>', html=True)
+
+    def test_print_does_not_expose_comparison_to_operator_or_other_branch(self):
+        self.client.force_login(self.operator)
+        url = reverse('operacion:conteos_app:detalle', args=[self.count.pk])
+        self.assertNotContains(self.client.get(url), 'Imprimir / Guardar PDF')
+        self.assertEqual(self.client.get(url, {'imprimir': '1'}).status_code, 403)
+        outsider = get_user_model().objects.create_user('print-outsider')
+        self.client.force_login(outsider)
+        url = reverse('inventario:conteos_erp:detalle', args=[self.count.pk])
+        self.assertEqual(self.client.get(url, {'imprimir': '1'}).status_code, 404)
+        self.client.logout()
+        self.assertEqual(self.client.get(url, {'imprimir': '1'}).status_code, 302)
+
     def test_comparison_is_hidden_in_recount_and_excel_preserves_system_history(self):
         self.acquire()
         conciliar_conteos_nocturnos()
