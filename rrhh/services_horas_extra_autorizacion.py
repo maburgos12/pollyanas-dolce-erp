@@ -5,6 +5,8 @@ from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.utils import timezone
 
+from core.audit import log_event
+
 from .models import HoraExtra
 from .services_extra_bloqueos import bloquear_hora_extra
 from .services_extra_conciliacion import (
@@ -113,4 +115,9 @@ def resolver_hora_extra(hora_extra_id, action, usuario, *, permitir_superusuario
     he.autorizado_por = usuario
     he.fecha_autorizacion_jefe = timezone.now()
     he.save(update_fields=["estado", "autorizado_por", "fecha_autorizacion_jefe"])
+    log_event(usuario, "UPDATE", "rrhh.HoraExtra", str(he.pk), {
+        "accion": action, "antes": {"estado": HoraExtra.ESTADO_PENDIENTE},
+        "despues": {"estado": he.estado, "autorizado_por_id": usuario.pk,
+                    "fecha_autorizacion_jefe": he.fecha_autorizacion_jefe.isoformat()},
+    })
     return he, message, ""

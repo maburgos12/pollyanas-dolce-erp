@@ -4,7 +4,7 @@
 {% block page_title %}RRHH · Horas extra{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20260930-corte-prenomina">
+<link rel="stylesheet" href="/static/css/template_modules/rrhh-templates-rrhh-horas-extra-list.css?v=20261021-estados-v1">
 {% endblock %}
 
 {% block content %}
@@ -17,93 +17,24 @@
 {% endif %}
 
 <section class="ch-table-panels" aria-label="Horas extra por estado">
-  <div class="ch-status-strip">
+  <nav class="ch-status-strip" aria-label="Filtrar horas extra por estado">
     {% for key, label, items in columnas %}
-      <div class="ch-status-card {% if forloop.first %}active{% endif %}">
+      <a href="?estado={{ key }}" class="ch-status-card {% if key == estado_actual %}active{% endif %}"{% if key == estado_actual %} aria-current="page"{% endif %}>
         <strong>{{ label }}</strong>
-        <span>{{ items|length }} registros</span>
-      </div>
+        <span>Registros: <b data-extra-count="{{ key }}">{{ items|length }}</b></span>
+      </a>
     {% endfor %}
-  </div>
+  </nav>
+  <div class="ch-list-heading"><h2>{{ estado_label }}</h2><p>Consulta cada estado por separado. Autorizar confirma las horas; su aplicación en prenómina se muestra aparte.</p></div>
   <div class="ch-row-table">
-  {% for key, label, items in columnas %}
-    {% for he in items %}
-      <article class="ch-row-item" id="hora-extra-{{ he.id }}">
-        <div>
-          <strong>{{ he.empleado.nombre }}</strong>
-          <dl class="ch-calculation-context" aria-label="Contexto del cálculo">
-            <div><dt>Modalidad</dt><dd>{{ he.contexto_calculo.modalidad }}</dd></div>
-            <div><dt>Comida</dt><dd>{{ he.contexto_calculo.comida }}</dd></div>
-            <div><dt>Turno</dt><dd>{{ he.contexto_calculo.turno }}</dd></div>
-            <div><dt>Resultado</dt><dd>{{ he.contexto_calculo.estado }}</dd></div>
-          </dl>
-          {% if not he.contexto_calculo.puede_autorizar %}
-            <p class="ch-calculation-warning" id="hora-extra-aviso-{{ he.id }}" role="status">{{ he.contexto_calculo.motivo_bloqueo }}</p>
-          {% endif %}
-          {% if not he.jefatura_actualizada %}
-            <p class="ch-calculation-warning" role="status">La jefatura cambió. Sincroniza esta detección antes de resolverla.</p>
-          {% endif %}
-          {% if he.notas %}<p>{{ he.notas|truncatechars:140 }}</p>{% endif %}
-          {% if he.movimiento_prenomina %}
-            <p class="ch-payroll-status">Pago: {{ he.movimiento_prenomina.corte.folio }} · {{ he.movimiento_prenomina.corte.fecha_inicio|date:"d/m/Y" }}–{{ he.movimiento_prenomina.corte.fecha_fin|date:"d/m/Y" }}</p>
-          {% elif he.requiere_aplicacion_prenomina and key == "pendiente" %}
-            <p class="ch-payroll-status">Pendiente de autorizar · siguiente corte</p>
-          {% elif he.requiere_aplicacion_prenomina and key == "autorizado" %}
-            <p class="ch-payroll-status">Pendiente del próximo corte</p>
-          {% endif %}
-        </div>
-        <div>{{ he.fecha|date:"Y-m-d" }}</div>
-        <div>{% if he.jefe_directo %}Jefe directo: {{ he.jefe_directo.get_full_name|default:he.jefe_directo.username }}{% else %}Sin asignar{% endif %}</div>
-        <div class="ch-row-badges">
-          <span class="ch-badge">{{ he.duracion_label }}</span>
-          <span class="ch-badge">{{ label }}</span>
-          {% if he.monto_calculado %}<span class="ch-badge gold">${{ he.monto_calculado }}</span>{% endif %}
-        </div>
-        {% if key == "pendiente" %}
-          {% if he.jefatura_actualizada %}
-          {% if he.jefe_directo_id == user_id or is_superuser %}
-            <form method="post" class="ch-actions" data-async-action data-reset-on-success="false">
-              {% csrf_token %}
-              <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
-              <button class="btn btn-primary" type="submit" name="action" value="autorizar" data-pending-label="Autorizando…"{% if not he.contexto_calculo.puede_autorizar %} disabled aria-disabled="true" aria-describedby="hora-extra-aviso-{{ he.id }}"{% endif %}>Autorizar</button>
-              <button class="btn btn-secondary" type="submit" name="action" value="rechazar" data-pending-label="Rechazando…">Rechazar</button>
-            </form>
-            {% if he.asistencia_id %}
-            <details class="ch-time-editor">
-              <summary>Editar tiempo</summary>
-              <div class="ch-time-evidence">
-                <span>Tiempo detectado</span>
-                <strong>{{ he.saldo_detectado_label|default:"No calculable" }}</strong>
-              </div>
-              <form method="post" class="ch-time-form" data-async-action data-reset-on-success="false">
-                {% csrf_token %}
-                <input type="hidden" name="hora_extra_id" value="{{ he.id }}">
-                <div class="ch-time-fields">
-                  <label>Horas
-                    <input type="number" name="horas_enteras" min="0" max="24" step="1" inputmode="numeric" required>
-                  </label>
-                  <label>Minutos
-                    <select name="minutos" required>
-                      <option value="">Selecciona</option>
-                      <option value="0">0 min</option>
-                      <option value="30">30 min</option>
-                    </select>
-                  </label>
-                </div>
-                <label>Motivo del ajuste
-                  <textarea name="motivo_ajuste" rows="2" maxlength="500" required placeholder="Indica el tiempo acordado y por qué se corrige"></textarea>
-                </label>
-                <p class="ch-time-help">El tiempo autorizado se registra en bloques de 30 minutos.</p>
-                <button class="btn btn-secondary" type="submit" name="action" value="ajustar" data-pending-label="Guardando…">Guardar ajuste</button>
-              </form>
-            </details>
-            {% endif %}
-          {% endif %}
-          {% endif %}
-        {% endif %}
-      </article>
+    {% for he in horas_visibles %}
+      {% include "rrhh/_hora_extra_fila.html" with key=estado_actual label=estado_label %}
+    {% empty %}
+      <p class="ch-empty">No hay solicitudes en este estado. Puedes consultar los otros estados arriba.</p>
     {% endfor %}
-  {% endfor %}
   </div>
 </section>
+{% endblock %}
+{% block extra_js %}
+<script src="/static/js/rrhh_horas_extra.js?v=20261021-estados-v1" defer></script>
 {% endblock %}

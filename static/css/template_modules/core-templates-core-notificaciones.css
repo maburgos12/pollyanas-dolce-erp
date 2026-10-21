@@ -1,6 +1,6 @@
 /* Extracted from core/templates/core/notificaciones.html */
 .notif-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
-  .notif-tabs{display:flex;gap:8px;flex-wrap:wrap}
+  .notif-state-filters{display:flex;gap:8px;flex-wrap:wrap}
   .notif-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border:1px solid var(--border-color,#e5dce8);border-radius:8px;color:var(--text-muted,#6b5f70);font-weight:800;text-decoration:none;background:#fff}
   .notif-tab.active{background:#9b1b59;color:#fff;border-color:#9b1b59}
   .notif-list{display:grid;gap:10px}

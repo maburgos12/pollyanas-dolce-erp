@@ -3,7 +3,7 @@
 {% block page_title %}Notificaciones{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/core-templates-core-notificaciones.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/core-templates-core-notificaciones.css?v=20261021-estados-v1">
 {% endblock %}
 
 {% block content %}
@@ -23,9 +23,9 @@
 </section>
 
 <div class="notif-toolbar">
-  <div class="notif-tabs">
+  <div class="notif-state-filters" aria-label="Filtrar notificaciones por estado">
     <a class="notif-tab {% if estado == 'pendientes' %}active{% endif %}" href="{% url 'notificaciones' %}">Pendientes <span>{{ pendientes_count }}</span></a>
-    <a class="notif-tab {% if estado == 'leidas' %}active{% endif %}" href="{% url 'notificaciones' %}?estado=leidas">Leídas <span>{{ leidas_count }}</span></a>
+    <a class="notif-tab {% if estado == 'leidas' %}active{% endif %}" href="{% url 'notificaciones' %}?estado=leidas">Leídas y atendidas <span>{{ leidas_count }}</span></a>
     <a class="notif-tab {% if estado == 'todas' %}active{% endif %}" href="{% url 'notificaciones' %}?estado=todas">Todas</a>
   </div>
 </div>
@@ -36,6 +36,7 @@
     <div>
       <div class="pd-u-ab3659c67f">
         <span class="notif-badge">{{ notificacion.get_tipo_display }}</span>
+        {% if notificacion.grupo_resuelta %}<span class="notif-badge">Atendida</span>{% endif %}
         {% if notificacion.prioridad == "alta" %}<span class="notif-badge">Alta</span>{% endif %}
         {% if notificacion.grupo_total > 1 %}
           <span class="notif-badge">{{ notificacion.grupo_total }} avisos agrupados</span>

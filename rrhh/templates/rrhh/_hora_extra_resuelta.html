@@ -1,0 +1,10 @@
+<article class="ch-row-item ch-row-resolved" id="hora-extra-{{ he.id }}" data-extra-row data-estado="{{ he.estado }}">
+  <div>
+    <strong>{{ he.empleado.nombre }}</strong>
+    <p class="ch-identity">{{ he.fecha|date:"d/m/Y" }} · Solicitud #{{ he.id }} · {{ he.duracion_label }}</p>
+    <p><span class="ch-badge">{{ he.get_estado_display }}</span></p>
+    {% if he.autorizado_por %}<p>{% if he.estado == "rechazado" %}Rechazó{% else %}Autorizó{% endif %}: {{ he.autorizado_por.get_full_name|default:he.autorizado_por.username }} · {{ he.fecha_autorizacion_jefe|date:"d/m/Y H:i" }}</p>{% endif %}
+    <p><a href="?estado={{ he.estado }}#hora-extra-{{ he.id }}">Ver en su historial</a></p>
+  </div>
+  <p class="ch-action-feedback" role="status" tabindex="-1" data-extra-feedback></p>
+</article>

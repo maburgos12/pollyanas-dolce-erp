@@ -1092,7 +1092,8 @@ class HorasExtraCorteViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Pendiente de autorizar · siguiente corte")
-        self.assertContains(response, "Pendiente del próximo corte")
+        response = self.client.get(reverse("rrhh:rrhh_he_list"), {"estado": "autorizado"})
+        self.assertContains(response, "Autorizada · sin corte de prenómina asignado")
         self.assertContains(response, f"Pago: {self.corte.folio}")
         self.assertContains(response, "01/09/2026–15/09/2026")
         self.assertContains(response, "1 h 30 min")

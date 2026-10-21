@@ -63,3 +63,29 @@
     .ch-calculation-context { grid-template-columns: 1fr; }
     .ch-time-fields { grid-template-columns: 1fr 1fr; }
   }
+
+/* Estados separados y confirmación en el lugar de trabajo. */
+.ch-status-card { text-decoration: none; }
+.ch-status-card:focus-visible, .ch-evidence summary:focus-visible { outline: 3px solid var(--vino); outline-offset: 3px; }
+.ch-status-card:active, .ch-actions .btn:active { transform: scale(.97); }
+.ch-list-heading { padding: 14px; }
+.ch-list-heading h2 { margin: 0 0 6px; font: 800 20px Nunito, sans-serif; }
+.ch-list-heading p, .ch-empty { color: var(--texto); font-size: 14px; line-height: 1.5; margin: 0; }
+.ch-empty { padding: 22px 14px; }
+.ch-row-item .ch-identity { color: var(--texto); font-weight: 800; }
+.ch-evidence { margin-top: 10px; }
+.ch-evidence summary { color: var(--vino); cursor: pointer; font-weight: 700; min-height: 32px; }
+.ch-row-item .ch-action-feedback { grid-column: 1 / -1; color: var(--texto); font-weight: 800; line-height: 1.5; margin: 0; }
+.ch-action-feedback:empty { display: none; }
+.ch-action-feedback[role="alert"] { color: #9b2420; }
+@media (hover: hover) and (pointer: fine) { .ch-status-card:not(.active):hover { background: var(--rosa); } }
+@media (max-width: 760px) {
+  .ch-row-item { gap: 10px; padding: 16px 14px; }
+  .ch-actions .btn { min-height: 44px; flex: 1; }
+  .ch-row-badges { grid-row: 2; }
+  .ch-row-item > div:empty { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .ch-status-card:active, .ch-actions .btn:active { transform: none; } }
+.ch-row-resolved { display: flex; flex-direction: column; align-items: stretch; justify-content: center; background: var(--blanco); }
+.ch-row-resolved a { color: var(--vino); text-decoration: underline; }
+@media (max-width: 760px) { .ch-actions .btn { width: auto; flex: 1 1 0; min-width: 0; } }
