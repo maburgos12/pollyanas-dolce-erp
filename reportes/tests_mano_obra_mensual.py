@@ -1,16 +1,17 @@
 from datetime import date
 from decimal import Decimal
 from io import BytesIO
+from pathlib import Path
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, transaction
-from django.test import TestCase, Client
+from django.test import TestCase, Client, SimpleTestCase
 from django.urls import reverse
 from openpyxl import load_workbook
 
 from maestros.models import UnidadMedida
-from pos_bridge.models import PointBranch, PointProductionLine
+from pos_bridge.models import PointBranch, PointProductionLine, PointDailySale, PointProduct
 from recetas.models import Receta, RecetaCodigoPointAlias
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 from reportes.services_mano_obra_mensual import calcular, leer_fuentes, aprobar, analisis_aprobado
@@ -206,6 +207,41 @@ class ManoObraMensualTests(TestCase):
         aprobar('2026-09', calcular('2026-09')['fingerprint'], self.user)
         self.assertIsNone(analisis_aprobado('2026-09')['filas'][0]['margen'])
 
+    def test_analisis_conserva_ventas_del_mes_y_cierre(self):
+        cierre = aprobar('2026-09', calcular('2026-09')['fingerprint'], self.user)
+        original = cierre.resultado
+        producto = PointProduct.objects.create(external_id='MO-VENTA', name='Venta prueba')
+        otra_sucursal = PointBranch.objects.create(external_id='MO-OTRA', name='Otra sucursal')
+        for fecha, cantidad, importe, receta, sucursal in (
+            (date(2026, 8, 31), 100, 99999, self.receta, self.branch),
+            (date(2026, 9, 1), 2, 80, self.receta, self.branch),
+            (date(2026, 9, 30), 3, 120, self.receta, otra_sucursal),
+            (date(2026, 9, 15), Decimal('-0.5'), -20, self.receta, self.branch),
+            (date(2026, 9, 16), 100, 99999, None, self.branch),
+            (date(2026, 10, 1), 100, 99999, self.receta, self.branch),
+        ):
+            PointDailySale.objects.create(branch=sucursal, product=producto, receta=receta,
+                sale_date=fecha, quantity=cantidad, total_amount=importe, gross_amount=999999)
+        with self.assertNumQueries(2):
+            fila = analisis_aprobado('2026-09')['filas'][0]
+        self.assertEqual(fila['precio'], Decimal(40))
+        self.assertEqual(fila['margen'], Decimal('9.999'))
+        cierre.refresh_from_db()
+        self.assertEqual(cierre.resultado, original)
+        self.assertEqual(CierreManoObraMensual.objects.count(), 1)
+
+    def test_analisis_cantidad_no_positiva_no_inventa_precio(self):
+        aprobar('2026-09', calcular('2026-09')['fingerprint'], self.user)
+        producto = PointProduct.objects.create(external_id='MO-CERO', name='Venta cero')
+        venta = PointDailySale.objects.create(branch=self.branch, product=producto,
+            receta=self.receta, sale_date=date(2026, 9, 1), quantity=0, total_amount=50)
+        for cantidad in (0, -1):
+            with self.subTest(cantidad=cantidad):
+                PointDailySale.objects.filter(pk=venta.pk).update(quantity=cantidad)
+                fila = analisis_aprobado('2026-09')['filas'][0]
+                self.assertIsNone(fila['precio'])
+                self.assertIsNone(fila['margen'])
+
     def test_vista_get_no_escribe_y_exporta(self):
         self.client.force_login(self.user)
         url = reverse('reportes:mano_obra_mensual')
@@ -240,3 +276,15 @@ class ManoObraMensualTests(TestCase):
         cell = load_workbook(BytesIO(response.content))['Simulacion']['A4']
         self.assertEqual(cell.value, '=1+1')
         self.assertEqual(cell.data_type, 's')
+
+
+class ManoObraSalesBoundaryTests(SimpleTestCase):
+    def test_analisis_usa_servicio_sin_excepcion_en_guard(self):
+        from orquestacion.services.pointdailysale_guard import (
+            is_allowed_pointdailysale_path,
+            scan_pointdailysale_usage,
+        )
+        path = 'reportes/services_mano_obra_mensual.py'
+        self.assertFalse(is_allowed_pointdailysale_path(path))
+        result = scan_pointdailysale_usage(base_dir=Path(__file__).resolve().parents[1])
+        self.assertEqual([v for v in result.violations if v.relative_path == path], [])

@@ -15,10 +15,11 @@ from django.utils import timezone
 
 from core.access import ROLE_ADMIN, ROLE_DG, can_view_reportes, has_any_role
 from core.models import AuditLog
-from pos_bridge.models import PointProductionLine, PointDailySale
+from pos_bridge.models import PointProductionLine
 from recetas.models import RecetaCodigoPointAlias
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, LineaPresupuestoMensual
 from rrhh.models import NominaLinea, NominaPeriodo
+from ventas.services.sales_read_service import get_point_sales_recipe_totals
 
 COMPONENTES = {
     'elaboracion': 'Elaboración y apoyo',
@@ -303,9 +304,7 @@ def analisis_aprobado(periodo):
     cierre = CierreManoObraMensual.objects.filter(periodo=inicio).order_by('-revision').first()
     if not cierre:
         return {'cierre': None, 'filas': [], 'periodo': periodo}
-    from django.db.models import Sum
-    ventas = {r['receta_id']: r for r in PointDailySale.objects.filter(sale_date__range=(inicio, fin), receta_id__isnull=False)
-        .values('receta_id').annotate(cantidad=Sum('quantity'), importe=Sum('total_amount'))}
+    ventas = {r['receta_id']: r for r in get_point_sales_recipe_totals(start_date=inicio, end_date=fin)}
     filas = []
     for p in cierre.resultado['productos']:
         venta = ventas.get(p['id'])

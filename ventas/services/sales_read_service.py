@@ -251,6 +251,15 @@ def get_point_sales_category_totals(*, start_date: date, end_date: date, sucursa
     )
 
 
+def get_point_sales_recipe_totals(*, start_date: date, end_date: date) -> list[dict]:
+    """Totales por receta para comparar costos; ambas fechas son inclusivas."""
+    return list(
+        PointDailySale.objects.filter(sale_date__range=(start_date, end_date), receta_id__isnull=False)
+        .values("receta_id")
+        .annotate(cantidad=Sum("quantity"), importe=Sum("total_amount"))
+    )
+
+
 def get_point_sales_product_totals(*, start_date: date) -> list[dict]:
     return list(
         PointDailySale.objects.filter(sale_date__gte=start_date)
