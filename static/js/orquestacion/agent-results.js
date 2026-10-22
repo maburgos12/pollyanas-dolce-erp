@@ -132,6 +132,18 @@
       ${missing ? `<p>Falta: ${missing}. Puedes completar el reporte en esta conversación.</p>` : ''}
       ${row.status === 'AWAITING_CONFIRMATION' ? `<p>Al confirmar se creará el reporte en Fallas y quedará disponible para seguimiento en Mantenimiento.</p><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Confirmar y crear reporte</button>` : ''}`;
   }
+  function evidence(row, allowedStates) {
+    const files = row.files || [];
+    if (!files.length) return '';
+    // Mirror the evidence endpoints; presentation never grants access.
+    if (!allowedStates.includes(row.status)) {
+      const reason = row.status === 'EXPIRED'
+        ? 'La propuesta venció; sus adjuntos no se pueden abrir desde esta propuesta.'
+        : 'Los adjuntos no están disponibles en el estado actual de esta propuesta.';
+      return `<p>${reason}</p><ul>${files.map(f=>`<li style="overflow-wrap:anywhere">${escape(f.nombre)}</li>`).join('')}</ul>`;
+    }
+    return `<div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener">${f.mime === 'application/pdf' ? '<span>PDF</span>' : `<img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy">`}<span>${escape(f.nombre)}</span></a>`).join('')}</div>`;
+  }
   function followup(row) {
     const report = row.report || {};
     const values = row.fields || {};
@@ -147,7 +159,7 @@
       <p>Esta acción conserva proveedor e importes. No registra ni autoriza pagos.</p>
       ${row.missing_fields?.length ? `<p>Falta: ${row.missing_fields.map(k=>escape({report_id:'Identificar el reporte',comentario:'Comentario',fecha_trabajo_finalizado:'Fecha real del trabajo','fotografías':'Evidencias'}[k] || k)).join(', ')}.</p>` : ''}
       ${row.status === 'REVIEW_REQUIRED' ? '<p>El reporte cambió. Consulta su ficha y prepara una nueva propuesta.</p>' : ''}
-      <div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener">${f.mime === 'application/pdf' ? '<span>PDF</span>' : `<img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy">`}<span>${escape(f.nombre)}</span></a>`).join('')}</div>
+      ${evidence(row, ['AWAITING_CONFIRMATION', 'EXECUTED'])}
       ${completed ? `<p>Actualización registrada en el reporte #${escape(row.report_id)}.</p><p class="agent-source">Registrada: ${date(row.confirmed_at)}</p>` : row.status === 'AWAITING_CONFIRMATION' ? `<p>${row.files?.length ? `Evidencias asociadas: ${escape(row.files.length)}.` : 'Puedes asociar imágenes o PDFs antes de confirmar.'}</p><label>Evidencias de este reporte<input type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf" data-followup-files="${escape(row.draft_id)}"></label><button type="button" class="agent-continue" data-followup-upload="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}">Asociar evidencias</button><button type="button" class="agent-continue" data-incident-id="${escape(row.draft_id)}" data-version="${escape(row.version)}" data-hash="${escape(row.payload_hash)}"${row.missing_fields?.length ? ' disabled' : ''}>Confirmar actualización del reporte</button>` : ''}`;
   }
   function purchase(row) {
@@ -166,7 +178,7 @@
         ${values.entrega_estimada ? `<div><dt>Entrega estimada, pendiente de recibir</dt><dd>${date(values.entrega_estimada)}</dd></div>` : ''}
       </dl>
       <p>La captura de compra es opcional. No sustituye la factura; puedes incorporarla después.</p>
-      <div class="agent-evidence-list">${(row.files || []).map(f=>`<a href="${escape(f.url)}" target="_blank" rel="noopener">${f.mime === 'application/pdf' ? '<span>PDF</span>' : `<img src="${escape(f.url)}" alt="${escape(f.nombre)}" loading="lazy">`}<span>${escape(f.nombre)}</span></a>`).join('')}</div>
+      ${evidence(row, ['WAITING_INFORMATION', 'AWAITING_CONFIRMATION', 'EXECUTED'])}
       ${row.missing_fields?.length ? `<p>Falta: ${row.missing_fields.map(k=>escape(missing[k] || k)).join(', ')}. Continúa esta misma propuesta en la conversación.</p>` : ''}
       ${row.status === 'REVIEW_REQUIRED' ? `<p>Ya existe una solicitud con estos artículos; revísala antes de duplicarla.</p><ul>${(row.existing_requests || []).map(r=>`<li>${escape(r.folio)}</li>`).join('')}</ul>` : ''}
       ${completed ? `<p><a href="${escape(row.url)}">Abrir solicitud ${escape(row.folio)}</a></p><p class="agent-source">Confirmada: ${date(row.confirmed_at)}</p>` : ['WAITING_INFORMATION','AWAITING_CONFIRMATION'].includes(row.status) ? `
