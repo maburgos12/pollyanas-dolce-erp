@@ -275,3 +275,33 @@ assert(productMarginHtml.includes('Costo sin verificar'));
 assert(productMarginHtml.includes('No disponible'));
 assert(productMarginHtml.includes('No es utilidad neta'));
 assert(!productMarginHtml.includes('<img'));
+
+// History must not request attachments rejected by the evidence endpoints.
+for (const kind of ['purchase', 'followup']) {
+  const files = [
+    {nombre:'captura <privada>.png', mime:'image/png', url:'/private/evidence-image/'},
+    {nombre:'factura.pdf', mime:'application/pdf', url:'/private/evidence-pdf/'},
+  ];
+  const draft = {...purchase, kind, files};
+  for (const status of ['EXPIRED', 'REVIEW_REQUIRED', 'CANCELLED', 'UNKNOWN', undefined,
+    ...(kind === 'followup' ? ['WAITING_INFORMATION'] : [])]) {
+    const rendered = view.incident({...draft, status});
+    assert(!rendered.includes('/private/evidence-'), `${kind} ${status} must not link or load restricted evidence`);
+    assert(rendered.includes('captura &lt;privada&gt;.png'));
+    assert(rendered.includes('factura.pdf'));
+    assert(rendered.includes(status === 'EXPIRED' ? 'La propuesta venció' : 'Los adjuntos no están disponibles'));
+    assert(!rendered.includes('data-incident-id'));
+    assert(!rendered.includes('data-followup-upload'));
+    assert(!rendered.includes('<privada>'));
+  }
+  for (const status of ['AWAITING_CONFIRMATION', 'EXECUTED', ...(kind === 'purchase' ? ['WAITING_INFORMATION'] : [])]) {
+    const rendered = view.incident({...draft, status});
+    assert(rendered.includes('href="/private/evidence-image/"'));
+    assert(rendered.includes('src="/private/evidence-image/"'));
+    assert(rendered.includes('href="/private/evidence-pdf/"'));
+    assert(!rendered.includes('src="/private/evidence-pdf/"'));
+    assert(!rendered.includes('Los adjuntos no están disponibles'));
+  }
+  assert(!view.incident({...draft, status:'EXPIRED', files:[]}).includes('La propuesta venció'));
+}
+console.log('Evidence history states: OK');
