@@ -83,16 +83,25 @@ class ObligacionesMaestroTests(TestCase):
         self.assertEqual(ObligacionGasto.objects.count(), 0)
         self.assertIn("ya lee una captura de ese mes", salida)
 
-    def test_genera_cuando_el_rubro_ya_no_lee_capturas(self):
-        # La regla desactivada es el caso de la renta: la captura se queda como
-        # historia y el contrato verificado pasa a ser la única fuente.
+    def test_no_duplica_captura_aunque_la_regla_este_desactivada(self):
         regla = self._regla_de_capturas()
         regla.activa = False
         regla.save()
         self._captura_del_excel()
-        self._generar()
-        obligacion = ObligacionGasto.objects.get()
-        self.assertEqual(obligacion.monto_reconocido, Decimal("6244.98"))
+        salida = self._generar()
+        self.assertFalse(ObligacionGasto.objects.exists())
+        self.assertIn("Ya existe una captura real", salida)
+
+    def test_el_servicio_directo_tambien_rechaza_duplicado(self):
+        from django.core.exceptions import ValidationError
+        from reportes.services_gastos_compromisos import generar_obligacion_recurrente
+        self._captura_del_excel()
+        with self.assertRaisesMessage(ValidationError, "Ya existe una captura real"):
+            generar_obligacion_recurrente(
+                usuario=self.usuario, recurrente=self.contrato, periodo=date(2026, 1, 1),
+            )
+        self.assertEqual(GastoOperativoMensual.objects.count(), 1)
+        self.assertFalse(ObligacionGasto.objects.exists())
 
     def test_genera_cuando_no_hay_captura_previa(self):
         self._regla_de_capturas()

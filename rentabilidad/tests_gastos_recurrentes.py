@@ -89,9 +89,9 @@ class IntegracionGastosRecurrentesTests(TestCase):
         leido = response.context["rent"]
         self.assertEqual(leido.punto_equilibrio_mensual, Decimal("1200.00"))
         self.assertTrue(leido.fuente_gastos_incompleta)
-        # 1 de 6 familias exigibles: cargas patronales no cuenta, no tiene fuente.
-        self.assertEqual(leido.cobertura_gastos_pct, 17)
-        self.assertContains(response, "17% de los gastos cargados")
+        # 1 de 7 familias exigibles, incluyendo cargas patronales.
+        self.assertEqual(leido.cobertura_gastos_pct, 14)
+        self.assertContains(response, "14% de los gastos cargados")
         self.assertContains(response, "Falta confirmar")
 
     def test_snapshot_releido_recalcula_estado_desde_sus_importes(self):
@@ -115,23 +115,23 @@ class IntegracionGastosRecurrentesTests(TestCase):
             "pendientes": [{"sucursal_id": None, "area": "gastos-venta", "familia": "electricidad",
                             "concepto": "Energía eléctrica", "estado": "PENDIENTE", "detalle": "sin sucursal"}],
         }, self.sucursal.pk)
-        self.assertEqual(resumen["cobertura_pct"], 100)
-        self.assertTrue(resumen["completo"])
+        self.assertEqual(resumen["cobertura_pct"], 86)
+        self.assertFalse(resumen["completo"])
         self.assertEqual(len(resumen["pendientes_globales"]), 1)
-        # Lo único propio es el aviso de cargas patronales, que no bloquea.
+        # El pendiente propio de cargas reduce la cobertura.
         self.assertEqual([p["familia"] for p in resumen["pendientes"]], ["cargas_patronales"])
 
-    def test_cargas_patronales_sin_fuente_no_bloquean_la_cobertura(self):
-        """IMSS/RCV no tienen fuente automatizada: se informan, no reprueban."""
+    def test_cargas_patronales_ausentes_reducen_la_cobertura(self):
+        """No declarar cobertura completa sin las cargas que SIPARE puede aportar."""
         resumen = costos_de_sucursal({
             "filas": [{"sucursal_id": self.sucursal.pk, "area": "gastos-venta", "familia": f,
                        "estado": "COMPLETO", "monto_mensual": Decimal("10")}
                       for f in ("renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina")],
             "pendientes": [],
         }, self.sucursal.pk)
-        self.assertEqual(resumen["familias_sin_fuente"], ["cargas_patronales"])
-        self.assertEqual(resumen["cobertura_pct"], 100)
-        self.assertTrue(resumen["completo"])
+        self.assertEqual(resumen["familias_sin_fuente"], [])
+        self.assertEqual(resumen["cobertura_pct"], 86)
+        self.assertFalse(resumen["completo"])
 
     def test_componente_ausente_no_borra_total_laboral_previo(self):
         from reportes.services_rentabilidad_mensual import aplicar_costos_en_memoria, leer_costos_mensuales
@@ -165,3 +165,12 @@ class IntegracionGastosRecurrentesTests(TestCase):
             "pendientes": [{"sucursal_id": self.sucursal.pk, "area": "administracion", "familia": "alarmas"}],
         })
         self.assertEqual(rent.gastos_admin_prorrateados, Decimal("150"))
+
+    def test_pendiente_no_oculta_gasto_conocido_superior_al_snapshot(self):
+        rent = SucursalRentabilidad(sucursal=self.sucursal, periodo=date(2026, 6, 1), otros_gastos_fijos=Decimal("100"))
+        resumen = aplicar_costos_en_memoria(rent, {
+            "filas": [{"sucursal_id": self.sucursal.pk, "area": "gastos-venta", "familia": "otros", "estado": "COMPLETO", "monto_mensual": Decimal("141")}],
+            "pendientes": [{"sucursal_id": self.sucursal.pk, "area": "gastos-venta", "familia": "otros"}],
+        })
+        self.assertEqual(rent.otros_gastos_fijos, Decimal("141"))
+        self.assertFalse(resumen["completo"])

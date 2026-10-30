@@ -413,6 +413,18 @@ def generar_obligacion_recurrente(*, usuario, recurrente: GastoRecurrente, perio
     existente = ObligacionGasto.objects.filter(gasto_recurrente=recurrente, periodo=periodo).first()
     if existente:
         return existente, False
+    # Una captura real sin obligación también llega a Rentabilidad aunque su regla esté inactiva.
+    previas = GastoOperativoMensual.objects.filter(
+        centro_costo_id=recurrente.centro_costo_id,
+        categoria_gasto_id=recurrente.categoria_gasto_id,
+        periodo=periodo, tipo_dato=GastoOperativoMensual.TIPO_DATO_REAL,
+        es_estimado=False, obligacion_gasto__isnull=True,
+    )
+    if previas.exists():
+        raise ValidationError(
+            "Ya existe una captura real de esta categoría, centro y mes sin enlazar. "
+            "Concíliala con el contrato antes de generar otra obligación."
+        )
     version = (
         recurrente.versiones.filter(vigencia_inicio__lte=periodo)
         .filter(models.Q(vigencia_fin__isnull=True) | models.Q(vigencia_fin__gte=periodo))
