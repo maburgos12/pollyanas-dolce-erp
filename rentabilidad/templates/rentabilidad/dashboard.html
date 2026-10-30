@@ -68,13 +68,13 @@
   {% if not fuente_estado.cuadra %}
   <section class="rent-panel" aria-label="Conciliación de ventas">
     <h2>Ventas pendientes de conciliación</h2>
-    <p><strong>El resultado consolidado es provisional.</strong> La diferencia entre venta bruta Point y los cálculos guardados es ${{ fuente_estado.diferencia|floatformat:2|intcomma }} (fuente menos cálculo). Se revisa cada sucursal: las diferencias no se compensan para declarar conciliado el total.</p>
+    <p><strong>El resultado consolidado es provisional.</strong> La diferencia entre venta neta fiscal y la lectura del mes es ${{ fuente_estado.diferencia|floatformat:2|intcomma }} (fuente menos cálculo). Se revisa cada sucursal: las diferencias no se compensan para declarar conciliado el total.</p>
     <div class="table-wrap"><table class="rent-table">
-      <thead><tr><th>Sucursal</th><th>Venta bruta Point</th><th>Cálculo guardado</th><th>Diferencia</th><th>Motivo</th></tr></thead>
+      <thead><tr><th>Sucursal</th><th>Venta neta fiscal</th><th>Lectura del mes</th><th>Diferencia</th><th>Motivo</th></tr></thead>
       <tbody>{% for row in fuente_estado.discrepancias %}<tr>
         <td data-label="Sucursal">{{ row.name }}</td>
-        <td data-label="Venta bruta Point">{% if row.source_total is not None %}${{ row.source_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
-        <td data-label="Cálculo guardado">{% if row.snapshot_total is not None %}${{ row.snapshot_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+        <td data-label="Venta neta fiscal">{% if row.source_total is not None %}${{ row.source_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+        <td data-label="Lectura del mes">{% if row.snapshot_total is not None %}${{ row.snapshot_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
         <td data-label="Diferencia">{% if row.difference is not None %}${{ row.difference|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
         <td data-label="Motivo">{{ row.reason }}</td>
       </tr>{% empty %}<tr><td colspan="5">Sin fuente y cálculo suficientes para conciliar este periodo.</td></tr>{% endfor %}</tbody>

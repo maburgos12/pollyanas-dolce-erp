@@ -371,7 +371,7 @@ def dashboard_rentabilidad(request):
     }
     conciliacion = reconcile_branch_sales(
         source_rows=ventas_fuente["by_branch"],
-        snapshot_rows=[{"branch_id": item["obj"].sucursal_id, "name": item["obj"].sucursal.nombre, "total": item["obj"].ventas_netas} for item in sucursales_data],
+        snapshot_rows=[{"branch_id": item["obj"].sucursal_id, "name": item["obj"].sucursal.nombre, "total": item["obj"].ventas_netas} for item in sucursales_data if item["obj"].en_perimetro_fuente],
     )
     fuente_estado["cuadra"] = conciliacion["reconciled"]
     fuente_estado["discrepancias"] = conciliacion["discrepancies"]
