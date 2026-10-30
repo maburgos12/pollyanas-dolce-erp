@@ -32,3 +32,7 @@ SIPARE ya existe: la ausencia de cargas debe reducir cobertura. Conservar un tot
 Consultas reproducibles: inventario_fuentes_datos --term electricidad; --term gasto --term nomina --term cedula --term cfdi, PostgreSQL configurado. El inventario es léxico; identificación confirmada por modelos y consultas de registros limitadas a Guamúchil.
 
 Riesgos: facturación eléctrica no equivale a consumo mensual; Excel administrativo no acredita exclusivamente cuota patronal. No modificar nómina, identidad, sueldos ni cédulas para aparentar cobertura.
+
+## Comprobación adicional de venta neta
+
+PointDailySale septiembre sucursal 6: 778 registros; gross_amount 142030.00, descuento 295.98, impuestos 4554.72, net_amount 137179.30. El snapshot omitía restar impuestos. El cálculo compartido usa gross_amount menos tax_amount antes de descontar; no altera las ventas originales. Recalcular solo el registro derivado 94 al aplicar esta conciliación.
