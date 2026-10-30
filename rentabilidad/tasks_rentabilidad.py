@@ -35,12 +35,6 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     Si year/month son None usa el mes anterior al actual (mes cerrado).
     """
     from .models_rentabilidad import SucursalRentabilidad
-    # Importa tus modelos reales aquí:
-    # from sucursales.models import Sucursal
-    # from ventas.models import Venta
-    # from gastos.models import GastoFijo
-    # from hr.models import NominaDetalle
-
     hoy = timezone.localdate()
     if year is None or month is None:
         # Mes anterior (cerrado)
@@ -57,12 +51,7 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     # ---------------------------------------------------------- #
     from django.db.models import Sum, Q
     from core.models import Sucursal
-    from pos_bridge.models.sales import PointDailySale
-    from recetas.models import RecetaCostoVersion
     from reportes.models import (
-        ProductBusinessRule,
-        ProductoReventaCosto,
-        ProductoReventaCostoHistoricoMensual,
         ProyectoInversion,
         ProyectoInversionGasto,
     )
@@ -76,121 +65,10 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
     fecha_inicio_mes = date(year, month, 1)
     fecha_fin_mes = date(year, month, ultimo_dia)
 
-    sucursales = Sucursal.objects.filter(activa=True)
     costos_mensuales = leer_costos_mensuales(periodo)
+    sucursales = Sucursal.objects.filter(Q(activa=True) | Q(pk__in=[sid for sid in costos_mensuales["resultado"]["sucursales"] if sid]))
 
     for suc in sucursales:
-
-        # ---- VENTAS ----
-        ventas_qs = PointDailySale.objects.filter(
-            branch__erp_branch=suc,
-            sale_date__year=year,
-            sale_date__month=month,
-        )
-        # Point gross incluye impuestos; el estado de resultados usa ingreso sin ellos.
-        ventas_brutas = (ventas_qs.aggregate(t=Sum("gross_amount"))["t"] or Decimal("0")) - (
-            ventas_qs.aggregate(t=Sum("tax_amount"))["t"] or Decimal("0")
-        )
-        descuentos = ventas_qs.aggregate(t=Sum("discount_amount"))["t"] or Decimal("0")
-
-        # ---- COSTO MATERIA PRIMA (historico mensual si existe, fallback por fecha) ----
-        from datetime import timedelta
-        from django.db.models import Case, IntegerField, When
-        from reportes.models import RecetaCostoHistoricoMensual
-        fin_periodo = ((periodo.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1))
-
-        receta_ids = list(
-            ventas_qs.filter(receta__isnull=False).values_list("receta_id", flat=True).distinct()
-        )
-
-        versiones = {}
-
-        # Primero intentar usar costeo historico del mes (congelado al cierre)
-        historicos = RecetaCostoHistoricoMensual.objects.filter(
-            receta_id__in=receta_ids,
-            periodo=periodo,
-        )
-        for historico in historicos:
-            versiones[historico.receta_id] = historico.costo_total
-
-        # Para recetas sin historico del mes, usar costo vigente hasta esa fecha
-        recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in versiones]
-        if recetas_sin_historico:
-            for rv in RecetaCostoVersion.objects.filter(
-                receta_id__in=recetas_sin_historico,
-                creado_en__date__lte=fin_periodo,
-            ).annotate(
-                fuente_prioridad=Case(
-                    When(fuente="POINT_PRODUCTION_REPORT", then=0),
-                    When(fuente="POINT_COST_CAPTURE", then=1),
-                    When(fuente="POINT_COST_CAPTURE_FIX", then=2),
-                    default=3,
-                    output_field=IntegerField(),
-                )
-            ).order_by("receta_id", "fuente_prioridad", "-version_num"):
-                if rv.receta_id not in versiones:
-                    versiones[rv.receta_id] = rv.costo_total
-
-        costo_mp_real = Decimal("0")
-        for venta in ventas_qs.filter(receta__isnull=False):
-            costo = versiones.get(venta.receta_id, Decimal("0"))
-            costo_mp_real += costo * venta.quantity
-
-        costo_mp_real = costo_mp_real.quantize(Decimal("0.01"))
-        ventas_produccion_brutas = ventas_qs.filter(receta__isnull=False).aggregate(
-            t=Sum("gross_amount")
-        )["t"] or Decimal("0")
-
-        # Si no se pudo calcular costo real (0 recetas vinculadas), usar estimado 30%
-        if costo_mp_real == Decimal("0") and ventas_produccion_brutas > 0:
-            costo_mp_real = (ventas_produccion_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
-        # Cap de seguridad: si CMV supera 80% de ventas, el costeo está mal escalado
-        # Usar fallback 30% hasta que el costeo real se corrija
-        elif ventas_produccion_brutas > 0 and costo_mp_real > (ventas_produccion_brutas * Decimal("0.80")):
-            costo_mp_real = (ventas_produccion_brutas * Decimal("0.30")).quantize(Decimal("0.01"))
-
-        # ---- COSTO REVENTA (productos sin receta con costo de adquisicion Point) ----
-        ventas_reventa_qs = ventas_qs.filter(receta__isnull=True, product_id__isnull=False)
-        producto_reventa_ids = list(
-            ventas_reventa_qs.values_list("product_id", flat=True).distinct()
-        )
-        costos_reventa = {}
-
-        historicos_reventa = ProductoReventaCostoHistoricoMensual.objects.filter(
-            producto_point_id__in=producto_reventa_ids,
-            periodo=periodo,
-        )
-        for historico in historicos_reventa:
-            costos_reventa[historico.producto_point_id] = historico.costo_promedio
-
-        productos_sin_historico = [
-            producto_id for producto_id in producto_reventa_ids if producto_id not in costos_reventa
-        ]
-        if productos_sin_historico:
-            for costo_producto in ProductoReventaCosto.objects.filter(
-                producto_point_id__in=productos_sin_historico,
-                fecha_vigencia__lte=fin_periodo,
-            ).order_by("producto_point_id", "-fecha_vigencia", "-id"):
-                if costo_producto.producto_point_id not in costos_reventa:
-                    costos_reventa[costo_producto.producto_point_id] = costo_producto.costo_unitario
-
-        nombres_reventa_fija = set(
-            ProductBusinessRule.objects.filter(
-                classification=ProductBusinessRule.CLASSIFICATION_REVENTA,
-                is_fixed=True,
-            ).values_list("normalized_name", flat=True)
-        )
-        productos_con_costo = set(costos_reventa.keys())
-        costo_reventa = Decimal("0")
-        for venta in ventas_reventa_qs.select_related("product"):
-            product_name = ProductBusinessRule.normalize_product_name(venta.product.name if venta.product_id else "")
-            es_reventa = venta.product_id in productos_con_costo or product_name in nombres_reventa_fija
-            if not es_reventa:
-                continue
-            costo = costos_reventa.get(venta.product_id, Decimal("0"))
-            costo_reventa += costo * venta.quantity
-
-        costo_reventa = costo_reventa.quantize(Decimal("0.01"))
 
         # ---- INVERSIÓN INICIAL Y FECHA DE APERTURA DESDE PROYECTOS ----
         inversion_total = ProyectoInversionGasto.objects.filter(
@@ -212,13 +90,6 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
 
         # ---- GUARDAR ----
         defaults = {
-            "ventas_brutas": ventas_brutas,
-            "descuentos": descuentos,
-            "devoluciones": Decimal("0"),
-            "costo_materia_prima": costo_mp_real,
-            "costo_reventa": costo_reventa,
-            "empaque": Decimal("0"),
-            "otros_costos_variables": Decimal("0"),
             "inversion_inicial": inversion_total,
             "fecha_apertura": fecha_apertura_suc,
         }
@@ -227,7 +98,9 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
                 sucursal=suc, periodo=fecha_inicio_mes, defaults=defaults,
             )
             resumen_gastos = aplicar_costos_en_memoria(obj, costos_mensuales)
-            obj.save()
+            campos = ["ventas_brutas", "descuentos", "devoluciones", "costo_materia_prima",
+                      "costo_reventa", "empaque", "otros_costos_variables", "estado", "alerta_nivel", "calculado_en"]
+            obj.save(update_fields=campos + list(resumen_gastos["campos"]))
         if not resumen_gastos["completo"]:
             logger.warning(
                 "[Rentabilidad] %s %s: cobertura %s%%; PE parcial, falta %s",
@@ -261,70 +134,3 @@ def analizar_sucursal_con_ia(rent_pk):
     except Exception as e:
         logger.exception(f"[AnalizarSucursal] Error pk={rent_pk}: {e}")
         return {"ok": False, "error": str(e)}
-
-
-"""
-=============================================================
-MIGRACIÓN  — Agregar al final de tu migration más reciente
-o crear nueva: python manage.py makemigrations sucursales
-=============================================================
-
-from django.db import migrations, models
-import django.db.models.deletion
-
-class Migration(migrations.Migration):
-    dependencies = [
-        ('sucursales', '000X_anterior'),
-    ]
-    operations = [
-        migrations.CreateModel(
-            name='SucursalRentabilidad',
-            fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True)),
-                ('sucursal', models.ForeignKey('sucursales.Sucursal', on_delete=django.db.models.deletion.CASCADE, related_name='rentabilidad_mensual')),
-                ('periodo', models.DateField()),
-                ('ventas_brutas', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('descuentos', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('devoluciones', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('costo_materia_prima', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('empaque', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('otros_costos_variables', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('renta', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('nomina_directa', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('servicios_luz_agua', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('mantenimiento', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('gastos_admin_prorrateados', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('otros_gastos_fijos', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('inversion_inicial', models.DecimalField(decimal_places=2, default=0, max_digits=14)),
-                ('fecha_apertura', models.DateField(blank=True, null=True)),
-                ('subsidio_recibido', models.DecimalField(decimal_places=2, default=0, max_digits=12)),
-                ('estado', models.CharField(choices=[...], db_index=True, default='SIN_DATOS', max_length=20)),
-                ('diagnostico_ia', models.TextField(blank=True, default='')),
-                ('recomendaciones_ia', models.JSONField(default=list)),
-                ('alerta_nivel', models.IntegerField(default=0)),
-                ('calculado_en', models.DateTimeField(auto_now=True)),
-                ('calculado_por_agente', models.BooleanField(default=False)),
-                ('notas_manuales', models.TextField(blank=True, default='')),
-            ],
-            options={'ordering': ['-periodo', 'sucursal'], 'unique_together': {('sucursal', 'periodo')}},
-        ),
-    ]
-"""
-
-"""
-=============================================================
-urls.py  — Agregar en sucursales/urls.py
-=============================================================
-
-from django.urls import path
-from . import views_rentabilidad
-
-app_name = 'sucursales'
-
-urlpatterns += [
-    path('rentabilidad/',                          views_rentabilidad.dashboard_rentabilidad, name='rentabilidad_dashboard'),
-    path('rentabilidad/<int:pk>/',                 views_rentabilidad.detalle_sucursal,       name='rentabilidad_detalle'),
-    path('rentabilidad/<int:pk>/analizar/',        views_rentabilidad.analizar_con_ia,        name='rentabilidad_analizar'),
-    path('rentabilidad/analizar-todas/',           views_rentabilidad.analizar_todas,         name='rentabilidad_analizar_todas'),
-]
-"""

@@ -45,13 +45,14 @@
 {% endblock %}
 
 {% block content %}
+<p>Resultados parciales antes de fabricación, logística y administración. Horas extra informativas: no se suman otra vez a la nómina. No confirman utilidad neta, ROI o recuperación.</p>
 <div class="rm-shell">
   <section class="rm-hero">
     <div>
       <h1>Reporte mensual consolidado · últimos 12 meses</h1>
       <p>
-        Ingresos del P&amp;L canónico, nómina con horas extra como línea aparte,
-        nómina como % de ventas, utilidad neta (P&amp;L de 6 líneas de gasto) y
+        Ingresos del P&amp;L canónico, nómina con horas extra informativas,
+        nómina como % de ventas, resultado parcial (antes de costos centrales) y
         variación contra el mismo mes del año anterior.
       </p>
     </div>
@@ -81,7 +82,7 @@
           <th>Horas extra</th>
           <th>Nómina total</th>
           <th>Nómina % ventas</th>
-          <th>Utilidad neta</th>
+          <th>Resultado parcial sucursales</th>
           <th>YoY ingresos</th>
           <th>YoY nómina</th>
           <th>YoY utilidad</th>
@@ -96,7 +97,7 @@
           <td>${{ fila.horas_extra|floatformat:2|intcomma }}</td>
           <td>${{ fila.nomina_total|floatformat:2|intcomma }}</td>
           <td>{% if fila.nomina_pct_ventas is not None %}{{ fila.nomina_pct_ventas|floatformat:2 }}%{% else %}<span class="rm-na">—</span>{% endif %}</td>
-          <td class="{% if fila.utilidad_neta < 0 %}rm-neg{% endif %}">${{ fila.utilidad_neta|floatformat:2|intcomma }}</td>
+          <td class="{% if fila.utilidad_neta < 0 %}rm-neg{% endif %}">${{ fila.utilidad_neta|floatformat:2|intcomma }}{% if fila.resultado_empresa_parcial is not None %}<div class="rm-note">Central: ${{ fila.central_registrado|floatformat:2|intcomma }} · Empresa parcial: ${{ fila.resultado_empresa_parcial|floatformat:2|intcomma }}</div>{% endif %}</td>
           <td>
             {% if fila.yoy.ingresos is not None %}
               <span class="{% if fila.yoy.ingresos >= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.ingresos|floatformat:1 }}%</span>
@@ -149,10 +150,7 @@
     </table>
     </div>
     <p class="rm-note">
-      Fuentes: rentabilidad histórica (P&amp;L canónico por sucursal-mes) y horas extra
-      de RRHH en estado autorizado o pagado. La utilidad neta corresponde a la utilidad
-      operativa del P&amp;L de 6 líneas de gasto (renta, nómina, servicios, mantenimiento,
-      gastos administrativos prorrateados y otros gastos fijos).
+      Fuentes: ventas Point sin impuestos ni descuentos, materiales por unidad, reventa, merma y gastos del mes. Las horas extra de RRHH autorizadas o pagadas son informativas; no incrementan nuevamente la nómina. El resultado de sucursales excluye los costos centrales, que se muestran por separado cuando se consulta toda la empresa.
     </p>
   </section>
 </div>

@@ -109,9 +109,9 @@ class ReconciliationTests(SimpleTestCase):
 
     @patch("rentabilidad.views_rentabilidad._costos_reventa_para_periodo", return_value={})
     @patch("rentabilidad.views_rentabilidad._costos_recetas_para_periodo", return_value={})
-    @patch("rentabilidad.views_rentabilidad.get_point_sales_product_panel_rows")
+    @patch("pos_bridge.models.sales.PointDailySale")
     def test_missing_cost_and_advance_are_not_profit_leaders(self, sales, recipe_costs, resale_costs):
-        sales.return_value = [dict(receta_id=None, product_id=1, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
+        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(receta_id=None, product_id=1, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
         panel = _build_productos_panel(date(2026, 9, 1), date(2026, 9, 1), date(2026, 9, 30))
         self.assertEqual(panel["top_utilidad"], [])
         self.assertIsNone(panel["riesgo_margen"][0]["margen"])

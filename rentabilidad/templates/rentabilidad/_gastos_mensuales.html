@@ -9,14 +9,14 @@
   <div class="ia-box">
   {% if not gastos.completo %}
   <p role="status"><strong>Cobertura {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
-    Se calcula con las fuentes disponibles y los importes previos señalados; no representa todavía un costo completo confirmado.
+    Se calcula con las fuentes disponibles del mes; no representa todavía un costo completo confirmado.
     {% if gastos.familias_faltantes_display %}Falta cargar: {{ gastos.familias_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}
   {% if 'cargas_patronales' in gastos.familias_faltantes %}
   <p>Cargas patronales (IMSS/RCV): se leen de SIPARE o de capturas documentadas por sucursal. Su ausencia reduce la cobertura; una captura manual conserva su condición parcial.</p>
   {% endif %}
   {% if gastos.campos_previos_conservados %}
-  <p>Hay importes previos conservados porque falta su fuente actual. No se consideran confirmados para este mes.</p>
+  <p>Hay importes previos conservados en el historial porque falta su fuente actual. No se suman al resultado de lectura del mes.</p>
   {% endif %}
   </div>
   <div class="history-table-wrap" role="region" tabindex="0" aria-label="Desglose mensual de gastos; tabla desplazable">

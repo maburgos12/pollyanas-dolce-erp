@@ -1,0 +1,6 @@
+{% load humanize %}
+<details><summary>Ver fuentes y costos centrales registrados</summary>
+<div class="table-wrap"><table><thead><tr><th>Área</th><th>Concepto</th><th>Real registrado</th><th>Fuente</th></tr></thead><tbody>
+{% for fila in costos_centrales %}<tr><td>{{ fila.area }}</td><td>{{ fila.concepto }}</td><td>{% if fila.pendiente %}Pendiente{% else %}${{ fila.monto|floatformat:2|intcomma }}{% endif %}</td><td>{{ fila.fuente|default:"Sin fuente" }} · línea {{ fila.id }}</td></tr>
+{% empty %}<tr><td colspan="4">Sin costos centrales registrados para este mes; no equivale a costo cero.</td></tr>{% endfor %}
+</tbody></table></div></details>

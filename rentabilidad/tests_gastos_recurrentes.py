@@ -44,8 +44,8 @@ class IntegracionGastosRecurrentesTests(TestCase):
         rent = SucursalRentabilidad.objects.get(sucursal=self.sucursal, periodo=date(2026, 6, 1))
         self.assertEqual(rent.renta, Decimal("13242.00"))
         self.assertEqual(rent.nomina_directa, Decimal("1200.00"))
-        # La cobertura parcial se rotula, ya no vacía el estado ni el PE.
-        self.assertNotEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
+        # La cobertura parcial no certifica rentabilidad integral.
+        self.assertEqual(rent.estado, EstadoRentabilidad.SIN_DATOS)
         resumen = costos_de_sucursal(leer_costos_mensuales(rent.periodo), self.sucursal.pk)
         self.assertFalse(resumen["completo"])
         self.assertLess(resumen["cobertura_pct"], 100)
@@ -87,7 +87,7 @@ class IntegracionGastosRecurrentesTests(TestCase):
         self.client.force_login(self.usuario)
         response = self.client.get(reverse("rentabilidad_detalle", kwargs={"pk": rent.pk}))
         leido = response.context["rent"]
-        self.assertEqual(leido.punto_equilibrio_mensual, Decimal("1200.00"))
+        self.assertEqual(leido.punto_equilibrio_mensual, Decimal("0"))  # Sin venta fuente.
         self.assertTrue(leido.fuente_gastos_incompleta)
         # 1 de 7 familias exigibles, incluyendo cargas patronales.
         self.assertEqual(leido.cobertura_gastos_pct, 14)
@@ -140,8 +140,9 @@ class IntegracionGastosRecurrentesTests(TestCase):
             sucursal=self.sucursal, periodo=date(2026, 6, 1), nomina_directa=Decimal("1400"),
         )
         resumen = aplicar_costos_en_memoria(rent, leer_costos_mensuales(rent.periodo))
-        self.assertEqual(rent.nomina_directa, Decimal("1400"))
-        self.assertIn("nomina_directa", resumen["campos_previos_conservados"])
+        self.assertEqual(rent.nomina_directa, Decimal("1200"))
+        self.assertNotIn("nomina_directa", resumen["campos_previos_conservados"])
+        self.assertEqual(SucursalRentabilidad.objects.get(pk=rent.pk).nomina_directa, Decimal("1400"))
         self.assertEqual(resumen["totales"]["nomina"], Decimal("1200"))
 
     def test_detalle_enlaza_soporte_seguro_y_no_esquemas_ejecutables(self):

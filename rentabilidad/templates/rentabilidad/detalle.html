@@ -41,7 +41,7 @@
 
   {% if not rent.gastos_mensuales.completo %}
   <p role="status"><strong>Resultado provisional · {{ rent.cobertura_gastos_pct }}% de los gastos cargados.</strong>
-    Utilidad, punto de equilibrio, recuperación y ROI se calculan solo con lo confirmado: el PE queda subestimado y la utilidad sobreestimada.
+    El resultado y el punto de equilibrio son parciales. ROI y recuperación no son calculables.
     {% if rent.gastos_faltantes_display %}Falta: {{ rent.gastos_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}
 
@@ -59,7 +59,7 @@
       <div class="sub">${{ rent.margen_bruto|floatformat:0|intcomma }} después de costos variables.</div>
     </article>
     <article class="kpi-card">
-      <div class="label">Utilidad operativa</div>
+      <div class="label">Resultado parcial</div>
       <div class="value {% if rent.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">
         ${{ rent.utilidad_operativa|floatformat:0|intcomma }}
       </div>
@@ -79,16 +79,8 @@
     </article>
     <article class="kpi-card">
       <div class="label">Recuperación inversión</div>
-      <div class="value {% if rent.porcentaje_recuperacion_inversion >= 100 %}positive{% endif %}">
-        {{ rent.porcentaje_recuperacion_inversion }}%
-      </div>
-      <div class="sub">
-        {% if rent.inversion_inicial %}
-        ${{ rent.inversion_pendiente|floatformat:0|intcomma }} pendientes por recuperar.
-        {% else %}
-        Inversión inicial no registrada.
-        {% endif %}
-      </div>
+      <div class="value">No calculable</div>
+      <div class="sub">Requiere costos integrales conciliados e historial completo.</div>
     </article>
     <article class="kpi-card">
       <div class="label">ROI anualizado</div>
@@ -99,7 +91,7 @@
         {% if rent.payback_meses_estimados is not None %}
         Payback estimado: {{ rent.payback_meses_estimados }} meses.
         {% else %}
-        Sin suficiente tracción para estimar payback.
+        Falta conciliación de costos integrales e historial.
         {% endif %}
       </div>
     </article>
@@ -109,13 +101,13 @@
     <article class="panel">
       <div class="panel-header">
         <div>
-          <h2 class="panel-title">Tendencia de utilidad operativa</h2>
-          <div class="panel-subtitle">Ventana de hasta 12 meses para ver aceleración, subsidio o recuperación.</div>
+          <h2 class="panel-title">Tendencia del resultado parcial</h2>
+          <div class="panel-subtitle">Ventana de hasta 12 meses de resultados parciales con las fuentes disponibles.</div>
         </div>
       </div>
       <div class="chart-wrap">
         <div class="chart-canvas-wrap">
-          <canvas id="utilidadTrendChart" aria-label="Tendencia mensual de utilidad operativa" role="img"></canvas>
+          <canvas id="utilidadTrendChart" aria-label="Tendencia mensual del resultado parcial" role="img"></canvas>
         </div>
       </div>
     </article>
@@ -184,11 +176,11 @@
           <dd>${{ rent.costo_reventa|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
-          <dt>Empaque</dt>
+          <dt>Empaque adicional (incluido en receta)</dt>
           <dd>${{ rent.empaque|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
-          <dt>Otros costos variables</dt>
+          <dt>Merma registrada</dt>
           <dd>${{ rent.otros_costos_variables|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
@@ -250,15 +242,15 @@
           <dd>${{ rent.inversion_inicial|floatformat:2|intcomma }}</dd>
         </div>
         <div class="metric-row">
-          <dt>Utilidad acumulada</dt>
-          <dd class="{% if rent.utilidad_acumulada >= 0 %}positive{% else %}negative{% endif %}">
-            ${{ rent.utilidad_acumulada|floatformat:2|intcomma }}
-          </dd>
+          <dt>Recuperación acumulada</dt><dd>No calculable</dd>
         </div>
       </dl>
     </article>
   </section>
 
+  <section class="panel"><h2>Costos centrales de empresa</h2><p>No asignados a esta sucursal. Su resultado es parcial antes de fabricación, logística y administración.</p>
+  {% include "rentabilidad/_costos_centrales.html" with costos_centrales=rent.costos_centrales %}
+  {% if rent.costos_pendientes %}<h3>Costos por confirmar</h3><ul>{% for pendiente in rent.costos_pendientes %}<li>{{ pendiente }}</li>{% endfor %}</ul>{% endif %}</section>
   {% include "rentabilidad/_gastos_mensuales.html" with gastos=rent.gastos_mensuales %}
 
   <section class="history-table-wrap">
@@ -274,7 +266,7 @@
             <th>Estado</th>
             <th class="num">Ventas netas</th>
             <th class="num">Margen bruto</th>
-            <th class="num">Utilidad op.</th>
+            <th class="num">Resultado parcial</th>
             <th class="num">Avance PE</th>
             <th class="num">ROI</th>
             <th class="num">Payback</th>
@@ -318,8 +310,8 @@
   </section>
 
   <div class="formula-note">
-    <strong>Fórmulas clave:</strong> Margen bruto = ventas netas menos costos variables. Utilidad operativa = margen bruto menos gastos fijos.
-    Punto de equilibrio = gastos fijos / (1 − costos variables / ventas netas). ROI anualizado = utilidad de los últimos 12 meses / inversión inicial.
+    <strong>Fórmulas clave:</strong> Margen bruto = ventas netas menos costos variables. Resultado parcial = margen bruto menos gastos fijos.
+    Punto de equilibrio = gastos fijos / (1 − costos variables / ventas netas). ROI y payback requieren costos integrales e historial conciliado.
   </div>
 </div>
 {% endblock %}
@@ -358,7 +350,7 @@
       data: {
         labels,
         datasets: [{
-          label: "Utilidad operativa",
+          label: "Resultado parcial",
           data: values,
           borderColor: "#8B2252",
           backgroundColor: "rgba(139, 34, 82, 0.12)",

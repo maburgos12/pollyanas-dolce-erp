@@ -95,7 +95,7 @@ class Command(BaseCommand):
             [
                 "periodo", "sucursal", "ingresos", "nomina", "horas_extra",
                 "nomina_total", "nomina_pct_ventas", "utilidad_neta",
-                "yoy_ingresos_pct", "yoy_nomina_pct", "yoy_utilidad_pct",
+                "yoy_ingresos_pct", "yoy_nomina_pct", "yoy_utilidad_pct", "alcance", "central_registrado", "resultado_empresa_parcial",
             ]
         )
         for fila in reporte["filas"]:
@@ -109,6 +109,7 @@ class Command(BaseCommand):
                     fila["yoy"]["ingresos"] if fila["yoy"]["ingresos"] is not None else "",
                     fila["yoy"]["nomina_total"] if fila["yoy"]["nomina_total"] is not None else "",
                     fila["yoy"]["utilidad_neta"] if fila["yoy"]["utilidad_neta"] is not None else "",
+                    fila["alcance"], fila["central_registrado"], fila["resultado_empresa_parcial"],
                 ]
             )
             if detalle:
@@ -119,12 +120,13 @@ class Command(BaseCommand):
                             s["ingresos"], s["nomina"], s["horas_extra"],
                             s["nomina_total"],
                             s["nomina_pct_ventas"] if s["nomina_pct_ventas"] is not None else "",
-                            s["utilidad_neta"], "", "", "",
+                            s["utilidad_neta"], "", "", "", s["alcance"], "", "",
                         ]
                     )
         return buffer.getvalue()
 
     def _render_tabla(self, reporte: dict, *, detalle: bool) -> None:
+        self.stdout.write("Resultado parcial antes de costos centrales; horas extra informativas, incluidas en nómina cuando se pagan.")
         encabezado = (
             f"{'Mes':<8} {'Ingresos':>14} {'Nómina':>13} {'Hrs extra':>11} "
             f"{'Nómina tot':>13} {'Nóm %vtas':>10} {'Utilidad':>14} "
@@ -146,7 +148,7 @@ class Command(BaseCommand):
                 for s in fila["sucursales"]:
                     self.stdout.write(
                         f"  · {s['sucursal']:<24} ing {_fmt(s['ingresos'])} · "
-                        f"nóm {_fmt(s['nomina'])} + HE {_fmt(s['horas_extra'])} "
+                        f"nóm {_fmt(s['nomina'])} · HE informativas {_fmt(s['horas_extra'])} "
                         f"({_fmt(s['nomina_pct_ventas'], '%')} de vtas) · "
                         f"util {_fmt(s['utilidad_neta'])}"
                     )
