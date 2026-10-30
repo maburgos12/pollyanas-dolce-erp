@@ -63,6 +63,13 @@ class ImportacionCfeTests(TestCase):
             self.assertTrue(g.es_estimado)
             self.assertEqual(g.archivo_soporte, "recibo.pdf")
 
+    def test_csv_sin_archivo_no_borra_soporte_preexistente(self):
+        cmd = Command()
+        cmd._asignar([self.factura], {self.factura.total: self.recibo}, self.cat)
+        self.recibo["archivo_soporte"] = ""
+        cmd._asignar([self.factura], {self.factura.total: self.recibo}, self.cat)
+        self.assertEqual(set(GastoOperativoMensual.objects.values_list("archivo_soporte", flat=True)), {"recibo.pdf"})
+
     def test_importe_ambiguo_exige_uuid_y_uuid_distinto_no_asigna(self):
         otra = SimpleNamespace(total=self.factura.total, uuid="B", fecha_emision=timezone.now())
         self.recibo["uuid"] = ""

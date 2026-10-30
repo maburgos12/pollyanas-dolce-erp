@@ -183,7 +183,7 @@ class Command(BaseCommand):
                         # Cada fila ya contiene su parte; no volver a dividir el bimestre.
                         "cobertura_mes_inicio": periodo,
                         "cobertura_mes_fin": periodo,
-                        "archivo_soporte": recibo.get("archivo_soporte", ""),
+                        **({"archivo_soporte": recibo["archivo_soporte"]} if recibo.get("archivo_soporte") else {}),
                         "comentario": (
                             f"Servicio {recibo['no_servicio']} · CFDI {cfdi.uuid} · "
                             f"factura {cfdi.fecha_emision:%d-%b-%Y} por {total:,.2f}. "
