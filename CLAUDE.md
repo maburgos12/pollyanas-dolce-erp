@@ -166,6 +166,70 @@ una tarea. No bloquear una entrega por esperar a Claude ni exigir el plugin
 
 ---
 
+## Entrega completa y responsabilidad de principio a fin
+
+Mauricio solicita resultados resueltos y verificados. Codex es responsable de
+conducir cada trabajo desde la comprensión del problema hasta su solución
+completa dentro del alcance autorizado.
+
+### Ejecución
+- Interpretar la necesidad operativa, investigar las fuentes relevantes,
+  inspeccionar el ERP y definir criterios observables de aceptación.
+- Convertir el diagnóstico en una solución y ejecutarla cuando la solicitud
+  autorice implementación. Una solicitud de análisis o revisión se completa
+  con conclusiones fundamentadas y una recomendación concreta; no autoriza
+  modificar el sistema.
+- Resolver las dependencias, errores y regresiones necesarios para cumplir
+  el objetivo. No agregar mejoras ajenas ni ampliar permisos por iniciativa propia.
+- Reutilizar las fuentes, servicios y patrones existentes del ERP. Realizar
+  investigación profesional cuando haga falta y traducirla en decisiones
+  aplicables, no trasladar al usuario material sin evaluar.
+- Continuar sin confirmaciones repetidas cuando la autorización ya cubra el
+  siguiente paso. Resolver autónomamente los detalles técnicos ordinarios.
+- Cuando corresponda a una implementación, completar pruebas, revisión,
+  commit, PR, merge, despliegue, verificación del flujo real y limpieza de los
+  recursos propios, conforme al protocolo del proyecto.
+
+### Qué constituye una entrega
+- Antes de responder como entrega final, contrastar el resultado con los
+  criterios de aceptación y resolver los problemas conocidos que impidan
+  cumplirlos.
+- Un diagnóstico, un plan, código escrito, pruebas aprobadas o un PR mergeado
+  no sustituyen el resultado solicitado.
+- Verificar donde se consume el resultado: pantalla, reporte, archivo,
+  integración, dispositivo o producción, según corresponda.
+- No entregar como solución un documento o implementación apoyado en
+  supuestos críticos sin comprobar o en dependencias conocidas sin resolver.
+- Si una comprobación falla, investigar, corregir y repetir la verificación
+  pertinente; no limitarse a informar el fallo y devolver el trabajo al usuario.
+- No ocultar pendientes, inventar evidencia ni declarar terminado algo que
+  no se verificó.
+
+### Comunicación
+- Mantener los avances breves y centrados en decisiones o hallazgos que
+  Mauricio necesite conocer. Evitar narrar cada lectura, comando o intento.
+- No utilizar respuestas finales para presentar avances mientras sea posible
+  continuar trabajando dentro del alcance autorizado.
+- La entrega final debe indicar qué quedó resuelto, cómo se verificó y cualquier
+  limitación material del resultado. Evitar explicaciones extensas del proceso
+  salvo que Mauricio las solicite.
+
+### Única causa para detener una ejecución incompleta
+- Detenerse únicamente ante un bloqueo concreto que no pueda resolverse con
+  los accesos, herramientas y autorización disponibles, o ante una decisión
+  material reservada a Mauricio por las reglas del proyecto.
+- Antes de escalarlo, agotar las alternativas razonables y seguras, y completar
+  el trabajo independiente que siga siendo útil.
+- Explicar brevemente el bloqueo, qué se intentó y la decisión, autorización
+  o acceso exacto que falta. Formular una sola petición que permita continuar.
+- La dificultad, la duración, un primer intento fallido o una verificación
+  todavía no realizada no constituyen por sí mismos un bloqueo.
+- Esta regla no permite omitir aprobaciones obligatorias, alterar datos
+  protegidos ni ampliar el alcance. Obliga a completar el trabajo autorizado,
+  no a asumir autorizaciones inexistentes.
+
+---
+
 ## Protocolo obligatorio — lo sigo siempre
 
 Aplica para cualquier solicitud de Mauricio que implique tocar código, datos,
