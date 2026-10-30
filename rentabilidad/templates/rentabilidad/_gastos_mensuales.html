@@ -9,11 +9,11 @@
   <div class="ia-box">
   {% if not gastos.completo %}
   <p role="status"><strong>Cobertura {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
-    Se calcula con los importes ya confirmados, así que el PE está subestimado.
+    Se calcula con las fuentes disponibles y los importes previos señalados; no representa todavía un costo completo confirmado.
     {% if gastos.familias_faltantes_display %}Falta cargar: {{ gastos.familias_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}
-  {% if gastos.familias_sin_fuente %}
-  <p>Cargas patronales (IMSS/RCV) no tienen fuente automatizada en el ERP: no se suman al gasto fijo ni cuentan en la cobertura hasta que SIPARE las alimente por sucursal.</p>
+  {% if 'cargas_patronales' in gastos.familias_faltantes %}
+  <p>Cargas patronales (IMSS/RCV): se leen de SIPARE o de capturas documentadas por sucursal. Su ausencia reduce la cobertura; una captura manual conserva su condición parcial.</p>
   {% endif %}
   {% if gastos.campos_previos_conservados %}
   <p>Hay importes previos conservados porque falta su fuente actual. No se consideran confirmados para este mes.</p>

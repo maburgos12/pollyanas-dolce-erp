@@ -122,6 +122,17 @@ class RentabilidadGastosFuenteTests(TestCase):
             net_amount=Decimal("1000.00"),
         )
 
+    def test_impuestos_cobrados_no_se_presentan_como_venta_neta(self):
+        PointDailySale.objects.filter(branch=self.point_branch).update(
+            gross_amount=Decimal("1160"), tax_amount=Decimal("152"),
+            discount_amount=Decimal("58"), net_amount=Decimal("950"),
+        )
+        recalcular_rentabilidad_mensual(year=2026, month=7)
+        snapshot = SucursalRentabilidad.objects.get(sucursal=self.sucursal, periodo=date(2026, 7, 1))
+        self.assertEqual(snapshot.ventas_brutas, Decimal("1008"))
+        self.assertEqual(snapshot.descuentos, Decimal("58"))
+        self.assertEqual(snapshot.ventas_netas, Decimal("950"))
+
     def test_recalculo_sin_fuente_no_sobrescribe_gastos_fijos_existentes(self):
         snapshot = SucursalRentabilidad.objects.create(
             sucursal=self.sucursal,

@@ -110,19 +110,31 @@ class Command(BaseCommand):
                     "inicio": _mes(fila.get("cobertura_inicio", "")),
                     "fin": _mes(fila.get("cobertura_fin", "")),
                     "evidencia": (fila.get("evidencia") or "").strip(),
+                    "uuid": (fila.get("uuid") or "").strip().upper(),
+                    "archivo_soporte": (fila.get("archivo_soporte") or "").strip(),
                 }
         return recibos
 
     def _asignar(self, facturas, recibos, categoria):
         """Una captura por mes cubierto; sin cobertura conocida, el mes de emisión."""
         centros = {c.codigo: c for c in CentroCosto.objects.all()}
+        por_importe = defaultdict(list)
+        for factura in facturas:
+            por_importe[Decimal(factura.total).quantize(CENTAVO)].append(factura)
+        for importe, recibo in recibos.items():
+            if not recibo.get("uuid") and len(por_importe[importe]) > 1:
+                raise CommandError(f"Importe CFE ambiguo {importe}; especifica el UUID del recibo.")
+            if bool(recibo["inicio"]) != bool(recibo["fin"]) or (
+                recibo["inicio"] and recibo["inicio"] > recibo["fin"]
+            ):
+                raise CommandError("La cobertura CFE debe tener inicio y fin en orden.")
         asignadas, sin_recibo, ya_capturadas = [], [], []
         for cfdi in facturas:
             total = Decimal(cfdi.total).quantize(CENTAVO)
             if total <= 0:
                 continue  # los de cero son notas o complementos, no gasto
             recibo = recibos.get(total)
-            if recibo is None:
+            if recibo is None or (recibo.get("uuid") and recibo["uuid"] != str(cfdi.uuid).upper()):
                 sin_recibo.append(cfdi)
                 continue
             centro = centros.get(recibo["centro"])
@@ -168,8 +180,10 @@ class Command(BaseCommand):
                         "fuente": "CFE_CFDI",
                         "es_estimado": prorrateado,
                         "tipo_dato": GastoOperativoMensual.TIPO_DATO_REAL,
-                        "cobertura_mes_inicio": meses[0],
-                        "cobertura_mes_fin": meses[-1],
+                        # Cada fila ya contiene su parte; no volver a dividir el bimestre.
+                        "cobertura_mes_inicio": periodo,
+                        "cobertura_mes_fin": periodo,
+                        **({"archivo_soporte": recibo["archivo_soporte"]} if recibo.get("archivo_soporte") else {}),
                         "comentario": (
                             f"Servicio {recibo['no_servicio']} · CFDI {cfdi.uuid} · "
                             f"factura {cfdi.fecha_emision:%d-%b-%Y} por {total:,.2f}. "

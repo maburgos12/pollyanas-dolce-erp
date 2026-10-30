@@ -1,7 +1,8 @@
 """Lectura del costo laboral, sin modificar nóminas ni asignaciones de RRHH.
 
 Las nóminas cerradas o pagadas usan el total oficial de percepciones y la
-sucursal vigente del expediente de RRHH, tal como se capturó en el ERP.
+sucursal conservada al generar la nómina; para líneas legadas sin snapshot,
+se conserva el criterio del expediente de RRHH.
 """
 from collections import defaultdict
 from datetime import date
@@ -101,10 +102,10 @@ def leer_personal_mensual(periodo: date) -> dict:
     )
     for linea in nominas:
         # Producción ya pertenece al costo de fabricación, no a ventas.
-        departamento = (linea.empleado.departamento or "").upper()
+        departamento = (linea.departamento_snapshot or linea.empleado.departamento or "").upper()
         if departamento in {"PRODUCCION", "LOGISTICA", "ADMINISTRACION"}:
             continue
-        sucursal_id = linea.empleado.sucursal_ref_id
+        sucursal_id = linea.sucursal_snapshot_id or linea.empleado.sucursal_ref_id
         if departamento != "VENTAS" or sucursal_id is None:
             pendientes.append(_fila(
                 periodo, origen="NOMINA", registro_id=linea.periodo_id,
@@ -204,7 +205,8 @@ def leer_personal_mensual(periodo: date) -> dict:
         filas.append(_fila(
             periodo, origen=linea.fuente_real, registro_id=linea.pk, sucursal_id=sid,
             familia="cargas_patronales", concepto=f"{tipo} · parte patronal mensual",
-            monto=linea.monto_real, estado="COMPLETO" if es_sipare else "PARCIAL", detalle=(
+            monto=linea.monto_real, soporte=meta.get("soporte", ""),
+            estado="COMPLETO" if es_sipare else "PARCIAL", detalle=(
                 "Importe mensual ya distribuido por Reportes; no incluye retenciones al trabajador."
                 if es_sipare else "Captura manual: falta comprobar que corresponde exclusivamente a la parte patronal."
             ),

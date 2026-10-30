@@ -51,6 +51,17 @@ class PersonalMensualTests(TestCase):
         self.assertIn("sucursal asignada en RRHH", filas[0]["detalle"])
         self.assertNotIn(linea.empleado.nombre, str(resultado))
 
+    def test_traslado_posterior_no_reasigna_el_costo_historico(self):
+        linea = self.nomina()
+        otra = Sucursal.objects.create(codigo="PER-OTRA", nombre="Otra")
+        Empleado.objects.filter(pk=linea.empleado_id).update(
+            sucursal_ref=otra, departamento="ADMINISTRACION",
+        )
+        filas = [f for f in self.leer()["filas"] if f["familia"] == "nomina"]
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0]["sucursal_id"], self.sucursal.pk)
+        self.assertEqual(filas[0]["monto_mensual"], Decimal("1200"))
+
     def test_borrador_y_produccion_no_suman_al_costo_de_ventas(self):
         self.nomina(estatus="BORRADOR")
         self.nomina(departamento="PRODUCCION")

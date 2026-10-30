@@ -7,7 +7,7 @@
 # cobertura_inicio/fin son opcionales: cuando se conocen, el importe se prorratea
 # entre esos meses; cuando no, el gasto queda en el mes en que se emitió la factura,
 # que es lo único verificable sin el recibo.
-no_servicio,centro_costo,importe,cobertura_inicio,cobertura_fin,evidencia
+no_servicio,centro_costo,importe,cobertura_inicio,cobertura_fin,evidencia,uuid,archivo_soporte
 543230202528,COMPARTIDO_MC,25065.08,2026-01,2026-01,GDMTO 45 kW · facturación mensual
 543230202528,COMPARTIDO_MC,20778.19,2026-02,2026-02,GDMTO 45 kW · facturación mensual
 543230202528,COMPARTIDO_MC,21958.35,2026-03,2026-03,GDMTO 45 kW · facturación mensual
@@ -40,3 +40,5 @@ no_servicio,centro_costo,importe,cobertura_inicio,cobertura_fin,evidencia
 545230101121,GUAMUCHIL,20152.20,,,Recibo del medidor DDL594 · CP 81400
 545230101121,GUAMUCHIL,13805.11,,,CP 81400 exclusivo de Guamúchil
 545230101121,GUAMUCHIL,212.79,,,CP 81400 exclusivo de Guamúchil
+
+545230101121,GUAMUCHIL,19428.09,,,CFDI reconocido en mes de emisión; consumo 13 julio a 10 septiembre no equivale a consumo de septiembre; excluye saldo anterior 0.24,21FB90AD-A533-4DA9-B490-FF660B7CB180,SAT CFDI 9927 y recibo 545230101121-sept.pdf

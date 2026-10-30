@@ -87,7 +87,10 @@ def recalcular_rentabilidad_mensual(self, year=None, month=None):
             sale_date__year=year,
             sale_date__month=month,
         )
-        ventas_brutas = ventas_qs.aggregate(t=Sum("gross_amount"))["t"] or Decimal("0")
+        # Point gross incluye impuestos; el estado de resultados usa ingreso sin ellos.
+        ventas_brutas = (ventas_qs.aggregate(t=Sum("gross_amount"))["t"] or Decimal("0")) - (
+            ventas_qs.aggregate(t=Sum("tax_amount"))["t"] or Decimal("0")
+        )
         descuentos = ventas_qs.aggregate(t=Sum("discount_amount"))["t"] or Decimal("0")
 
         # ---- COSTO MATERIA PRIMA (historico mensual si existe, fallback por fecha) ----

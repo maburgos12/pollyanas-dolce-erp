@@ -21,10 +21,8 @@ CAMPO_FAMILIA = {
     "mantenimiento": "mantenimiento",
 }
 REQUERIDAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina", "cargas_patronales"}
-# Familias sin fuente automatizada en el ERP: se siguen reportando como pendientes,
-# pero no cuentan en el denominador de cobertura ni apagan el punto de equilibrio.
-# Retirar de aquí en cuanto SIPARE alimente monto_real/cedula_imss por sucursal.
-SIN_FUENTE_ACTIVA = {"cargas_patronales"}
+# SIPARE ya alimenta cargas patronales; su ausencia sí reduce la cobertura.
+SIN_FUENTE_ACTIVA = set()
 AREAS_EXCLUIDAS = {"produccion", "nomina", "resultados", "logistica"}
 
 
@@ -111,6 +109,8 @@ def aplicar_costos_en_memoria(rentabilidad, resultado):
     for campo in set(CAMPO_FAMILIA.values()) | {"gastos_admin_prorrateados"}:
         if getattr(rentabilidad, campo) and campo in campos_incompletos:
             conservados.append(campo)
+            # Un componente pendiente no debe ocultar gastos nuevos ya comprobados.
+            setattr(rentabilidad, campo, max(getattr(rentabilidad, campo), resumen["campos"].get(campo, ZERO)))
         elif campo in resumen["campos"]:
             setattr(rentabilidad, campo, resumen["campos"][campo])
         elif getattr(rentabilidad, campo):
