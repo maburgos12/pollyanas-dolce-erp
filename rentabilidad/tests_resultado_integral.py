@@ -125,3 +125,17 @@ class ResultadoIntegralTests(TestCase):
         self.assertEqual(totales["ventas_netas"], self.venta.net_amount)
         self.assertEqual(totales["merma"], Decimal("20"))
         self.assertEqual(totales["central_registrado"], self.central.monto_real)
+
+    def test_centro_con_merma_sin_venta_reduce_resultado_y_no_exige_conciliar_ventas(self):
+        centro = Sucursal.objects.create(codigo="MERMA", nombre="Centro sin venta")
+        MermaMensualSucursal.objects.create(periodo=self.periodo, sucursal=centro,
+            nombre_producto="Merma", unidades_merma=1, costo_merma=10)
+        rent = next(r for r in registros_del_mes(self.periodo) if r.sucursal_id == centro.pk)
+        self.assertEqual(rent.utilidad_operativa, Decimal("-10"))
+        self.assertFalse(rent.en_perimetro_ventas)
+        reporte = build_reporte_mensual_consolidado(hasta=self.periodo, meses=1)
+        self.assertEqual(reporte["filas"][0]["resultado_empresa_parcial"], Decimal("420"))
+        self.client.force_login(get_user_model().objects.create_superuser("merma", password="test"))
+        response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo": "2026-09"})
+        self.assertEqual(response.context["totales"]["resultado_empresa_parcial"], Decimal("420"))
+        self.assertNotIn(centro.nombre, str(response.context["fuente_estado"]["discrepancias"]))
