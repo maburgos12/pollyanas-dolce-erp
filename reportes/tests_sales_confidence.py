@@ -46,6 +46,20 @@ class SalesConfidenceTests(TestCase):
         self.assertEqual(result["missing_cost_sales"], Decimal("200"))
         self.assertIsNone(result["margin"])
 
+    def test_current_month_snapshot_replaces_stale_materialized_cost_without_rewriting_sales(self):
+        from recetas.models import Receta
+        from reportes.models import RecetaCostoHistoricoMensual
+        recipe = Receta.objects.create(nombre="Rebanada corregida", hash_contenido="confidence_slice")
+        original = self.fact(receta=recipe, costo_estimado=87,
+            metadata={"costing": {"source": "producto_costo_operativo_mensual", "period": "2025-07-01", "unit_cost": "87"}})
+        RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2025,9,1),
+            costo_total=23, coverage_pct=100)
+        result = self.confidence()
+        self.assertEqual(result["margin"], Decimal("77"))
+        self.assertEqual(result["prior_cost_sales"], 0)
+        original.refresh_from_db()
+        self.assertEqual(original.costo_estimado, 87)
+
     def test_preopening_identity_is_pending_without_reassigning_rows(self):
         self.branch.fecha_apertura = date(2026, 7, 14)
         self.branch.save()
@@ -298,6 +312,20 @@ class ReconciliationTests(SimpleTestCase):
         self.assertEqual(panel["top_utilidad"], [])
         self.assertIsNone(panel["riesgo_margen"][0]["margen"])
         self.assertIsNone(panel["riesgo_margen"][0]["utilidad"])
+
+    @patch("rentabilidad.views_rentabilidad.asignar_costos_filas")
+    @patch("pos_bridge.models.sales.PointDailySale")
+    def test_documented_service_is_not_a_missing_cost_alert(self, sales, assign):
+        from rentabilidad.views_rentabilidad import _build_productos_panel
+        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(
+            receta_id=None, product_id=1, cost_is_resale=True, cantidad=1, venta=50,
+            cost_evidence={"cost": Decimal("0"), "authorized": True, "treatment": "UNALLOCATED_SERVICE"},
+            product__name="Servicio a domicilio", product__category="Servicio", sucursales=1)]
+        panel = _build_productos_panel(date(2026, 9, 1), date(2026, 9, 1), date(2026, 9, 30))
+        self.assertEqual(panel["riesgo_margen"], [])
+        self.assertEqual(panel["top_utilidad"], [])
+        self.assertEqual(panel["costo_faltante"], 0)
+        self.assertEqual(panel["productos_revisados"], 1)
 
 class SnapshotConfidenceTests(SimpleTestCase):
     @patch('reportes.dashboard_full_dataset.build_closed_yoy_panel', return_value={})
