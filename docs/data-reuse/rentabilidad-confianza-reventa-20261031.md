@@ -37,3 +37,5 @@ Consultas reproducibles: inventario_fuentes_datos --term costo; selected_sales_f
 Añadir Caja G $19.86 (30-sep), Tarjeta regalo $2 (28-sep) y Vela humo rosa $20 (29-sep), PZA; source_hash idempotente y movimiento íntegro en metadata. Conservar todos los registros previos. No recalcular históricos ni alterar identidades maestras.
 
 Persisten faltantes de Extras, Estuche Escolar, Topping Zanahoria C y otros artículos detallados en la evidencia. La equivalencia paquete/pieza de servilletas requiere revisión separada. La cobertura monetaria no certifica utilidad neta ni ignora artículos de venta cero. El proveedor IA respondió falta de crédito; esta autorización no permite compras de crédito ni cambios de credenciales.
+
+Verificación productiva: Té del Jardín tiene receta 125 con modo_costeo=REVENTA, PointProduct 283 (external_id 402), adquisición válida $14 y una versión antigua de receta en cero. Las ventas Point no llevan receta; seis filas históricas sí la conservan. El criterio usa la clasificación REVENTA ya existente para elegir adquisición y no trata esa receta como fabricación. No modifica modo_costeo, FK ni ventas.

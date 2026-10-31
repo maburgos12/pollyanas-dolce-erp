@@ -18,6 +18,7 @@ Q2 = Decimal("0.01")
 
 def _cost_evidence(groups, end_date):
     from pos_bridge.models import PointProduct
+    from recetas.models import Receta
     from recetas.utils.normalizacion import normalizar_nombre
     from rentabilidad.services_costos import _fuentes_reventa_para_periodo, _fuentes_recetas_para_periodo, asignar_recetas_identificadas
 
@@ -42,13 +43,18 @@ def _cost_evidence(groups, end_date):
         if product_id:
             by_month[group["month"]].add(product_id)
     asignar_recetas_identificadas([g for g in groups if g["product__sku"]])
+    resale_recipes = set(Receta.objects.filter(pk__in={g["receta_id"] for g in groups if g["receta_id"]}, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
         recipes = _fuentes_recetas_para_periodo({g["receta_id"] for g in groups if g["month"] == month and g["receta_id"]}, month, cutoff)
         resale = _fuentes_reventa_para_periodo(by_month[month], month, cutoff)
         for group in groups:
             if group["month"] == month:
-                group["cost_evidence"] = recipes.get(group["receta_id"]) if group["receta_id"] else resale.get(group["resale_product_id"])
+                evidence = recipes.get(group["receta_id"])
+                acquisition = resale.get(group["resale_product_id"])
+                if not group["receta_id"] or (group["receta_id"] in resale_recipes and acquisition and acquisition["cost"] > ZERO):
+                    evidence = acquisition
+                group["cost_evidence"] = evidence
 
 
 def _source_priority():
