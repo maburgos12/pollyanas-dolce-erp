@@ -1,12 +1,18 @@
 """Costos materiales por unidad vendida; nunca sustituye faltantes por porcentajes."""
+from calendar import monthrange
 from decimal import Decimal
 
 
 def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
+    return {pk: fuente["cost"] for pk, fuente in _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo).items()}
+
+
+def _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo):
     if not receta_ids:
         return {}
 
     from django.db.models import Case, IntegerField, When
+    from django.utils.timezone import localdate
     from recetas.models import RecetaCostoVersion
     from reportes.models import RecetaCostoHistoricoMensual
 
@@ -16,7 +22,7 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         periodo=periodo,
     )
     for historico in historicos:
-        costos[historico.receta_id] = Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0")
+        costos[historico.receta_id] = {"cost": Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0"), "period": historico.periodo, "through": historico.periodo.replace(day=monthrange(historico.periodo.year, historico.periodo.month)[1])}
 
     recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in costos]
     if recetas_sin_historico:
@@ -36,11 +42,16 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         )
         for version in versiones:
             if version.receta_id not in costos:
-                costos[version.receta_id] = (Decimal(version.costo_total or 0) - Decimal(version.costo_mo or 0) - Decimal(version.costo_indirecto or 0)) / Decimal(version.rendimiento_cantidad or 1)
+                costos[version.receta_id] = {"cost": (Decimal(version.costo_total or 0) - Decimal(version.costo_mo or 0) - Decimal(version.costo_indirecto or 0)) / Decimal(version.rendimiento_cantidad or 1), "period": localdate(version.creado_en).replace(day=1)}
     return costos
 
 
 def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
+    return {pk: fuente["cost"] for pk, fuente in _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo).items()}
+
+
+def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
+    """Conserva la vigencia junto al costo para auditar arrastres entre meses."""
     if not producto_ids:
         return {}
 
@@ -58,7 +69,10 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         ids = (historico.metadata or {}).get("source_rows", [])
         if ids and any(pk not in fuentes or fuentes[pk].producto_point_id != historico.producto_point_id or fuentes[pk].fecha_vigencia > fin_periodo or not resale_cost_matches_product(fuentes[pk]) for pk in ids):
             continue
-        costos[historico.producto_point_id] = Decimal(historico.costo_promedio or 0)
+        fecha = max((fuentes[pk].fecha_vigencia for pk in ids), default=historico.source_date or periodo)
+        if fecha > fin_periodo:
+            continue
+        costos[historico.producto_point_id] = {"cost": Decimal(historico.costo_promedio or 0), "period": fecha.replace(day=1)}
 
     productos_sin_historico = [producto_id for producto_id in producto_ids if producto_id not in costos]
     if productos_sin_historico:
@@ -70,7 +84,7 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         )
         for vigente in vigentes:
             if vigente.producto_point_id not in costos and resale_cost_matches_product(vigente):
-                costos[vigente.producto_point_id] = Decimal(vigente.costo_unitario or 0)
+                costos[vigente.producto_point_id] = {"cost": Decimal(vigente.costo_unitario or 0), "period": vigente.fecha_vigencia.replace(day=1)}
     return costos
 
 

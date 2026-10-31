@@ -1,4 +1,6 @@
 """Read-only confidence contract. Never repair, relabel or merge source records."""
+from calendar import monthrange
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -12,6 +14,41 @@ from django.db.models.expressions import RawSQL
 
 ZERO = Decimal("0")
 Q2 = Decimal("0.01")
+
+
+def _cost_evidence(groups, end_date):
+    from pos_bridge.models import PointProduct
+    from recetas.utils.normalizacion import normalizar_nombre
+    from rentabilidad.services_costos import _fuentes_reventa_para_periodo, _fuentes_recetas_para_periodo, asignar_recetas_identificadas
+
+    ids = {g["point_product_id"] for g in groups if g["point_product_id"]}
+    keys = {g["producto_clave"] for g in groups if g["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE and not g["point_product_id"]}
+    identities = defaultdict(set)
+    products = {p.pk: p for p in PointProduct.objects.filter(Q(pk__in=ids) | Q(external_id__in=keys) | Q(external_id__in=[f"official:{k}" for k in keys]))}
+    for product in products.values():
+        # La clave autoritativa es externa: nunca interpretarla como PK ni resolver por nombre solo.
+        identities[(product.external_id.removeprefix("official:"), normalizar_nombre(product.name))].add(product.pk)
+    by_month = defaultdict(set)
+    for group in groups:
+        product_id = group["point_product_id"]
+        if not product_id and group["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE:
+            candidates = identities.get((group["producto_clave"], normalizar_nombre(group["producto_nombre"])), set())
+            if len(candidates) == 1:
+                product_id = next(iter(candidates))
+        group["resale_product_id"] = product_id
+        product = products.get(product_id)
+        group["product__sku"] = product.sku if product else ""
+        group["product__name"] = group["producto_nombre"]
+        if product_id:
+            by_month[group["month"]].add(product_id)
+    asignar_recetas_identificadas([g for g in groups if g["product__sku"]])
+    for month in {g["month"] for g in groups}:
+        cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
+        recipes = _fuentes_recetas_para_periodo({g["receta_id"] for g in groups if g["month"] == month and g["receta_id"]}, month, cutoff)
+        resale = _fuentes_reventa_para_periodo(by_month[month], month, cutoff)
+        for group in groups:
+            if group["month"] == month:
+                group["cost_evidence"] = recipes.get(group["receta_id"]) if group["receta_id"] else resale.get(group["resale_product_id"])
 
 
 def _source_priority():
@@ -87,18 +124,22 @@ def build_sales_confidence(*, start_date, end_date):
     identity_pending = facts.filter(
         Q(sucursal__isnull=True) | Q(fecha__lt=F("sucursal__fecha_apertura")),
     ).count()
-    groups = facts.annotate(
+    groups = list(facts.annotate(
         month=TruncMonth("fecha"),
+        positive_quantity=Case(When(cantidad__gt=0, then=1), default=0, output_field=IntegerField()),
         backed_amount=Case(
             When(costo_estimado__gt=0, then=1), default=0, output_field=IntegerField(),
         ),
     ).values(
         "month", "source_kind", "metadata__costing__source",
-        "metadata__costing__period", "backed_amount",
+        "metadata__costing__period", "backed_amount", "positive_quantity",
+        "point_product_id", "producto_clave", "producto_nombre", "receta_id",
     ).annotate(
         rows=Count("id"), positive_sales=Sum("venta_neta", filter=Q(venta_neta__gt=0)),
         cost=Sum("costo_estimado"),
-    )
+        quantity=Sum("cantidad"),
+    ))
+    _cost_evidence(groups, end_date)
     missing_sales = prior_sales = covered_sales = positive_sales = costs = ZERO
     missing_rows = 0
     sources = set()
@@ -115,12 +156,19 @@ def build_sales_confidence(*, start_date, end_date):
             group["metadata__costing__source"] == "producto_costo_operativo_mensual"
             and period and period <= group["month"] and group["backed_amount"]
         )
+        cost = group["cost"] or ZERO
+        if not backed:
+            evidence = group["cost_evidence"]
+            if evidence and evidence["cost"] > ZERO and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
+                backed = True
+                period = evidence["period"]
+                cost = (group["quantity"] * evidence["cost"]).quantize(Q2)
         if not backed:
             missing_sales += sales
             missing_rows += group["rows"]
             continue
         covered_sales += sales
-        costs += group["cost"] or ZERO
+        costs += cost
         periods.add(period)
         if period < group["month"]:
             prior_sales += sales

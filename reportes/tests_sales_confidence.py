@@ -62,6 +62,130 @@ class SalesConfidenceTests(TestCase):
         self.assertEqual(result["days_observed"], 0)
         self.assertIsNone(result["net_sales"])
 
+    def resale(self, external_id="169", name="Pirotecnia", cost=20, day=date(2025, 9, 1)):
+        from pos_bridge.models import PointProduct
+        from reportes.models import ProductoReventaCosto
+        product = PointProduct.objects.create(external_id=external_id, name=name)
+        source = ProductoReventaCosto.objects.create(producto_point=product, costo_unitario=cost,
+            fecha_vigencia=day, source_hash=external_id, metadata={"point_name": name})
+        return product, source
+
+    def test_recipe_and_free_addon_use_existing_costs_without_rewriting_identities(self):
+        from recetas.models import Receta, RecetaAgrupacionAddon
+        from pos_bridge.models import PointProduct
+        from reportes.models import RecetaCostoHistoricoMensual
+        base = Receta.objects.create(nombre="Pastel", nombre_normalizado="pastel", hash_contenido="confidence-base")
+        addon = Receta.objects.create(nombre="Topping", nombre_normalizado="topping", hash_contenido="confidence-addon")
+        for recipe, amount in [(base, 30), (addon, 5)]:
+            RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2025,9,1), costo_total=amount, coverage_pct=100)
+        self.fact(receta=base)
+        product = PointProduct.objects.create(external_id="gift", sku="addon", name="Topping")
+        RecetaAgrupacionAddon.objects.create(base_receta=base, addon_receta=addon, addon_codigo_point="addon",
+            addon_nombre_point="Topping", status="APPROVED", activo=True)
+        gift = self.fact(key="gift", producto_nombre="Topping")
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(venta_neta=0, venta_total=0, cantidad=2)
+        self.assertEqual(self.confidence()["margin"], 60)
+        from reportes.sales_confidence import build_sales_confidence
+        early = build_sales_confidence(start_date=date(2025,9,1), end_date=date(2025,9,15))
+        self.assertIsNone(early["margin"])
+        gift.refresh_from_db()
+        self.assertIsNone(gift.receta_id)
+        self.assertIsNone(gift.point_product_id)
+        self.assertEqual(gift.costo_estimado, 0)
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Otro topping")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Topping")
+        RecetaAgrupacionAddon.objects.filter(addon_receta=addon).update(addon_codigo_point="")
+        product.sku = ""
+        product.save()
+        self.assertIsNone(self.confidence()["margin"])
+        RecetaAgrupacionAddon.objects.filter(addon_receta=addon).update(addon_codigo_point="addon")
+        product.sku = "addon"
+        product.save()
+        RecetaCostoHistoricoMensual.objects.filter(receta=addon).update(coverage_pct=90)
+        self.assertIsNone(self.confidence()["margin"])
+
+    def test_recipe_version_keeps_origin_date_and_excludes_labor_and_overhead(self):
+        from datetime import datetime, timezone
+        from recetas.models import Receta, RecetaCostoVersion
+        recipe = Receta.objects.create(nombre="Vaso", nombre_normalizado="vaso", hash_contenido="confidence-version")
+        version = RecetaCostoVersion.objects.create(receta=recipe, version_num=1, costo_total=50, costo_mo=10,
+            costo_indirecto=10, rendimiento_cantidad=2)
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,8,20,tzinfo=timezone.utc))
+        self.fact(receta=recipe)
+        result = self.confidence()
+        self.assertEqual(result["margin"], 85)
+        self.assertEqual(result["prior_cost_sales"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025,8,1)])
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,10,1,tzinfo=timezone.utc))
+        self.assertEqual(self.confidence()["cost_periods"], [date(2025,9,1)])
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,10,2,tzinfo=timezone.utc))
+        self.assertIsNone(self.confidence()["margin"])
+
+    def test_resale_without_recipe_is_backed_without_rewriting_sales(self):
+        product, source = self.resale()
+        fact = self.fact(point_product=product, metadata={"costing": {"source": "missing_recipe"}})
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(cantidad=2)
+        result = self.confidence()
+        self.assertEqual(result["margin"], Decimal("60"))
+        self.assertEqual(result["cost_coverage_pct"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025, 9, 1)])
+        fact.refresh_from_db()
+        self.assertEqual(fact.costo_estimado, 0)
+        self.assertEqual(fact.metadata["costing"]["source"], "missing_recipe")
+        self.assertIsNone(fact.receta_id)
+
+    def test_external_identity_requires_unique_code_and_name_not_internal_pk_or_sku(self):
+        from pos_bridge.models import PointProduct
+        product, source = self.resale()
+        fact = self.fact(key="169", producto_nombre="PIROTECNIA")
+        self.assertEqual(self.confidence()["margin"], 80)
+        PointProduct.objects.create(external_id="official:169", name="Pirotecnia")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(producto_clave=str(product.pk), producto_nombre="Otro artículo")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(producto_clave="0169", producto_nombre="Pirotecnia")
+        self.assertIsNone(self.confidence()["margin"])
+
+    def test_rejected_or_future_source_uses_valid_prior_cost_and_keeps_its_date(self):
+        from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
+        from reportes.sales_confidence import build_sales_confidence
+        product, old = self.resale(day=date(2025, 8, 1), cost=10)
+        late = ProductoReventaCosto.objects.create(producto_point=product, costo_unitario=20,
+            fecha_vigencia=date(2025, 9, 28), source_hash="late", metadata={"point_name": product.name})
+        hist = ProductoReventaCostoHistoricoMensual.objects.create(producto_point=product, periodo=date(2025, 9, 1),
+            costo_promedio=20, metadata={"source_rows": [late.pk]})
+        self.fact(point_product=product)
+        result = build_sales_confidence(start_date=date(2025, 9, 1), end_date=date(2025, 9, 15))
+        self.assertEqual(result["margin"], 90)
+        self.assertEqual(result["prior_cost_sales"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025, 8, 1)])
+        self.assertEqual(self.confidence()["margin"], 80)
+        late.metadata = {"point_name": "Rollos térmicos"}
+        late.save()
+        self.assertEqual(self.confidence()["margin"], 90)
+        hist.refresh_from_db()
+        self.assertEqual(hist.costo_promedio, 20)
+        old.delete()
+        late.metadata = {"point_name": product.name}
+        late.save()
+        early = build_sales_confidence(start_date=date(2025, 9, 1), end_date=date(2025, 9, 15))
+        self.assertIsNone(early["margin"])
+        self.assertEqual(early["missing_cost_sales"], 100)
+
+    def test_gift_without_cost_and_positive_sale_without_quantity_remain_pending(self):
+        product, source = self.resale()
+        self.fact(point_product=product)
+        gift = self.fact(key="gift", producto_nombre="Regalo sin costo")
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(venta_neta=0, venta_total=0)
+        result = self.confidence()
+        self.assertEqual(result["cost_coverage_pct"], 100)
+        self.assertEqual(result["missing_cost_rows"], 1)
+        self.assertIsNone(result["margin"])
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(point_product=product, cantidad=0, venta_neta=100,
+            producto_clave="1", producto_nombre="", fecha=date(2025,9,11))
+        self.assertEqual(self.confidence()["missing_cost_rows"], 1)
+
 
     def test_grouped_selection_matches_old_precedence_for_days_branches_nulls_and_ties(self):
         other = Sucursal.objects.create(codigo="OTHER-TEST", nombre="Otra")
