@@ -8,10 +8,12 @@
   <p>{{ sales_confidence.start_date|date:"d M Y" }} al {{ sales_confidence.end_date|date:"d M Y" }} · {{ sales_confidence.days_observed }} día{{ sales_confidence.days_observed|pluralize:"s" }} con registros · {{ sales_confidence.branches }} sucursales observadas.</p>
   <div class="sales-confidence-metrics">
     <div><span>Venta neta observada</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.net_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
-    <div><span>Venta con costo respaldado</span><strong>{% if sales_confidence.cost_coverage_pct is not None %}{{ sales_confidence.cost_coverage_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong></div>
+    <div><span>Venta con costo o regla documentada</span><strong>{% if sales_confidence.cost_coverage_pct is not None %}{{ sales_confidence.cost_coverage_pct|floatformat:2 }}%{% else %}N/D{% endif %}</strong></div>
     <div><span>Venta sin costo respaldado</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.missing_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
     <div><span>Venta con costo de meses anteriores</span><strong>{% if sales_confidence.rows %}${{ sales_confidence.prior_cost_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</strong></div>
   </div>
+  {% if sales_confidence.authorized_zero_sales %}<p>Cargos con costo directo no imputado o cero autorizado: ${{ sales_confidence.authorized_zero_sales|floatformat:2|intcomma }} de venta. Se incluyen en el margen provisional según las reglas aprobadas.</p>{% endif %}
+  {% if sales_confidence.service_unallocated_sales %}<p><strong>Domicilios: ${{ sales_confidence.service_unallocated_sales|floatformat:2|intcomma }} cobrados sin costo de reparto asignado.</strong> El margen provisional no mide la rentabilidad del servicio; los gastos de logística registrados se mantienen por separado.</p>{% endif %}
   <details>
     <summary>Ver alcance y fechas de las fuentes</summary>
     <p>Cobertura de costo sobre ventas positivas registradas. No certifica que todos los días o sucursales hayan enviado información. Esta lectura usa venta neta sin impuestos; otras tarjetas pueden usar venta total o bruta.</p>

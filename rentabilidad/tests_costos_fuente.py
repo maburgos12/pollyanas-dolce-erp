@@ -28,7 +28,7 @@ class CostosFuenteTests(TestCase):
             status=RecetaAgrupacionAddon.STATUS_APPROVED, activo=True)
         for receta, costo in [(base, 100), (addon, 10)]:
             RecetaCostoHistoricoMensual.objects.create(periodo=periodo, receta=receta, costo_total=costo, coverage_pct=100)
-        for ext, sku, name, receta, monto in [('base','BASE','Pastel',base,200),('addon','1254','TOPPING ZANAHORIA',None,0)]:
+        for ext, sku, name, receta, monto in [('base','BASE','Pastel',base,200),('addon','1254','TOPPING ZANAHORIA',base,0)]:
             product = PointProduct.objects.create(external_id=ext, sku=sku, name=name)
             PointDailySale.objects.create(branch=branch, product=product, receta=receta, sale_date=periodo, quantity=1, gross_amount=monto)
         row = leer_resultado_mensual(periodo)["sucursales"][suc.pk]
@@ -39,6 +39,19 @@ class CostosFuenteTests(TestCase):
         row = leer_resultado_mensual(periodo)["sucursales"][suc.pk]
         self.assertEqual(row["costo_materia_prima"], Decimal("110"))
         self.assertEqual(len(row["pendientes"]), 1)
+
+    def test_cost_above_sale_remains_visible_without_becoming_missing(self):
+        periodo = date(2026, 9, 1)
+        suc = Sucursal.objects.create(codigo="NEG", nombre="Negativo")
+        branch = PointBranch.objects.create(external_id="NEG", name="Negativo", erp_branch=suc)
+        product = PointProduct.objects.create(external_id="NEG", name="Empaque")
+        ProductoReventaCosto.objects.create(producto_point=product, fecha_vigencia=periodo,
+            costo_unitario=20, source_hash="negative-margin", metadata={"point_name": product.name})
+        PointDailySale.objects.create(branch=branch, product=product, sale_date=periodo, quantity=1, gross_amount=10)
+        row = leer_resultado_mensual(periodo)["sucursales"][suc.pk]
+        self.assertEqual(row["pendientes"], [])
+        self.assertEqual(len(row["advertencias"]), 1)
+        self.assertEqual(row["costo_reventa"], 20)
 
     def test_receta_point_existente_y_relacion_con_nombre_equivocado(self):
         periodo = date(2026, 9, 1)

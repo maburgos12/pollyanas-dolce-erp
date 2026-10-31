@@ -19,7 +19,7 @@ from decimal import Decimal
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
-from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo, asignar_recetas_identificadas
+from .services_costos import asignar_costos_filas
 from .services_resultado import registros_del_mes
 from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales, selected_sales_facts
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
@@ -98,11 +98,7 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         "product_id", "product__name", "product__category", "product__sku", "receta_id"
     ).annotate(venta=Sum("gross_amount") - Sum("tax_amount") - Sum("discount_amount"),
                cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True)))
-    asignar_recetas_identificadas(rows)
-    receta_ids = [row["receta_id"] for row in rows if row["receta_id"]]
-    producto_reventa_ids = [row["product_id"] for row in rows if row["product_id"] and not row["receta_id"]]
-    costos_recetas = _costos_recetas_para_periodo(receta_ids, periodo, fecha_fin)
-    costos_reventa = _costos_reventa_para_periodo(producto_reventa_ids, periodo, fecha_fin)
+    asignar_costos_filas(rows, periodo, fecha_fin)
 
     productos = []
     costo_faltante = 0
@@ -118,19 +114,19 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         nombre_producto = row["product__name"] or "Producto sin nombre"
         es_anticipo = _es_anticipo(nombre_producto)
 
-        if row["receta_id"]:
-            costo_unitario = costos_recetas.get(row["receta_id"], Decimal("0"))
-            tipo = "Fabricado"
-            tiene_costo = costo_unitario > 0
-        elif row["product_id"]:
-            costo_unitario = costos_reventa.get(row["product_id"], Decimal("0"))
-            tipo = "Anticipo" if es_anticipo else "Reventa"
-            tiene_costo = costo_unitario > 0
+        evidence = row["cost_evidence"]
+        if evidence:
+            costo_unitario = evidence["cost"]
+            tiene_costo = costo_unitario > 0 or bool(evidence.get("authorized"))
+        tipo = "Anticipo" if es_anticipo else "Reventa" if row["cost_is_resale"] else "Fabricado"
+        if evidence and evidence.get("treatment") == "UNALLOCATED_SERVICE":
+            tipo = "Servicio sin costo asignado"
+            tiene_costo = False  # No presentar margen de servicio como si fuera gratuito.
 
         costo_total = (costo_unitario * cantidad).quantize(Decimal("0.01"))
         utilidad = venta - costo_total if tiene_costo and not es_anticipo else None
         margen = _pct(utilidad, venta) if utilidad is not None and venta > 0 else None
-        if not tiene_costo and venta > 0:
+        if not tiene_costo and venta > 0 and not (evidence and evidence.get("authorized")):
             costo_faltante += 1
             if es_anticipo:
                 costo_faltante_anticipo += 1
