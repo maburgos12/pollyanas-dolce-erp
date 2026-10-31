@@ -311,25 +311,23 @@ class PointInventoryCostCaptureService:
         )
 
     def _resolve_point_product(self, row: PointInventoryCostRow) -> PointProduct | None:
-        codes: list[str] = []
-        for code in [row.point_internal_id, row.point_code]:
-            code = str(code or "").strip()
-            if code and code not in codes:
-                codes.append(code)
-        if codes:
-            product = PointProduct.objects.filter(sku__in=codes).order_by("id").first()
-            if product is not None:
-                return product
-            product = PointProduct.objects.filter(external_id__in=codes).order_by("id").first()
-            if product is not None:
-                return product
-
+        # Los IDs internos de Insumos y Productos son espacios distintos en Point.
         normalized_name = normalizar_nombre(row.point_name)
-        if normalized_name:
-            product = PointProduct.objects.filter(normalized_name=normalized_name).order_by("id").first()
-            if product is not None:
-                return product
-        return None
+        if not normalized_name:
+            return None
+        candidates = PointProduct.objects.filter(normalized_name=normalized_name)
+        exact = list(candidates.filter(sku=str(row.point_code or "").strip())[:2])
+        if len(exact) == 1:
+            return exact[0]
+        if exact:
+            return None
+        if row.kind == "product" and row.point_internal_id:
+            exact = list(candidates.filter(external_id=row.point_internal_id)[:2])
+            if len(exact) == 1:
+                return exact[0]
+        # Conservar la coincidencia nominal existente solamente si es inequívoca.
+        matches = list(candidates[:2])
+        return matches[0] if len(matches) == 1 else None
 
     def persist_cost_row(self, row: PointInventoryCostRow, *, supplier_name: str = "POINT EXISTENCIA ALMACEN") -> tuple[CostoInsumo | None, bool, str]:
         resolved = self.identity_service.resolve_insumo(point_code=row.point_code, point_name=row.point_name)
@@ -357,6 +355,7 @@ class PointInventoryCostCaptureService:
                     "source": "POINT_EXISTENCIA_ALMACEN",
                     "branch": row.branch_name,
                     "category": row.category_name,
+                    "kind": row.kind,
                     "point_code": row.point_code,
                     "point_name": row.point_name,
                     "point_category": row.point_category,
@@ -398,6 +397,7 @@ class PointInventoryCostCaptureService:
                 "cantidad_snapshot": row.quantity,
                 "metadata": {
                     "source": "POINT_EXISTENCIA_ALMACEN",
+                    "kind": row.kind,
                     "branch": row.branch_name,
                     "category": row.category_name,
                     "point_code": row.point_code,

@@ -82,6 +82,14 @@ def decimal_or_none(value: Any) -> Decimal | None:
         return None
 
 
+def resale_cost_matches_product(cost) -> bool:
+    """No reutilizar una captura de almacén cuyo nombre pertenece a otro artículo."""
+    source_name = (cost.metadata or {}).get("point_name")
+    if cost.fuente != "POINT_ALMACEN" or not source_name:
+        return True
+    return normalizar_nombre(source_name) == normalizar_nombre(cost.producto_point.name)
+
+
 def point_unit_code(value: str) -> str | None:
     return UNIT_ALIAS.get(str(value or "").strip().lower().rstrip("."))
 

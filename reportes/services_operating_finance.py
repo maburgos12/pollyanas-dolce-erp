@@ -552,21 +552,8 @@ class OperatingFinanceSnapshotService:
         for row in row_buffer:
             all_product_ids.add(row.product_id)
 
-        costs: dict[int, Decimal] = {}
-        for historical in ProductoReventaCostoHistoricoMensual.objects.filter(
-            producto_point_id__in=all_product_ids,
-            periodo=period_start,
-        ):
-            costs[historical.producto_point_id] = as_decimal(historical.costo_promedio)
-
-        missing_product_ids = [product_id for product_id in all_product_ids if product_id not in costs]
-        if missing_product_ids:
-            for current in ProductoReventaCosto.objects.filter(
-                producto_point_id__in=missing_product_ids,
-                fecha_vigencia__lte=period_end,
-            ).order_by("producto_point_id", "-fecha_vigencia", "-id"):
-                if current.producto_point_id not in costs:
-                    costs[current.producto_point_id] = as_decimal(current.costo_unitario)
+        from rentabilidad.services_costos import _costos_reventa_para_periodo
+        costs = _costos_reventa_para_periodo(all_product_ids, period_start, period_end)
 
         forced_resale_names = {
             name

@@ -502,15 +502,15 @@ if (periodoSelect) {
 async function analizarSucursal(pk, btn) {
   const row = document.getElementById(`ia-row-${pk}`);
   const panel = document.getElementById(`ia-panel-${pk}`);
-  const showing = row.style.display !== 'none';
-  if (showing) {
+  const showing = getComputedStyle(row).display !== 'none';
+  if (showing && btn.textContent !== 'Reintentar') {
     row.style.display = 'none';
     btn.textContent = 'Ver';
     return;
   }
   btn.disabled = true;
   btn.textContent = '...';
-  row.style.display = '';
+  row.style.display = 'table-row';
   try {
     const res = await fetch(`/rentabilidad/${pk}/analizar/`, {
       method: 'POST',

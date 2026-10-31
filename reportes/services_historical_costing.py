@@ -199,13 +199,15 @@ class MonthlyHistoricalCostingService:
         return [row for row in rows if _raw_source(row) not in DERIVED_SOURCES]
 
     def _resale_product_costs(self, *, producto_point_id: int, period_end: date):
-        return list(
+        from pos_bridge.services.point_cost_validation import resale_cost_matches_product
+        rows = (
             ProductoReventaCosto.objects.filter(
                 producto_point_id=producto_point_id,
                 fecha_vigencia__lte=period_end,
                 costo_unitario__gt=0,
-            ).order_by("fecha_vigencia", "id")
+            ).select_related("producto_point").order_by("fecha_vigencia", "id")
         )
+        return [row for row in rows if resale_cost_matches_product(row)]
 
     def _build_resale_product_monthly_cost(
         self,

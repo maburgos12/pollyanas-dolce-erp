@@ -9,7 +9,7 @@ from unidecode import unidecode
 from pos_bridge.models.sales import PointDailySale
 from control.models import MermaMensualSucursal
 from reportes.models import LineaPresupuestoMensual, ReglaFuenteRubro
-from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo
+from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo, asignar_recetas_identificadas
 
 ZERO = Decimal("0")
 CENTRALES = {"produccion", "logistica", "administracion"}
@@ -18,10 +18,14 @@ CENTRALES = {"produccion", "logistica", "administracion"}
 def leer_resultado_mensual(periodo):
     fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
     ventas = PointDailySale.objects.filter(sale_date__range=(periodo, fin))
-    filas = list(ventas.values("branch__erp_branch_id", "receta_id", "product_id")
+    filas = list(ventas.values("branch__erp_branch_id", "receta_id", "product_id", "product__sku", "product__name")
                  .annotate(brutas=Sum("gross_amount"), impuestos=Sum("tax_amount"),
                            descuentos=Sum("discount_amount"), cantidad=Sum("quantity")))
-    recetas = _costos_recetas_para_periodo({f["receta_id"] for f in filas if f["receta_id"]}, periodo, fin)
+    asignar_recetas_identificadas(filas)
+    mermas = list(MermaMensualSucursal.objects.filter(periodo=periodo))
+    receta_ids = {f["receta_id"] for f in filas if f["receta_id"]}
+    receta_ids.update(m.receta_id for m in mermas if m.receta_id)
+    recetas = _costos_recetas_para_periodo(receta_ids, periodo, fin)
     reventa = _costos_reventa_para_periodo({f["product_id"] for f in filas if not f["receta_id"]}, periodo, fin)
     sucursales = defaultdict(lambda: {"ventas_brutas": ZERO, "descuentos": ZERO,
         "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "tiene_ventas": False})
@@ -38,10 +42,13 @@ def leer_resultado_mensual(periodo):
             suc["pendientes"].append(f"Revisar costo/unidad superior a venta: producto {fila['product_id']}")
         if costo <= 0 and fila["cantidad"]:
             suc["pendientes"].append(f"Costo sin confirmar: producto {fila['product_id']}, receta {fila['receta_id']}")
-    for merma in MermaMensualSucursal.objects.filter(periodo=periodo):
+    for merma in mermas:
         suc = sucursales[merma.sucursal_id]
-        suc["merma"] += merma.costo_merma
-        if merma.unidades_merma and not merma.costo_merma:
+        costo_merma = merma.costo_merma
+        if not costo_merma and merma.receta_id and recetas.get(merma.receta_id):
+            costo_merma = (merma.unidades_merma * recetas[merma.receta_id]).quantize(Decimal("0.01"))
+        suc["merma"] += costo_merma
+        if merma.unidades_merma and not costo_merma:
             suc["pendientes"].append(f"Merma sin costo: {merma.nombre_producto}")
     # Una única versión por rubro: nunca sumar presupuesto, revisado o consumo MP
     # encima del material de las unidades vendidas y de la merma.

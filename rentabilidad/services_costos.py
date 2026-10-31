@@ -45,23 +45,54 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         return {}
 
     from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
+    from pos_bridge.services.point_cost_validation import resale_cost_matches_product
 
     costos = {}
-    historicos = ProductoReventaCostoHistoricoMensual.objects.filter(
+    historicos = list(ProductoReventaCostoHistoricoMensual.objects.filter(
         producto_point_id__in=producto_ids,
         periodo=periodo,
-    )
+    ))
+    source_ids = {pk for h in historicos for pk in (h.metadata or {}).get("source_rows", [])}
+    fuentes = {c.pk: c for c in ProductoReventaCosto.objects.filter(pk__in=source_ids).select_related("producto_point")}
     for historico in historicos:
+        ids = (historico.metadata or {}).get("source_rows", [])
+        if ids and any(pk not in fuentes or fuentes[pk].producto_point_id != historico.producto_point_id or fuentes[pk].fecha_vigencia > fin_periodo or not resale_cost_matches_product(fuentes[pk]) for pk in ids):
+            continue
         costos[historico.producto_point_id] = Decimal(historico.costo_promedio or 0)
 
     productos_sin_historico = [producto_id for producto_id in producto_ids if producto_id not in costos]
     if productos_sin_historico:
         vigentes = (
             ProductoReventaCosto.objects
-            .filter(producto_point_id__in=productos_sin_historico, fecha_vigencia__lte=fin_periodo)
+            .filter(producto_point_id__in=productos_sin_historico, fecha_vigencia__lte=fin_periodo, costo_unitario__gt=0)
+            .select_related("producto_point")
             .order_by("producto_point_id", "-fecha_vigencia", "-id")
         )
         for vigente in vigentes:
-            if vigente.producto_point_id not in costos:
+            if vigente.producto_point_id not in costos and resale_cost_matches_product(vigente):
                 costos[vigente.producto_point_id] = Decimal(vigente.costo_unitario or 0)
     return costos
+
+
+def asignar_recetas_identificadas(filas):
+    """Reutiliza identidades existentes sin crear relaciones ni modificar ventas."""
+    from collections import defaultdict
+    from recetas.models import RecetaAgrupacionAddon
+    from pos_bridge.models import PointRecipeNode
+    from recetas.utils.normalizacion import normalizar_nombre
+
+    aprobados = defaultdict(set)
+    for regla in RecetaAgrupacionAddon.objects.filter(activo=True, status=RecetaAgrupacionAddon.STATUS_APPROVED).exclude(addon_receta_id=None).select_related("addon_receta"):
+        nombre = normalizar_nombre(regla.addon_nombre_point)
+        if nombre == normalizar_nombre(regla.addon_receta.nombre):
+            aprobados[(regla.addon_codigo_point, nombre)].add(regla.addon_receta_id)
+    codigos = {fila["product__sku"] for fila in filas if fila["receta_id"] is None}
+    for nodo in PointRecipeNode.objects.filter(source_type="PRODUCT", point_code__in=codigos, erp_recipe__isnull=False).select_related("erp_recipe"):
+        nombre = normalizar_nombre(nodo.point_name)
+        if nombre == normalizar_nombre(nodo.erp_recipe.nombre):
+            aprobados[(nodo.point_code, nombre)].add(nodo.erp_recipe_id)
+    for fila in filas:
+        ids = aprobados.get((fila["product__sku"], normalizar_nombre(fila["product__name"])), set())
+        if fila["receta_id"] is None and len(ids) == 1:
+            # La base ya tiene su venta: esta fila consume únicamente el complemento aprobado.
+            fila["receta_id"] = next(iter(ids))
