@@ -95,6 +95,13 @@ class SalesConfidenceTests(TestCase):
         FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Otro topping")
         self.assertIsNone(self.confidence()["margin"])
         FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Topping")
+        RecetaAgrupacionAddon.objects.filter(addon_receta=addon).update(addon_codigo_point="")
+        product.sku = ""
+        product.save()
+        self.assertIsNone(self.confidence()["margin"])
+        RecetaAgrupacionAddon.objects.filter(addon_receta=addon).update(addon_codigo_point="addon")
+        product.sku = "addon"
+        product.save()
         RecetaCostoHistoricoMensual.objects.filter(receta=addon).update(coverage_pct=90)
         self.assertIsNone(self.confidence()["margin"])
 
@@ -175,7 +182,8 @@ class SalesConfidenceTests(TestCase):
         self.assertEqual(result["cost_coverage_pct"], 100)
         self.assertEqual(result["missing_cost_rows"], 1)
         self.assertIsNone(result["margin"])
-        FactVentaDiaria.objects.filter(pk=gift.pk).update(point_product=product, cantidad=0, venta_neta=100)
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(point_product=product, cantidad=0, venta_neta=100,
+            producto_clave="1", producto_nombre="", fecha=date(2025,9,11))
         self.assertEqual(self.confidence()["missing_cost_rows"], 1)
 
 

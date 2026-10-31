@@ -41,7 +41,7 @@ def _cost_evidence(groups, end_date):
         group["product__name"] = group["producto_nombre"]
         if product_id:
             by_month[group["month"]].add(product_id)
-    asignar_recetas_identificadas(groups)
+    asignar_recetas_identificadas([g for g in groups if g["product__sku"]])
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
         recipes = _fuentes_recetas_para_periodo({g["receta_id"] for g in groups if g["month"] == month and g["receta_id"]}, month, cutoff)
@@ -126,12 +126,13 @@ def build_sales_confidence(*, start_date, end_date):
     ).count()
     groups = list(facts.annotate(
         month=TruncMonth("fecha"),
+        positive_quantity=Case(When(cantidad__gt=0, then=1), default=0, output_field=IntegerField()),
         backed_amount=Case(
             When(costo_estimado__gt=0, then=1), default=0, output_field=IntegerField(),
         ),
     ).values(
         "month", "source_kind", "metadata__costing__source",
-        "metadata__costing__period", "backed_amount",
+        "metadata__costing__period", "backed_amount", "positive_quantity",
         "point_product_id", "producto_clave", "producto_nombre", "receta_id",
     ).annotate(
         rows=Count("id"), positive_sales=Sum("venta_neta", filter=Q(venta_neta__gt=0)),
