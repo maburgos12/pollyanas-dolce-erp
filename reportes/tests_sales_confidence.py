@@ -342,6 +342,35 @@ class RentabilidadSummaryConfidenceTests(TestCase):
         self.assertIsNone(response.context['totales']['pct_margen_bruto'])
 
 
+    def test_branch_with_only_fixed_expenses_does_not_block_observed_margin(self):
+        from django.contrib.auth.models import User
+        from django.urls import reverse
+        from pos_bridge.models import PointBranch, PointDailySale, PointProduct
+        from reportes.models import ProductoReventaCosto
+        from rentabilidad.models_rentabilidad import SucursalRentabilidad
+        from rentabilidad.services_resultado import registros_del_mes
+        branch = Sucursal.objects.create(codigo="OBSERVED", nombre="Venta observada")
+        pb = PointBranch.objects.create(external_id="OBSERVED", name=branch.nombre, erp_branch=branch)
+        product = PointProduct.objects.create(external_id="OBSERVED", name="Producto")
+        PointDailySale.objects.create(branch=pb, product=product, sale_date=date(2026,9,10), quantity=1, gross_amount=100)
+        ProductoReventaCosto.objects.create(producto_point=product, fecha_vigencia=date(2026,9,1), costo_unitario=30, source_hash="observed")
+        FactVentaDiaria.objects.create(fecha=date(2026,9,10), sucursal=branch, producto_clave="OBSERVED", producto_nombre="Producto", source_kind="AUTHORITATIVE", cantidad=1, venta_neta=100)
+        SucursalRentabilidad.objects.create(sucursal=branch, periodo=date(2026,9,1))
+        records = registros_del_mes(date(2026,9,1))
+        outside = Sucursal.objects.create(codigo="OUTSIDE", nombre="Sin venta del mes")
+        extra = SucursalRentabilidad(sucursal=outside, periodo=date(2026,9,1))
+        extra.en_perimetro_fuente = False
+        extra.en_perimetro_ventas = False
+        extra.costos_pendientes = ["Sin ventas o merma fuente del mes"]
+        extra.resultado_integral_pendiente = True
+        user = User.objects.create_superuser("observed", "", "local-test")
+        self.client.force_login(user)
+        with patch("rentabilidad.views_rentabilidad.registros_del_mes", return_value=records+[extra]):
+            response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo":"2026-09"})
+        self.assertTrue(response.context["totales"]["margen_disponible"])
+        self.assertEqual(response.context["totales"]["pct_margen_bruto"], 70)
+
+
 class CostEvidenceTests(TestCase):
     def test_partial_recipe_cost_is_unavailable_even_with_a_positive_amount(self):
         from recetas.models import Receta

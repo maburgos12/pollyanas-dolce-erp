@@ -226,7 +226,7 @@
         {% with r=item.obj %}
         <div class="rank-item">
           <div><strong>{{ r.sucursal.nombre }}</strong><div class="muted">Venta ${{ r.ventas_netas|floatformat:0|intcomma }}</div></div>
-          <strong>{% if totales.margen_disponible %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</strong>
+          <strong>{% if totales.margen_disponible and r.ventas_netas > 0 %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</strong>
         </div>
         {% endwith %}
         {% endfor %}
@@ -409,7 +409,7 @@
             </td>
             <td class="num" data-label="Ventas">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
             <td class="num" data-label="Costo variable">${{ r.costo_variable_total|floatformat:0|intcomma }}</td>
-            <td class="num" data-label="Margen bruto">{% if totales.margen_disponible %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</td>
+            <td class="num" data-label="Margen bruto">{% if totales.margen_disponible and r.ventas_netas > 0 %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</td>
             <td class="num" data-label="Gasto fijo">${{ r.gasto_fijo_total|floatformat:0|intcomma }}</td>
             <td data-label="Punto equilibrio">
               <div class="pe-progress {% if r.punto_equilibrio_mensual <= 0 %}is-low{% elif r.porcentaje_avance_pe >= 100 %}is-ok{% elif r.porcentaje_avance_pe >= 85 %}is-mid{% else %}is-low{% endif %}">

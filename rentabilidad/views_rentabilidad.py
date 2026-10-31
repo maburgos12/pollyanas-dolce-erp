@@ -376,14 +376,14 @@ def dashboard_rentabilidad(request):
     sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
     totales["margen_disponible"] = bool(
         fuente_estado["cuadra"] and sales_confidence["margin"] is not None
-        and all(not item["obj"].costos_pendientes for item in sucursales_data)
+        and all(not item["obj"].costos_pendientes for item in sucursales_data if item["obj"].en_perimetro_fuente)
     )
     if not totales["margen_disponible"]:
         totales["pct_margen_bruto"] = None
         totales["pct_utilidad"] = None
 
     diagnostico = {
-        "ranking_margen": sorted(sucursales_data, key=lambda item: item["obj"].porcentaje_margen_bruto) if totales["margen_disponible"] else [],
+        "ranking_margen": sorted((item for item in sucursales_data if item["obj"].en_perimetro_ventas), key=lambda item: item["obj"].porcentaje_margen_bruto) if totales["margen_disponible"] else [],
         "ranking_utilidad": sorted(sucursales_data, key=lambda item: item["obj"].utilidad_operativa, reverse=True) if totales["margen_disponible"] else [],
         "ranking_pe": sorted(sucursales_data, key=lambda item: item["obj"].porcentaje_avance_pe),
         "interpretacion": [
