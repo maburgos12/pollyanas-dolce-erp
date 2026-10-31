@@ -105,6 +105,29 @@ class SalesConfidenceTests(TestCase):
         RecetaCostoHistoricoMensual.objects.filter(receta=addon).update(coverage_pct=90)
         self.assertIsNone(self.confidence()["margin"])
 
+    def test_existing_resale_recipe_uses_acquisition_cost_without_changing_its_mode(self):
+        from recetas.models import Receta
+        recipe = Receta.objects.create(nombre="Pirotecnia", nombre_normalizado="pirotecnia", hash_contenido="resale-recipe")
+        original_mode = recipe.modo_costeo
+        recipe.modo_costeo = Receta.MODO_COSTEO_REVENTA
+        recipe.save()
+        product, source = self.resale()
+        fact = self.fact(key=product.external_id, producto_nombre=product.name, receta=recipe)
+        self.assertEqual(self.confidence()["margin"], 80)
+        fact.refresh_from_db()
+        recipe.refresh_from_db()
+        self.assertEqual(fact.receta_id, recipe.pk)
+        self.assertEqual(recipe.modo_costeo, Receta.MODO_COSTEO_REVENTA)
+        recipe.modo_costeo = original_mode
+        recipe.save()
+        self.assertIsNone(self.confidence()["margin"])
+        from reportes.models import RecetaCostoHistoricoMensual
+        recipe.modo_costeo = Receta.MODO_COSTEO_REVENTA
+        recipe.save()
+        source.delete()
+        RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2025,9,1), costo_total=30, coverage_pct=100)
+        self.assertEqual(self.confidence()["margin"], 70)
+
     def test_recipe_version_keeps_origin_date_and_excludes_labor_and_overhead(self):
         from datetime import datetime, timezone
         from recetas.models import Receta, RecetaCostoVersion
