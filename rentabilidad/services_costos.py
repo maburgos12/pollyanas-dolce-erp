@@ -58,6 +58,25 @@ def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
     from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
     from pos_bridge.services.point_cost_validation import resale_cost_matches_product
 
+    # Las decisiones DG explícitas tienen precedencia; un cero común sigue desconocido.
+    decisiones = {}
+    for row in ProductoReventaCosto.objects.filter(
+        producto_point_id__in=producto_ids, fecha_vigencia__lte=fin_periodo,
+        fuente=ProductoReventaCosto.FUENTE_MANUAL,
+    ).select_related("producto_point").order_by("producto_point_id", "-fecha_vigencia", "-id"):
+        meta = row.metadata or {}
+        treatment = meta.get("cost_treatment")
+        if (row.producto_point_id not in decisiones
+                and treatment in {"NO_DIRECT_COST", "SUPPLIER_GIFT", "UNALLOCATED_SERVICE", "PURCHASE_REFERENCE"}
+                and meta.get("authorization")
+                and meta.get("point_external_id") == row.producto_point.external_id
+                and meta.get("point_name") == row.producto_point.name
+                and ((treatment == "PURCHASE_REFERENCE" and row.costo_unitario > 0)
+                     or (treatment != "PURCHASE_REFERENCE" and row.costo_unitario == 0))):
+            decisiones[row.producto_point_id] = {
+                "cost": row.costo_unitario, "period": row.fecha_vigencia.replace(day=1),
+                "treatment": treatment, "authorized": True,
+            }
     costos = {}
     historicos = list(ProductoReventaCostoHistoricoMensual.objects.filter(
         producto_point_id__in=producto_ids,
@@ -85,6 +104,7 @@ def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         for vigente in vigentes:
             if vigente.producto_point_id not in costos and resale_cost_matches_product(vigente):
                 costos[vigente.producto_point_id] = {"cost": Decimal(vigente.costo_unitario or 0), "period": vigente.fecha_vigencia.replace(day=1)}
+    costos.update(decisiones)
     return costos
 
 
@@ -98,15 +118,34 @@ def asignar_recetas_identificadas(filas):
     aprobados = defaultdict(set)
     for regla in RecetaAgrupacionAddon.objects.filter(activo=True, status=RecetaAgrupacionAddon.STATUS_APPROVED).exclude(addon_receta_id=None).select_related("addon_receta"):
         nombre = normalizar_nombre(regla.addon_nombre_point)
-        if nombre == normalizar_nombre(regla.addon_receta.nombre):
+        if regla.addon_codigo_point and nombre == normalizar_nombre(regla.addon_receta.nombre):
             aprobados[(regla.addon_codigo_point, nombre)].add(regla.addon_receta_id)
-    codigos = {fila["product__sku"] for fila in filas if fila["receta_id"] is None}
+    aprobados_explicitos = {key: set(ids) for key, ids in aprobados.items()}
+    codigos = {fila["product__sku"] for fila in filas if fila["receta_id"] is None and fila["product__sku"]}
     for nodo in PointRecipeNode.objects.filter(source_type="PRODUCT", point_code__in=codigos, erp_recipe__isnull=False).select_related("erp_recipe"):
         nombre = normalizar_nombre(nodo.point_name)
         if nombre == normalizar_nombre(nodo.erp_recipe.nombre):
             aprobados[(nodo.point_code, nombre)].add(nodo.erp_recipe_id)
     for fila in filas:
         ids = aprobados.get((fila["product__sku"], normalizar_nombre(fila["product__name"])), set())
-        if fila["receta_id"] is None and len(ids) == 1:
+        if len(ids) == 1 and (fila["receta_id"] is None or ids == aprobados_explicitos.get((fila["product__sku"], normalizar_nombre(fila["product__name"])))):
             # La base ya tiene su venta: esta fila consume únicamente el complemento aprobado.
-            fila["receta_id"] = next(iter(ids))
+            receta_id = next(iter(ids))
+            fila["recipe_identity_corrected"] = bool(fila["receta_id"] and fila["receta_id"] != receta_id)
+            fila["receta_id"] = receta_id
+
+
+def asignar_costos_filas(filas, periodo, fin_periodo):
+    """Misma precedencia de receta, adquisición y decisión DG en todos los lectores."""
+    from recetas.models import Receta
+    asignar_recetas_identificadas(filas)
+    ids = {f["receta_id"] for f in filas if f["receta_id"]}
+    recipes = _fuentes_recetas_para_periodo(ids, periodo, fin_periodo)
+    resale = _fuentes_reventa_para_periodo({f["product_id"] for f in filas if f["product_id"]}, periodo, fin_periodo)
+    resale_recipes = set(Receta.objects.filter(pk__in=ids, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
+    for row in filas:
+        evidence = recipes.get(row["receta_id"])
+        acquisition = resale.get(row["product_id"])
+        is_resale = not row["receta_id"] or bool(acquisition and (acquisition.get("authorized") or (row["receta_id"] in resale_recipes and acquisition["cost"] > 0)))
+        row["cost_evidence"] = acquisition if is_resale else evidence
+        row["cost_is_resale"] = is_resale

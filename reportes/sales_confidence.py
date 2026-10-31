@@ -18,9 +18,8 @@ Q2 = Decimal("0.01")
 
 def _cost_evidence(groups, end_date):
     from pos_bridge.models import PointProduct
-    from recetas.models import Receta
     from recetas.utils.normalizacion import normalizar_nombre
-    from rentabilidad.services_costos import _fuentes_reventa_para_periodo, _fuentes_recetas_para_periodo, asignar_recetas_identificadas
+    from rentabilidad.services_costos import asignar_costos_filas
 
     ids = {g["point_product_id"] for g in groups if g["point_product_id"]}
     keys = {g["producto_clave"] for g in groups if g["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE and not g["point_product_id"]}
@@ -29,7 +28,6 @@ def _cost_evidence(groups, end_date):
     for product in products.values():
         # La clave autoritativa es externa: nunca interpretarla como PK ni resolver por nombre solo.
         identities[(product.external_id.removeprefix("official:"), normalizar_nombre(product.name))].add(product.pk)
-    by_month = defaultdict(set)
     for group in groups:
         product_id = group["point_product_id"]
         if not product_id and group["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE:
@@ -37,24 +35,13 @@ def _cost_evidence(groups, end_date):
             if len(candidates) == 1:
                 product_id = next(iter(candidates))
         group["resale_product_id"] = product_id
+        group["product_id"] = product_id
         product = products.get(product_id)
         group["product__sku"] = product.sku if product else ""
         group["product__name"] = group["producto_nombre"]
-        if product_id:
-            by_month[group["month"]].add(product_id)
-    asignar_recetas_identificadas([g for g in groups if g["product__sku"]])
-    resale_recipes = set(Receta.objects.filter(pk__in={g["receta_id"] for g in groups if g["receta_id"]}, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
-        recipes = _fuentes_recetas_para_periodo({g["receta_id"] for g in groups if g["month"] == month and g["receta_id"]}, month, cutoff)
-        resale = _fuentes_reventa_para_periodo(by_month[month], month, cutoff)
-        for group in groups:
-            if group["month"] == month:
-                evidence = recipes.get(group["receta_id"])
-                acquisition = resale.get(group["resale_product_id"])
-                if not group["receta_id"] or (group["receta_id"] in resale_recipes and acquisition and acquisition["cost"] > ZERO):
-                    evidence = acquisition
-                group["cost_evidence"] = evidence
+        asignar_costos_filas([g for g in groups if g["month"] == month], month, cutoff)
 
 
 def _source_priority():
@@ -148,6 +135,7 @@ def build_sales_confidence(*, start_date, end_date):
     _cost_evidence(groups, end_date)
     missing_sales = prior_sales = covered_sales = positive_sales = costs = ZERO
     missing_rows = 0
+    authorized_zero_sales = service_unallocated_sales = ZERO
     sources = set()
     periods = set()
     for group in groups:
@@ -163,9 +151,11 @@ def build_sales_confidence(*, start_date, end_date):
             and period and period <= group["month"] and group["backed_amount"]
         )
         cost = group["cost"] or ZERO
+        evidence = group["cost_evidence"]
+        if group.get("recipe_identity_corrected") or (evidence and evidence.get("authorized")):
+            backed = False  # La decisión explícita reemplaza la clasificación materializada antigua.
         if not backed:
-            evidence = group["cost_evidence"]
-            if evidence and evidence["cost"] > ZERO and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
+            if evidence and (evidence["cost"] > ZERO or evidence.get("authorized")) and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
                 backed = True
                 period = evidence["period"]
                 cost = (group["quantity"] * evidence["cost"]).quantize(Q2)
@@ -173,6 +163,10 @@ def build_sales_confidence(*, start_date, end_date):
             missing_sales += sales
             missing_rows += group["rows"]
             continue
+        if evidence and evidence.get("authorized") and evidence["cost"] == ZERO:
+            authorized_zero_sales += sales
+            if evidence.get("treatment") == "UNALLOCATED_SERVICE":
+                service_unallocated_sales += sales
         covered_sales += sales
         costs += cost
         periods.add(period)
@@ -182,10 +176,11 @@ def build_sales_confidence(*, start_date, end_date):
         start_date=start_date, end_date=end_date, sources=sorted(sources),
         cost_periods=sorted(periods), identity_pending_rows=identity_pending,
         missing_cost_sales=missing_sales, missing_cost_rows=missing_rows,
-        prior_cost_sales=prior_sales,
+        prior_cost_sales=prior_sales, authorized_zero_sales=authorized_zero_sales,
+        service_unallocated_sales=service_unallocated_sales,
         cost_coverage_pct=(covered_sales / positive_sales * 100).quantize(Q2) if positive_sales else None,
         margin=((summary["net_sales"] or ZERO) - costs).quantize(Q2) if summary["rows"] and not missing_rows and not identity_pending else None,
-        status="Sin datos" if not summary["rows"] else "Provisional" if missing_rows or prior_sales or identity_pending else "Estimado con costo del mes")
+        status="Sin datos" if not summary["rows"] else "Provisional" if missing_rows or prior_sales or identity_pending or authorized_zero_sales else "Estimado con costo del mes")
     labels = {"AUTHORITATIVE": "Venta histórica ERP", "V2_FACT": "Point v2", "LEGACY": "Point legacy"}
     summary["source_labels"] = [labels.get(source, source) for source in sorted(sources)]
     summary["net_sales"] = (summary["net_sales"] or ZERO) if summary["rows"] else None

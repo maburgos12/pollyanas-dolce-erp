@@ -85,6 +85,7 @@
   {% if not totales.gastos_completos %}
   <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Utilidad y punto de equilibrio se calculan con los gastos ya cargados, así que el PE está subestimado y la utilidad sobreestimada. Revisa la pestaña Gastos para ver qué falta por sucursal.</p>
   {% endif %}
+  {% for item in sucursales_data %}{% if item.obj.advertencias_costos %}<p role="status"><strong>{{ item.obj.sucursal.nombre }} — costos por revisar:</strong> {{ item.obj.advertencias_costos|join:"; " }}. Se conservan en el cálculo, incluso si producen margen negativo.</p>{% endif %}{% endfor %}
   <section class="kpi-grid">
     <article class="kpi-card">
       <div class="kpi-label">Ventas totales</div>
@@ -92,7 +93,7 @@
       <div class="kpi-note">Netas, {{ sucursales_data|length }} sucursales</div>
     </article>
     <article class="kpi-card">
-      <div class="kpi-label">Margen bruto</div>
+      <div class="kpi-label">Margen bruto provisional</div>
       <div class="kpi-value">{% if totales.pct_margen_bruto is not None %}{{ totales.pct_margen_bruto }}%{% else %}N/D{% endif %}</div>
       <div class="kpi-note">{% if totales.margen_disponible %}Contribución después de materiales, reventa y merma; antes de fabricación{% else %}Requiere ventas conciliadas y costo respaldado{% endif %}</div>
     </article>
@@ -225,7 +226,7 @@
         {% with r=item.obj %}
         <div class="rank-item">
           <div><strong>{{ r.sucursal.nombre }}</strong><div class="muted">Venta ${{ r.ventas_netas|floatformat:0|intcomma }}</div></div>
-          <strong>{% if totales.margen_disponible %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</strong>
+          <strong>{% if totales.margen_disponible and r.ventas_netas > 0 %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</strong>
         </div>
         {% endwith %}
         {% endfor %}
@@ -408,7 +409,7 @@
             </td>
             <td class="num" data-label="Ventas">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
             <td class="num" data-label="Costo variable">${{ r.costo_variable_total|floatformat:0|intcomma }}</td>
-            <td class="num" data-label="Margen bruto">{% if totales.margen_disponible %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</td>
+            <td class="num" data-label="Margen bruto">{% if totales.margen_disponible and r.ventas_netas > 0 %}{{ r.porcentaje_margen_bruto }}%{% else %}N/D{% endif %}</td>
             <td class="num" data-label="Gasto fijo">${{ r.gasto_fijo_total|floatformat:0|intcomma }}</td>
             <td data-label="Punto equilibrio">
               <div class="pe-progress {% if r.punto_equilibrio_mensual <= 0 %}is-low{% elif r.porcentaje_avance_pe >= 100 %}is-ok{% elif r.porcentaje_avance_pe >= 85 %}is-mid{% else %}is-low{% endif %}">

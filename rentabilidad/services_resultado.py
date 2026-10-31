@@ -9,7 +9,7 @@ from unidecode import unidecode
 from pos_bridge.models.sales import PointDailySale
 from control.models import MermaMensualSucursal
 from reportes.models import LineaPresupuestoMensual, ReglaFuenteRubro
-from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo, asignar_recetas_identificadas
+from .services_costos import _costos_recetas_para_periodo, asignar_costos_filas
 
 ZERO = Decimal("0")
 CENTRALES = {"produccion", "logistica", "administracion"}
@@ -21,26 +21,26 @@ def leer_resultado_mensual(periodo):
     filas = list(ventas.values("branch__erp_branch_id", "receta_id", "product_id", "product__sku", "product__name")
                  .annotate(brutas=Sum("gross_amount"), impuestos=Sum("tax_amount"),
                            descuentos=Sum("discount_amount"), cantidad=Sum("quantity")))
-    asignar_recetas_identificadas(filas)
+    asignar_costos_filas(filas, periodo, fin)
     mermas = list(MermaMensualSucursal.objects.filter(periodo=periodo))
     receta_ids = {f["receta_id"] for f in filas if f["receta_id"]}
     receta_ids.update(m.receta_id for m in mermas if m.receta_id)
     recetas = _costos_recetas_para_periodo(receta_ids, periodo, fin)
-    reventa = _costos_reventa_para_periodo({f["product_id"] for f in filas if not f["receta_id"]}, periodo, fin)
     sucursales = defaultdict(lambda: {"ventas_brutas": ZERO, "descuentos": ZERO,
-        "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "tiene_ventas": False})
+        "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "advertencias": [], "tiene_ventas": False})
     for fila in filas:
         suc = sucursales[fila["branch__erp_branch_id"]]
         suc["tiene_ventas"] = True
         suc["ventas_brutas"] += (fila["brutas"] or ZERO) - (fila["impuestos"] or ZERO)
         suc["descuentos"] += fila["descuentos"] or ZERO
-        costo = recetas.get(fila["receta_id"], ZERO) if fila["receta_id"] else reventa.get(fila["product_id"], ZERO)
-        campo = "costo_materia_prima" if fila["receta_id"] else "costo_reventa"
+        evidence = fila["cost_evidence"]
+        costo = evidence["cost"] if evidence else ZERO
+        campo = "costo_reventa" if fila["cost_is_resale"] else "costo_materia_prima"
         suc[campo] += costo * (fila["cantidad"] or ZERO)
         neto = (fila["brutas"] or ZERO) - (fila["impuestos"] or ZERO) - (fila["descuentos"] or ZERO)
         if neto > 0 and costo * (fila["cantidad"] or ZERO) > neto:
-            suc["pendientes"].append(f"Revisar costo/unidad superior a venta: producto {fila['product_id']}")
-        if costo <= 0 and fila["cantidad"]:
+            suc["advertencias"].append(f"Revisar costo/unidad superior a venta: producto {fila['product_id']}")
+        if costo <= 0 and fila["cantidad"] and not (evidence and evidence.get("authorized")):
             suc["pendientes"].append(f"Costo sin confirmar: producto {fila['product_id']}, receta {fila['receta_id']}")
     for merma in mermas:
         suc = sucursales[merma.sucursal_id]
@@ -78,6 +78,7 @@ def aplicar_resultado(rent, resultado):
     suc = resultado["sucursales"].get(rent.sucursal_id)
     rent.en_perimetro_fuente = suc is not None
     rent.en_perimetro_ventas = bool(suc and suc["tiene_ventas"])
+    rent.advertencias_costos = list(suc["advertencias"]) if suc else []
     rent.costos_pendientes = list(suc["pendientes"]) if suc else ["Sin ventas o merma fuente del mes"]
     for campo in ("ventas_brutas", "descuentos", "costo_materia_prima", "costo_reventa"):
         setattr(rent, campo, (suc[campo] if suc else ZERO).quantize(Decimal("0.01")))

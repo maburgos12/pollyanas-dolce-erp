@@ -70,6 +70,42 @@ class SalesConfidenceTests(TestCase):
             fecha_vigencia=day, source_hash=external_id, metadata={"point_name": name})
         return product, source
 
+    def test_authorized_zero_is_distinct_from_unknown_and_keeps_service_provisional(self):
+        from reportes.models import ProductoReventaCosto
+        product, source = self.resale(cost=0)
+        original = self.fact(key=product.external_id, producto_nombre=product.name)
+        self.assertIsNone(self.confidence()["margin"])
+        source.fuente = ProductoReventaCosto.FUENTE_MANUAL
+        source.metadata.update(cost_treatment="UNALLOCATED_SERVICE", authorization="Mauricio",
+                               point_external_id=product.external_id)
+        source.save()
+        result = self.confidence()
+        self.assertEqual(result["margin"], 100)
+        self.assertEqual(result["service_unallocated_sales"], 100)
+        self.assertEqual(result["cost_coverage_pct"], 100)
+        self.assertEqual(result["status"], "Provisional")
+        source.metadata["point_external_id"] = "different"
+        source.save()
+        self.assertIsNone(self.confidence()["margin"])
+        original.refresh_from_db()
+        self.assertEqual(original.costo_estimado, 0)
+
+    def test_authorized_purchase_corrects_bad_recipe_without_rewriting_sales(self):
+        from recetas.models import Receta
+        from reportes.models import ProductoReventaCosto
+        wrong = Receta.objects.create(nombre="Bollo", hash_contenido="wrong-candle")
+        product, source = self.resale(cost=3)
+        original = self.fact(key=product.external_id, producto_nombre=product.name, receta=wrong,
+            costo_estimado=80, metadata={"costing": {"source": "producto_costo_operativo_mensual", "period": "2025-09-01", "unit_cost": "80"}})
+        source.fuente = ProductoReventaCosto.FUENTE_MANUAL
+        source.metadata.update(cost_treatment="PURCHASE_REFERENCE", authorization="Mauricio",
+                               point_external_id=product.external_id)
+        source.save()
+        self.assertEqual(self.confidence()["margin"], 97)
+        original.refresh_from_db()
+        self.assertEqual(original.receta_id, wrong.pk)
+        self.assertEqual(original.costo_estimado, 80)
+
     def test_recipe_and_free_addon_use_existing_costs_without_rewriting_identities(self):
         from recetas.models import Receta, RecetaAgrupacionAddon
         from pos_bridge.models import PointProduct
@@ -254,12 +290,10 @@ class ReconciliationTests(SimpleTestCase):
         result = reconcile_branch_sales(source_rows=[{"branch_id": 1, "name": "Matriz", "total": Decimal("0")}], snapshot_rows=[])
         self.assertFalse(result["reconciled"])
 
-    @patch("rentabilidad.views_rentabilidad.asignar_recetas_identificadas")
-    @patch("rentabilidad.views_rentabilidad._costos_reventa_para_periodo", return_value={})
-    @patch("rentabilidad.views_rentabilidad._costos_recetas_para_periodo", return_value={})
+    @patch("rentabilidad.views_rentabilidad.asignar_costos_filas")
     @patch("pos_bridge.models.sales.PointDailySale")
-    def test_missing_cost_and_advance_are_not_profit_leaders(self, sales, recipe_costs, resale_costs, addons):
-        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(receta_id=None, product_id=1, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
+    def test_missing_cost_and_advance_are_not_profit_leaders(self, sales, costs):
+        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(receta_id=None, product_id=1, cost_evidence=None, cost_is_resale=True, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
         panel = _build_productos_panel(date(2026, 9, 1), date(2026, 9, 1), date(2026, 9, 30))
         self.assertEqual(panel["top_utilidad"], [])
         self.assertIsNone(panel["riesgo_margen"][0]["margen"])
@@ -308,11 +342,40 @@ class RentabilidadSummaryConfidenceTests(TestCase):
         self.assertIsNone(response.context['totales']['pct_margen_bruto'])
 
 
+    def test_branch_with_only_fixed_expenses_does_not_block_observed_margin(self):
+        from django.contrib.auth.models import User
+        from django.urls import reverse
+        from pos_bridge.models import PointBranch, PointDailySale, PointProduct
+        from reportes.models import ProductoReventaCosto
+        from rentabilidad.models_rentabilidad import SucursalRentabilidad
+        from rentabilidad.services_resultado import registros_del_mes
+        branch = Sucursal.objects.create(codigo="OBSERVED", nombre="Venta observada")
+        pb = PointBranch.objects.create(external_id="OBSERVED", name=branch.nombre, erp_branch=branch)
+        product = PointProduct.objects.create(external_id="OBSERVED", name="Producto")
+        PointDailySale.objects.create(branch=pb, product=product, sale_date=date(2026,9,10), quantity=1, gross_amount=100)
+        ProductoReventaCosto.objects.create(producto_point=product, fecha_vigencia=date(2026,9,1), costo_unitario=30, source_hash="observed")
+        FactVentaDiaria.objects.create(fecha=date(2026,9,10), sucursal=branch, producto_clave="OBSERVED", producto_nombre="Producto", source_kind="AUTHORITATIVE", cantidad=1, venta_neta=100)
+        SucursalRentabilidad.objects.create(sucursal=branch, periodo=date(2026,9,1))
+        records = registros_del_mes(date(2026,9,1))
+        outside = Sucursal.objects.create(codigo="OUTSIDE", nombre="Sin venta del mes")
+        extra = SucursalRentabilidad(sucursal=outside, periodo=date(2026,9,1))
+        extra.en_perimetro_fuente = False
+        extra.en_perimetro_ventas = False
+        extra.costos_pendientes = ["Sin ventas o merma fuente del mes"]
+        extra.resultado_integral_pendiente = True
+        user = User.objects.create_superuser("observed", "", "local-test")
+        self.client.force_login(user)
+        with patch("rentabilidad.views_rentabilidad.registros_del_mes", return_value=records+[extra]):
+            response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo":"2026-09"})
+        self.assertTrue(response.context["totales"]["margen_disponible"])
+        self.assertEqual(response.context["totales"]["pct_margen_bruto"], 70)
+
+
 class CostEvidenceTests(TestCase):
     def test_partial_recipe_cost_is_unavailable_even_with_a_positive_amount(self):
         from recetas.models import Receta
         from reportes.models import RecetaCostoHistoricoMensual
-        from rentabilidad.views_rentabilidad import _costos_recetas_para_periodo
+        from rentabilidad.services_costos import _costos_recetas_para_periodo
         recipe = Receta.objects.create(nombre='Costo parcial prueba', hash_contenido='confidence-partial-cost')
         RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2026,9,1), costo_total=50, coverage_pct=50)
         costs = _costos_recetas_para_periodo([recipe.pk], date(2026,9,1), date(2026,9,30))

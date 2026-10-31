@@ -250,6 +250,7 @@
 
   <section class="panel"><h2>Costos centrales de empresa</h2><p>No asignados a esta sucursal. Su resultado es parcial antes de fabricación, logística y administración.</p>
   {% include "rentabilidad/_costos_centrales.html" with costos_centrales=rent.costos_centrales %}
+  {% if rent.advertencias_costos %}<h3>Advertencias de costo y precio</h3><ul>{% for aviso in rent.advertencias_costos %}<li>{{ aviso }}</li>{% endfor %}</ul>{% endif %}
   {% if rent.costos_pendientes %}<h3>Costos por confirmar</h3><ul>{% for pendiente in rent.costos_pendientes %}<li>{{ pendiente }}</li>{% endfor %}</ul>{% endif %}</section>
   {% include "rentabilidad/_gastos_mensuales.html" with gastos=rent.gastos_mensuales %}
 
