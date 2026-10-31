@@ -24,9 +24,10 @@ def leer_resultado_mensual(periodo):
     recetas = _costos_recetas_para_periodo({f["receta_id"] for f in filas if f["receta_id"]}, periodo, fin)
     reventa = _costos_reventa_para_periodo({f["product_id"] for f in filas if not f["receta_id"]}, periodo, fin)
     sucursales = defaultdict(lambda: {"ventas_brutas": ZERO, "descuentos": ZERO,
-        "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": []})
+        "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "tiene_ventas": False})
     for fila in filas:
         suc = sucursales[fila["branch__erp_branch_id"]]
+        suc["tiene_ventas"] = True
         suc["ventas_brutas"] += (fila["brutas"] or ZERO) - (fila["impuestos"] or ZERO)
         suc["descuentos"] += fila["descuentos"] or ZERO
         costo = recetas.get(fila["receta_id"], ZERO) if fila["receta_id"] else reventa.get(fila["product_id"], ZERO)
@@ -69,6 +70,7 @@ def leer_resultado_mensual(periodo):
 def aplicar_resultado(rent, resultado):
     suc = resultado["sucursales"].get(rent.sucursal_id)
     rent.en_perimetro_fuente = suc is not None
+    rent.en_perimetro_ventas = bool(suc and suc["tiene_ventas"])
     rent.costos_pendientes = list(suc["pendientes"]) if suc else ["Sin ventas o merma fuente del mes"]
     for campo in ("ventas_brutas", "descuentos", "costo_materia_prima", "costo_reventa"):
         setattr(rent, campo, (suc[campo] if suc else ZERO).quantize(Decimal("0.01")))

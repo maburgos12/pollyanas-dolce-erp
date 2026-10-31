@@ -68,8 +68,6 @@ class SucursalRentabilidad(models.Model):
     @property
     def margen_bruto(self):
         """Ventas netas - costos variables"""
-        if self.ventas_netas == 0:
-            return Decimal("0")
         return self.ventas_netas - self.costo_variable_total
 
     @property
