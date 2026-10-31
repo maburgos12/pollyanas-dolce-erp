@@ -299,6 +299,20 @@ class ReconciliationTests(SimpleTestCase):
         self.assertIsNone(panel["riesgo_margen"][0]["margen"])
         self.assertIsNone(panel["riesgo_margen"][0]["utilidad"])
 
+    @patch("rentabilidad.views_rentabilidad.asignar_costos_filas")
+    @patch("pos_bridge.models.sales.PointDailySale")
+    def test_documented_service_is_not_a_missing_cost_alert(self, sales, assign):
+        from rentabilidad.views_rentabilidad import _build_productos_panel
+        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(
+            receta_id=None, product_id=1, cost_is_resale=True, cantidad=1, venta=50,
+            cost_evidence={"cost": Decimal("0"), "authorized": True, "treatment": "UNALLOCATED_SERVICE"},
+            product__name="Servicio a domicilio", product__category="Servicio", sucursales=1)]
+        panel = _build_productos_panel(date(2026, 9, 1), date(2026, 9, 1), date(2026, 9, 30))
+        self.assertEqual(panel["riesgo_margen"], [])
+        self.assertEqual(panel["top_utilidad"], [])
+        self.assertEqual(panel["costo_faltante"], 0)
+        self.assertEqual(panel["productos_revisados"], 1)
+
 class SnapshotConfidenceTests(SimpleTestCase):
     @patch('reportes.dashboard_full_dataset.build_closed_yoy_panel', return_value={})
     @patch('reportes.dashboard_full_dataset.get_dashboard_sales_dataset', return_value={'latest_date': date(2026, 9, 30), 'daily_sales_snapshot': {}})

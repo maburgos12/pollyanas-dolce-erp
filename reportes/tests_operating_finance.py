@@ -1043,6 +1043,23 @@ class MonthlyHistoricalCostingServiceTests(TestCase):
         self.assertEqual(derived_cost.costo_total, Decimal("3.750000"))
         self.assertEqual(derived_cost.coverage_pct, Decimal("100.000000"))
 
+    def test_rebanada_excludes_rejected_components_and_preserves_parent_rule(self):
+        parent = Receta.objects.create(nombre="Pastel mediano prueba", hash_contenido="reject_parent")
+        sliced = Receta.objects.create(nombre="Rebanada prueba", hash_contenido="reject_slice")
+        RecetaPresentacionDerivada.objects.create(receta_padre=parent, receta_derivada=sliced,
+            unidades_por_padre=10, requiere_componentes_directos=True)
+        for recipe, cost, status in ((parent, "200", LineaReceta.STATUS_AUTO),
+                                     (sliced, "3", LineaReceta.STATUS_AUTO),
+                                     (sliced, "64", LineaReceta.STATUS_REJECTED)):
+            LineaReceta.objects.create(receta=recipe, posicion=1, insumo_texto="Componente",
+                cantidad=1, costo_linea_excel=Decimal(cost), match_status=status)
+        result = MonthlyHistoricalCostingService()._build_recipe_monthly_cost(
+            period_start=date(2026, 9, 1), receta=sliced)
+        self.assertEqual(result.total_cost, Decimal("23"))
+        self.assertEqual(result.costed_lines, 2)
+        self.assertEqual(result.total_lines, 2)
+        self.assertEqual(sliced.lineas.count(), 2)
+
     def test_historical_snapshot_excludes_service_accessory_sales(self):
         service_recipe = Receta.objects.create(
             nombre="Letrero Chispas Felicidades",

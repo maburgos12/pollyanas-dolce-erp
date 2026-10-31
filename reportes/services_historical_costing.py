@@ -707,6 +707,7 @@ class MonthlyHistoricalCostingService:
             lineas = list(
                 receta.lineas.select_related("insumo", "unidad")
                 .exclude(tipo_linea=LineaReceta.TIPO_SUBSECCION)
+                .exclude(match_status=LineaReceta.STATUS_REJECTED)
                 .order_by("posicion", "id")
             )
             derived_relation = get_active_derived_relation(receta)
