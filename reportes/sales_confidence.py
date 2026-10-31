@@ -158,7 +158,7 @@ def build_sales_confidence(*, start_date, end_date):
         cost = group["cost"] or ZERO
         if not backed:
             evidence = group["cost_evidence"]
-            if evidence and evidence["cost"] > ZERO and group["quantity"] > ZERO:
+            if evidence and evidence["cost"] > ZERO and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
                 backed = True
                 period = evidence["period"]
                 cost = (group["quantity"] * evidence["cost"]).quantize(Q2)

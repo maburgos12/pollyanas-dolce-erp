@@ -85,6 +85,9 @@ class SalesConfidenceTests(TestCase):
         gift = self.fact(key="gift", producto_nombre="Topping")
         FactVentaDiaria.objects.filter(pk=gift.pk).update(venta_neta=0, venta_total=0, cantidad=2)
         self.assertEqual(self.confidence()["margin"], 60)
+        from reportes.sales_confidence import build_sales_confidence
+        early = build_sales_confidence(start_date=date(2025,9,1), end_date=date(2025,9,15))
+        self.assertIsNone(early["margin"])
         gift.refresh_from_db()
         self.assertIsNone(gift.receta_id)
         self.assertIsNone(gift.point_product_id)

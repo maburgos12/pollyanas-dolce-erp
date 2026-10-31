@@ -1,4 +1,5 @@
 """Costos materiales por unidad vendida; nunca sustituye faltantes por porcentajes."""
+from calendar import monthrange
 from decimal import Decimal
 
 
@@ -21,7 +22,7 @@ def _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         periodo=periodo,
     )
     for historico in historicos:
-        costos[historico.receta_id] = {"cost": Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0"), "period": historico.periodo}
+        costos[historico.receta_id] = {"cost": Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0"), "period": historico.periodo, "through": historico.periodo.replace(day=monthrange(historico.periodo.year, historico.periodo.month)[1])}
 
     recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in costos]
     if recetas_sin_historico:
