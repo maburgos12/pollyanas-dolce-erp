@@ -67,7 +67,14 @@ Formato de respuesta:
 
 def _construir_contexto(rent) -> str:
     """Convierte el objeto SucursalRentabilidad en un bloque de texto para el prompt."""
+    if not hasattr(rent, "resultado_integral_pendiente"):
+        from reportes.services_rentabilidad_mensual import leer_costos_mensuales, aplicar_costos_en_memoria
+        aplicar_costos_en_memoria(rent, leer_costos_mensuales(rent.periodo))
     lines = [
+        "RESULTADO PARCIAL: no es utilidad neta ni permite concluir rentabilidad integral o recuperación.",
+        "Producción, logística y administración se informan a nivel empresa, sin reparto a sucursales.",
+        f"Costos centrales registrados del mes (empresa): ${rent.central_registrado:,.2f}; cobertura no certificada.",
+        f"Costos pendientes: {rent.costos_pendientes}; gastos pendientes: {rent.gastos_faltantes_display}",
         f"SUCURSAL: {rent.sucursal.nombre if hasattr(rent.sucursal, 'nombre') else rent.sucursal}",
         f"PERIODO: {rent.periodo.strftime('%B %Y')}",
         f"MESES OPERANDO: {rent.meses_operando or 'N/D'}",
@@ -95,7 +102,7 @@ def _construir_contexto(rent) -> str:
         f"Total gastos fijos:    ${rent.gasto_fijo_total:,.2f}",
         "",
         "=== RENTABILIDAD ===",
-        f"Utilidad operativa:    ${rent.utilidad_operativa:,.2f}  ({rent.porcentaje_utilidad_operativa}%)",
+        f"Resultado parcial de sucursal:    ${rent.utilidad_operativa:,.2f}  ({rent.porcentaje_utilidad_operativa}%)",
         f"Punto de equilibrio:   ${rent.punto_equilibrio_mensual:,.2f}",
         f"Avance sobre PE:       {rent.porcentaje_avance_pe}%",
         f"Brecha al PE:          ${rent.brecha_pe:,.2f} {'(FALTA)' if rent.brecha_pe > 0 else '(EXCEDE)'}",
@@ -103,11 +110,7 @@ def _construir_contexto(rent) -> str:
         "",
         "=== INVERSIÓN Y RECUPERACIÓN ===",
         f"Inversión inicial:     ${rent.inversion_inicial:,.2f}",
-        f"Utilidad acumulada:    ${rent.utilidad_acumulada:,.2f}",
-        f"Inversión recuperada:  {rent.porcentaje_recuperacion_inversion}%",
-        f"Inversión pendiente:   ${rent.inversion_pendiente:,.2f}",
-        f"Payback estimado:      {rent.payback_meses_estimados or 'No calculable'} meses",
-        f"ROI anualizado:        {rent.roi_anualizado or 'N/D'}%",
+        "Recuperación, ROI y payback: no calculables hasta conciliar costos integrales e historial.",
     ]
 
     if rent.es_subsidiada:

@@ -614,7 +614,10 @@ class OperatingFinanceSnapshotService:
         except Exception:
             return {}
 
-        rows = list(SucursalRentabilidad.objects.filter(periodo=period_start))
+        if not SucursalRentabilidad.objects.filter(periodo=period_start).exists():
+            return {}
+        from rentabilidad.services_resultado import registros_del_mes
+        rows = registros_del_mes(period_start)
         if not rows:
             return {}
 
@@ -642,6 +645,8 @@ class OperatingFinanceSnapshotService:
             "costo_materia_prima": costo_materia_prima.quantize(Decimal("0.01")),
             "costo_reventa": costo_reventa.quantize(Decimal("0.01")),
             "gasto_fijo": gasto_fijo.quantize(Decimal("0.01")),
+            "merma": sum((row.merma_registrada for row in rows), Decimal("0")),
+            "central_registrado": rows[0].central_registrado,
         }
 
     def _allocate_amounts(
@@ -860,7 +865,10 @@ class OperatingFinanceSnapshotService:
         costo_fabricacion_total = (
             costo_materia_prima_total + mano_obra_prod_total + indirecto_prod_total + empaque_prod_total
         ).quantize(Decimal("0.01"))
-        margen_bruto_total = venta_financiera_total - costo_materia_prima_total - costo_reventa_total
+        merma_registrada = as_decimal(profitability_totals.get("merma", 0))
+        if "central_registrado" in profitability_totals:
+            company_expense_total = as_decimal(profitability_totals["central_registrado"])
+        margen_bruto_total = venta_financiera_total - costo_materia_prima_total - costo_reventa_total - merma_registrada
         contribucion_total = margen_bruto_total - gasto_comercial_total
         utilidad_operativa_total = contribucion_total - company_expense_total
         if not uses_profitability_source:
@@ -886,6 +894,8 @@ class OperatingFinanceSnapshotService:
                     "financial_totals_source": (
                         "RENTABILIDAD_SUCURSAL" if uses_profitability_source else "OPERATING_FINANCE_CALCULATED"
                     ),
+                    "alcance_resultado": "PARCIAL_COSTOS_CENTRALES_SIN_CERTIFICAR" if uses_profitability_source else "OPERATING_FINANCE_CALCULATED",
+                    "merma_registrada": str(merma_registrada),
                     "rentabilidad_rows": int(profitability_totals.get("rows", 0)) if uses_profitability_source else 0,
                     "rentabilidad_ventas_netas": str(profitability_totals.get("ventas_netas", "0")) if uses_profitability_source else "0",
                     "venta_total_calculada": str(venta_total),

@@ -19,14 +19,12 @@ from decimal import Decimal
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
-from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales
+from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo
+from .services_resultado import registros_del_mes
+from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales, selected_sales_facts
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
 from reportes.services_rentabilidad_mensual import (
     aplicar_costos_en_memoria, leer_costos_mensuales, costos_de_sucursal, ETIQUETAS,
-)
-from ventas.services.sales_read_service import (
-    get_point_sales_period_summary,
-    get_point_sales_product_panel_rows,
 )
 
 # Palabras clave que identifican productos de tipo anticipo/pasivo
@@ -93,73 +91,13 @@ def _periodo_bounds(periodo):
     return periodo, date(periodo.year, periodo.month, ultimo_dia)
 
 
-def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
-    if not receta_ids:
-        return {}
-
-    from django.db.models import Case, IntegerField, When
-    from recetas.models import RecetaCostoVersion
-    from reportes.models import RecetaCostoHistoricoMensual
-
-    costos = {}
-    historicos = RecetaCostoHistoricoMensual.objects.filter(
-        receta_id__in=receta_ids,
-        periodo=periodo,
-    )
-    for historico in historicos:
-        costos[historico.receta_id] = Decimal(historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0")
-
-    recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in costos]
-    if recetas_sin_historico:
-        versiones = (
-            RecetaCostoVersion.objects
-            .filter(receta_id__in=recetas_sin_historico, creado_en__date__lte=fin_periodo)
-            .annotate(
-                fuente_prioridad=Case(
-                    When(fuente="POINT_PRODUCTION_REPORT", then=0),
-                    When(fuente="POINT_COST_CAPTURE", then=1),
-                    When(fuente="POINT_COST_CAPTURE_FIX", then=2),
-                    default=3,
-                    output_field=IntegerField(),
-                )
-            )
-            .order_by("receta_id", "fuente_prioridad", "-version_num")
-        )
-        for version in versiones:
-            if version.receta_id not in costos:
-                costos[version.receta_id] = Decimal(version.costo_total or 0)
-    return costos
-
-
-def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
-    if not producto_ids:
-        return {}
-
-    from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
-
-    costos = {}
-    historicos = ProductoReventaCostoHistoricoMensual.objects.filter(
-        producto_point_id__in=producto_ids,
-        periodo=periodo,
-    )
-    for historico in historicos:
-        costos[historico.producto_point_id] = Decimal(historico.costo_promedio or 0)
-
-    productos_sin_historico = [producto_id for producto_id in producto_ids if producto_id not in costos]
-    if productos_sin_historico:
-        vigentes = (
-            ProductoReventaCosto.objects
-            .filter(producto_point_id__in=productos_sin_historico, fecha_vigencia__lte=fin_periodo)
-            .order_by("producto_point_id", "-fecha_vigencia", "-id")
-        )
-        for vigente in vigentes:
-            if vigente.producto_point_id not in costos:
-                costos[vigente.producto_point_id] = Decimal(vigente.costo_unitario or 0)
-    return costos
-
 
 def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
-    rows = get_point_sales_product_panel_rows(start_date=fecha_inicio, end_date=fecha_fin)
+    from pos_bridge.models.sales import PointDailySale
+    rows = PointDailySale.objects.filter(sale_date__range=(fecha_inicio, fecha_fin)).values(
+        "product_id", "product__name", "product__category", "receta_id"
+    ).annotate(venta=Sum("gross_amount") - Sum("tax_amount") - Sum("discount_amount"),
+               cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True))
     receta_ids = [row["receta_id"] for row in rows if row["receta_id"]]
     producto_reventa_ids = [row["product_id"] for row in rows if row["product_id"] and not row["receta_id"]]
     costos_recetas = _costos_recetas_para_periodo(receta_ids, periodo, fecha_fin)
@@ -361,13 +299,7 @@ def dashboard_rentabilidad(request):
     )
 
     # Registros del periodo seleccionado
-    registros = (
-        SucursalRentabilidad.objects
-        .filter(periodo=periodo)
-        .select_related("sucursal")
-        .exclude(sucursal=None)
-        .order_by("-ventas_brutas")
-    )
+    registros = registros_del_mes(periodo, costos_mensuales)
 
     # Enriquecer con colores y datos calculados para el template
     sucursales_data = []
@@ -375,7 +307,6 @@ def dashboard_rentabilidad(request):
         # Recalcular en memoria para que snapshots históricos creados antes de
         # las guardas de integridad no se presenten como rentables si carecen
         # de gastos reales. No modifica la base durante una consulta.
-        aplicar_costos_en_memoria(r, costos_mensuales)
         colores = _colores_estado(r.estado)
         costo_variable_pct = _pct(r.costo_variable_total, r.ventas_netas)
         gasto_fijo_pct = _pct(r.gasto_fijo_total, r.ventas_netas)
@@ -422,18 +353,25 @@ def dashboard_rentabilidad(request):
     # Alertas urgentes (alerta_nivel == 2)
     alertas_urgentes = [r for r in sucursales_data if r["obj"].alerta_nivel == 2]
 
-    ventas_fuente = get_point_sales_period_summary(start_date=fecha_inicio, end_date=fecha_fin)
+    resultado = costos_mensuales["resultado"]
+    ventas_fuente = dict(resultado["fuente"])
+    fiscal = selected_sales_facts(start_date=fecha_inicio, end_date=fecha_fin).values(
+        "sucursal_id", "sucursal__nombre").annotate(total=Sum("venta_neta"))
+    ventas_fuente["by_branch"] = [{"branch_id": row["sucursal_id"], "name": row["sucursal__nombre"] or "Sin asignar", "total": row["total"] or Decimal("0")} for row in fiscal]
+    ventas_fuente["total"] = sum((r["total"] for r in ventas_fuente["by_branch"]), Decimal("0"))
+    totales["central_registrado"] = resultado["central_registrado"]
+    totales["resultado_empresa_parcial"] = totales["utilidad_operativa"] - resultado["central_registrado"]
     fuente_estado = {
         "max_sale_date": ventas_fuente["max_sale_date"],
         "rows": ventas_fuente["rows"],
         "total": ventas_fuente["total"],
-        "rentabilidad_total": totales["ventas_brutas"],
-        "diferencia": ventas_fuente["total"] - totales["ventas_brutas"],
-        "max_calculado_en": registros.aggregate(max_calc=Max("calculado_en"))["max_calc"],
+        "rentabilidad_total": totales["ventas_netas"],
+        "diferencia": ventas_fuente["total"] - totales["ventas_netas"],
+        "max_calculado_en": max((r.calculado_en for r in registros if r.calculado_en), default=None),
     }
     conciliacion = reconcile_branch_sales(
         source_rows=ventas_fuente["by_branch"],
-        snapshot_rows=[{"branch_id": item["obj"].sucursal_id, "name": item["obj"].sucursal.nombre, "total": item["obj"].ventas_brutas} for item in sucursales_data],
+        snapshot_rows=[{"branch_id": item["obj"].sucursal_id, "name": item["obj"].sucursal.nombre, "total": item["obj"].ventas_netas} for item in sucursales_data if item["obj"].en_perimetro_fuente],
     )
     fuente_estado["cuadra"] = conciliacion["reconciled"]
     fuente_estado["discrepancias"] = conciliacion["discrepancies"]
@@ -441,7 +379,7 @@ def dashboard_rentabilidad(request):
     sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
     totales["margen_disponible"] = bool(
         fuente_estado["cuadra"] and sales_confidence["margin"] is not None
-        and all(item["obj"].costo_variable_total > 0 or item["obj"].ventas_netas <= 0 for item in sucursales_data)
+        and all(not item["obj"].costos_pendientes for item in sucursales_data)
     )
     if not totales["margen_disponible"]:
         totales["pct_margen_bruto"] = None
@@ -488,6 +426,7 @@ def dashboard_rentabilidad(request):
         "periodos_disponibles": periodos_disponibles,
         "sucursales_data":      sucursales_data,
         "totales":              totales,
+        "costos_centrales": resultado["centrales"],
         "conteo_estados":       conteo_estados,
         "alertas_urgentes":     alertas_urgentes,
         "fuente_estado":        fuente_estado,

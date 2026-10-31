@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 from io import StringIO
 import json
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -80,6 +81,14 @@ class ReporteMensualConsolidadoTests(TestCase):
             monto_calculado=Decimal("100"), estado=HoraExtra.ESTADO_PAGADO,
         )
 
+    def setUp(self):
+        # Este contrato prueba agregación/exportación sobre la proyección compartida.
+        # La lectura real de fuentes se verifica en tests_resultado_integral.
+        reader = patch("rentabilidad.services_resultado.registros_del_mes", side_effect=lambda periodo: list(
+            SucursalRentabilidad.objects.filter(periodo=periodo).select_related("sucursal")))
+        reader.start()
+        self.addCleanup(reader.stop)
+
     def _fila(self, reporte, anio, mes):
         for fila in reporte["filas"]:
             if fila["periodo"] == date(anio, mes, 1):
@@ -95,15 +104,15 @@ class ReporteMensualConsolidadoTests(TestCase):
         self.assertEqual(fila["nomina"], Decimal("30000.00"))
         # Solo autorizado + pagado: 500 + 300 + 100
         self.assertEqual(fila["horas_extra"], Decimal("900.00"))
-        self.assertEqual(fila["nomina_total"], Decimal("30900.00"))
-        self.assertEqual(fila["nomina_pct_ventas"], Decimal("20.88"))
+        self.assertEqual(fila["nomina_total"], Decimal("30000.00"))
+        self.assertEqual(fila["nomina_pct_ventas"], Decimal("20.27"))
         self.assertEqual(fila["utilidad_neta"], Decimal("46500.00"))
 
     def test_variacion_yoy_contra_mismo_mes_anio_anterior(self):
         reporte = build_reporte_mensual_consolidado(hasta=date(2026, 6, 1), meses=12)
         fila = self._fila(reporte, 2026, 6)
         self.assertEqual(fila["yoy"]["ingresos"], Decimal("85.00"))
-        self.assertEqual(fila["yoy"]["nomina_total"], Decimal("106.00"))
+        self.assertEqual(fila["yoy"]["nomina_total"], Decimal("100.00"))
         self.assertEqual(fila["yoy"]["utilidad_neta"], Decimal("86.00"))
 
         # Mes sin base del año anterior → YoY None
@@ -122,7 +131,7 @@ class ReporteMensualConsolidadoTests(TestCase):
         fila = self._fila(reporte, 2026, 6)
         por_nombre = {s["sucursal"]: s for s in fila["sucursales"]}
         self.assertEqual(por_nombre["Centro"]["horas_extra"], Decimal("800.00"))
-        self.assertEqual(por_nombre["Centro"]["nomina_total"], Decimal("20800.00"))
+        self.assertEqual(por_nombre["Centro"]["nomina_total"], Decimal("20000.00"))
         self.assertEqual(por_nombre["Centro"]["utilidad_neta"], Decimal("31500.00"))
         self.assertEqual(por_nombre["Sin sucursal asignada"]["horas_extra"], Decimal("100.00"))
 
@@ -175,6 +184,12 @@ class ReporteMensualViewTests(TestCase):
         )
         User = get_user_model()
         cls.dg = User.objects.create_superuser("dg-test", "dg@test.local", "clave-segura-123")
+
+    def setUp(self):
+        reader = patch("rentabilidad.services_resultado.registros_del_mes", side_effect=lambda periodo: list(
+            SucursalRentabilidad.objects.filter(periodo=periodo).select_related("sucursal")))
+        reader.start()
+        self.addCleanup(reader.stop)
 
     def test_requiere_login(self):
         response = self.client.get(reverse("rentabilidad_reporte_mensual"))

@@ -85,6 +85,11 @@ class ConstruirSnapshotTests(TestCase):
             gastos_admin_prorrateados=Decimal("0"),
             otros_gastos_fijos=Decimal("0"),
         )
+        from pos_bridge.models import PointBranch, PointProduct, PointDailySale
+        branch = PointBranch.objects.create(external_id="CONSEJO", name="Sucursal Uno", erp_branch=sucursal)
+        product = PointProduct.objects.create(external_id="CONSEJO", sku="CONSEJO", name="Pastel Test")
+        PointDailySale.objects.create(branch=branch, product=product, sale_date=date(2026, 5, 1),
+                                     quantity=1, gross_amount=100000)
         receta = Receta.objects.create(
             nombre="Pastel Test",
             codigo_point="CONSEJO1",

@@ -47,14 +47,11 @@ def _texto_dashboard(payload: dict) -> str:
 def _texto_sucursales() -> str:
     """Snapshot más reciente de cada sucursal, reutilizando el mismo bloque de
     texto que ya usa el agente de rentabilidad por sucursal."""
-    vistos: set[int] = set()
-    bloques = []
-    for fila in SucursalRentabilidad.objects.select_related("sucursal").order_by("-periodo"):
-        if fila.sucursal_id in vistos:
-            continue
-        vistos.add(fila.sucursal_id)
-        bloques.append(_construir_contexto(fila))
-    return "\n\n---\n\n".join(bloques)
+    from rentabilidad.services_resultado import registros_del_mes
+    periodo = SucursalRentabilidad.objects.order_by("-periodo").values_list("periodo", flat=True).first()
+    if not periodo:
+        return "Sin resultado mensual disponible."
+    return "\n\n---\n\n".join(_construir_contexto(fila) for fila in registros_del_mes(periodo))
 
 
 def _texto_productos(months_window: int) -> str:

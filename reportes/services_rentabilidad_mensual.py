@@ -23,7 +23,7 @@ CAMPO_FAMILIA = {
 REQUERIDAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "nomina", "cargas_patronales"}
 # SIPARE ya alimenta cargas patronales; su ausencia sí reduce la cobertura.
 SIN_FUENTE_ACTIVA = set()
-AREAS_EXCLUIDAS = {"produccion", "nomina", "resultados", "logistica"}
+AREAS_EXCLUIDAS = {"produccion", "nomina", "resultados", "logistica", "administracion"}
 
 
 def _campo(fila):
@@ -34,9 +34,11 @@ def _campo(fila):
 
 def leer_costos_mensuales(periodo):
     """Sin efectos laterales; las dos fuentes se consultan una vez por mes."""
+    from rentabilidad.services_resultado import leer_resultado_mensual
     gastos, personal = leer_gastos_mensuales(periodo), leer_personal_mensual(periodo)
     return {
         "periodo": periodo.replace(day=1),
+        "resultado": leer_resultado_mensual(periodo),
         "filas": gastos["filas"] + personal["filas"],
         "pendientes": gastos["pendientes"] + personal["pendientes"],
     }
@@ -100,21 +102,21 @@ def costos_de_sucursal(resultado, sucursal_id):
 def aplicar_costos_en_memoria(rentabilidad, resultado):
     """Único adaptador del snapshot. Nunca guarda; el caller decide la escritura.
 
-    Una familia completamente ausente conserva el valor previo y se etiqueta
-    como no actualizado. Los importes parciales actuales se muestran como tales.
+    Los importes previos sin fuente se conservan en BD, fuera de la lectura
+    actual. Un componente conocido sustituye el total anterior; no lo maximiza.
     """
     resumen = costos_de_sucursal(resultado, rentabilidad.sucursal_id)
     conservados = []
-    campos_incompletos = {_campo(p) for p in resumen["pendientes"]}
     for campo in set(CAMPO_FAMILIA.values()) | {"gastos_admin_prorrateados"}:
-        if getattr(rentabilidad, campo) and campo in campos_incompletos:
-            conservados.append(campo)
-            # Un componente pendiente no debe ocultar gastos nuevos ya comprobados.
-            setattr(rentabilidad, campo, max(getattr(rentabilidad, campo), resumen["campos"].get(campo, ZERO)))
-        elif campo in resumen["campos"]:
+        if campo in resumen["campos"]:
             setattr(rentabilidad, campo, resumen["campos"][campo])
         elif getattr(rentabilidad, campo):
             conservados.append(campo)
+            if "resultado" in resultado:
+                setattr(rentabilidad, campo, ZERO)
+    if "resultado" in resultado:
+        from rentabilidad.services_resultado import aplicar_resultado
+        aplicar_resultado(rentabilidad, resultado["resultado"])
     resumen["campos_previos_conservados"] = conservados
     resumen["completo"] = resumen["completo"] and not conservados
     rentabilidad.gastos_mensuales = resumen

@@ -1,24 +1,4 @@
-"""
-Reporte mensual consolidado (últimos N meses) para las sucursales.
-
-Cruza, mes a mes:
-1. Ingresos totales (ventas netas del P&L canónico: SucursalRentabilidad).
-2. Nómina del P&L (línea nomina_directa) con HoraExtra (RRHH) como línea aparte.
-3. Nómina total (nómina P&L + horas extra) como % de ventas.
-4. Utilidad neta del P&L de 6 líneas de gasto (utilidad operativa:
-   margen bruto − renta − nómina − servicios − mantenimiento − admin − otros).
-5. Variación % contra el mismo mes del año anterior (ingresos, nómina, utilidad).
-
-Fuentes:
-- SucursalRentabilidad (rentabilidad histórica / P&L canónico por sucursal-mes).
-- rrhh.HoraExtra con estado autorizado o pagado (costo real comprometido);
-  la sucursal se resuelve por Empleado.sucursal_ref (FK canónico).
-
-Nota: nomina_directa proviene de GastoOperativoMensual (categoría NOMINA);
-las horas extra de RRHH se reportan como línea separada, por lo que si el
-importe de nómina importado ya incluyera horas extra, la línea "nómina total"
-debe leerse como techo, no como suma contable auditada.
-"""
+"""Reporte de resultados parciales por sucursal; horas extra informativas sin doble suma."""
 
 from __future__ import annotations
 
@@ -71,23 +51,22 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     """{periodo: {sucursal_id: {nombre, ingresos, nomina, utilidad}}}"""
     from rentabilidad.models_rentabilidad import SucursalRentabilidad
 
-    qs = (
-        SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta)
-        .exclude(sucursal=None)
-        .select_related("sucursal")
-    )
-    if sucursal_id:
-        qs = qs.filter(sucursal_id=sucursal_id)
-
-    data: dict[date, dict] = {}
-    for row in qs:
-        mes = data.setdefault(row.periodo, {})
-        mes[row.sucursal_id] = {
-            "nombre": row.sucursal.nombre,
-            "ingresos": _quantize(row.ventas_netas),
-            "nomina": _quantize(row.nomina_directa),
-            "utilidad": _quantize(row.utilidad_operativa),
-        }
+    from .services_resultado import registros_del_mes
+    from pos_bridge.models.sales import PointDailySale
+    periodos = set(SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta).order_by().values_list("periodo", flat=True))
+    fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
+    periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
+    data = {}
+    for periodo in periodos:
+        mes = data.setdefault(periodo, {})
+        for row in registros_del_mes(periodo):
+            if sucursal_id and row.sucursal_id != sucursal_id:
+                continue
+            mes[row.sucursal_id] = {
+                "nombre": row.sucursal.nombre, "ingresos": _quantize(row.ventas_netas),
+                "nomina": _quantize(row.nomina_directa), "utilidad": _quantize(row.utilidad_operativa),
+                "central_registrado": getattr(row, "central_registrado", None),
+            }
     return data
 
 
@@ -123,8 +102,9 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
     nomina = sum((s["nomina"] for s in rent_mes.values()), Decimal("0"))
     utilidad = sum((s["utilidad"] for s in rent_mes.values()), Decimal("0"))
     horas_extra = sum(he_mes.values(), Decimal("0"))
-    nomina_total = nomina + horas_extra
+    nomina_total = nomina
 
+    central = next((s.get("central_registrado") for s in rent_mes.values()), None)
     sucursales = []
     claves = set(rent_mes) | set(he_mes)
     for clave in claves:
@@ -135,7 +115,7 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
             "utilidad": Decimal("0"),
         }
         he = he_mes.get(clave, Decimal("0"))
-        nomina_total_suc = datos["nomina"] + he
+        nomina_total_suc = datos["nomina"]
         sucursales.append(
             {
                 "sucursal_id": clave,
@@ -145,7 +125,8 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
                 "horas_extra": _quantize(he),
                 "nomina_total": _quantize(nomina_total_suc),
                 "nomina_pct_ventas": _pct(nomina_total_suc, datos["ingresos"]),
-                "utilidad_neta": datos["utilidad"],
+                "utilidad_neta": datos["utilidad"],  # Alias legado; alcance explícito en exportación.
+                "alcance": "RESULTADO_PARCIAL_SUCURSAL",
             }
         )
     sucursales.sort(key=lambda s: (s["sucursal_id"] is None, s["sucursal"]))
@@ -158,6 +139,9 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
         "nomina_total": _quantize(nomina_total),
         "nomina_pct_ventas": _pct(nomina_total, ingresos),
         "utilidad_neta": _quantize(utilidad),
+        "alcance": "RESULTADO_PARCIAL_SUCURSAL",
+        "central_registrado": central,
+        "resultado_empresa_parcial": utilidad - central if central is not None else None,
         "sucursales": sucursales,
     }
 
@@ -216,6 +200,9 @@ def build_reporte_mensual_consolidado(
         periodo = _month_add(desde, offset)
         fila = filas_por_periodo.get(periodo) or _fila_mes(periodo, {}, {})
         anterior = filas_por_periodo.get(_month_add(periodo, -12))
+        if sucursal_id:
+            fila["central_registrado"] = None
+            fila["resultado_empresa_parcial"] = None
         fila["yoy"] = {
             "ingresos": _yoy(fila["ingresos"], anterior["ingresos"] if anterior else None),
             "nomina_total": _yoy(fila["nomina_total"], anterior["nomina_total"] if anterior else None),
@@ -250,6 +237,10 @@ def reporte_a_json(reporte: dict) -> dict:
         filas.append(
             {
                 "periodo": fila["periodo"].isoformat(),
+                "alcance": fila["alcance"],
+                "central_registrado": _num(fila["central_registrado"]),
+                "resultado_empresa_parcial": _num(fila["resultado_empresa_parcial"]),
+                "utilidad_neta_confirmada": None,
                 "ingresos": _num(fila["ingresos"]),
                 "nomina": _num(fila["nomina"]),
                 "horas_extra": _num(fila["horas_extra"]),
@@ -260,6 +251,8 @@ def reporte_a_json(reporte: dict) -> dict:
                 "sucursales": [
                     {
                         "sucursal_id": s["sucursal_id"],
+                        "alcance": s["alcance"],
+                        "utilidad_neta_confirmada": None,
                         "sucursal": s["sucursal"],
                         "ingresos": _num(s["ingresos"]),
                         "nomina": _num(s["nomina"]),
@@ -279,4 +272,6 @@ def reporte_a_json(reporte: dict) -> dict:
         "sucursal_id": reporte["sucursal_id"],
         "filas": filas,
         "totales": {k: _num(v) for k, v in reporte["totales"].items()},
+        "alcance": "RESULTADO_PARCIAL_SUCURSAL",
+        "nota": "utilidad_neta es un alias legado del resultado parcial antes de costos centrales. Las horas extra son informativas; no se suman otra vez a nómina.",
     }

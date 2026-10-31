@@ -206,6 +206,8 @@ class SucursalRentabilidad(models.Model):
         Meses estimados para recuperar inversión completa
         basado en la utilidad promedio de los últimos 3 meses.
         """
+        if getattr(self, "resultado_integral_pendiente", False):
+            return None
         if self.inversion_pendiente == 0:
             return 0
         ultimos = SucursalRentabilidad.objects.filter(
@@ -222,6 +224,8 @@ class SucursalRentabilidad(models.Model):
     @property
     def roi_anualizado(self):
         """ROI anualizado = (Utilidad anual estimada / Inversión) × 100"""
+        if getattr(self, "resultado_integral_pendiente", False):
+            return None
         if self.inversion_inicial == 0:
             return None
         ultimos = SucursalRentabilidad.objects.filter(
@@ -304,6 +308,10 @@ class SucursalRentabilidad(models.Model):
         Clasificación por reglas deterministas.
         El agente IA complementa con contexto cualitativo.
         """
+        if getattr(self, "resultado_integral_pendiente", False) or self.fuente_gastos_incompleta:
+            self.estado = EstadoRentabilidad.SIN_DATOS
+            self.alerta_nivel = 1
+            return self.estado
         pct = float(self.porcentaje_avance_pe)
         util = float(self.utilidad_operativa)
         roi  = float(self.roi_anualizado or 0)
