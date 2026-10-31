@@ -46,6 +46,20 @@ class SalesConfidenceTests(TestCase):
         self.assertEqual(result["missing_cost_sales"], Decimal("200"))
         self.assertIsNone(result["margin"])
 
+    def test_current_month_snapshot_replaces_stale_materialized_cost_without_rewriting_sales(self):
+        from recetas.models import Receta
+        from reportes.models import RecetaCostoHistoricoMensual
+        recipe = Receta.objects.create(nombre="Rebanada corregida", hash_contenido="confidence_slice")
+        original = self.fact(receta=recipe, costo_estimado=87,
+            metadata={"costing": {"source": "producto_costo_operativo_mensual", "period": "2025-07-01", "unit_cost": "87"}})
+        RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2025,9,1),
+            costo_total=23, coverage_pct=100)
+        result = self.confidence()
+        self.assertEqual(result["margin"], Decimal("77"))
+        self.assertEqual(result["prior_cost_sales"], 0)
+        original.refresh_from_db()
+        self.assertEqual(original.costo_estimado, 87)
+
     def test_preopening_identity_is_pending_without_reassigning_rows(self):
         self.branch.fecha_apertura = date(2026, 7, 14)
         self.branch.save()

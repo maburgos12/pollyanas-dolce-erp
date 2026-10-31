@@ -152,8 +152,10 @@ def build_sales_confidence(*, start_date, end_date):
         )
         cost = group["cost"] or ZERO
         evidence = group["cost_evidence"]
-        if group.get("recipe_identity_corrected") or (evidence and evidence.get("authorized")):
-            backed = False  # La decisión explícita reemplaza la clasificación materializada antigua.
+        monthly_evidence = (evidence and evidence.get("through") and evidence["through"] <= end_date
+                            and evidence["cost"] > ZERO and (not period or evidence["period"] >= period))
+        if monthly_evidence or group.get("recipe_identity_corrected") or (evidence and evidence.get("authorized")):
+            backed = False  # El histórico vigente o la decisión DG reemplazan el costo materializado antiguo.
         if not backed:
             if evidence and (evidence["cost"] > ZERO or evidence.get("authorized")) and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
                 backed = True
