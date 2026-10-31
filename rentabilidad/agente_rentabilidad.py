@@ -152,23 +152,15 @@ def analizar_sucursal(rent, guardar=True) -> dict:
         )
         raw = response.choices[0].message.content.strip()
         resultado = json.loads(raw)
+        if not isinstance(resultado, dict) or not isinstance(resultado.get("diagnostico"), str) or not resultado["diagnostico"].strip():
+            raise ValueError("El proveedor IA no devolvió un diagnóstico válido.")
 
     except json.JSONDecodeError as e:
         logger.error(f"[AgentRentabilidad] JSON inválido para {rent}: {e}")
-        resultado = {
-            "diagnostico": "No se pudo generar diagnóstico automático. Revisa manualmente.",
-            "recomendaciones": [],
-            "alerta_nivel": 1,
-            "resumen_ejecutivo": "Diagnóstico no disponible.",
-        }
+        raise ValueError("El proveedor IA no devolvió un diagnóstico válido.") from e
     except Exception as e:
         logger.exception(f"[AgentRentabilidad] Error para {rent}: {e}")
-        resultado = {
-            "diagnostico": f"Error del agente: {str(e)}",
-            "recomendaciones": [],
-            "alerta_nivel": 1,
-            "resumen_ejecutivo": "Error en diagnóstico.",
-        }
+        raise
 
     if guardar:
         rent.diagnostico_ia     = resultado.get("diagnostico", "")

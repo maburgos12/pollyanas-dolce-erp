@@ -11,6 +11,32 @@ from reportes.models import ProductoReventaCosto
 
 
 class PointInventoryCostCaptureServiceTests(TestCase):
+    def test_insumo_no_se_asocia_por_id_interno_de_otro_catalogo(self):
+        PointProduct.objects.create(external_id="267", sku="0227", name="Extra 10")
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(branch_name="ALMACEN", category_name="Limpieza",
+            point_internal_id="267", point_code="FPF03800", point_name="TOALLA SANITAS",
+            point_category="Limpieza", quantity=38, unit="PZA", unit_cost=45,
+            total_cost=1710, last_movement="2026-09-28", raw_row=[])
+        cost, created, status = service.persist_resale_product_cost_row(row)
+        self.assertIsNone(cost)
+        self.assertFalse(created)
+        self.assertEqual(status, "NO_MATCH_POINT_PRODUCT")
+        self.assertFalse(ProductoReventaCosto.objects.exists())
+
+    def test_codigo_reutilizado_exige_nombre_y_no_elige_primero_de_duplicados(self):
+        PointProduct.objects.create(external_id="1", sku="ABC", name="Otro producto")
+        service = PointInventoryCostCaptureService()
+        row = PointInventoryCostRow(branch_name="ALMACEN", category_name="Productos",
+            point_internal_id="2", point_code="ABC", point_name="Vela",
+            point_category="Velas", quantity=1, unit="PZA", unit_cost=5,
+            total_cost=5, last_movement="2026-09-01", raw_row=[], kind="product")
+        self.assertIsNone(service._resolve_point_product(row))
+        p = PointProduct.objects.create(external_id="2", sku="ABC", name="Vela")
+        self.assertEqual(service._resolve_point_product(row), p)
+        PointProduct.objects.create(external_id="3", sku="ABC", name="Vela")
+        self.assertIsNone(service._resolve_point_product(row))
+
     def test_company_point_units_are_recognized_by_cost_validator(self):
         self.assertEqual(point_unit_code("GLI"), "gli")
         self.assertEqual(point_unit_type("GLI"), "VOLUME")

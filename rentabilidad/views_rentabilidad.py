@@ -19,7 +19,7 @@ from decimal import Decimal
 import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
-from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo
+from .services_costos import _costos_recetas_para_periodo, _costos_reventa_para_periodo, asignar_recetas_identificadas
 from .services_resultado import registros_del_mes
 from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales, selected_sales_facts
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
@@ -94,10 +94,11 @@ def _periodo_bounds(periodo):
 
 def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
     from pos_bridge.models.sales import PointDailySale
-    rows = PointDailySale.objects.filter(sale_date__range=(fecha_inicio, fecha_fin)).values(
-        "product_id", "product__name", "product__category", "receta_id"
+    rows = list(PointDailySale.objects.filter(sale_date__range=(fecha_inicio, fecha_fin)).values(
+        "product_id", "product__name", "product__category", "product__sku", "receta_id"
     ).annotate(venta=Sum("gross_amount") - Sum("tax_amount") - Sum("discount_amount"),
-               cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True))
+               cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True)))
+    asignar_recetas_identificadas(rows)
     receta_ids = [row["receta_id"] for row in rows if row["receta_id"]]
     producto_reventa_ids = [row["product_id"] for row in rows if row["product_id"] and not row["receta_id"]]
     costos_recetas = _costos_recetas_para_periodo(receta_ids, periodo, fecha_fin)
