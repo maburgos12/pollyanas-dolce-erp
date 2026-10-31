@@ -1,4 +1,6 @@
 """Read-only confidence contract. Never repair, relabel or merge source records."""
+from calendar import monthrange
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
@@ -12,6 +14,30 @@ from django.db.models.expressions import RawSQL
 
 ZERO = Decimal("0")
 Q2 = Decimal("0.01")
+
+
+def _resale_evidence(groups, end_date):
+    from pos_bridge.models import PointProduct
+    from recetas.utils.normalizacion import normalizar_nombre
+    from rentabilidad.services_costos import _fuentes_reventa_para_periodo
+
+    ids = {g["point_product_id"] for g in groups if g["point_product_id"]}
+    keys = {g["producto_clave"] for g in groups if g["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE and not g["point_product_id"]}
+    identities = defaultdict(set)
+    for product in PointProduct.objects.filter(Q(pk__in=ids) | Q(external_id__in=keys) | Q(external_id__in=[f"official:{k}" for k in keys])):
+        # La clave autoritativa es externa: nunca interpretarla como PK ni resolver por nombre solo.
+        identities[(product.external_id.removeprefix("official:"), normalizar_nombre(product.name))].add(product.pk)
+    by_month = defaultdict(set)
+    for group in groups:
+        product_id = group["point_product_id"]
+        if not product_id and group["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE:
+            candidates = identities.get((group["producto_clave"], normalizar_nombre(group["producto_nombre"])), set())
+            if len(candidates) == 1:
+                product_id = next(iter(candidates))
+        group["resale_product_id"] = product_id
+        if product_id:
+            by_month[group["month"]].add(product_id)
+    return {month: _fuentes_reventa_para_periodo(product_ids, month, min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))) for month, product_ids in by_month.items()}
 
 
 def _source_priority():
@@ -87,7 +113,7 @@ def build_sales_confidence(*, start_date, end_date):
     identity_pending = facts.filter(
         Q(sucursal__isnull=True) | Q(fecha__lt=F("sucursal__fecha_apertura")),
     ).count()
-    groups = facts.annotate(
+    groups = list(facts.annotate(
         month=TruncMonth("fecha"),
         backed_amount=Case(
             When(costo_estimado__gt=0, then=1), default=0, output_field=IntegerField(),
@@ -95,10 +121,13 @@ def build_sales_confidence(*, start_date, end_date):
     ).values(
         "month", "source_kind", "metadata__costing__source",
         "metadata__costing__period", "backed_amount",
+        "point_product_id", "producto_clave", "producto_nombre",
     ).annotate(
         rows=Count("id"), positive_sales=Sum("venta_neta", filter=Q(venta_neta__gt=0)),
         cost=Sum("costo_estimado"),
-    )
+        quantity=Sum("cantidad"),
+    ))
+    resale = _resale_evidence(groups, end_date)
     missing_sales = prior_sales = covered_sales = positive_sales = costs = ZERO
     missing_rows = 0
     sources = set()
@@ -115,12 +144,19 @@ def build_sales_confidence(*, start_date, end_date):
             group["metadata__costing__source"] == "producto_costo_operativo_mensual"
             and period and period <= group["month"] and group["backed_amount"]
         )
+        cost = group["cost"] or ZERO
+        if not backed:
+            evidence = resale.get(group["month"], {}).get(group["resale_product_id"])
+            if evidence and evidence["cost"] > ZERO and group["quantity"] > ZERO:
+                backed = True
+                period = evidence["period"]
+                cost = (group["quantity"] * evidence["cost"]).quantize(Q2)
         if not backed:
             missing_sales += sales
             missing_rows += group["rows"]
             continue
         covered_sales += sales
-        costs += group["cost"] or ZERO
+        costs += cost
         periods.add(period)
         if period < group["month"]:
             prior_sales += sales

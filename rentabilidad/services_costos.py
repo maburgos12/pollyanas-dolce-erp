@@ -41,6 +41,11 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
 
 
 def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
+    return {pk: fuente["cost"] for pk, fuente in _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo).items()}
+
+
+def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
+    """Conserva la vigencia junto al costo para auditar arrastres entre meses."""
     if not producto_ids:
         return {}
 
@@ -58,7 +63,10 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         ids = (historico.metadata or {}).get("source_rows", [])
         if ids and any(pk not in fuentes or fuentes[pk].producto_point_id != historico.producto_point_id or fuentes[pk].fecha_vigencia > fin_periodo or not resale_cost_matches_product(fuentes[pk]) for pk in ids):
             continue
-        costos[historico.producto_point_id] = Decimal(historico.costo_promedio or 0)
+        fecha = max((fuentes[pk].fecha_vigencia for pk in ids), default=historico.source_date or periodo)
+        if fecha > fin_periodo:
+            continue
+        costos[historico.producto_point_id] = {"cost": Decimal(historico.costo_promedio or 0), "period": fecha.replace(day=1)}
 
     productos_sin_historico = [producto_id for producto_id in producto_ids if producto_id not in costos]
     if productos_sin_historico:
@@ -70,7 +78,7 @@ def _costos_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         )
         for vigente in vigentes:
             if vigente.producto_point_id not in costos and resale_cost_matches_product(vigente):
-                costos[vigente.producto_point_id] = Decimal(vigente.costo_unitario or 0)
+                costos[vigente.producto_point_id] = {"cost": Decimal(vigente.costo_unitario or 0), "period": vigente.fecha_vigencia.replace(day=1)}
     return costos
 
 

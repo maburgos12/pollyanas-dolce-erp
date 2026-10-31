@@ -62,6 +62,77 @@ class SalesConfidenceTests(TestCase):
         self.assertEqual(result["days_observed"], 0)
         self.assertIsNone(result["net_sales"])
 
+    def resale(self, external_id="169", name="Pirotecnia", cost=20, day=date(2025, 9, 1)):
+        from pos_bridge.models import PointProduct
+        from reportes.models import ProductoReventaCosto
+        product = PointProduct.objects.create(external_id=external_id, name=name)
+        source = ProductoReventaCosto.objects.create(producto_point=product, costo_unitario=cost,
+            fecha_vigencia=day, source_hash=external_id, metadata={"point_name": name})
+        return product, source
+
+    def test_resale_without_recipe_is_backed_without_rewriting_sales(self):
+        product, source = self.resale()
+        fact = self.fact(point_product=product, metadata={"costing": {"source": "missing_recipe"}})
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(cantidad=2)
+        result = self.confidence()
+        self.assertEqual(result["margin"], Decimal("60"))
+        self.assertEqual(result["cost_coverage_pct"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025, 9, 1)])
+        fact.refresh_from_db()
+        self.assertEqual(fact.costo_estimado, 0)
+        self.assertEqual(fact.metadata["costing"]["source"], "missing_recipe")
+        self.assertIsNone(fact.receta_id)
+
+    def test_external_identity_requires_unique_code_and_name_not_internal_pk_or_sku(self):
+        from pos_bridge.models import PointProduct
+        product, source = self.resale()
+        fact = self.fact(key="169", producto_nombre="PIROTECNIA")
+        self.assertEqual(self.confidence()["margin"], 80)
+        PointProduct.objects.create(external_id="official:169", name="Pirotecnia")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(producto_clave=str(product.pk), producto_nombre="Otro artículo")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=fact.pk).update(producto_clave="0169", producto_nombre="Pirotecnia")
+        self.assertIsNone(self.confidence()["margin"])
+
+    def test_rejected_or_future_source_uses_valid_prior_cost_and_keeps_its_date(self):
+        from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
+        from reportes.sales_confidence import build_sales_confidence
+        product, old = self.resale(day=date(2025, 8, 1), cost=10)
+        late = ProductoReventaCosto.objects.create(producto_point=product, costo_unitario=20,
+            fecha_vigencia=date(2025, 9, 28), source_hash="late", metadata={"point_name": product.name})
+        hist = ProductoReventaCostoHistoricoMensual.objects.create(producto_point=product, periodo=date(2025, 9, 1),
+            costo_promedio=20, metadata={"source_rows": [late.pk]})
+        self.fact(point_product=product)
+        result = build_sales_confidence(start_date=date(2025, 9, 1), end_date=date(2025, 9, 15))
+        self.assertEqual(result["margin"], 90)
+        self.assertEqual(result["prior_cost_sales"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025, 8, 1)])
+        self.assertEqual(self.confidence()["margin"], 80)
+        late.metadata = {"point_name": "Rollos térmicos"}
+        late.save()
+        self.assertEqual(self.confidence()["margin"], 90)
+        hist.refresh_from_db()
+        self.assertEqual(hist.costo_promedio, 20)
+        old.delete()
+        late.metadata = {"point_name": product.name}
+        late.save()
+        early = build_sales_confidence(start_date=date(2025, 9, 1), end_date=date(2025, 9, 15))
+        self.assertIsNone(early["margin"])
+        self.assertEqual(early["missing_cost_sales"], 100)
+
+    def test_gift_without_cost_and_positive_sale_without_quantity_remain_pending(self):
+        product, source = self.resale()
+        self.fact(point_product=product)
+        gift = self.fact(key="gift", producto_nombre="Regalo sin costo")
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(venta_neta=0, venta_total=0)
+        result = self.confidence()
+        self.assertEqual(result["cost_coverage_pct"], 100)
+        self.assertEqual(result["missing_cost_rows"], 1)
+        self.assertIsNone(result["margin"])
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(point_product=product, cantidad=0, venta_neta=100)
+        self.assertEqual(self.confidence()["missing_cost_rows"], 1)
+
 
     def test_grouped_selection_matches_old_precedence_for_days_branches_nulls_and_ties(self):
         other = Sucursal.objects.create(codigo="OTHER-TEST", nombre="Otra")
