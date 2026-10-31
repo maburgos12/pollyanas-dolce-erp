@@ -3,10 +3,15 @@ from decimal import Decimal
 
 
 def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
+    return {pk: fuente["cost"] for pk, fuente in _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo).items()}
+
+
+def _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo):
     if not receta_ids:
         return {}
 
     from django.db.models import Case, IntegerField, When
+    from django.utils.timezone import localdate
     from recetas.models import RecetaCostoVersion
     from reportes.models import RecetaCostoHistoricoMensual
 
@@ -16,7 +21,7 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         periodo=periodo,
     )
     for historico in historicos:
-        costos[historico.receta_id] = Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0")
+        costos[historico.receta_id] = {"cost": Decimal(historico.costo_por_unidad_rendimiento or historico.costo_total or 0) if historico.coverage_pct >= 100 else Decimal("0"), "period": historico.periodo}
 
     recetas_sin_historico = [receta_id for receta_id in receta_ids if receta_id not in costos]
     if recetas_sin_historico:
@@ -36,7 +41,7 @@ def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
         )
         for version in versiones:
             if version.receta_id not in costos:
-                costos[version.receta_id] = (Decimal(version.costo_total or 0) - Decimal(version.costo_mo or 0) - Decimal(version.costo_indirecto or 0)) / Decimal(version.rendimiento_cantidad or 1)
+                costos[version.receta_id] = {"cost": (Decimal(version.costo_total or 0) - Decimal(version.costo_mo or 0) - Decimal(version.costo_indirecto or 0)) / Decimal(version.rendimiento_cantidad or 1), "period": localdate(version.creado_en).replace(day=1)}
     return costos
 
 

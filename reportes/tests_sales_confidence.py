@@ -70,6 +70,48 @@ class SalesConfidenceTests(TestCase):
             fecha_vigencia=day, source_hash=external_id, metadata={"point_name": name})
         return product, source
 
+    def test_recipe_and_free_addon_use_existing_costs_without_rewriting_identities(self):
+        from recetas.models import Receta, RecetaAgrupacionAddon
+        from pos_bridge.models import PointProduct
+        from reportes.models import RecetaCostoHistoricoMensual
+        base = Receta.objects.create(nombre="Pastel", nombre_normalizado="pastel", hash_contenido="confidence-base")
+        addon = Receta.objects.create(nombre="Topping", nombre_normalizado="topping", hash_contenido="confidence-addon")
+        for recipe, amount in [(base, 30), (addon, 5)]:
+            RecetaCostoHistoricoMensual.objects.create(receta=recipe, periodo=date(2025,9,1), costo_total=amount, coverage_pct=100)
+        self.fact(receta=base)
+        product = PointProduct.objects.create(external_id="gift", sku="addon", name="Topping")
+        RecetaAgrupacionAddon.objects.create(base_receta=base, addon_receta=addon, addon_codigo_point="addon",
+            addon_nombre_point="Topping", status="APPROVED", activo=True)
+        gift = self.fact(key="gift", producto_nombre="Topping")
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(venta_neta=0, venta_total=0, cantidad=2)
+        self.assertEqual(self.confidence()["margin"], 60)
+        gift.refresh_from_db()
+        self.assertIsNone(gift.receta_id)
+        self.assertIsNone(gift.point_product_id)
+        self.assertEqual(gift.costo_estimado, 0)
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Otro topping")
+        self.assertIsNone(self.confidence()["margin"])
+        FactVentaDiaria.objects.filter(pk=gift.pk).update(producto_nombre="Topping")
+        RecetaCostoHistoricoMensual.objects.filter(receta=addon).update(coverage_pct=90)
+        self.assertIsNone(self.confidence()["margin"])
+
+    def test_recipe_version_keeps_origin_date_and_excludes_labor_and_overhead(self):
+        from datetime import datetime, timezone
+        from recetas.models import Receta, RecetaCostoVersion
+        recipe = Receta.objects.create(nombre="Vaso", nombre_normalizado="vaso", hash_contenido="confidence-version")
+        version = RecetaCostoVersion.objects.create(receta=recipe, version_num=1, costo_total=50, costo_mo=10,
+            costo_indirecto=10, rendimiento_cantidad=2)
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,8,20,tzinfo=timezone.utc))
+        self.fact(receta=recipe)
+        result = self.confidence()
+        self.assertEqual(result["margin"], 85)
+        self.assertEqual(result["prior_cost_sales"], 100)
+        self.assertEqual(result["cost_periods"], [date(2025,8,1)])
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,10,1,tzinfo=timezone.utc))
+        self.assertEqual(self.confidence()["cost_periods"], [date(2025,9,1)])
+        RecetaCostoVersion.objects.filter(pk=version.pk).update(creado_en=datetime(2025,10,2,tzinfo=timezone.utc))
+        self.assertIsNone(self.confidence()["margin"])
+
     def test_resale_without_recipe_is_backed_without_rewriting_sales(self):
         product, source = self.resale()
         fact = self.fact(point_product=product, metadata={"costing": {"source": "missing_recipe"}})

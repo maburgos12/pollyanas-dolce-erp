@@ -13,6 +13,7 @@ La confianza no debe exigir una receta a un producto de reventa con costo docume
 | Venta seleccionada | FactVentaDiaria | analytics_service desde fuentes Point | día/sucursal/producto/fuente | Septiembre: $3,310,119.13; $110,355.93 marcado sin costo | core, reportes, rentabilidad |
 | Identidad | PointProduct | integración Point | FK explícita o external_id + nombre normalizado exacto y único | Pirotecnia G: clave externa 169, ERP 84; ERP 169 es otro artículo | ventas, inventario, reportes |
 | Adquisición | ProductoReventaCosto | compras/almacén/historial Point | producto + fecha + source_hash | Pirotecnia Ch $10.28, Coca-Cola $15.63, Espagueti $29.84 | costeo histórico, finanzas, rentabilidad |
+| Costo de receta | RecetaCostoHistoricoMensual / RecetaCostoVersion | servicios de costeo existentes | receta + mes o versión previa al corte | complementos y empaques ya recuperados por lector común; cobertura completa requerida | mismos consumidores |
 | Costo mensual | ProductoReventaCostoHistoricoMensual | servicio histórico | producto/mes + source_rows | existen históricos contaminados por colisión de IDs, ya rechazados por lector común | mismos consumidores |
 
 ## Alias y equivalencias
@@ -25,7 +26,7 @@ La confianza no debe exigir una receta a un producto de reventa con costo docume
 
 ## Decisión de diseño
 
-Extender build_sales_confidence solo con evidencia de reventa para grupos que carecen del respaldo mensual reconocido. Reutilizar el lector validado de rentabilidad; conservar también el mes de origen para mostrar arrastres. Mantener la precedencia por sucursal/día, exclusión de ventas espejo, controles de identidad, fecha máxima y faltantes de productos regalados. Cantidad cero no puede respaldar una venta positiva. El criterio existente de recetas queda sin cambios.
+Extender build_sales_confidence con evidencia de reventa y recetas para grupos que carecen del respaldo mensual reconocido. Reutilizar el lector validado de rentabilidad; conservar también el mes de origen para mostrar arrastres. Mantener la precedencia por sucursal/día, exclusión de ventas espejo, controles de identidad, fecha máxima y faltantes de productos regalados. Cantidad cero no puede respaldar una venta positiva. Para recetas sin respaldo en la materialización se reutilizan el histórico mensual completo y las versiones previas al corte, descontando mano de obra e indirectos; complementos y empaques usan únicamente las identidades ya validadas por el lector compartido. No se crean equivalencias nuevas.
 
 Consumidores revisados: core/views.py, rentabilidad/views_rentabilidad.py, reportes/views.py, reportes/executive_panels.py. La interfaz de _costos_reventa_para_periodo sigue devolviendo importes; el lector de evidencia agrega vigencia sin cambiar sus callers.
 
