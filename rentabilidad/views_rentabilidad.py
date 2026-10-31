@@ -140,6 +140,7 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
             "categoria": row["product__category"] or "Sin categoría",
             "tipo": tipo,
             "es_anticipo": es_anticipo,
+            "servicio_sin_costo_asignado": bool(evidence and evidence.get("treatment") == "UNALLOCATED_SERVICE"),
             "cantidad": cantidad,
             "venta": venta,
             "costo_unitario": costo_unitario,
@@ -153,7 +154,7 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
     return {
         "top_utilidad": sorted([row for row in productos if row["utilidad"] is not None], key=lambda row: row["utilidad"], reverse=True)[:12],
         "riesgo_margen": sorted(
-            [row for row in productos if row["venta"] > 0],
+            [row for row in productos if row["venta"] > 0 and not row["servicio_sin_costo_asignado"]],
             key=lambda row: (row["margen"] is not None, row["margen"] or Decimal("0"), -row["venta"]),
         )[:12],
         "costo_faltante": costo_faltante,
