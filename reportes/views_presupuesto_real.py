@@ -1446,9 +1446,32 @@ def estado_resultados(request: HttpRequest) -> HttpResponse:
     else:
         kpis["margen_operativo_pct"] = None
 
+    reparto = None
+    if selected_year == 2026 and selected_version == "ORIGINAL":
+        from .services_reparto_historico import reparto_historico
+        reparto = reparto_historico(buckets, lineas)
+    if request.GET.get("export") == "reparto":
+        if not reparto or reparto["errores"]:
+            return HttpResponse("No hay un reparto conciliado para exportar.", status=409)
+        response = HttpResponse(content_type="text/csv; charset=utf-8")
+        response["Content-Disposition"] = 'attachment; filename="reparto-enero-agosto-2026.csv"'
+        response.write("\ufeff")
+        writer = csv.writer(response)
+        writer.writerow(["Mes", "Sucursal", "Etapa", "Ventas", "Gasto directo", "Costos",
+                         "Producción", "Administración", "Logística", "Utilidad operativa asignada"])
+        for fila in reparto["detalle"]:
+            nombre = fila["nombre"]
+            if nombre.startswith(("=", "+", "-", "@", "\t", "\r")):
+                nombre = "'" + nombre
+            writer.writerow([fila["mes_nombre"], nombre, fila["etapa"],
+                             *[fila[k] for k in ("ventas", "gasto_directo", "costos", "produccion",
+                                                "administracion", "logistica", "utilidad")]])
+        return response
+
     return render(request, "reportes/estado_resultados.html", {
         "module_tabs": _reportes_module_tabs("estado_resultados"),
         "filas": filas,
+        "reparto": reparto,
         "desglose": desglose,
         "kpis": kpis,
         "month_options": MONTH_COLUMNS,
