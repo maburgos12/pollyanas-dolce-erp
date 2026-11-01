@@ -10,7 +10,7 @@
 {% block content %}
 <div class="cierre">
 <header><h1>Rentabilidad · {{ periodo|date:"F Y" }}</h1>
-<form method="get"><label for="cierre-periodo">Periodo</label><input id="cierre-periodo" name="periodo" type="month" value="{{ periodo|date:'Y-m' }}"><button class="btn btn-primary" type="submit">Consultar</button></form></header>
+<form method="get">{% if sucursal_id %}<input type="hidden" name="sucursal" value="{{ sucursal_id }}">{% endif %}<label for="cierre-periodo">Periodo</label><input id="cierre-periodo" name="periodo" type="month" value="{{ periodo|date:'Y-m' }}"><button class="btn btn-primary" type="submit">Consultar</button></form></header>
 <nav aria-label="Informes de rentabilidad">
 <a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Todas las sucursales</a>
 <a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Acumulado enero–agosto</a>

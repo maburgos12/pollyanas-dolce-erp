@@ -108,6 +108,7 @@ class RepartoRentabilidadTests(TestCase):
         rent = SucursalRentabilidad.objects.create(sucursal=self.bamoa, periodo=date(2026,1,1))
         self.client.force_login(self.user)
         response = self.client.get(f'/rentabilidad/{rent.pk}/')
+        self.assertContains(response, f'name="sucursal" value="{self.bamoa.pk}"')
         self.assertEqual(response.context['total']['ventas'], 0)
         self.assertEqual(response.context['total']['utilidad'], -1)
         self.assertIsNone(response.context['total']['margen_pct'])
