@@ -56,6 +56,12 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     periodos = set(SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta).order_by().values_list("periodo", flat=True))
     fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
     periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
+    from .services_resultado import leer_cierre_conciliado
+    cierre = leer_cierre_conciliado() if desde <= date(2026, 8, 1) and hasta >= date(2026, 1, 1) else None
+    if cierre and cierre["errores"]:
+        raise ValueError("Cierre enero–agosto sin conciliar: " + "; ".join(cierre["errores"]))
+    if cierre:
+        periodos.update(date(2026, f["mes"], 1) for f in cierre["detalle"] if desde <= date(2026, f["mes"], 1) <= hasta)
     data = {}
     for periodo in periodos:
         mes = data.setdefault(periodo, {})
@@ -67,6 +73,17 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
                 "nomina": _quantize(row.nomina_directa), "utilidad": _quantize(row.utilidad_operativa),
                 "central_registrado": getattr(row, "central_registrado", None),
             }
+        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 8, 1):
+            anteriores = mes.copy()
+            mes.clear()
+            for fila in cierre["detalle"]:
+                sid = fila["sucursal_id"]
+                if fila["mes"] != periodo.month or (sucursal_id and sid != sucursal_id):
+                    continue
+                mes[sid] = {"nombre": fila["nombre"], "ingresos": fila["ventas"],
+                            "nomina": anteriores.get(sid, {}).get("nomina", Decimal("0")),
+                            "utilidad": fila["utilidad"], "central_registrado": None,
+                            "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"]}
     return data
 
 
@@ -104,6 +121,7 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
     horas_extra = sum(he_mes.values(), Decimal("0"))
     nomina_total = nomina
 
+    alcance = "REPARTO_CONCILIADO" if rent_mes and all(s.get("alcance") == "REPARTO_CONCILIADO" for s in rent_mes.values()) else "RESULTADO_PARCIAL_SUCURSAL"
     central = next((s.get("central_registrado") for s in rent_mes.values()), None)
     sucursales = []
     claves = set(rent_mes) | set(he_mes)
@@ -126,7 +144,7 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
                 "nomina_total": _quantize(nomina_total_suc),
                 "nomina_pct_ventas": _pct(nomina_total_suc, datos["ingresos"]),
                 "utilidad_neta": datos["utilidad"],  # Alias legado; alcance explícito en exportación.
-                "alcance": "RESULTADO_PARCIAL_SUCURSAL",
+                "alcance": alcance,
             }
         )
     sucursales.sort(key=lambda s: (s["sucursal_id"] is None, s["sucursal"]))
@@ -139,7 +157,7 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
         "nomina_total": _quantize(nomina_total),
         "nomina_pct_ventas": _pct(nomina_total, ingresos),
         "utilidad_neta": _quantize(utilidad),
-        "alcance": "RESULTADO_PARCIAL_SUCURSAL",
+        "alcance": alcance,
         "central_registrado": central,
         "resultado_empresa_parcial": utilidad - central if central is not None else None,
         "sucursales": sucursales,
@@ -200,6 +218,8 @@ def build_reporte_mensual_consolidado(
         periodo = _month_add(desde, offset)
         fila = filas_por_periodo.get(periodo) or _fila_mes(periodo, {}, {})
         anterior = filas_por_periodo.get(_month_add(periodo, -12))
+        if anterior and anterior["alcance"] != fila["alcance"]:
+            anterior = None  # Bases fiscales y gerenciales distintas no forman un YoY comparable.
         if sucursal_id:
             fila["central_registrado"] = None
             fila["resultado_empresa_parcial"] = None
@@ -272,6 +292,6 @@ def reporte_a_json(reporte: dict) -> dict:
         "sucursal_id": reporte["sucursal_id"],
         "filas": filas,
         "totales": {k: _num(v) for k, v in reporte["totales"].items()},
-        "alcance": "RESULTADO_PARCIAL_SUCURSAL",
-        "nota": "utilidad_neta es un alias legado del resultado parcial antes de costos centrales. Las horas extra son informativas; no se suman otra vez a nómina.",
+        "alcance": "POR_PERIODO",
+        "nota": "utilidad_neta es un alias legado: consultar alcance por mes. REPARTO_CONCILIADO incluye costos centrales asignados; RESULTADO_PARCIAL_SUCURSAL los excluye. Las horas extra son informativas y no se suman otra vez a nómina.",
     }

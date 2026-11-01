@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Rentabilidad · cierre mensual{% endblock %}
+{% block extra_css %}
+<style>
+.cierre {max-width:1200px;margin:auto}.cierre header,.cierre nav,.cierre form{display:flex;flex-wrap:wrap;align-items:center;gap:12px}.cierre header{justify-content:space-between}.cierre a{color:var(--vino,#8B2252)}.cierre caption{text-align:left;padding:12px 0;font-size:.9rem}.cierre h1{font-size:1.6rem}.cierre p{max-width:75ch}.cierre nav{margin:20px 0}.cierre input,.cierre button{font:inherit;padding:8px}.cierre table{width:100%;border-collapse:collapse}.cierre th,.cierre td{padding:12px;text-align:right;border-bottom:1px solid #ded8dc;font-variant-numeric:tabular-nums}.cierre th:first-child{text-align:left}.cierre tfoot{font-weight:700}.cierre details{padding:16px 0;border-bottom:1px solid #ded8dc}.cierre summary{cursor:pointer;font-weight:700}.cierre dl{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;max-width:650px}.cierre dd{margin:0;text-align:right;font-variant-numeric:tabular-nums}.cierre .resultado{font-weight:800}.cierre .perdida{color:#a32626}.cierre .table-responsive{overflow-x:auto}.cierre .nota{color:#65505a;font-size:.9rem}.cierre .resumen{padding:16px 0;border-block:1px solid #ded8dc}
+@media(max-width:650px){.cierre caption{display:block;width:100%}.cierre table thead{display:none}.cierre table,.cierre tbody,.cierre tfoot,.cierre tr,.cierre th,.cierre td{display:block}.cierre tr{padding:16px 0;border-bottom:2px solid #ded8dc}.cierre th,.cierre td{padding:9px 0}.cierre td{display:flex;justify-content:space-between;gap:12px}.cierre td::before{content:attr(data-label);text-align:left;max-width:60%}.cierre th:first-child{text-align:left;font-size:1.05rem}.cierre dl{font-size:.95rem}.cierre nav a{padding:8px 0}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="cierre">
+<header><h1>Rentabilidad · {{ periodo|date:"F Y" }}</h1>
+<form method="get"><label for="cierre-periodo">Periodo</label><input id="cierre-periodo" name="periodo" type="month" value="{{ periodo|date:'Y-m' }}"><button class="btn btn-primary" type="submit">Consultar</button></form></header>
+<nav aria-label="Informes de rentabilidad">
+<a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Todas las sucursales</a>
+<a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Acumulado enero–agosto</a>
+<a href="{% url 'rentabilidad_dashboard' %}?export=reparto">Descargar detalle enero–agosto CSV</a>
+<a href="{% url 'rentabilidad_reporte_mensual' %}?hasta={{ periodo|date:'Y-m' }}">Informe mensual</a>
+</nav>
+{% if errores %}
+<h2>No se puede conciliar el cierre</h2><ul>{% for error in errores %}<li>{{ error }}</li>{% endfor %}</ul>
+{% else %}
+<p>Resultado del cierre registrado, con el reparto autorizado por participación en ventas. Los gastos directos se conservan en su sucursal; costos, producción, administración y logística se distribuyen una sola vez.</p>
+<div class="resumen"><strong>Resultado operativo asignado: ${{ total.utilidad|floatformat:2|intcomma }}</strong>{% if total.utilidad_pct is not None %} · {{ total.utilidad_pct|floatformat:2 }}% de las ventas{% endif %}</div>
+<div class="table-responsive" role="region" aria-label="Resultado mensual por sucursal" tabindex="0">
+<table id="cierre-table"><caption>Pesos MXN · misma base del Estado de resultados, incluidos los impuestos de sus fuentes.</caption>
+<thead><tr><th scope="col">Sucursal</th><th scope="col">Ventas</th><th scope="col">Costos y producción</th><th scope="col">Margen después de costos y producción</th><th scope="col">Resultado operativo asignado</th></tr></thead>
+<tbody>{% for f in filas %}<tr>
+<th scope="row"><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;sucursal={{ f.sucursal_id }}">{{ f.nombre }}</a><div class="nota">{{ f.etapa }}</div></th>
+<td data-label="Ventas">${{ f.ventas|floatformat:2|intcomma }}</td>
+<td data-label="Costos y producción">${{ f.costos_produccion|floatformat:2|intcomma }}</td>
+<td data-label="Margen después de costos y producción">{% if f.margen_pct is not None %}{{ f.margen_pct|floatformat:2 }}%{% else %}Sin ventas del mes{% endif %}</td>
+<td class="resultado {% if f.utilidad < 0 %}perdida{% endif %}" data-label="Resultado operativo asignado">${{ f.utilidad|floatformat:2|intcomma }}</td>
+</tr>{% empty %}<tr><td>No hay movimientos de esta sucursal en el mes seleccionado.</td></tr>{% endfor %}</tbody>
+{% if not sucursal_id %}<tfoot><tr><th scope="row">Total seleccionado</th><td data-label="Ventas">${{ total.ventas|floatformat:2|intcomma }}</td><td data-label="Costos y producción">${{ total.costos_produccion|floatformat:2|intcomma }}</td><td data-label="Margen después de costos y producción">{% if total.margen_pct is not None %}{{ total.margen_pct|floatformat:2 }}%{% else %}Sin ventas{% endif %}</td><td data-label="Resultado operativo asignado">${{ total.utilidad|floatformat:2|intcomma }}</td></tr></tfoot>{% endif %}
+</table></div>
+<h2>Cómo se obtiene cada resultado</h2>
+{% for f in filas %}<details {% if sucursal_id %}open{% endif %}><summary>{{ f.nombre }} · ${{ f.utilidad|floatformat:2|intcomma }}</summary>
+<dl><dt>Ventas</dt><dd>${{ f.ventas|floatformat:2|intcomma }}</dd><dt>− Costos asignados</dt><dd>${{ f.costos|floatformat:2|intcomma }}</dd><dt>− Producción asignada</dt><dd>${{ f.produccion|floatformat:2|intcomma }}</dd><dt>Margen después de costos y producción</dt><dd>${{ f.margen|floatformat:2|intcomma }}</dd><dt>− Gastos directos</dt><dd>${{ f.gasto_directo|floatformat:2|intcomma }}</dd><dt>− Administración asignada</dt><dd>${{ f.administracion|floatformat:2|intcomma }}</dd><dt>− Logística asignada</dt><dd>${{ f.logistica|floatformat:2|intcomma }}</dd><dt class="resultado">Resultado operativo asignado</dt><dd class="resultado">${{ f.utilidad|floatformat:2|intcomma }}</dd></dl>
+<p class="nota">{{ f.etapa }}. Los gastos previos a la apertura no representan pérdidas de un mes en operación.</p></details>{% endfor %}
+<p class="nota">El punto de equilibrio requiere separar costos fijos y variables. Un fondo repartido por ventas no permite calcularlo ni medir el ahorro de cerrar una sucursal. Este resultado registrado no certifica por sí solo la cobertura documental de todos los gastos.</p>
+{% endif %}
+<p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;tab=productos">Revisar costos unitarios de productos</a> · <a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;tab=gastos">Revisar fuentes y cobertura documental</a></p>
+</div>
+{% endblock %}
