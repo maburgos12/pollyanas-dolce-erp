@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Rentabilidad · reparto enero–agosto 2026{% endblock %}
+{% block content %}
+<p><a class="btn btn-secondary" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Volver al análisis mensual de Rentabilidad</a></p>
+{% include "reportes/partials/reparto_historico.html" with reparto_export_url="?tab=reparto&export=reparto" %}
+{% endblock %}

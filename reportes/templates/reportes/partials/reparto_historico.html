@@ -8,7 +8,7 @@
   <ul>{% for error in reparto.errores %}<li>{{ error }}</li>{% endfor %}</ul>
   {% else %}
   <p><strong>Total conciliado enero–agosto: ${{ reparto.total|floatformat:2|intcomma }}</strong></p>
-  <p><a class="btn btn-secondary" href="?year=2026&amp;version=ORIGINAL&amp;export=reparto">Descargar detalle mensual CSV</a></p>
+  <p><a class="btn btn-secondary" href="{{ reparto_export_url|default:"?year=2026&version=ORIGINAL&export=reparto"|force_escape }}">Descargar detalle mensual CSV</a></p>
   <div class="table-responsive" role="region" aria-label="Utilidad mensual asignada por sucursal" tabindex="0">
     <table class="table table-striped" id="reparto-table">
       <caption>Utilidad operativa asignada en pesos. — indica que no hay ventas ni gastos registrados en ese mes.</caption>

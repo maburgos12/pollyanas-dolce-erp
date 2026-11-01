@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Sum, Case, When, F, Value, IntegerField
 
 from core.models import Sucursal
 from pos_bridge.models import PointDailySale
@@ -12,6 +12,18 @@ from .services_costeo_logistica import repartir_centavos
 ZERO = Decimal('0')
 FONDOS = ('costos', 'produccion', 'administracion', 'logistica')
 MESES = ('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto')
+
+
+def ventas_con_identidad_historica(desde, hasta):
+    """La relación actual de Point 2 no cambia las ventas de Crucero en 2026."""
+    crucero = Sucursal.objects.filter(codigo='CRUCERO').values_list('pk', flat=True).first()
+    return PointDailySale.objects.filter(sale_date__range=(desde, hasta)).annotate(
+        sucursal_historica_id=Case(
+            When(branch__external_id='2', sale_date__range=(date(2026, 1, 1), date(2026, 6, 30)),
+                 then=Value(crucero)),
+            default=F('branch__erp_branch_id'), output_field=IntegerField(),
+        )
+    )
 
 
 def etapa_sucursal(codigo, mes):
@@ -33,19 +45,15 @@ def etapa_sucursal(codigo, mes):
 def reparto_historico(buckets, lineas):
     """Usa los mismos fondos y filtro de fuente que Estado de resultados."""
     sucursales = {s.pk: s for s in Sucursal.objects.all()}
-    por_codigo = {s.codigo: s.pk for s in sucursales.values()}
     ventas = defaultdict(lambda: defaultdict(lambda: ZERO))
     gastos = defaultdict(lambda: defaultdict(lambda: ZERO))
     errores = []
-    dias = (PointDailySale.objects.filter(sale_date__range=(date(2026, 1, 1), date(2026, 8, 31)))
-            .order_by().values('sale_date', 'branch__external_id', 'branch__erp_branch_id')
+    dias = (ventas_con_identidad_historica(date(2026, 1, 1), date(2026, 8, 31))
+            .order_by().values('sale_date', 'sucursal_historica_id')
             .annotate(bruto=Sum('gross_amount'), descuento=Sum('discount_amount')))
     for dia in dias:
         fecha = dia['sale_date']
-        sid = dia['branch__erp_branch_id']
-        # Point reutilizó el externo 2. Su relación vigente no redefine Crucero.
-        if dia['branch__external_id'] == '2' and fecha <= date(2026, 6, 30):
-            sid = por_codigo.get('CRUCERO')
+        sid = dia['sucursal_historica_id']
         sucursal = sucursales.get(sid)
         if sucursal is None:
             errores.append('Hay ventas sin sucursal histórica identificada.')
@@ -118,3 +126,25 @@ def reparto_historico(buckets, lineas):
         r['margen'] = r['utilidad'] / r['ventas'] * 100 if r['ventas'] else None
     return {'errores': [], 'filas': sorted(resumen.values(), key=lambda r: -r['utilidad']),
             'detalle': detalle, 'meses': MESES, 'totales': totales, 'total': sum(totales, ZERO)}
+
+
+def exportar_reparto(reparto):
+    import csv
+    from django.http import HttpResponse
+
+    if not reparto or reparto["errores"]:
+        return HttpResponse("No hay un reparto conciliado para exportar.", status=409)
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = 'attachment; filename="reparto-enero-agosto-2026.csv"'
+    response.write("\ufeff")
+    writer = csv.writer(response)
+    writer.writerow(["Mes", "Sucursal", "Etapa", "Ventas", "Gasto directo", "Costos",
+                     "Producción", "Administración", "Logística", "Utilidad operativa asignada"])
+    for fila in reparto["detalle"]:
+        nombre = fila["nombre"]
+        if nombre.startswith(("=", "+", "-", "@", "\t", "\r")):
+            nombre = "'" + nombre
+        writer.writerow([fila["mes_nombre"], nombre, fila["etapa"],
+                         *[fila[k] for k in ("ventas", "gasto_directo", "costos", "produccion",
+                                            "administracion", "logistica", "utilidad")]])
+    return response
