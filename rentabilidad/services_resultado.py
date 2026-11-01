@@ -6,7 +6,7 @@ from decimal import Decimal
 
 from django.db.models import Sum, Max, Count
 from unidecode import unidecode
-from pos_bridge.models.sales import PointDailySale
+from reportes.services_reparto_historico import ventas_con_identidad_historica
 from control.models import MermaMensualSucursal
 from reportes.models import LineaPresupuestoMensual, ReglaFuenteRubro
 from .services_costos import _costos_recetas_para_periodo, asignar_costos_filas
@@ -17,8 +17,8 @@ CENTRALES = {"produccion", "logistica", "administracion"}
 
 def leer_resultado_mensual(periodo):
     fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
-    ventas = PointDailySale.objects.filter(sale_date__range=(periodo, fin))
-    filas = list(ventas.values("branch__erp_branch_id", "receta_id", "product_id", "product__sku", "product__name")
+    ventas = ventas_con_identidad_historica(periodo, fin)
+    filas = list(ventas.values("sucursal_historica_id", "receta_id", "product_id", "product__sku", "product__name")
                  .annotate(brutas=Sum("gross_amount"), impuestos=Sum("tax_amount"),
                            descuentos=Sum("discount_amount"), cantidad=Sum("quantity")))
     asignar_costos_filas(filas, periodo, fin)
@@ -29,7 +29,7 @@ def leer_resultado_mensual(periodo):
     sucursales = defaultdict(lambda: {"ventas_brutas": ZERO, "descuentos": ZERO,
         "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "advertencias": [], "tiene_ventas": False})
     for fila in filas:
-        suc = sucursales[fila["branch__erp_branch_id"]]
+        suc = sucursales[fila["sucursal_historica_id"]]
         suc["tiene_ventas"] = True
         suc["ventas_brutas"] += (fila["brutas"] or ZERO) - (fila["impuestos"] or ZERO)
         suc["descuentos"] += fila["descuentos"] or ZERO

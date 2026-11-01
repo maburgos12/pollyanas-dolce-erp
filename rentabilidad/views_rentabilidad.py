@@ -165,14 +165,13 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
     }
 
 
-def _build_gastos_panel(periodo, resultado=None):
+def _build_gastos_panel(resultado, sucursal_ids):
     from collections import defaultdict
     from core.models import Sucursal
 
-    resultado = resultado if resultado is not None else leer_costos_mensuales(periodo)
     por_categoria = defaultdict(lambda: {"total": Decimal("0"), "registros": 0})
     por_sucursal, pendientes, globales = [], [], []
-    for sucursal in Sucursal.objects.filter(activa=True):
+    for sucursal in Sucursal.objects.filter(pk__in=sucursal_ids):
         resumen = costos_de_sucursal(resultado, sucursal.pk)
         por_sucursal.append({
             "centro_costo__sucursal__nombre": sucursal.nombre, "total": resumen["total"],
@@ -281,6 +280,14 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
 def dashboard_rentabilidad(request):
     _require_view_rentabilidad(request.user)
     periodo = _get_periodo(request)
+    if request.GET.get("tab") == "reparto" or request.GET.get("export") == "reparto":
+        from reportes.services_estado_resultados import leer_estado_resultados
+        from reportes.services_reparto_historico import reparto_historico, exportar_reparto
+        buckets, _, lineas = leer_estado_resultados(2026, "ORIGINAL")
+        reparto = reparto_historico(buckets, lineas)
+        if request.GET.get("export") == "reparto":
+            return exportar_reparto(reparto)
+        return render(request, "rentabilidad/reparto.html", {"reparto": reparto, "periodo": periodo})
     active_tab = request.GET.get("tab", "resumen")
     tabs_validos = {"resumen", "diagnostico", "productos", "gastos", "alertas"}
     if active_tab not in tabs_validos:
@@ -356,6 +363,22 @@ def dashboard_rentabilidad(request):
     fiscal = selected_sales_facts(start_date=fecha_inicio, end_date=fecha_fin).values(
         "sucursal_id", "sucursal__nombre").annotate(total=Sum("venta_neta"))
     ventas_fuente["by_branch"] = [{"branch_id": row["sucursal_id"], "name": row["sucursal__nombre"] or "Sin asignar", "total": row["total"] or Decimal("0")} for row in fiscal]
+    if date(2026, 1, 1) <= periodo <= date(2026, 6, 1):
+        from core.models import Sucursal
+        crucero = Sucursal.objects.filter(codigo="CRUCERO").first()
+        bamoa_id = Sucursal.objects.filter(codigo="BAMOA").values_list("pk", flat=True).first()
+        if crucero:
+            for row in ventas_fuente["by_branch"]:
+                if bamoa_id is not None and row["branch_id"] == bamoa_id:
+                    row.update(branch_id=crucero.pk, name=crucero.nombre)
+    # La fuente fiscal puede contener ambos IDs del mismo local histórico.
+    agrupadas = {}
+    for row in ventas_fuente["by_branch"]:
+        if row["branch_id"] in agrupadas:
+            agrupadas[row["branch_id"]]["total"] += row["total"]
+        else:
+            agrupadas[row["branch_id"]] = dict(row)
+    ventas_fuente["by_branch"] = list(agrupadas.values())
     ventas_fuente["total"] = sum((r["total"] for r in ventas_fuente["by_branch"]), Decimal("0"))
     totales["central_registrado"] = resultado["central_registrado"]
     totales["resultado_empresa_parcial"] = totales["utilidad_operativa"] - resultado["central_registrado"]
@@ -406,7 +429,7 @@ def dashboard_rentabilidad(request):
         ],
     }
     productos_panel = _build_productos_panel(periodo, fecha_inicio, fecha_fin)
-    gastos_panel = _build_gastos_panel(periodo, costos_mensuales)
+    gastos_panel = _build_gastos_panel(costos_mensuales, [r.sucursal_id for r in registros])
     totales["gastos_completos"] = gastos_panel["completo"]
     if not gastos_panel["completo"]:
         diagnostico["ranking_utilidad"] = []
@@ -542,7 +565,7 @@ def reporte_mensual(request):
         )
         return response
 
-    sucursales = Sucursal.objects.filter(activa=True).order_by("nombre")
+    sucursales = Sucursal.objects.all().order_by("nombre")
     filas = list(reversed(reporte["filas"]))  # más reciente primero en pantalla
     return render(request, "rentabilidad/reporte_mensual.html", {
         "reporte": reporte,
