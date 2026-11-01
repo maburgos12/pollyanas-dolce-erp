@@ -1,0 +1,39 @@
+{% load humanize %}
+{% if reparto %}
+<section class="card" id="reparto-sucursales" aria-labelledby="reparto-titulo">
+  <h2 class="card-header" id="reparto-titulo">Utilidad asignada por sucursal · enero–agosto 2026</h2>
+  <p>Reparto autorizado por participación mensual en ventas. Conserva los gastos directos de cada sucursal y distribuye costos, producción, administración y logística. Los importes incluyen los impuestos que forman parte de las fuentes del estado de resultados.</p>
+  {% if reparto.errores %}
+  <p><strong>Reparto pendiente de conciliación.</strong> No se muestran utilidades parciales como un acumulado completo.</p>
+  <ul>{% for error in reparto.errores %}<li>{{ error }}</li>{% endfor %}</ul>
+  {% else %}
+  <p><strong>Total conciliado enero–agosto: ${{ reparto.total|floatformat:2|intcomma }}</strong></p>
+  <p><a class="btn btn-secondary" href="?year=2026&amp;version=ORIGINAL&amp;export=reparto">Descargar detalle mensual CSV</a></p>
+  <div class="table-responsive" role="region" aria-label="Utilidad mensual asignada por sucursal" tabindex="0">
+    <table class="table table-striped" id="reparto-table">
+      <caption>Utilidad operativa asignada en pesos. — indica que no hay ventas ni gastos registrados en ese mes.</caption>
+      <thead><tr><th scope="col">Sucursal</th>{% for mes in reparto.meses %}<th scope="col">{{ mes }}</th>{% endfor %}<th scope="col">Acumulado</th><th scope="col">Margen</th></tr></thead>
+      <tbody>
+      {% for fila in reparto.filas %}
+      <tr><th scope="row">{{ fila.nombre }}{% if fila.previo %}<br><small>Incluye ${{ fila.previo|floatformat:2|intcomma }} registrados antes de abrir.</small>{% endif %}</th>
+        {% for celda in fila.meses %}<td>{% if celda is not None %}<span title="{{ celda.etapa }}">${{ celda.importe|floatformat:2|intcomma }}</span>{% if celda.etapa != 'Operación' and celda.etapa != 'Operación histórica' %}<br><small>{{ celda.etapa }}</small>{% endif %}{% else %}—{% endif %}</td>{% endfor %}
+        <td><strong>${{ fila.utilidad|floatformat:2|intcomma }}</strong></td><td>{% if fila.margen is not None %}{{ fila.margen|floatformat:2 }}%{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr class="er-row-total"><th scope="row">Empresa</th>{% for total in reparto.totales %}<td>${{ total|floatformat:2|intcomma }}</td>{% endfor %}<td>${{ reparto.total|floatformat:2|intcomma }}</td><td>—</td></tr></tfoot>
+    </table>
+  </div>
+  <details><summary>Ver cada fondo distribuido</summary>
+    <div class="table-responsive" role="region" aria-label="Detalle de fondos por mes y sucursal" tabindex="0">
+      <table class="table table-striped">
+        <thead><tr><th scope="col">Mes</th><th scope="col">Sucursal</th><th scope="col">Ventas</th><th scope="col">Gasto directo</th><th scope="col">Costos</th><th scope="col">Producción</th><th scope="col">Administración</th><th scope="col">Logística</th><th scope="col">Utilidad asignada</th></tr></thead>
+        <tbody>{% for fila in reparto.detalle %}<tr><td>{{ fila.mes_nombre }}</td><th scope="row">{{ fila.nombre }}</th><td>${{ fila.ventas|floatformat:2|intcomma }}</td><td>${{ fila.gasto_directo|floatformat:2|intcomma }}</td><td>${{ fila.costos|floatformat:2|intcomma }}</td><td>${{ fila.produccion|floatformat:2|intcomma }}</td><td>${{ fila.administracion|floatformat:2|intcomma }}</td><td>${{ fila.logistica|floatformat:2|intcomma }}</td><td>${{ fila.utilidad|floatformat:2|intcomma }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </div>
+  </details>
+  <p>Crucero conserva sus ventas históricas hasta junio; Bamoa comienza el 14 de julio. Guamúchil tiene ventas desde el 24 de marzo: enero–febrero son preapertura y marzo es parcial. La fecha de Guamúchil es una referencia operativa, no una fecha confirmada en el catálogo.</p>
+  <p>Este reparto concilia con los importes registrados; no certifica cobertura completa de gastos ni representa costos evitables por cierre. Las etapas anteriores a apertura no son meses de operación con pérdidas.</p>
+  {% endif %}
+</section>
+{% endif %}
