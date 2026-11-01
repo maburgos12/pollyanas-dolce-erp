@@ -414,7 +414,7 @@ class OperadoraCapturaBonosTests(TestCase):
     def _payload_registro(self, bono=None, **overrides):
         payload = {
             "bono": (bono or self.bono).id,
-            "dia": 10,
+            "dia": 1,  # Siempre transcurrido, incluso al iniciar el mes.
             "tiene_asistencia": True,
             "tiene_uniforme": True,
             "tiene_puntualidad": True,
