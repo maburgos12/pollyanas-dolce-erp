@@ -5,6 +5,7 @@ from datetime import date, datetime, time
 from decimal import Decimal, ROUND_HALF_UP
 from calendar import monthrange
 
+from django.core.exceptions import ValidationError
 from django.db.models import Count, Sum
 from django.utils import timezone
 
@@ -156,6 +157,10 @@ class ConsumoInsumoAuditService:
                 costo_info = CostoUnitarioAudit(snapshot_unit_cost, unidades.get(insumo.id, ""), "BOM_SNAPSHOT")
             costo_unitario = costo_info.costo
             real_data = real_by_insumo.get(insumo.id) or self._empty_real_data()
+            excluido = Decimal(str(real_data.get("consumo_excluido", 0)))
+            teorico = _q4(teorico - excluido)
+            if teorico < 0:
+                raise ValidationError(f"Revisar exclusión de costeo del insumo {insumo.pk}: cambió la receta fuente.")
             consumo_real = _q4(real_data["consumo_real"])
             diferencia = _q4(consumo_real - teorico)
             diferencia_pct = _pct((diferencia / teorico) * Decimal("100")) if teorico > 0 else Decimal("0.00")
@@ -167,6 +172,8 @@ class ConsumoInsumoAuditService:
             if teorico_data["unidad_incompatible_count"]:
                 alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             metadata = {
+                "consumo_excluido": str(excluido),
+                "ajuste_saldo_inicial": str(real_data.get("ajuste_saldo_inicial", 0)),
                 "metodo_consumo": real_data["metodo_consumo"],
                 "produccion_recetas": real_data.get("produccion_recetas", 0),
                 "movimientos_periodo": real_data["movimientos_periodo"],
@@ -398,6 +405,38 @@ class ConsumoInsumoAuditService:
             elif tipo == MovimientoInventario.TIPO_CONSUMO:
                 item["consumos"] = Decimal(str(item["consumos"])) + qty
 
+        # La conciliación de saldos no representa uso físico de insumos.
+        saldos = {
+            row["insumo_id"]: row["total"]
+            for row in MovimientoInventario.objects.filter(
+                insumo_id__in=insumo_ids, fecha__range=(start_dt, end_dt),
+                tipo=MovimientoInventario.TIPO_AJUSTE,
+                trazabilidad__source="POINT_ALMACEN_BASELINE",
+            ).values("insumo_id").annotate(total=Sum("cantidad"))
+        }
+        excluidos: dict[int, Decimal] = {}
+        for movimiento in MovimientoInventario.objects.filter(
+            insumo_id__in=insumo_ids, fecha__range=(start_dt, end_dt),
+            trazabilidad__has_key="exclusion_costeo",
+        ):
+            correccion = movimiento.trazabilidad["exclusion_costeo"]
+            try:
+                cantidad = Decimal(correccion["cantidad"])
+                cantidad_fuente = Decimal(correccion["cantidad_fuente"])
+                valida = (
+                    cantidad.is_finite() and cantidad_fuente.is_finite()
+                    and movimiento.tipo == MovimientoInventario.TIPO_CONSUMO
+                    and correccion["source_hash"] == movimiento.source_hash
+                    and cantidad_fuente == movimiento.cantidad
+                    and 0 < cantidad <= movimiento.cantidad
+                    and bool(correccion["motivo"]) and bool(correccion["autorizado_por"])
+                )
+            except (KeyError, TypeError, ValueError, ArithmeticError):
+                valida = False
+            if not valida:
+                raise ValidationError(f"Revisar exclusión de costeo del movimiento {movimiento.pk}: la fuente cambió o la evidencia es inválida.")
+            excluidos[movimiento.insumo_id] = excluidos.get(movimiento.insumo_id, DECIMAL_ZERO) + cantidad
+
         after_start = self._signed_rows_by_insumo(after_start_rows)
         after_end = self._signed_rows_by_insumo(after_end_rows)
 
@@ -414,9 +453,13 @@ class ConsumoInsumoAuditService:
             consumos = Decimal(str(period_data["consumos"] or 0))
             movimientos_por_tipo = dict(period_data["por_tipo"])
             metodo_consumo = "CONSUMO_DIRECTO" if consumos > 0 else "DIFERENCIAL"
-            consumo_real = consumos if metodo_consumo == "CONSUMO_DIRECTO" else stock_inicial + entradas - stock_final
+            excluido = excluidos.get(insumo_id, DECIMAL_ZERO)
+            saldo = saldos.get(insumo_id, DECIMAL_ZERO)
+            consumo_real = (consumos - excluido) if metodo_consumo == "CONSUMO_DIRECTO" else stock_inicial + entradas - stock_final + saldo
             real_data_limited = metodo_consumo != "CONSUMO_DIRECTO"
             result[insumo_id] = {
+                "consumo_excluido": excluido,
+                "ajuste_saldo_inicial": saldo if metodo_consumo == "DIFERENCIAL" else DECIMAL_ZERO,
                 "stock_inicial": stock_inicial,
                 "stock_final": stock_final,
                 "entradas_periodo": entradas,
@@ -526,48 +569,7 @@ class ConsumoInsumoAuditService:
         return unit in {"kg", "lt", "l"} and cost > ANOMALO_COST_CAP
 
     def calcular_consumo_real(self, period_start: date, period_end: date, insumo: Insumo) -> dict[str, object]:
-        stock_total = Decimal(
-            str(
-                ExistenciaInsumo.objects.filter(insumo=insumo).aggregate(
-                    stock_total=Sum("stock_actual")
-                )["stock_total"]
-                or 0
-            )
-        )
-        start_dt = timezone.make_aware(datetime.combine(period_start, time.min))
-        end_dt = timezone.make_aware(datetime.combine(period_end, time.max))
-        now = timezone.now()
-
-        after_start = self._signed_movements_after(insumo, start_dt, now)
-        after_end = self._signed_movements_after(insumo, end_dt, now)
-        stock_inicial = stock_total - after_start
-        stock_final = stock_total - after_end
-
-        period_qs = MovimientoInventario.objects.filter(insumo=insumo, fecha__range=(start_dt, end_dt))
-        entradas = period_qs.filter(tipo=MovimientoInventario.TIPO_ENTRADA).aggregate(total=Sum("cantidad"))["total"] or DECIMAL_ZERO
-        movimientos_por_tipo = {
-            row["tipo"]: int(row["n"])
-            for row in period_qs.values("tipo").annotate(n=Count("id")).order_by("tipo")
-        }
-        consumo_real = stock_inicial + Decimal(str(entradas or 0)) - stock_final
-        real_data_limited = not any(
-            movimientos_por_tipo.get(tipo, 0)
-            for tipo in [
-                MovimientoInventario.TIPO_SALIDA,
-                MovimientoInventario.TIPO_CONSUMO,
-                MovimientoInventario.TIPO_AJUSTE,
-            ]
-        )
-        return {
-            "stock_inicial": stock_inicial,
-            "stock_final": stock_final,
-            "entradas_periodo": Decimal(str(entradas or 0)),
-            "consumo_real": consumo_real,
-            "movimientos_periodo": period_qs.count(),
-            "movimientos_por_tipo": movimientos_por_tipo,
-            "stock_reconstruido": True,
-            "real_data_limited": real_data_limited,
-        }
+        return self._consumo_real_bulk(period_start, period_end, {insumo.pk})[insumo.pk]
 
     def _signed_movements_after(self, insumo: Insumo, since_dt: datetime, until_dt: datetime) -> Decimal:
         total = DECIMAL_ZERO
