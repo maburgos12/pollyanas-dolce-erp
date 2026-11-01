@@ -75,11 +75,14 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         hasta = _parse_hasta(options["hasta"]) if options.get("hasta") else None
         sucursal_id = self._resolve_sucursal(options.get("sucursal"))
-        reporte = build_reporte_mensual_consolidado(
-            hasta=hasta,
-            meses=options["meses"],
-            sucursal_id=sucursal_id,
-        )
+        try:
+            reporte = build_reporte_mensual_consolidado(
+                hasta=hasta,
+                meses=options["meses"],
+                sucursal_id=sucursal_id,
+            )
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
         formato = options["formato"]
         if formato == "json":
             self.stdout.write(json.dumps(reporte_a_json(reporte), ensure_ascii=False, indent=2))
@@ -126,7 +129,7 @@ class Command(BaseCommand):
         return buffer.getvalue()
 
     def _render_tabla(self, reporte: dict, *, detalle: bool) -> None:
-        self.stdout.write("Resultado parcial antes de costos centrales; horas extra informativas, incluidas en nómina cuando se pagan.")
+        self.stdout.write("Enero–agosto 2026: reparto conciliado con costos centrales incluidos. Otros períodos: resultado parcial. Horas extra informativas.")
         encabezado = (
             f"{'Mes':<8} {'Ingresos':>14} {'Nómina':>13} {'Hrs extra':>11} "
             f"{'Nómina tot':>13} {'Nóm %vtas':>10} {'Utilidad':>14} "

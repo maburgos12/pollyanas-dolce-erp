@@ -35,7 +35,8 @@ def _campo(fila):
 def leer_costos_mensuales(periodo):
     """Sin efectos laterales; las dos fuentes se consultan una vez por mes."""
     from rentabilidad.services_resultado import leer_resultado_mensual
-    gastos, personal = leer_gastos_mensuales(periodo), leer_personal_mensual(periodo)
+    gastos = leer_gastos_mensuales(periodo, usar_reparto_consolidado=(periodo.year == 2026 and periodo.month <= 8))
+    personal = leer_personal_mensual(periodo)
     return {
         "periodo": periodo.replace(day=1),
         "resultado": leer_resultado_mensual(periodo),

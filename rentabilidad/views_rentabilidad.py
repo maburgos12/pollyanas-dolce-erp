@@ -20,7 +20,7 @@ import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
 from .services_costos import asignar_costos_filas
-from .services_resultado import registros_del_mes
+from .services_resultado import registros_del_mes, leer_cierre_conciliado, resumen_cierre_mensual
 from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales, selected_sales_facts
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
 from reportes.services_rentabilidad_mensual import (
@@ -292,7 +292,20 @@ def dashboard_rentabilidad(request):
     tabs_validos = {"resumen", "diagnostico", "productos", "gastos", "alertas"}
     if active_tab not in tabs_validos:
         active_tab = "resumen"
+    cierre = None
+    if not request.GET.get("periodo") and active_tab in {"resumen", "diagnostico"}:
+        cierre = leer_cierre_conciliado()
+        if cierre is not None:
+            periodo = date(2026, 8, 1)
     fecha_inicio, fecha_fin = _periodo_bounds(periodo)
+    if active_tab in {"resumen", "diagnostico"} and date(2026, 1, 1) <= periodo <= date(2026, 8, 1):
+        cierre = cierre if cierre is not None else leer_cierre_conciliado()
+        if cierre is not None:
+            sid = request.GET.get("sucursal", "")
+            sid = int(sid) if sid.isdigit() else None
+            return render(request, "rentabilidad/cierre_mensual.html",
+                          resumen_cierre_mensual(cierre, periodo, sid),
+                          status=409 if cierre["errores"] else 200)
     costos_mensuales = leer_costos_mensuales(periodo)
 
     # Periodos disponibles para el selector
@@ -465,6 +478,12 @@ def dashboard_rentabilidad(request):
 def detalle_sucursal(request, pk):
     _require_view_rentabilidad(request.user)
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
+    if date(2026, 1, 1) <= rent.periodo <= date(2026, 8, 1):
+        cierre = leer_cierre_conciliado()
+        if cierre is not None:
+            return render(request, "rentabilidad/cierre_mensual.html",
+                          resumen_cierre_mensual(cierre, rent.periodo, rent.sucursal_id),
+                          status=409 if cierre["errores"] else 200)
     costos_por_mes = {rent.periodo: leer_costos_mensuales(rent.periodo)}
     aplicar_costos_en_memoria(rent, costos_por_mes[rent.periodo])
 
@@ -545,7 +564,12 @@ def reporte_mensual(request):
     if param_sucursal and param_sucursal.isdigit():
         sucursal_id = int(param_sucursal)
 
-    reporte = build_reporte_mensual_consolidado(hasta=hasta, meses=12, sucursal_id=sucursal_id)
+    try:
+        reporte = build_reporte_mensual_consolidado(hasta=hasta, meses=12, sucursal_id=sucursal_id)
+    except ValueError as exc:
+        if request.GET.get("formato") in {"json", "csv"}:
+            return JsonResponse({"error": str(exc)}, status=409)
+        return render(request, "rentabilidad/cierre_mensual.html", {"errores": [str(exc)]}, status=409)
 
     formato = request.GET.get("formato", "html")
     if formato == "json":

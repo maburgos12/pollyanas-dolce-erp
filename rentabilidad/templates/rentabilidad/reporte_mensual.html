@@ -45,15 +45,15 @@
 {% endblock %}
 
 {% block content %}
-<p><a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Ver reparto conciliado enero–agosto 2026 y su CSV</a>. Este reporte mensual conserva la base de costos de productos vendidos.</p>
-<p>Resultados parciales antes de fabricación, logística y administración. Horas extra informativas: no se suman otra vez a la nómina. No confirman utilidad neta, ROI o recuperación.</p>
+<p><a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Ver reparto conciliado enero–agosto 2026 y su CSV</a>. Enero–agosto utiliza el mismo cierre conciliado.</p>
+<p>Enero–agosto 2026 incluye los fondos de costos, producción, logística y administración distribuidos. Los otros períodos conservan su resultado parcial. Horas extra informativas: no se suman otra vez a la nómina. No confirman utilidad neta, ROI o recuperación.</p>
 <div class="rm-shell">
   <section class="rm-hero">
     <div>
       <h1>Reporte mensual consolidado · últimos 12 meses</h1>
       <p>
         Ingresos del P&amp;L canónico, nómina con horas extra informativas,
-        nómina como % de ventas, resultado parcial (antes de costos centrales) y
+        nómina como % de ventas, resultado según el alcance de cada mes y
         variación contra el mismo mes del año anterior.
       </p>
     </div>
@@ -83,7 +83,7 @@
           <th>Horas extra</th>
           <th>Nómina total</th>
           <th>Nómina % ventas</th>
-          <th>Resultado parcial sucursales</th>
+          <th>Resultado por sucursales</th>
           <th>YoY ingresos</th>
           <th>YoY nómina</th>
           <th>YoY utilidad</th>
@@ -92,7 +92,7 @@
       <tbody>
         {% for fila in filas %}
         <tr>
-          <td class="rm-mes">{{ fila.periodo|date:"M Y" }}</td>
+          <td class="rm-mes">{{ fila.periodo|date:"M Y" }}<div class="rm-note">{% if fila.alcance == "REPARTO_CONCILIADO" %}Reparto conciliado{% else %}Resultado parcial{% endif %}</div></td>
           <td>${{ fila.ingresos|floatformat:2|intcomma }}</td>
           <td>${{ fila.nomina|floatformat:2|intcomma }}</td>
           <td>${{ fila.horas_extra|floatformat:2|intcomma }}</td>

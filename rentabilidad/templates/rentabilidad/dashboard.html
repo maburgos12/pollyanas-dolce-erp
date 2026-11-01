@@ -315,7 +315,7 @@
         <div>
           <h2>Gastos recurrentes y personal por concepto</h2>
           <p>Lectura mensual de gastos, obligaciones y nómina ERP. Los pagos no se suman de nuevo.</p>
-          {% if not gastos_panel.completo %}<p><strong>Cobertura promedio {{ gastos_panel.cobertura_pct }}%.</strong> Los importes son parciales: el punto de equilibrio sale subestimado y la utilidad sobreestimada. Revisa abajo qué falta por sucursal.</p>{% endif %}
+          {% if not gastos_panel.completo %}<p><strong>Cobertura de categorías promedio {{ gastos_panel.cobertura_pct }}%.</strong> Los importes son parciales: el punto de equilibrio sale subestimado y la utilidad sobreestimada. Revisa abajo qué falta por sucursal.</p>{% endif %}
         </div>
         <div class="kpi-value pd-u-ae01fa962b">${{ gastos_panel.total|floatformat:0|intcomma }}</div>
       </div>
@@ -425,7 +425,7 @@
                     {% if r.punto_equilibrio_mensual <= 0 %}
                     Sin gasto fijo cargado
                     {% elif r.fuente_gastos_incompleta %}
-                    PE parcial · {{ r.cobertura_gastos_pct }}% de gastos
+                    PE parcial · {{ r.cobertura_gastos_pct }}% de categorías de gasto
                     {% elif r.porcentaje_avance_pe >= 100 %}
                     PE cubierto
                     {% else %}

@@ -63,7 +63,7 @@ class RepartoRentabilidadTests(TestCase):
                 {'sucursal_id': self.bamoa.pk,'sucursal__nombre':'Bamoa','total':Decimal(40)}]
         with patch('rentabilidad.views_rentabilidad.selected_sales_facts') as facts:
             facts.return_value.values.return_value.annotate.return_value=fiscal
-            response=self.client.get('/rentabilidad/?periodo=2026-06')
+            response=self.client.get('/rentabilidad/?periodo=2026-06&tab=gastos')
         self.assertEqual(response.status_code,200)
         self.assertTrue(response.context['fuente_estado']['cuadra'])
         self.assertIn('Crucero', [r['centro_costo__sucursal__nombre'] for r in response.context['gastos_panel']['por_sucursal']])
@@ -86,3 +86,54 @@ class RepartoRentabilidadTests(TestCase):
         old=leer_resultado_mensual(date(2025,6,1))['sucursales']
         self.assertIn(self.bamoa.pk,old)
         self.assertNotIn(self.crucero.pk,old)
+
+    def test_primary_monthly_view_uses_closed_sources_without_partial_model(self):
+        self.client.force_login(self.user)
+        with patch('rentabilidad.views_rentabilidad.leer_costos_mensuales', side_effect=AssertionError('No mezclar bases')):
+            with CaptureQueriesContext(connection) as queries:
+                response = self.client.get('/rentabilidad/?periodo=2026-06')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['total']['ventas'], Decimal(100))
+        self.assertEqual(response.context['total']['utilidad'], Decimal(79))
+        self.assertEqual(response.context['total']['margen'], Decimal(89))
+        self.assertContains(response, 'Crucero')
+        self.assertContains(response, 'id="cierre-table"')
+        self.assertNotContains(response, 'Sin datos suficientes')
+        self.assertNotContains(response, 'Analizar con IA')
+        self.assertFalse([q for q in queries if q['sql'].split()[0] in {'INSERT', 'UPDATE', 'DELETE'}])
+
+    def test_report_export_and_branch_detail_reconcile_including_preopening(self):
+        from .services_reporte_mensual import build_reporte_mensual_consolidado, reporte_a_json
+        from .models_rentabilidad import SucursalRentabilidad
+        rent = SucursalRentabilidad.objects.create(sucursal=self.bamoa, periodo=date(2026,1,1))
+        self.client.force_login(self.user)
+        response = self.client.get(f'/rentabilidad/{rent.pk}/')
+        self.assertContains(response, f'name="sucursal" value="{self.bamoa.pk}"')
+        self.assertEqual(response.context['total']['ventas'], 0)
+        self.assertEqual(response.context['total']['utilidad'], -1)
+        self.assertIsNone(response.context['total']['margen_pct'])
+        report = build_reporte_mensual_consolidado(hasta=date(2026,8,1), meses=8)
+        self.assertEqual(report['totales']['utilidad_neta'], Decimal(631))
+        for row in report['filas']:
+            self.assertEqual(row['alcance'], 'REPARTO_CONCILIADO')
+            self.assertIsNone(row['central_registrado'])
+            self.assertEqual(sum(s['utilidad_neta'] for s in row['sucursales']), row['utilidad_neta'])
+        self.assertEqual(reporte_a_json(report)['filas'][0]['alcance'], 'REPARTO_CONCILIADO')
+        csv = self.client.get('/rentabilidad/reporte-mensual/?hasta=2026-08&formato=csv')
+        self.assertEqual(csv.status_code, 200)
+        self.assertIn(b'REPARTO_CONCILIADO', csv.content)
+
+    def test_unreconciled_close_never_falls_back_to_partial_profit(self):
+        self.client.force_login(self.user)
+        PointDailySale.objects.filter(sale_date=date(2026,2,15)).update(gross_amount=111)
+        for url in ('/rentabilidad/?periodo=2026-02', '/rentabilidad/reporte-mensual/?hasta=2026-08&formato=json'):
+            self.assertEqual(self.client.get(url).status_code, 409)
+
+    def test_decimal_costs_and_fractional_margin_are_not_truncated(self):
+        from .services_resultado import resumen_cierre_mensual
+        cierre = {'errores': [], 'detalle': [{'mes': 8, 'sucursal_id': 1, 'ventas': Decimal('100.50'),
+            'costos': Decimal('10.20'), 'produccion': Decimal('1.35'), 'gasto_directo': Decimal('4.10'),
+            'administracion': Decimal('2.01'), 'logistica': Decimal('3.04'), 'utilidad': Decimal('79.80')}]}
+        data = resumen_cierre_mensual(cierre, date(2026,8,1))
+        self.assertEqual(data['total']['costos_produccion'], Decimal('11.55'))
+        self.assertEqual(data['total']['margen'], Decimal('88.95'))

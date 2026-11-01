@@ -8,7 +8,7 @@
   </div>
   <div class="ia-box">
   {% if not gastos.completo %}
-  <p role="status"><strong>Cobertura {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
+  <p role="status"><strong>Categorías con importe: {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
     Se calcula con las fuentes disponibles del mes; no representa todavía un costo completo confirmado.
     {% if gastos.familias_faltantes_display %}Falta cargar: {{ gastos.familias_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}

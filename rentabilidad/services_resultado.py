@@ -104,3 +104,30 @@ def registros_del_mes(periodo, costos=None):
     for rent in registros:
         aplicar_costos_en_memoria(rent, costos)
     return [r for r in registros if r.en_perimetro_fuente or (r.sucursal.activa and r.gasto_fijo_total)]
+
+
+def leer_cierre_conciliado():
+    """Cierre gerencial autorizado; comparte importes y guardas con el P&L."""
+    from reportes.services_estado_resultados import leer_estado_resultados
+    from reportes.services_reparto_historico import reparto_historico
+    if not LineaPresupuestoMensual.objects.filter(
+        periodo__year=2026, periodo__month__lte=8, version="ORIGINAL",
+        rubro__activo=True, rubro__area__codigo="resultados",
+    ).exclude(fuente_real="").exists():
+        return None
+    buckets, _, lineas = leer_estado_resultados(2026, "ORIGINAL")
+    return reparto_historico(buckets, lineas)
+
+
+def resumen_cierre_mensual(cierre, periodo, sucursal_id=None):
+    filas = [dict(f) for f in cierre["detalle"] if f["mes"] == periodo.month
+             and (sucursal_id is None or f["sucursal_id"] == sucursal_id)]
+    campos = ("ventas", "costos", "produccion", "gasto_directo", "administracion", "logistica", "utilidad")
+    total = {k: sum((f[k] for f in filas), ZERO) for k in campos}
+    for fila in [*filas, total]:
+        fila["costos_produccion"] = fila["costos"] + fila["produccion"]
+        fila["margen"] = fila["ventas"] - fila["costos_produccion"]
+        fila["margen_pct"] = fila["margen"] / fila["ventas"] * 100 if fila["ventas"] else None
+        fila["utilidad_pct"] = fila["utilidad"] / fila["ventas"] * 100 if fila["ventas"] else None
+    return {"filas": filas, "total": total, "errores": cierre["errores"], "periodo": periodo,
+            "sucursal_id": sucursal_id}
