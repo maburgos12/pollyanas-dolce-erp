@@ -47,21 +47,39 @@
         <td class="num" data-label="Costos y producción">${{ f.costos_produccion|floatformat:2|intcomma }}</td>
         <td class="num" data-label="Margen después de costos y producción">{% if f.margen_pct is not None %}{{ f.margen_pct|floatformat:2 }}%{% else %}Sin ventas del mes{% endif %}</td>
         <td class="num" data-label="Gastos operativos">${{ f.gastos_operativos|floatformat:2|intcomma }}</td>
-        <td data-label="Punto equilibrio"><div class="metric-stack"><strong>Requiere clasificación</strong><span class="cell-note">Separar costos fijos y variables; no se calcula con fondos repartidos.</span></div></td>
+        <td data-label="Punto equilibrio"><div class="metric-stack">{% if f.punto_equilibrio is not None %}<strong>${{ f.punto_equilibrio|floatformat:2|intcomma }}</strong><span class="cell-note">Escenario integral del mes</span>{% else %}<strong>No calculable</strong><span class="cell-note">{{ f.motivo_pe }}</span>{% endif %}</div></td>
         <td class="num {% if f.utilidad >= 0 %}positive{% else %}negative{% endif %}" data-label="Resultado operativo asignado">${{ f.utilidad|floatformat:2|intcomma }}</td>
         <td data-label="Diagnóstico"><a class="btn-ia" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;sucursal={{ f.sucursal_id }}&amp;tab=diagnostico">Ver detalle</a></td>
       </tr>
       <tr class="ia-row"><td colspan="8" class="full-row"><div class="ia-panel">
-        {% if sucursal_id %}<strong>Cómo se obtiene el resultado</strong><div class="rank-list">
+        <details{% if sucursal_id %} open{% endif %}><summary class="btn-ia">Ver desglose de {{ f.nombre }}</summary>
+        <strong>Cómo se obtiene el resultado</strong><div class="rank-list">
           <div class="rank-item"><span>Costos asignados</span><strong>${{ f.costos|floatformat:2|intcomma }}</strong></div>
           <div class="rank-item"><span>Producción asignada</span><strong>${{ f.produccion|floatformat:2|intcomma }}</strong></div>
           <div class="rank-item"><span>Gastos directos</span><strong>${{ f.gasto_directo|floatformat:2|intcomma }}</strong></div>
           <div class="rank-item"><span>Administración asignada</span><strong>${{ f.administracion|floatformat:2|intcomma }}</strong></div>
           <div class="rank-item"><span>Logística asignada</span><strong>${{ f.logistica|floatformat:2|intcomma }}</strong></div>
-        </div>{% else %}<span>{{ f.etapa }}. {% if f.ventas %}Resultado después de gastos directos y fondos asignados.{% else %}Sin ventas del mes; este gasto no representa pérdidas de un mes en operación.{% endif %}</span>{% endif %}
+        </div>
+        <h3>Gastos directos por concepto</h3>
+        <div class="rank-list">{% for gasto in f.desglose_directo %}<div class="rank-item"><span>{{ gasto.concepto }}<small class="cell-note">Fuente: {{ gasto.fuente }} · registro {{ gasto.linea_id }}</small></span><strong>${{ gasto.monto|floatformat:2|intcomma }}</strong></div>{% empty %}<p>Sin gastos directos registrados en este mes.</p>{% endfor %}</div>
+        <h3>Cálculo del punto de equilibrio</h3>
+        {% if f.combustible is not None %}<div class="rank-list">
+          <div class="rank-item"><span>Materiales, reventa y merma asignados</span><strong>${{ f.costos|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Combustible asignado</span><strong>${{ f.combustible|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Total variable</span><strong>${{ f.costo_variable|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Otros gastos de logística</span><strong>${{ f.logistica_restante|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Gastos mantenidos al importe del mes (directos + producción + administración + otros de logística)</span><strong>${{ f.gasto_fijo_escenario|floatformat:2|intcomma }}</strong></div>
+          {% if f.contribucion_pct is not None %}<div class="rank-item"><span>Margen de contribución</span><strong>{{ f.contribucion_pct|floatformat:2 }}%</strong></div>{% endif %}
+          {% if f.punto_equilibrio is not None %}<div class="rank-item"><span>Ventas necesarias para cubrir el mes</span><strong>${{ f.punto_equilibrio|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Diferencia de ventas frente al equilibrio</span><strong>${{ f.diferencia_pe|floatformat:2|intcomma }}</strong></div>{% endif %}
+        </div>{% endif %}
+        {% if f.motivo_pe %}<p>{{ f.motivo_pe }}</p>{% endif %}
+        </details>
+        {% if not f.ventas %}<p>{{ f.etapa }}. Sin ventas del mes; este gasto no representa pérdidas de un mes en operación.</p>{% endif %}
       </div></td></tr>
     {% empty %}<tr><td colspan="8" class="full-row">No hay movimientos de esta sucursal en el mes seleccionado.</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
+<p class="muted">Punto de equilibrio = gastos mantenidos al importe del mes ÷ (1 − costo variable ÷ ventas). Escenario aprobado: materiales, reventa, merma y combustible varían con las ventas; los demás gastos permanecen al nivel observado del mes. Incluye los fondos compartidos asignados y no representa el ahorro de cerrar una sucursal.</p>
 <p class="muted pd-u-20d43445e1">Fórmula: ventas − costos − producción − gastos directos − administración − logística = resultado operativo asignado. El cierre conciliado no certifica por sí solo la cobertura documental de todos los gastos; la pestaña Gastos conserva esa revisión.</p>
 {% endif %}

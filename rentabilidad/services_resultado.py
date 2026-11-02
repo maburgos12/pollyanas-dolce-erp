@@ -116,7 +116,33 @@ def leer_cierre_conciliado():
     ).exclude(fuente_real="").exists():
         return None
     buckets, _, lineas = leer_estado_resultados(2026, "ORIGINAL")
-    return reparto_historico(buckets, lineas)
+    cierre = reparto_historico(buckets, lineas)
+    from reportes.services_costeo_logistica import repartir_centavos
+    combustible = defaultdict(lambda: ZERO)
+    gastos = defaultdict(list)
+    for linea in lineas:
+        if linea.periodo.month > 8 or not str(linea.fuente_real or '').strip():
+            continue
+        area = linea.rubro.area.codigo
+        concepto = ' '.join(unidecode(linea.rubro.concepto).lower().split())
+        if area == 'logistica' and concepto in {'diesel', 'gasolina'}:
+            combustible[linea.periodo.month] += linea.monto_real or ZERO
+        if area == 'gastos-venta' and linea.monto_real:
+            gastos[(linea.periodo.month, linea.rubro.sucursal_id)].append({
+                'concepto': linea.rubro.concepto, 'monto': linea.monto_real,
+                'fuente': linea.fuente_real, 'linea_id': linea.pk,
+            })
+    for mes in range(1, 9):
+        filas = [f for f in cierre['detalle'] if f['mes'] == mes]
+        fondo = sum((f['logistica'] for f in filas), ZERO)
+        # Combustible sigue el reparto autorizado; el resto conserva el gasto del mes.
+        cuotas = (repartir_centavos(combustible[mes], {f['sucursal_id']: f['ventas'] for f in filas})
+                  if ZERO <= combustible[mes] <= fondo else None)
+        for fila in filas:
+            cuota = cuotas.get(fila['sucursal_id'], ZERO) if cuotas is not None else None
+            fila['combustible'] = cuota if cuota is not None and cuota <= fila['logistica'] else None
+            fila['desglose_directo'] = gastos[(mes, fila['sucursal_id'])]
+    return cierre
 
 
 def resumen_cierre_mensual(cierre, periodo, sucursal_id=None):
@@ -129,5 +155,29 @@ def resumen_cierre_mensual(cierre, periodo, sucursal_id=None):
         fila["margen"] = fila["ventas"] - fila["costos_produccion"]
         fila["margen_pct"] = fila["margen"] / fila["ventas"] * 100 if fila["ventas"] else None
         fila["utilidad_pct"] = fila["utilidad"] / fila["ventas"] * 100 if fila["ventas"] else None
+    total['combustible'] = (sum((f.get('combustible') for f in filas), ZERO)
+                            if all(f.get('combustible') is not None for f in filas) else None)
+    for fila in [*filas, total]:
+        combustible = fila.get('combustible')
+        fila['punto_equilibrio'] = None
+        fila['motivo_pe'] = ''
+        if combustible is None:
+            fila['motivo_pe'] = 'Revisar combustible contra el fondo de logística.'
+            continue
+        fila['logistica_restante'] = fila['logistica'] - combustible
+        fila['costo_variable'] = fila['costos'] + combustible
+        fila['gasto_fijo_escenario'] = (fila['gasto_directo'] + fila['produccion']
+                                       + fila['administracion'] + fila['logistica_restante'])
+        contribucion = fila['ventas'] - fila['costo_variable']
+        fila['contribucion_pct'] = contribucion / fila['ventas'] * 100 if fila['ventas'] else None
+        if fila['ventas'] <= ZERO:
+            fila['motivo_pe'] = 'Sin ventas del mes para calcular la proporción variable.'
+        elif contribucion <= ZERO:
+            fila['motivo_pe'] = 'La venta no cubre el costo variable; no hay equilibrio con esta proporción.'
+        elif fila['gasto_fijo_escenario'] < ZERO:
+            fila['motivo_pe'] = 'Revisar gastos mensuales negativos.'
+        else:
+            fila['punto_equilibrio'] = (fila['gasto_fijo_escenario'] * fila['ventas'] / contribucion).quantize(Decimal('.01'))
+            fila['diferencia_pe'] = fila['ventas'] - fila['punto_equilibrio']
     return {"filas": filas, "total": total, "errores": cierre["errores"], "periodo": periodo,
             "sucursal_id": sucursal_id}

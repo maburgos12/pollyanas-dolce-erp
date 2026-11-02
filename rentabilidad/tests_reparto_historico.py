@@ -158,7 +158,62 @@ class RepartoRentabilidadTests(TestCase):
         self.assertEqual(response.context['total']['utilidad'], Decimal(79))
         self.assertContains(response, 'Puente de resultado')
         self.assertContains(response, 'Interpretación ejecutiva')
-        self.assertContains(response, 'Requiere clasificación')
+        self.assertContains(response, 'Escenario integral del mes')
+        self.assertContains(response, 'Gastos directos por concepto')
+        self.assertContains(response, 'Ver desglose de Crucero')
         self.assertNotContains(response, 'onclick="analizarSucursal')
         self.assertNotContains(response, 'Resultado provisional:')
         self.assertContains(response, 'value="2026-06" selected')
+
+    def test_break_even_separates_fuel_and_preserves_closed_amounts(self):
+        from reportes.models import RubroPresupuesto
+        from .services_resultado import leer_cierre_conciliado, resumen_cierre_mensual
+        before = leer_cierre_conciliado()
+        logistics = RubroPresupuesto.objects.get(concepto='logistica')
+        fuel = RubroPresupuesto.objects.create(area=logistics.area, concepto='Diésel', tipo='EGRESO')
+        period = date(2026, 8, 1)
+        LineaPresupuestoMensual.objects.filter(rubro=logistics, periodo=period).update(monto_real=1)
+        source = LineaPresupuestoMensual.objects.create(rubro=fuel, periodo=period, monto_real=2, fuente_real='AUTO:COMBUSTIBLE_UNIDAD')
+        # Un importe presupuestado sin fuente real nunca forma parte del combustible.
+        LineaPresupuestoMensual.objects.create(rubro=RubroPresupuesto.objects.create(
+            area=logistics.area, concepto='Gasolina', tipo='EGRESO'), periodo=period,
+            monto_real=999, monto_presupuesto=999)
+        with CaptureQueriesContext(connection) as queries:
+            close = leer_cierre_conciliado()
+            data = resumen_cierre_mensual(close, period)
+        self.assertFalse([q for q in queries if q['sql'].split()[0] in {'INSERT', 'UPDATE', 'DELETE'}])
+        fields = ('ventas', 'costos', 'produccion', 'gasto_directo', 'administracion', 'logistica', 'utilidad')
+        self.assertEqual([[f[k] for k in fields] for f in before['detalle']],
+                         [[f[k] for k in fields] for f in close['detalle']])
+        row = data['filas'][0]
+        self.assertEqual(row['combustible'], Decimal(2))
+        self.assertEqual(row['logistica_restante'], Decimal(1))
+        self.assertEqual(row['costo_variable'], Decimal(12))
+        self.assertEqual(row['gasto_fijo_escenario'], Decimal(9))
+        self.assertEqual(row['punto_equilibrio'], Decimal('10.23'))
+        self.assertEqual(row['ventas'] - row['costo_variable'] - row['gasto_fijo_escenario'], row['utilidad'])
+        self.assertEqual(sum(g['monto'] for g in row['desglose_directo']), row['gasto_directo'])
+        self.assertEqual(data['total']['punto_equilibrio'], row['punto_equilibrio'])
+        # Combustible mayor que todo logística no permite publicar un PE engañoso.
+        source.monto_real = 4
+        source.save(update_fields=['monto_real'])
+        LineaPresupuestoMensual.objects.filter(rubro=logistics, periodo=period).update(monto_real=-1)
+        invalid = resumen_cierre_mensual(leer_cierre_conciliado(), period)['filas'][0]
+        self.assertIsNone(invalid['punto_equilibrio'])
+        self.assertIn('Revisar combustible', invalid['motivo_pe'])
+
+    def test_break_even_handles_preopening_nonpositive_contribution_and_zero_fixed(self):
+        from copy import deepcopy
+        from .services_resultado import resumen_cierre_mensual
+        fields = ('ventas', 'costos', 'produccion', 'gasto_directo', 'administracion', 'logistica', 'utilidad', 'combustible')
+        for sales, variable, fixed, expected in ((0, 0, 1, None), (100, 100, 5, None),
+                                                (100, 110, 5, None), (100, 50, 0, Decimal('0.00'))):
+            with self.subTest(sales=sales, variable=variable, fixed=fixed):
+                row = {k: Decimal(0) for k in fields}
+                row.update(mes=8, sucursal_id=1, ventas=Decimal(sales), costos=Decimal(variable),
+                           gasto_directo=Decimal(fixed), utilidad=Decimal(sales-variable-fixed))
+                close = {'errores': [], 'detalle': [row]}
+                original = deepcopy(close)
+                result = resumen_cierre_mensual(close, date(2026,8,1))
+                self.assertEqual(result['filas'][0]['punto_equilibrio'], expected)
+                self.assertEqual(close, original)
