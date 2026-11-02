@@ -1,0 +1,67 @@
+{% load humanize %}
+{% if errores %}
+<section class="rent-panel" role="alert"><h2>No se puede conciliar el cierre</h2><ul>{% for error in errores %}<li>{{ error }}</li>{% endfor %}</ul></section>
+{% else %}
+<section class="kpi-grid">
+  <article class="kpi-card"><div class="kpi-label">Ventas totales</div><div class="kpi-value">${{ total.ventas|floatformat:2|intcomma }}</div><div class="kpi-note">{{ filas|length }} sucursales · base del Estado de resultados</div></article>
+  <article class="kpi-card"><div class="kpi-label">Margen después de costos y producción</div><div class="kpi-value">{% if total.margen_pct is not None %}{{ total.margen_pct|floatformat:2 }}%{% else %}Sin ventas{% endif %}</div><div class="kpi-note">${{ total.margen|floatformat:2|intcomma }} · reparto autorizado</div></article>
+  <article class="kpi-card"><div class="kpi-label">Gastos operativos</div><div class="kpi-value">${{ total.gastos_operativos|floatformat:2|intcomma }}</div><div class="kpi-note">Directos, administración y logística</div></article>
+  <article class="kpi-card"><div class="kpi-label">Resultado operativo asignado</div><div class="kpi-value {% if total.utilidad >= 0 %}positive{% else %}negative{% endif %}">${{ total.utilidad|floatformat:2|intcomma }}</div><div class="kpi-note">{% if total.utilidad_pct is not None %}{{ total.utilidad_pct|floatformat:2 }}% sobre ventas{% else %}Mes sin ventas{% endif %}</div></article>
+</section>
+<section class="rent-panel">
+  <div class="panel-head"><div><h2>Lectura General</h2><p>Gastos directos en su sucursal; costos, producción, administración y logística distribuidos una sola vez por participación en ventas.</p></div></div>
+  <div class="summary-grid">
+    <article class="mini-metric"><span>Mayor resultado asignado</span><strong>{{ mayor_resultado.nombre|default:"Sin movimientos" }}</strong>{% if mayor_resultado %}<div class="muted">${{ mayor_resultado.utilidad|floatformat:2|intcomma }}</div>{% endif %}</article>
+    <article class="mini-metric"><span>Menor resultado asignado</span><strong>{{ menor_resultado.nombre|default:"Sin movimientos" }}</strong>{% if menor_resultado %}<div class="muted">${{ menor_resultado.utilidad|floatformat:2|intcomma }} · {{ menor_resultado.etapa }}</div>{% endif %}</article>
+    <article class="mini-metric"><span>Informes</span><p><a href="{% url 'rentabilidad_reporte_mensual' %}?hasta={{ periodo|date:'Y-m' }}">Informe mensual</a></p><p><a href="{% url 'rentabilidad_dashboard' %}?export=reparto">Descargar detalle enero–agosto CSV</a></p>{% if sucursal_id %}<p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Ver todas las sucursales</a></p>{% endif %}</article>
+  </div>
+</section>
+{% if active_tab == 'diagnostico' %}
+<section class="section-grid">
+  <article class="rent-panel"><div class="panel-head"><div><h2>Puente de resultado</h2><p>Fondos incluidos en el resultado del mes.</p></div></div>
+    <div class="rank-list">
+      <div class="rank-item"><span>Ventas</span><strong>${{ total.ventas|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>− Costos</span><strong>${{ total.costos|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>− Producción</span><strong>${{ total.produccion|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>− Gastos directos</span><strong>${{ total.gasto_directo|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>− Administración</span><strong>${{ total.administracion|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>− Logística</span><strong>${{ total.logistica|floatformat:2|intcomma }}</strong></div>
+      <div class="rank-item"><span>Resultado operativo asignado</span><strong>${{ total.utilidad|floatformat:2|intcomma }}</strong></div>
+    </div>
+  </article>
+  <aside class="rent-panel"><div class="panel-head"><div><h3>Interpretación ejecutiva</h3><p>Lectura del cierre, sin consultas a un proveedor IA.</p></div></div>
+    <p>{% if total.utilidad < 0 %}El resultado asignado es negativo. Revisa el desglose de gastos directos y fondos repartidos antes de decidir ajustes.{% else %}El resultado asignado es positivo después de los fondos incluidos en el cierre.{% endif %}</p>
+    <p>El margen después de costos y producción es común a las sucursales con ventas porque esos fondos se reparten por participación en ventas. No mide diferencias de mezcla de productos.</p>
+    <p>El resultado asignado no equivale al ahorro de cerrar una sucursal. Los gastos anteriores a la apertura se identifican por separado.</p>
+  </aside>
+</section>
+{% endif %}
+<section class="rent-panel">
+  <div class="panel-head"><div><h2>Tabla auditable</h2><p>Detalle por sucursal con los fondos del cierre conciliado. Pesos MXN, incluidos los impuestos de sus fuentes.</p></div></div>
+  <div class="table-wrap"><table class="rent-table" id="cierre-table">
+    <thead><tr><th class="col-branch">Sucursal</th><th class="num">Ventas</th><th class="num">Costos y producción</th><th class="num">Margen después de costos y producción</th><th class="num">Gastos operativos</th><th class="col-pe">Punto equilibrio</th><th class="num">Resultado operativo asignado</th><th class="col-ia">Diagnóstico</th></tr></thead>
+    <tbody>{% for f in filas %}
+      <tr>
+        <td data-label="Sucursal"><a class="branch-name" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;sucursal={{ f.sucursal_id }}">{{ f.nombre }}</a><div class="pd-u-40df0f88aa"><span class="estado-badge">{{ f.etapa }}</span></div></td>
+        <td class="num" data-label="Ventas">${{ f.ventas|floatformat:2|intcomma }}</td>
+        <td class="num" data-label="Costos y producción">${{ f.costos_produccion|floatformat:2|intcomma }}</td>
+        <td class="num" data-label="Margen después de costos y producción">{% if f.margen_pct is not None %}{{ f.margen_pct|floatformat:2 }}%{% else %}Sin ventas del mes{% endif %}</td>
+        <td class="num" data-label="Gastos operativos">${{ f.gastos_operativos|floatformat:2|intcomma }}</td>
+        <td data-label="Punto equilibrio"><div class="metric-stack"><strong>Requiere clasificación</strong><span class="cell-note">Separar costos fijos y variables; no se calcula con fondos repartidos.</span></div></td>
+        <td class="num {% if f.utilidad >= 0 %}positive{% else %}negative{% endif %}" data-label="Resultado operativo asignado">${{ f.utilidad|floatformat:2|intcomma }}</td>
+        <td data-label="Diagnóstico"><a class="btn-ia" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;sucursal={{ f.sucursal_id }}&amp;tab=diagnostico">Ver detalle</a></td>
+      </tr>
+      <tr class="ia-row"><td colspan="8" class="full-row"><div class="ia-panel">
+        {% if sucursal_id %}<strong>Cómo se obtiene el resultado</strong><div class="rank-list">
+          <div class="rank-item"><span>Costos asignados</span><strong>${{ f.costos|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Producción asignada</span><strong>${{ f.produccion|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Gastos directos</span><strong>${{ f.gasto_directo|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Administración asignada</span><strong>${{ f.administracion|floatformat:2|intcomma }}</strong></div>
+          <div class="rank-item"><span>Logística asignada</span><strong>${{ f.logistica|floatformat:2|intcomma }}</strong></div>
+        </div>{% else %}<span>{{ f.etapa }}. {% if f.ventas %}Resultado después de gastos directos y fondos asignados.{% else %}Sin ventas del mes; este gasto no representa pérdidas de un mes en operación.{% endif %}</span>{% endif %}
+      </div></td></tr>
+    {% empty %}<tr><td colspan="8" class="full-row">No hay movimientos de esta sucursal en el mes seleccionado.</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+<p class="muted pd-u-20d43445e1">Fórmula: ventas − costos − producción − gastos directos − administración − logística = resultado operativo asignado. El cierre conciliado no certifica por sí solo la cobertura documental de todos los gastos; la pestaña Gastos conserva esa revisión.</p>
+{% endif %}

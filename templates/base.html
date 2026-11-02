@@ -1131,7 +1131,7 @@
             '.investment-module-tabs'
         ].join(', ');
         main.querySelectorAll(tabSelector).forEach(function (localTabs) {
-            if (localTabs.classList.contains('erp-group-tabs')) return;
+            if (localTabs.classList.contains('erp-group-tabs') || localTabs.hasAttribute('data-local-view-tabs')) return;
             var localLabels = Array.from(localTabs.querySelectorAll('a, button')).map(function (el) {
                 return el.textContent.trim().replace(/\s+/g, ' ');
             }).filter(Boolean);
@@ -1240,7 +1240,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261101-rentabilidad-cierre-v3').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261102-rentabilidad-interfaz-v1').catch(function () {});
         }
     })();
     </script>
