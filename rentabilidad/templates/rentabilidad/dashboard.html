@@ -31,11 +31,17 @@
             {% endfor %}
           </select>
         </div>
-        <button class="btn-analizar-todo" onclick="analizarTodas(this)">Analizar con IA</button>
+        {% if cierre_conciliado %}<a class="btn-analizar-todo" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;tab=diagnostico{% if sucursal_id %}&amp;sucursal={{ sucursal_id }}{% endif %}">Ver diagnóstico</a>{% else %}<button class="btn-analizar-todo" onclick="analizarTodas(this)">Analizar con IA</button>{% endif %}
       </div>
     </div>
 
     <div class="source-strip">
+      {% if cierre_conciliado %}
+      <article class="source-chip {% if not errores %}is-ok{% else %}is-warn{% endif %}"><span>Cierre registrado</span><strong>{% if errores %}Por conciliar{% else %}Conciliado{% endif %}</strong></article>
+      <article class="source-chip"><span>Periodo</span><strong>{{ periodo|date:"F Y" }}</strong></article>
+      <article class="source-chip"><span>Sucursales del mes</span><strong>{{ filas|length }}</strong></article>
+      <article class="source-chip"><span>Base del resultado</span><strong>Reparto autorizado</strong></article>
+      {% else %}
       <article class="source-chip {% if fuente_estado.cuadra %}is-ok{% else %}is-warn{% endif %}">
         <span>Venta fiscal vs resultado</span>
         <strong>{% if fuente_estado.cuadra %}Cuadrado{% else %}Diferencia ${{ fuente_estado.diferencia|floatformat:2|intcomma }}{% endif %}</strong>
@@ -52,25 +58,29 @@
         <span>Último recálculo</span>
         <strong>{{ fuente_estado.max_calculado_en|date:"Y-m-d H:i"|default:"Sin cálculo" }}</strong>
       </article>
+    {% endif %}
     </div>
   </section>
 
   <section class="rent-panel">
     <h2>Reparto conciliado · enero–agosto 2026</h2>
     <p>Utilidad por sucursal después de distribuir los fondos de costos, producción, administración y logística del Estado de resultados.</p>
-    <a class="btn btn-secondary" href="?periodo={{ periodo|date:'Y-m' }}&amp;tab=reparto">Ver reparto conciliado y descargar detalle</a>
-    <p>El análisis mensual de abajo utiliza costos de productos vendidos y ventas sin impuestos. Sus márgenes tienen una base distinta del reparto.</p>
+    <a class="btn btn-secondary" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;tab=reparto">Ver reparto conciliado y descargar detalle</a>
+    {% if not cierre_conciliado %}<p>El análisis mensual de abajo utiliza costos de productos vendidos y ventas sin impuestos. Sus márgenes tienen una base distinta del reparto.</p>{% endif %}
   </section>
-  {% include "reportes/partials/sales_confidence.html" %}
+  {% if not cierre_conciliado %}{% include "reportes/partials/sales_confidence.html" %}{% endif %}
 
-  <nav class="rent-tabs" aria-label="Pestañas de rentabilidad">
-    <a class="rent-tab {% if active_tab == 'resumen' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=resumen">Resumen</a>
-    <a class="rent-tab {% if active_tab == 'diagnostico' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=diagnostico">Diagnóstico</a>
-    <a class="rent-tab {% if active_tab == 'productos' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=productos">Productos</a>
-    <a class="rent-tab {% if active_tab == 'gastos' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=gastos">Gastos</a>
-    <a class="rent-tab {% if active_tab == 'alertas' %}is-active{% endif %}" href="?periodo={{ periodo|date:'Y-m' }}&tab=alertas">Alertas {{ alertas_panel|length }}</a>
+  <nav class="rent-tabs" data-local-view-tabs aria-label="Pestañas de rentabilidad">
+    <a class="rent-tab {% if active_tab == 'resumen' %}is-active{% endif %}" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&tab=resumen{% if sucursal_id %}&amp;sucursal={{ sucursal_id }}{% endif %}">Resumen</a>
+    <a class="rent-tab {% if active_tab == 'diagnostico' %}is-active{% endif %}" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&tab=diagnostico{% if sucursal_id %}&amp;sucursal={{ sucursal_id }}{% endif %}">Diagnóstico</a>
+    <a class="rent-tab {% if active_tab == 'productos' %}is-active{% endif %}" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&tab=productos">Productos</a>
+    <a class="rent-tab {% if active_tab == 'gastos' %}is-active{% endif %}" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&tab=gastos">Gastos</a>
+    <a class="rent-tab {% if active_tab == 'alertas' %}is-active{% endif %}" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&tab=alertas">Alertas{% if not cierre_conciliado %} {{ alertas_panel|length }}{% endif %}</a>
   </nav>
 
+  {% if cierre_conciliado %}
+  {% include "rentabilidad/_cierre_integrado.html" %}
+  {% else %}
   {% if not fuente_estado.cuadra %}
   <section class="rent-panel" aria-label="Conciliación de ventas">
     <h2>Ventas pendientes de conciliación</h2>
@@ -490,6 +500,7 @@
     Fórmulas: margen bruto = ventas netas - costo variable. Resultado parcial = margen bruto - gasto fijo.
     Punto de equilibrio = gasto fijo / (1 - costo variable / ventas). ROI y payback no se confirman sin costos integrales e historial conciliado.
   </p>
+  {% endif %}
 </div>
 {% endblock %}
 
@@ -502,10 +513,12 @@ if (periodoSelect) {
     const params = new URLSearchParams(window.location.search);
     params.set('periodo', event.target.value);
     params.set('tab', '{{ active_tab }}');
-    window.location.search = params.toString();
+    {% if sucursal_id %}params.set('sucursal', '{{ sucursal_id }}');{% endif %}
+    window.location.href = "{% url 'rentabilidad_dashboard' %}?" + params.toString();
   });
 }
 
+{% if not cierre_conciliado %}
 async function analizarSucursal(pk, btn) {
   const row = document.getElementById(`ia-row-${pk}`);
   const panel = document.getElementById(`ia-panel-${pk}`);
@@ -569,5 +582,6 @@ async function analizarTodas(btn) {
   btn.disabled = false;
   btn.textContent = 'Analizar con IA';
 }
+{% endif %}
 </script>
 {% endblock %}

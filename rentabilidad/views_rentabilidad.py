@@ -276,6 +276,22 @@ def _build_alertas_panel(sucursales_data, productos_panel, gastos_panel, max_sal
     return alertas
 
 
+def _render_cierre_dashboard(request, cierre, periodo, sucursal_id=None):
+    context = resumen_cierre_mensual(cierre, periodo, sucursal_id)
+    for fila in [*context["filas"], context["total"]]:
+        fila["gastos_operativos"] = fila["gasto_directo"] + fila["administracion"] + fila["logistica"]
+    ranking = sorted(context["filas"], key=lambda fila: fila["utilidad"], reverse=True)
+    periodos = set(SucursalRentabilidad.objects.values_list("periodo", flat=True))
+    periodos.update(date(2026, fila["mes"], 1) for fila in cierre["detalle"])
+    periodos.add(periodo)
+    context.update(cierre_conciliado=True, active_tab="diagnostico" if request.GET.get("tab") == "diagnostico" else "resumen",
+                   periodos_disponibles=sorted(periodos, reverse=True)[:24],
+                   mayor_resultado=ranking[0] if ranking else None,
+                   menor_resultado=ranking[-1] if ranking else None)
+    return render(request, "rentabilidad/dashboard.html", context,
+                  status=409 if cierre["errores"] else 200)
+
+
 @login_required
 def dashboard_rentabilidad(request):
     _require_view_rentabilidad(request.user)
@@ -303,9 +319,7 @@ def dashboard_rentabilidad(request):
         if cierre is not None:
             sid = request.GET.get("sucursal", "")
             sid = int(sid) if sid.isdigit() else None
-            return render(request, "rentabilidad/cierre_mensual.html",
-                          resumen_cierre_mensual(cierre, periodo, sid),
-                          status=409 if cierre["errores"] else 200)
+            return _render_cierre_dashboard(request, cierre, periodo, sid)
     costos_mensuales = leer_costos_mensuales(periodo)
 
     # Periodos disponibles para el selector
@@ -481,9 +495,7 @@ def detalle_sucursal(request, pk):
     if date(2026, 1, 1) <= rent.periodo <= date(2026, 8, 1):
         cierre = leer_cierre_conciliado()
         if cierre is not None:
-            return render(request, "rentabilidad/cierre_mensual.html",
-                          resumen_cierre_mensual(cierre, rent.periodo, rent.sucursal_id),
-                          status=409 if cierre["errores"] else 200)
+            return _render_cierre_dashboard(request, cierre, rent.periodo, rent.sucursal_id)
     costos_por_mes = {rent.periodo: leer_costos_mensuales(rent.periodo)}
     aplicar_costos_en_memoria(rent, costos_por_mes[rent.periodo])
 
