@@ -150,6 +150,7 @@
 
   .btn-analizar-todo:hover,
   .btn-ia:hover { filter: brightness(.95); }
+  .rent-table summary.btn-ia { min-height: 44px; margin-bottom: 12px; color: var(--rent-ink); }
   .btn-analizar-todo:disabled,
   .btn-ia:disabled { opacity: .62; cursor: wait; }
 
