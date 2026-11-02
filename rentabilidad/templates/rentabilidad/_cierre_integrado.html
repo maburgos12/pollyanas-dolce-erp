@@ -29,7 +29,7 @@
       <div class="rank-item"><span>Resultado operativo asignado</span><strong>${{ total.utilidad|floatformat:2|intcomma }}</strong></div>
     </div>
   </article>
-  <aside class="rent-panel"><div class="panel-head"><div><h3>Interpretación ejecutiva</h3><p>Lectura del cierre, sin consultas a un proveedor IA.</p></div></div>
+  <aside class="rent-panel"><div class="panel-head"><div><h3>Interpretación ejecutiva</h3><p>Desglose y lectura del resultado del mes.</p></div></div>
     <p>{% if total.utilidad < 0 %}El resultado asignado es negativo. Revisa el desglose de gastos directos y fondos repartidos antes de decidir ajustes.{% else %}El resultado asignado es positivo después de los fondos incluidos en el cierre.{% endif %}</p>
     <p>El margen después de costos y producción es común a las sucursales con ventas porque esos fondos se reparten por participación en ventas. No mide diferencias de mezcla de productos.</p>
     <p>El resultado asignado no equivale al ahorro de cerrar una sucursal. Los gastos anteriores a la apertura se identifican por separado.</p>
