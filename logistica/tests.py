@@ -2875,9 +2875,13 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)
 
-        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
         self.assertEqual(resultado["score"], 0)
         self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
+
+        self.assertNotIn("ticket_verificado", resultado["motivos"])
+        carga.refresh_from_db()
+        self.assertEqual(carga.auditoria_estado, resultado["estado"])
 
     def test_precio_por_litro_imposible_invalida_la_lectura(self):
         """Caso real #36: el lector reportó $43.206/L. No existe ese precio."""
@@ -2889,8 +2893,12 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)
 
-        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
         self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
+
+        self.assertNotIn("ticket_verificado", resultado["motivos"])
+        carga.refresh_from_db()
+        self.assertEqual(carga.auditoria_estado, resultado["estado"])
 
     def test_ticket_doblado_no_acusa_por_litros_inventados(self):
         """El renglón de litros viene tapado y el lector devuelve un número que
@@ -2904,9 +2912,13 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
             resultado = auditar_carga_combustible(carga.id)
 
-        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
         self.assertEqual(resultado["score"], 0)
         self.assertIn("lectura_del_ticket_dudosa", resultado["motivos"])
+
+        self.assertNotIn("ticket_verificado", resultado["motivos"])
+        carga.refresh_from_db()
+        self.assertEqual(carga.auditoria_estado, resultado["estado"])
 
     def test_diferencia_de_centavos_se_tolera(self):
         carga = self._carga_de_prueba("centavos")
@@ -2936,9 +2948,13 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
         ):
             resultado = auditar_carga_combustible(carga.id)
 
-        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_OK)
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ERROR)
         self.assertIn("lectura_no_disponible", resultado["motivos"])
         self.assertEqual(resultado["score"], 0)
+
+        self.assertNotIn("ticket_verificado", resultado["motivos"])
+        carga.refresh_from_db()
+        self.assertEqual(carga.auditoria_estado, resultado["estado"])
 
     def test_mismo_folio_en_dos_cargas_es_alto_riesgo(self):
         """El repartidor refotografía el mismo ticket: la foto cambia, el folio no."""
@@ -2964,7 +2980,7 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
             auditar_carga_combustible(primera.id)
         with mock.patch(
             "logistica.services_combustible_auditoria.leer_ticket",
-            return_value=_lectura(litros=Decimal("22.31"), importe=Decimal("600.00"), folio="2981313"),
+            return_value=_lectura(litros=Decimal("22.31"), importe=Decimal("600.00"), precio=Decimal("26.90"), folio="2981313"),
         ):
             resultado = auditar_carga_combustible(segunda.id)
 
@@ -2979,6 +2995,33 @@ class LogisticaCombustibleAuditoriaTests(TestCase):
 
         self.assertIn("ticket_ilegible", resultado["motivos"])
         self.assertEqual(resultado["score"], 0)
+
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
+        self.assertNotIn("ticket_verificado", resultado["motivos"])
+
+    def test_lectura_incompleta_no_se_declara_verificada(self):
+        carga = self._carga_de_prueba("incompleto")
+        for faltante in ("litros", "importe_total", "precio_por_litro"):
+            with self.subTest(faltante=faltante):
+                lectura = _lectura(litros=Decimal("44.61"), importe=Decimal("1200"), precio=Decimal("26.90"))
+                lectura[faltante] = None
+                with mock.patch("logistica.services_combustible_auditoria.leer_ticket", return_value=lectura):
+                    resultado = auditar_carga_combustible(carga.id)
+                self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_REVISION)
+                self.assertEqual(resultado["score"], 0)
+                self.assertNotIn("ticket_verificado", resultado["motivos"])
+
+    def test_fallo_lector_conserva_riesgo_local_de_duplicado(self):
+        primera = self._carga_de_prueba("duplicado1")
+        segunda = self._carga_de_prueba("duplicado2")
+        segunda.foto_ticket = primera.foto_ticket.name
+        segunda.save(update_fields=["foto_ticket"])
+        with mock.patch("logistica.services_combustible_auditoria.leer_ticket", side_effect=TicketOCRNoDisponible("sin saldo")):
+            auditar_carga_combustible(primera.id)
+            resultado = auditar_carga_combustible(segunda.id)
+        self.assertEqual(resultado["estado"], CargaCombustibleUnidad.AUDITORIA_ALTO_RIESGO)
+        self.assertIn("ticket_duplicado", resultado["motivos"])
+        self.assertIn("lectura_no_disponible", resultado["motivos"])
 
     def test_lector_normaliza_orientacion_y_reduce_la_imagen(self):
         from logistica.services_ticket_ocr import _imagen_para_modelo
