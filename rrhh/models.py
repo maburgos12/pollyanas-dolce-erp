@@ -2802,7 +2802,7 @@ class Prestamo(models.Model):
 
     def recalcular_saldo(self):
         cobrado = (
-            self.cuotas.filter(estado=PrestamoCuota.ESTADO_COBRADO).aggregate(Sum("monto_cobrado"))[
+            self.cuotas.filter(estado__in=[PrestamoCuota.ESTADO_COBRADO, PrestamoCuota.ESTADO_PARCIAL]).aggregate(Sum("monto_cobrado"))[
                 "monto_cobrado__sum"
             ]
             or Decimal("0.00")

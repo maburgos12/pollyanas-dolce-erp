@@ -39,6 +39,7 @@
         vacaciones: [],
         horas: [],
         prestamos: [],
+        empleadosPrestamo: [],
         message: "",
         error: ""
       };
@@ -166,6 +167,8 @@
           render();
           return;
         }
+        const empleadosRes = await apiFetch(`${API}/prestamos/empleados/`);
+        state.empleadosPrestamo = empleadosRes.ok ? await empleadosRes.json() : [];
         await cargarHistorialReciente();
         render();
       }
@@ -295,27 +298,37 @@
 
       async function enviarPrestamo(event) {
         event.preventDefault();
+        const button = event.currentTarget.querySelector('button[type="submit"]');
+        if (button.disabled) return;
         const payload = {
+          empleado: document.getElementById("pr_empleado").value,
           concepto: document.getElementById("pr_concepto").value,
           metodo_pago: document.getElementById("pr_metodo").value,
           fecha_deposito: document.getElementById("pr_deposito").value || null,
           importe: document.getElementById("pr_importe").value,
           num_quincenas: document.getElementById("pr_quincenas").value
         };
-        const res = await apiFetch(`${API}/prestamos/`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (res.ok) {
-          await cargarHistorialReciente();
-          limpiarFormPrestamo();
-          state.message = `Préstamo solicitado - Folio: ${data.folio || "sin folio"}`;
-          state.error = "";
-          render();
-        } else {
-          mostrarError(`Error al solicitar préstamo: ${JSON.stringify(data)}`);
+        button.disabled = true;
+        try {
+          const res = await apiFetch(`${API}/prestamos/`, {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify(payload)
+          });
+          const data = await res.json();
+          if (res.ok) {
+            await cargarHistorialReciente();
+            limpiarFormPrestamo();
+            state.message = `Préstamo ${data.folio || ""}: ${data.estado_display || "solicitado"}`;
+            state.error = "";
+            render();
+          } else {
+            mostrarError(`Error al solicitar préstamo: ${JSON.stringify(data)}`);
+          }
+        } catch {
+          mostrarError("No se pudo confirmar el envío. Revisa la lista de préstamos antes de reintentar.");
+        } finally {
+          button.disabled = false;
         }
       }
 
@@ -646,9 +659,11 @@
       }
 
       function renderPrestamos() {
+        const empleados = state.empleadosPrestamo.map(e => `<option value="${Number(e.id)}" ${e.es_propio ? "selected" : ""}>${esc(e.nombre)}${e.es_propio ? " (mi solicitud)" : ""}</option>`).join("");
         const items = state.prestamos.map(p => `
           <article class="card">
             <div class="row"><strong>${esc(p.folio)}</strong><span class="badge">${esc(p.estado_display || p.estado)}</span></div>
+            <div>${esc(p.empleado_nombre)}</div>
             <div class="muted">$${esc(p.importe)} · ${esc(p.num_quincenas)} quincenas · descuento $${esc(p.descuento_quincenal)}</div>
             ${p.jefe_directo_nombre ? `<div class="muted">Autoriza: ${esc(p.jefe_directo_nombre)}</div>` : ""}
             <div>${esc(p.concepto)}</div>
@@ -661,8 +676,9 @@
             <form id="form_prestamo" onsubmit="enviarPrestamo(event)">
               <div class="talon-header">SOLICITUD DE PRÉSTAMO</div>
               <div class="field-row">
-                <label for="pr_nombre">NOMBRE DE EMPLEADO</label>
-                <input type="text" id="pr_nombre" name="nombre" value="${perfilValue("nombre")}" readonly class="readonly-field">
+                <label for="pr_empleado">EMPLEADO</label>
+                <select id="pr_empleado" name="empleado" required>${empleados || '<option value="">Sin empleados disponibles</option>'}</select>
+                <p class="muted">El jefe se toma del expediente. Al enviar para tu colaborador directo das tu visto bueno; Dirección conserva la aprobación final. Tu préstamo personal requiere autorización de otra persona.</p>
               </div>
               <div class="field-row-double">
                 <div>

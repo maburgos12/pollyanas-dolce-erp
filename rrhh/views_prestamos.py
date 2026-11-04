@@ -5,10 +5,12 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
-from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import JsonResponse
+from rest_framework.exceptions import ValidationError
+
 from django.views.decorators.cache import never_cache
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -17,12 +19,16 @@ from core.access import can_manage_rrhh, can_view_rrhh
 from core.notificaciones import (
     notificar_prestamo_aprobado,
     notificar_prestamo_para_direccion,
-    notificar_prestamo_solicitado,
 )
 
-from .models import Empleado, ImportacionNominaContpaq, Prestamo, PrestamoCuota
+from .models import ImportacionNominaContpaq, Prestamo, PrestamoCuota
+from .serializers import PrestamoSerializer
+from .services_identidad import empleado_de_usuario
 from .services_prestamos import (
     aplicar_cobro_manual,
+    crear_solicitud_prestamo,
+    can_capturar_prestamos_equipo,
+    empleados_solicitables_prestamo,
     aprobar_prestamo_direccion,
     autorizar_prestamo_jefe,
     can_autorizar_prestamo_direccion,
@@ -32,14 +38,6 @@ from .services_prestamos import (
     usuario_equivale_jefe_prestamo,
 )
 from .views import _module_tabs
-
-
-ESTADOS_DEUDA_VIGENTE = [
-    Prestamo.ESTADO_SOLICITADO,
-    Prestamo.ESTADO_AUTORIZADO,
-    Prestamo.ESTADO_APROBADO,
-    Prestamo.ESTADO_ACTIVO,
-]
 
 
 def _prestamos_por_autorizar(user):
@@ -53,11 +51,13 @@ def _prestamos_por_autorizar(user):
 def _prestamos_asignados(user):
     if not user or not user.is_authenticated:
         return Prestamo.objects.none()
-    return Prestamo.objects.filter(prestamos_jefe_q(user)).select_related("empleado", "jefe_directo", "autorizado_jefe")
+    return Prestamo.objects.filter(
+        prestamos_jefe_q(user) | Q(empleado=empleado_de_usuario(user)) | Q(creado_por=user)
+    ).select_related("empleado", "jefe_directo", "autorizado_jefe")
 
 
 def _can_view_prestamos(user) -> bool:
-    return bool(can_view_rrhh(user) or _prestamos_asignados(user).exists())
+    return bool(can_view_rrhh(user) or can_capturar_prestamos_equipo(user) or _prestamos_asignados(user).exists())
 
 
 def _require_rrhh_view(user):
@@ -84,21 +84,13 @@ def _is_jefe_asignado(user, prestamo: Prestamo) -> bool:
 
 
 def _can_view_prestamo(user, prestamo: Prestamo) -> bool:
-    return bool(can_view_rrhh(user) or _is_jefe_asignado(user, prestamo))
+    return bool(can_view_rrhh(user) or _is_jefe_asignado(user, prestamo)
+                or prestamo.creado_por_id == user.pk
+                or prestamo.empleado_id == getattr(empleado_de_usuario(user), "pk", None))
 
 
 def _can_authorize_jefe(user, prestamo: Prestamo) -> bool:
     return can_autorizar_prestamo_jefe(user, prestamo)
-
-
-def _deuda_vigente(empleado_id: str | int | None):
-    if not empleado_id:
-        return Prestamo.objects.none()
-    return Prestamo.objects.filter(
-        empleado_id=empleado_id,
-        estado__in=ESTADOS_DEUDA_VIGENTE,
-        saldo_actual__gt=0,
-    ).order_by("-fecha_solicitud", "-id")
 
 
 def _parse_decimal(raw: str | None) -> Decimal:
@@ -124,7 +116,7 @@ def prestamos_lista(request):
     if can_view_rrhh(request.user):
         base_qs = Prestamo.objects.select_related("empleado", "jefe_directo", "autorizado_jefe")
     else:
-        base_qs = Prestamo.objects.filter(prestamos_jefe_q(request.user)).select_related("empleado", "jefe_directo", "autorizado_jefe")
+        base_qs = _prestamos_asignados(request.user)
     por_autorizar = _prestamos_por_autorizar(request.user)
     activos = base_qs.filter(estado=Prestamo.ESTADO_ACTIVO)
     pendientes = base_qs.filter(
@@ -140,6 +132,7 @@ def prestamos_lista(request):
             "liquidados": liquidados,
             "por_autorizar": por_autorizar,
             "can_manage_rrhh": can_manage_rrhh(request.user),
+            "can_capture_loans": can_capturar_prestamos_equipo(request.user),
             "show_rrhh_tabs": can_view_rrhh(request.user),
             "module_tabs": _module_tabs("prestamos", request.user),
         },
@@ -148,56 +141,47 @@ def prestamos_lista(request):
 
 @login_required
 def prestamo_nuevo(request):
-    _require_rrhh_manage(request.user)
+    if not can_capturar_prestamos_equipo(request.user):
+        raise PermissionDenied("No tienes colaboradores directos activos ni permisos de captura RRHH.")
+    empleados = empleados_solicitables_prestamo(request.user).select_related("jefe_directo__usuario_erp").order_by("nombre")
+    errores = None
     if request.method == "POST":
-        empleado_id = request.POST.get("empleado")
-        deuda = _deuda_vigente(empleado_id).first()
-        if deuda:
-            messages.error(
-                request,
-                f"{deuda.empleado.nombre} no puede solicitar un nuevo préstamo porque aún cuenta con un monto "
-                f"de crédito no cubierto: {deuda.folio} · saldo ${deuda.saldo_actual}.",
-            )
-            return redirect("rrhh:rrhh_prestamo_nuevo")
-
-        importe = _parse_decimal(request.POST.get("importe"))
+        payload = request.POST.dict()
+        payload["fecha_deposito"] = payload.get("fecha_deposito") or None
+        datos = PrestamoSerializer(data=payload, context={"request": request})
         try:
-            quincenas = max(int(request.POST.get("num_quincenas", "1")), 1)
-        except (TypeError, ValueError):
-            quincenas = 1
-        descuento = (importe / Decimal(str(quincenas))).quantize(Decimal("0.01"))
-
-        prestamo = Prestamo.objects.create(
-            empleado_id=empleado_id,
-            concepto=request.POST.get("concepto", ""),
-            metodo_pago=request.POST.get("metodo_pago", Prestamo.METODO_TRANSFERENCIA),
-            fecha_solicitud=_parse_date(request.POST.get("fecha_solicitud")) or date.today(),
-            fecha_deposito=_parse_date(request.POST.get("fecha_deposito")),
-            importe=importe,
-            num_quincenas=quincenas,
-            descuento_quincenal=descuento,
-            saldo_actual=importe,
-            estado=Prestamo.ESTADO_SOLICITADO,
-            jefe_directo_id=request.POST.get("jefe_directo") or None,
-            creado_por=request.user,
-        )
-        notificar_prestamo_solicitado(prestamo, actor=request.user)
-        destino = f" Pendiente de autorización por {prestamo.jefe_directo.get_full_name() or prestamo.jefe_directo.username}." if prestamo.jefe_directo else " Pendiente de asignar/autorización de jefe."
-        messages.success(request, f"Préstamo {prestamo.folio} creado.{destino}")
-        return redirect("rrhh:rrhh_prestamo_detalle", pk=prestamo.pk)
-
-    empleados = Empleado.objects.filter(activo=True).order_by("nombre")
-    User = get_user_model()
-    autorizadores = User.objects.filter(is_active=True).order_by("first_name", "last_name", "username")
+            datos.is_valid(raise_exception=True)
+            empleado = datos.validated_data.get("empleado")
+            if not empleado or not empleados.filter(pk=empleado.pk).exists():
+                raise PermissionDenied("Empleado fuera de tu alcance de captura.")
+            prestamo = crear_solicitud_prestamo(
+                empleado=empleado,
+                actor=request.user,
+                concepto=datos.validated_data["concepto"],
+                metodo_pago=datos.validated_data["metodo_pago"],
+                importe=datos.validated_data["importe"],
+                num_quincenas=datos.validated_data["num_quincenas"],
+                fecha_deposito=datos.validated_data.get("fecha_deposito"),
+                fecha_solicitud=_parse_date(request.POST.get("fecha_solicitud")),
+            )
+        except ValidationError as exc:
+            errores = [str(mensaje) for valor in exc.detail.values()
+                       for mensaje in (valor if isinstance(valor, list) else [valor])]
+        else:
+            destino = "Dirección" if prestamo.estado == Prestamo.ESTADO_AUTORIZADO else "su jefe directo"
+            messages.success(request, f"Préstamo {prestamo.folio} creado. Pendiente de autorización de {destino}.")
+            return redirect("rrhh:rrhh_prestamo_detalle", pk=prestamo.pk)
     return render(
-        request,
-        "rrhh/prestamo_nuevo.html",
+        request, "rrhh/prestamo_nuevo.html",
         {
             "empleados": empleados,
-            "autorizadores": autorizadores,
             "metodos": Prestamo.METODO_CHOICES,
             "module_tabs": _module_tabs("prestamos", request.user),
+            "show_rrhh_tabs": can_view_rrhh(request.user),
+            "errores": errores,
+            "valores": request.POST,
         },
+        status=400 if errores else 200,
     )
 
 
@@ -226,7 +210,7 @@ def prestamo_detalle(request, pk):
             "can_manage_rrhh": can_manage_rrhh(request.user),
             "show_rrhh_tabs": can_view_rrhh(request.user),
             "can_authorize_jefe": _can_authorize_jefe(request.user, prestamo),
-            "can_approve_direccion": _can_approve_direccion(request.user),
+            "can_approve_direccion": can_autorizar_prestamo_direccion(request.user, prestamo),
         },
     )
 

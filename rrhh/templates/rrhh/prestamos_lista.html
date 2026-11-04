@@ -18,8 +18,10 @@
 
 <section class="loan-page">
   <div class="loan-actions">
-    {% if can_manage_rrhh %}
+    {% if can_capture_loans %}
     <a class="btn btn-primary" href="{% url 'rrhh:rrhh_prestamo_nuevo' %}">Nuevo préstamo</a>
+    {% endif %}
+    {% if can_manage_rrhh %}
     <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_quincena_cobros' %}">Cobros quincena</a>
     <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_importar_contpaq' %}">Importar CONTPAQ</a>
     {% endif %}
