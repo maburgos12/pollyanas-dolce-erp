@@ -29,7 +29,7 @@ Mostrar el mes completo de personal contra ventas, sin duplicar prestaciones, di
 
 ## Decisión
 
-Extender Planeación de personal existente con lectura de listas registradas y comparación fiscal, sin nuevas tablas, capturas, migraciones ni recálculos de nómina. Reutilizar destino_de para jefaturas y funciones de producción. Mantener los cierres históricos y sus contratos; aclarar alcance y enlazar desde el reporte mensual. JSON y CSV añaden datos, conservan columnas anteriores. No se cambian permisos.
+Extender Planeación de personal existente con lectura de listas registradas y comparación fiscal, sin nuevas tablas, capturas, migraciones ni recálculos de nómina. Reutilizar destino_de para jefaturas y funciones de producción. Mantener los cierres históricos y sus contratos; aclarar alcance y enlazar desde el reporte mensual. JSON y CSV añaden datos, conservan columnas anteriores. No se cambian permisos. El listado de RRHH muestra la etiqueta del puesto operativo existente cuando el descriptivo está vacío, sin copiarlo ni modificar el expediente.
 
 Consulta reproducible: inventario_fuentes_datos --term nomina; auditoría ORM de NominaPeriodo.fecha_fin de octubre, conceptos relacionados, expedientes por periodo y build_personnel_plan(date(2026,10,1)). Evidencia privada fuera del repositorio: Documents/Codex/2026-11-04/nomina-ventas/implementacion.
 

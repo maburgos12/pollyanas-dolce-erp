@@ -8,6 +8,18 @@ from rrhh.models import Empleado, NominaPeriodo, NominaLinea, NominaConceptoLine
 
 
 class PersonalRegistradoTests(TestCase):
+    def test_rrhh_muestra_funcion_existente_cuando_no_hay_descriptivo(self):
+        from rrhh.services_catalogos import puesto_operativo_choices
+        e=Empleado.objects.create(codigo='visible',nombre='Persona',departamento='VENTAS',
+            puesto_operativo='AUXILIAR_CAJAS')
+        self.client.force_login(get_user_model().objects.create_superuser('rrhh-test',password='test-only'))
+        response=self.client.get('/rrhh/empleados/')
+        expected=dict(puesto_operativo_choices())['AUXILIAR_CAJAS']
+        self.assertEqual(response.context['empleados'][0].puesto_presentacion,expected)
+        self.assertContains(response,f'<td class="cell-wrap">{expected}</td>',html=True)
+        e.refresh_from_db()
+        self.assertEqual(e.puesto,'')
+
     def test_dos_quincenas_despensa_y_funciones_conservan_total(self):
         from reportes.services_personal_registrado import leer_personal_registrado
         suc = Sucursal.objects.create(codigo='LAB', nombre='Matriz')
