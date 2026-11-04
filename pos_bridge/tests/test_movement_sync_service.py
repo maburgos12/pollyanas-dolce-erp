@@ -89,6 +89,11 @@ class FakeWasteExtractor:
         return list(self.rows)
 
 
+class RecoveringFakeWasteExtractor(FakeWasteExtractor):
+    def recover_omitted(self, *, rows):
+        return list(self.rows) if rows else []
+
+
 class FakeProductionExtractor:
     def __init__(self, rows):
         self.rows = rows
@@ -196,6 +201,34 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(job.result_summary["justification_warnings"], 1)
         self.assertEqual(PointWasteLine.objects.get(source_hash=waste_line.source_hash).justification, "Justificación original")
         self.assertEqual(MermaPOS.objects.get(source_hash=waste_line.source_hash).motivo, "Justificación original")
+
+    def test_full_waste_rerun_recovers_omitted_row_after_live_validation(self):
+        receta = Receta.objects.create(nombre="Merma omitida", codigo_point="OMIT-1", hash_contenido="waste-omitted")
+        line = FakeWasteLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            movement_external_id="1705214",
+            movement_at=datetime(2026, 10, 20, 20, 0),
+            responsible="Operación",
+            item_name=receta.nombre,
+            item_code="",
+            quantity=Decimal("3"),
+            unit="PZA",
+            unit_cost=Decimal("0"),
+            total_cost=Decimal("0"),
+            justification="Acreditada",
+            raw_payload={"details": []},
+            source_hash="waste-omitted-hash",
+        )
+        PointMovementSyncService(waste_extractor=FakeWasteExtractor([line])).run_waste_sync(
+            start_date=date(2026, 10, 1), end_date=date(2026, 10, 31)
+        )
+
+        job = PointMovementSyncService(waste_extractor=RecoveringFakeWasteExtractor([line])).run_waste_sync(
+            start_date=date(2026, 10, 1), end_date=date(2026, 10, 31)
+        )
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(PointWasteLine.objects.get(source_hash=line.source_hash).sync_job, job)
 
     def test_full_waste_rerun_rejects_missing_initial_day_row_without_cancellation(self):
         receta = Receta.objects.create(

@@ -124,6 +124,93 @@ class PointWasteExtractor:
                 session_stack=session_stack,
             )
 
+    def recover_omitted(self, *, rows: list) -> list[ExtractedWasteLine]:
+        grouped: dict[str, list] = {}
+        for row in rows:
+            grouped.setdefault(row.movement_external_id, []).append(row)
+        if not grouped:
+            return []
+
+        recovered: list[ExtractedWasteLine] = []
+        with ExitStack() as session_stack:
+            auth_session = self._create_auth_session(session_stack=session_stack)
+            for movement_id, existing_rows in grouped.items():
+                warnings = [{"path": self.LIST_PATH, "message": "Point omitió el movimiento del listado mensual."}]
+                justifications, auth_session = self._read_rows(
+                    auth_session=auth_session,
+                    path=self.JUSTIFICATION_PATH,
+                    params={"id_mov": movement_id},
+                    label=f"las justificaciones de la merma {movement_id}",
+                    session_stack=session_stack,
+                    allow_point_error=True,
+                    warnings=warnings,
+                )
+                details, auth_session = self._read_rows(
+                    auth_session=auth_session,
+                    path=self.DETAIL_PATH,
+                    params={"pk_movimiento": movement_id},
+                    label=f"el detalle de la merma {movement_id}",
+                    session_stack=session_stack,
+                )
+                expected = {row.source_hash: row for row in existing_rows}
+                current: dict[str, tuple[dict, object, object, object]] = {}
+                for index, detail in enumerate(details):
+                    item_name = str(detail.get("Articulo") or "").strip()
+                    quantity = decimal_from_value(detail.get("Cantidad"))
+                    unit_cost = decimal_from_value(detail.get("Costo_unitario"))
+                    total_cost = decimal_from_value(detail.get("Costo_total"))
+                    source_hash = deterministic_id("point_waste", movement_id, item_name, quantity, total_cost, index)
+                    current[source_hash] = (detail, quantity, unit_cost, total_cost)
+                if set(current) != set(expected):
+                    raise ExtractionError(
+                        "El detalle actual de una merma omitida por Point no coincide con el historial acreditado.",
+                        context={"movement_id": movement_id},
+                    )
+                justification_text = " | ".join(
+                    {
+                        str(item.get("Justificacion") or "").strip()
+                        for item in justifications
+                        if str(item.get("Justificacion") or "").strip()
+                    }
+                )
+                for source_hash, (detail, quantity, unit_cost, total_cost) in current.items():
+                    row = expected[source_hash]
+                    movement = (row.raw_payload or {}).get("movement") or {
+                        "PK_Movimiento": movement_id,
+                        "Fecha": row.movement_at.isoformat(),
+                        "Sucursal": row.branch.name,
+                        "Responsable": row.responsible,
+                    }
+                    raw_payload = {
+                        "movement": movement,
+                        "justifications": justifications,
+                        "details": details,
+                        "source_warnings": warnings,
+                    }
+                    recovered.append(
+                        ExtractedWasteLine(
+                            branch={
+                                "external_id": row.branch.external_id,
+                                "name": row.branch.name,
+                                "status": row.branch.status,
+                                "metadata": row.branch.metadata,
+                            },
+                            movement_external_id=movement_id,
+                            movement_at=row.movement_at,
+                            responsible=row.responsible,
+                            item_name=str(detail.get("Articulo") or "").strip(),
+                            item_code=row.item_code,
+                            quantity=quantity,
+                            unit=str(detail.get("Unidad") or "").strip(),
+                            unit_cost=unit_cost,
+                            total_cost=total_cost,
+                            justification=justification_text,
+                            raw_payload=raw_payload,
+                            source_hash=source_hash,
+                        )
+                    )
+        return recovered
+
     def _extract(self, *, start_date: date, end_date: date, branch_filter: str | None, session_stack: ExitStack) -> list[ExtractedWasteLine]:
         # Point can omit initial-day movements when queried with exact boundaries.
         # Calendar padding broadens discovery; only operational dates are emitted.

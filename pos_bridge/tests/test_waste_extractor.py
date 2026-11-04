@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -13,6 +14,7 @@ from django.utils import timezone as django_timezone
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.services.waste_extractor import PointWasteExtractor
 from pos_bridge.utils.exceptions import ExtractionError
+from pos_bridge.utils.helpers import deterministic_id
 
 
 class _FakeResponse:
@@ -231,6 +233,30 @@ class PointWasteExtractorBoundaryTests(SimpleTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].justification, "")
         self.assertEqual(rows[0].raw_payload["source_warnings"][0]["path"], "/Mermas/get_justificacion")
+
+    def test_recovers_omitted_persisted_movement_only_when_live_detail_matches(self, write_json):
+        movement = self._movement(1705214, "2026-10-20T19:01:00")
+        detail = json.loads(_FakeSession().get("https://point/Mermas/get_detalle").text)[0]
+        quantity = Decimal(str(detail["Cantidad"]))
+        total_cost = Decimal(str(detail["Costo_total"]))
+        source_hash = deterministic_id("point_waste", "1705214", detail["Articulo"], quantity, total_cost, 0)
+        branch = SimpleNamespace(external_id="CEDIS", name="CEDIS", status="ACTIVE", metadata={})
+        existing = SimpleNamespace(
+            movement_external_id="1705214",
+            source_hash=source_hash,
+            movement_at=datetime(2026, 10, 20, 19, 1, tzinfo=timezone.utc),
+            responsible="Operación",
+            item_code="",
+            branch=branch,
+            raw_payload={"movement": movement},
+        )
+        session = _TrackedSession([])
+
+        rows = self._extractor(session).recover_omitted(rows=[existing])
+
+        self.assertEqual([row.source_hash for row in rows], [source_hash])
+        self.assertEqual(rows[0].branch["external_id"], "CEDIS")
+        self.assertEqual(rows[0].raw_payload["source_warnings"][0]["path"], "/Mermas/get_mermas")
 
     def test_invalid_date_aborts_without_writing_partial_export(self, write_json):
         session = _TrackedSession([self._movement(1, "2026-09-27T19:01:00"), self._movement(2, "not-a-date")])
