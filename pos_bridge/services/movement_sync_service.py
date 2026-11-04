@@ -622,6 +622,7 @@ class PointMovementSyncService:
         ledger_created = 0
         ledger_updated = 0
         unresolved = 0
+        justification_warnings = 0
         for item in extracted_lines:
             branch = self._upsert_branch(item.branch)
             receta = self.matcher.resolve_receta(point_name=item.item_name)
@@ -629,6 +630,13 @@ class PointMovementSyncService:
             movement_at = item.movement_at
             if timezone.is_naive(movement_at):
                 movement_at = timezone.make_aware(movement_at, timezone.get_current_timezone())
+            source_warnings = item.raw_payload.get("source_warnings") or []
+            justification = item.justification
+            if source_warnings:
+                justification_warnings += 1
+                existing = PointWasteLine.objects.filter(source_hash=item.source_hash).only("justification").first()
+                if existing and existing.justification:
+                    justification = existing.justification
             defaults = {
                 "branch": branch,
                 "erp_branch": branch.erp_branch,
@@ -644,7 +652,7 @@ class PointMovementSyncService:
                 "unit": item.unit,
                 "unit_cost": item.unit_cost,
                 "total_cost": item.total_cost,
-                "justification": item.justification,
+                "justification": justification,
                 "source_endpoint": "/Mermas/get_mermas",
                 "raw_payload": item.raw_payload,
             }
@@ -678,6 +686,7 @@ class PointMovementSyncService:
             "mermas_updated": ledger_updated,
             "waste_lines_superseded": waste_lines_superseded,
             "mermas_superseded": mermas_superseded,
+            "justification_warnings": justification_warnings,
             "unmatched_items": unresolved,
         }
 

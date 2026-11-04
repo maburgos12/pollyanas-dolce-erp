@@ -40,6 +40,7 @@ class PointWasteExtractor:
     LIST_PATH = "/Mermas/get_mermas"
     DETAIL_PATH = "/Mermas/get_detalle"
     JUSTIFICATION_PATH = "/Mermas/get_justificacion"
+    CEDIS_BRANCH_FILTER = "8"
 
     def __init__(
         self,
@@ -72,7 +73,17 @@ class PointWasteExtractor:
                     time_module.sleep(min(2 ** (attempt - 1), 5))
         raise ExtractionError("No fue posible abrir una sesión de Point para consultar mermas.") from last_error
 
-    def _read_rows(self, *, auth_session, path: str, params: dict, label: str, session_stack: ExitStack):
+    def _read_rows(
+        self,
+        *,
+        auth_session,
+        path: str,
+        params: dict,
+        label: str,
+        session_stack: ExitStack,
+        allow_point_error: bool = False,
+        warnings: list[dict] | None = None,
+    ):
         attempts = max(1, int(getattr(self.settings, "retry_attempts", 1) or 1))
         for attempt in range(1, attempts + 1):
             try:
@@ -83,6 +94,10 @@ class PointWasteExtractor:
                 )
                 response.raise_for_status()
                 payload = json.loads(response.text)
+                if allow_point_error and isinstance(payload, dict) and payload.get("error") is True and payload.get("data") is None:
+                    if warnings is not None:
+                        warnings.append({"path": path, "message": str(payload.get("message") or "")})
+                    return [], auth_session
                 if not isinstance(payload, list) or any(not isinstance(item, dict) for item in payload):
                     raise ExtractionError(
                         f"Point devolvió {label} con formato inesperado.",
@@ -126,6 +141,19 @@ class PointWasteExtractor:
             label="el listado de mermas",
             session_stack=session_stack,
         )
+        if branch_filter is None:
+            cedis_movements, auth_session = self._read_rows(
+                auth_session=auth_session,
+                path=self.LIST_PATH,
+                params={
+                    "sucursal": self.CEDIS_BRANCH_FILTER,
+                    "fechaini": str(self._to_epoch_ms(query_start)),
+                    "fechafin": str(self._to_epoch_ms(query_end)),
+                },
+                label="el listado de mermas de CEDIS",
+                session_stack=session_stack,
+            )
+            movements.extend(cedis_movements)
 
         extracted: list[ExtractedWasteLine] = []
         raw_export = {
@@ -163,12 +191,15 @@ class PointWasteExtractor:
                 continue
             branch_name = str(movement.get("Sucursal") or movement.get("Sucursal_corto") or "").strip()
             responsible = str(movement.get("Responsable") or "").strip()
+            source_warnings: list[dict] = []
             justifications, auth_session = self._read_rows(
                 auth_session=auth_session,
                 path=self.JUSTIFICATION_PATH,
                 params={"id_mov": movement_id},
                 label=f"las justificaciones de la merma {movement_id}",
                 session_stack=session_stack,
+                allow_point_error=True,
+                warnings=source_warnings,
             )
             details, auth_session = self._read_rows(
                 auth_session=auth_session,
@@ -185,6 +216,8 @@ class PointWasteExtractor:
                 }
             )
             movement_export = {"movement": movement, "justifications": justifications, "details": details}
+            if source_warnings:
+                movement_export["source_warnings"] = source_warnings
             raw_export["movements"].append(movement_export)
 
             for index, detail in enumerate(details):
