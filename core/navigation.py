@@ -608,9 +608,9 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
         try:
             from rrhh.models import Prestamo
-            from rrhh.services_prestamos import prestamos_jefe_q
+            from rrhh.services_prestamos import prestamos_jefe_q, can_capturar_prestamos_equipo
 
-            tiene_prestamos_por_autorizar = Prestamo.objects.filter(
+            tiene_prestamos_por_autorizar = can_capturar_prestamos_equipo(user) or Prestamo.objects.filter(
                 prestamos_jefe_q(user),
                 estado=Prestamo.ESTADO_SOLICITADO,
             ).exists()
@@ -621,7 +621,7 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             best_match_len = max(best_match_len, match_len)
             mi_trabajo["items"].append(
                 {
-                    "label": "Préstamos por autorizar",
+                    "label": "Préstamos",
                     "url": "/rrhh/prestamos/",
                     "active": False,
                     "_match_len": match_len,

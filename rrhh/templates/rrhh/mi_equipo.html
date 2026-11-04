@@ -9,6 +9,7 @@
   <nav class="module-tabs rrhh-tabs" aria-label="Registros de mi equipo">
     <button type="button" class="module-tab active" data-recurso="permisos" aria-pressed="true">Permisos</button>
     <button type="button" class="module-tab" data-recurso="horas-extra" aria-pressed="false">Horas extra</button>
+    <a class="module-tab" href="{% url 'rrhh:rrhh_prestamos_lista' %}">Préstamos</a>
   </nav>
   <p id="equipo-status" role="status" aria-live="polite">Cargando registros…</p>
   <div class="equipo-toolbar"><h2 id="equipo-list-title">Permisos de mi equipo</h2><button type="button" class="btn btn-primary" id="equipo-nuevo" disabled>Crear permiso</button><button type="button" class="btn" id="equipo-recargar">Actualizar</button></div>

@@ -4663,8 +4663,8 @@ class RRHHViewsTests(TestCase):
             follow=True,
         )
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "no puede solicitar un nuevo préstamo")
+        self.assertEqual(resp.status_code, 400)
+        self.assertContains(resp, "prestamo vigente", status_code=400)
         self.assertEqual(Prestamo.objects.filter(empleado=empleado).count(), 1)
 
     def test_jefe_asignado_ve_y_autoriza_prestamo_en_su_bandeja(self):
@@ -4699,7 +4699,7 @@ class RRHHViewsTests(TestCase):
 
         resp_lista = self.client.get(reverse("rrhh:rrhh_prestamos_lista"))
         self.assertEqual(resp_lista.status_code, 200)
-        self.assertContains(resp_lista, "Préstamos por autorizar")
+        self.assertContains(resp_lista, "Por autorizar por mí")
         self.assertContains(resp_lista, "Por autorizar por mí")
         self.assertContains(resp_lista, prestamo.folio)
 
