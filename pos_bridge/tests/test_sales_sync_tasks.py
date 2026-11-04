@@ -24,6 +24,21 @@ from pos_bridge.utils.source_retry import source_error_metadata
 
 
 class PointSalesSyncTaskRoutingTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        patcher = patch(
+            "pos_bridge.tasks.run_monthly_product_closure._apply_monthly_automation_gates",
+            side_effect=lambda closure, **_kwargs: (
+                closure,
+                {
+                    "physical_counts": {"ready": True, "issues": []},
+                    "audit_refresh": {"ready": True, "status": "updated", "run_status": "READY"},
+                },
+            ),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_real_official_partial_timeout_retries_without_building_even_when_exhausted(self):
         branch = PointBranch.objects.create(external_id="partial-retry", name="Matriz")
         service = OfficialSalesBackfillService()
@@ -569,6 +584,55 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         self.assertEqual(result["automation_status"], "REVIEW")
         self.assertIn("production", result["failed_or_partial_sources"])
 
+    def test_monthly_closure_physical_gate_keeps_closure_reviewable_without_lock(self):
+        success = SimpleNamespace(id=1, status=PointSyncJob.STATUS_SUCCESS, result_summary={}, error_message="")
+        closure = SimpleNamespace(
+            id=104,
+            status="BUILT",
+            is_locked=False,
+            metadata={"validation": {"lock_ready": True}},
+            get_status_display=lambda: "Construido",
+        )
+
+        def blocked_gate(value, **_kwargs):
+            value.metadata = {
+                "validation": {
+                    "lock_ready": False,
+                    "blocking_issues": ["Conteos físicos: LEYVA sin conteo."],
+                    "automation_reviews": ["LEYVA sin conteo."],
+                }
+            }
+            return value, {
+                "physical_counts": {"ready": False, "issues": ["LEYVA sin conteo."]},
+                "audit_refresh": {"ready": True, "run_status": "READY"},
+            }
+
+        with (
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductoMonthClosure.objects.filter") as filter_mock,
+            patch("pos_bridge.tasks.run_monthly_product_closure.run_sales_history_sync", return_value=success),
+            patch("pos_bridge.tasks.run_monthly_product_closure.PointMovementSyncService") as movements,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
+            ),
+            patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._apply_monthly_automation_gates",
+                side_effect=blocked_gate,
+            ),
+        ):
+            filter_mock.return_value.order_by.return_value.first.return_value = None
+            movements.return_value.run_production_sync.return_value = success
+            movements.return_value.run_waste_sync.return_value = success
+            closure_service.return_value.build.return_value = closure
+
+            result = run_monthly_product_closure(month="2026-10", lock_after_build=True)
+
+        closure_service.return_value.lock.assert_not_called()
+        self.assertEqual(result["automation_status"], "REVIEW")
+        self.assertFalse(result["physical_counts"]["ready"])
+        self.assertIn("LEYVA sin conteo", result["automation_reviews"][0])
+
     def test_monthly_closure_transient_source_failure_defers_build_and_returns_retryable(self):
         source_refresh = [
             {
@@ -815,6 +879,21 @@ class PointSalesSyncTaskRoutingTests(TestCase):
 
 class MonthlyProductClosureMutexTests(TransactionTestCase):
     reset_sequences = True
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch(
+            "pos_bridge.tasks.run_monthly_product_closure._apply_monthly_automation_gates",
+            side_effect=lambda closure, **_kwargs: (
+                closure,
+                {
+                    "physical_counts": {"ready": True, "issues": []},
+                    "audit_refresh": {"ready": True, "status": "updated", "run_status": "READY"},
+                },
+            ),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     @staticmethod
     def _closure():

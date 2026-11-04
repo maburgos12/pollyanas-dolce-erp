@@ -28,8 +28,7 @@ class Command(BaseCommand):
             "--enable-monthly-product-closure",
             action="store_true",
             help=(
-                "Habilita explícitamente la construcción mensual de cierres Point. "
-                "El schedule nunca bloquea cierres automáticamente."
+                "Compatibilidad: el cierre mensual ya queda habilitado con candados automáticos."
             ),
         )
 
@@ -174,9 +173,9 @@ class Command(BaseCommand):
 
         monthly_closure_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="0",
-            hour="4",
+            hour="5",
             day_of_week="*",
-            day_of_month="5",
+            day_of_month="*",
             month_of_year="*",
             timezone=timezone_name,
         )
@@ -189,8 +188,8 @@ class Command(BaseCommand):
                 "task": "pos_bridge.monthly_product_closure",
                 "crontab": monthly_closure_cron,
                 "interval": None,
-                "kwargs": json.dumps({"lock_after_build": False}),
-                "enabled": bool(options.get("enable_monthly_product_closure")),
+                "kwargs": json.dumps({"lock_after_build": True}),
+                "enabled": True,
             },
         )
 

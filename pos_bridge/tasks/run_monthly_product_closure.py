@@ -3,10 +3,14 @@ from __future__ import annotations
 from calendar import monthrange
 from contextlib import contextmanager
 from datetime import date, timedelta
+from decimal import Decimal
 
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
+from core.branch_catalog import canonical_point_network_branch_qs
+from inventario.conteos_nocturna import conciliar_conteos_nocturnos
+from inventario.models_conteos import ConteoSucursal
 from pos_bridge.models import PointSyncJob
 from pos_bridge.utils.source_retry import source_error_metadata
 from pos_bridge.services.conversion_sync_service import sync_conversion_lines
@@ -15,6 +19,8 @@ from pos_bridge.services.point_account_session_lock import point_account_session
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError, ProductMonthClosureService
 from pos_bridge.tasks.run_sales_history_sync import run_sales_history_sync
 from recetas.models import ProductoMonthClosure
+from reportes.models import ProductInventoryAuditRun
+from reportes.services_inventory_audit_refresh import refresh_inventory_audit_month
 
 
 MONTHLY_PRODUCT_CLOSURE_LOCK_NAMESPACE = 1_347_901_003
@@ -171,6 +177,139 @@ def _inventory_authority(
     }
 
 
+def _physical_count_gate(month_end: date) -> dict[str, object]:
+    branches = list(canonical_point_network_branch_qs(month_end).only("id", "codigo", "nombre"))
+    counts = list(
+        ConteoSucursal.objects.filter(
+            fecha=month_end,
+            sucursal_id__in=[branch.id for branch in branches],
+            lineas__producto_id__isnull=False,
+        )
+        .exclude(estado="CANCELADO")
+        .select_related("sucursal")
+        .prefetch_related("lineas")
+        .distinct()
+    )
+    by_branch: dict[int, list[ConteoSucursal]] = {}
+    for count in counts:
+        by_branch.setdefault(count.sucursal_id, []).append(count)
+
+    issues: list[str] = []
+    branch_rows: list[dict[str, object]] = []
+    for branch in branches:
+        branch_counts = by_branch.get(branch.id, [])
+        if not branch_counts:
+            issues.append(f"{branch.codigo}: falta conteo físico de productos del {month_end:%d/%m/%Y}.")
+            branch_rows.append({"code": branch.codigo, "ready": False, "count_ids": [], "product_lines": 0})
+            continue
+
+        product_lines = 0
+        ready = True
+        reasons: list[str] = []
+        for count in branch_counts:
+            line_ids = [line.id for line in count.lineas.all() if line.producto_id]
+            product_lines += len(line_ids)
+            lines = dict((count.conciliacion or {}).get("lineas") or {})
+            if count.estado not in {"ENVIADO", "ACEPTADO"}:
+                ready = False
+                reasons.append(f"conteo {count.pk} está {count.estado}")
+                continue
+            for line_id in line_ids:
+                result = dict(lines.get(str(line_id)) or {})
+                if result.get("estado") != "CALCULADA" or result.get("diferencia") in (None, ""):
+                    ready = False
+                    reasons.append(f"conteo {count.pk} tiene líneas pendientes")
+                    break
+                try:
+                    difference = Decimal(str(result["diferencia"]))
+                except (ArithmeticError, TypeError, ValueError):
+                    ready = False
+                    reasons.append(f"conteo {count.pk} tiene una diferencia inválida")
+                    break
+                if difference != 0:
+                    ready = False
+                    reasons.append(f"conteo {count.pk} requiere reconteo")
+                    break
+        if product_lines <= 0:
+            ready = False
+            reasons.append("no contiene productos")
+        if not ready:
+            issues.append(f"{branch.codigo}: {'; '.join(dict.fromkeys(reasons))}.")
+        branch_rows.append(
+            {
+                "code": branch.codigo,
+                "ready": ready,
+                "count_ids": [count.pk for count in branch_counts],
+                "product_lines": product_lines,
+            }
+        )
+
+    return {
+        "ready": bool(branches) and not issues,
+        "operational_date": month_end.isoformat(),
+        "required_branch_count": len(branches),
+        "ready_branch_count": sum(bool(row["ready"]) for row in branch_rows),
+        "branches": branch_rows,
+        "issues": issues,
+    }
+
+
+def _audit_materialization_gate(month_start: date) -> dict[str, object]:
+    try:
+        refresh = refresh_inventory_audit_month(month_start)
+    except Exception as exc:  # the monthly run remains reviewable and retries on the next schedule
+        return {"ready": False, "status": "error", "run_status": "", "error": str(exc)}
+    run = ProductInventoryAuditRun.objects.filter(month=month_start).first()
+    run_status = run.status if run is not None else ""
+    ready = run_status == ProductInventoryAuditRun.Status.READY
+    return {
+        "ready": ready,
+        "status": str(refresh.get("status") or ""),
+        "run_status": run_status,
+        "run_id": run.pk if run is not None else None,
+        "error": "" if ready else "La auditoría visible todavía no está lista.",
+    }
+
+
+def _apply_monthly_automation_gates(
+    closure: ProductoMonthClosure,
+    *,
+    month_end: date,
+) -> tuple[ProductoMonthClosure, dict[str, object]]:
+    physical = _physical_count_gate(month_end)
+    audit = _audit_materialization_gate(closure.month_start)
+    with transaction.atomic():
+        closure = ProductoMonthClosure.objects.select_for_update().get(pk=closure.pk)
+        metadata = dict(closure.metadata or {})
+        validation = dict(metadata.get("validation") or {})
+        blocking = list(validation.get("blocking_issues") or [])
+        reviews = [item if isinstance(item, str) else str(item) for item in validation.get("automation_reviews") or []]
+        if not physical["ready"]:
+            blocking.extend(f"Conteos físicos: {issue}" for issue in physical["issues"])
+            reviews.extend(physical["issues"])
+        if not audit["ready"]:
+            blocking.append("La auditoría materializada de Producido vs Vendido no está lista.")
+            reviews.append(str(audit.get("error") or "Auditoría mensual pendiente."))
+        validation.update(
+            {
+                "blocking_issues": list(dict.fromkeys(blocking)),
+                "lock_ready": not blocking,
+                "physical_counts": physical,
+                "audit_materialization": audit,
+                "automation_reviews": list(dict.fromkeys(reviews)),
+            }
+        )
+        metadata["validation"] = validation
+        metadata["reservation_policy"] = {
+            "source": "crm.PickupReservation",
+            "treatment": "availability_only_not_sale",
+            "detail": "Las reservas reducen disponibilidad; sólo Point acredita la venta mensual.",
+        }
+        closure.metadata = metadata
+        closure.save(update_fields=["metadata", "updated_at"])
+    return closure, {"physical_counts": physical, "audit_refresh": audit}
+
+
 def _run_monthly_product_closure_locked(
     *,
     month: str | date | None = None,
@@ -206,6 +345,11 @@ def _run_monthly_product_closure_locked(
             "automation_reviews": list(validation.get("automation_reviews") or []),
             "retryable": False,
         }
+
+    try:
+        count_reconciliation = conciliar_conteos_nocturnos()
+    except Exception as exc:
+        count_reconciliation = {"procesados": 0, "calculados": 0, "pendientes": 0, "reintentar": True, "error": str(exc)}
 
     source_refresh = _refresh_month_sources(
         month_start=target_month,
@@ -244,6 +388,7 @@ def _run_monthly_product_closure_locked(
                 for step in source_refresh
                 if step.get("retryable")
             ],
+            "count_reconciliation": count_reconciliation,
             "retryable": True,
         }
 
@@ -256,6 +401,7 @@ def _run_monthly_product_closure_locked(
         approval_reason="scheduled_monthly_automation",
         approval_channel="celery_monthly_product_closure",
     )
+    closure, automation_evidence = _apply_monthly_automation_gates(closure, month_end=month_end)
     validation = dict((closure.metadata or {}).get("validation") or {})
     automation_reviews = list(validation.get("automation_reviews") or [])
     can_lock = (
@@ -303,6 +449,8 @@ def _run_monthly_product_closure_locked(
         "failed_or_partial_sources": failed_or_partial_sources,
         "automation_status": automation_status,
         "automation_reviews": list(dict.fromkeys(automation_reviews)),
+        "count_reconciliation": count_reconciliation,
+        **automation_evidence,
         "retryable": retryable,
     }
 
