@@ -19,6 +19,7 @@ from django.utils import timezone
 from conciliacion.models import CfdiSucursalResolucion, ImportacionBancaria
 from conciliacion.services.reglas_fiscales import (
     matriz_reglas_conciliacion,
+    es_reversion_comprobada,
     regla_para_movimiento,
     resumen_matriz_reglas,
 )
@@ -306,6 +307,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     mesa_ingresos = _mesa_ingresos_sucursal(inicio=inicio, fin=fin, movimientos_qs=movimientos_qs)
     resumen_ejecutivo = _resumen_ejecutivo_periodo(
         movimientos_abonos=abonos,
+        devoluciones=sum((r["banco_total"] for r in canales_comparativo if r["canal"] == "devoluciones"), Decimal("0")),
         movimientos_cargos=cargos,
         cargos_por_tipo=cargos_por_tipo,
         cfdi_emitidos=cfdi_emitidos,
@@ -372,6 +374,7 @@ def _resumen_ejecutivo_periodo(
     cfdi_emitidos: dict[str, Any],
     cfdi_recibidos: dict[str, Any],
     alcance_fiscal: dict[str, Any],
+    devoluciones: Decimal = Decimal("0"),
 ) -> dict[str, Any]:
     banco_abonos = movimientos_abonos["total"]
     banco_cargos = movimientos_cargos["total"]
@@ -388,7 +391,7 @@ def _resumen_ejecutivo_periodo(
         "banco_cargos_proveedores": cargos_proveedores["total"],
         "sat_ventas": sat_ventas,
         "sat_proveedores": sat_proveedores,
-        "diferencia_abonos_ventas": banco_abonos - sat_ventas,
+        "diferencia_abonos_ventas": banco_abonos - devoluciones - sat_ventas,
         "diferencia_cargos_proveedores": cargos_proveedores["total"] - sat_proveedores,
         "pagos_cobrados": alcance_fiscal["pagos_emitidos"]["total"],
         "pagos_proveedores": alcance_fiscal["pagos_recibidos"]["total"],
@@ -813,9 +816,13 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
         MovimientoBancario.CONCILIACION_TARJETA_CREDITO,
     }
     propios = {"conteo": 0, "total": Decimal("0.00")}
-    for descripcion, monto, tipo_conciliacion in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list(
-        "descripcion", "monto", "tipo_conciliacion"
-    ):
+    devoluciones = {"conteo": 0, "total": Decimal("0.00")}
+    for movimiento in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).select_related('movimiento_relacionado'):
+        if es_reversion_comprobada(movimiento):
+            devoluciones['conteo'] += 1
+            devoluciones['total'] += movimiento.monto
+            continue
+        descripcion, monto, tipo_conciliacion = movimiento.descripcion, movimiento.monto, movimiento.tipo_conciliacion
         # abonos clasificados como dinero propio (traspasos, disposiciones de credito,
         # pagos recibidos en tarjeta propia) no son ingresos de clientes
         if tipo_conciliacion in PROPIOS:
@@ -869,6 +876,12 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
                 "permite_match_directo": regla.permite_match_directo,
             }
         )
+    if devoluciones['conteo']:
+        rows.append({'canal': 'devoluciones', 'nombre': 'Devoluciones de transferencias comprobadas',
+            'banco_conteo': devoluciones['conteo'], 'banco_total': devoluciones['total'],
+            'sat_conteo': 0, 'sat_total': Decimal('0'), 'diferencia': Decimal('0'), 'estado': 'ok',
+            'metodo': 'Cargo y abono de la misma cuenta, importe y rastreo, ligados con soporte. No son ventas.',
+            'accion': 'Efecto neto cero con el cargo original', 'permite_match_directo': False})
     if propios["conteo"]:
         rows.append(
             {
@@ -893,7 +906,10 @@ def _mesa_ingresos_sucursal(*, inicio: datetime, fin: datetime, movimientos_qs) 
     sucursales_lookup = _sucursales_lookup(sucursales)
     rows: dict[tuple[str, str], dict[str, Any]] = {}
 
-    for descripcion, monto in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).values_list("descripcion", "monto"):
+    for movimiento in movimientos_qs.filter(tipo=MovimientoBancario.TIPO_ABONO).select_related('movimiento_relacionado'):
+        if es_reversion_comprobada(movimiento):
+            continue
+        descripcion, monto = movimiento.descripcion, movimiento.monto
         canal = _clasificar_canal_banco(descripcion)
         sucursal = _clasificar_sucursal_texto(descripcion, sucursales_lookup)
         row = _ingreso_row(rows, canal, sucursal)

@@ -227,7 +227,24 @@ def regla_para_forma_pago(
     return regla_por_codigo("PENDIENTE_CLASIFICAR")
 
 
+def es_reversion_comprobada(movimiento) -> bool:
+    """Un reverso exige soporte y vínculo recíproco; la palabra devolución no basta."""
+    if not getattr(movimiento, 'movimiento_relacionado_id', None):
+        return False
+    otro = movimiento.movimiento_relacionado
+    referencia = movimiento.extra_raw.get('referencia')
+    return bool(referencia and referencia == otro.extra_raw.get('referencia')
+        and movimiento.conciliado and otro.conciliado
+        and movimiento.tipo_conciliacion == otro.tipo_conciliacion == 'soporte'
+        and otro.movimiento_relacionado_id == movimiento.pk
+        and movimiento.cuenta_id == otro.cuenta_id
+        and movimiento.moneda == otro.moneda and movimiento.monto == otro.monto
+        and {movimiento.tipo, otro.tipo} == {'cargo', 'abono'})
+
+
 def regla_para_movimiento(movimiento) -> ReglaConciliacionFiscal:
+    if es_reversion_comprobada(movimiento):
+        return regla_por_codigo('TRASPASO_BALANCE')
     texto = _normalize_text(getattr(movimiento, "descripcion", ""))
     tipo = getattr(movimiento, "tipo", "")
     cuenta = getattr(movimiento, "cuenta", None)

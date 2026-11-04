@@ -566,3 +566,37 @@ def _minimal_text_pdf(lines: list[str]) -> bytes:
         ).encode("ascii")
     )
     return bytes(pdf)
+
+
+class ReversionTransferenciaTests(TestCase):
+    def setUp(self):
+        cuenta = CuentaBancaria.objects.create(banco='banbajio', nombre_display='FONSMA')
+        fecha = timezone.make_aware(datetime(2026, 10, 22, 16, 50))
+        common = dict(cuenta=cuenta, monto=Decimal('5000'), moneda='MXN',
+            fecha_transaccion=fecha, fecha_refresh=fecha, conciliado=True,
+            tipo_conciliacion='soporte', extra_raw={'referencia':'BB3058311013215'})
+        self.cargo = MovimientoBancario.objects.create(id_transaction='cargo-dev', tipo='cargo',
+            descripcion='ENVIO SPEI:PAGO GASOLINA', **common)
+        self.abono = MovimientoBancario.objects.create(id_transaction='abono-dev', tipo='abono',
+            descripcion='DEVOLUCION DE SPEI:PAGO GASOLINA', movimiento_relacionado=self.cargo, **common)
+        self.cargo.movimiento_relacionado = self.abono
+        self.cargo.save(update_fields=['movimiento_relacionado'])
+
+    def test_reverso_comprobado_no_genera_ingreso_ni_factura_de_cliente(self):
+        self.abono.refresh_from_db()
+        self.assertEqual(regla_para_movimiento(self.abono).codigo, 'TRASPASO_BALANCE')
+        d = resumen_periodo_conciliacion(year=2026, month=10)
+        canales = {r['canal']:r for r in d['canales_comparativo']}
+        self.assertEqual(canales['transferencia']['banco_total'], Decimal('0'))
+        self.assertEqual(canales['devoluciones']['banco_total'], Decimal('5000'))
+        self.assertEqual(d['resumen_ejecutivo']['banco_abonos'], Decimal('5000'))
+        self.assertEqual(d['resumen_ejecutivo']['diferencia_abonos_ventas'], Decimal('0'))
+        self.assertEqual(d['mesa_ingresos']['total_banco'], Decimal('0'))
+
+    def test_texto_devolucion_sin_vinculo_reciproco_no_excluye_abono(self):
+        self.cargo.movimiento_relacionado = None
+        self.cargo.save(update_fields=['movimiento_relacionado'])
+        self.abono.refresh_from_db()
+        self.assertEqual(regla_para_movimiento(self.abono).codigo, 'TRANSFERENCIA_CLIENTE')
+        d = resumen_periodo_conciliacion(year=2026, month=10)
+        self.assertEqual(d['mesa_ingresos']['total_banco'], Decimal('5000'))

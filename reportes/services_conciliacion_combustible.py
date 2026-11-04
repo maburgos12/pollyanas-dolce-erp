@@ -151,6 +151,7 @@ def conciliar_combustible(periodo: date) -> dict:
     from sat_client.models import CfdiDescargado
     from syncfy_client.models import MovimientoBancario
     from reportes.services_isn import RFC_EMPRESA
+    from conciliacion.services.reglas_fiscales import es_reversion_comprobada
 
     inicio = periodo.replace(day=1)
     fin = _mes_siguiente(inicio)
@@ -282,9 +283,7 @@ def conciliar_combustible(periodo: date) -> dict:
             movimiento_relacionado__isnull=False).select_related('movimiento_relacionado', 'cuenta'):
         cargo = p.movimiento_relacionado
         raw = cargo.extra_raw.get('raw', {})
-        if (isinstance(raw, dict) and raw.get('rfc_proveedor') in proveedores
-                and cargo.cuenta_id == p.cuenta_id and cargo.tipo == 'cargo' and cargo.monto == p.monto
-                and cargo.movimiento_relacionado_id == p.pk and cargo.conciliado):
+        if isinstance(raw, dict) and raw.get('rfc_proveedor') in proveedores and es_reversion_comprobada(p):
             devoluciones.append({'fecha': timezone.localtime(p.fecha_transaccion).date().isoformat(),
                 'importe': p.monto, 'referencia': p.extra_raw.get('referencia', ''), 'nota': p.nota_conciliacion})
     total_bitacora = sum((c.importe_total for c in registros), ZERO)

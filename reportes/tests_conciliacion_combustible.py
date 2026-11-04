@@ -225,7 +225,8 @@ class ConciliacionDocumentalCombustibleTests(TestCase):
         cuenta = CuentaBancaria.objects.create(banco='banbajio', nombre_display='FONSMA', numero_cuenta='0201')
         fecha = datetime(2026,9,22,12,tzinfo=ZoneInfo('America/Mazatlan'))
         common = dict(cuenta=cuenta, monto='5000', fecha_transaccion=fecha, fecha_refresh=fecha,
-                      conciliado=True, descripcion='PAGO GASOLINA', extra_raw={'raw':{'rfc_proveedor':'FAOR391222TTA'}})
+                      conciliado=True, tipo_conciliacion='soporte', descripcion='PAGO GASOLINA',
+                      extra_raw={'referencia':'BB3058311013215', 'raw':{'rfc_proveedor':'FAOR391222TTA'}})
         cargo = MovimientoBancario.objects.create(id_transaction='dev-cargo', tipo='cargo',
                                                   cfdi_relacionado=anticipo, **common)
         abono = MovimientoBancario.objects.create(id_transaction='dev-abono', tipo='abono',

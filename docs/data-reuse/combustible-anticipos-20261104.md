@@ -28,3 +28,5 @@ Los movimientos se incorporan como selección parcial de proveedor, no como cobe
 ## Validación y riesgos
 
 Inventario local: `inventario_fuentes_datos --term combustible --term anticipo --term bancario`. Consultas en producción por RFC, UUID y fechas; extractos reproducibles conservados fuera del repositorio en la carpeta de auditoría de DG. Tests: arrastre, aplicación sin doble conteo, XML incompleto, nota duplicada/otro proveedor y fecha bancaria distinta. Consumidor de código: tarea mensual `task_conciliar_combustible_mensual`; se valida su cuerpo sin enviar correo. La conciliación física continúa parcial.
+
+La comprobación de la mesa bancaria detectó que el reverso se clasificaba como ingreso por contener SPEI. Se reutiliza el vínculo recíproco con soporte, misma cuenta/moneda/importe/rastreo para excluirlo de ventas y mostrarlo como devolución comprobada. La regla se comparte entre la mesa, el comparativo y la clasificación fiscal; conserva el abono en los totales bancarios brutos.
