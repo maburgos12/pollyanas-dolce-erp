@@ -17,6 +17,7 @@ from sat_client.models import CfdiDescargado
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 from .models import ExpedienteCedulaIMSS, ExpedienteISN
 from .services_isn import extraer_isn_cfdi
+from .services_personal_registrado import leer_personal_registrado
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -174,6 +175,7 @@ def build_personnel_plan(cutoff=None):
                     if not descriptions or not all(
                         any(service in d for service in (
                             'COMISION', 'COMISIÓN', 'MANEJO DE CUENTA',
+                            'TARJETAS TITULAR',
                             'TARJETAS REPOSICION', 'TARJETAS REPOSICIÓN',
                             'CARGO POR ENVIO', 'CARGO POR ENVÍO'))
                         for d in descriptions
@@ -243,6 +245,7 @@ def build_personnel_plan(cutoff=None):
                 reference=reference, amount=monto,
             ))
 
+    registered = leer_personal_registrado(start, end)
     for row in rows.values():
         if not row['cfdis']:
             row['ordinary'] = row['extraordinary'] = None
@@ -262,6 +265,9 @@ def build_personnel_plan(cutoff=None):
                         if row['sales'] and row['documented'] is not None else None)
         row['target'] = money(row['sales'] * Decimal('.25')) if row['sales'] else None
         row['ceiling'] = money(row['sales'] * Decimal('.27')) if row['sales'] else None
+        row['registered'] = registered.get(row['month'])
+        row['payroll_difference'] = (row['ordinary'] + row['extraordinary'] - row['registered']['total']
+            if row['cfdis'] and row['registered'] else None)
 
     recent = [month_shift(end, n) for n in (-3, -2, -1)]
     policy = budget_policy([rows.get(m, {}).get('sales') for m in recent])
@@ -270,6 +276,20 @@ def build_personnel_plan(cutoff=None):
         .order_by('branch__name'))
     branch_months = list(sales.annotate(month=TruncMonth('sale_date')).values(
         'branch_id', 'month').annotate(amount=Sum('total_amount')))
+    branch_ids = {b['branch_id']: b['branch__erp_branch_id'] for b in branch_rows}
+    branch_sales = {}
+    for item in branch_months:
+        key = (item['month'], branch_ids[item['branch_id']])
+        branch_sales[key] = branch_sales.get(key, ZERO) + item['amount']
+    for month, registered_row in registered.items():
+        unclassified = {g['sucursal_id'] for g in registered_row['grupos']
+                        if g['destino'] == 'sin_clasificar'}
+        for group in registered_row['grupos']:
+            group['ventas'] = (branch_sales.get((month, group['sucursal_id']))
+                               if group['sucursal_id'] is not None else None)
+            group['porcentaje'] = (money(group['total'] / group['ventas'] * 100)
+                if group['ventas'] and group['destino'] == 'tienda'
+                and group['sucursal_id'] not in unclassified and registered_row['mes_cubierto'] else None)
     for branch in branch_rows:
         recent_sales = []
         for month in recent:
@@ -286,7 +306,8 @@ def build_personnel_plan(cutoff=None):
         item['contract_label'] = dict(Empleado.CONTRATO_CHOICES).get(item['tipo_contrato'], item['tipo_contrato'])
     sources = [dict(month=r['month'], **s) for r in rows.values() for s in r['sources']]
     return dict(cutoff=end - timedelta(days=1), start=start, generated_at=timezone.now(),
-                months=list(rows.values()), policy=policy, recent=recent, branches=branch_rows,
+                months=list(rows.values()), selected=rows[month_shift(end, -1)],
+                policy=policy, recent=recent, branches=branch_rows,
                 staff=staff, people=sum(s['people'] for s in staff), sources=sources,
                 unparsed=unparsed, rfc=RFC,
                 sales_total=sum((r['sales'] or ZERO for r in rows.values()), ZERO),

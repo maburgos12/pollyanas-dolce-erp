@@ -1804,7 +1804,10 @@ def empleados(request):
         open_employee_pk if any(empleado.pk == open_employee_pk for empleado in empleados_page) else None
     )
     hoy = timezone.localdate()
+    puestos_catalogo = dict(puesto_operativo_choices())
     for empleado in empleados_page:
+        empleado.puesto_presentacion = empleado.puesto or puestos_catalogo.get(
+            empleado.puesto_operativo, empleado.puesto_operativo)
         empleado.jornada_historial = list(empleado.jornadas_asignadas.all())
         empleado.jornada_vigente = next((asignacion for asignacion in empleado.jornada_historial if (
             asignacion.fecha_inicio <= hoy and (asignacion.fecha_fin is None or asignacion.fecha_fin >= hoy)
