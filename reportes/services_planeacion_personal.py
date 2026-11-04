@@ -175,6 +175,7 @@ def build_personnel_plan(cutoff=None):
                     if not descriptions or not all(
                         any(service in d for service in (
                             'COMISION', 'COMISIÓN', 'MANEJO DE CUENTA',
+                            'TARJETAS TITULAR',
                             'TARJETAS REPOSICION', 'TARJETAS REPOSICIÓN',
                             'CARGO POR ENVIO', 'CARGO POR ENVÍO'))
                         for d in descriptions

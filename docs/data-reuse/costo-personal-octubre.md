@@ -15,7 +15,7 @@ Mostrar el mes completo de personal contra ventas, sin duplicar prestaciones, di
 | Puesto y destino | Empleado, CatalogoFuncionOperativa | RRHH | ID estable, puesto_operativo, nivel | Cinco fichas verificadas: Call center y encargado corregidos con bitácora; Paula capturó CAJAS en Alondra/Carlos y AUXILIAR_CAJAS en Leonor, confirmado por DG y releído en producción | Organigrama, costeo |
 | Percepciones fiscales | sat_client.CfdiDescargado | SAT | UUID vigente, RFC emisor, FechaFinalPago | Octubre: 138 CFDI, 729484.92, incluyendo ordinarias y extraordinarias | Planeación existente |
 | Cargas patronales | ExpedienteCedulaIMSS, ExpedienteISN | Conciliación aplicada | periodo, registro patronal, tipo | Sin expediente aplicado de octubre en consulta; septiembre IMSS id13 | Planeación existente |
-| Servicio vales | CfdiDescargado | SAT | UUID de servicio, distinto de carga de saldo | Octubre 875.02 | Planeación existente |
+| Servicio vales | CfdiDescargado | SAT | UUID de servicio, distinto de carga de saldo | Octubre 2789.02: incluye 1914.00 de TARJETAS TITULAR antes omitidas | Planeación existente |
 | Venta | official_point_sales_rows_for_range | Sincronización oficial Point | licencia, producto, día | Octubre 3691537.84 con impuestos | Planeación existente |
 
 ## Alias y equivalencias

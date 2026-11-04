@@ -178,6 +178,17 @@ class PersonnelPlanTests(TestCase):
                          fecha_emision=datetime(2026, 8, 15, tzinfo=tz.utc))
         self.assertEqual(build_personnel_plan()['months'][-1]['fees'], D(464))
 
+    def test_tarjetas_titular_son_costo_del_servicio_no_carga_de_saldo(self, _):
+        self.invoice('tarjetas',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+            '<c:Concepto Descripcion="TARJETAS TITULAR" Importe="1650"/>'
+            '</c:Conceptos></c:Comprobante>', tipo_cfdi='recibido',tipo_comprobante='I',
+            rfc_emisor='EDENRED',nombre_emisor='EDENRED MEXICO',rfc_receptor=RFC,
+            total=D('1914.00'),fecha_emision=datetime(2026,8,1,12,tzinfo=tz.utc))
+        result=build_personnel_plan()
+        self.assertEqual(result['selected']['fees'],D('1914.00'))
+        self.assertEqual(result['unparsed'],[])
+
     def test_isn_uses_obligation_period(self, _):
         self.add_complete_non_isn_components(7)
         xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
