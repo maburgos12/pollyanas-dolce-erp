@@ -44,6 +44,7 @@ class RRHHEmpleadosView(_RRHHBaseView):
         q = (request.query_params.get("q") or "").strip()
         activo_raw = (request.query_params.get("activo") or "").strip().lower()
         area = (request.query_params.get("area") or "").strip()
+        departamento = (request.query_params.get("departamento") or "").strip()
         sucursal = (request.query_params.get("sucursal") or "").strip()
         sucursal_id = (request.query_params.get("sucursal_id") or "").strip()
         sin_sucursal = (request.query_params.get("sin_sucursal") or "").strip()
@@ -56,6 +57,8 @@ class RRHHEmpleadosView(_RRHHBaseView):
             qs = Empleado.objects.all()  # rrhh-allow-inactive-history: endpoint administrativo explicito
         else:
             qs = Empleado.objects.filter(activo=True)
+        if departamento:
+            qs = qs.filter(departamento__iexact=departamento)
         if area:
             qs = qs.filter(area__iexact=area)
         # Filtrado canónico por FK (FASE 2). `sucursal_id` es la vía preferida; `sucursal`
@@ -117,10 +120,13 @@ class RRHHEmpleadosSinAsignarView(_RRHHBaseView):
             return Response({"detail": "No tienes permisos para consultar RRHH."}, status=status.HTTP_403_FORBIDDEN)
 
         area = (request.query_params.get("area") or "").strip()
+        departamento = (request.query_params.get("departamento") or "").strip()
         # Pendiente = sin vínculo canónico por id (incluye los que tienen texto pero
         # aún sin FK). Fuente única de "por asignar".
         qs = Empleado.objects.filter(activo=True, sucursal_ref__isnull=True)
-        if area:
+        if departamento:
+            qs = qs.filter(departamento__iexact=departamento)
+        elif area:
             qs = qs.filter(area__iexact=area)
         else:
             qs = qs.filter(area__in=["VENTAS", "PRODUCCION"])

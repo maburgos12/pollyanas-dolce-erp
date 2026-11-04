@@ -6,6 +6,16 @@ from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriod
 
 
 class RRHHEmpleadoSerializer(serializers.ModelSerializer):
+    departamento = serializers.CharField(read_only=True)
+    puesto_operativo = serializers.CharField(read_only=True)
+    puesto_presentacion = serializers.SerializerMethodField()
+
+    def get_puesto_presentacion(self, obj):
+        from rrhh.services_catalogos import etiquetas_puestos, puesto_presentacion
+        if not hasattr(self, "_etiquetas_puestos"):
+            self._etiquetas_puestos = etiquetas_puestos()
+        return puesto_presentacion(obj, self._etiquetas_puestos)
+
     # Fuente canónica de sucursal por id (FASE 1/2). `sucursal` (texto) es legacy/display.
     sucursal_ref = serializers.IntegerField(source="sucursal_ref_id", read_only=True)
     sucursal_ref_nombre = serializers.CharField(source="sucursal_ref.nombre", read_only=True, default="")
@@ -21,6 +31,9 @@ class RRHHEmpleadoSerializer(serializers.ModelSerializer):
             "nss",
             "area",
             "puesto",
+            "departamento",
+            "puesto_operativo",
+            "puesto_presentacion",
             "tipo_contrato",
             "fecha_ingreso",
             "salario_diario",

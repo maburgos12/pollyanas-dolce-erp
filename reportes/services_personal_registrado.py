@@ -39,13 +39,15 @@ def leer_personal_registrado(start, end):
         else:
             row['pendientes'].append(f'Línea {line.pk}: percepciones sin conciliación de conceptos.')
         department = line.departamento_snapshot
-        function = emp.puesto_operativo
+        function = emp._clave_funcion(emp.puesto_operativo)
         default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
-            'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'sin_clasificar'),
+            'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'ventas_pendiente'),
             'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
             'RRHH': 'administracion', 'LOGISTICA': 'logistica'}.get(department, 'sin_clasificar')
         destination = destino_de(emp.nivel_organizacional, function, predeterminado=default).lower()
-        if destination == 'sin_clasificar':
+        if emp._clave_funcion(emp.nivel_organizacional) not in ('JEFATURA', 'DIRECCION'):
+            destination = {'LIMPIEZA': 'limpieza', 'ALMACEN': 'almacen'}.get(function, destination)
+        if destination in ('sin_clasificar', 'ventas_pendiente'):
             row['pendientes'].append(f'Línea {line.pk}: función pendiente de clasificar en RRHH.')
         key = (line.sucursal_snapshot_id, destination)
         group = row['grupos'].setdefault(key, dict(sucursal_id=line.sucursal_snapshot_id,
@@ -62,9 +64,29 @@ def leer_personal_registrado(start, end):
             row['pendientes'].append('Los periodos registrados no cubren todos los días del mes.')
         row['periodos'] = list(row['periodos'].values())
         row['grupos'] = list(row['grupos'].values())
+        sucursales = {}
+        row['otros_costos'] = []
         for group in row['grupos']:
+            if group['destino'] in ('tienda', 'ventas_pendiente'):
+                branch = sucursales.setdefault(group['sucursal_id'], dict(sucursal_id=group['sucursal_id'],
+                    sucursal=group['sucursal'], personas=set(), percepciones=Decimal(0),
+                    despensa=Decimal(0), total=Decimal(0), puestos_pendientes=0))
+                branch['personas'].update(group['personas'])
+                if group['destino'] == 'ventas_pendiente':
+                    branch['puestos_pendientes'] += len(group['personas'])
+                for field in ('percepciones', 'despensa', 'total'):
+                    branch[field] += group[field]
+            else:
+                row['otros_costos'].append(group)
             group['personas'] = len(group['personas'])
             group['destino_label'] = {'tienda': 'Personal de tienda', 'logistica': 'Logística',
-                'administracion': 'Administración', 'produccion': 'Producción', 'cedis': 'CEDIS',
-                'call_center': 'Call center', 'sin_clasificar': 'Sin función registrada'}[group['destino']]
+                'administracion': 'Administración', 'produccion': 'Producción', 'cedis': 'Cuartos fríos',
+                'call_center': 'Call center', 'limpieza': 'Limpieza', 'almacen': 'Almacén',
+                'ventas_pendiente': 'Ventas · puesto específico pendiente',
+                'sin_clasificar': 'Departamento o función pendiente'}[group['destino']]
+        row['sucursales_ventas'] = sorted(sucursales.values(), key=lambda b: b['sucursal'])
+        for branch in row['sucursales_ventas']:
+            branch['personas'] = len(branch['personas'])
+        row['total_ventas'] = sum((b['total'] for b in row['sucursales_ventas']), Decimal(0))
+        row['total_otros'] = sum((g['total'] for g in row['otros_costos']), Decimal(0))
     return rows

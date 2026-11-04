@@ -283,13 +283,18 @@ def build_personnel_plan(cutoff=None):
         branch_sales[key] = branch_sales.get(key, ZERO) + item['amount']
     for month, registered_row in registered.items():
         unclassified = {g['sucursal_id'] for g in registered_row['grupos']
-                        if g['destino'] == 'sin_clasificar'}
+                        if g['destino'] in ('sin_clasificar', 'ventas_pendiente')}
         for group in registered_row['grupos']:
             group['ventas'] = (branch_sales.get((month, group['sucursal_id']))
                                if group['sucursal_id'] is not None else None)
             group['porcentaje'] = (money(group['total'] / group['ventas'] * 100)
                 if group['ventas'] and group['destino'] == 'tienda'
                 and group['sucursal_id'] not in unclassified and registered_row['mes_cubierto'] else None)
+    for month, registered_row in registered.items():
+        for branch in registered_row['sucursales_ventas']:
+            branch['ventas'] = branch_sales.get((month, branch['sucursal_id'])) if branch['sucursal_id'] else None
+            branch['porcentaje'] = (money(branch['total'] / branch['ventas'] * 100)
+                if branch['ventas'] and registered_row['mes_cubierto'] else None)
     for branch in branch_rows:
         recent_sales = []
         for month in recent:

@@ -63,7 +63,7 @@ class PersonalRegistradoTests(TestCase):
         self.assertEqual(r['total'],D(110))
         self.assertEqual(r['despensa'],D(0))
         self.assertFalse(r['mes_cubierto'])
-        self.assertEqual(r['grupos'][0]['destino'],'sin_clasificar')
+        self.assertEqual(r['grupos'][0]['destino'],'ventas_pendiente')
         self.assertTrue(r['pendientes'])
 
     @patch('reportes.services_planeacion_personal.timezone.localdate', return_value=date(2026,11,4))
@@ -102,3 +102,21 @@ class PersonalRegistradoTests(TestCase):
         r=leer_personal_registrado(date(2026,10,1),date(2026,11,1))[date(2026,10,1)]
         self.assertEqual(r['total'],D(100))
         self.assertTrue(r['pendientes'])
+
+    def test_sucursal_con_puesto_pendiente_y_apoyos_concilia_sin_inventar_cajas(self):
+        from reportes.services_personal_registrado import leer_personal_registrado
+        suc = Sucursal.objects.create(codigo='MES', nombre='Sucursal')
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2026,10,1),fecha_fin=date(2026,10,31),estatus='PAGADA')
+        people = [('VENTAS','CAJAS'),('VENTAS',''),('ADMINISTRACION','LIMPIEZA'),('ADMINISTRACION','ALMACEN')]
+        for i, (dep, fun) in enumerate(people):
+            e = Empleado.objects.create(nombre=str(i), departamento=dep, puesto_operativo=fun, sucursal_ref=suc)
+            line = NominaLinea.objects.create(periodo=period,empleado=e,salario_base=100)
+            NominaConceptoLinea.objects.create(linea=line,tipo='PERCEPCION',codigo_concepto='1',nombre='Sueldo',importe=100)
+        row = leer_personal_registrado(date(2026,10,1),date(2026,11,1))[date(2026,10,1)]
+        self.assertEqual(row['sucursales_ventas'][0]['personas'], 2)
+        self.assertEqual(row['sucursales_ventas'][0]['puestos_pendientes'], 1)
+        self.assertEqual(row['total_ventas'], D(200))
+        self.assertEqual(row['total_otros'], D(200))
+        self.assertEqual(row['total'], row['total_ventas'] + row['total_otros'])
+        self.assertEqual({g['destino'] for g in row['otros_costos']}, {'limpieza','almacen'})
+        self.assertEqual(Empleado.objects.filter(departamento='VENTAS',puesto_operativo='').count(), 1)

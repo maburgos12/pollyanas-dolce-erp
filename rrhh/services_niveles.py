@@ -37,3 +37,11 @@ def empleado_es_liderazgo(empleado: Empleado | None, *, departamento: str = "") 
         return True
     puesto = f"{empleado.puesto_operativo or ''} {empleado.puesto or ''}".upper()
     return "JEFATURA" in puesto or "JEFE" in puesto or "ENCARG" in puesto
+
+
+def jefes_organizacionales():
+    # Dirección puede tener equipo sin estar en la plantilla de nómina activa.
+    return Empleado.objects.filter(liderazgo_q()).filter(
+        Q(activo=True) | Q(nivel_organizacional=Empleado.NIVEL_DIRECCION,
+                          colaboradores_directos__activo=True)
+    ).distinct()

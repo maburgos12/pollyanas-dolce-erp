@@ -107,7 +107,7 @@ from .services_identidad import (
 )
 from .services.lista_raya import importar_lista_raya_nomina
 from .services_personnel_normalization import build_personnel_normalization_plan
-from .services_niveles import jefatura_q, liderazgo_q
+from .services_niveles import jefatura_q, liderazgo_q, jefes_organizacionales
 from .services_permisos import (
     can_authorize_direccion,
     can_resolver_permiso_jefe,
@@ -294,12 +294,12 @@ def _resolver_jefe_directo_desde_post(post_data, organizacion: dict, empleado: E
     jefe_pk = _safe_int(jefe_id)
     if jefe_pk is None:
         raise ValidationError("Selecciona un jefe directo valido.")
-    qs = Empleado.objects.filter(pk=jefe_pk, activo=True).filter(liderazgo_q())
+    qs = jefes_organizacionales().filter(pk=jefe_pk)
     if empleado:
         qs = qs.exclude(pk=empleado.pk)
     jefe = qs.first()
     if not jefe:
-        raise ValidationError("El jefe directo debe ser una persona activa con nivel de liderazgo.")
+        raise ValidationError("El jefe directo debe tener liderazgo activo o ser la dirección ya vinculada al equipo.")
     departamento = (organizacion.get("departamento") or "").strip().upper()
     jefe_departamento = (jefe.departamento or "").strip().upper()
     if departamento and jefe_departamento != departamento and jefe.nivel_organizacional != Empleado.NIVEL_DIRECCION:
@@ -1804,10 +1804,10 @@ def empleados(request):
         open_employee_pk if any(empleado.pk == open_employee_pk for empleado in empleados_page) else None
     )
     hoy = timezone.localdate()
-    puestos_catalogo = dict(puesto_operativo_choices())
+    from rrhh.services_catalogos import etiquetas_puestos, puesto_presentacion
+    puestos_catalogo = etiquetas_puestos()
     for empleado in empleados_page:
-        empleado.puesto_presentacion = empleado.puesto or puestos_catalogo.get(
-            empleado.puesto_operativo, empleado.puesto_operativo)
+        empleado.puesto_presentacion = puesto_presentacion(empleado, puestos_catalogo)
         empleado.jornada_historial = list(empleado.jornadas_asignadas.all())
         empleado.jornada_vigente = next((asignacion for asignacion in empleado.jornada_historial if (
             asignacion.fecha_inicio <= hoy and (asignacion.fecha_fin is None or asignacion.fecha_fin >= hoy)
@@ -2015,7 +2015,7 @@ def empleados(request):
         "nivel_organizacional_values": NIVEL_ORGANIZACIONAL_VALUES,
         "tipo_personal_choices": Empleado.TIPO_PERSONAL_CHOICES,
         "bono_esquemas": BonoEsquema.objects.filter(activo=True).order_by("nombre"),
-        "empleados_jefes": Empleado.objects.filter(activo=True).filter(liderazgo_q()).order_by("departamento", "nombre"),
+        "empleados_jefes": jefes_organizacionales().order_by("departamento", "nombre"),
         "usuarios_erp": _usuarios_erp_disponibles_rrhh(),
         "sucursales_app": Sucursal.objects.filter(activa=True).order_by("nombre"),
         "motivo_baja_choices": EmpleadoBaja.MOTIVO_CHOICES,
@@ -2764,10 +2764,15 @@ def organizacion_ch(request):
         raise PermissionDenied("No tienes permisos para ver organización de Capital Humano")
 
     empleados = (
-        Empleado.objects.select_related("jefe_directo", "usuario_erp")
+        Empleado.objects.select_related("jefe_directo", "usuario_erp", "sucursal_ref")
         .filter(activo=True)
         .order_by("departamento_origen", "departamento", "jefe_directo__nombre", "nombre")
     )
+    from rrhh.services_catalogos import etiquetas_puestos, puesto_presentacion
+    etiquetas = etiquetas_puestos()
+    for empleado in empleados:
+        empleado.puesto_presentacion = puesto_presentacion(empleado, etiquetas)
+        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_operativo or "Puesto pendiente")
     departamentos = (
         empleados.values("departamento")
         .annotate(
@@ -2799,7 +2804,10 @@ def organizacion_ch(request):
         if jefe_activo
         else Empleado.objects.none()
     )
-    sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(jefatura_q())
+    for empleado in equipo_jefatura:
+        empleado.puesto_presentacion = puesto_presentacion(empleado, etiquetas)
+        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_operativo or "Puesto pendiente")
+    sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(nivel_organizacional="DIRECCION")
     identity_map = _identity_map_context(limit=80)
     reglamento = ReglamentoLaboral.objects.filter(estado=ReglamentoLaboral.ESTADO_VIGENTE).first()
     return render(

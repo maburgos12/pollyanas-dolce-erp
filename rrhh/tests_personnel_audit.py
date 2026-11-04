@@ -223,6 +223,7 @@ class PersonnelNormalizationPlanTests(TestCase):
         self.assertNotIn("separar_grupos_repartidor", actions_without_group)
 
     def test_command_outputs_markdown_table_and_json(self):
+        Empleado.objects.create(nombre="Puesto pendiente", departamento="VENTAS")
         out = io.StringIO()
         call_command("plan_personnel_normalization", "--limit", "5", stdout=out)
         text = out.getvalue()

@@ -150,7 +150,7 @@
               <tr>
                 <th>Código</th>
                 <th>Colaborador</th>
-                <th>Área / división</th>
+                <th>Área anterior</th>
                 <th>Puesto operativo</th>
                 <th>Sucursal</th>
                 <th>Bonos</th>
@@ -160,10 +160,10 @@
               {% for empleado in equipo_jefatura %}
                 <tr>
                   <td>{{ empleado.codigo|default:"-" }}</td>
-                  <td><strong>{{ empleado.nombre }}</strong><br><span class="org-muted">{{ empleado.puesto|default:"Sin puesto descriptivo" }}</span></td>
+                  <td><strong>{{ empleado.nombre }}</strong><br><span class="org-muted">{{ empleado.puesto_presentacion }}</span></td>
                   <td>{{ empleado.area|default:"-" }}</td>
-                  <td>{{ empleado.puesto_operativo|default:"-" }}</td>
-                  <td>{{ empleado.sucursal|default:"-" }}</td>
+                  <td>{{ empleado.funcion_presentacion }}</td>
+                  <td>{{ empleado.sucursal_display|default:"Sin sucursal" }}</td>
                   <td>
                     {% if empleado.participa_bonos_ventas %}<span class="org-badge">Ventas</span>{% endif %}
                     {% if empleado.participa_bonos_produccion %}<span class="org-badge">Producción</span>{% endif %}
@@ -232,7 +232,7 @@
             <th>Empleado</th>
             <th>Origen</th>
             <th>Adscripción</th>
-            <th>Área / división</th>
+            <th>Área anterior</th>
             <th>Puesto</th>
             <th>Puesto operativo</th>
             <th>Jefe directo</th>
@@ -249,10 +249,10 @@
             <td>{{ empleado.get_departamento_origen_display|default:empleado.departamento_origen|default:"-" }}</td>
             <td>{{ empleado.get_departamento_display|default:empleado.departamento|default:"-" }}</td>
             <td>{{ empleado.area|default:"-" }}</td>
-            <td>{{ empleado.puesto|default:"-" }}</td>
-            <td>{{ empleado.puesto_operativo|default:"-" }}</td>
+            <td>{{ empleado.puesto_presentacion }}</td>
+            <td>{{ empleado.funcion_presentacion }}</td>
             <td>{% if empleado.jefe_directo %}{{ empleado.jefe_directo.nombre }}{% else %}<span class="org-muted">Sin jefe directo</span>{% endif %}</td>
-            <td>{{ empleado.sucursal|default:"-" }}</td>
+            <td>{{ empleado.sucursal_display|default:"Sin sucursal" }}</td>
             <td>{{ empleado.get_tipo_personal_display }}</td>
             <td>
               {% if empleado.participa_bonos_ventas %}<span class="org-badge">Ventas</span>{% endif %}
