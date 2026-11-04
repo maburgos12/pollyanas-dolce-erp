@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% load static humanize %}
+{% block title %}Corregir combustible · {{ carga.bitacora.folio }}{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'logistica/combustible.css' %}?v=20261104-1">{% endblock %}
+{% block content %}
+<div class="pd-page-gutters combustible-editor">
+  <a href="{% url 'logistica:bitacoras_lista' %}">← Volver a Bitácoras</a>
+  <h1>Corregir registro de combustible</h1>
+  <p>Bitácora <strong>{{ carga.bitacora.folio }}</strong> · {{ carga.unidad.codigo }} · {{ carga.fecha_registro|date:"d/m/Y H:i" }}</p>
+  <p>Capturado por <strong>{{ carga.repartidor }}</strong>. Revisa la foto antes de cambiar los datos.</p>
+  <div class="combustible-editor-grid">
+    <section class="pd-work-panel combustible-panel" aria-labelledby="ticket-title">
+      <h2 id="ticket-title">Ticket original</h2>
+      {% if carga.foto_ticket %}
+      <a href="{{ carga.foto_ticket.url }}" target="_blank" rel="noopener"><img class="combustible-foto" src="{{ carga.foto_ticket.url }}" alt="Ticket original de la carga #{{ carga.pk }}. Abrir para ampliar."></a>
+      {% endif %}
+      <p>Auditoría: <strong>{{ carga.get_auditoria_estado_display }}</strong></p>
+      {% for motivo in carga.auditoria_resumen %}<p>{{ motivo }}</p>{% endfor %}
+    </section>
+    <section class="pd-work-panel combustible-panel" aria-labelledby="correccion-title">
+      <h2 id="correccion-title">Datos corregidos</h2>
+      <p>Actualmente: <strong>${{ carga.importe_total|floatformat:2|intcomma }} MXN</strong> · {{ carga.litros }} L.</p>
+      <form method="post">
+        {% csrf_token %}{{ form.revision }}
+        {% if form.non_field_errors %}<div role="alert" class="combustible-error">{{ form.non_field_errors }}</div>{% endif %}
+        {% for field in form.visible_fields %}
+        <div class="combustible-field">
+          {{ field.label_tag }}{{ field }}
+          {% if field.errors %}<div role="alert" class="combustible-error" id="{{ field.auto_id }}_error">{{ field.errors }}</div>{% endif %}
+        </div>
+        {% endfor %}
+        <p>Al guardar, conservaremos el historial y avisaremos a {{ carga.repartidor }}. El aviso dejará de aparecer cuando pulse “Entendido”.</p>
+        <button class="btn btn-primary" type="submit">Guardar corrección y avisar</button>
+      </form>
+    </section>
+  </div>
+  <section class="pd-work-panel combustible-panel" aria-labelledby="historial-title">
+    <h2 id="historial-title">Historial de correcciones</h2>
+    {% for evento in historial %}
+    <article class="combustible-history">
+      <h3>{{ evento.timestamp|date:"d/m/Y H:i" }} · {{ evento.user.get_full_name|default:evento.user.username }}</h3>
+      <p>Importe: ${{ evento.payload.antes.importe_total }} → ${{ evento.payload.despues.importe_total }} MXN.<br>Litros: {{ evento.payload.antes.litros }} → {{ evento.payload.despues.litros }} L.</p>
+      <p>Motivo: {{ evento.payload.motivo }}</p>
+    </article>
+    {% empty %}<p>No hay correcciones registradas.</p>{% endfor %}
+  </section>
+</div>
+{% endblock %}

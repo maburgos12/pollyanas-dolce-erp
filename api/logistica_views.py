@@ -22,6 +22,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 from core.access import can_manage_logistica, can_manage_submodule, can_view_logistica, can_view_module, can_view_submodule
 from core.audit import log_event
+from core.models import Notificacion
+from logistica.views_combustible import AVISO_CORRECCION
 from crm.models import PedidoCliente
 from logistica.services_reportes_repetidos import (
     buscar_reporte_abierto_equivalente,
@@ -324,6 +326,25 @@ class LogisticaSessionTokenView(_LogisticaBaseView):
 
         refresh = RefreshToken.for_user(user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)}, status=status.HTTP_200_OK)
+
+
+class LogisticaAvisosCombustibleView(_LogisticaBaseView):
+    def get(self, request):
+        if _is_pwa_preview_request(request) or getattr(request, 'preview_actor', None):
+            return Response([])
+        avisos = Notificacion.objects.filter(usuario=request.user, objeto_tipo=AVISO_CORRECCION, leida=False).order_by('pk')
+        response = Response(list(avisos.values('id', 'titulo', 'mensaje')))
+        response['Cache-Control'] = 'private, no-store'
+        return response
+
+
+class LogisticaAvisoCombustibleConfirmarView(_LogisticaBaseView):
+    def post(self, request, pk):
+        if getattr(request, 'preview_actor', None):
+            raise DRFPermissionDenied('La vista previa no puede confirmar avisos.')
+        aviso = get_object_or_404(Notificacion, pk=pk, usuario=request.user, objeto_tipo=AVISO_CORRECCION)
+        Notificacion.objects.filter(pk=aviso.pk, leida=False).update(leida=True, leido_en=timezone.now())
+        return Response({'confirmado': True})
 
 
 class LogisticaMiPerfilView(_LogisticaBaseView):

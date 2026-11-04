@@ -1582,6 +1582,7 @@
   <body>
     {% include "operacion/_lucide_sprite.html" %}
     <div id="app"></div>
+    {% include "logistica/_avisos_combustible.html" with iniciar_avisos=False %}
     <script src="{% static 'logistica/pwa/offline_queue_compat.js' %}?v=route-control-v63-carga-tramos-consolidada"></script>
     <script>
       const API = "/api/logistica";
@@ -2664,6 +2665,7 @@
         state.token = "";
         state.refreshToken = "";
         state.perfil = null;
+        document.querySelector(".combustible-aviso")?.close();
         sessionStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(ACCESS_TOKEN_KEY);
         localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -2850,6 +2852,10 @@
         state.perfil = normalizePerfil(raw);
         state.tutorialCarga.abierto = Boolean(raw?.mostrar_tutorial_carga_sucursal);
         state.tutorialCarga.paso = 0;
+        const usuarioAviso = state.perfil?.username;
+        if (!state.previewReadOnly) {
+          window.mostrarAvisosCombustible(apiFetch, () => state.perfil?.username === usuarioAviso && !state.previewReadOnly).catch(() => {});
+        }
         purgeRutaTrackingQueue();
         purgeOfflineMutationQueue();
         flushOfflineMutationQueue().catch(() => {});
@@ -5721,7 +5727,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v95-evidencias-network-only", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v95-evidencias-network-only-combustible-correccion-20261104", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

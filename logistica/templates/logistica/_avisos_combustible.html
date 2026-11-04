@@ -1,0 +1,3 @@
+{% load static %}
+<link rel="stylesheet" href="{% static 'logistica/combustible.css' %}?v=20261104-1">
+<script src="{% static 'logistica/avisos_combustible.js' %}?v=20261104-1" data-csrf="{{ csrf_token }}" data-iniciar="{{ iniciar_avisos|yesno:'true,false' }}"></script>

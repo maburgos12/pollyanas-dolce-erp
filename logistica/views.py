@@ -3768,6 +3768,7 @@ def reporte_crear(request):
 
 @login_required
 def bitacoras_lista(request):
+    from .views_combustible import puede_corregir_combustible
     if not can_view_submodule(request.user, "logistica", "bitacoras"):
         raise PermissionDenied("No tienes permisos para ver bitácoras de Logística")
 
@@ -3809,6 +3810,7 @@ def bitacoras_lista(request):
         "logistica/bitacoras_lista.html",
         {
             "module_tabs": _module_tabs("bitacoras", request.user),
+            "puede_corregir_combustible": puede_corregir_combustible(request.user) and not getattr(request, "preview_actor", None),
             "bitacoras": bitacoras,
             "bitacoras_page": page,
             "combustible_total": combustible_total,
