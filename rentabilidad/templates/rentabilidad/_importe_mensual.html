@@ -1,0 +1,1 @@
+{% load humanize %}{% if valor != None and valor != "" %}<span{% if valor < 0 %} class="rm-neg"{% endif %}>${{ valor|floatformat:2|intcomma }}</span>{% else %}<span class="rm-na">—</span>{% endif %}

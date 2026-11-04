@@ -111,19 +111,19 @@ class ReporteMensualConsolidadoTests(TestCase):
     def test_variacion_yoy_contra_mismo_mes_anio_anterior(self):
         reporte = build_reporte_mensual_consolidado(hasta=date(2026, 6, 1), meses=12)
         fila = self._fila(reporte, 2026, 6)
-        self.assertEqual(fila["yoy"]["ingresos"], Decimal("85.00"))
-        self.assertEqual(fila["yoy"]["nomina_total"], Decimal("100.00"))
-        self.assertEqual(fila["yoy"]["utilidad_neta"], Decimal("86.00"))
+        self.assertIsNone(fila["yoy"]["ingresos"])  # Cambió el perímetro de sucursales.
+        self.assertIsNone(fila["yoy"]["nomina_total"])
+        self.assertIsNone(fila["yoy"]["utilidad_neta"])
 
         # Mes sin base del año anterior → YoY None
         fila_sin_base = self._fila(reporte, 2026, 5)
         self.assertIsNone(fila_sin_base["yoy"]["ingresos"])
 
-    def test_mes_sin_datos_aparece_en_cero(self):
+    def test_mes_sin_datos_no_inventa_ceros(self):
         reporte = build_reporte_mensual_consolidado(hasta=date(2026, 6, 1), meses=12)
         fila = self._fila(reporte, 2025, 12)
-        self.assertEqual(fila["ingresos"], Decimal("0.00"))
-        self.assertEqual(fila["utilidad_neta"], Decimal("0.00"))
+        self.assertIsNone(fila["ingresos"])
+        self.assertIsNone(fila["utilidad_neta"])
         self.assertIsNone(fila["nomina_pct_ventas"])
 
     def test_desglose_por_sucursal_incluye_sin_sucursal(self):
@@ -157,7 +157,7 @@ class ReporteMensualConsolidadoTests(TestCase):
         junio = [f for f in payload["filas"] if f["periodo"] == "2026-06-01"][0]
         self.assertEqual(junio["ingresos"], "148000.00")
         self.assertEqual(junio["horas_extra"], "900.00")
-        self.assertEqual(junio["yoy"]["ingresos"], "85.00")
+        self.assertIsNone(junio["yoy"]["ingresos"])
 
     def test_comando_formato_csv_con_detalle(self):
         salida = StringIO()
@@ -170,6 +170,27 @@ class ReporteMensualConsolidadoTests(TestCase):
         contenido = salida.getvalue()
         self.assertIn("2026-06,TOTAL,98000.00", contenido)
         self.assertIn("Centro", contenido)
+
+    def test_no_source_with_previous_year_does_not_report_minus_100(self):
+        reporte = build_reporte_mensual_consolidado(hasta=date(2027, 6, 1), meses=1)
+        fila = reporte["filas"][0]
+        self.assertIsNone(fila["ingresos"])
+        self.assertEqual(fila["alcance"], "SIN_DATOS")
+        self.assertIsNone(fila["yoy"]["ingresos"])
+
+    def test_missing_payroll_source_is_not_zero_or_added_to_result(self):
+        from .services_reporte_mensual import _fila_mes
+        fila = _fila_mes(date(2026,6,1), {1: {"nombre":"A", "ingresos":Decimal("100"),
+            "nomina":None, "utilidad":Decimal("30")}}, {1: Decimal("12")})
+        self.assertIsNone(fila["nomina"])
+        self.assertIsNone(fila["nomina_pct_ventas"])
+        self.assertEqual(fila["utilidad_neta"], Decimal("30"))
+        self.assertEqual(fila["horas_extra"], Decimal("12"))
+
+    def test_same_branch_same_basis_keeps_real_yoy(self):
+        reporte = build_reporte_mensual_consolidado(hasta=date(2026, 6, 1), meses=1, sucursal_id=self.suc_a.pk)
+        self.assertEqual(reporte["filas"][0]["yoy"]["ingresos"], Decimal("22.50"))
+
 
 
 class ReporteMensualViewTests(TestCase):
@@ -200,7 +221,9 @@ class ReporteMensualViewTests(TestCase):
         response = self.client.get(reverse("rentabilidad_reporte_mensual"), {"hasta": "2026-06"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Reporte mensual consolidado")
-        self.assertContains(response, "Nómina total")
+        self.assertContains(response, "Resultado operativo")
+        self.assertContains(response, "PE integral mensual")
+        self.assertNotContains(response, "Nómina total")
 
     def test_export_json(self):
         self.client.force_login(self.dg)
