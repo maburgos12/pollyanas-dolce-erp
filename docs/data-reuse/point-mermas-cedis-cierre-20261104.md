@@ -23,7 +23,7 @@ Recuperar para el cierre mensual todas las líneas de merma que Point registra p
 
 ## Decisión de diseño
 
-Extender el extractor existente con una consulta complementaria al filtro Point `8` sólo cuando se sincroniza el conjunto completo y deduplicar con el `source_hash` ya existente. Si únicamente `/Mermas/get_justificacion` devuelve el error explícito de Point, conservar cantidad y detalle, registrar la advertencia en `raw_payload` y preservar cualquier justificación anterior. Los listados, fechas, detalles y cantidades mantienen validación estricta. No se crea una segunda captura ni se modifica inventario.
+Extender el extractor existente con una consulta complementaria al filtro Point `8` sólo cuando se sincroniza el conjunto completo y deduplicar con el `source_hash` ya existente. Si el listado mensual omite un movimiento ya acreditado, releer su detalle por `PK_Movimiento` y conservarlo únicamente cuando todos sus hashes coincidan con el historial; cualquier diferencia sigue bloqueando la sincronización. Si únicamente `/Mermas/get_justificacion` devuelve el error explícito de Point, conservar cantidad y detalle, registrar la advertencia en `raw_payload` y preservar cualquier justificación anterior. Los listados, fechas, detalles y cantidades mantienen validación estricta. No se crea una segunda captura ni se modifica inventario.
 
 Consultas reproducibles: `python manage.py inventario_fuentes_datos --term merma --term CEDIS`; consultas acotadas de `PointWasteLine`, `PointBranch` y jobs de octubre en producción.
 

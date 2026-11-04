@@ -218,6 +218,20 @@ class PointMovementSyncService:
             },
         )
 
+    def _recover_omitted_waste_lines(self, *, start_date: date, end_date: date, lines: list) -> list:
+        recover = getattr(self.waste_extractor, "recover_omitted", None)
+        if recover is None:
+            return lines
+        current_tz = timezone.get_current_timezone()
+        start_at = timezone.make_aware(datetime.combine(start_date, datetime.min.time()), current_tz)
+        end_at = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), datetime.min.time()), current_tz)
+        omitted = list(
+            PointWasteLine.objects.select_related("branch")
+            .filter(movement_at__gte=start_at, movement_at__lt=end_at)
+            .exclude(source_hash__in={line.source_hash for line in lines})
+        )
+        return [*lines, *recover(rows=omitted)]
+
     def _point_inventory_location(self, branch: PointBranch | None) -> str | None:
         if branch is None:
             return None
@@ -987,6 +1001,8 @@ class PointMovementSyncService:
                     end_date=end_date,
                     branch_filter=branch_filter,
                 )
+                if not branch_filter:
+                    lines = self._recover_omitted_waste_lines(start_date=start_date, end_date=end_date, lines=lines)
             summary = self.persist_waste_lines(sync_job, lines)
             return self._mark_success(sync_job, summary)
         except PosBridgeError as exc:
