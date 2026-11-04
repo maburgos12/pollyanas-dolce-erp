@@ -164,6 +164,39 @@ class PointMovementSyncServiceTests(TestCase):
         self.assertEqual(merma.fuente, PointMovementSyncService.WASTE_SOURCE)
         self.assertEqual(merma.responsable_texto, "Alondra Alvarado")
 
+    def test_waste_warning_preserves_existing_justification(self):
+        receta = Receta.objects.create(nombre="Producto CEDIS", codigo_point="CEDIS-1", hash_contenido="waste-warning")
+        waste_line = FakeWasteLine(
+            branch={"external_id": "CEDIS", "name": "CEDIS", "status": "ACTIVE", "metadata": {}},
+            movement_external_id="1712749",
+            movement_at=datetime(2026, 10, 30, 20, 0),
+            responsible="Operación",
+            item_name=receta.nombre,
+            item_code="",
+            quantity=Decimal("1"),
+            unit="PZA",
+            unit_cost=Decimal("10"),
+            total_cost=Decimal("10"),
+            justification="Justificación original",
+            raw_payload={"details": [], "justifications": []},
+            source_hash="waste-warning-hash",
+        )
+        service = PointMovementSyncService(waste_extractor=FakeWasteExtractor([waste_line]))
+        service.run_waste_sync(start_date=date(2026, 10, 1), end_date=date(2026, 10, 31))
+        warning_line = replace(
+            waste_line,
+            justification="",
+            raw_payload={"details": [], "justifications": [], "source_warnings": [{"path": "/Mermas/get_justificacion"}]},
+        )
+        job = PointMovementSyncService(waste_extractor=FakeWasteExtractor([warning_line])).run_waste_sync(
+            start_date=date(2026, 10, 1), end_date=date(2026, 10, 31)
+        )
+
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(job.result_summary["justification_warnings"], 1)
+        self.assertEqual(PointWasteLine.objects.get(source_hash=waste_line.source_hash).justification, "Justificación original")
+        self.assertEqual(MermaPOS.objects.get(source_hash=waste_line.source_hash).motivo, "Justificación original")
+
     def test_full_waste_rerun_rejects_missing_initial_day_row_without_cancellation(self):
         receta = Receta.objects.create(
             nombre="Pastel reemplazo mensual",

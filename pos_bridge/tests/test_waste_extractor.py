@@ -203,6 +203,35 @@ class PointWasteExtractorBoundaryTests(SimpleTestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(len([url for url, _ in session.calls if url.endswith("/get_detalle")]), 1)
 
+    def test_unfiltered_extract_supplements_cedis_without_duplicating_movements(self, write_json):
+        general = self._movement(1, "2026-09-27T19:01:00")
+        cedis = dict(self._movement(2, "2026-09-27T20:01:00"), Sucursal="CEDIS", Sucursal_corto="CEDIS")
+        session = _TrackedSession(lambda params: [general, cedis] if params["sucursal"] == "8" else [general])
+
+        rows = self._extractor(session).extract(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual([row.movement_external_id for row in rows], ["1", "2"])
+        list_filters = [params["sucursal"] for url, params in session.calls if url.endswith("/get_mermas")]
+        self.assertEqual(list_filters, ["null", "8"])
+
+    def test_explicit_point_justification_error_keeps_detail_with_warning(self, write_json):
+        movement = self._movement(1, "2026-09-27T19:01:00")
+        session = _TrackedSession([movement])
+        original_get = session.get
+
+        def get(url, params=None, timeout=None):
+            if url.endswith("/get_justificacion"):
+                session.calls.append((url, params))
+                return _FakeResponse({"error": True, "message": "initial catalog excede el límite", "data": None})
+            return original_get(url, params=params, timeout=timeout)
+
+        session.get = get
+        rows = self._extractor(session).extract(start_date=date(2026, 9, 27), end_date=date(2026, 9, 27))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].justification, "")
+        self.assertEqual(rows[0].raw_payload["source_warnings"][0]["path"], "/Mermas/get_justificacion")
+
     def test_invalid_date_aborts_without_writing_partial_export(self, write_json):
         session = _TrackedSession([self._movement(1, "2026-09-27T19:01:00"), self._movement(2, "not-a-date")])
         with self.assertRaises(Exception) as raised:
