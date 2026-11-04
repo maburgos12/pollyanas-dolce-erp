@@ -90,6 +90,14 @@ class PrestamosEquipoTests(TestCase):
         self.assertEqual(r.data['estado'], Prestamo.ESTADO_SOLICITADO)
         self.assertEqual(self.api.post(reverse('rrhh:prestamo-autorizar-jefe', args=[r.data['id']])).status_code, 403)
 
+    def test_jefa_ve_acceso_sin_prestamos_pendientes(self):
+        from core.navigation import build_nav_groups
+
+        self.assertFalse(Prestamo.objects.exists())
+        grupos = build_nav_groups(self.jefe, '/dashboard/')
+        trabajo = next(g for g in grupos if g['key'] == 'mi_trabajo')
+        self.assertIn('/rrhh/prestamos/', [i['url'] for i in trabajo['items']])
+
     def test_empleado_solicita_para_si_y_no_para_otros(self):
         self.assertEqual(self.crear(self.personal, empleado=self.ajeno.pk).status_code, 403)
         r = self.crear(self.personal)

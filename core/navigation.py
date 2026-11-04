@@ -608,9 +608,9 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             )
         try:
             from rrhh.models import Prestamo
-            from rrhh.services_prestamos import prestamos_jefe_q, can_capturar_prestamos_equipo
+            from rrhh.services_prestamos import prestamos_jefe_q
 
-            tiene_prestamos_por_autorizar = can_capturar_prestamos_equipo(user) or Prestamo.objects.filter(
+            tiene_prestamos_por_autorizar = (tiene_equipo and empleado_actual.activo) or Prestamo.objects.filter(
                 prestamos_jefe_q(user),
                 estado=Prestamo.ESTADO_SOLICITADO,
             ).exists()
