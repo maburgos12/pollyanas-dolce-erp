@@ -160,3 +160,80 @@ class ConciliacionDocumentalCombustibleTests(TestCase):
         self.assertIn('— parcial',mail.call_args.kwargs['subject'])
         self.assertIn('ANTICIPOS FACTURADOS: $4,000.00',mail.call_args.kwargs['message'])
         self.assertNotIn('posible consumo directo',mail.call_args.kwargs['message'])
+
+    def relacionado(self, refs, **kwargs):
+        c = self.factura(**kwargs)
+        relaciones = '<cfdi:CfdiRelacionados TipoRelacion="07">' + ''.join(
+            f'<cfdi:CfdiRelacionado UUID="{u}"/>' for u in refs) + '</cfdi:CfdiRelacionados>'
+        c.xml_raw = c.xml_raw.replace('<cfdi:Conceptos>', relaciones + '<cfdi:Conceptos>')
+        c.save(update_fields=['xml_raw'])
+        return c
+
+    def test_arrastre_y_aplicacion_sin_duplicar_nota_ni_inventar_canje(self):
+        anterior = self.factura(clave='84111506', descripcion='Anticipo', importe='3000',
+            fecha_emision=datetime(2026,8,31,12,tzinfo=ZoneInfo('America/Mazatlan')))
+        previo = self.relacionado([anterior.uuid], importe='600',
+            fecha_emision=datetime(2026,8,31,13,tzinfo=ZoneInfo('America/Mazatlan')))
+        self.relacionado([previo.uuid], tipo_comprobante='E', clave='84111506',
+            descripcion='Aplicacion de anticipo', importe='600',
+            fecha_emision=datetime(2026,8,31,14,tzinfo=ZoneInfo('America/Mazatlan')))
+        nuevo = self.factura(clave='84111506', descripcion='Anticipo', importe='4000')
+        consumo = self.relacionado([anterior.uuid, nuevo.uuid], importe='6400')
+        self.relacionado([consumo.uuid], tipo_comprobante='E', clave='84111506',
+                         descripcion='Aplicacion de anticipo', importe='6400')
+        datos = conciliar_combustible(self.periodo)
+        circuito = datos['circuitos'][0]
+        self.assertEqual(circuito['arrastre_documental'], Decimal('2400'))
+        self.assertEqual(circuito['aplicaciones_mes'], Decimal('6400'))
+        self.assertEqual(circuito['residual_documental'], Decimal('0'))
+        self.assertEqual(datos['total_facturado']['DIESEL'], Decimal('6400'))
+        self.assertIsNone(datos['saldo_vales'])
+        self.assertNotIn('Solicitar estado de cuenta de gasolinera', render_conciliacion_texto(datos))
+
+    def test_relacion_incompleta_o_nota_duplicada_no_cierra_saldo(self):
+        anticipo = self.factura(clave='84111506', descripcion='Anticipo', importe='4000')
+        consumo = self.relacionado([anticipo.uuid], importe='4000')
+        self.assertIsNone(conciliar_combustible(self.periodo)['circuitos'][0]['residual_documental'])
+        for _ in range(2):
+            self.relacionado([consumo.uuid], tipo_comprobante='E', clave='84111506',
+                             descripcion='Aplicacion de anticipo', importe='4000')
+        self.assertIsNone(conciliar_combustible(self.periodo)['circuitos'][0]['residual_documental'])
+
+    def test_nota_de_otro_proveedor_no_confirma_aplicacion(self):
+        anticipo = self.factura(clave='84111506', descripcion='Anticipo', importe='4000')
+        consumo = self.relacionado([anticipo.uuid], importe='4000')
+        self.relacionado([consumo.uuid], tipo_comprobante='E', clave='84111506',
+                         descripcion='Aplicacion de anticipo', importe='4000', rfc_emisor='OTRO123456ABC')
+        self.assertFalse(conciliar_combustible(self.periodo)['aplicaciones'][0]['confirmada'])
+
+    def test_pago_vinculado_no_exige_fecha_de_factura_ni_cuenta_pago_como_consumo(self):
+        from syncfy_client.models import CuentaBancaria, MovimientoBancario
+        anticipo = self.factura(clave='84111506', descripcion='Anticipo', importe='4000')
+        cuenta = CuentaBancaria.objects.create(banco='banbajio', nombre_display='FONSMA', numero_cuenta='0201')
+        fecha = datetime(2026,9,13,12,tzinfo=ZoneInfo('America/Mazatlan'))
+        MovimientoBancario.objects.create(id_transaction='prueba-anticipo', cuenta=cuenta,
+            descripcion='FACTURA GASOLINA', monto='4000', tipo='cargo', fecha_transaccion=fecha,
+            fecha_refresh=fecha, cfdi_relacionado=anticipo, conciliado=True)
+        datos = conciliar_combustible(self.periodo)
+        self.assertEqual(datos['total_pagos_anticipos'], Decimal('4000'))
+        self.assertEqual(datos['pagos_anticipos'][0]['fecha'], '2026-09-13')
+        self.assertEqual(datos['total_facturado']['DIESEL'], Decimal('0'))
+
+    def test_devolucion_no_es_pago_de_anticipo(self):
+        from syncfy_client.models import CuentaBancaria, MovimientoBancario
+        anticipo = self.factura(clave='84111506', descripcion='Anticipo', importe='5000')
+        cuenta = CuentaBancaria.objects.create(banco='banbajio', nombre_display='FONSMA', numero_cuenta='0201')
+        fecha = datetime(2026,9,22,12,tzinfo=ZoneInfo('America/Mazatlan'))
+        common = dict(cuenta=cuenta, monto='5000', fecha_transaccion=fecha, fecha_refresh=fecha,
+                      conciliado=True, tipo_conciliacion='soporte', descripcion='PAGO GASOLINA',
+                      extra_raw={'referencia':'BB3058311013215', 'raw':{'rfc_proveedor':'FAOR391222TTA'}})
+        cargo = MovimientoBancario.objects.create(id_transaction='dev-cargo', tipo='cargo',
+                                                  cfdi_relacionado=anticipo, **common)
+        abono = MovimientoBancario.objects.create(id_transaction='dev-abono', tipo='abono',
+                                                  movimiento_relacionado=cargo, **common)
+        cargo.movimiento_relacionado = abono
+        cargo.save(update_fields=['movimiento_relacionado'])
+        datos = conciliar_combustible(self.periodo)
+        self.assertEqual(datos['total_pagos_anticipos'], Decimal('0'))
+        self.assertEqual(len(datos['devoluciones']), 1)
+        self.assertIn('efecto neto $0.00', render_conciliacion_texto(datos))

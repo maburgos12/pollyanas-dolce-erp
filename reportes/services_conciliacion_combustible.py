@@ -73,10 +73,76 @@ def _leer_documento(cfdi):
                        and total_xml == cfdi.total)
         return {'conceptos': conceptos, 'consistente': consistente,
                 'serie': raiz.get('Serie', ''), 'folio': raiz.get('Folio', ''),
+                'aplica_anticipos': [x.get('UUID', '').upper() for g in raiz
+                                      if _nombre(g) == 'CfdiRelacionados' and g.get('TipoRelacion') == '07'
+                                      for x in g if _nombre(x) == 'CfdiRelacionado'],
                 'relaciones': [dict(e.attrib) for e in raiz.iter()
                                if _nombre(e) in ('CfdiRelacionados', 'CfdiRelacionado')]}
     except (ET.ParseError, InvalidOperation, ValueError, KeyError):
         return None
+
+
+def _circuito_anticipos(leidos, inicio, fin, proveedores):
+    """Reconstruir relaciones explícitas; nunca repartir una aplicación con FIFO."""
+    documentos = {}
+    for c, d in leidos:
+        if d and c.moneda == 'MXN' and c.rfc_emisor in proveedores:
+            documentos[c.uuid.upper()] = {**d, 'uuid': c.uuid.upper(), 'total': c.total,
+                'fecha': timezone.localtime(c.fecha_emision).date(), 'rfc': c.rfc_emisor,
+                'tipo': c.tipo_comprobante, 'factura': d['serie'] + d['folio']}
+    anticipos = {u: d for u, d in documentos.items() if d['tipo'] == 'I'
+                 and d['consistente'] and d['conceptos']
+                 and all('ANTICIPO' in x['descripcion'].upper() for x in d['conceptos'])}
+    notas = defaultdict(list)
+    for d in documentos.values():
+        if (d['tipo'] == 'E' and d['consistente'] and len(d['aplica_anticipos']) == 1
+                and d['conceptos'] and all('ANTICIPO' in x['descripcion'].upper() for x in d['conceptos'])):
+            notas[d['aplica_anticipos'][0]].append(d)
+    aplicaciones = []
+    for u, d in documentos.items():
+        if d['tipo'] != 'I' or not d['aplica_anticipos'] or not any(x['tipo'] for x in d['conceptos']):
+            continue
+        refs = set(d['aplica_anticipos'])
+        nc = notas[u]
+        valida = (d['consistente'] and len(nc) == 1 and nc[0]['total'] == d['total']
+                  and nc[0]['rfc'] == d['rfc'] and nc[0]['fecha'] < fin
+                  and all(a in anticipos and anticipos[a]['rfc'] == d['rfc']
+                          and anticipos[a]['fecha'] < fin for a in refs))
+        aplicaciones.append({'uuid': u, 'factura': d['factura'], 'fecha': d['fecha'],
+            'total': d['total'], 'anticipos': sorted(refs), 'rfc': d['rfc'],
+            'nota': nc[0]['factura'] if len(nc) == 1 else '',
+            'nota_uuid': nc[0]['uuid'] if len(nc) == 1 else '', 'confirmada': valida})
+    circuitos = []
+    for rfc in sorted(proveedores):
+        mes = [a for a in aplicaciones if a['rfc'] == rfc and inicio <= a['fecha'] < fin]
+        seleccion = {u for u, d in anticipos.items() if d['rfc'] == rfc and inicio <= d['fecha'] < fin}
+        seleccion.update(u for a in mes for u in a['anticipos'])
+        if not seleccion:
+            continue
+        # Incluir aplicaciones previas de los mismos anticipos para recuperar arrastre.
+        relacionadas = []
+        while True:
+            relacionadas = [a for a in aplicaciones if a['rfc'] == rfc and a['fecha'] < fin
+                            and seleccion.intersection(a['anticipos'])]
+            ampliada = seleccion | {u for a in relacionadas for u in a['anticipos']}
+            if ampliada == seleccion:
+                break
+            seleccion = ampliada
+        completo = all(u in anticipos for u in seleccion) and all(a['confirmada'] for a in relacionadas)
+        comprado = sum((anticipos[u]['total'] for u in seleccion if u in anticipos
+                        and inicio <= anticipos[u]['fecha'] < fin), ZERO)
+        aplicado = sum((a['total'] for a in mes if a['confirmada']), ZERO)
+        arrastre = None
+        residual = None
+        if completo:
+            arrastre = (sum((anticipos[u]['total'] for u in seleccion if anticipos[u]['fecha'] < inicio), ZERO)
+                        - sum((a['total'] for a in relacionadas if a['fecha'] < inicio), ZERO))
+            residual = arrastre + comprado - aplicado
+            if arrastre < ZERO or residual < ZERO:
+                arrastre = residual = None
+        circuitos.append({'rfc': rfc, 'arrastre_documental': arrastre, 'anticipos_mes': comprado,
+                          'aplicaciones_mes': aplicado, 'residual_documental': residual})
+    return aplicaciones, circuitos
 
 
 def conciliar_combustible(periodo: date) -> dict:
@@ -85,6 +151,7 @@ def conciliar_combustible(periodo: date) -> dict:
     from sat_client.models import CfdiDescargado
     from syncfy_client.models import MovimientoBancario
     from reportes.services_isn import RFC_EMPRESA
+    from conciliacion.services.reglas_fiscales import es_reversion_comprobada
 
     inicio = periodo.replace(day=1)
     fin = _mes_siguiente(inicio)
@@ -101,6 +168,8 @@ def conciliar_combustible(periodo: date) -> dict:
         if d and d['consistente'] and c.tipo_comprobante == 'I' and c.moneda == 'MXN' and any(x['tipo'] for x in d['conceptos']):
             proveedores.add(c.rfc_emisor)
 
+    aplicaciones, circuitos = _circuito_anticipos(leidos, inicio, fin, proveedores)
+    uuids_aplicacion = {a['uuid'] for a in aplicaciones}
     facturas, anticipos, egresos, pendientes, exclusiones = [], [], [], [], []
     total_facturado = {'DIESEL': ZERO, 'GASOLINA': ZERO}
     por_ticket = defaultdict(list)
@@ -147,7 +216,8 @@ def conciliar_combustible(periodo: date) -> dict:
             match = re.fullmatch(r'PL/\d+/EXP/ES/\d{4}-(\d+)', x['identificacion'])
             item = {**base, 'tipo': x['tipo'], 'total': bruto, 'ticket': match.group(1) if match else '',
                     'litros': x['litros'], 'carga_id': None, 'unidad': None,
-                    'estado': 'SIN CARGA IDENTIFICADA', 'del_mes': del_mes}
+                    'estado': 'SIN CARGA IDENTIFICADA', 'del_mes': del_mes,
+                    'es_aplicacion': c.uuid.upper() in uuids_aplicacion}
             if del_mes:
                 total_facturado[x['tipo']] += bruto
                 facturas.append(item)
@@ -201,8 +271,26 @@ def conciliar_combustible(periodo: date) -> dict:
 
     banco = MovimientoBancario.objects.filter(fecha_transaccion__date__gte=inicio, fecha_transaccion__date__lt=fin)
     n_banco = banco.count()
+    pagos = list(MovimientoBancario.objects.filter(
+        cfdi_relacionado__uuid__in=[a['uuid'] for a in anticipos], conciliado=True,
+        tipo='cargo', moneda='MXN', movimiento_relacionado__isnull=True).select_related('cuenta', 'cfdi_relacionado').order_by('fecha_transaccion'))
+    pagos_anticipos = [{'id': p.pk, 'fecha': timezone.localtime(p.fecha_transaccion).date().isoformat(),
+        'banco': p.cuenta.nombre_display, 'cuenta': (p.cuenta.numero_cuenta or '')[-4:],
+        'importe': p.monto, 'uuid': p.cfdi_relacionado.uuid,
+        'referencia': p.extra_raw.get('referencia', ''), 'nota': p.nota_conciliacion} for p in pagos]
+    devoluciones = []
+    for p in banco.filter(tipo='abono', conciliado=True, moneda='MXN',
+            movimiento_relacionado__isnull=False).select_related('movimiento_relacionado', 'cuenta'):
+        cargo = p.movimiento_relacionado
+        raw = cargo.extra_raw.get('raw', {})
+        if isinstance(raw, dict) and raw.get('rfc_proveedor') in proveedores and es_reversion_comprobada(p):
+            devoluciones.append({'fecha': timezone.localtime(p.fecha_transaccion).date().isoformat(),
+                'importe': p.monto, 'referencia': p.extra_raw.get('referencia', ''), 'nota': p.nota_conciliacion})
     total_bitacora = sum((c.importe_total for c in registros), ZERO)
     return {'periodo': inicio.strftime('%Y-%m'), 'rfc_receptor': rfc, 'fecha_corte': timezone.localdate().isoformat(),
+            'aplicaciones': [a for a in aplicaciones if inicio <= a['fecha'] < fin],
+            'circuitos': circuitos, 'pagos_anticipos': pagos_anticipos, 'devoluciones': devoluciones,
+            'total_pagos_anticipos': sum((p['importe'] for p in pagos_anticipos), ZERO),
             'estado': 'PARCIAL', 'facturas': facturas, 'anticipos': anticipos, 'egresos': egresos,
             'exclusiones': exclusiones, 'pendientes': pendientes, 'cargas': cargas,
             'total_facturado': total_facturado, 'total_anticipos': sum((a['total'] for a in anticipos), ZERO),
@@ -216,16 +304,33 @@ def conciliar_combustible(periodo: date) -> dict:
 def render_conciliacion_texto(datos: dict) -> str:
     lineas = [f"Conciliación documental combustible {datos['periodo']} — PARCIAL",
               f"RFC receptor: {datos['rfc_receptor']} · corte: {datos['fecha_corte']}", '',
-              'CONSUMO FACTURADO (anticipos separados):']
+              'LECTURA DEL MES:',
+              'Las transferencias compran saldo anticipado. Los canjes consumen ese saldo.',
+              'Factura de consumo y nota de aplicación respaldan un mismo uso del anticipo.',
+              f"Anticipos facturados: ${datos['total_anticipos']:,.2f}. Pagos vinculados en ERP: ${datos.get('total_pagos_anticipos', ZERO):,.2f}."]
+    for c in datos.get('circuitos', []):
+        saldo = c['residual_documental']
+        arrastre = c['arrastre_documental']
+        lineas.append(f"  {c['rfc']}: arrastre documental {('$' + format(arrastre, ',.2f')) if arrastre is not None else 'pendiente'}; aplicaciones ${c['aplicaciones_mes']:,.2f}; residual del circuito {('$' + format(saldo, ',.2f')) if saldo is not None else 'pendiente'}.")
+    lineas += ['El residual documental no certifica el saldo físico de vales ni otros saldos históricos.', '',
+               'DETALLE FISCAL DEL COMBUSTIBLE (no sumar otra vez a los anticipos):']
     for f in datos['facturas']:
         unidad = f['unidad'] or 'sin unidad/persona identificada'
-        lineas.append(f"  {f['fecha']} | {f['emisor']} | {f['factura']} | {f['tipo']} | ${f['total']:,.2f} | ticket {f['ticket'] or 'no identificado'} | {unidad} | {f['estado']} | UUID {f['uuid']}")
+        lineas.append(f"  {f['fecha']} | {f['emisor']} | {f['factura']} | {f['tipo']} | ${f['total']:,.2f} | ticket {f['ticket'] or 'no identificado'} | {unidad} | {f['estado']} | {'aplicación de anticipo' if f.get('es_aplicacion') else 'fuera del circuito de anticipos; pago separado'} | UUID {f['uuid']}")
     if not datos['facturas']:
         lineas.append('  Sin consumo facturado identificado; revisar cobertura SAT y conceptos.')
     lineas.append(f"  Diésel ${datos['total_facturado']['DIESEL']:,.2f} · Gasolina ${datos['total_facturado']['GASOLINA']:,.2f}")
     lineas += ['', f"ANTICIPOS FACTURADOS: ${datos['total_anticipos']:,.2f} (no sumar como consumo)"]
     for a in datos['anticipos']:
         lineas.append(f"  {a['fecha']} | {a['emisor']} | {a['factura']} | ${a['total']:,.2f} | UUID {a['uuid']}")
+    lineas += ['', 'PAGOS DE ANTICIPOS COMPROBADOS Y VINCULADOS:']
+    for p in datos.get('pagos_anticipos', []):
+        lineas.append(f"  {p['fecha']} | {p['banco']} *{p['cuenta']} | ${p['importe']:,.2f} | rastreo {p['referencia']} | CFDI {p['uuid']}")
+    for d in datos.get('devoluciones', []):
+        lineas.append(f"  {d['fecha']} | envío devuelto ${d['importe']:,.2f} | efecto neto $0.00 | rastreo {d['referencia']} | {d['nota']}")
+    lineas += ['', 'APLICACIONES FISCALES (cada pareja se cuenta una vez):']
+    for a in datos.get('aplicaciones', []):
+        lineas.append(f"  {a['fecha']} | {a['factura']} / {a['nota'] or 'nota pendiente'} | ${a['total']:,.2f} | {'relaciones verificadas' if a['confirmada'] else 'revisar relaciones/importes'} | anticipos: {', '.join(a['anticipos'])}")
     lineas += ['', 'BITÁCORA POR UNIDAD (fecha de captura):']
     for unidad, b in sorted(datos['bitacora'].items()):
         lineas.append(f"  {unidad} | {b['cargas']} cargas | ${b['total']:,.2f}")
@@ -243,11 +348,11 @@ def render_conciliacion_texto(datos: dict) -> str:
         for e in datos['exclusiones']:
             lineas.append(f"  {e['emisor']} | ${e['total']:,.2f} | UUID {e['uuid']} | {e['motivo']}")
     lineas += ['', 'PENDIENTES PARA CIERRE:',
-               '  Saldo inicial/final de vales y canjes: no comprobados. Solicitar estado de cuenta de gasolinera.',
-               '  Confirmar persona/unidad de gasolina sin carga identificada; centavos no prueban consumo personal.',
+               '  Canjes físicos: comprobar vales/tickets y bitácora. Las aplicaciones fiscales no prueban por sí solas la entrega ni la unidad.',
+               '  Combustible fuera del circuito de anticipos: conciliar su pago por separado; no atribuirlo a una unidad sin evidencia.',
                '  Los anticipos, su aplicación fiscal y los tickets no son gastos independientes.',
                '  Un cruce documental no confirma pago ni canje; OCR debe cotejarse con la foto ante inconsistencias.',
-               f"  Movimientos bancarios disponibles del mes: {datos['movimientos_bancarios_mes']}; disponibilidad no implica pago conciliado."]
+               f"  Movimientos bancarios disponibles del mes: {datos['movimientos_bancarios_mes']}; la selección importada no garantiza cobertura completa de la cuenta."]
     if not datos['movimientos_bancarios_mes']:
         lineas.append('  Sin cobertura bancaria del mes en ERP; pago pendiente de comprobación.')
     lineas.extend('  ' + p for p in datos['pendientes'])
