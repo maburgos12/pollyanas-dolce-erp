@@ -132,5 +132,8 @@
       indicator.addEventListener("click", reloadApp);
     })();
   </script>
+{% if request.user.is_authenticated and request.user.repartidor_logistica and not request.preview_actor %}
+{% include "logistica/_avisos_combustible.html" with iniciar_avisos=True %}
+{% endif %}
 </body>
 </html>

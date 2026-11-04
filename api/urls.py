@@ -152,6 +152,8 @@ from .logistica_views import (
     LogisticaLavadoEstadoView,
     LogisticaLavadoUnidadView,
     LogisticaMiPerfilView,
+    LogisticaAvisosCombustibleView,
+    LogisticaAvisoCombustibleConfirmarView,
     LogisticaTutorialCargaConfirmarView,
     LogisticaMisReportesView,
     LogisticaRepartidoresDisponiblesView,
@@ -410,6 +412,8 @@ urlpatterns = [
     path("logistica/auth/token/", LogisticaTokenView.as_view(), name="api_logistica_auth_token"),
     path("logistica/auth/session-token/", LogisticaSessionTokenView.as_view(), name="api_logistica_auth_session_token"),
     path("logistica/auth/token/refresh/", TokenRefreshView.as_view(), name="api_logistica_auth_token_refresh"),
+    path("logistica/avisos-combustible/", LogisticaAvisosCombustibleView.as_view(), name="api_logistica_avisos_combustible"),
+    path("logistica/avisos-combustible/<int:pk>/confirmar/", LogisticaAvisoCombustibleConfirmarView.as_view(), name="api_logistica_aviso_combustible_confirmar"),
     path("logistica/mi-perfil/", LogisticaMiPerfilView.as_view(), name="api_logistica_mi_perfil"),
     path(
         "logistica/tutorial-carga-sucursal/confirmar/",

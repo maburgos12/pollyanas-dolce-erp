@@ -1240,9 +1240,12 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261102-rentabilidad-equilibrio-v1').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261104-combustible-correccion').catch(function () {});
         }
     })();
     </script>
+{% if request.user.is_authenticated and request.user.repartidor_logistica and not request.preview_actor %}
+{% include "logistica/_avisos_combustible.html" with iniciar_avisos=True %}
+{% endif %}
 </body>
 </html>

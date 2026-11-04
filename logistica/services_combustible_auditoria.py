@@ -29,6 +29,7 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     motivos: list[str] = []
     score = 0
 
+    analizada_en_anterior = carga.auditoria_analizada_en
     ticket_sha = _sha256_field_file(carga.foto_ticket)
     if ticket_sha:
         duplicada = (
@@ -74,16 +75,16 @@ def auditar_carga_combustible(carga_id: int) -> dict:
         "ticket_leido": lectura["detalle"],
     }
     carga.auditoria_analizada_en = timezone.now()
-    carga.save(
-        update_fields=[
-            "ticket_sha256",
-            "auditoria_score",
-            "auditoria_estado",
-            "auditoria_motivos",
-            "auditoria_detalle",
-            "auditoria_analizada_en",
-        ]
-    )
+    # No publicar un resultado calculado antes de una corrección concurrente.
+    actualizadas = CargaCombustibleUnidad.objects.filter(
+        pk=carga.pk, litros=carga.litros, importe_total=carga.importe_total,
+        foto_ticket=carga.foto_ticket.name, auditoria_analizada_en=analizada_en_anterior,
+    ).update(**{campo: getattr(carga, campo) for campo in (
+        'ticket_sha256', 'auditoria_score', 'auditoria_estado', 'auditoria_motivos',
+        'auditoria_detalle', 'auditoria_analizada_en',
+    )})
+    if not actualizadas:
+        return {'estado': 'obsoleto', 'carga_id': carga.pk}
     return {"estado": estado, "score": min(score, 100), "motivos": motivos, "ticket": lectura["detalle"]}
 
 

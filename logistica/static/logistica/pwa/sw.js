@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v95-evidencias-network-only";
+const CACHE_NAME = "pollyanas-logistica-pwa-v95-evidencias-network-only-combustible-correccion-20261104";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v63-carga-tramos-consolidada",
@@ -46,7 +46,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/api/")) {
+  if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/logistica/combustible/")) {
     event.respondWith(fetch(event.request));
     return;
   }
