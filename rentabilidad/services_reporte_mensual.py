@@ -72,7 +72,9 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
                 continue
             mes[row.sucursal_id] = {
                 "nombre": row.sucursal.nombre, "ingresos": _quantize(row.ventas_netas),
-                "nomina": _quantize(row.nomina_directa), "utilidad": _quantize(row.utilidad_operativa),
+                "nomina": (_quantize(row.nomina_directa) if not hasattr(row, "gastos_mensuales") or
+                           {"nomina", "cargas_patronales"} & set(row.gastos_mensuales["totales"]) else None),
+                "utilidad": _quantize(row.utilidad_operativa),
                 "central_registrado": getattr(row, "central_registrado", None),
             }
         if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
@@ -83,7 +85,7 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
                 if fila["mes"] != periodo.month or (sucursal_id and sid != sucursal_id):
                     continue
                 mes[sid] = {"nombre": fila["nombre"], "ingresos": fila["ventas"],
-                            "nomina": anteriores.get(sid, {}).get("nomina", Decimal("0")),
+                            "nomina": anteriores.get(sid, {}).get("nomina"),
                             "utilidad": fila["utilidad"], "central_registrado": None,
                             "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"],
                             "financiero": _detalle_financiero(fila)}
@@ -150,7 +152,8 @@ def _horas_extra_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> d
 
 def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
     ingresos = sum((s["ingresos"] for s in rent_mes.values()), Decimal("0"))
-    nomina = sum((s["nomina"] for s in rent_mes.values()), Decimal("0"))
+    nomina = (sum((s["nomina"] for s in rent_mes.values()), Decimal("0"))
+              if rent_mes and all(s["nomina"] is not None for s in rent_mes.values()) else None)
     utilidad = sum((s["utilidad"] for s in rent_mes.values()), Decimal("0"))
     horas_extra = sum(he_mes.values(), Decimal("0"))
     nomina_total = nomina
@@ -190,10 +193,10 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
         "periodo": periodo,
         "ingresos": _quantize(ingresos) if rent_mes else None,
         "financiero": _sumar_financiero([s.get("financiero") for s in rent_mes.values()], ingresos),
-        "nomina": _quantize(nomina) if rent_mes else None,
+        "nomina": _quantize(nomina) if nomina is not None else None,
         "horas_extra": _quantize(horas_extra),
-        "nomina_total": _quantize(nomina_total) if rent_mes else None,
-        "nomina_pct_ventas": _pct(nomina_total, ingresos),
+        "nomina_total": _quantize(nomina_total) if nomina_total is not None else None,
+        "nomina_pct_ventas": _pct(nomina_total, ingresos) if nomina_total is not None else None,
         "utilidad_neta": _quantize(utilidad) if rent_mes else None,
         "alcance": alcance,
         "central_registrado": central,

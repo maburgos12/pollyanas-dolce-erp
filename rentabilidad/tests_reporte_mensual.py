@@ -178,6 +178,15 @@ class ReporteMensualConsolidadoTests(TestCase):
         self.assertEqual(fila["alcance"], "SIN_DATOS")
         self.assertIsNone(fila["yoy"]["ingresos"])
 
+    def test_missing_payroll_source_is_not_zero_or_added_to_result(self):
+        from .services_reporte_mensual import _fila_mes
+        fila = _fila_mes(date(2026,6,1), {1: {"nombre":"A", "ingresos":Decimal("100"),
+            "nomina":None, "utilidad":Decimal("30")}}, {1: Decimal("12")})
+        self.assertIsNone(fila["nomina"])
+        self.assertIsNone(fila["nomina_pct_ventas"])
+        self.assertEqual(fila["utilidad_neta"], Decimal("30"))
+        self.assertEqual(fila["horas_extra"], Decimal("12"))
+
     def test_same_branch_same_basis_keeps_real_yoy(self):
         reporte = build_reporte_mensual_consolidado(hasta=date(2026, 6, 1), meses=1, sucursal_id=self.suc_a.pk)
         self.assertEqual(reporte["filas"][0]["yoy"]["ingresos"], Decimal("22.50"))
