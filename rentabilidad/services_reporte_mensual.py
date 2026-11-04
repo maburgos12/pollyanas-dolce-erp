@@ -57,9 +57,9 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
     periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
     from .services_resultado import leer_cierre_conciliado
-    cierre = leer_cierre_conciliado() if desde <= date(2026, 8, 1) and hasta >= date(2026, 1, 1) else None
+    cierre = leer_cierre_conciliado() if desde <= date(2026, 9, 1) and hasta >= date(2026, 1, 1) else None
     if cierre and cierre["errores"]:
-        raise ValueError("Cierre enero–agosto sin conciliar: " + "; ".join(cierre["errores"]))
+        raise ValueError("Cierre enero–septiembre sin conciliar: " + "; ".join(cierre["errores"]))
     if cierre:
         periodos.update(date(2026, f["mes"], 1) for f in cierre["detalle"] if desde <= date(2026, f["mes"], 1) <= hasta)
     data = {}
@@ -73,7 +73,7 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
                 "nomina": _quantize(row.nomina_directa), "utilidad": _quantize(row.utilidad_operativa),
                 "central_registrado": getattr(row, "central_registrado", None),
             }
-        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 8, 1):
+        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
             anteriores = mes.copy()
             mes.clear()
             for fila in cierre["detalle"]:

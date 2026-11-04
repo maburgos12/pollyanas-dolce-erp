@@ -29,7 +29,7 @@ class RepartoHistoricoTests(TestCase):
             rubros[k] = RubroPresupuesto.objects.create(area=areas[k], concepto=k, tipo='EGRESO')
         directos = {s.pk: RubroPresupuesto.objects.create(area=areas['gastos-venta'], concepto='Gasto '+s.codigo, sucursal=s, tipo='EGRESO') for s in (cls.crucero, cls.bamoa)}
         cls.buckets = {k: {} for k in ('ingresos', 'gastos-venta', *FONDOS)}
-        for m in range(1, 9):
+        for m in range(1, 10):
             PointDailySale.objects.create(branch=cls.point, product=cls.product, sale_date=date(2026, m, 15), gross_amount=110, discount_amount=10)
             amounts = {'ingresos': 100, 'costos': 10, 'produccion': 1, 'administracion': 2, 'logistica': 3}
             for k, amount in amounts.items():
@@ -47,8 +47,8 @@ class RepartoHistoricoTests(TestCase):
         before = list(PointDailySale.objects.values())
         result = self.calculate()
         self.assertEqual(result['errores'], [])
-        self.assertEqual(result['total'], D(79*8-1))
-        for m in range(1,9):
+        self.assertEqual(result['total'], D(79*9-1))
+        for m in range(1,10):
             month=[r for r in result['detalle'] if r['mes']==m]
             self.assertEqual(sum(r['ventas'] for r in month),D(100))
             for k in FONDOS:
@@ -86,12 +86,12 @@ class RepartoHistoricoTests(TestCase):
         self.client.force_login(self.user)
         response=self.client.get(url)
         self.assertContains(response,'id="reparto-table"')
-        self.assertEqual(response.context['reparto']['total'],D(631))
+        self.assertEqual(response.context['reparto']['total'],D(710))
         exported=self.client.get(url+'&export=reparto')
         self.assertEqual(exported.status_code,200)
         rows=list(csv.DictReader(StringIO(exported.content.decode('utf-8-sig'))))
-        self.assertEqual(sum(D(r['Utilidad operativa asignada']) for r in rows),D(631))
-        self.assertEqual(len(rows),9)
+        self.assertEqual(sum(D(r['Utilidad operativa asignada']) for r in rows),D(710))
+        self.assertEqual(len(rows),10)
         self.assertEqual(self.client.get('/reportes/estado-resultados/?year=2025&export=reparto').status_code,409)
         self.assertNotContains(self.client.get('/reportes/estado-resultados/?year=2025'),'id="reparto-table"')
         self.assertEqual(self.client.get(url+'&version=REVISADO&export=reparto').status_code,409)

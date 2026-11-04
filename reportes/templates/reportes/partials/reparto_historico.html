@@ -1,13 +1,13 @@
 {% load humanize %}
 {% if reparto %}
 <section class="card" id="reparto-sucursales" aria-labelledby="reparto-titulo">
-  <h2 class="card-header" id="reparto-titulo">Utilidad asignada por sucursal · enero–agosto 2026</h2>
+  <h2 class="card-header" id="reparto-titulo">Utilidad asignada por sucursal · enero–septiembre 2026</h2>
   <p>Reparto autorizado por participación mensual en ventas. Conserva los gastos directos de cada sucursal y distribuye costos, producción, administración y logística. Los importes incluyen los impuestos que forman parte de las fuentes del estado de resultados.</p>
   {% if reparto.errores %}
   <p><strong>Reparto pendiente de conciliación.</strong> No se muestran utilidades parciales como un acumulado completo.</p>
   <ul>{% for error in reparto.errores %}<li>{{ error }}</li>{% endfor %}</ul>
   {% else %}
-  <p><strong>Total conciliado enero–agosto: ${{ reparto.total|floatformat:2|intcomma }}</strong></p>
+  <p><strong>Total conciliado enero–septiembre: ${{ reparto.total|floatformat:2|intcomma }}</strong></p>
   <p><a class="btn btn-secondary" href="{{ reparto_export_url|default:"?year=2026&version=ORIGINAL&export=reparto"|force_escape }}">Descargar detalle mensual CSV</a></p>
   <div class="table-responsive" role="region" aria-label="Utilidad mensual asignada por sucursal" tabindex="0">
     <table class="table table-striped" id="reparto-table">
