@@ -57,6 +57,12 @@ def auditar_carga_combustible(carga_id: int) -> dict:
     motivos.extend(lectura["motivos"])
 
     estado = _estado(score)
+    # Cero riesgo no prueba una lectura; conservar las alertas locales existentes.
+    if estado == CargaCombustibleUnidad.AUDITORIA_OK:
+        if lectura["detalle"]["status"] == "no_disponible":
+            estado = CargaCombustibleUnidad.AUDITORIA_ERROR
+        elif "ticket_verificado" not in lectura["motivos"]:
+            estado = CargaCombustibleUnidad.AUDITORIA_REVISION
     carga.ticket_sha256 = ticket_sha or ""
     carga.auditoria_score = min(score, 100)
     carga.auditoria_estado = estado
@@ -84,8 +90,8 @@ def auditar_carga_combustible(carga_id: int) -> dict:
 def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
     """Lee el ticket y lo compara contra lo que capturó el repartidor.
 
-    Si la lectura no está disponible, la carga NO se castiga: se marca para
-    revisión humana sin sumar puntos de riesgo.
+    Si la lectura no está disponible, la carga NO se castiga: se marca como
+    error de lectura sin sumar puntos de riesgo.
     """
     try:
         leido = leer_ticket(carga.foto_ticket)
@@ -156,7 +162,7 @@ def _cotejar_ticket(carga: CargaCombustibleUnidad) -> dict:
         # Sin score: si el dinero cuadra, un litraje mal tecleado no es un riesgo.
         motivos.append("litros_capturados_difieren")
 
-    if score == 0:
+    if score == 0 and coherente:
         # El dinero del ticket cuadra con lo capturado; los avisos de litros van después.
         motivos.insert(0, "ticket_verificado")
 
