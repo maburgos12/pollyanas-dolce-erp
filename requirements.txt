@@ -23,6 +23,7 @@ google-auth-httplib2==0.2.0
 xlrd==2.0.1
 playwright==1.51.0
 celery[redis]==5.4.0
+# Kombu 5.7 requiere redis-py >=6.1; conservar la combinación de producción.
 kombu==5.6.2
 django-celery-beat==2.7.0
 redis==5.0.8
