@@ -13,7 +13,7 @@ from pos_bridge.services.open_transfer_sync_service import open_transfer_close_w
 
 @override_settings(TIME_ZONE="America/Mazatlan")
 class SetupCelerySchedulesCommandTests(TestCase):
-    def test_monthly_product_closure_is_paused_and_never_locks_by_default(self):
+    def test_monthly_product_closure_is_daily_enabled_and_locks_only_after_gates(self):
         from django.conf import settings
         from django_celery_beat.models import CrontabSchedule, PeriodicTask
 
@@ -35,16 +35,16 @@ class SetupCelerySchedulesCommandTests(TestCase):
         call_command("setup_celery_schedules")
 
         task = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
-        self.assertEqual(task.crontab.day_of_month, "5")
-        self.assertEqual(task.crontab.hour, "4")
-        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": False})
-        self.assertFalse(task.enabled)
+        self.assertEqual(task.crontab.day_of_month, "*")
+        self.assertEqual(task.crontab.hour, "5")
+        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": True})
+        self.assertTrue(task.enabled)
         self.assertEqual(
             PeriodicTask.objects.filter(
                 task="pos_bridge.monthly_product_closure",
                 enabled=True,
             ).count(),
-            0,
+            1,
         )
         self.assertFalse(PeriodicTask.objects.get(name="legacy cierre producto mensual").enabled)
         self.assertNotIn(
@@ -52,19 +52,18 @@ class SetupCelerySchedulesCommandTests(TestCase):
             [entry.get("task") for entry in settings.CELERY_BEAT_SCHEDULE.values()],
         )
 
-    def test_monthly_product_closure_requires_explicit_enable_flag(self):
+    def test_legacy_enable_flag_is_idempotent_and_no_longer_required(self):
         from django_celery_beat.models import PeriodicTask
 
         call_command("setup_celery_schedules", "--enable-monthly-product-closure")
 
         task = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
         self.assertTrue(task.enabled)
-        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": False})
+        self.assertEqual(json.loads(task.kwargs), {"lock_after_build": True})
 
-        # A normal deploy/setup run returns the high-risk schedule to containment.
         call_command("setup_celery_schedules")
         task.refresh_from_db()
-        self.assertFalse(task.enabled)
+        self.assertTrue(task.enabled)
 
     @override_settings(POINT_DELIVERY_SYNC_ENABLED=False)
     @patch("crm.services.point_delivery_auto_sync.PointDeliveryAutoSyncService.run")
@@ -252,8 +251,8 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(close_email.crontab.hour, "1")
         self.assertEqual(close_email.crontab.minute, "0")
         monthly = PeriodicTask.objects.get(name="pos_bridge: cierre producto mensual")
-        self.assertEqual(monthly.crontab.day_of_month, "5")
-        self.assertEqual(monthly.crontab.hour, "4")
+        self.assertEqual(monthly.crontab.day_of_month, "*")
+        self.assertEqual(monthly.crontab.hour, "5")
         product_prices = PeriodicTask.objects.get(name="pos_bridge: sync precios catalogo semanal")
         self.assertEqual(product_prices.task, "pos_bridge.sync_product_prices_task")
         self.assertEqual(product_prices.crontab.day_of_week, "1")

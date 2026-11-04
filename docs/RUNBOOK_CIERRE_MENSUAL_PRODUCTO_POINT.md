@@ -80,22 +80,24 @@ Si existen lineas con derivadas sin relacion activa o catalogo pendiente:
 
 ## Flujo operativo
 
-### Contención del schedule mensual
+### Automatización del schedule mensual
 
-`setup_celery_schedules` registra `pos_bridge: cierre producto mensual` pausado y
-con `lock_after_build=false`. Por tanto, ejecutar el setup durante un deploy no
-refresca, reconstruye ni bloquea agosto ni ningún otro periodo. La tarea Celery y
-el comando manual permanecen disponibles para una corrida explícita.
+`setup_celery_schedules` registra `pos_bridge: cierre producto mensual` habilitado,
+diario a las 05:00 de `America/Mazatlan` y con `lock_after_build=true`. La tarea
+selecciona el mes anterior, reintenta mientras permanezca abierto y termina sin
+consultar Point cuando el cierre ya está bloqueado.
 
-Solo una decisión operacional explícita puede habilitar la cadencia:
+El flag histórico permanece como compatibilidad, pero ya no es necesario:
 
 ```bash
 ./.venv/bin/python manage.py setup_celery_schedules --enable-monthly-product-closure
 ```
 
-Incluso habilitado, el schedule únicamente construye un borrador revisable; el
-bloqueo institucional sigue siendo una acción separada de DG/ADMIN. Una ejecución
-posterior de `setup_celery_schedules` sin el flag devuelve el schedule a pausado.
+El lock automático sólo ocurre si las fuentes Point son autoritativas, cada
+sucursal operativa tiene su evidencia física de producto conciliada sin diferencia
+y `ProductInventoryAuditRun` está `READY`. Si falla un candado, conserva un cierre
+`BUILT`, registra el motivo y vuelve a intentar al día siguiente; nunca fuerza un
+ajuste de inventario.
 
 ### 1. Vista operativa
 

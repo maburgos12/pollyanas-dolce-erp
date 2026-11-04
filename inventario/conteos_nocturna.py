@@ -4,6 +4,7 @@ import inspect
 import json
 import logging
 from contextlib import ExitStack
+from decimal import Decimal
 from uuid import uuid4
 
 from django.db import transaction
@@ -18,7 +19,7 @@ from pos_bridge.services.point_http_client import PointHttpSessionClient
 
 from .conteos_conciliacion import MZ, _pendiente, calcular_cierre_linea, cierre_dia
 from .conteos_point import sucursal_point_conteo
-from .models_conteos import ConteoSucursal, EventoConteoSucursal
+from .models_conteos import ConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal
 from .services_conteos import lecturas_efectivas
 
 logger = logging.getLogger(__name__)
@@ -75,10 +76,47 @@ def _publicar(count, readings, result):
             return False
         previous = current.conciliacion
         comparable = lambda value: {k:v for k,v in value.items() if k not in ('procesado_en','ejecucion')}
-        if comparable(previous) == comparable(result):
+        product_readings = [reading for reading in readings if reading.linea.producto_id]
+        if comparable(previous) == comparable(result) and (
+            current.estado != 'ENVIADO' or not product_readings or 'automatizacion' in previous
+        ):
             return True
+        calculated_products = [
+            reading for reading in product_readings
+            if result['lineas'].get(str(reading.linea_id), {}).get('estado') == 'CALCULADA'
+        ]
+        differing_line_ids = [
+            reading.linea_id for reading in calculated_products
+            if Decimal(result['lineas'][str(reading.linea_id)]['diferencia']) != 0
+        ]
+        automation = {'accion':'NINGUNA','linea_ids':[]}
+        update_fields = ['conciliacion']
+        if current.estado == 'ENVIADO' and product_readings and len(calculated_products) == len(product_readings):
+            if differing_line_ids:
+                current.estado = 'RECONTEO'
+                current.ronda += 1
+                current.iniciado_en = None
+                current.referencia = {}
+                current.version += 1
+                LecturaConteoSucursal.objects.bulk_create([
+                    LecturaConteoSucursal(
+                        linea_id=line_id,
+                        ronda=current.ronda,
+                        actor=current.responsable,
+                    )
+                    for line_id in differing_line_ids
+                ])
+                automation = {'accion':'RECONTEO','linea_ids':differing_line_ids}
+                update_fields.extend(['estado','ronda','iniciado_en','referencia','version'])
+            elif len(product_readings) == len(readings):
+                current.estado = 'ACEPTADO'
+                current.aceptado_en = timezone.now()
+                current.version += 1
+                automation = {'accion':'ACEPTADO','linea_ids':[reading.linea_id for reading in product_readings]}
+                update_fields.extend(['estado','aceptado_en','version'])
+        result = {**result, 'automatizacion':automation}
         current.conciliacion = result
-        current.save(update_fields=['conciliacion'])
+        current.save(update_fields=update_fields)
         EventoConteoSucursal.objects.create(conteo=current,actor=None,action='conciliacion_nocturna',payload=result)
         return True
 
@@ -86,9 +124,13 @@ def _publicar(count, readings, result):
 def conciliar_conteos_nocturnos():
     now = timezone.now()
     counts = ConteoSucursal.objects.filter(
-        Q(conciliacion={}) | Q(conciliacion__reintentar=True),
+        Q(conciliacion={}) | Q(conciliacion__reintentar=True) | Q(
+            estado='ENVIADO',
+            conciliacion__automatizacion__isnull=True,
+            lineas__producto_id__isnull=False,
+        ),
         estado__in=('ENVIADO','ACEPTADO'),fecha__lt=now.astimezone(MZ).date(),
-    ).order_by('pk')
+    ).distinct().order_by('pk')
     service, batches = AuditStockHistoryService(), {}
     summary = {'procesados':0,'calculados':0,'pendientes':0,'reintentar':False}
     with ExitStack() as stack:

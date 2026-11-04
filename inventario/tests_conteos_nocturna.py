@@ -81,7 +81,8 @@ class NightlyCountTests(TestCase):
         self.assertEqual(Decimal(result['point_al_cierre']),4)
         self.assertEqual(result['posteriores_cierre'],[103])
         self.assertEqual(huella_lecturas(lecturas_efectivas(self.count)),before)
-        self.assertEqual((self.count.version,self.count.estado,self.count.observaciones,self.count.referencia),(version,'ENVIADO','Nota conservada',{}))
+        self.assertEqual((self.count.version,self.count.estado,self.count.observaciones,self.count.referencia),(version+1,'ACEPTADO','Nota conservada',{}))
+        self.assertIsNotNone(self.count.aceptado_en)
         self.fake.login.assert_called_once()
         self.fake.get_stock_history.assert_called_once_with('100','81',movements=500)
         event=self.count.eventos.get(action='conciliacion_nocturna')
@@ -89,6 +90,44 @@ class NightlyCountTests(TestCase):
         with patch('inventario.conteos_nocturna.PointHttpSessionClient') as client:
             self.assertEqual(conciliar_conteos_nocturnos()['procesados'],0)
             client.assert_not_called()
+
+    def test_difference_opens_recount_only_for_the_affected_product(self):
+        reading=self.line.lecturas.get(ronda=1)
+        reading.cantidad=Decimal('2')
+        reading.save(update_fields=['cantidad'])
+
+        with patch('inventario.conteos_nocturna.load_point_bridge_settings',return_value=self.settings), patch('inventario.conteos_nocturna.PointHttpSessionClient',return_value=self.fake):
+            summary=conciliar_conteos_nocturnos()
+
+        self.count.refresh_from_db()
+        self.assertEqual(summary['calculados'],1)
+        self.assertEqual((self.count.estado,self.count.ronda),('RECONTEO',2))
+        self.assertIsNone(self.count.iniciado_en)
+        self.assertEqual(self.line.lecturas.filter(ronda=2).count(),1)
+        self.assertIsNone(self.line.lecturas.get(ronda=2).cantidad)
+        event=self.count.eventos.get(action='conciliacion_nocturna')
+        self.assertEqual(event.payload['automatizacion']['accion'],'RECONTEO')
+        self.assertEqual(event.payload['automatizacion']['linea_ids'],[self.line.pk])
+
+    def test_legacy_calculated_count_is_accepted_without_recapturing(self):
+        with patch('inventario.conteos_nocturna.load_point_bridge_settings',return_value=self.settings), patch('inventario.conteos_nocturna.PointHttpSessionClient',return_value=self.fake):
+            conciliar_conteos_nocturnos()
+        self.count.refresh_from_db()
+        previous_version=self.count.version
+        previous=dict(self.count.conciliacion)
+        previous.pop('automatizacion')
+        self.count.estado='ENVIADO'
+        self.count.aceptado_en=None
+        self.count.conciliacion=previous
+        self.count.save(update_fields=['estado','aceptado_en','conciliacion'])
+
+        with patch('inventario.conteos_nocturna.load_point_bridge_settings',return_value=self.settings), patch('inventario.conteos_nocturna.PointHttpSessionClient',return_value=self.fake):
+            summary=conciliar_conteos_nocturnos()
+
+        self.count.refresh_from_db()
+        self.assertEqual(summary['procesados'],1)
+        self.assertEqual((self.count.estado,self.count.version),('ACEPTADO',previous_version+1))
+        self.assertEqual(self.count.conciliacion['automatizacion']['accion'],'ACEPTADO')
 
     def test_missing_physical_time_stays_pending_without_point_contact(self):
         self.line.lecturas.update(contado_en=None)
@@ -260,16 +299,18 @@ class NightlyCountTests(TestCase):
         self.assertEqual(self.client.get(url, {'imprimir': '1'}).status_code, 302)
 
     def test_comparison_is_hidden_in_recount_and_excel_preserves_system_history(self):
+        reading=self.line.lecturas.get(ronda=1)
+        reading.cantidad=Decimal('2')
+        reading.save(update_fields=['cantidad'])
         self.acquire()
         conciliar_conteos_nocturnos()
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.estado,'RECONTEO')
         self.client.force_login(self.admin)
-        detail=reverse('inventario:conteos_erp:detalle',args=[self.count.pk])
-        self.assertContains(self.client.get(detail),'Físico al cierre')
         response=self.client.get(reverse('inventario:conteos_erp:exportar',args=[self.count.pk]))
         workbook=load_workbook(BytesIO(response.content))
         self.assertIn('Conciliación nocturna',workbook.sheetnames)
         self.assertIn('Sistema',str(list(workbook['Historial'].values)))
-        self.action('reconteo',{'linea_ids':[self.line.pk],'motivo':'Revisión'},actor=self.admin)
         self.client.force_login(self.operator)
         response=self.client.get(reverse('operacion:conteos_app:detalle',args=[self.count.pk]))
         self.assertNotContains(response,'Físico al cierre')
