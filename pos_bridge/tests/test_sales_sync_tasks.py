@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.db import close_old_connections
 from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 
-from pos_bridge.models import PointBranch, PointSyncJob
+from pos_bridge.models import PointBranch, PointHistoricalInventoryClosing, PointSyncJob
 from pos_bridge.services.official_sales_backfill_service import OfficialSalesBackfillService
 from pos_bridge.services.product_month_closure_service import ProductMonthClosureError
 from pos_bridge.tasks.celery_tasks import task_monthly_product_closure, task_visible_cut_refresh_cycle
@@ -500,6 +500,10 @@ class PointSalesSyncTaskRoutingTests(TestCase):
                     },
                 },
             ) as conversions,
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._capture_historical_closing",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "closing_id": 7},
+            ),
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
         ):
             filter_mock.return_value.order_by.return_value.first.return_value = None
@@ -542,8 +546,11 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         self.assertTrue(result["inventory_authority"]["opening"]["authoritative"])
         self.assertEqual(result["inventory_authority"]["opening"]["target_date"], "2026-07-31")
         self.assertEqual(result["inventory_authority"]["closing"]["target_date"], "2026-08-31")
-        self.assertEqual([step["name"] for step in result["source_refresh"]], ["sales", "production", "waste", "conversions"])
-        conversion_step = result["source_refresh"][-1]
+        self.assertEqual(
+            [step["name"] for step in result["source_refresh"]],
+            ["sales", "production", "waste", "conversions", "historical_closing"],
+        )
+        conversion_step = result["source_refresh"][-2]
         self.assertEqual(conversion_step["job_id"], 4)
         self.assertEqual(conversion_step["summary"]["provenance"]["date_from"], "2026-08-01")
 
@@ -569,6 +576,10 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             patch(
                 "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
                 return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
+            ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._capture_historical_closing",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "closing_id": 7},
             ),
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
         ):
@@ -680,6 +691,10 @@ class PointSalesSyncTaskRoutingTests(TestCase):
                 "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
                 return_value={"status": PointSyncJob.STATUS_SUCCESS, "issues": []},
             ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._capture_historical_closing",
+                return_value={"status": PointSyncJob.STATUS_SUCCESS, "closing_id": 7},
+            ),
             patch("pos_bridge.tasks.run_monthly_product_closure.ProductMonthClosureService") as closure_service,
         ):
             filter_mock.return_value.order_by.return_value.first.return_value = None
@@ -779,6 +794,13 @@ class PointSalesSyncTaskRoutingTests(TestCase):
                 "pos_bridge.tasks.run_monthly_product_closure.sync_conversion_lines",
                 side_effect=lambda **kwargs: events.append("conversions") or {"status": PointSyncJob.STATUS_SUCCESS},
             ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure._capture_historical_closing",
+                side_effect=lambda **kwargs: events.append("historical_closing") or {
+                    "status": PointSyncJob.STATUS_SUCCESS,
+                    "closing_id": 7,
+                },
+            ),
         ):
             movements.return_value.run_production_sync.side_effect = (
                 lambda **kwargs: events.append("production") or successful_job
@@ -794,8 +816,68 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             )
 
         session_lock.assert_called_once_with(wait=True)
-        self.assertEqual(events, ["lock_enter", "sales", "production", "waste", "conversions", "lock_exit"])
+        self.assertEqual(
+            events,
+            ["lock_enter", "sales", "production", "waste", "conversions", "historical_closing", "lock_exit"],
+        )
+        self.assertEqual(result[-1]["name"], "historical_closing")
         self.assertFalse(any(step["retryable"] for step in result))
+
+    def test_historical_closing_refresh_reuses_verified_evidence(self):
+        closing = PointHistoricalInventoryClosing.objects.create(
+            operational_date=date(2026, 8, 31),
+            status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+            source=PointHistoricalInventoryClosing.SOURCE_STOCK_HISTORY,
+            source_fingerprint="a" * 64,
+        )
+        with patch(
+            "pos_bridge.tasks.run_monthly_product_closure.historical_closing.HistoricalPointInventoryClosingCapture"
+        ) as capture:
+            from pos_bridge.tasks.run_monthly_product_closure import _capture_historical_closing
+
+            result = _capture_historical_closing(operational_date=closing.operational_date)
+
+        capture.assert_not_called()
+        self.assertEqual(result["closing_id"], closing.id)
+        self.assertTrue(result["reused"])
+        self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
+
+    def test_historical_closing_refresh_captures_exact_month_end(self):
+        closing = SimpleNamespace(
+            id=8,
+            status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+        )
+        capture_result = SimpleNamespace(
+            closing=closing,
+            resolved_count=1570,
+            unresolved_count=0,
+        )
+        with (
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.historical_closing.select_default_branches",
+                return_value=["branch"],
+            ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.historical_closing.select_default_products",
+                return_value=["product"],
+            ),
+            patch(
+                "pos_bridge.tasks.run_monthly_product_closure.historical_closing.HistoricalPointInventoryClosingCapture"
+            ) as capture,
+        ):
+            capture.return_value.capture.return_value = capture_result
+            from pos_bridge.tasks.run_monthly_product_closure import _capture_historical_closing
+
+            result = _capture_historical_closing(operational_date=date(2026, 8, 31))
+
+        capture.return_value.capture.assert_called_once_with(
+            operational_date=date(2026, 8, 31),
+            branches=["branch"],
+            products=["product"],
+        )
+        self.assertFalse(result["reused"])
+        self.assertEqual(result["resolved"], 1570)
+        self.assertEqual(result["status"], PointSyncJob.STATUS_SUCCESS)
 
     def test_monthly_source_refresh_releases_shared_lock_and_marks_timeout_retryable(self):
         released = []
