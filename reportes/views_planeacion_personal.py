@@ -34,11 +34,24 @@ def planeacion_personal(request):
         writer.writerow(['Periodo', 'Ventas Point con impuestos', 'Objetivo 25%', 'Limite 27%',
                          'Percepciones ordinarias', 'Percepciones extraordinarias',
                          'IMSS patronal', 'RCV Infonavit patronal', 'ISN',
-                         'Servicio vales con IVA', 'Suma documentada', 'Familias documentadas'])
+                         'Servicio vales con IVA', 'Suma documentada', 'Familias documentadas',
+                         'Lista de raya con despensa', 'Diferencia CFDI menos lista',
+                         'Periodos cubren mes', 'Pendientes lista de raya'])
         for row in data['months']:
             writer.writerow([row['month']] + [row[k] for k in (
                 'sales', 'target', 'ceiling', 'ordinary', 'extraordinary', 'imss',
-                'rcv', 'isn', 'fees', 'documented')] + [', '.join(row['coverage'])])
+                'rcv', 'isn', 'fees', 'documented')] + [', '.join(row['coverage']),
+                (row['registered'] or {}).get('total'), row['payroll_difference'],
+                (row['registered'] or {}).get('mes_cubierto'),
+                '; '.join((row['registered'] or {}).get('pendientes', []))])
+        writer.writerow([])
+        writer.writerow(['Periodo', 'Sucursal histórica', 'Destino según función actual',
+                         'Personas', 'Percepciones', 'Despensa adicional', 'Subtotal sin cargas',
+                         'Ventas con impuestos', '% tienda sin cargas'])
+        for row in data['months']:
+            for group in (row['registered'] or {}).get('grupos', []):
+                writer.writerow([row['month']] + [group[k] for k in ('sucursal', 'destino_label',
+                    'personas', 'percepciones', 'despensa', 'total', 'ventas', 'porcentaje')])
         writer.writerow([])
         writer.writerow(['Periodo', 'Fuente', 'ID ERP', 'Referencia', 'Importe'])
         for source in data['sources']:

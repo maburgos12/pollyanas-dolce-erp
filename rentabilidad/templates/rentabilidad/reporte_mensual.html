@@ -120,8 +120,10 @@
             </dl>
             <p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ fila.periodo|date:'Y-m' }}&amp;sucursal={{ s.sucursal_id }}&amp;tab=diagnostico">Ver conceptos y fuentes de gastos de {{ s.sucursal }}</a></p>
             {% else %}<p>Desglose integral pendiente: esta fuente sólo ofrece un resultado parcial.</p>{% endif %}
-            <p class="rm-sub">Personal directo registrado en sucursal (nómina y cargas): {% include 'rentabilidad/_importe_mensual.html' with valor=s.nomina %}
+            <p class="rm-sub">Registro de nómina y cargas disponible por adscripción (no costo integral por función): {% include 'rentabilidad/_importe_mensual.html' with valor=s.nomina %}
               {% if s.nomina_pct_ventas is not None %} · {{ s.nomina_pct_ventas|floatformat:2 }}% de ventas{% endif %}.
+              Este indicador puede incluir reparto y jefaturas adscritos a ventas y omitir prestaciones.
+              <a href="{% url 'reportes:planeacion_personal' %}?mes={{ fila.periodo|date:'Y-m' }}">Consultar nómina del mes, despensa y separación por función</a> antes de decidir contrataciones.
               Horas extra operativas autorizadas o pagadas: {% include 'rentabilidad/_importe_mensual.html' with valor=s.horas_extra %}.
               Son un control informativo, no un gasto adicional ni comprobación de pago; la asignación operativa usa la sucursal actual del empleado.</p>
             {% endfor %}

@@ -1,0 +1,70 @@
+"""Lectura de listas de raya; conserva importes y adscripción, sin recalcular nóminas."""
+from calendar import monthrange
+from datetime import timedelta
+from decimal import Decimal
+
+from rrhh.models import NominaLinea
+from .clasificacion_nomina import destino_de
+
+
+def leer_personal_registrado(start, end):
+    rows = {}
+    lines = (NominaLinea.objects.filter(
+        periodo__fecha_fin__gte=start, periodo__fecha_fin__lt=end,
+        periodo__estatus__in=('CERRADA', 'PAGADA'))
+        .select_related('periodo', 'empleado', 'sucursal_snapshot')
+        .prefetch_related('conceptos').order_by('periodo_id', 'id'))
+    for line in lines:
+        period, emp = line.periodo, line.empleado
+        month = period.fecha_fin.replace(day=1)
+        row = rows.setdefault(month, dict(percepciones=Decimal(0), despensa=Decimal(0),
+            total=Decimal(0), periodos={}, grupos={}, pendientes=[], dias=set()))
+        if period.pk not in row['periodos']:
+            row['periodos'][period.pk] = dict(id=period.pk, inicio=period.fecha_inicio,
+                fin=period.fecha_fin, estatus=period.estatus)
+            if period.fecha_inicio < month:
+                row['pendientes'].append(f'Periodo {period.pk} cruza meses; importe por fecha final, sin prorrateo.')
+            day = max(month, period.fecha_inicio)
+            while day <= period.fecha_fin:
+                row['dias'].add(day.day)
+                day += timedelta(days=1)
+        concepts = [c for c in line.conceptos.all() if c.tipo == 'PERCEPCION']
+        concept_total = sum((c.importe for c in concepts), Decimal(0))
+        vouchers = sum((c.importe for c in concepts if c.codigo_concepto == '32'), Decimal(0))
+        extra = Decimal(0)
+        if concepts and concept_total == line.total_percepciones:
+            pass  # Despensa incluida: no se suma otra vez.
+        elif concepts and concept_total - vouchers == line.total_percepciones:
+            extra = vouchers
+        else:
+            row['pendientes'].append(f'Línea {line.pk}: percepciones sin conciliación de conceptos.')
+        department = line.departamento_snapshot
+        function = emp.puesto_operativo
+        default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
+            'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'sin_clasificar'),
+            'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
+            'RRHH': 'administracion', 'LOGISTICA': 'logistica'}.get(department, 'sin_clasificar')
+        destination = destino_de(emp.nivel_organizacional, function, predeterminado=default).lower()
+        if destination == 'sin_clasificar':
+            row['pendientes'].append(f'Línea {line.pk}: función pendiente de clasificar en RRHH.')
+        key = (line.sucursal_snapshot_id, destination)
+        group = row['grupos'].setdefault(key, dict(sucursal_id=line.sucursal_snapshot_id,
+            sucursal=line.sucursal_snapshot.nombre if line.sucursal_snapshot else 'Sin sucursal histórica',
+            destino=destination, percepciones=Decimal(0), despensa=Decimal(0), total=Decimal(0), personas=set()))
+        group['personas'].add(emp.pk)
+        for target in (row, group):
+            target['percepciones'] += line.total_percepciones
+            target['despensa'] += extra
+            target['total'] += line.total_percepciones + extra
+    for month, row in rows.items():
+        row['mes_cubierto'] = len(row.pop('dias')) == monthrange(month.year, month.month)[1]
+        if not row['mes_cubierto']:
+            row['pendientes'].append('Los periodos registrados no cubren todos los días del mes.')
+        row['periodos'] = list(row['periodos'].values())
+        row['grupos'] = list(row['grupos'].values())
+        for group in row['grupos']:
+            group['personas'] = len(group['personas'])
+            group['destino_label'] = {'tienda': 'Personal de tienda', 'logistica': 'Logística',
+                'administracion': 'Administración', 'produccion': 'Producción', 'cedis': 'CEDIS',
+                'call_center': 'Call center', 'sin_clasificar': 'Sin función registrada'}[group['destino']]
+    return rows

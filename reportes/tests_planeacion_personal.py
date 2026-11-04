@@ -97,6 +97,22 @@ class PersonnelPlanTests(TestCase):
         self.assertIsNone(result['policy'])
         self.assertIsNone(result['branches'][0]['recent_average'])
 
+    def test_no_porcentaje_de_tienda_si_hay_personal_sin_clasificar(self, _):
+        from core.models import Sucursal
+        from rrhh.models import NominaPeriodo, NominaLinea
+        suc = Sucursal.objects.create(codigo='PLAN', nombre='Sucursal A')
+        self.branch.erp_branch = suc
+        self.branch.save(update_fields=['erp_branch'])
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2026,8,1),
+            fecha_fin=date(2026,8,31), estatus='PAGADA')
+        for code, function in [('known','CAJAS'), ('missing','')]:
+            emp = Empleado.objects.create(codigo=code,nombre=code,departamento='VENTAS',
+                sucursal_ref=suc,puesto_operativo=function)
+            NominaLinea.objects.create(periodo=period,empleado=emp,salario_base=100)
+        groups = build_personnel_plan()['selected']['registered']['grupos']
+        self.assertEqual(sum(g['total'] for g in groups),D(200))
+        self.assertTrue(all(g['porcentaje'] is None for g in groups))
+
     def invoice(self, uuid, xml, **kwargs):
         values = dict(uuid=uuid, rfc_emisor=RFC, rfc_receptor='PERSONA', subtotal=100,
                       total=100, tipo_cfdi='emitido', tipo_comprobante='N', xml_raw=xml,

@@ -18,6 +18,19 @@
   <form method="get" class="tools"><label>Mes de cierre <input type="month" name="mes" value="{{ cutoff|date:'Y-m' }}" required></label><button class="btn" type="submit">Consultar corte</button><a class="btn" href="?mes={{ cutoff|date:'Y-m' }}&amp;formato=csv">Descargar cifras y fuentes</a><button class="btn" type="button" onclick="window.print()">Imprimir / PDF</button></form>
 </section>
 <section class="card">
+  <h2>Nómina registrada · {{ selected.month|date:"m/Y" }}</h2>
+  <p class="reading"><strong>El costo integral aún requiere conciliación.</strong> La lista de raya y los CFDI son fuentes que se comparan, no importes que se suman entre sí. Los límites de planeación no representan saldo disponible para contratar. Además de las cargas patronales, deben verificarse las prestaciones devengadas del mes y los pagos extraordinarios.</p>
+  {% if selected.registered %}
+  <p>Lista de raya con despensa: <strong>${{ selected.registered.total|floatformat:2|intcomma }}</strong> · Diferencia de percepciones CFDI menos lista: <strong>{{ selected.payroll_difference|default_if_none:"Sin CFDI comparable"|intcomma }}</strong>.</p>
+  <p>{% if selected.registered.mes_cubierto %}Los periodos registrados cubren el mes.{% else %}<strong>Los periodos registrados no cubren el mes completo.</strong>{% endif %} {% for p in selected.registered.periodos %}Nómina #{{ p.id }}: {{ p.inicio|date:"d/m" }}–{{ p.fin|date:"d/m" }} ({{ p.estatus }}). {% endfor %}</p>
+  <div class="table-responsive"><table><thead><tr><th>Sucursal histórica / función actual</th><th>Personas</th><th>Percepciones</th><th>Despensa adicional</th><th>Subtotal sin cargas</th><th>Venta con impuestos</th><th>% tienda sin cargas</th></tr></thead><tbody>
+  {% for g in selected.registered.grupos %}<tr><td>{{ g.sucursal }} · {{ g.destino_label }}</td><td>{{ g.personas }}</td><td>{{ g.percepciones|floatformat:2|intcomma }}</td><td>{{ g.despensa|floatformat:2|intcomma }}</td><td>{{ g.total|floatformat:2|intcomma }}</td><td>{{ g.ventas|default_if_none:"—"|intcomma }}</td><td>{{ g.porcentaje|default_if_none:"—" }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="caption">Encargados de cajas permanecen en tienda; repartidores en logística; jefaturas en administración; call center separado, sin inventar un reparto de horas. La función corresponde al expediente actual de RRHH y la sucursal a la lista histórica. Personas únicas dentro de cada grupo: si hubo traslado, no sumar los conteos entre sucursales. La despensa adicional sólo se suma cuando los conceptos prueban que quedó fuera de las percepciones. Estos subtotales no incluyen cargas patronales ni provisiones y sus porcentajes no son el costo integral. Se omite el porcentaje si faltan funciones por clasificar en esa sucursal o si los periodos no cubren el mes.</p>
+  {% if selected.registered.pendientes %}<details><summary>Pendientes de la lista de raya ({{ selected.registered.pendientes|length }})</summary><ul>{% for item in selected.registered.pendientes %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
+  {% else %}<p>Sin listas de raya cerradas o pagadas para este corte.</p>{% endif %}
+</section>
+<section class="card">
 {% if policy %}
   <p class="period-label">Referencia observada · {{ recent.0|date:"m/Y" }} a {{ recent.2|date:"m/Y" }}</p>
   <div class="metrics">
