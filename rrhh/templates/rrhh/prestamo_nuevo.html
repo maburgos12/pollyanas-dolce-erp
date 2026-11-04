@@ -4,56 +4,52 @@
 {% block page_title %}Nuevo préstamo{% endblock %}
 
 {% block content %}
+{% if show_rrhh_tabs %}
 <section class="module-tabs rrhh-tabs" aria-label="Submódulos RRHH">
   {% for tab in module_tabs %}
     <a href="{% url tab.url_name %}" class="module-tab {% if tab.active %}active{% endif %}">{{ tab.label }}</a>
   {% endfor %}
 </section>
+{% endif %}
 
 <section class="card">
   <p><a class="btn btn-secondary" href="{% url 'rrhh:rrhh_prestamos_lista' %}">← Volver a préstamos</a></p>
   <form method="post">
     {% csrf_token %}
+    {% if errores %}<div role="alert">{% for mensaje in errores %}<p>{{ mensaje }}</p>{% endfor %}</div>{% endif %}
+    <p>El jefe directo se toma del expediente del empleado. Si solicitas para un colaborador directo, el envío registra tu visto bueno y pasa a Dirección. Las demás solicitudes pasan primero al jefe asignado.</p>
     <div class="form-grid">
       <label>Empleado
         <select name="empleado" required>
           <option value="">Seleccionar empleado</option>
           {% for empleado in empleados %}
-            <option value="{{ empleado.id }}">{{ empleado.codigo }} · {{ empleado.nombre }} · {{ empleado.area }}</option>
+            <option value="{{ empleado.id }}" {% if valores.empleado == empleado.id|stringformat:"s" %}selected{% endif %}>{{ empleado.codigo }} · {{ empleado.nombre }} · {{ empleado.area }}</option>
           {% endfor %}
         </select>
       </label>
       <label>Método de pago
         <select name="metodo_pago">
           {% for value, label in metodos %}
-            <option value="{{ value }}">{{ label }}</option>
-          {% endfor %}
-        </select>
-      </label>
-      <label>Jefe directo / primer autorizador
-        <select name="jefe_directo">
-          <option value="">Seleccionar autorizador</option>
-          {% for user in autorizadores %}
-            <option value="{{ user.id }}">{{ user.get_full_name|default:user.username }}</option>
+            <option value="{{ value }}" {% if valores.metodo_pago == value %}selected{% endif %}>{{ label }}</option>
           {% endfor %}
         </select>
       </label>
       <label>Fecha solicitud
-        <input type="date" name="fecha_solicitud">
+        <input type="date" name="fecha_solicitud" value="{{ valores.fecha_solicitud|default:'' }}">
       </label>
       <label>Fecha depósito
-        <input type="date" name="fecha_deposito">
+        <input type="date" name="fecha_deposito" value="{{ valores.fecha_deposito|default:'' }}">
       </label>
       <label>Importe
-        <input id="id_importe" type="number" name="importe" min="0.01" step="0.01" required>
+        <input id="id_importe" type="number" name="importe" value="{{ valores.importe|default:'' }}" min="0.01" step="0.01" required>
       </label>
       <label>Número de quincenas
-        <input id="id_num_quincenas" type="number" name="num_quincenas" min="1" step="1" required>
+        <input id="id_num_quincenas" type="number" name="num_quincenas" value="{{ valores.num_quincenas|default:'' }}" min="1" step="1" required>
       </label>
     </div>
     <p id="descuento_preview" class="muted">$0.00 por quincena</p>
     <label>Concepto
-      <textarea name="concepto" rows="4" required></textarea>
+      <textarea name="concepto" rows="4" required>{{ valores.concepto|default:"" }}</textarea>
     </label>
     <div class="pd-u-88b9d5c614">
       <button class="btn btn-primary" type="submit">Crear préstamo</button>

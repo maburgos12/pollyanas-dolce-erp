@@ -10,11 +10,33 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
-from core.notificaciones import notificar_prestamo_solicitado
+from core.access import ROLE_ADMIN, ROLE_DG, can_manage_rrhh, has_any_role
+from core.notificaciones import notificar_prestamo_solicitado, notificar_prestamo_para_direccion
 
 from .models import Empleado, Prestamo, PrestamoCuota
 from .services import usuario_jefe_directo_de_empleado
+from .services_identidad import empleado_de_usuario
+
+
+def equipo_prestamos_usuario(user):
+    empleados = Empleado.objects.filter(activo=True, jefe_directo__activo=True)
+    if not user or not user.is_authenticated or not user.is_active:
+        return empleados.none()
+    return empleados.filter(jefe_directo__usuario_erp=user).exclude(usuario_erp=user)
+
+
+def empleados_solicitables_prestamo(user):
+    empleados = Empleado.objects.filter(activo=True)
+    if not user or not user.is_authenticated or not user.is_active:
+        return empleados.none()
+    if can_manage_rrhh(user):
+        return empleados
+    propio = empleado_de_usuario(user)
+    return empleados.filter(Q(pk=getattr(propio, "pk", None)) | Q(pk__in=equipo_prestamos_usuario(user)))
+
+
+def can_capturar_prestamos_equipo(user):
+    return bool(can_manage_rrhh(user) or equipo_prestamos_usuario(user).exists())
 
 
 @transaction.atomic
@@ -28,6 +50,7 @@ def crear_solicitud_prestamo(
     num_quincenas,
     fecha_deposito: date | None = None,
     require_active_manager: bool = True,
+    fecha_solicitud: date | None = None,
 ) -> Prestamo:
     """Crea una solicitud sin permitir que el cliente controle autorizaciones."""
     empleado = (
@@ -35,6 +58,8 @@ def crear_solicitud_prestamo(
         .select_related("jefe_directo__usuario_erp")
         .get(pk=empleado.pk)
     )
+    if not empleado.activo:
+        raise ValidationError({"empleado": "El empleado debe estar activo."})
     concepto = (concepto or "").strip()
     if not concepto:
         raise ValidationError({"concepto": "El concepto es obligatorio."})
@@ -45,7 +70,7 @@ def crear_solicitud_prestamo(
         importe = Decimal(str(importe))
     except (TypeError, ValueError, ArithmeticError):
         raise ValidationError({"importe": "El importe debe ser numerico."}) from None
-    if importe <= 0:
+    if not importe.is_finite() or importe <= 0:
         raise ValidationError({"importe": "El importe debe ser mayor a cero."})
 
     try:
@@ -56,10 +81,6 @@ def crear_solicitud_prestamo(
         raise ValidationError({"num_quincenas": "Indica al menos una quincena."})
 
     jefe_directo = usuario_jefe_directo_de_empleado(empleado)
-    if require_active_manager and (not jefe_directo or not jefe_directo.is_active):
-        raise ValidationError(
-            {"empleado": "El empleado no tiene una jefa directa activa con usuario ERP."}
-        )
 
     deuda = Prestamo.objects.filter(
         empleado=empleado,
@@ -76,12 +97,17 @@ def crear_solicitud_prestamo(
             {"empleado": f"Aun tiene un prestamo vigente: {deuda.folio} · saldo ${deuda.saldo_actual}."}
         )
 
+    if require_active_manager and (not jefe_directo or not jefe_directo.is_active):
+        raise ValidationError(
+            {"empleado": "El empleado no tiene una jefa directa activa con usuario ERP."}
+        )
+
     descuento = (importe / Decimal(str(num_quincenas))).quantize(Decimal("0.01"))
     prestamo = Prestamo.objects.create(
         empleado=empleado,
         concepto=concepto,
         metodo_pago=metodo_pago,
-        fecha_solicitud=timezone.localdate(),
+        fecha_solicitud=fecha_solicitud or timezone.localdate(),
         fecha_deposito=fecha_deposito,
         importe=importe,
         num_quincenas=num_quincenas,
@@ -91,7 +117,14 @@ def crear_solicitud_prestamo(
         jefe_directo=jefe_directo,
         creado_por=actor,
     )
-    notificar_prestamo_solicitado(prestamo, actor=actor)
+    # Capturar para un colaborador directo constituye el visto bueno de su jefe.
+    if (equipo_prestamos_usuario(actor).filter(pk=empleado.pk).exists()
+            and usuario_equivale_jefe_prestamo(actor, prestamo)
+            and can_autorizar_prestamo_jefe(actor, prestamo)):
+        autorizar_prestamo_jefe(prestamo, actor)
+        notificar_prestamo_para_direccion(prestamo, actor=actor)
+    else:
+        notificar_prestamo_solicitado(prestamo, actor=actor)
     return prestamo
 
 
@@ -112,16 +145,19 @@ def generar_cuotas(prestamo: Prestamo) -> list[PrestamoCuota]:
     cuotas = []
     fecha = _siguiente_quincena(prestamo.fecha_deposito or prestamo.fecha_solicitud)
 
+    restante = prestamo.importe
     for i in range(1, prestamo.num_quincenas + 1):
+        monto = restante if i == prestamo.num_quincenas else min(prestamo.descuento_quincenal, restante)
         cuotas.append(
             PrestamoCuota(
                 prestamo=prestamo,
                 numero_quincena=i,
                 fecha_quincena=fecha,
-                monto_esperado=prestamo.descuento_quincenal,
+                monto_esperado=monto,
                 estado=PrestamoCuota.ESTADO_PENDIENTE,
             )
         )
+        restante -= monto
         fecha = _siguiente_quincena(fecha)
 
     PrestamoCuota.objects.bulk_create(cuotas, ignore_conflicts=True)
@@ -133,7 +169,8 @@ def can_autorizar_prestamo_jefe(user, prestamo: Prestamo) -> bool:
         return False
     if prestamo.estado != Prestamo.ESTADO_SOLICITADO:
         return False
-    if _same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user):
+    if (_same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user)
+            or prestamo.empleado_id == getattr(empleado_de_usuario(user), "pk", None)):
         return False
     return getattr(user, "is_superuser", False) or usuario_equivale_jefe_prestamo(user, prestamo)
 
@@ -170,7 +207,10 @@ def _email(user) -> str:
     return (getattr(user, "email", "") or "").strip().lower()
 
 
+@transaction.atomic
 def autorizar_prestamo_jefe(prestamo: Prestamo, user) -> Prestamo:
+    Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    prestamo.refresh_from_db()
     if not can_autorizar_prestamo_jefe(user, prestamo):
         raise PermissionDenied("Solo el jefe directo asignado puede autorizar este préstamo.")
     prestamo.firma_jefe = True
@@ -186,7 +226,8 @@ def can_autorizar_prestamo_direccion(user, prestamo: Prestamo | None = None) -> 
         return False
     if not (user.is_superuser or has_any_role(user, ROLE_DG, ROLE_ADMIN)):
         return False
-    if prestamo and getattr(prestamo.empleado, "usuario_erp_id", None) == user.id:
+    if prestamo and (_same_user_or_email(getattr(prestamo.empleado, "usuario_erp", None), user)
+                     or prestamo.empleado_id == getattr(empleado_de_usuario(user), "pk", None)):
         return False
     return True
 
@@ -201,7 +242,10 @@ def prestamos_por_autorizar_q(user) -> Q:
     return pendientes
 
 
+@transaction.atomic
 def aprobar_prestamo_direccion(prestamo: Prestamo, user) -> Prestamo:
+    Prestamo.objects.select_for_update().get(pk=prestamo.pk)
+    prestamo.refresh_from_db()
     if not can_autorizar_prestamo_direccion(user, prestamo):
         raise PermissionDenied("Solo Dirección puede aprobar préstamos y generar cuotas.")
     if prestamo.estado != Prestamo.ESTADO_AUTORIZADO:

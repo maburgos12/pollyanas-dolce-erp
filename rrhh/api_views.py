@@ -38,6 +38,7 @@ from .services_prestamos import (
     autorizar_prestamo_jefe,
     crear_solicitud_prestamo,
     prestamos_por_autorizar_q,
+    empleados_solicitables_prestamo,
 )
 from .services_permisos import permisos_empleados_usuario, permisos_visibles_usuario, resolver_permiso_direccion, resolver_permiso_jefe
 from .services_vacaciones import (
@@ -84,7 +85,7 @@ class _CapitalHumanoAccessMixin:
             filtro = Q(empleado=empleado) if empleado else Q()
             model = getattr(qs, "model", None)
             if model == Prestamo:
-                filtro |= prestamos_por_autorizar_q(self.request.user)
+                filtro |= prestamos_por_autorizar_q(self.request.user) | Q(creado_por=self.request.user)
             elif model == HoraExtra:
                 filtro |= Q(pk__isnull=False) if self.request.user.is_superuser else Q(jefe_directo=self.request.user)
             elif model == SolicitudVacaciones:
@@ -424,6 +425,7 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
 
 class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = PrestamoSerializer
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         qs = Prestamo.objects.select_related("empleado", "jefe_directo", "autorizado_jefe", "autorizado_dg")
@@ -431,7 +433,7 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         if can_view_rrhh(self.request.user):
             pass
         elif empleado:
-            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user))
+            qs = qs.filter(Q(empleado=empleado) | Q(jefe_directo=self.request.user) | Q(creado_por=self.request.user))
         else:
             qs = qs.filter(jefe_directo=self.request.user)
         estado = self.request.query_params.get("estado")
@@ -443,8 +445,8 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
         if not empleado:
             raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
-        if not can_view_rrhh(self.request.user) and empleado != empleado_de_usuario(self.request.user):
-            raise PermissionDenied("No puedes solicitar préstamos para otro empleado.")
+        if not empleados_solicitables_prestamo(self.request.user).filter(pk=empleado.pk).exists():
+            raise PermissionDenied("Solo puedes solicitar préstamos para ti o tus colaboradores directos activos.")
 
         serializer.instance = crear_solicitud_prestamo(
             empleado=empleado,
@@ -454,8 +456,16 @@ class PrestamoViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             importe=serializer.validated_data["importe"],
             num_quincenas=serializer.validated_data["num_quincenas"],
             fecha_deposito=serializer.validated_data.get("fecha_deposito"),
-            require_active_manager=False,
+            require_active_manager=empleado != empleado_de_usuario(self.request.user),
         )
+
+    @action(detail=False, methods=["get"], url_path="empleados")
+    def empleados(self, request):
+        propios = empleado_de_usuario(request.user)
+        return Response([
+            {"id": e.pk, "nombre": e.nombre, "es_propio": e.pk == getattr(propios, "pk", None)}
+            for e in empleados_solicitables_prestamo(request.user).order_by("nombre")
+        ])
 
     @action(detail=True, methods=["post"], url_path="autorizar-jefe")
     def autorizar_jefe(self, request, pk=None):
