@@ -18,6 +18,7 @@ from ventas.services.sales_canonical_source import official_point_sales_rows_for
 from .models import ExpedienteCedulaIMSS, ExpedienteISN
 from .services_isn import extraer_isn_cfdi
 from .services_personal_registrado import leer_personal_registrado
+from .services_personal_global import resumen_personal_global
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -309,6 +310,8 @@ def build_personnel_plan(cutoff=None):
     for item in staff:
         item['department_label'] = dict(Empleado.DEP_CHOICES).get(item['departamento'], item['departamento'])
         item['contract_label'] = dict(Empleado.CONTRATO_CHOICES).get(item['tipo_contrato'], item['tipo_contrato'])
+    selected = rows[month_shift(end, -1)]
+    selected['global'] = resumen_personal_global(selected)
     sources = [dict(month=r['month'], **s) for r in rows.values() for s in r['sources']]
     return dict(cutoff=end - timedelta(days=1), start=start, generated_at=timezone.now(),
                 months=list(rows.values()), selected=rows[month_shift(end, -1)],
