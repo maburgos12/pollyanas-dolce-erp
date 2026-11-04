@@ -880,6 +880,21 @@ class PointSalesSyncTaskRoutingTests(TestCase):
 class MonthlyProductClosureMutexTests(TransactionTestCase):
     reset_sequences = True
 
+    def setUp(self):
+        super().setUp()
+        patcher = patch(
+            "pos_bridge.tasks.run_monthly_product_closure._apply_monthly_automation_gates",
+            side_effect=lambda closure, **_kwargs: (
+                closure,
+                {
+                    "physical_counts": {"ready": True, "issues": []},
+                    "audit_refresh": {"ready": True, "status": "updated", "run_status": "READY"},
+                },
+            ),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     @staticmethod
     def _closure():
         return SimpleNamespace(
