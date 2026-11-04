@@ -65,8 +65,17 @@ def leer_personal_registrado(start, end):
         row['periodos'] = list(row['periodos'].values())
         row['grupos'] = list(row['grupos'].values())
         sucursales = {}
+        departamentos = {}
+        personas_mes = set()
         row['otros_costos'] = []
         for group in row['grupos']:
+            departamento = departamentos.setdefault(group['destino'], dict(
+                destino=group['destino'], personas=set(), percepciones=Decimal(0),
+                despensa=Decimal(0), total=Decimal(0)))
+            departamento['personas'].update(group['personas'])
+            personas_mes.update(group['personas'])
+            for field in ('percepciones', 'despensa', 'total'):
+                departamento[field] += group[field]
             if group['destino'] in ('tienda', 'ventas_pendiente'):
                 branch = sucursales.setdefault(group['sucursal_id'], dict(sucursal_id=group['sucursal_id'],
                     sucursal=group['sucursal'], personas=set(), percepciones=Decimal(0),
@@ -84,6 +93,11 @@ def leer_personal_registrado(start, end):
                 'call_center': 'Call center', 'limpieza': 'Limpieza', 'almacen': 'Almacén',
                 'ventas_pendiente': 'Ventas · puesto específico pendiente',
                 'sin_clasificar': 'Departamento o función pendiente'}[group['destino']]
+            departamento['destino_label'] = group['destino_label']
+        row['departamentos'] = sorted(departamentos.values(), key=lambda g: g['destino_label'])
+        for departamento in row['departamentos']:
+            departamento['personas'] = len(departamento['personas'])
+        row['personas'] = len(personas_mes)
         row['sucursales_ventas'] = sorted(sucursales.values(), key=lambda b: b['sucursal'])
         for branch in row['sucursales_ventas']:
             branch['personas'] = len(branch['personas'])

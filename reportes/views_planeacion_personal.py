@@ -64,6 +64,39 @@ def planeacion_personal(request):
         writer.writerow(['Periodo', 'Fuente', 'ID ERP', 'Referencia', 'Importe'])
         for source in data['sources']:
             writer.writerow([source[k] for k in ('month', 'kind', 'id', 'reference', 'amount')])
+        global_row = data['selected']['global']
+        writer.writerow([])
+        writer.writerow(['Global por departamento', 'Personas', 'Percepciones', 'Vales adicionales',
+                         'Nomina registrada', '% ventas totales'])
+        for group in global_row['departamentos']:
+            writer.writerow([group[k] for k in ('destino_label', 'personas', 'percepciones',
+                                               'despensa', 'total', 'porcentaje')])
+        writer.writerow(['Total nomina y vales', global_row['personas'], '', '',
+                         global_row['nomina'], global_row['nomina_porcentaje']])
+        writer.writerow([])
+        writer.writerow(['Gastos operativos por area', 'Importe mensual', '% ventas totales', 'Registros parciales'])
+        for area in global_row['gastos_areas']:
+            writer.writerow([area[k] for k in ('nombre', 'total', 'porcentaje', 'parciales')])
+        writer.writerow([])
+        writer.writerow(['Resumen final', 'Importe del mes', '% ventas totales'])
+        writer.writerow(['Ventas totales con impuestos', global_row['ventas']])
+        for component in global_row['componentes']:
+            writer.writerow([component[k] for k in ('nombre', 'monto', 'porcentaje')])
+        writer.writerow(['Subtotal personal con cargas identificadas', global_row['personal_subtotal'],
+                         global_row['personal_porcentaje']])
+        writer.writerow(['Subtotal personal y gastos identificados', global_row['subtotal'], global_row['porcentaje']])
+        writer.writerow(['Costo integral cerrado', 'Pendiente de conciliacion'])
+        writer.writerow(['Alcance', 'No incluye materia prima, empaque de fabricacion ni inversiones. '
+                         'No sumar subtotales entre si ni CFDI a listas. Vacio significa pendiente, no cero.'])
+        writer.writerow(['Diferencia CFDI menos lista, no sumable', data['selected']['payroll_difference']])
+        writer.writerow(['Periodos cubren mes', (data['selected']['registered'] or {}).get('mes_cubierto')])
+        writer.writerow(['Pendientes lista', '; '.join((data['selected']['registered'] or {}).get('pendientes', []))])
+        writer.writerow([])
+        writer.writerow(['Fuentes de gastos / pendientes', 'ID', 'Clave de asignacion', 'Area',
+                         'Concepto', 'Importe mensual', 'Estado', 'Detalle'])
+        for expense in global_row['fuentes_gastos'] + global_row['pendientes_gastos']:
+            writer.writerow([expense[k] for k in ('origen', 'registro_id', 'clave', 'area', 'concepto',
+                                                  'monto_mensual', 'estado', 'detalle')])
         response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="planeacion_personal.csv"'
         return response
