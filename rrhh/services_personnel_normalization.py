@@ -12,6 +12,7 @@ from django.db.models import Count, Q
 from core.access import ROLE_ORDER
 from core.models import Departamento, Sucursal, UserModuleAccess, UserProfile
 from rrhh.models import Empleado
+from bonos_ventas.empleados import AREAS_BONOS_VENTAS
 from rrhh.services_catalogos import area_division_map, area_division_values, puesto_operativo_values
 from rrhh.services_personnel_audit import SPECIAL_OPERATIONAL_GROUPS, normalize_catalog_key
 
@@ -228,6 +229,24 @@ def _employee_catalog_proposals() -> list[NormalizationProposal]:
         .order_by("nombre", "id")
     )
     for empleado in employees:
+        if not empleado.puesto_operativo and not empleado.puesto and empleado.nivel_organizacional not in {"JEFATURA", "DIRECCION"}:
+            proposals.append(_proposal(key=f"employee.position_missing:{empleado.pk}", plane="personal",
+                entity_type="Empleado", entity_id=empleado.pk, display=empleado.nombre,
+                current_value=f"Departamento: {empleado.departamento}; puesto específico pendiente",
+                proposed_value="Confirmar función en la ficha existente", action="confirmar_puesto_especifico",
+                severity="warning", reason="Departamento y sucursal no acreditan un puesto específico; no se asigna automáticamente."))
+        if not empleado.jefe_directo_id and empleado.nivel_organizacional != "DIRECCION":
+            proposals.append(_proposal(key=f"employee.manager_missing:{empleado.pk}", plane="personal",
+                entity_type="Empleado", entity_id=empleado.pk, display=empleado.nombre,
+                current_value="Sin jefe directo", proposed_value="Vincular la persona responsable existente",
+                action="confirmar_jefe_directo", severity="warning", reason="La jerarquía debe conservarse en la ficha maestra."))
+        if empleado.departamento and empleado.departamento != "VENTAS" and (empleado.participa_bonos_ventas or empleado.area in AREAS_BONOS_VENTAS):
+            proposals.append(_proposal(key=f"employee.sales_bonus_scope:{empleado.pk}", plane="personal",
+                entity_type="Empleado", entity_id=empleado.pk, display=empleado.nombre,
+                current_value=f"Departamento {empleado.departamento}; selección de bono de ventas habilitada",
+                proposed_value="Revisar participación futura; conservar pagos y ajustes históricos",
+                action="revisar_participacion_bonos_ventas", severity="warning",
+                reason="Participar en bonos no convierte a la persona en personal de cajas. No se recalculan bonos desde este diagnóstico."))
         suggested_level = _suggest_level(empleado)
         if suggested_level and empleado.nivel_organizacional != suggested_level:
             proposals.append(
@@ -281,7 +300,11 @@ def _employee_catalog_proposals() -> list[NormalizationProposal]:
 
         if empleado.puesto_operativo in area_by_puesto:
             expected_area = area_by_puesto[empleado.puesto_operativo]
-            if empleado.area != expected_area:
+            # Departamento amplio y función específica pueden coexistir; no proponer sobrescribirlos.
+            compatibles = {normalize_catalog_key(expected_area), normalize_catalog_key(empleado.departamento)}
+            if empleado.puesto_operativo == "REPARTIDOR":
+                compatibles.add("REPARTIDOR")
+            if normalize_catalog_key(empleado.area) not in compatibles:
                 proposals.append(
                     _proposal(
                         key=f"employee.position_to_area:{empleado.pk}",
@@ -561,7 +584,7 @@ def _repartidor_proposals() -> list[NormalizationProposal]:
                     reason="Si ya tiene acceso a la PWA, capturar esa cuenta en Empleado.usuario_erp para unir persona RRHH, usuario y logistica.",
                 )
             )
-        if normalize_catalog_key(empleado.area) != "REPARTIDORES":
+        if normalize_catalog_key(empleado.area) not in {"REPARTIDOR", "REPARTIDORES", normalize_catalog_key(empleado.departamento)}:
             proposals.append(
                 _proposal(
                     key=f"repartidor.area:{empleado.pk}",

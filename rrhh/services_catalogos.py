@@ -150,3 +150,13 @@ def puesto_operativo_choices() -> tuple[tuple[str, str], ...]:
 
 def puesto_operativo_values() -> frozenset[str]:
     return frozenset(value for value, _label in puesto_operativo_choices())
+
+
+def puesto_presentacion(empleado, catalogo):
+    """Etiqueta de la ficha sin copiar el catálogo a campos históricos."""
+    clave = Empleado._clave_funcion(empleado.puesto_operativo)
+    return empleado.puesto or catalogo.get(clave) or empleado.puesto_operativo or "Puesto pendiente"
+
+
+def etiquetas_puestos():
+    return {Empleado._clave_funcion(valor): etiqueta for valor, etiqueta in puesto_operativo_choices()}

@@ -112,6 +112,9 @@ class PersonnelPlanTests(TestCase):
         groups = build_personnel_plan()['selected']['registered']['grupos']
         self.assertEqual(sum(g['total'] for g in groups),D(200))
         self.assertTrue(all(g['porcentaje'] is None for g in groups))
+        branch = build_personnel_plan()['selected']['registered']['sucursales_ventas'][0]
+        self.assertEqual(branch['puestos_pendientes'], 1)
+        self.assertEqual(branch['porcentaje'], D('50.00'))
 
     def invoice(self, uuid, xml, **kwargs):
         values = dict(uuid=uuid, rfc_emisor=RFC, rfc_receptor='PERSONA', subtotal=100,
