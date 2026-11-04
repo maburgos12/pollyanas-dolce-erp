@@ -40,21 +40,23 @@
   .rm-note { font-size: .78rem; color: var(--texto-light, #7A6565); margin-top: 10px; }
   details.rm-detalle { margin-top: 4px; }
   details.rm-detalle summary { cursor: pointer; color: var(--vino, #8B2252); font-size: .8rem; }
+  .rm-breakdown { max-width: 700px; text-align: left; }
+  .rm-breakdown > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--gris-suave); }
+  .rm-breakdown dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .rm-detalle h2 { font-size: 1rem; text-align: left; }
+  .rm-detalle p { text-align: left; max-width: 75ch; }
   .rm-sub { font-size: .8rem; color: var(--texto-light, #7A6565); }
 </style>
 {% endblock %}
 
 {% block content %}
-<p><a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Ver reparto conciliado enero–septiembre 2026 y su CSV</a>. Enero–septiembre utiliza el mismo cierre conciliado.</p>
-<p>Enero–septiembre 2026 incluye los fondos de costos, producción, logística y administración distribuidos. Los otros períodos conservan su resultado parcial. Horas extra informativas: no se suman otra vez a la nómina. No confirman utilidad neta, ROI o recuperación.</p>
 <div class="rm-shell">
   <section class="rm-hero">
     <div>
       <h1>Reporte mensual consolidado · últimos 12 meses</h1>
       <p>
-        Ingresos del P&amp;L canónico, nómina con horas extra informativas,
-        nómina como % de ventas, resultado según el alcance de cada mes y
-        variación contra el mismo mes del año anterior.
+        Ventas, costos, márgenes, gastos y resultado operativo por mes y sucursal.
+        El personal se consulta en el desglose, sin sumar nuevamente las horas extra.
       </p>
     </div>
     <form method="get" class="rm-controls">
@@ -73,86 +75,78 @@
   </section>
 
   <section class="rm-card">
-    <div class="table-responsive">
+    <p>Importes reales registrados. El cierre enero–septiembre 2026 conserva su reparto autorizado y su base de impuestos.
+      <a href="{% url 'rentabilidad_dashboard' %}?tab=reparto">Consultar fuentes y reparto</a>.</p>
+    <div class="table-responsive" tabindex="0" role="region" aria-label="Resultados financieros mensuales">
     <table class="rm-tabla">
-      <thead>
-        <tr>
-          <th>Mes</th>
-          <th>Ingresos</th>
-          <th>Nómina (P&amp;L)</th>
-          <th>Horas extra</th>
-          <th>Nómina total</th>
-          <th>Nómina % ventas</th>
-          <th>Resultado por sucursales</th>
-          <th>YoY ingresos</th>
-          <th>YoY nómina</th>
-          <th>YoY utilidad</th>
-        </tr>
-      </thead>
+      <caption>Resultado mensual · importes en MXN</caption>
+      <thead><tr>
+        <th scope="col">Mes / cobertura</th><th scope="col">Ventas</th>
+        <th scope="col">Costos y producción</th><th scope="col">Margen bruto gerencial</th>
+        <th scope="col">Gastos operativos</th><th scope="col">Resultado operativo</th>
+        <th scope="col">PE integral mensual</th><th scope="col">Variación anual ventas</th>
+        <th scope="col">Variación anual resultado</th>
+      </tr></thead>
       <tbody>
-        {% for fila in filas %}
+      {% for fila in filas %}
         <tr>
-          <td class="rm-mes">{{ fila.periodo|date:"M Y" }}<div class="rm-note">{% if fila.alcance == "REPARTO_CONCILIADO" %}Reparto conciliado{% else %}Resultado parcial{% endif %}</div></td>
-          <td>${{ fila.ingresos|floatformat:2|intcomma }}</td>
-          <td>${{ fila.nomina|floatformat:2|intcomma }}</td>
-          <td>${{ fila.horas_extra|floatformat:2|intcomma }}</td>
-          <td>${{ fila.nomina_total|floatformat:2|intcomma }}</td>
-          <td>{% if fila.nomina_pct_ventas is not None %}{{ fila.nomina_pct_ventas|floatformat:2 }}%{% else %}<span class="rm-na">—</span>{% endif %}</td>
-          <td class="{% if fila.utilidad_neta < 0 %}rm-neg{% endif %}">${{ fila.utilidad_neta|floatformat:2|intcomma }}{% if fila.resultado_empresa_parcial is not None %}<div class="rm-note">Central: ${{ fila.central_registrado|floatformat:2|intcomma }} · Empresa parcial: ${{ fila.resultado_empresa_parcial|floatformat:2|intcomma }}</div>{% endif %}</td>
-          <td>
-            {% if fila.yoy.ingresos is not None %}
-              <span class="{% if fila.yoy.ingresos >= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.ingresos|floatformat:1 }}%</span>
-            {% else %}<span class="rm-na">—</span>{% endif %}
-          </td>
-          <td>
-            {% if fila.yoy.nomina_total is not None %}
-              <span class="{% if fila.yoy.nomina_total <= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.nomina_total|floatformat:1 }}%</span>
-            {% else %}<span class="rm-na">—</span>{% endif %}
-          </td>
-          <td>
-            {% if fila.yoy.utilidad_neta is not None %}
-              <span class="{% if fila.yoy.utilidad_neta >= 0 %}rm-pos{% else %}rm-neg{% endif %}">{{ fila.yoy.utilidad_neta|floatformat:1 }}%</span>
-            {% else %}<span class="rm-na">—</span>{% endif %}
-          </td>
+          <th scope="row" class="rm-mes">{{ fila.periodo|date:"M Y" }}<div class="rm-note">{% if fila.financiero %}Reparto conciliado{% elif fila.alcance == 'SIN_DATOS' %}Sin datos en la fuente{% else %}Cobertura parcial{% endif %}</div></th>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.ingresos %}</td>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.financiero.costos_produccion %}</td>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.financiero.margen %}{% if fila.financiero and fila.financiero.margen_pct is not None %}<div class="rm-note">{{ fila.financiero.margen_pct|floatformat:2 }}%</div>{% endif %}</td>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.financiero.gastos_operativos %}</td>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.utilidad_neta %}{% if fila.financiero and fila.financiero.utilidad_pct is not None %}<div class="rm-note">{{ fila.financiero.utilidad_pct|floatformat:2 }}%</div>{% endif %}</td>
+          <td>{% include 'rentabilidad/_importe_mensual.html' with valor=fila.financiero.punto_equilibrio %}{% if fila.financiero.motivo_pe %}<div class="rm-note">{{ fila.financiero.motivo_pe }}</div>{% endif %}</td>
+          <td>{% if fila.yoy.ingresos is not None %}{{ fila.yoy.ingresos|floatformat:1 }}%{% else %}No comparable{% endif %}</td>
+          <td>{% if fila.yoy.utilidad_neta is not None %}{{ fila.yoy.utilidad_neta|floatformat:1 }}%{% else %}No comparable{% endif %}</td>
         </tr>
-        {% if not sucursal_id and fila.sucursales %}
-        <tr>
-          <td colspan="10" style="padding-top:0;">
-            <details class="rm-detalle">
-              <summary>Desglose por sucursal · {{ fila.periodo|date:"M Y" }}</summary>
-              <div class="rm-sub">
-                {% for s in fila.sucursales %}
-                <div>
-                  {{ s.sucursal }} — ingresos ${{ s.ingresos|floatformat:2|intcomma }} ·
-                  nómina ${{ s.nomina|floatformat:2|intcomma }} + HE ${{ s.horas_extra|floatformat:2|intcomma }}
-                  {% if s.nomina_pct_ventas is not None %}({{ s.nomina_pct_ventas|floatformat:2 }}% de ventas){% endif %} ·
-                  utilidad ${{ s.utilidad_neta|floatformat:2|intcomma }}
-                </div>
-                {% endfor %}
-              </div>
-            </details>
-          </td>
-        </tr>
+        {% if fila.sucursales %}
+        <tr><td colspan="9">
+          <details class="rm-detalle"><summary>Ver gastos, personal y punto de equilibrio por sucursal · {{ fila.periodo|date:"M Y" }}</summary>
+            {% for s in fila.sucursales %}
+            <h2 class="rm-mes">{{ s.sucursal }}</h2>
+            {% if s.financiero %}
+            <dl class="rm-breakdown">
+              <div><dt>Materiales, reventa y merma asignados</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.costos %}</dd></div>
+              <div><dt>Producción asignada</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.produccion %}</dd></div>
+              <div><dt>Gastos directos (incluyen personal directo)</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.gasto_directo %}</dd></div>
+              <div><dt>Resultado antes de administración y logística</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.antes_comunes %}</dd></div>
+              <div><dt>Administración asignada</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.administracion %}</dd></div>
+              <div><dt>Logística asignada</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.logistica %}</dd></div>
+              <div><dt>Resultado operativo</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.utilidad %}</dd></div>
+              <div><dt>Costos variables del escenario</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.costo_variable %}</dd></div>
+              <div><dt>Gastos fijos del escenario</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.gasto_fijo_escenario %}</dd></div>
+              <div><dt>Punto de equilibrio integral</dt><dd>{% include 'rentabilidad/_importe_mensual.html' with valor=s.financiero.punto_equilibrio %} {{ s.financiero.motivo_pe }}</dd></div>
+            </dl>
+            <p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ fila.periodo|date:'Y-m' }}&amp;sucursal={{ s.sucursal_id }}&amp;tab=diagnostico">Ver conceptos y fuentes de gastos de {{ s.sucursal }}</a></p>
+            {% else %}<p>Desglose integral pendiente: esta fuente sólo ofrece un resultado parcial.</p>{% endif %}
+            <p class="rm-sub">Personal directo registrado en sucursal (nómina y cargas): {% include 'rentabilidad/_importe_mensual.html' with valor=s.nomina %}
+              {% if s.nomina_pct_ventas is not None %} · {{ s.nomina_pct_ventas|floatformat:2 }}% de ventas{% endif %}.
+              Horas extra operativas autorizadas o pagadas: {% include 'rentabilidad/_importe_mensual.html' with valor=s.horas_extra %}.
+              Son un control informativo, no un gasto adicional ni comprobación de pago; la asignación operativa usa la sucursal actual del empleado.</p>
+            {% endfor %}
+          </details>
+        </td></tr>
         {% endif %}
-        {% endfor %}
+      {% endfor %}
       </tbody>
-      <tfoot>
-        <tr>
-          <td>TOTAL 12M</td>
-          <td>${{ reporte.totales.ingresos|floatformat:2|intcomma }}</td>
-          <td>${{ reporte.totales.nomina|floatformat:2|intcomma }}</td>
-          <td>${{ reporte.totales.horas_extra|floatformat:2|intcomma }}</td>
-          <td>${{ reporte.totales.nomina_total|floatformat:2|intcomma }}</td>
-          <td></td>
-          <td class="{% if reporte.totales.utilidad_neta < 0 %}rm-neg{% endif %}">${{ reporte.totales.utilidad_neta|floatformat:2|intcomma }}</td>
-          <td colspan="3"></td>
-        </tr>
-      </tfoot>
+      {% if reporte.financiero_total %}
+      <tfoot><tr><th scope="row">Total del cierre disponible<br>{{ reporte.meses_con_cierre }} de {{ reporte.meses }} meses</th>
+        <td>{% include 'rentabilidad/_importe_mensual.html' with valor=reporte.financiero_total.ventas %}</td>
+        <td>{% include 'rentabilidad/_importe_mensual.html' with valor=reporte.financiero_total.costos_produccion %}</td>
+        <td>{% include 'rentabilidad/_importe_mensual.html' with valor=reporte.financiero_total.margen %}</td>
+        <td>{% include 'rentabilidad/_importe_mensual.html' with valor=reporte.financiero_total.gastos_operativos %}</td>
+        <td>{% include 'rentabilidad/_importe_mensual.html' with valor=reporte.financiero_total.utilidad %}</td>
+        <td colspan="3">El punto de equilibrio se evalúa por mes.</td>
+      </tr></tfoot>
+      {% endif %}
     </table>
     </div>
-    <p class="rm-note">
-      Fuentes según el alcance de cada mes: el reparto conciliado de enero–septiembre de 2026 usa el Estado de resultados, con los impuestos de sus fuentes y los costos centrales asignados incluidos. Los meses con resultado parcial usan ventas Point netas de impuestos y descuentos y excluyen los costos centrales. Las horas extra de RRHH autorizadas o pagadas son informativas; no incrementan nuevamente la nómina.
-    </p>
+    <p class="rm-note">Costos y producción son los fondos del cierre gerencial asignados; no certifican por sí solos un costo contable de inventario vendido.
+      El margen bruto descuenta ambos fondos. El resultado descuenta además gastos directos, administración y logística, una sola vez.
+      El PE usa materiales y combustible como variables y el resto como gastos fijos del escenario; no representa ahorro garantizado al cerrar una sucursal.</p>
+    <p class="rm-note">— significa dato no disponible, no cero. Los comparativos exigen el mismo alcance y las mismas sucursales con información.
+      Los totales del cierre excluyen meses parciales o sin datos. No se agregan provisiones nuevas; utilidad neta requiere completar financiero e impuestos.</p>
   </section>
 </div>
 {% endblock %}

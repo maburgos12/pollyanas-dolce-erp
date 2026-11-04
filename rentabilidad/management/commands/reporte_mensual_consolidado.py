@@ -21,6 +21,7 @@ from django.core.management.base import BaseCommand, CommandError
 from rentabilidad.services_reporte_mensual import (
     build_reporte_mensual_consolidado,
     reporte_a_json,
+    CAMPOS_FINANCIEROS,
 )
 
 
@@ -39,7 +40,7 @@ def _fmt(value, suffix: str = "") -> str:
 
 
 class Command(BaseCommand):
-    help = "Reporte mensual consolidado: ingresos, nómina (+horas extra), % de ventas, utilidad neta y variación YoY."
+    help = "Reporte financiero mensual: ventas, costos, márgenes, gastos, resultado operativo y PE; personal informativo."
 
     def add_arguments(self, parser):
         parser.add_argument("--hasta", help="Último mes del reporte (YYYY-MM). Default: último mes con P&L.")
@@ -99,7 +100,7 @@ class Command(BaseCommand):
                 "periodo", "sucursal", "ingresos", "nomina", "horas_extra",
                 "nomina_total", "nomina_pct_ventas", "utilidad_neta",
                 "yoy_ingresos_pct", "yoy_nomina_pct", "yoy_utilidad_pct", "alcance", "central_registrado", "resultado_empresa_parcial",
-            ]
+            ] + ["fin_" + k for k in (*CAMPOS_FINANCIEROS, "punto_equilibrio", "margen_pct", "utilidad_pct")]
         )
         for fila in reporte["filas"]:
             writer.writerow(
@@ -113,7 +114,7 @@ class Command(BaseCommand):
                     fila["yoy"]["nomina_total"] if fila["yoy"]["nomina_total"] is not None else "",
                     fila["yoy"]["utilidad_neta"] if fila["yoy"]["utilidad_neta"] is not None else "",
                     fila["alcance"], fila["central_registrado"], fila["resultado_empresa_parcial"],
-                ]
+                ] + [(fila.get("financiero") or {}).get(k, "") for k in (*CAMPOS_FINANCIEROS, "punto_equilibrio", "margen_pct", "utilidad_pct")]
             )
             if detalle:
                 for s in fila["sucursales"]:
@@ -124,41 +125,23 @@ class Command(BaseCommand):
                             s["nomina_total"],
                             s["nomina_pct_ventas"] if s["nomina_pct_ventas"] is not None else "",
                             s["utilidad_neta"], "", "", "", s["alcance"], "", "",
-                        ]
+                        ] + [(s.get("financiero") or {}).get(k, "") for k in (*CAMPOS_FINANCIEROS, "punto_equilibrio", "margen_pct", "utilidad_pct")]
                     )
         return buffer.getvalue()
 
     def _render_tabla(self, reporte: dict, *, detalle: bool) -> None:
-        self.stdout.write("Enero–agosto 2026: reparto conciliado con costos centrales incluidos. Otros períodos: resultado parcial. Horas extra informativas.")
-        encabezado = (
-            f"{'Mes':<8} {'Ingresos':>14} {'Nómina':>13} {'Hrs extra':>11} "
-            f"{'Nómina tot':>13} {'Nóm %vtas':>10} {'Utilidad':>14} "
-            f"{'YoY ing':>9} {'YoY nóm':>9} {'YoY util':>9}"
-        )
-        self.stdout.write(self.style.MIGRATE_HEADING(encabezado))
-        self.stdout.write("-" * len(encabezado))
+        self.stdout.write("Resultado operativo por mes; — indica ausencia de datos. PE integral mensual.")
         for fila in reporte["filas"]:
+            fin = fila.get("financiero") or {}
             self.stdout.write(
-                f"{fila['periodo'].strftime('%Y-%m'):<8} "
-                f"{_fmt(fila['ingresos']):>14} {_fmt(fila['nomina']):>13} "
-                f"{_fmt(fila['horas_extra']):>11} {_fmt(fila['nomina_total']):>13} "
-                f"{_fmt(fila['nomina_pct_ventas'], '%'):>10} {_fmt(fila['utilidad_neta']):>14} "
-                f"{_fmt(fila['yoy']['ingresos'], '%'):>9} "
-                f"{_fmt(fila['yoy']['nomina_total'], '%'):>9} "
-                f"{_fmt(fila['yoy']['utilidad_neta'], '%'):>9}"
+                f"{fila['periodo']:%Y-%m} · {fila['alcance']} · ventas {_fmt(fila['ingresos'])} · "
+                f"costos y producción {_fmt(fin.get('costos_produccion'))} · "
+                f"margen {_fmt(fin.get('margen'))} · gastos {_fmt(fin.get('gastos_operativos'))} · "
+                f"resultado {_fmt(fila['utilidad_neta'])} · PE {_fmt(fin.get('punto_equilibrio'))}"
             )
             if detalle:
-                for s in fila["sucursales"]:
-                    self.stdout.write(
-                        f"  · {s['sucursal']:<24} ing {_fmt(s['ingresos'])} · "
-                        f"nóm {_fmt(s['nomina'])} · HE informativas {_fmt(s['horas_extra'])} "
-                        f"({_fmt(s['nomina_pct_ventas'], '%')} de vtas) · "
-                        f"util {_fmt(s['utilidad_neta'])}"
-                    )
-        totales = reporte["totales"]
-        self.stdout.write("-" * len(encabezado))
-        self.stdout.write(
-            f"{'TOTAL':<8} {_fmt(totales['ingresos']):>14} {_fmt(totales['nomina']):>13} "
-            f"{_fmt(totales['horas_extra']):>11} {_fmt(totales['nomina_total']):>13} "
-            f"{'':>10} {_fmt(totales['utilidad_neta']):>14}"
-        )
+                for suc in fila["sucursales"]:
+                    fin = suc.get("financiero") or {}
+                    self.stdout.write(f"  {suc['sucursal']} · resultado {_fmt(suc['utilidad_neta'])} · "
+                                      f"PE {_fmt(fin.get('punto_equilibrio'))} · personal directo {_fmt(suc['nomina'])} · "
+                                      f"HE operativas informativas {_fmt(suc['horas_extra'])}")

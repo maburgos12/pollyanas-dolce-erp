@@ -36,7 +36,7 @@ def _yoy(actual: Decimal, anterior: Decimal | None) -> Decimal | None:
     denominador para que el signo del resultado siga la dirección real del
     cambio (mejora → positivo, deterioro → negativo).
     """
-    if anterior is None or anterior == 0:
+    if actual is None or anterior is None or anterior == 0:
         return None
     return ((actual - anterior) / abs(anterior) * Decimal("100")).quantize(TWO_PLACES)
 
@@ -56,7 +56,7 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     periodos = set(SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta).order_by().values_list("periodo", flat=True))
     fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
     periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
-    from .services_resultado import leer_cierre_conciliado
+    from .services_resultado import leer_cierre_conciliado, resumen_cierre_mensual
     cierre = leer_cierre_conciliado() if desde <= date(2026, 9, 1) and hasta >= date(2026, 1, 1) else None
     if cierre and cierre["errores"]:
         raise ValueError("Cierre enero–septiembre sin conciliar: " + "; ".join(cierre["errores"]))
@@ -68,6 +68,8 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
         for row in registros_del_mes(periodo):
             if sucursal_id and row.sucursal_id != sucursal_id:
                 continue
+            if not getattr(row, "en_perimetro_fuente", True) and not row.gasto_fijo_total:
+                continue
             mes[row.sucursal_id] = {
                 "nombre": row.sucursal.nombre, "ingresos": _quantize(row.ventas_netas),
                 "nomina": _quantize(row.nomina_directa), "utilidad": _quantize(row.utilidad_operativa),
@@ -76,15 +78,47 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
         if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
             anteriores = mes.copy()
             mes.clear()
-            for fila in cierre["detalle"]:
+            for fila in resumen_cierre_mensual(cierre, periodo, sucursal_id)["filas"]:
                 sid = fila["sucursal_id"]
                 if fila["mes"] != periodo.month or (sucursal_id and sid != sucursal_id):
                     continue
                 mes[sid] = {"nombre": fila["nombre"], "ingresos": fila["ventas"],
                             "nomina": anteriores.get(sid, {}).get("nomina", Decimal("0")),
                             "utilidad": fila["utilidad"], "central_registrado": None,
-                            "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"]}
+                            "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"],
+                            "financiero": _detalle_financiero(fila)}
     return data
+
+
+# Los importes se proyectan desde el cierre existente; no se recalcula ni contabiliza.
+CAMPOS_FINANCIEROS = (
+    "costos", "produccion", "costos_produccion", "margen", "gasto_directo",
+    "antes_comunes", "administracion", "logistica", "gastos_operativos", "utilidad",
+    "costo_variable", "gasto_fijo_escenario",
+)
+
+
+def _detalle_financiero(fila):
+    datos = dict(fila)
+    datos["antes_comunes"] = fila["margen"] - fila["gasto_directo"]
+    datos["gastos_operativos"] = fila["gasto_directo"] + fila["administracion"] + fila["logistica"]
+    return {k: datos.get(k) for k in (*CAMPOS_FINANCIEROS, "punto_equilibrio", "motivo_pe",
+                                     "margen_pct", "utilidad_pct", "contribucion_pct")}
+
+
+def _sumar_financiero(filas, ventas):
+    if not filas or any(f is None for f in filas):
+        return None
+    total = {k: sum((f[k] for f in filas), Decimal("0"))
+             if all(f.get(k) is not None for f in filas) else None for k in CAMPOS_FINANCIEROS}
+    total.update(margen_pct=_pct(total["margen"], ventas), utilidad_pct=_pct(total["utilidad"], ventas))
+    variable, fijo = total["costo_variable"], total["gasto_fijo_escenario"]
+    contribucion = ventas - variable if variable is not None else None
+    total["contribucion_pct"] = _pct(contribucion, ventas) if contribucion is not None else None
+    total["punto_equilibrio"] = (_quantize(fijo * ventas / contribucion)
+        if ventas > 0 and contribucion is not None and contribucion > 0 and fijo is not None and fijo >= 0 else None)
+    total["motivo_pe"] = "" if total["punto_equilibrio"] is not None else "Sin ventas/contribución válida o falta conciliar combustible."
+    return total
 
 
 def _horas_extra_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> dict:
@@ -122,15 +156,17 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
     nomina_total = nomina
 
     alcance = "REPARTO_CONCILIADO" if rent_mes and all(s.get("alcance") == "REPARTO_CONCILIADO" for s in rent_mes.values()) else "RESULTADO_PARCIAL_SUCURSAL"
+    if not rent_mes:
+        alcance = "SIN_DATOS"
     central = next((s.get("central_registrado") for s in rent_mes.values()), None)
     sucursales = []
     claves = set(rent_mes) | set(he_mes)
     for clave in claves:
         datos = rent_mes.get(clave) or {
             "nombre": SIN_SUCURSAL_NOMBRE if clave is SIN_SUCURSAL_KEY else f"Sucursal {clave}",
-            "ingresos": Decimal("0"),
-            "nomina": Decimal("0"),
-            "utilidad": Decimal("0"),
+            "ingresos": None,
+            "nomina": None,
+            "utilidad": None,
         }
         he = he_mes.get(clave, Decimal("0"))
         nomina_total_suc = datos["nomina"]
@@ -141,22 +177,24 @@ def _fila_mes(periodo: date, rent_mes: dict, he_mes: dict) -> dict:
                 "ingresos": datos["ingresos"],
                 "nomina": datos["nomina"],
                 "horas_extra": _quantize(he),
-                "nomina_total": _quantize(nomina_total_suc),
-                "nomina_pct_ventas": _pct(nomina_total_suc, datos["ingresos"]),
+                "nomina_total": _quantize(nomina_total_suc) if nomina_total_suc is not None else None,
+                "nomina_pct_ventas": _pct(nomina_total_suc, datos["ingresos"]) if nomina_total_suc is not None else None,
                 "utilidad_neta": datos["utilidad"],  # Alias legado; alcance explícito en exportación.
-                "alcance": alcance,
+                "alcance": datos.get("alcance", "RESULTADO_PARCIAL_SUCURSAL") if clave in rent_mes else "SIN_DATOS",
+                "financiero": datos.get("financiero"),
             }
         )
     sucursales.sort(key=lambda s: (s["sucursal_id"] is None, s["sucursal"]))
 
     return {
         "periodo": periodo,
-        "ingresos": _quantize(ingresos),
-        "nomina": _quantize(nomina),
+        "ingresos": _quantize(ingresos) if rent_mes else None,
+        "financiero": _sumar_financiero([s.get("financiero") for s in rent_mes.values()], ingresos),
+        "nomina": _quantize(nomina) if rent_mes else None,
         "horas_extra": _quantize(horas_extra),
-        "nomina_total": _quantize(nomina_total),
+        "nomina_total": _quantize(nomina_total) if rent_mes else None,
         "nomina_pct_ventas": _pct(nomina_total, ingresos),
-        "utilidad_neta": _quantize(utilidad),
+        "utilidad_neta": _quantize(utilidad) if rent_mes else None,
         "alcance": alcance,
         "central_registrado": central,
         "resultado_empresa_parcial": utilidad - central if central is not None else None,
@@ -218,7 +256,9 @@ def build_reporte_mensual_consolidado(
         periodo = _month_add(desde, offset)
         fila = filas_por_periodo.get(periodo) or _fila_mes(periodo, {}, {})
         anterior = filas_por_periodo.get(_month_add(periodo, -12))
-        if anterior and anterior["alcance"] != fila["alcance"]:
+        if anterior and (anterior["alcance"] != fila["alcance"] or
+                         {s["sucursal_id"] for s in anterior["sucursales"] if s["alcance"] != "SIN_DATOS"} !=
+                         {s["sucursal_id"] for s in fila["sucursales"] if s["alcance"] != "SIN_DATOS"}):
             anterior = None  # Bases fiscales y gerenciales distintas no forman un YoY comparable.
         if sucursal_id:
             fila["central_registrado"] = None
@@ -230,18 +270,27 @@ def build_reporte_mensual_consolidado(
         }
         filas.append(fila)
 
+    completas = [f for f in filas if f["financiero"] is not None]
+    ventas_cierre = sum((f["ingresos"] for f in completas), Decimal("0"))
+    financiero_total = _sumar_financiero([f["financiero"] for f in completas], ventas_cierre)
+    if financiero_total:
+        financiero_total["ventas"] = ventas_cierre
+        # El PE es mensual: no sumar ni presentar el escenario acumulado como mensual.
+        financiero_total["punto_equilibrio"] = None
     return {
+        "financiero_total": financiero_total,
+        "meses_con_cierre": len(completas),
         "hasta": hasta,
         "desde": desde,
         "meses": meses,
         "sucursal_id": sucursal_id,
         "filas": filas,
         "totales": {
-            "ingresos": _quantize(sum((f["ingresos"] for f in filas), Decimal("0"))),
-            "nomina": _quantize(sum((f["nomina"] for f in filas), Decimal("0"))),
-            "horas_extra": _quantize(sum((f["horas_extra"] for f in filas), Decimal("0"))),
-            "nomina_total": _quantize(sum((f["nomina_total"] for f in filas), Decimal("0"))),
-            "utilidad_neta": _quantize(sum((f["utilidad_neta"] for f in filas), Decimal("0"))),
+            "ingresos": _quantize(sum(((f["ingresos"] or Decimal("0")) for f in filas), Decimal("0"))),
+            "nomina": _quantize(sum(((f["nomina"] or Decimal("0")) for f in filas), Decimal("0"))),
+            "horas_extra": _quantize(sum(((f["horas_extra"] or Decimal("0")) for f in filas), Decimal("0"))),
+            "nomina_total": _quantize(sum(((f["nomina_total"] or Decimal("0")) for f in filas), Decimal("0"))),
+            "utilidad_neta": _quantize(sum(((f["utilidad_neta"] or Decimal("0")) for f in filas), Decimal("0"))),
         },
     }
 
@@ -257,6 +306,7 @@ def reporte_a_json(reporte: dict) -> dict:
         filas.append(
             {
                 "periodo": fila["periodo"].isoformat(),
+                "financiero": {k: _num(v) for k, v in fila["financiero"].items()} if fila["financiero"] else None,
                 "alcance": fila["alcance"],
                 "central_registrado": _num(fila["central_registrado"]),
                 "resultado_empresa_parcial": _num(fila["resultado_empresa_parcial"]),
@@ -271,6 +321,7 @@ def reporte_a_json(reporte: dict) -> dict:
                 "sucursales": [
                     {
                         "sucursal_id": s["sucursal_id"],
+                        "financiero": {k: _num(v) for k, v in s["financiero"].items()} if s["financiero"] else None,
                         "alcance": s["alcance"],
                         "utilidad_neta_confirmada": None,
                         "sucursal": s["sucursal"],
@@ -286,6 +337,8 @@ def reporte_a_json(reporte: dict) -> dict:
             }
         )
     return {
+        "financiero_total": {k: _num(v) for k,v in reporte["financiero_total"].items()} if reporte["financiero_total"] else None,
+        "meses_con_cierre": reporte["meses_con_cierre"],
         "hasta": reporte["hasta"].isoformat(),
         "desde": reporte["desde"].isoformat(),
         "meses": reporte["meses"],

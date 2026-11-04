@@ -548,8 +548,8 @@ def analizar_todas(request):
 def reporte_mensual(request):
     """Reporte mensual consolidado (últimos 12 meses).
 
-    Cruza ingresos (P&L canónico), nómina con horas extra como línea aparte,
-    nómina como % de ventas, utilidad neta (6 líneas de gasto) y variación YoY.
+    Presenta el cierre financiero mensual; personal y horas extra como desglose.
+    Los meses sin fuente no se convierten en ventas cero ni caídas anuales.
     ?formato=json|csv exporta; ?sucursal=<id> filtra a una sucursal.
     """
     from django.http import HttpResponse

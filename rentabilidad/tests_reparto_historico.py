@@ -233,3 +233,38 @@ class RepartoRentabilidadTests(TestCase):
         PointDailySale.objects.filter(sale_date=date(2026, 9, 15)).update(gross_amount=111)
         self.assertEqual(self.client.get('/rentabilidad/?periodo=2026-09').status_code, 409)
         self.assertEqual(self.client.get('/rentabilidad/?export=reparto').status_code, 409)
+
+    def test_financial_monthly_bridge_and_exports_preserve_costs_once(self):
+        from .services_reporte_mensual import build_reporte_mensual_consolidado, reporte_a_json
+        from .management.commands.reporte_mensual_consolidado import Command
+        import csv
+        import io
+        with CaptureQueriesContext(connection) as queries:
+            report = build_reporte_mensual_consolidado(hasta=date(2026,9,1), meses=12)
+        self.assertFalse([q for q in queries if q['sql'].split()[0] in {'INSERT','UPDATE','DELETE'}])
+        self.assertEqual(report['meses_con_cierre'], 9)
+        self.assertIsNone(report['financiero_total']['punto_equilibrio'])
+        for row in report['filas']:
+            f = row['financiero']
+            if f is None:
+                continue
+            self.assertEqual(f['costos_produccion'], f['costos'] + f['produccion'])
+            self.assertEqual(row['ingresos'] - f['costos_produccion'], f['margen'])
+            self.assertEqual(f['margen'] - f['gastos_operativos'], row['utilidad_neta'])
+            self.assertEqual(f['antes_comunes'] - f['administracion'] - f['logistica'], f['utilidad'])
+            self.assertEqual(sum(s['financiero']['utilidad'] for s in row['sucursales']), f['utilidad'])
+        payload = reporte_a_json(report)
+        exported = list(csv.DictReader(io.StringIO(Command()._render_csv(report, detalle=True))))
+        for row in payload['filas']:
+            csvrow = next(r for r in exported if r['periodo'] == row['periodo'][:7] and r['sucursal'] == 'TOTAL')
+            if row['financiero']:
+                self.assertEqual(Decimal(csvrow['fin_utilidad']), Decimal(row['financiero']['utilidad']))
+                self.assertEqual(Decimal(csvrow['fin_costos_produccion']), Decimal(row['financiero']['costos_produccion']))
+            else:
+                self.assertEqual(csvrow['fin_utilidad'], '')
+        self.client.force_login(self.user)
+        response = self.client.get('/rentabilidad/reporte-mensual/?hasta=2026-09')
+        self.assertContains(response, 'Gastos directos (incluyen personal directo)')
+        self.assertContains(response, 'Punto de equilibrio integral')
+        self.assertContains(response, 'Total del cierre disponible')
+        self.assertNotContains(response, 'Nómina total')
