@@ -111,7 +111,7 @@ def leer_cierre_conciliado():
     from reportes.services_estado_resultados import leer_estado_resultados
     from reportes.services_reparto_historico import reparto_historico
     if not LineaPresupuestoMensual.objects.filter(
-        periodo__year=2026, periodo__month__lte=8, version="ORIGINAL",
+        periodo__year=2026, periodo__month__lte=9, version="ORIGINAL",
         rubro__activo=True, rubro__area__codigo="resultados",
     ).exclude(fuente_real="").exists():
         return None
@@ -121,7 +121,7 @@ def leer_cierre_conciliado():
     combustible = defaultdict(lambda: ZERO)
     gastos = defaultdict(list)
     for linea in lineas:
-        if linea.periodo.month > 8 or not str(linea.fuente_real or '').strip():
+        if linea.periodo.month > 9 or not str(linea.fuente_real or '').strip():
             continue
         area = linea.rubro.area.codigo
         concepto = ' '.join(unidecode(linea.rubro.concepto).lower().split())
@@ -132,7 +132,7 @@ def leer_cierre_conciliado():
                 'concepto': linea.rubro.concepto, 'monto': linea.monto_real,
                 'fuente': linea.fuente_real, 'linea_id': linea.pk,
             })
-    for mes in range(1, 9):
+    for mes in range(1, 10):
         filas = [f for f in cierre['detalle'] if f['mes'] == mes]
         fondo = sum((f['logistica'] for f in filas), ZERO)
         # Combustible sigue el reparto autorizado; el resto conserva el gasto del mes.

@@ -1,4 +1,4 @@
-"""Reparto gerencial autorizado enero–agosto 2026; lectura, sin mutar cierres."""
+"""Reparto gerencial autorizado enero–septiembre 2026; lectura, sin mutar cierres."""
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
@@ -11,7 +11,7 @@ from .services_costeo_logistica import repartir_centavos
 
 ZERO = Decimal('0')
 FONDOS = ('costos', 'produccion', 'administracion', 'logistica')
-MESES = ('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto')
+MESES = ('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre')
 
 
 def ventas_con_identidad_historica(desde, hasta):
@@ -48,7 +48,7 @@ def reparto_historico(buckets, lineas):
     ventas = defaultdict(lambda: defaultdict(lambda: ZERO))
     gastos = defaultdict(lambda: defaultdict(lambda: ZERO))
     errores = []
-    dias = (ventas_con_identidad_historica(date(2026, 1, 1), date(2026, 8, 31))
+    dias = (ventas_con_identidad_historica(date(2026, 1, 1), date(2026, 9, 30))
             .order_by().values('sale_date', 'sucursal_historica_id')
             .annotate(bruto=Sum('gross_amount'), descuento=Sum('discount_amount')))
     for dia in dias:
@@ -64,7 +64,7 @@ def reparto_historico(buckets, lineas):
             continue
         ventas[fecha.month][sid] += dia['bruto'] - dia['descuento']
     for linea in lineas:
-        if (linea.periodo.month <= 8 and linea.rubro.area.codigo == 'gastos-venta'
+        if (linea.periodo.month <= 9 and linea.rubro.area.codigo == 'gastos-venta'
                 and str(linea.fuente_real or '').strip()):
             monto = linea.monto_real or ZERO
             sid = linea.rubro.sucursal_id
@@ -115,7 +115,7 @@ def reparto_historico(buckets, lineas):
     resumen = {}
     for fila in detalle:
         sid = fila['sucursal_id']
-        r = resumen.setdefault(sid, {'nombre': fila['nombre'], 'meses': [None] * 8,
+        r = resumen.setdefault(sid, {'nombre': fila['nombre'], 'meses': [None] * len(MESES),
                                     'utilidad': ZERO, 'ventas': ZERO, 'previo': ZERO})
         r['meses'][fila['mes'] - 1] = {'importe': fila['utilidad'], 'etapa': fila['etapa']}
         r['utilidad'] += fila['utilidad']
@@ -135,7 +135,7 @@ def exportar_reparto(reparto):
     if not reparto or reparto["errores"]:
         return HttpResponse("No hay un reparto conciliado para exportar.", status=409)
     response = HttpResponse(content_type="text/csv; charset=utf-8")
-    response["Content-Disposition"] = 'attachment; filename="reparto-enero-agosto-2026.csv"'
+    response["Content-Disposition"] = 'attachment; filename="reparto-enero-septiembre-2026.csv"'
     response.write("\ufeff")
     writer = csv.writer(response)
     writer.writerow(["Mes", "Sucursal", "Etapa", "Ventas", "Gasto directo", "Costos",

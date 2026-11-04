@@ -13,7 +13,7 @@
   <div class="summary-grid">
     <article class="mini-metric"><span>Mayor resultado asignado</span><strong>{{ mayor_resultado.nombre|default:"Sin movimientos" }}</strong>{% if mayor_resultado %}<div class="muted">${{ mayor_resultado.utilidad|floatformat:2|intcomma }}</div>{% endif %}</article>
     <article class="mini-metric"><span>Menor resultado asignado</span><strong>{{ menor_resultado.nombre|default:"Sin movimientos" }}</strong>{% if menor_resultado %}<div class="muted">${{ menor_resultado.utilidad|floatformat:2|intcomma }} · {{ menor_resultado.etapa }}</div>{% endif %}</article>
-    <article class="mini-metric"><span>Informes</span><p><a href="{% url 'rentabilidad_reporte_mensual' %}?hasta={{ periodo|date:'Y-m' }}">Informe mensual</a></p><p><a href="{% url 'rentabilidad_dashboard' %}?export=reparto">Descargar detalle enero–agosto CSV</a></p>{% if sucursal_id %}<p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Ver todas las sucursales</a></p>{% endif %}</article>
+    <article class="mini-metric"><span>Informes</span><p><a href="{% url 'rentabilidad_reporte_mensual' %}?hasta={{ periodo|date:'Y-m' }}">Informe mensual</a></p><p><a href="{% url 'rentabilidad_dashboard' %}?export=reparto">Descargar detalle enero–septiembre CSV</a></p>{% if sucursal_id %}<p><a href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}">Ver todas las sucursales</a></p>{% endif %}</article>
   </div>
 </section>
 {% if active_tab == 'diagnostico' %}

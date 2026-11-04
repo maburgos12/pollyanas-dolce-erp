@@ -312,9 +312,9 @@ def dashboard_rentabilidad(request):
     if not request.GET.get("periodo") and active_tab in {"resumen", "diagnostico"}:
         cierre = leer_cierre_conciliado()
         if cierre is not None:
-            periodo = date(2026, 8, 1)
+            periodo = date(2026, 9, 1)
     fecha_inicio, fecha_fin = _periodo_bounds(periodo)
-    if active_tab in {"resumen", "diagnostico"} and date(2026, 1, 1) <= periodo <= date(2026, 8, 1):
+    if active_tab in {"resumen", "diagnostico"} and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
         cierre = cierre if cierre is not None else leer_cierre_conciliado()
         if cierre is not None:
             sid = request.GET.get("sucursal", "")
@@ -492,7 +492,7 @@ def dashboard_rentabilidad(request):
 def detalle_sucursal(request, pk):
     _require_view_rentabilidad(request.user)
     rent = get_object_or_404(SucursalRentabilidad, pk=pk)
-    if date(2026, 1, 1) <= rent.periodo <= date(2026, 8, 1):
+    if date(2026, 1, 1) <= rent.periodo <= date(2026, 9, 1):
         cierre = leer_cierre_conciliado()
         if cierre is not None:
             return _render_cierre_dashboard(request, cierre, rent.periodo, rent.sucursal_id)
