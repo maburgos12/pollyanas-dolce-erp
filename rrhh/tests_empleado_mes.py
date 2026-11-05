@@ -1,6 +1,7 @@
 from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -57,6 +58,57 @@ class EmpleadoMesTests(TestCase):
             s.entregar(self.rh, p.pk, self.hoy, 'RH', '', p.version)
         with self.assertRaises(ValidationError):
             s.aprobar_premio(self.rh, p.pk, 'efectivo', 'Otro', 200, p.version)
+
+    def test_mes_pasado_sin_plazo_captura_hasta_eleccion(self):
+        mes = (self.hoy.replace(day=1) - timedelta(days=1)).replace(day=1)
+        self.p = s.abrir_periodo(self.rh, mes)
+        self.assertIsNone(self.p.fecha_limite)
+        log = AuditLog.objects.get(action='EM_MES_ABRIR', object_id=str(self.p.pk))
+        self.assertIsNone(log.payload['despues']['fecha_limite'])
+        with patch('django.utils.timezone.localdate', return_value=self.hoy + timedelta(days=365)):
+            self.assertFalse(self.p.plazo_vencido)
+            p = self.decidir()
+            self.assertFalse(s.puede_editar_evaluacion(p.ganador.evaluador, p.ganador))
+            with self.assertRaises(ValidationError):
+                s.postular(self.jefes['PRODUCCION'], p.pk, self.equipos['PRODUCCION'][2].pk)
+            with self.assertRaises(ValidationError):
+                s.devolver(self.rh, p.ganador_id, 'Corrección', p.ganador.version)
+            with self.assertRaises(ValidationError):
+                s.ampliar_plazo(self.rh, p.pk, None, 'Retirar plazo', p.version)
+
+    def test_retirar_plazo_conserva_evaluacion_y_auditoria(self):
+        e = self.enviar(self.postular())
+        PeriodoEmpleadoMes.objects.filter(pk=self.p.pk).update(fecha_limite=self.hoy - timedelta(days=1))
+        with self.assertRaises(PermissionDenied):
+            s.ampliar_plazo(self.dg, self.p.pk, None, 'Retirar plazo', 0)
+        with self.assertRaises(ValidationError):
+            s.ampliar_plazo(self.rh, self.p.pk, None, '', 0)
+        with self.assertRaises(ValidationError):
+            s.ampliar_plazo(self.rh, self.p.pk, None, 'Retirar plazo', 1)
+        p = s.ampliar_plazo(self.rh, self.p.pk, None, 'Captura hasta elección de RRHH', 0)
+        self.assertIsNone(p.fecha_limite)
+        self.assertEqual(p.version, 1)
+        log = AuditLog.objects.get(action='EM_MES_AMPLIAR', object_id=str(p.pk))
+        self.assertEqual(log.payload['antes']['fecha_limite'], (self.hoy - timedelta(days=1)).isoformat())
+        self.assertIsNone(log.payload['despues']['fecha_limite'])
+        e = s.devolver(self.rh, e.pk, 'Completar evidencia', e.version)
+        self.assertTrue(s.puede_editar_evaluacion(e.evaluador, e))
+        self.assertEqual(e.total, 70)
+        with self.assertRaises(ValidationError):
+            s.ampliar_plazo(self.rh, p.pk, self.hoy, 'No acortar captura abierta', p.version)
+
+    def test_apertura_sin_plazo_conserva_validaciones(self):
+        mes = (self.hoy.replace(day=1) - timedelta(days=1)).replace(day=1)
+        with self.assertRaises(PermissionDenied):
+            s.abrir_periodo(self.dg, mes)
+        for fecha in (self.hoy - timedelta(days=1), '2026-11-30'):
+            with self.assertRaises(ValidationError):
+                s.abrir_periodo(self.rh, mes, fecha)
+        with self.assertRaises(ValidationError):
+            s.abrir_periodo(self.rh, mes.replace(day=2))
+        s.abrir_periodo(self.rh, mes)
+        with self.assertRaises(ValidationError):
+            s.abrir_periodo(self.rh, mes)
 
     def test_permisos_equipo_ventas_dg(self):
         self.assertTrue(s.puede_ver_todo(self.dg))

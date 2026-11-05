@@ -19,3 +19,19 @@ Reutilizar identidades, vínculos y AuditLog. Crear sólo periodo/evaluación co
 
 ## Procedimiento y límites
 Producción consultada con SET TRANSACTION READ ONLY, agrupaciones y verificación autenticada en /rrhh/organizacion/. Inventario_fuentes_datos --term empleado --term evaluacion --term reconocimiento ejecutado también en PostgreSQL local aislado; allí el padrón está vacío y no prueba cobertura productiva. El grafo falló Transport closed al comenzar implementación; se usaron lecturas acotadas del código. La consulta histórica no acredita vigencia de asistencia del mes futuro.
+
+## Actualización autorizada: captura sin fecha límite (2026-11-05)
+
+Unidad de análisis: el mismo periodo mensual (`mes`, único), con evaluaciones por empleado. El mes evaluado no cambia al capturar después de su cierre calendario.
+
+| Concepto | Fuente oficial | Identificador | Evidencia actual | Decisión y consumidores |
+| --- | --- | --- | --- | --- |
+| Periodo y plazo | `rrhh.PeriodoEmpleadoMes` / `rrhh_periodoempleadomes` | PK y mes único | Producción, lectura transaccional: 0 periodos y 0 evaluaciones | Extender `fecha_limite` para admitir NULL; conservar fechas existentes. Servicios, formularios, listado y detalle |
+| Equipos evaluadores | `rrhh.Empleado`, `auth.User` | `jefe_directo`, `usuario_erp` | Una jefatura activa vinculada por departamento; Producción 25 colaboradores, Administración 7 | Reutilizar jefaturas y equipos sin cambios. Ventas fuera del alcance |
+| Cierre y trazabilidad | `PeriodoEmpleadoMes.ganador`, `core.AuditLog` | periodo y usuario actor | El servicio `elegir` ya bloquea cambios posteriores y audita la decisión | Reutilizar el cierre existente; sin otro estado ni tabla |
+
+`fecha_limite=NULL` significa captura abierta hasta que RRHH registre al ganador. La fecha, si se especifica, sigue validándose. RRHH puede retirar un límite existente con motivo y versión; no puede modificar una decisión cerrada. No se fusionan registros ni se crean equivalencias entre fuentes.
+
+Procedimiento: grafo indexado y llamadas de `abrir_periodo` trazadas; `inventario_fuentes_datos --term empleado --term evaluacion --term reconocimiento` ejecutado en PostgreSQL 16 aislado (metadatos, no cobertura productiva). Producción consultada con `SET TRANSACTION READ ONLY`, conteos de las dos tablas y jefaturas filtradas por departamento. La autorización del chat incluye habilitar octubre de 2026 sin inventar candidatos, calificaciones o premios. La apertura excepcional debe identificar a Mauricio como actor autorizante en la bitácora; no atribuirla a Paula ni ampliar permisos web de DG.
+
+Riesgos y comprobación: cubrir NULL en todas las comparaciones de fechas, mantener bloqueo de decisión y validar octubre visible en producción tras la apertura. Las cifras de equipos describen esta lectura y no seleccionan ganadores.

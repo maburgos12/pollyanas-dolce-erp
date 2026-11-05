@@ -1,6 +1,7 @@
 """Evaluación mensual CEDIS; identidades y auditoría permanecen en sus fuentes existentes."""
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 SECCIONES = (
     ("Desempeño y logros", (("calidad_cantidad", "Calidad y cantidad de trabajo"), ("metas", "Cumplimiento de metas y objetivos"), ("expectativas", "Superación de expectativas"), ("innovacion", "Innovación y creatividad"), ("tiempo", "Gestión del tiempo"))),
@@ -12,7 +13,7 @@ CRITERIOS = dict(item for _, items in SECCIONES for item in items)
 
 class PeriodoEmpleadoMes(models.Model):
     mes = models.DateField(unique=True)
-    fecha_limite = models.DateField()
+    fecha_limite = models.DateField(null=True, blank=True)
     evaluador_produccion = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="periodos_empleado_produccion")
     evaluador_administracion = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="periodos_empleado_administracion")
     creado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="periodos_empleado_creados")
@@ -35,6 +36,10 @@ class PeriodoEmpleadoMes(models.Model):
 
     class Meta:
         ordering = ["-mes"]
+
+    @property
+    def plazo_vencido(self):
+        return self.fecha_limite is not None and self.fecha_limite < timezone.localdate()
 
     @property
     def estado_display(self):

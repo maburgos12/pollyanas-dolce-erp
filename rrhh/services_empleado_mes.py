@@ -102,7 +102,7 @@ def _version(obj, version):
 def _abierto(periodo):
     if periodo.ganador_id:
         raise ValidationError("El periodo ya tiene una decisión definitiva.")
-    if timezone.localdate() > periodo.fecha_limite:
+    if periodo.plazo_vencido:
         raise ValidationError("El plazo terminó; Capital Humano debe ampliarlo.")
 
 
@@ -118,11 +118,12 @@ def _texto(value, nombre):
 
 
 @transaction.atomic
-def abrir_periodo(user, mes, fecha_limite):
+def abrir_periodo(user, mes, fecha_limite=None):
     _gestor(user)
     _fecha(mes)
-    _fecha(fecha_limite)
-    if mes.day != 1 or fecha_limite < mes or fecha_limite < timezone.localdate():
+    if fecha_limite is not None:
+        _fecha(fecha_limite)
+    if mes.day != 1 or fecha_limite is not None and (fecha_limite < mes or fecha_limite < timezone.localdate()):
         raise ValidationError("Indica el primer día del mes y un plazo vigente posterior al inicio.")
     responsables = {}
     for dep in DEPARTAMENTOS:
@@ -152,7 +153,7 @@ def postular(user, periodo_id, empleado_id):
 
 
 def puede_editar_evaluacion(user, evaluacion):
-    return bool(_activo(user) and not puede_ver_todo(user) and evaluacion.evaluador_id == user.pk and evaluacion.empleado.usuario_erp_id != user.pk and evaluacion.estado == "borrador" and not evaluacion.periodo.ganador_id and evaluacion.periodo.fecha_limite >= timezone.localdate() and Empleado.objects.filter(usuario_erp=user, activo=True, tipo_personal="POLLYANA", departamento=evaluacion.departamento_snapshot).exists())
+    return bool(_activo(user) and not puede_ver_todo(user) and evaluacion.evaluador_id == user.pk and evaluacion.empleado.usuario_erp_id != user.pk and evaluacion.estado == "borrador" and not evaluacion.periodo.ganador_id and not evaluacion.periodo.plazo_vencido and Empleado.objects.filter(usuario_erp=user, activo=True, tipo_personal="POLLYANA", departamento=evaluacion.departamento_snapshot).exists())
 
 
 def _bloquear_evaluacion(evaluacion_id):
@@ -213,10 +214,13 @@ def devolver(user, evaluacion_id, motivo, version):
 def ampliar_plazo(user, periodo_id, fecha_limite, motivo, version):
     _gestor(user)
     motivo = _texto(motivo, "El motivo")
-    _fecha(fecha_limite)
+    if fecha_limite is not None:
+        _fecha(fecha_limite)
     periodo = PeriodoEmpleadoMes.objects.select_for_update().get(pk=periodo_id)
     _version(periodo, version)
-    if periodo.ganador_id or fecha_limite <= periodo.fecha_limite or fecha_limite < timezone.localdate():
+    if periodo.ganador_id or periodo.fecha_limite is None:
+        raise ValidationError("El periodo ya está cerrado o su captura no tiene fecha límite.")
+    if fecha_limite is not None and (fecha_limite <= periodo.fecha_limite or fecha_limite < timezone.localdate()):
         raise ValidationError("El nuevo plazo debe ampliar el anterior y estar vigente; no puede cambiarse una decisión cerrada.")
     antes = _snapshot(periodo)
     periodo.fecha_limite = fecha_limite

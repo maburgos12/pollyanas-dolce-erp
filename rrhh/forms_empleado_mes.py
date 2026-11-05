@@ -7,7 +7,7 @@ DATE = {"type": "date"}
 
 class PeriodoForm(forms.Form):
     mes = forms.DateField(label="Mes evaluado", widget=forms.DateInput(format="%Y-%m", attrs={"type": "month"}), input_formats=["%Y-%m", "%Y-%m-%d"])
-    fecha_limite = forms.DateField(label="Fecha límite de captura", widget=forms.DateInput(format="%Y-%m-%d", attrs=DATE))
+    fecha_limite = forms.DateField(label="Fecha límite de captura (opcional)", required=False, widget=forms.DateInput(format="%Y-%m-%d", attrs=DATE), help_text="Deja vacío para capturar hasta que RRHH registre al ganador y cierre las evaluaciones.")
 
 
 class PostulacionForm(forms.Form):
@@ -27,7 +27,7 @@ class MotivoForm(VersionForm):
 
 
 class PlazoForm(MotivoForm):
-    fecha_limite = forms.DateField(label="Nueva fecha límite", widget=forms.DateInput(format="%Y-%m-%d", attrs=DATE))
+    fecha_limite = forms.DateField(label="Nueva fecha límite (opcional)", required=False, widget=forms.DateInput(format="%Y-%m-%d", attrs=DATE), help_text="Deja vacío para retirar el límite y mantener la captura abierta hasta la elección de RRHH.")
 
 
 class EleccionForm(MotivoForm):
