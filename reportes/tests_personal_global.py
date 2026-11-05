@@ -53,6 +53,28 @@ class PersonalGlobalTests(TestCase):
         self.assertEqual(result['gastos_parciales'], 1)
         self.assertEqual(result['subtotal'], D(462))
 
+    def test_honorarios_corporativos_aparecen_una_vez_en_administracion(self):
+        from .models import ReglaFuenteRubro
+        area = AreaPresupuesto.objects.create(codigo='administracion', nombre='Administración')
+        category = CategoriaGasto.objects.create(codigo='ADMIN_CORP', nombre='Administración corporativa',
+            capa_objetivo='EMPRESA', bucket='CORPORATIVO')
+        center = CentroCosto.objects.create(codigo='GLOBAL-CORP', nombre='Corporativo', tipo='CORPORATIVO')
+        rubro = RubroPresupuesto.objects.create(area=area, concepto='Honorarios personas fisicas', tipo='EGRESO')
+        ReglaFuenteRubro.objects.create(rubro=rubro, tipo_fuente='OBLIGACION_GASTO',
+            filtros={'desde': '2026-10'})
+        expense = GastoOperativoMensual.objects.create(periodo=self.month, centro_costo=center,
+            categoria_gasto=category, monto=D('122999.97'), archivo_soporte='test/renta.pdf')
+        ObligacionGasto.objects.create(origen='VARIABLE', area=area, rubro=rubro, centro_costo=center,
+            categoria_gasto=category, concepto='Honorarios octubre', periodo=self.month,
+            fecha_gasto=self.month, fecha_vencimiento=self.month, monto_reconocido=expense.monto,
+            gasto_operativo=expense)
+        result = resumen_personal_global(self.selected())
+        admin = next(row for row in result['gastos_areas'] if row['codigo'] == 'administracion')
+        self.assertEqual(admin['total'], D('122999.97'))
+        self.assertEqual(admin['registros'], 1)
+        self.assertEqual(result['gastos_total'], D('123099.97'))
+        self.assertEqual(result['nomina'], D(440))
+
     def selected(self):
         return dict(month=self.month, sales=D(1000),
             registered=leer_personal_registrado(self.month, date(2026, 11, 1))[self.month],

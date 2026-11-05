@@ -16,7 +16,8 @@ FAMILIAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "manteni
 FAMILIA_CODIGO = {"RENTA": "renta", "RENTA_SUC": "renta", "LUZ_SUC": "electricidad",
                   "TELEFONO_SUC": "telefono", "SISTEMAS_CORP": "sistemas",
                   "MANTENIMIENTO": "mantenimiento", "AGUA_SUC": "otros",
-                  "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros"}
+                  "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros",
+                  "ADMIN_CORP": "otros"}
 FAMILIA_CONCEPTO = {"arrendamiento local": "renta", "energía eléctrica": "electricidad",
                     "teléfono e internet": "telefono", "mantenimiento equipo/maquinaria": "mantenimiento",
                     "licencias y servicios de sistemas": "sistemas",
