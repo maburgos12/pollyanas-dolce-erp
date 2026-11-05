@@ -37,7 +37,7 @@ def resumen_personal_global(selected):
     components = [dict(clave=key, nombre=label, monto=(registered or {}).get(key))
                   for key, label in (('percepciones', 'Percepciones de las listas de raya'),
                                      ('despensa', 'Vales adicionales, no incluidos en percepciones'))]
-    components += [dict(clave=key, nombre=label, monto=selected[key]) for key, label in (
+    components += [dict(clave=key, nombre=selected.get(key + '_label', label), monto=selected[key]) for key, label in (
         ('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
         ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA'))]
     components += [dict(clave='provisiones', nombre='Prestaciones devengadas no pagadas · por conciliar', monto=None)]
