@@ -93,6 +93,12 @@ El cierre oficial comprueba el lock; una entrega/bloqueo del ciclo de vida debe
 esperar a que termine el comando. Si el registro está entregado/bloqueado, `resume`
 lo muestra, pero no avanza hasta recuperar formalmente propiedad activa.
 
+Los comandos `deploy`/`verify` productivos usan además `factory-production.lock`,
+compartido por las tareas inscritas del mismo repositorio. No permite despliegues
+o verificaciones simultáneos entre ellas. No coordina otros repositorios ni
+operadores que ejecuten el deploy fuera de la fábrica. Entre pasos se revalida la
+versión real; el lock no es un permiso para publicar una revisión distinta.
+
 ## Recursos y cierre
 
 Registrar proyecto Compose, contenedores, volúmenes, puertos y propietario antes

@@ -178,6 +178,18 @@ class FactoryTests(unittest.TestCase):
                 self.assertRaises(ValueError):
             self.factory.check_close()
 
+    def test_production_execution_cannot_overlap_another_task(self):
+        self.factory.path.unlink()
+        self.factory.initialize("Keep behavior", "Approved production", "production")
+        self.through_integration()
+        environment_lock = self.registry / "locks/factory-production.lock"
+        environment_lock.mkdir()
+        with self.assertRaisesRegex(ValueError, "production"):
+            self.factory.run("deploy", [sys.executable, "-c", "print('deploy')"],
+                             5, "Official deploy", revision=self.sha)
+        self.assertTrue(environment_lock.exists())
+        self.assertFalse(self.factory.lock_path.exists())
+
     def test_enrolled_task_cannot_bypass_gate_using_legacy_close(self):
         origin = self.root / "origin.git"
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)

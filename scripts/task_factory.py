@@ -44,8 +44,10 @@ class Factory:
         self.lock_path = self.registry / "locks" / f"factory-{task}.lock"
 
     @contextmanager
-    def lock(self):
+    def lock(self, production=False):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        environment_lock = self.registry / "locks/factory-production.lock"
+        environment_owned = False
         try:
             self.lock_path.mkdir()
         except FileExistsError:
@@ -56,8 +58,18 @@ class Factory:
                 raise ValueError("lifecycle operation in progress")
             if not self.record_path.exists() or self.record_path.parent.name != "active":
                 raise ValueError("only active tasks can advance; resume lifecycle ownership first")
+            if production:
+                try:
+                    environment_lock.mkdir()
+                except FileExistsError:
+                    raise ValueError("production execution locked by another task") from None
+                environment_owned = True
+                (environment_lock / "owner").write_text(f"{self.task} pid={os.getpid()}")
             yield
         finally:
+            if environment_owned:
+                (environment_lock / "owner").unlink(missing_ok=True)
+                environment_lock.rmdir()
             (self.lock_path / "pid").unlink(missing_ok=True)
             self.lock_path.rmdir()
 
@@ -151,7 +163,7 @@ class Factory:
             raise ValueError("CI and integration must be observed through GitHub")
         if not args or not note.strip() or not 1 <= timeout <= 3600:
             raise ValueError("command, observation note and timeout 1..3600 are required")
-        with self.lock():
+        with self.lock(production=stage in ("deploy", "verify") and self.read()["delivery"] == "production"):
             sha = self.head(clean=True)
             valid = self.require(stage, sha)
             production = self.read()["delivery"] == "production"
