@@ -1,4 +1,5 @@
 import re
+from django.core.serializers.json import DjangoJSONEncoder
 from decimal import Decimal
 from hashlib import sha256
 from uuid import uuid4
@@ -32,6 +33,39 @@ ALMACEN_CHOICES = [
     ("OTRO", "Otro"),
 ]
 ALMACEN_LABELS = dict(ALMACEN_CHOICES)
+
+
+class InsumoAuditSnapshot(models.Model):
+    """Resultado documental versionado; nunca es un movimiento de inventario."""
+
+    periodo = models.DateField(db_index=True)
+    fingerprint = models.CharField(max_length=64, db_index=True)
+    payload = models.JSONField(encoder=DjangoJSONEncoder)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ["-creado_en", "-id"]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("La evidencia se conserva; genera una nueva revisión.")
+        super().save(*args, **kwargs)
+
+
+class InsumoAuditReview(models.Model):
+    snapshot = models.ForeignKey(InsumoAuditSnapshot, on_delete=models.PROTECT, related_name="revisiones")
+    caso = models.CharField(max_length=80)
+    accion = models.CharField(max_length=12, choices=[("EXPLICAR", "Explicar"), ("APROBAR", "Aprobar explicación")])
+    explicacion = models.OneToOneField("self", null=True, blank=True, on_delete=models.PROTECT)
+    nota = models.TextField()
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    request_id = models.UUIDField(default=uuid4, unique=True)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError("El historial de revisión no se sobrescribe.")
+        super().save(*args, **kwargs)
 
 
 class ExistenciaInsumo(models.Model):

@@ -1,10 +1,80 @@
 """Consolidado mensual de fuentes existentes, sin recalcular ni prorratear gastos."""
 from decimal import Decimal, ROUND_HALF_UP
 
+from rrhh.models import NominaImportacion
+
 from .models import AreaPresupuesto
 from .services_rentabilidad_gastos import leer_gastos_mensuales
+from .services_isn import bases_gravadas_empleados, calcular_isn_sinaloa, prorratear_isn
 
 ZERO = Decimal('0')
+
+
+def gastos_combustible_reconocidos(periodo):
+    from logistica.models import CargaCombustibleUnidad
+    from .services_conciliacion_combustible import conciliar_combustible
+    datos = conciliar_combustible(periodo)
+    registros = CargaCombustibleUnidad.objects.in_bulk([f['id'] for f in datos['cargas']])
+    resultado = {'filas': [], 'pendientes': []}
+    for fila in datos['cargas']:
+        carga = registros[fila['id']]
+        reconocimiento = (carga.auditoria_detalle or {}).get('reconocimiento_costo', {})
+        vigente = (isinstance(reconocimiento, dict)
+            and reconocimiento.get('periodo') == periodo.strftime('%Y-%m')
+            and reconocimiento.get('carga_id') == carga.pk
+            and reconocimiento.get('importe') == str(carga.importe_total))
+        dg = (vigente and reconocimiento.get('fuente') == 'CONFIRMACION_DG'
+            and reconocimiento.get('criterio') == 'SIN_TICKET')
+        documental = (vigente and reconocimiento.get('fuente') == 'REVISION_DOCUMENTAL'
+            and reconocimiento.get('criterio') == 'TICKET_ORIGINAL'
+            and len(carga.ticket_sha256) == 64 and bool(reconocimiento.get('folio'))
+            and str(reconocimiento.get('fecha_ticket', ''))[:7] == periodo.strftime('%Y-%m')
+            and fila['estado'] != 'DUPLICADO_REVISAR'
+            and reconocimiento.get('sha256') == carga.ticket_sha256
+            and carga.foto_ticket and carga.foto_ticket.storage.exists(carga.foto_ticket.name))
+        cruce = fila['estado'] == 'CRUCE_DOCUMENTAL'
+        completo = bool(cruce or dg or documental)
+        referencia = ('CFDI ' + fila['uuid_cfdi'] if cruce else
+            'Confirmación de Dirección: gasto real autorizado sin ticket' if dg else
+            'Ticket original cotejado; SHA256 ' + carga.ticket_sha256 if documental else '')
+        salida = dict(origen='CARGA_COMBUSTIBLE', registro_id=carga.pk,
+            clave='CARGA_COMBUSTIBLE:' + str(carga.pk), area='logistica', familia='otros',
+            concepto='Combustible · ' + fila['unidad'], monto_mensual=fila['importe'] if completo else None,
+            estado='COMPLETO' if completo else 'PENDIENTE', referencia_soporte=referencia,
+            detalle='' if completo else 'Carga registrada sin reconocimiento acreditado del costo.')
+        resultado['filas' if completo else 'pendientes'].append(salida)
+    return resultado
+
+
+def cargas_mensuales_personal(selected):
+    registered = selected['registered']
+    cargas = (registered or {}).get('componentes_cargas', {})
+    cargas_cubiertas = (registered or {}).get('cargas_cubiertas', False)
+    patronal = {'imss': None, 'rcv': None, 'isn': None}
+    cargas_error = ''
+    isn_calculado = False
+    if cargas_cubiertas:
+        patronal['imss'] = sum((cargas[c] for c in ('AU', 'AW', 'AZ', 'BC')), ZERO)
+        patronal['rcv'] = sum((cargas[c] for c in ('AV', 'AX', 'BB')), ZERO)
+        try:
+            bases = bases_gravadas_empleados(selected['month'])
+            if set(bases) != set(registered['destinos_cargas']):
+                raise ValueError('La base de ISN no cubre las mismas personas que las cargas de nómina.')
+            patronal['isn'] = selected['isn']
+            if patronal['isn'] is None:
+                patronal['isn'] = calcular_isn_sinaloa(sum(bases.values(), ZERO))
+                isn_calculado = True
+            reparto = ({persona: ZERO for persona in bases}
+                       if not sum(bases.values(), ZERO) and not patronal['isn']
+                       else prorratear_isn(bases, patronal['isn']))
+            for key in ('imss', 'rcv'):
+                if selected[key] is not None and selected[key] != patronal[key]:
+                    raise ValueError('Las cargas de nómina no concilian con el control patronal aplicado.')
+        except ValueError as exc:
+            cargas_error = str(exc)
+    return dict(valores=patronal, error=cargas_error, isn_calculado=isn_calculado,
+                reparto=reparto if not cargas_error and cargas_cubiertas else {},
+                usados=[k for k, v in patronal.items() if selected[k] is None and v is not None])
 
 
 def resumen_personal_global(selected):
@@ -17,7 +87,28 @@ def resumen_personal_global(selected):
 
     departments = [dict(g, porcentaje=porcentaje(g['total']))
                    for g in (registered or {}).get('departamentos', [])]
-    expenses = leer_gastos_mensuales(selected['month'], usar_reparto_consolidado=True)
+    cargas = (registered or {}).get('componentes_cargas', {})
+    cargas_cubiertas = (registered or {}).get('cargas_cubiertas', False)
+    control_cargas = selected.get('cargas_nomina') or cargas_mensuales_personal(selected)
+    patronal = control_cargas['valores']
+    cargas_error = control_cargas['error']
+    isn_calculado = control_cargas['isn_calculado']
+    if cargas_cubiertas and not cargas_error:
+        reparto = control_cargas['reparto']
+        for department in departments:
+            department['isn'] = sum((monto for persona, monto in reparto.items()
+                if registered['destinos_cargas'][persona] == department['destino']), ZERO)
+            department['cargas'] = department['cargas_sin_isn'] + department['isn']
+            department['costo_personal'] = department['total'] + department['cargas']
+            department['costo_porcentaje'] = porcentaje(department['costo_personal'])
+    for department in departments:
+        for key in ('cargas', 'costo_personal', 'costo_porcentaje'):
+            department.setdefault(key, None)
+    expenses = leer_gastos_mensuales(selected['month'], usar_reparto_consolidado=True,
+                                      incluir_indirectos_produccion=True)
+    combustible = gastos_combustible_reconocidos(selected['month'])
+    expenses['filas'].extend(combustible['filas'])
+    expenses['pendientes'].extend(combustible['pendientes'])
     # Un importe con evidencia incompleta no forma parte del total respaldado.
     incompletos = [dict(f, monto_mensual=None) for f in expenses['filas'] if f['estado'] != 'COMPLETO']
     expenses['pendientes'].extend(incompletos)
@@ -37,25 +128,57 @@ def resumen_personal_global(selected):
     components = [dict(clave=key, nombre=label, monto=(registered or {}).get(key))
                   for key, label in (('percepciones', 'Percepciones de las listas de raya'),
                                      ('despensa', 'Vales adicionales, no incluidos en percepciones'))]
-    components += [dict(clave=key, nombre=selected.get(key + '_label', label), monto=selected[key]) for key, label in (
-        ('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
-        ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA'))]
+    for key, label in (('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
+                       ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA')):
+        label = selected.get(key + '_label', label)
+        amount = selected[key]
+        if amount is None and patronal.get(key) is not None:
+            amount = patronal[key]
+        if key in control_cargas['usados']:
+            label += ' · devengado calculado en ERP' if key == 'isn' else ' · registrado en nómina'
+        components.append(dict(clave=key, nombre=label, monto=amount))
+    if cargas_cubiertas and cargas.get('BD'):
+        components.append(dict(clave='otras_cargas', nombre='Otras obligaciones registradas en nómina', monto=cargas['BD']))
+    criterios = list(NominaImportacion.objects.filter(estatus='IMPORTADA',
+        resumen__criterio_prestaciones__mes=selected['month'].strftime('%Y-%m'))
+        .values_list('resumen__criterio_prestaciones', flat=True)) if registered else []
+    prestaciones_al_pago = bool(criterios) and all(
+        isinstance(c, dict) and c.get('metodo') == 'AL_PAGO' and c.get('provision_contable_mes') == '0.00'
+        and c.get('fuente') == 'CONFIRMACION_DG' for c in criterios)
+    if prestaciones_al_pago:
+        components.append(dict(clave='provisiones',
+            nombre='Provisiones contables adicionales de prestaciones', monto=ZERO))
     labor_total = (sum((c['monto'] for c in components if c['monto'] is not None), ZERO)
                    if registered else None)
-    components.append(dict(clave='gastos', nombre='Gastos operativos identificados', monto=expense_total))
+    components.append(dict(clave='gastos', nombre='Gastos operativos y financieros identificados', monto=expense_total))
     for component in components:
         component['porcentaje'] = porcentaje(component['monto'])
     # Los CFDI y la diferencia fiscal son contraste, nunca otra percepción sumable.
     total = labor_total + (expense_total or ZERO) if labor_total is not None else None
+    personal_cerrado = bool(registered and registered['mes_cubierto'] and not registered['pendientes']
+        and cargas_cubiertas and not cargas_error and prestaciones_al_pago
+        and selected.get('payroll_reconciled', selected.get('payroll_difference') == ZERO)
+        and not selected.get('errors', [])
+        and all(c['monto'] is not None for c in components if c['clave'] != 'gastos'))
     # Sólo se exporta la trazabilidad necesaria; no pagos, cuentas ni archivos privados.
     fields = ('origen', 'registro_id', 'clave', 'area', 'concepto', 'monto_mensual', 'estado', 'detalle', 'referencia_soporte')
+    costo_departamentos = (sum((g['costo_personal'] for g in departments), ZERO)
+                           if departments and all(g['costo_personal'] is not None for g in departments) else None)
     return dict(
         ventas=sales, departamentos=departments, personas=(registered or {}).get('personas'),
+        cargas_error=cargas_error, isn_calculado=isn_calculado,
+        prestaciones_al_pago=prestaciones_al_pago,
+        prestaciones_pagadas=(registered or {}).get('prestaciones_pagadas'), personal_cerrado=personal_cerrado,
+        costo_departamentos=costo_departamentos, costo_departamentos_porcentaje=porcentaje(costo_departamentos),
+        cargas_total=costo_departamentos - registered['total'] if costo_departamentos is not None else None,
         nomina=(registered or {}).get('total'), nomina_porcentaje=porcentaje((registered or {}).get('total')),
         gastos_areas=sorted(areas.values(), key=lambda g: g['nombre']), gastos_total=expense_total,
         componentes=components, personal_subtotal=labor_total, personal_porcentaje=porcentaje(labor_total),
-        subtotal=total, porcentaje=porcentaje(total), costo_integral=None,
+        subtotal=total, porcentaje=porcentaje(total),
+        costo_integral=total if personal_cerrado and expense_total is not None and not expenses['pendientes'] else None,
         fuentes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['filas']],
         pendientes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['pendientes']],
+        referencias_consumo=list({f['referencia_servicio']['gasto_id']: f['referencia_servicio']
+            for f in expenses['filas'] if f.get('referencia_servicio')}.values()),
         gastos_parciales=len(incompletos),
     )

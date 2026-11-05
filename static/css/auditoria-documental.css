@@ -1,0 +1,22 @@
+.documentary-audit{width:100%;min-width:0;max-width:1300px;margin:auto;color:var(--texto,#3d2b2b)}
+.documentary-audit header p,.documentary-audit .audit-notice{max-width:75ch;line-height:1.6}
+.documentary-audit h1{font-size:1.8rem}.documentary-audit h2{font-size:1.4rem}
+.audit-filters{display:flex;gap:16px;align-items:end;flex-wrap:wrap;margin:24px 0}
+.audit-filters label{display:flex;flex-direction:column;gap:6px}
+.documentary-audit input,.documentary-audit select,.documentary-audit textarea{padding:10px;border:1px solid var(--texto-light,#7a6565);border-radius:6px;min-height:44px;font:inherit;color:inherit;background:var(--blanco,#fffaf5)}
+.documentary-audit textarea{display:block;width:100%;margin:8px 0 16px}
+.audit-notice{padding:16px;background:var(--rosa,#f8e8ee);border-radius:8px}
+.audit-meta{color:var(--texto-light,#7a6565)}
+.audit-links{display:flex;gap:24px;flex-wrap:wrap;margin:20px 0;align-items:center}
+.documentary-audit a{color:var(--vino,#8b2252);text-underline-offset:3px}
+.documentary-audit a:focus-visible,.documentary-audit summary:focus-visible,.audit-scroll:focus-visible{outline:2px solid var(--vino,#8b2252);outline-offset:3px}
+.audit-scroll{overflow-x:auto;margin:24px 0}.documentary-audit table{width:100%;border-collapse:collapse}
+.documentary-audit caption{text-align:left;font-weight:700;padding:10px 0}
+.documentary-audit th,.documentary-audit td{padding:12px;text-align:left;border-bottom:1px solid var(--gris-suave,#f5f0eb);vertical-align:top}
+.documentary-audit .quantity{font-variant-numeric:tabular-nums;text-align:right}
+.documentary-audit summary{cursor:pointer;padding:12px 0;min-height:44px}.documentary-audit li{margin:12px 0;line-height:1.5}
+.audit-coverage{display:grid;grid-template-columns:minmax(170px,1fr) 1fr;max-width:700px;gap:12px}.audit-coverage dd{margin:0}
+.audit-case{padding:24px 0;border-top:1px solid var(--texto-light,#7a6565);scroll-margin-top:90px}
+.documentary-audit pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;max-height:480px;overflow:auto;padding:12px;background:var(--gris-suave,#f5f0eb)}
+#revision{scroll-margin-top:90px}#revision article{padding:12px 0;border-bottom:1px solid var(--gris-suave,#f5f0eb)}
+@media(max-width:600px){.audit-filters label{width:100%}.documentary-audit th,.documentary-audit td{padding:10px 8px}.audit-coverage{display:block}.audit-coverage dd{margin:4px 0 16px}}

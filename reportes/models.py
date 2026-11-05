@@ -277,6 +277,8 @@ class GastoOperativoMensual(models.Model):
     periodo = models.DateField(db_index=True)
     cobertura_mes_inicio = models.DateField(null=True, blank=True)
     cobertura_mes_fin = models.DateField(null=True, blank=True)
+    servicio_desde = models.DateField(null=True, blank=True)
+    servicio_hasta = models.DateField(null=True, blank=True)
     centro_costo = models.ForeignKey(
         CentroCosto,
         on_delete=models.PROTECT,
@@ -332,10 +334,19 @@ class GastoOperativoMensual(models.Model):
                 ),
                 name="gasto_cobertura_mensual_valida",
             ),
+            models.CheckConstraint(
+                check=(models.Q(servicio_desde__isnull=True, servicio_hasta__isnull=True)
+                    | models.Q(servicio_desde__isnull=False, servicio_hasta__isnull=False,
+                               servicio_hasta__gt=models.F("servicio_desde"))),
+                name="gasto_periodo_servicio_valido",
+            ),
         ]
 
     def clean(self):
         super().clean()
+        desde, hasta = self.servicio_desde, self.servicio_hasta
+        if (desde is None) != (hasta is None) or (desde is not None and hasta <= desde):
+            raise ValidationError("El periodo del servicio requiere ambas fechas y una duración positiva.")
         inicio, fin = self.cobertura_mes_inicio, self.cobertura_mes_fin
         if inicio is None and fin is None:
             return

@@ -3,6 +3,8 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.utils import timezone
+from django.db.models import F, JSONField, Value
+from django.db.models.expressions import CombinedExpression
 from PIL import Image, ImageOps, ImageStat, UnidentifiedImageError
 
 from .models import CargaCombustibleUnidad
@@ -81,8 +83,10 @@ def auditar_carga_combustible(carga_id: int) -> dict:
         foto_ticket=carga.foto_ticket.name, auditoria_analizada_en=analizada_en_anterior,
     ).update(**{campo: getattr(carga, campo) for campo in (
         'ticket_sha256', 'auditoria_score', 'auditoria_estado', 'auditoria_motivos',
-        'auditoria_detalle', 'auditoria_analizada_en',
-    )})
+        'auditoria_analizada_en',
+    )}, auditoria_detalle=CombinedExpression(
+        F('auditoria_detalle'), '||', Value(carga.auditoria_detalle, output_field=JSONField()),
+        output_field=JSONField()))
     if not actualizadas:
         return {'estado': 'obsoleto', 'carga_id': carga.pk}
     return {"estado": estado, "score": min(score, 100), "motivos": motivos, "ticket": lectura["detalle"]}

@@ -245,6 +245,16 @@ class PersonnelPlanTests(TestCase):
         values.update(kwargs)
         return CfdiDescargado.objects.create(**values)
 
+    def test_peaje_estatal_no_se_confunde_con_un_isn_sin_soporte(self, _):
+        self.invoice('peaje-estatal',
+            '<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+            '<c:Concepto Descripcion="IV-Autopista Estatal B. Juarez peaje"/>'
+            '</c:Conceptos></c:Comprobante>',
+            rfc_emisor='GES8101015I7', rfc_receptor=RFC, tipo_cfdi='recibido', tipo_comprobante='I')
+        result = build_personnel_plan()
+        self.assertEqual(result['unparsed'], [])
+        self.assertTrue(all(row['isn'] is None for row in result['months']))
+
     def add_complete_non_isn_components(self, month):
         self.invoice(f'ordinary-{month}', payroll_xml(f'2026-{month:02d}-15', 'O', '100'))
         self.invoice(f'extraordinary-{month}', payroll_xml(f'2026-{month:02d}-28', 'E', '20'))

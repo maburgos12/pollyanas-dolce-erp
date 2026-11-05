@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from . import views_documentary_audit
 from . import investment_views
 from . import views_inventory_traceability
 from . import views_mano_obra_area
@@ -13,6 +14,8 @@ from .views_produccion import ProducidoVsVendidoMermaView
 app_name = "reportes"
 
 urlpatterns = [
+    path("auditoria-compras-produccion/", views_documentary_audit.dashboard, name="auditoria_documental"),
+    path("auditoria-compras-produccion/<int:snapshot_id>/revision/", views_documentary_audit.review, name="auditoria_documental_revision"),
     path('mano-obra-mensual/', views_mano_obra_mensual.mensual, name='mano_obra_mensual'),
     path(
         "auditoria-inventario/",

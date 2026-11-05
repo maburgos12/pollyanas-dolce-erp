@@ -32,3 +32,25 @@ def conciliar_conteos_nocturnos(self):
     if summary['reintentar'] and self.request.retries < self.max_retries:
         raise self.retry(countdown=1800)
     return summary
+
+
+@shared_task(bind=True, name='inventario.auditar_compras_produccion', max_retries=3)
+def auditar_compras_produccion(self):
+    from datetime import timedelta
+    from django.utils import timezone
+    from .services_documentary_audit import refresh_report
+
+    from pos_bridge.models import PointSyncJob
+    for kind in ('inventory', 'production', 'transfers', 'waste', 'sales'):
+        latest = PointSyncJob.objects.filter(job_type=kind).order_by('-started_at', '-pk').first()
+        if latest and latest.status in ('PENDING', 'RUNNING'):
+            raise self.retry(countdown=1800, exc=RuntimeError('Último ciclo fuente activo; auditoría diferida.'))
+    current = timezone.localdate().replace(day=1)
+    periods = [(current - timedelta(days=1)).replace(day=1), current]
+    results = []
+    for period in periods:
+        snapshot = refresh_report(period)
+        if snapshot is None:
+            raise self.retry(countdown=1800, exc=RuntimeError('Periodo en revisión; auditoría diferida.'))
+        results.append({'period': str(period), 'snapshot_id': snapshot.pk if snapshot else None})
+    return results
