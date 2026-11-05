@@ -191,7 +191,7 @@ class PointSyncServiceTests(TestCase):
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_FAILED,
             attempt_count=1,
-            parameters={"branch_filter": "Centro"},
+            parameters={"branch_filter": "Centro", "capture_costs": False},
             triggered_by=self.user,
         )
         PointSyncJob.objects.create(
@@ -217,6 +217,7 @@ class PointSyncServiceTests(TestCase):
             triggered_by=self.user,
             branch_filter="Centro",
             limit_branches=None,
+            capture_costs=False,
             attempt_count=2,
         )
         inventory_job.refresh_from_db()

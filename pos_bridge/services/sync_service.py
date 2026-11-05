@@ -616,6 +616,7 @@ class PointSyncService:
                     triggered_by=triggered_by or failed_job.triggered_by,
                     branch_filter=parameters.get("branch_filter") or None,
                     limit_branches=parameters.get("limit_branches"),
+                    capture_costs=parameters.get("capture_costs"),
                     attempt_count=failed_job.attempt_count + 1,
                 )
             )

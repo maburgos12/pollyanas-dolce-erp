@@ -8,6 +8,7 @@ from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.core.cache import cache
 from django.core.management import call_command
+from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 
@@ -228,6 +229,14 @@ def task_inventory_sync(
         capture_costs=capture_costs,
     )
     if result["status"] == PointSyncJob.STATUS_FAILED:
+        with transaction.atomic():
+            job = PointSyncJob.objects.select_for_update().get(pk=result["job_id"])
+            if job.parameters.get("retry_scheduled"):
+                return result
+            # El recuperador periódico no debe duplicar los reintentos de Celery.
+            job.parameters = {**job.parameters, "retry_scheduled": True,
+                              "retry_scheduled_at": timezone.now().isoformat()}
+            job.save(update_fields=["parameters", "updated_at"])
         raise self.retry(exc=RuntimeError(result["error_message"] or "Falló la sincronización de inventario Point."))
     return result
 
