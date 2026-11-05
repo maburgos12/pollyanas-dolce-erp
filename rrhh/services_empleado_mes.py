@@ -41,6 +41,8 @@ def puede_acceder(user):
     if puede_ver_todo(user):
         return True
     jefe = empleado_vinculado_usuario(user)
+    if jefe is None:
+        return False
     es_jefe = jefe and jefe.activo and jefe.tipo_personal == "POLLYANA" and jefe.nivel_organizacional == "JEFATURA" and jefe.departamento in DEPARTAMENTOS
     tiene_equipo = bool(es_jefe and Empleado.objects.filter(jefe_directo=jefe, activo=True, tipo_personal="POLLYANA", departamento=jefe.departamento).exclude(nivel_organizacional__in=["JEFATURA", "DIRECCION"]).exists())
     return tiene_equipo or PeriodoEmpleadoMes.objects.filter(Q(evaluador_produccion=user) | Q(evaluador_administracion=user)).exists()

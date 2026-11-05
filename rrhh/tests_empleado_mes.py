@@ -153,6 +153,13 @@ class EmpleadoMesTests(TestCase):
         with self.assertRaises(ValidationError):
             s.entregar(self.rh, p.pk, self.hoy-timedelta(days=1), 'RH', '', p.version)
 
+    def test_usuario_desvinculado_no_accede_a_evaluaciones(self):
+        e = self.postular()
+        Empleado.objects.filter(usuario_erp=e.evaluador).update(usuario_erp=None)
+        usuario = get_user_model().objects.get(pk=e.evaluador_id)
+        self.assertFalse(s.puede_acceder(usuario))
+        self.assertTrue(s.evaluaciones_visibles(self.rh, self.p).filter(pk=e.pk).exists())
+
     def test_jefatura_ambigua(self):
         Empleado.objects.create(nombre='Duplicada', codigo='EMDUP', departamento='PRODUCCION', nivel_organizacional='JEFATURA')
         mes = (self.hoy.replace(day=1)+timedelta(days=32)).replace(day=1)
