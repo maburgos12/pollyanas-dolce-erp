@@ -2079,6 +2079,53 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         )
         self.assertEqual(issue.source_ids, (transfer.id,))
 
+    def test_daily_open_transfer_provenance_uses_its_own_operational_date(self):
+        local_tz = timezone.get_current_timezone()
+        daily_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            status=PointSyncJob.STATUS_SUCCESS,
+            started_at=datetime(2026, 8, 11, 2, 0, tzinfo=local_tz),
+            finished_at=datetime(2026, 8, 11, 2, 5, tzinfo=local_tz),
+            parameters={
+                "mode": "open_transfers",
+                "fecha": "2026-08-10",
+                "branch_filter": "",
+            },
+            result_summary={
+                "transfer_lines_seen": 1,
+                "transfer_lines_created": 1,
+                "transfer_lines_updated": 0,
+                "lineas_nuevas": 1,
+                "lineas_actualizadas": 0,
+            },
+        )
+        transfer = self._transfer(
+            sync_job=daily_job,
+            is_received=False,
+            is_finalized=False,
+            received_at=None,
+        )
+        _snapshot, manifest = persist_open_transfer_snapshot(
+            sync_job=daily_job,
+            lines=[transfer],
+            operational_date=date(2026, 8, 10),
+            captured_at=datetime(2026, 8, 11, 2, 4, tzinfo=local_tz),
+        )
+        daily_job.result_summary = {
+            **daily_job.result_summary,
+            "open_transfer_manifest": manifest,
+        }
+        daily_job.save(update_fields=["result_summary", "updated_at"])
+
+        authority = self.service._validate_transfer_authority(
+            month_start=date(2026, 8, 1),
+            month_end=date(2026, 8, 31),
+            rows=[transfer],
+        )
+
+        self.assertTrue(authority["authoritative"])
+        self.assertEqual(authority["mutable_rows"], (transfer,))
+
     def test_received_flag_without_received_date_keeps_origin_incomplete(self):
         self._closing(date(2026, 7, 31), {self.centro: Decimal("10")})
         self._closing(date(2026, 8, 31), {self.centro: Decimal("6")})

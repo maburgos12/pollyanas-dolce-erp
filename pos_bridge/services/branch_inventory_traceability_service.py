@@ -981,10 +981,23 @@ class BranchInventoryTraceabilityService:
                         provenance_job
                     )
                 else:
-                    provenance_issues = cls._open_transfer_job_contract_issues(
-                        provenance_job,
-                        operational_date=month_end,
-                    )
+                    try:
+                        provenance_date = date.fromisoformat(
+                            str((provenance_job.parameters or {})["fecha"])
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        provenance_issues = [
+                            "OPEN_TRANSFER_SYNC_OPERATIONAL_DATE_INVALID"
+                        ]
+                    else:
+                        provenance_issues = (
+                            cls._open_transfer_job_contract_issues(
+                                provenance_job,
+                                operational_date=provenance_date,
+                            )
+                            if month_start <= provenance_date <= month_end
+                            else ["OPEN_TRANSFER_SYNC_OPERATIONAL_DATE_OUT_OF_RANGE"]
+                        )
             else:
                 provenance_issues = cls._transfer_job_contract_issues(
                     provenance_job,
