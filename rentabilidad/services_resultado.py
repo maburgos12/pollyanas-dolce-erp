@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum, Max, Count
+from django.db.models import Sum, Max, Count, F, Value, DecimalField
 from unidecode import unidecode
 from reportes.services_reparto_historico import ventas_con_identidad_historica
 from control.models import MermaMensualSucursal
@@ -15,9 +15,33 @@ ZERO = Decimal("0")
 CENTRALES = {"produccion", "logistica", "administracion"}
 
 
+def ventas_para_costeo(desde, hasta):
+    """Recupera meses históricos oficiales sin sumar su espejo de Point."""
+    ventas = ventas_con_identidad_historica(desde, hasta)
+    if ventas.exists():
+        return ventas
+    from reportes.sales_confidence import selected_sales_facts
+
+    # Los históricos fiscales ya expresan neto sin impuesto; costo_estimado
+    # no acredita adquisición ni receta vigente y nunca alimenta el costeo.
+    return selected_sales_facts(start_date=desde, end_date=hasta).annotate(**{
+        "sale_date": F("fecha"),
+        "sucursal_historica_id": F("sucursal_id"),
+        "branch": F("sucursal_id"),
+        "product_id": F("point_product_id"),
+        "product__sku": F("producto_clave"),
+        "product__name": F("producto_nombre"),
+        "product__category": F("categoria"),
+        "gross_amount": F("venta_neta") + F("descuento"),
+        "tax_amount": Value(ZERO, output_field=DecimalField()),
+        "discount_amount": F("descuento"),
+        "quantity": F("cantidad"),
+    })
+
+
 def leer_resultado_mensual(periodo):
     fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
-    ventas = ventas_con_identidad_historica(periodo, fin)
+    ventas = ventas_para_costeo(periodo, fin)
     filas = list(ventas.values("sucursal_historica_id", "receta_id", "product_id", "product__sku", "product__name")
                  .annotate(brutas=Sum("gross_amount"), impuestos=Sum("tax_amount"),
                            descuentos=Sum("discount_amount"), cantidad=Sum("quantity")))

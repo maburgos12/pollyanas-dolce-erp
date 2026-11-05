@@ -20,7 +20,7 @@ import calendar
 
 from .models_rentabilidad import SucursalRentabilidad, EstadoRentabilidad
 from .services_costos import asignar_costos_filas
-from .services_resultado import registros_del_mes, leer_cierre_conciliado, resumen_cierre_mensual
+from .services_resultado import registros_del_mes, leer_cierre_conciliado, resumen_cierre_mensual, ventas_para_costeo
 from reportes.sales_confidence import build_sales_confidence, reconcile_branch_sales, selected_sales_facts
 from core.access import can_manage_rentabilidad, can_view_rentabilidad
 from reportes.services_rentabilidad_mensual import (
@@ -93,8 +93,7 @@ def _periodo_bounds(periodo):
 
 
 def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
-    from pos_bridge.models.sales import PointDailySale
-    rows = list(PointDailySale.objects.filter(sale_date__range=(fecha_inicio, fecha_fin)).values(
+    rows = list(ventas_para_costeo(fecha_inicio, fecha_fin).values(
         "product_id", "product__name", "product__category", "product__sku", "receta_id"
     ).annotate(venta=Sum("gross_amount") - Sum("tax_amount") - Sum("discount_amount"),
                cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True)))
@@ -329,6 +328,7 @@ def dashboard_rentabilidad(request):
         .distinct()
         .order_by("-periodo")[:24]
     )
+    periodos_disponibles = sorted({periodo, *periodos_disponibles}, reverse=True)
 
     # Registros del periodo seleccionado
     registros = registros_del_mes(periodo, costos_mensuales)
