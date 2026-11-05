@@ -139,6 +139,14 @@ class FactoryTests(unittest.TestCase):
                 self.assertRaises(ValueError):
             self.factory.integration()
 
+    def test_failed_ci_refresh_invalidates_previous_success(self):
+        self.through_ci()
+        with patch.object(self.factory, "github_pr", return_value=self.pr(statusCheckRollup=[])), \
+                self.assertRaises(ValueError):
+            self.factory.check_ci("1")
+        self.assertEqual(self.factory.status()["next_step"], "ci")
+        self.assertEqual(self.factory.status()["events"][-1]["result"], "failed")
+
     def test_tooling_requires_verification_and_cleanup_before_close(self):
         self.through_integration()
         with self.assertRaises(ValueError):

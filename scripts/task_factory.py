@@ -240,8 +240,13 @@ class Factory:
         with self.lock():
             sha = self.head(clean=True)
             self.require("ci", sha)
-            observed = self.github_pr(pr)
-            self.validate_ci(observed, sha)
+            try:
+                observed = self.github_pr(pr)
+                self.validate_ci(observed, sha)
+            except (ValueError, OSError, subprocess.SubprocessError) as error:
+                self.append(dict(stage="ci", sha=sha, result="failed", finished_at=now(),
+                                 pr=str(pr), error=str(error)))
+                raise
             self.append(dict(stage="ci", sha=sha, result="passed", finished_at=now(),
                              pr=observed["url"], checks=observed["statusCheckRollup"]))
 
