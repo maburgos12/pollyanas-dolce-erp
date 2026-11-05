@@ -152,6 +152,20 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(result['unparsed'], [CfdiDescargado.objects.get(uuid='gov-3').pk])
         self.assertIsNone(result['selected']['isn'])
 
+    def test_edenred_sin_movimientos_cero_se_excluye_pero_otro_cero_sigue_pendiente(self, _):
+        for index, description in enumerate(('SIN MOVIMIENTOS', 'SERVICIO NUEVO')):
+            xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+                   f'<c:Concepto Descripcion="{description}" Importe="0" ValorUnitario="0.01"/>'
+                   '</c:Conceptos></c:Comprobante>')
+            self.invoice(f'edenred-cero-{index}', xml, tipo_cfdi='recibido', tipo_comprobante='I',
+                rfc_emisor='EDENRED', nombre_emisor='EDENRED MEXICO', rfc_receptor=RFC,
+                total=D(0), fecha_emision=datetime(2026, 8, 15, tzinfo=tz.utc))
+        result = build_personnel_plan()
+        self.assertEqual([r['id'] for r in result['excluded_fiscal']],
+                         [CfdiDescargado.objects.get(uuid='edenred-cero-0').pk])
+        self.assertEqual(result['unparsed'], [CfdiDescargado.objects.get(uuid='edenred-cero-1').pk])
+        self.assertIsNone(result['selected']['fees'])
+
     def test_ajuste_documentado_explica_diferencia_sin_cambiar_percepciones(self, _):
         from rrhh.models import NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
         period = NominaPeriodo.objects.create(fecha_inicio=date(2026, 8, 1),

@@ -214,19 +214,24 @@ def build_personnel_plan(cutoff=None):
             else:
                 root = ET.fromstring((invoice.xml_raw or '').lstrip('\ufeff'))
                 concepts = root.findall('.//' + CFDI_NS + 'Concepto')
+                descriptions = [re.sub('[^A-Z]', '', c.attrib.get('Descripcion', '').upper())
+                                for c in concepts]
+                if invoice.total == ZERO and descriptions and all(d == 'SINMOVIMIENTOS' for d in descriptions):
+                    issued = timezone.localtime(invoice.fecha_emision).date()
+                    if start <= issued < end:
+                        excluded_fiscal.append(dict(id=invoice.pk,
+                            reason='Documento sin movimientos e importe cero; no genera costo de personal.'))
+                    continue
                 if invoice.rfc_emisor == 'GES8101015I7':
                     try:
                         month, amount = extraer_isn_cfdi(invoice)
                     except ValueError:
-                        descriptions = [re.sub('[^A-Z]', '', c.attrib.get('Descripcion', '').upper())
-                                        for c in concepts]
                         identifica_nomina = any('NOMINA' in (
                             c.attrib.get('NoIdentificacion', '') + ' ' + c.attrib.get('Descripcion', '')
                             ).upper().replace('Ó', 'O') for c in concepts)
-                        ajeno = not identifica_nomina and descriptions and (all(any(word in d for word in (
+                        ajeno = not identifica_nomina and descriptions and all(any(word in d for word in (
                             'PEAJE', 'PLACA', 'CALCOMANIA', 'PROEDUC', 'CRUZROJA', 'CUOTADIF'))
-                            for d in descriptions) or (invoice.total == ZERO
-                            and all(d == 'SINMOVIMIENTOS' for d in descriptions)))
+                            for d in descriptions)
                         if not ajeno:
                             raise
                         issued = timezone.localtime(invoice.fecha_emision).date()
