@@ -7,7 +7,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from maestros.models import Insumo, UnidadMedida
-from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointSyncJob
+from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine, PointSyncJob
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService, PointRecipeSyncResult
 from pos_bridge.services.sync_service import PointSyncService
 from recetas.models import LineaReceta, Receta, RecetaPresentacionDerivada
@@ -58,6 +58,30 @@ class FakePointHttpClient:
 
 
 class PointProductRecipeSyncServiceTests(TestCase):
+    def test_catalog_creation_preserves_inactive_and_ambiguous_codes(self):
+        from unittest.mock import Mock
+        Insumo.objects.create(nombre="Retirado", codigo_point="OLD", activo=False)
+        Insumo.objects.create(nombre="Primero", codigo_point="AB-1")
+        Insumo.objects.create(nombre="Segundo", codigo_point="AB1")
+        service = PointProductRecipeSyncService()
+        client = Mock()
+        count_before = Insumo.objects.count()
+        for code in ("OLD", "AB1"):
+            row = {"Codigo_Articulo": code, "Articulo": "Nuevo"}
+            resolved, created = service._resolve_or_create_direct_catalog_insumo(
+                client=client, row=row, articulo_row=None,
+            )
+            self.assertIsNone(resolved.insumo)
+            self.assertFalse(created)
+            component = service._resolve_component(
+                client=client, row=row, run=None, depth=0, max_depth=3,
+                visited={}, summary={}, node_outcomes={},
+            )
+            self.assertIsNone(component.insumo)
+            self.assertEqual(component.classification, PointRecipeNodeLine.COMPONENT_UNRESOLVED)
+        self.assertEqual(Insumo.objects.count(), count_before)
+        self.assertEqual(client.mock_calls, [])
+
     def test_discovery_coordinates_its_point_session_with_other_imports(self):
         from django.db import connection
         from unittest.mock import patch

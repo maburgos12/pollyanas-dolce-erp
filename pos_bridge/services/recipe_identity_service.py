@@ -75,29 +75,37 @@ class PointRecipeIdentityService:
 
         if point_code:
             code_norm = normalizar_codigo_point(point_code)
-            for insumo in Insumo.objects.exclude(codigo_point="").order_by("id"):
-                if normalizar_codigo_point(insumo.codigo_point) == code_norm:
-                    return ResolvedInsumo(insumo=insumo, score=100.0, method="POINT_CODE")
+            matches = [item for item in Insumo.objects.exclude(codigo_point="").order_by("id")
+                       if normalizar_codigo_point(item.codigo_point) == code_norm]
+            active = [item for item in matches if item.activo]
+            if len(active) == 1:
+                return ResolvedInsumo(insumo=active[0], score=100.0, method="POINT_CODE")
+            if matches:
+                return ResolvedInsumo(insumo=None, score=0, method=(
+                    "AMBIGUOUS_POINT_CODE" if active else "INACTIVE_POINT_CODE"
+                ))
 
         candidate_names = [point_name, *extra_names]
         for candidate in candidate_names:
             name_norm = normalizar_nombre(candidate)
             if not name_norm:
                 continue
-            alias = InsumoAlias.objects.select_related("insumo").filter(nombre_normalizado=name_norm).first()
+            alias = InsumoAlias.objects.select_related("insumo").filter(nombre_normalizado=name_norm, insumo__activo=True).first()
             if alias and alias.insumo_id:
                 return ResolvedInsumo(insumo=canonical_insumo(alias.insumo), score=100.0, method="ALIAS")
-            insumo = Insumo.objects.filter(nombre_normalizado=name_norm).order_by("id").first()
+            insumo = Insumo.objects.filter(nombre_normalizado=name_norm, activo=True).order_by("id").first()
             if insumo is not None:
                 return ResolvedInsumo(insumo=canonical_insumo(insumo), score=100.0, method="EXACT")
 
         for candidate in candidate_names:
             match = self.catalog_matcher.resolve(candidate)
-            if match.insumo is not None:
+            if match.insumo is not None and match.insumo.activo:
                 return ResolvedInsumo(insumo=canonical_insumo(match.insumo), score=float(match.score or 0), method=match.metodo)
 
         candidate = point_name or (extra_names[0] if extra_names else "")
         insumo, score, method = match_insumo(candidate)
+        if insumo is not None and not insumo.activo:
+            return ResolvedInsumo(insumo=None, score=0, method="INACTIVE_MATCH")
         return ResolvedInsumo(insumo=canonical_insumo(insumo), score=float(score or 0), method=method or "NO_MATCH")
 
     def sync_insumo_point_identity(
@@ -174,6 +182,8 @@ class PointRecipeIdentityService:
         categoria: str = "",
     ) -> Insumo:
         resolved = self.resolve_insumo(point_code=point_code, point_name=point_name)
+        if resolved.method in {"INACTIVE_POINT_CODE", "AMBIGUOUS_POINT_CODE"}:
+            raise ValueError(f"No se puede crear el insumo Point {point_code}: {resolved.method}")
         if resolved.insumo is not None:
             self.sync_insumo_point_identity(
                 insumo=resolved.insumo,
