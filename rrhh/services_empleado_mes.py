@@ -14,6 +14,7 @@ from core.models import AuditLog
 from .models import Empleado, EvaluacionEmpleadoMes, PeriodoEmpleadoMes
 from .models_empleado_mes import CRITERIOS
 from .services_catalogos import etiquetas_puestos, puesto_presentacion
+from .services_identidad import empleado_vinculado_usuario
 
 DEPARTAMENTOS = ("PRODUCCION", "ADMINISTRACION")
 
@@ -37,9 +38,12 @@ def _jefatura(user):
 def puede_acceder(user):
     if not _activo(user):
         return False
-    jefe = _jefatura(user)
-    tiene_equipo = bool(jefe and Empleado.objects.filter(jefe_directo=jefe, activo=True, tipo_personal="POLLYANA", departamento=jefe.departamento).exclude(nivel_organizacional__in=["JEFATURA", "DIRECCION"]).exists())
-    return puede_ver_todo(user) or tiene_equipo or PeriodoEmpleadoMes.objects.filter(Q(evaluador_produccion=user) | Q(evaluador_administracion=user)).exists()
+    if puede_ver_todo(user):
+        return True
+    jefe = empleado_vinculado_usuario(user)
+    es_jefe = jefe and jefe.activo and jefe.tipo_personal == "POLLYANA" and jefe.nivel_organizacional == "JEFATURA" and jefe.departamento in DEPARTAMENTOS
+    tiene_equipo = bool(es_jefe and Empleado.objects.filter(jefe_directo=jefe, activo=True, tipo_personal="POLLYANA", departamento=jefe.departamento).exclude(nivel_organizacional__in=["JEFATURA", "DIRECCION"]).exists())
+    return tiene_equipo or PeriodoEmpleadoMes.objects.filter(Q(evaluador_produccion=user) | Q(evaluador_administracion=user)).exists()
 
 
 def periodos_visibles(user):
