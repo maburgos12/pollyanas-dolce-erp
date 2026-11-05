@@ -779,3 +779,18 @@ operativos móviles debe considerar Safari y la app instalada en iOS desde el di
 
 Estas reglas aplican al código que se cree o modifique; no autorizan cambios masivos
 ni alteración de capturas existentes.
+
+## Software factory — piloto de entrega verificable
+
+Para tareas inscritas en el piloto, usar `scripts/task_factory.py` después del
+inicio/preflight oficial. Registrar aceptación, referencia de autorización y
+modalidad `production` o `tooling` según el consumidor real. Seguir
+`docs/software-factory.md`: evidencia por SHA, CI de GitHub, integración,
+despliegue cuando aplique, verificación y limpieza. `status`/`resume` son consultas;
+no ejecutan agentes en segundo plano ni amplían autorizaciones.
+
+`task_workspace_close.sh --state merged` exige el gate de la fábrica para las
+tareas inscritas. No borrar ni editar el registro para eludirlo. Las tareas
+anteriores/ajenas conservan su ciclo de vida; no inscribirlas automáticamente.
+Un comando exitoso no sustituye la revisión profesional ni la comprobación de
+aceptación. Nunca usar salidas simuladas como evidencia de producción.

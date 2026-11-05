@@ -31,21 +31,23 @@ def planeacion_personal(request):
     if request.GET.get('formato') == 'csv':
         output = StringIO()
         writer = csv.writer(output)
-        writer.writerow(['Periodo', 'Ventas Point con impuestos', 'Objetivo 25%', 'Limite 27%',
+        writer.writerow(['Periodo', 'Ventas con impuestos', 'Objetivo 25%', 'Limite 27%',
                          'Percepciones ordinarias', 'Percepciones extraordinarias',
-                         'IMSS patronal', 'RCV Infonavit patronal', 'ISN',
+                         'IMSS documentado', 'RCV Infonavit documentado', 'ISN',
                          'Servicio vales con IVA', 'Suma documentada', 'Familias documentadas',
                          'Lista de raya con despensa', 'Diferencia CFDI menos lista',
-                         'Periodos cubren mes', 'Pendientes lista de raya'])
+                         'Periodos cubren mes', 'Pendientes lista de raya',
+                         'Ajustes reales conciliados', 'Diferencia fiscal sin conciliar', 'Contraste fiscal conciliado'])
         for row in data['months']:
             writer.writerow([row['month']] + [row[k] for k in (
                 'sales', 'target', 'ceiling', 'ordinary', 'extraordinary', 'imss',
                 'rcv', 'isn', 'fees', 'documented')] + [', '.join(row['coverage']),
                 (row['registered'] or {}).get('total'), row['payroll_difference'],
                 (row['registered'] or {}).get('mes_cubierto'),
-                '; '.join((row['registered'] or {}).get('pendientes', []))])
+                '; '.join((row['registered'] or {}).get('pendientes', [])),
+                row['payroll_adjustments'], row['payroll_unexplained'], row['payroll_reconciled']])
         writer.writerow([])
-        writer.writerow(['Periodo', 'Sucursal histórica', 'Destino según función actual',
+        writer.writerow(['Periodo', 'Sucursal histórica', 'Destino según función conservada en nómina',
                          'Personas', 'Percepciones', 'Despensa adicional', 'Subtotal sin cargas',
                          'Ventas con impuestos', '% tienda sin cargas'])
         for row in data['months']:
@@ -97,6 +99,8 @@ def planeacion_personal(request):
         writer.writerow(['Alcance', 'No incluye materia prima, empaque de fabricacion ni inversiones. '
                          'No sumar subtotales entre si ni CFDI a listas. Vacio significa pendiente, no cero.'])
         writer.writerow(['Diferencia CFDI menos lista, no sumable', data['selected']['payroll_difference']])
+        writer.writerow(['Ajustes reales conciliados, no sumables', data['selected']['payroll_adjustments']])
+        writer.writerow(['Diferencia fiscal sin conciliar', data['selected']['payroll_unexplained']])
         writer.writerow(['Periodos cubren mes', (data['selected']['registered'] or {}).get('mes_cubierto')])
         writer.writerow(['Pendientes lista', '; '.join((data['selected']['registered'] or {}).get('pendientes', []))])
         writer.writerow([])

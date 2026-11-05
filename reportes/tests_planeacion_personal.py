@@ -14,6 +14,7 @@ from reportes.models import (
     DocumentoCedulaIMSS,
     ExpedienteCedulaIMSS,
     ExpedienteISN,
+    FactVentaDiaria,
     LineaPresupuestoMensual,
     RubroPresupuesto,
 )
@@ -97,6 +98,112 @@ class PersonnelPlanTests(TestCase):
         self.assertIsNone(result['months'][-1]['target'])
         self.assertIsNone(result['policy'])
         self.assertIsNone(result['branches'][0]['recent_average'])
+
+    def test_historico_autoritativo_cubre_2025_con_impuestos_y_sucursal_cerrada(self, _):
+        from core.models import Sucursal
+        suc = Sucursal.objects.create(codigo='HIST25', nombre='Crucero histórico', activa=False)
+        for month in range(1, 13):
+            FactVentaDiaria.objects.create(fecha=date(2025, month, 15), sucursal=suc,
+                producto_clave='hist-plan', source_kind='AUTHORITATIVE',
+                venta_total=D('116'), venta_neta=D('100'))
+        result = build_personnel_plan(date(2025, 12, 31))
+        self.assertEqual(result['sales_total'], D('1392'))
+        self.assertEqual(result['selected']['sales'], D('116'))
+        self.assertEqual(result['selected']['branches'], 1)
+        self.assertEqual(result['branches'][0]['branch__erp_branch_id'], suc.pk)
+        self.assertEqual(result['branches'][0]['branch__name'], 'Crucero histórico')
+        self.assertEqual(result['branches'][0]['recent_average'], D('116'))
+
+    def test_historico_no_duplica_dia_oficial_ni_acepta_fuentes_legadas(self, _):
+        from core.models import Sucursal
+        suc = Sucursal.objects.create(codigo='HIST26', nombre='Sucursal A')
+        self.branch.erp_branch = suc
+        self.branch.save(update_fields=['erp_branch'])
+        PointDailySale.objects.create(branch=self.branch, product=self.product,
+            sale_date=date(2025, 8, 1), total_amount=400, source_endpoint=OFFICIAL_POINT_SOURCE)
+        for day, kind, amount in [(1, 'AUTHORITATIVE', 999), (2, 'AUTHORITATIVE', 116),
+                                  (3, 'LEGACY', 8000), (4, 'V2_FACT', 9000)]:
+            FactVentaDiaria.objects.create(fecha=date(2025, 8, day), sucursal=suc,
+                producto_clave='hist-plan', source_kind=kind, venta_total=amount)
+        result = build_personnel_plan(date(2025, 8, 31))
+        self.assertEqual(result['selected']['sales'], D('516'))
+        self.assertEqual(result['selected']['branches'], 1)
+        self.assertEqual(sum(b['amount'] for b in result['branches']), result['sales_total'])
+
+    def test_no_amplia_historico_de_otro_ejercicio_sin_auditoria_de_identidades(self, _):
+        from core.models import Sucursal
+        suc = Sucursal.objects.create(codigo='OTRO-EJ', nombre='Otra referencia')
+        FactVentaDiaria.objects.create(fecha=date(2026, 8, 2), sucursal=suc,
+            producto_clave='hist-no-auditado', source_kind='AUTHORITATIVE', venta_total=999)
+        self.assertEqual(build_personnel_plan()['selected']['sales'], D('400'))
+
+    def test_peaje_placas_y_documento_en_cero_no_se_reportan_como_isn_faltante(self, _):
+        for index, (description, amount) in enumerate([
+                ('IV-Autopista Estatal Peaje', '101'), ('Calcomania Part.', '200'),
+                ('SIN MOVIMIENTOS', '0'), ('Nomina no identificada', '300')]):
+            xml = ('<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4"><c:Conceptos>'
+                   f'<c:Concepto Descripcion="{description}" Importe="{amount}"/>'
+                   '</c:Conceptos></c:Comprobante>')
+            self.invoice(f'gov-{index}', xml, tipo_cfdi='recibido', tipo_comprobante='I',
+                rfc_emisor='GES8101015I7', rfc_receptor=RFC, total=D(amount),
+                fecha_emision=datetime(2026, 8, 15, tzinfo=tz.utc))
+        result = build_personnel_plan()
+        self.assertEqual(len(result['excluded_fiscal']), 3)
+        self.assertEqual(result['unparsed'], [CfdiDescargado.objects.get(uuid='gov-3').pk])
+        self.assertIsNone(result['selected']['isn'])
+
+    def test_ajuste_documentado_explica_diferencia_sin_cambiar_percepciones(self, _):
+        from rrhh.models import NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 31), estatus='CERRADA')
+        emp = Empleado.objects.create(codigo='AJUSTE-HIST', nombre='Prueba histórica')
+        line = NominaLinea.objects.create(periodo=period, empleado=emp, salario_base=D('90'))
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION', codigo_concepto='1',
+            nombre='Sueldo', importe=D('90'))
+        self.invoice('fiscal-ajuste', payroll_xml('2026-08-31', amount='100'))
+        source = NominaImportacion.objects.create(periodo=period, estatus='IMPORTADA',
+            archivo_hash='a' * 64, archivo_nombre='historia.json', resumen={
+                'uuids': ['fiscal-ajuste'], 'ajustes_por_uuid': {'fiscal-ajuste': [dict(
+                    importe='-10.00', estado='PAGO_CONCILIADO_CON_LISTA', soporte='original.json')]}})
+        selected = build_personnel_plan()['selected']
+        self.assertEqual(selected['payroll_difference'], D('10'))
+        self.assertEqual(selected['payroll_adjustments'], D('-10'))
+        self.assertEqual(selected['payroll_unexplained'], D('0'))
+        self.assertTrue(selected['payroll_reconciled'])
+        self.assertEqual(selected['registered']['total'], D('90'))
+        source.resumen['ajustes_por_uuid']['fiscal-ajuste'][0]['estado'] = 'PENDIENTE'
+        source.save(update_fields=['resumen'])
+        selected = build_personnel_plan()['selected']
+        self.assertFalse(selected['payroll_reconciled'])
+        self.assertEqual(selected['payroll_unexplained'], D('10'))
+        self.assertTrue(any('ajustes sin conciliación' in e for e in selected['errors']))
+
+    def test_ajustes_de_otro_cfdi_no_cierran_diferencia(self, _):
+        from reportes.services_planeacion_personal import _ajustes_conciliados
+        from rrhh.models import NominaImportacion, NominaPeriodo
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 31), estatus='CERRADA')
+        NominaImportacion.objects.create(periodo=period, estatus='IMPORTADA', archivo_hash='a' * 64,
+            archivo_nombre='historia.json', resumen={'uuids': ['otro'], 'ajustes_por_uuid': {
+                'otro': [dict(importe='-10', estado='PAGO_CONCILIADO_CON_LISTA', soporte='original.json')]}})
+        month = date(2026, 8, 1)
+        result = _ajustes_conciliados({month: {'periodos': [{'id': period.pk}]}}, {month: {'FISCAL'}})[month]
+        self.assertEqual(result['amount'], D(0))
+        self.assertTrue(result['errors'])
+
+    def test_no_duplica_ajuste_por_mayusculas_del_mismo_uuid(self, _):
+        from reportes.services_planeacion_personal import _ajustes_conciliados
+        from rrhh.models import NominaImportacion, NominaPeriodo
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2026, 8, 1),
+            fecha_fin=date(2026, 8, 31), estatus='CERRADA')
+        item = dict(importe='-10', estado='PAGO_CONCILIADO_CON_LISTA', soporte='original.json')
+        NominaImportacion.objects.create(periodo=period, estatus='IMPORTADA', archivo_hash='a' * 64,
+            archivo_nombre='historia.json', resumen={'uuids': ['fiscal'],
+                'ajustes_por_uuid': {'fiscal': [item], 'FISCAL': [item]}})
+        month = date(2026, 8, 1)
+        result = _ajustes_conciliados({month: {'periodos': [{'id': period.pk}]}}, {month: {'FISCAL'}})[month]
+        self.assertEqual(result['amount'], D(0))
+        self.assertTrue(result['errors'])
 
     def test_no_porcentaje_de_tienda_si_hay_personal_sin_clasificar(self, _):
         from core.models import Sucursal
@@ -451,7 +558,8 @@ class PersonnelPlanTests(TestCase):
         self.assertEqual(self.client.get(path + '?mes=no').status_code, 400)
         self.assertContains(self.client.get(path), 'Presupuesto de personal')
         response = self.client.get(path + '?formato=csv')
-        self.assertContains(response, 'Ventas Point')
+        self.assertContains(response, 'Ventas con impuestos')
+        self.assertContains(response, 'Ajustes reales conciliados,Diferencia fiscal sin conciliar,Contraste fiscal conciliado')
         self.assertNotContains(response, 'local-test')
         self.assertContains(response, '2026-08-01,400.00,100.00,108.00')
         data = self.client.get(path + '?formato=json').json()

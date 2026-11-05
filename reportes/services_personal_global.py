@@ -105,8 +105,9 @@ def resumen_personal_global(selected):
     prestaciones_al_pago = bool(criterios) and all(
         isinstance(c, dict) and c.get('metodo') == 'AL_PAGO' and c.get('provision_contable_mes') == '0.00'
         and c.get('fuente') == 'CONFIRMACION_DG' for c in criterios)
-    components += [dict(clave='provisiones', nombre='Provisiones contables adicionales de prestaciones',
-                        monto=ZERO if prestaciones_al_pago else None)]
+    if prestaciones_al_pago:
+        components.append(dict(clave='provisiones',
+            nombre='Provisiones contables adicionales de prestaciones', monto=ZERO))
     labor_total = (sum((c['monto'] for c in components if c['monto'] is not None), ZERO)
                    if registered else None)
     components.append(dict(clave='gastos', nombre='Gastos operativos y financieros identificados', monto=expense_total))
@@ -116,7 +117,8 @@ def resumen_personal_global(selected):
     total = labor_total + (expense_total or ZERO) if labor_total is not None else None
     personal_cerrado = bool(registered and registered['mes_cubierto'] and not registered['pendientes']
         and cargas_cubiertas and not cargas_error and prestaciones_al_pago
-        and selected.get('payroll_difference') == ZERO
+        and selected.get('payroll_reconciled', selected.get('payroll_difference') == ZERO)
+        and not selected.get('errors', [])
         and all(c['monto'] is not None for c in components if c['clave'] != 'gastos'))
     # Sólo se exporta la trazabilidad necesaria; no pagos, cuentas ni archivos privados.
     fields = ('origen', 'registro_id', 'clave', 'area', 'concepto', 'monto_mensual', 'estado', 'detalle', 'referencia_soporte')
