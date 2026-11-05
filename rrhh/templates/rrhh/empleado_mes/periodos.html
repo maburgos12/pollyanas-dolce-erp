@@ -1,0 +1,7 @@
+{% extends "rrhh/empleado_mes/base.html" %}
+{% block reconocimiento %}
+<header class="em-heading"><p class="em-eyebrow">RECONOCIMIENTO · PRODUCCIÓN Y ADMINISTRACIÓN</p><h1>Empleado del mes CEDIS</h1><p>Dos candidatos por equipo. Una evaluación documentada y un reconocimiento con seguimiento hasta su entrega.</p></header>
+<section class="em-section" aria-labelledby="periodos"><h2 id="periodos">Periodos e historial</h2>
+{% if periodos %}<ul class="em-periods">{% for periodo in periodos %}<li><a href="{% url 'rrhh:empleado_mes_detalle' periodo.pk %}"><strong>{{ periodo.mes|date:"F Y"|capfirst }}</strong><span>{{ periodo.estado_display }}</span><small>Captura hasta {{ periodo.fecha_limite|date:"d/m/Y" }}</small></a></li>{% endfor %}</ul>{% else %}<div class="em-empty"><h3>Aún no hay periodos abiertos</h3><p>{% if gestiona %}Abre el mes que se evaluará para que ambas jefaturas puedan postular a sus colaboradores.{% else %}RRHH abrirá el periodo. Aquí aparecerán las evaluaciones que te corresponden.{% endif %}</p></div>{% endif %}</section>
+{% if gestiona %}<section class="em-section" aria-labelledby="abrir"><h2 id="abrir">Abrir periodo</h2><p>Los evaluadores se tomarán de las jefaturas activas de Producción y Administración en RRHH. Los campos con * son obligatorios.</p><form method="post">{% csrf_token %}{% include 'rrhh/empleado_mes/form_fields.html' %}<button type="submit" class="btn btn-primary">Abrir periodo</button></form></section>{% endif %}
+{% endblock %}
