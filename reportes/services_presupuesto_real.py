@@ -35,6 +35,7 @@ from .models import (
     ReglaFuenteRubro,
 )
 from .services_presupuesto_maestro import normalize_header_text
+from .services_rentabilidad_gastos import _vigente
 
 AUTO_PREFIX = "AUTO:"
 MANUAL_PREFIX = "MANUAL:"
@@ -262,6 +263,8 @@ class PresupuestoRealConsolidacionService:
         self, regla: ReglaFuenteRubro, periodo: date, indices: dict
     ) -> tuple[Decimal, bool]:
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO:
+            if not _vigente(regla, periodo):
+                return (Decimal("0"), False)
             if "gasto" not in indices:
                 indices["gasto"] = self._build_gasto_index(periodo)
             return self._monto_gasto_operativo(regla, indices["gasto"])
