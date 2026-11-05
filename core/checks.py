@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import re
 
 from django.conf import settings
@@ -10,7 +11,7 @@ from core.hallmark_ui_audit import BASELINE_PATH, new_issues_against_baseline
 
 
 ASSIGNABLE_GUARDRAIL_GLOBS = ("**/views.py", "**/api_views.py", "**/serializers.py", "**/forms.py")
-ASSIGNABLE_GUARDRAIL_SKIP_PARTS = {".venv", "migrations", "tests", "management"}
+ASSIGNABLE_GUARDRAIL_SKIP_PARTS = {".venv", "migrations", "tests", "management", "storage"}
 ALLOW_INACTIVE_MARKER = "rrhh-allow-inactive-history"
 ASSIGNABLE_PATTERNS = (
     (re.compile(r"queryset\s*=\s*(?:get_user_model\(\)|User)\.objects\.all\("), "usa filter(is_active=True)"),
@@ -22,13 +23,15 @@ ASSIGNABLE_PATTERNS = (
 
 
 def _iter_assignable_source_files(base_dir: Path):
-    seen = set()
-    for pattern in ASSIGNABLE_GUARDRAIL_GLOBS:
-        for path in base_dir.glob(pattern):
-            if path in seen or any(part in ASSIGNABLE_GUARDRAIL_SKIP_PARTS for part in path.parts):
-                continue
-            seen.add(path)
-            yield path
+    if any(part in ASSIGNABLE_GUARDRAIL_SKIP_PARTS for part in base_dir.parts):
+        return
+    filenames = {Path(pattern).name for pattern in ASSIGNABLE_GUARDRAIL_GLOBS}
+    for directory, children, names in os.walk(base_dir):
+        # Los soportes del NAS no son código de asignación de personal.
+        children[:] = [name for name in children if name not in ASSIGNABLE_GUARDRAIL_SKIP_PARTS]
+        for name in names:
+            if name in filenames:
+                yield Path(directory) / name
 
 
 @register()
