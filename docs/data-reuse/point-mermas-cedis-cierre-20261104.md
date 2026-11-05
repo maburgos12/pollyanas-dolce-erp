@@ -18,6 +18,7 @@ Materializar automáticamente el saldo final exacto del último día del mes des
 | Cierre histórico Point | `pos_bridge.PointHistoricalInventoryClosing` y `PointHistoricalInventoryClosingLine` | `HistoricalPointInventoryClosingCapture` | fecha operativa, sucursal y producto Point | producción tiene cierres verificados del 31/08 y 30/09; el 31/10 no existía | balance mensual y auditoría Producido vs Vendido |
 | Historial oficial de existencias | endpoint Stock leído por `PointHttpSessionClient` | Point | sucursal, producto, movimiento y fecha UTC | es la evidencia usada por los cierres verificados existentes | capturador histórico |
 | Snapshot operativo | `pos_bridge.PointInventorySnapshot` | sincronización diaria de inventario | job, sucursal, producto y hora de captura | octubre tiene snapshots del 31/10, pero no acreditan por sí solos el corte histórico exacto | disponibilidad y balance preliminar |
+| Transferencias Point | `pos_bridge.PointTransferLine` | `PointMovementSyncService` | job mensual, movimiento y producto | octubre tenía líneas persistidas y corte de transferencias abiertas, pero no un job autoritativo para todo el mes | balance y auditoría mensual |
 
 ## Alias y equivalencias
 
@@ -30,7 +31,9 @@ Materializar automáticamente el saldo final exacto del último día del mes des
 
 Extender el extractor existente con una consulta complementaria al filtro Point `8` sólo cuando se sincroniza el conjunto completo y deduplicar con el `source_hash` ya existente. Si el listado mensual omite un movimiento ya acreditado, releer su detalle por `PK_Movimiento` y conservarlo únicamente cuando todos sus hashes coincidan con el historial; cualquier diferencia sigue bloqueando la sincronización. Si únicamente `/Mermas/get_justificacion` devuelve el error explícito de Point, conservar cantidad y detalle, registrar la advertencia en `raw_payload` y preservar cualquier justificación anterior. Los listados, fechas, detalles y cantidades mantienen validación estricta. No se crea una segunda captura ni se modifica inventario.
 
-Antes de materializar la auditoría mensual, reutilizar `HistoricalPointInventoryClosingCapture` para el último día exacto del mes. Si ya existe un cierre `VERIFIED`, se reutiliza sin consultar Point. Si la captura queda `DRAFT`, el cierre mensual permanece en revisión y la ejecución diaria vuelve a intentar; sólo un cierre histórico `VERIFIED` habilita la auditoría. No se convierte `PointInventorySnapshot` en evidencia histórica ni se crea otra tabla.
+Antes de materializar la auditoría mensual, reutilizar `HistoricalPointInventoryClosingCapture` para el último día exacto del mes. Si ya existe un cierre `VERIFIED`, se reutiliza sin consultar Point. Si la captura queda `DRAFT`, el cierre mensual permanece en revisión y la ejecución diaria vuelve a intentar; sólo un cierre histórico `VERIFIED` habilita la auditoría. La misma ejecución recupera el reporte mensual de transferencias con `apply_inventory=False`: acredita la fuente sin volver a aplicar movimientos al inventario operativo.
+
+Un `PointInventorySnapshot` no se relabela como cierre. El contrato documental existente puede acreditar una frontera cuando fue capturado después del corte, su último movimiento es anterior al corte y su job conserva procedencia completa. Un hueco del historial retenido no contradice por sí mismo esa fuente independiente; los movimientos documentados, identidades, cantidades o saldos que sí la contradigan continúan rechazándola.
 
 Consultas reproducibles: `python manage.py inventario_fuentes_datos --term merma --term CEDIS`, `--term 'cierre histórico Point'` y `--term 'inventario Point'`; consultas acotadas de `PointWasteLine`, `PointBranch`, `PointHistoricalInventoryClosing` y jobs de octubre en producción.
 

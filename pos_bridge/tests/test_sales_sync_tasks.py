@@ -509,6 +509,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             filter_mock.return_value.order_by.return_value.first.return_value = None
             movements.return_value.run_production_sync.return_value = fake_job(2)
             movements.return_value.run_waste_sync.return_value = fake_job(3)
+            movements.return_value.run_transfer_sync.return_value = fake_job(5)
             closure_service.return_value.build.return_value = built
             closure_service.return_value.lock.return_value = locked
 
@@ -529,6 +530,9 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         movements.return_value.run_waste_sync.assert_called_once_with(
             **exact_range, branch_filter=None, triggered_by=None
         )
+        movements.return_value.run_transfer_sync.assert_called_once_with(
+            **exact_range, branch_filter=None, triggered_by=None, apply_inventory=False
+        )
         conversions.assert_called_once_with(
             date_from=date(2026, 8, 1), date_to=date(2026, 8, 31), branch_filter=None
         )
@@ -548,7 +552,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         self.assertEqual(result["inventory_authority"]["closing"]["target_date"], "2026-08-31")
         self.assertEqual(
             [step["name"] for step in result["source_refresh"]],
-            ["sales", "production", "waste", "conversions", "historical_closing"],
+            ["sales", "production", "waste", "transfers", "conversions", "historical_closing"],
         )
         conversion_step = result["source_refresh"][-2]
         self.assertEqual(conversion_step["job_id"], 4)
@@ -586,6 +590,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             filter_mock.return_value.order_by.return_value.first.return_value = None
             movements.return_value.run_production_sync.return_value = partial
             movements.return_value.run_waste_sync.return_value = success
+            movements.return_value.run_transfer_sync.return_value = success
             closure_service.return_value.build.return_value = closure
 
             result = run_monthly_product_closure(month="2026-08", lock_after_build=True)
@@ -635,6 +640,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             filter_mock.return_value.order_by.return_value.first.return_value = None
             movements.return_value.run_production_sync.return_value = success
             movements.return_value.run_waste_sync.return_value = success
+            movements.return_value.run_transfer_sync.return_value = success
             closure_service.return_value.build.return_value = closure
 
             result = run_monthly_product_closure(month="2026-10", lock_after_build=True)
@@ -700,6 +706,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             filter_mock.return_value.order_by.return_value.first.return_value = None
             movements.return_value.run_production_sync.return_value = success
             movements.return_value.run_waste_sync.return_value = success
+            movements.return_value.run_transfer_sync.return_value = success
             closure_service.return_value.build.return_value = closure
             closure_service.return_value.lock.side_effect = ProductMonthClosureError("source fingerprint changed")
 
@@ -733,6 +740,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             filter_mock.return_value.order_by.return_value.first.return_value = existing
             movements.return_value.run_production_sync.return_value = success
             movements.return_value.run_waste_sync.return_value = success
+            movements.return_value.run_transfer_sync.return_value = success
             closure_service.return_value.build.return_value = closure
             result = run_monthly_product_closure(month="2026-08")
 
@@ -808,6 +816,9 @@ class PointSalesSyncTaskRoutingTests(TestCase):
             movements.return_value.run_waste_sync.side_effect = (
                 lambda **kwargs: events.append("waste") or successful_job
             )
+            movements.return_value.run_transfer_sync.side_effect = (
+                lambda **kwargs: events.append("transfers") or successful_job
+            )
             from pos_bridge.tasks.run_monthly_product_closure import _refresh_month_sources
 
             result = _refresh_month_sources(
@@ -818,7 +829,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         session_lock.assert_called_once_with(wait=True)
         self.assertEqual(
             events,
-            ["lock_enter", "sales", "production", "waste", "conversions", "historical_closing", "lock_exit"],
+            ["lock_enter", "sales", "production", "waste", "transfers", "conversions", "historical_closing", "lock_exit"],
         )
         self.assertEqual(result[-1]["name"], "historical_closing")
         self.assertFalse(any(step["retryable"] for step in result))
@@ -912,6 +923,7 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         ):
             movements.return_value.run_production_sync.return_value = successful_job
             movements.return_value.run_waste_sync.return_value = successful_job
+            movements.return_value.run_transfer_sync.return_value = successful_job
             from pos_bridge.tasks.run_monthly_product_closure import _refresh_month_sources
 
             result = _refresh_month_sources(

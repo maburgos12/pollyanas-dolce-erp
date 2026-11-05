@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
 import hashlib
+import json
 from copy import deepcopy
 from unittest.mock import patch
 
@@ -222,6 +223,66 @@ class SnapshotHistoricalBoundaryTests(TestCase):
         record.refresh_from_db()
         self.assertEqual(record.raw_metadata, metadata)
         self.assertEqual(list(record.rows.values()), before)
+
+    def test_independent_snapshot_survives_noncontradictory_original_history_gap(self):
+        self._snapshot(raw={
+            "headers": ["Código", "Producto", "Cantidad", "Unidad", "Costo unitario",
+                        "Costo total", "Último Movimiento"],
+            "row": [self.product.external_id, "sku", "Producto", "Pasteles", "1",
+                    "Pza", "10", "10", "2026-09-20T18:00:00", "False"],
+        })
+        rows = [
+            {"FK_Movimiento": 900, "Movimiento": "ENTRADA POR PRODUCCIÓN",
+             "Fecha": "2026-08-31T22:00:00", "Cantidad": 2,
+             "Existencia_anterior": 0, "Existencia_nueva": 2,
+             "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False},
+            {"FK_Movimiento": 910, "Movimiento": "VENTA",
+             "Fecha": "2026-09-10T18:00:00", "Cantidad": 1,
+             "Existencia_anterior": 2, "Existencia_nueva": 1,
+             "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False},
+            {"FK_Movimiento": 920, "Movimiento": "ENTRADA POR PRODUCCIÓN",
+             "Fecha": "2026-09-20T18:00:00", "Cantidad": 1,
+             "Existencia_anterior": 0, "Existencia_nueva": 1,
+             "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False},
+            {"FK_Movimiento": 930, "Movimiento": "VENTA",
+             "Fecha": "2026-10-02T18:00:00", "Cantidad": 1,
+             "Existencia_anterior": 1, "Existencia_nueva": 0,
+             "Costo_Total": 0, "Costo_Unitario": 0, "Cancelado": False},
+        ]
+        evidence = {
+            "source": "POINT_STOCK_HISTORY_API", "domain": "PRODUCT",
+            "response_complete": True, "branch_id": self.branch.pk,
+            "product_id": self.product.pk,
+            "request": {"path": "/Stock/GetHistorial", "params": {
+                "tipo": "false", "almacen": self.branch.external_id,
+                "pkproducto": self.product.external_id, "movimientos": "500",
+                "tipoMovimiento": "",
+            }},
+            "retrieved_at": "2026-10-04T18:00:00+00:00", "history_limit": 500,
+            "fetched_rows": len(rows),
+            "raw_sha256": hashlib.sha256(
+                json.dumps(rows, sort_keys=True, default=str).encode()
+            ).hexdigest(),
+            "original_locator": {"source_file": "/evidence/original-gap.json", "source_line": 1},
+            "request_provenance": {
+                "kind": "DERIVED_FROM_ACQUISITION_SCRIPT", "source_file": "/evidence/read.py",
+                "source_code": "# read original gap\n",
+                "source_sha256": hashlib.sha256(b"# read original gap\n").hexdigest(),
+                "client_contract": "PointHttpSessionClient.get_stock_history",
+            },
+        }
+        AuditStockHistoryService().ingest_original_response(
+            self.branch, self.product, self.month, rows, evidence=evidence,
+        )
+
+        values, proofs, unproven = self._read()
+
+        self.assertEqual(values, {self.line.pk: Decimal("1")})
+        self.assertEqual(unproven, ())
+        consistency = proofs[self.line.pk]["canonical_consistency_evidence"]
+        self.assertTrue(consistency["valid"])
+        self.assertEqual(consistency["reason"], "NO_KNOWN_DOCUMENTARY_CONTRADICTION")
+        self.assertFalse(consistency["coverage_promoted"])
 
     def test_snapshot_accepts_exact_waste_reversal_without_promoting_coverage(self):
         self._snapshot(stock="4")
