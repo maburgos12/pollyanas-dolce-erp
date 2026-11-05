@@ -5,8 +5,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db import transaction
-from django.db.models import Sum
+from django.core.exceptions import ValidationError
+from django.db import connection, transaction
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from maestros.models import Insumo
@@ -16,6 +17,12 @@ from recetas.models import LineaReceta, Receta, VentaHistorica
 from .models import UBICACION_CEDIS, ExistenciaInsumo, MovimientoInventario
 from .services_auditoria_insumos import DECIMAL_ZERO, ConsumoInsumoAuditService, parse_period, period_bounds
 from .services_existencias import aplicar_delta
+
+
+def bloquear_consumos_fusion():
+    # La fusión no puede intercalarse entre leer el BOM y registrar su consumo.
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(%s)", [2026110519])
 
 
 def _q3(value: Decimal) -> Decimal:
@@ -71,6 +78,7 @@ class ConsumoInsumoAutoService:
     def __init__(self):
         self.audit = ConsumoInsumoAuditService()
 
+    @transaction.atomic
     def generar_consumos_produccion(
         self,
         fecha_inicio: date,
@@ -78,6 +86,8 @@ class ConsumoInsumoAutoService:
         *,
         dry_run: bool = False,
     ) -> ConsumoBomSummary:
+        if not dry_run:
+            bloquear_consumos_fusion()
         summary = ConsumoBomSummary(fecha_inicio=fecha_inicio, fecha_fin=fecha_fin, dry_run=dry_run)
         production_items = self._build_production_consumption(fecha_inicio, fecha_fin, summary)
         resale_items = self._build_resale_consumption(fecha_inicio, fecha_fin, summary)
@@ -100,6 +110,36 @@ class ConsumoInsumoAutoService:
                 else:
                     summary.movimientos_sin_cambio += 1
         return summary
+
+    def reidentificar_consumos_fusion(self, source, target, *, acted_by=None):
+        cambios = []
+        movimientos = MovimientoInventario.objects.select_for_update().filter(
+            insumo=source, tipo=MovimientoInventario.TIPO_CONSUMO).order_by('pk')
+        for movimiento in movimientos:
+            produccion = movimiento.referencia.removeprefix('PROD-')
+            if (not movimiento.referencia.startswith('PROD-') or not produccion
+                    or movimiento.source_hash != self._source_hash('BOM', produccion, source.pk)):
+                raise ValidationError(f'Consumo {movimiento.pk} sin origen BOM verificable; conciliar antes de fusionar.')
+            trazabilidad = movimiento.trazabilidad or {}
+            if not isinstance(trazabilidad, dict) or not isinstance(trazabilidad.get('fusiones_insumo', []), list):
+                raise ValidationError(f'Consumo {movimiento.pk} sin trazabilidad verificable; conciliar antes de fusionar.')
+            if 'exclusion_costeo' in trazabilidad:
+                raise ValidationError(f'Consumo {movimiento.pk} con exclusión auditada; conciliar antes de fusionar.')
+            cambios.append((movimiento, self._source_hash('BOM', produccion, target.pk)))
+        if cambios and MovimientoInventario.objects.filter(
+            Q(source_hash__in=[clave for _, clave in cambios])
+            | Q(insumo=target, tipo=MovimientoInventario.TIPO_CONSUMO,
+                referencia__in=[m.referencia for m, _ in cambios])).exists():
+            raise ValidationError('Ya existe consumo del mismo origen en el destino; conciliar antes de fusionar.')
+        for movimiento, clave in cambios:
+            trazabilidad = movimiento.trazabilidad or {}
+            movimiento.trazabilidad = {**trazabilidad, 'fusiones_insumo': [
+                *trazabilidad.get('fusiones_insumo', []),
+                {'insumo_origen_id': source.pk, 'insumo_destino_id': target.pk,
+                 'source_hash_anterior': movimiento.source_hash, 'source_hash': clave,
+                 'usuario': getattr(acted_by, 'username', None), 'fecha': timezone.now().isoformat()}]}
+            movimiento.source_hash = clave
+            movimiento.save(update_fields=['source_hash', 'trazabilidad'])
 
     def generar_consumos_periodo(self, period: str, *, dry_run: bool = False) -> ConsumoBomSummary:
         start, end = period_bounds(parse_period(period))
