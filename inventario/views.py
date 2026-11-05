@@ -5270,13 +5270,14 @@ def existencias(request: HttpRequest) -> HttpResponse:
         return redirect(redirect_url)
 
     selected_q = (request.GET.get("q") or "").strip()
-    inventory_ctx = _inventory_canonical_context(limit=200, almacen=selected_almacen)
+    inventory_ctx = _inventory_canonical_context(limit=None, almacen=selected_almacen)
     existencias_rows = _canonicalized_existencias_rows(
-        limit=200,
+        limit=None,
         almacen=selected_almacen,
         canonical_rows=inventory_ctx["canonical_rows"],
         usage_maps=inventory_ctx["usage_maps"],
     )
+    catalog_count = len(existencias_rows)
     if selected_q:
         existencias_rows = [
             row
@@ -5310,6 +5311,18 @@ def existencias(request: HttpRequest) -> HttpResponse:
     unavailable_count = sum(
         1 for row in existencias_rows if not getattr(row, "inventory_decision_ready", False)
     )
+    unavailable_reasons = defaultdict(int)
+    for row in existencias_rows:
+        if not row.inventory_decision_ready:
+            if not (row.insumo.codigo_point or "").strip():
+                reason = "Sin código Point"
+            else:
+                reason = {
+                    InventoryFreshness.STALE: "Captura vencida",
+                    InventoryFreshness.MISSING: "Sin captura utilizable",
+                    InventoryFreshness.ERROR: "Error de captura o identidad",
+                }[row.inventory_freshness]
+            unavailable_reasons[reason] += 1
     captured_values = [
         row.inventory_captured_at
         for row in existencias_rows
@@ -5329,6 +5342,9 @@ def existencias(request: HttpRequest) -> HttpResponse:
         "inventory_source": "POINT",
         "inventory_fresh_count": healthy_count + critical_count,
         "inventory_unavailable_count": unavailable_count,
+        "inventory_catalog_count": catalog_count,
+        "inventory_visible_count": len(existencias_rows),
+        "inventory_unavailable_reasons": dict(unavailable_reasons),
         "inventory_last_captured_at": max(captured_values) if captured_values else None,
         "reorder_formula_mode": formula_mode,
         "reorder_max_diff_pct": _inventario_reorder_max_diff_pct(),

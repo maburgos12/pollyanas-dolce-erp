@@ -47,6 +47,24 @@ class CanonicalPointInventoryContractTests(SimpleTestCase):
         )
 
 
+class InventoryFullCatalogTests(TestCase):
+    def test_existencias_includes_and_searches_beyond_first_200(self):
+        user = get_user_model().objects.create_superuser("full-catalog", password="test-password")
+        self.client.force_login(user)
+        Insumo.objects.bulk_create([
+            Insumo(nombre=f"Artículo {i:03}", nombre_normalizado=f"articulo {i:03}")
+            for i in range(205)
+        ])
+        response = self.client.get(reverse("inventario:existencias"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["inventory_catalog_count"], 205)
+        self.assertEqual(response.context["inventory_unavailable_count"], 205)
+        response = self.client.get(reverse("inventario:existencias"), {"q": "Artículo 204"})
+        self.assertEqual(response.context["inventory_catalog_count"], 205)
+        self.assertEqual(response.context["inventory_visible_count"], 1)
+        self.assertContains(response, "Sin código Point")
+
+
 @override_settings(POINT_INVENTORY_CANONICAL_MAX_AGE_MINUTES=720)
 class CanonicalPointInventoryServiceTests(TestCase):
     def setUp(self):
@@ -114,6 +132,22 @@ class CanonicalPointInventoryServiceTests(TestCase):
         self.assertEqual(almacen[self.insumo.id].display_quantity, Decimal("20.000000"))
         self.assertEqual(cedis[self.insumo.id].quantity_base, Decimal("-14140.000000"))
         self.assertEqual(cedis[self.insumo.id].display_quantity, Decimal("-14.140000"))
+
+    def test_snapshot_from_another_point_code_is_not_usable(self):
+        PointInsumoInventorySnapshot.objects.filter(insumo=self.insumo).update(point_code="OTHER")
+        reading = self.service.read_many([self.insumo], location="ALMACEN")[self.insumo.id]
+        self.assertEqual(reading.freshness, InventoryFreshness.ERROR)
+        self.assertIsNone(reading.quantity_base)
+        self.assertIn("código", reading.error)
+
+    def test_rejected_capture_exposes_reason_instead_of_generic_missing(self):
+        PointInsumoInventorySnapshot.objects.filter(insumo=self.insumo).delete()
+        self.job.result_summary = {"blockers": [{"location": "ALMACEN", "point_code": "AZM",
+                                                "reason": "IDENTIDAD_POINT_DUPLICADA"}]}
+        self.job.save(update_fields=["result_summary"])
+        reading = self.service.read_many([self.insumo], location="ALMACEN")[self.insumo.id]
+        self.assertEqual(reading.freshness, InventoryFreshness.ERROR)
+        self.assertIn("artículos distintos con el mismo código", reading.error)
 
     def test_variant_reads_the_canonical_point_snapshot_instead_of_internal_stock(self):
         variant = Insumo.objects.create(

@@ -1003,6 +1003,12 @@ class PointProductRecipeSyncService:
         point_code = (row.get("Codigo_Articulo") or row.get("CodigoInsumo") or "").strip()
         point_name = (row.get("Articulo") or row.get("Nombre") or row.get("Nombre_Articulo") or "").strip()
         resolved = self.identity_service.resolve_insumo(point_code=point_code, point_name=point_name)
+        if resolved.method in {"INACTIVE_POINT_CODE", "AMBIGUOUS_POINT_CODE"}:
+            return ComponentResolution(
+                insumo=None, receta=None, child_node=None,
+                classification=PointRecipeNodeLine.COMPONENT_UNRESOLVED,
+                match_method=resolved.method, match_score=0.0,
+            )
         articulo_row = None
 
         child_node = None
@@ -1201,6 +1207,8 @@ class PointProductRecipeSyncService:
             return ResolvedInsumo(insumo=None, score=0.0, method="NO_MATCH"), False
 
         resolved = self.identity_service.resolve_insumo(point_code=point_code, point_name=point_name)
+        if resolved.method in {"INACTIVE_POINT_CODE", "AMBIGUOUS_POINT_CODE"}:
+            return resolved, False
         target_code_norm = self._norm_code(point_code)
         resolved_code_norm = self._norm_code(resolved.insumo.codigo_point or "") if resolved.insumo is not None else ""
         normalized_point_name = normalizar_nombre(point_name)

@@ -40,9 +40,19 @@
       {% if inventory_last_captured_at %}
         Última captura: {{ inventory_last_captured_at|date:"d/m/Y H:i" }}.
       {% endif %}
+      Catálogo completo: {{ inventory_catalog_count }} insumos activos.
+      {% if selected_q %}La búsqueda muestra {{ inventory_visible_count }}; los estados siguientes corresponden a esos resultados.{% endif %}
       {{ inventory_fresh_count }} insumos vigentes;
       {% if inventory_unavailable_count %}<strong>{{ inventory_unavailable_count }} sin dato vigente.</strong>{% else %}sin bloqueos de vigencia.{% endif %}
     </p>
+    {% if inventory_unavailable_reasons %}
+    <ul>
+      {% for reason, count in inventory_unavailable_reasons.items %}
+      <li>{{ reason }}: <strong>{{ count }}</strong></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    <p class="muted">Vigente indica una captura reciente de Point; no acredita conteo físico ni ausencia de saldos negativos.</p>
   </section>
 
   <section class="card card-animate">
