@@ -122,7 +122,7 @@ def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
     return costos
 
 
-def asignar_recetas_identificadas(filas):
+def asignar_recetas_identificadas(filas, *, incluir_aliases=False):
     """Reutiliza identidades existentes sin crear relaciones ni modificar ventas."""
     from collections import defaultdict
     from recetas.models import RecetaAgrupacionAddon
@@ -136,6 +136,13 @@ def asignar_recetas_identificadas(filas):
             aprobados[(regla.addon_codigo_point, nombre)].add(regla.addon_receta_id)
     aprobados_explicitos = {key: set(ids) for key, ids in aprobados.items()}
     codigos = {fila["product__sku"] for fila in filas if fila["receta_id"] is None and fila["product__sku"]}
+    if incluir_aliases:
+        from recetas.models import RecetaCodigoPointAlias
+
+        for alias in RecetaCodigoPointAlias.objects.filter(activo=True, codigo_point__in=codigos).select_related("receta"):
+            nombre = normalizar_nombre(alias.nombre_point)
+            if nombre and nombre == normalizar_nombre(alias.receta.nombre):
+                aprobados[(alias.codigo_point, nombre)].add(alias.receta_id)
     for nodo in PointRecipeNode.objects.filter(source_type="PRODUCT", point_code__in=codigos, erp_recipe__isnull=False).select_related("erp_recipe"):
         nombre = normalizar_nombre(nodo.point_name)
         if nombre == normalizar_nombre(nodo.erp_recipe.nombre):
@@ -161,9 +168,15 @@ def asignar_costos_filas(filas, periodo, fin_periodo):
             if not fila["product_id"] and len(ids) == 1:
                 fila["product_id"] = next(iter(ids))
     asignar_recetas_identificadas(filas)
+    resale = _fuentes_reventa_para_periodo({f["product_id"] for f in filas if f["product_id"]}, periodo, fin_periodo)
+    # shortcut: aliases revisados para ene-sep2026, ampliar tras auditar otros periodos.
+    if periodo.year == 2026 and periodo.month <= 9:
+        pendientes = [f for f in filas if f["receta_id"] is None and not (
+            resale.get(f["product_id"]) and (resale[f["product_id"]]["cost"] > 0
+                                             or resale[f["product_id"]].get("authorized")))]
+        asignar_recetas_identificadas(pendientes, incluir_aliases=True)
     ids = {f["receta_id"] for f in filas if f["receta_id"]}
     recipes = _fuentes_recetas_para_periodo(ids, periodo, fin_periodo)
-    resale = _fuentes_reventa_para_periodo({f["product_id"] for f in filas if f["product_id"]}, periodo, fin_periodo)
     resale_recipes = set(Receta.objects.filter(pk__in=ids, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
     for row in filas:
         evidence = recipes.get(row["receta_id"])
