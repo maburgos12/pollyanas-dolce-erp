@@ -305,19 +305,19 @@ class ReconciliationTests(SimpleTestCase):
         self.assertFalse(result["reconciled"])
 
     @patch("rentabilidad.views_rentabilidad.asignar_costos_filas")
-    @patch("pos_bridge.models.sales.PointDailySale")
+    @patch("rentabilidad.views_rentabilidad.ventas_para_costeo")
     def test_missing_cost_and_advance_are_not_profit_leaders(self, sales, costs):
-        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(receta_id=None, product_id=1, cost_evidence=None, cost_is_resale=True, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
+        sales.return_value.values.return_value.annotate.return_value = [dict(receta_id=None, product_id=1, cost_evidence=None, cost_is_resale=True, cantidad=1, venta=1000, product__name="Pastel sin costo", product__category="Pastel", sucursales=1)]
         panel = _build_productos_panel(date(2026, 9, 1), date(2026, 9, 1), date(2026, 9, 30))
         self.assertEqual(panel["top_utilidad"], [])
         self.assertIsNone(panel["riesgo_margen"][0]["margen"])
         self.assertIsNone(panel["riesgo_margen"][0]["utilidad"])
 
     @patch("rentabilidad.views_rentabilidad.asignar_costos_filas")
-    @patch("pos_bridge.models.sales.PointDailySale")
+    @patch("rentabilidad.views_rentabilidad.ventas_para_costeo")
     def test_documented_service_is_not_a_missing_cost_alert(self, sales, assign):
         from rentabilidad.views_rentabilidad import _build_productos_panel
-        sales.objects.filter.return_value.values.return_value.annotate.return_value = [dict(
+        sales.return_value.values.return_value.annotate.return_value = [dict(
             receta_id=None, product_id=1, cost_is_resale=True, cantidad=1, venta=50,
             cost_evidence={"cost": Decimal("0"), "authorized": True, "treatment": "UNALLOCATED_SERVICE"},
             product__name="Servicio a domicilio", product__category="Servicio", sucursales=1)]
