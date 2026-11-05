@@ -74,6 +74,37 @@ class PointSyncServiceTests(TestCase):
             password="test12345",
         )
 
+    def test_inventory_source_sessions_hold_account_lock(self):
+        from pos_bridge.services.point_account_session_lock import POINT_ACCOUNT_SESSION_LOCK_ID
+        from django.db import connection
+
+        def assert_locked(*args, **kwargs):
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' "
+                    "AND pid=pg_backend_pid() AND classid=%s AND objid=%s AND granted)",
+                    [POINT_ACCOUNT_SESSION_LOCK_ID >> 32, POINT_ACCOUNT_SESSION_LOCK_ID & 0xffffffff],
+                )
+                self.assertTrue(cursor.fetchone()[0], 'Inventory must protect the shared Point session')
+
+        extractor = FakeExtractor()
+        original_extract = extractor.extract
+        def extract(**kwargs):
+            assert_locked()
+            return original_extract(**kwargs)
+        extractor.extract = extract
+        costs = FakeInventoryCostCaptureService()
+        original_costs = costs.capture_and_persist_all
+        def capture(**kwargs):
+            assert_locked()
+            return original_costs(**kwargs)
+        costs.capture_and_persist_all = capture
+        job = PointSyncService(extractor=extractor, inventory_cost_capture_service=costs).run_inventory_sync()
+        self.assertEqual(job.status, PointSyncJob.STATUS_SUCCESS, job.error_message)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid() AND classid=%s AND objid=%s", [POINT_ACCOUNT_SESSION_LOCK_ID >> 32, POINT_ACCOUNT_SESSION_LOCK_ID & 0xffffffff])
+            self.assertEqual(cursor.fetchone()[0], 0)
+
     def test_run_inventory_sync_persists_entities(self):
         cost_capture = FakeInventoryCostCaptureService()
         service = PointSyncService(extractor=FakeExtractor(), inventory_cost_capture_service=cost_capture)
@@ -160,7 +191,7 @@ class PointSyncServiceTests(TestCase):
             job_type=PointSyncJob.JOB_TYPE_INVENTORY,
             status=PointSyncJob.STATUS_FAILED,
             attempt_count=1,
-            parameters={"branch_filter": "Centro"},
+            parameters={"branch_filter": "Centro", "capture_costs": False},
             triggered_by=self.user,
         )
         PointSyncJob.objects.create(
@@ -186,6 +217,7 @@ class PointSyncServiceTests(TestCase):
             triggered_by=self.user,
             branch_filter="Centro",
             limit_branches=None,
+            capture_costs=False,
             attempt_count=2,
         )
         inventory_job.refresh_from_db()

@@ -25,6 +25,7 @@ from pos_bridge.models import (
 )
 from pos_bridge.services.alert_service import PointAlertService
 from pos_bridge.services.inventory_extractor import PointInventoryExtractor
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.point_inventory_cost_capture_service import PointInventoryCostCaptureService
 from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
 from pos_bridge.services.product_month_source_mutex import lock_product_month_sources, snapshot_affected_months
@@ -468,10 +469,11 @@ class PointSyncService:
         self.record_log(sync_job, PointExtractionLog.LEVEL_INFO, "Inicio de sincronización Point inventario.", context=parameters)
 
         try:
-            branch_results = self.extractor.extract(
-                branch_filter=branch_filter,
-                limit_branches=limit_branches,
-            )
+            with point_account_session_lock(wait=True):
+                branch_results = self.extractor.extract(
+                    branch_filter=branch_filter,
+                    limit_branches=limit_branches,
+                )
             if not branch_results:
                 raise PersistenceError("La extracción no devolvió sucursales ni inventario. Ajusta selectores/configuración.")
 
@@ -509,9 +511,10 @@ class PointSyncService:
                 )
             if should_capture_costs:
                 try:
-                    cost_result = self.inventory_cost_capture_service.capture_and_persist_all(
-                        branch_hint=self.settings.inventory_cost_capture_branch,
-                    )
+                    with point_account_session_lock(wait=True):
+                        cost_result = self.inventory_cost_capture_service.capture_and_persist_all(
+                            branch_hint=self.settings.inventory_cost_capture_branch,
+                        )
                 except PosBridgeError as exc:
                     summary.update(
                         {
@@ -613,6 +616,7 @@ class PointSyncService:
                     triggered_by=triggered_by or failed_job.triggered_by,
                     branch_filter=parameters.get("branch_filter") or None,
                     limit_branches=parameters.get("limit_branches"),
+                    capture_costs=parameters.get("capture_costs"),
                     attempt_count=failed_job.attempt_count + 1,
                 )
             )
