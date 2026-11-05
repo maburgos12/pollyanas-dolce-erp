@@ -8,6 +8,69 @@ from rrhh.models import Empleado, NominaPeriodo, NominaLinea, NominaConceptoLine
 
 
 class PersonalRegistradoTests(TestCase):
+    def test_otro_pago_conserva_neto_sin_sumarlo_al_costo_salarial(self):
+        from reportes.services_personal_registrado import leer_personal_registrado
+        from django.core.management import call_command
+        from io import StringIO
+        emp = Empleado.objects.create(codigo='prestamo', nombre='Persona',
+            departamento='VENTAS', puesto_operativo='CAJAS', salario_diario=500)
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2025,1,1),
+            fecha_fin=date(2025,1,31), estatus='CERRADA')
+        line = NominaLinea.objects.create(periodo=period, empleado=emp,
+            snapshot_origen=NominaLinea.SNAPSHOT_HISTORICA, salario_base=100,
+            otros_pagos=3000, descuentos=10)
+        for tipo, codigo, importe in [('PERCEPCION','1',100), ('OTRO_PAGO','132',3000)]:
+            NominaConceptoLinea.objects.create(linea=line, tipo=tipo,
+                codigo_concepto=codigo, nombre=codigo, importe=importe)
+        call_command('capturar_snapshots_nomina', periodo='2025-01', apply=True, stdout=StringIO())
+        line.refresh_from_db()
+        self.assertEqual(line.snapshot_origen, NominaLinea.SNAPSHOT_HISTORICA)
+        self.assertEqual(line.departamento_snapshot, '')
+        self.assertEqual(line.neto_calculado, D(3090))
+        row = leer_personal_registrado(date(2025,1,1), date(2025,2,1))[date(2025,1,1)]
+        self.assertEqual(row['total'], D(100))
+        self.assertEqual(row['grupos'][0]['destino'], 'sin_clasificar')
+
+    def test_puesto_del_periodo_no_cambia_con_la_ficha_actual(self):
+        from reportes.services_personal_registrado import leer_personal_registrado
+        suc = Sucursal.objects.create(codigo='HIS', nombre='Sucursal histórica')
+        emp = Empleado.objects.create(codigo='hist', nombre='Persona', departamento='VENTAS',
+            puesto_operativo='CAJAS', nivel_organizacional='COLABORADOR', sucursal_ref=suc)
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2025,1,1),
+            fecha_fin=date(2025,1,31), estatus='CERRADA')
+        line = NominaLinea.objects.create(periodo=period, empleado=emp, salario_base=100)
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION',
+            codigo_concepto='1', nombre='Sueldo', importe=100)
+        Empleado.objects.filter(pk=emp.pk).update(puesto_operativo='REPARTIDOR',
+            nivel_organizacional='JEFATURA', departamento='LOGISTICA', sucursal_ref=None)
+        line.puesto_operativo_snapshot = 'REPARTIDOR'
+        line.save()
+        row = leer_personal_registrado(date(2025,1,1), date(2025,2,1))[date(2025,1,1)]
+        self.assertEqual(row['total_ventas'], D(100))
+        self.assertEqual(row['grupos'][0]['destino'], 'tienda')
+        self.assertEqual(row['grupos'][0]['sucursal_id'], suc.pk)
+        self.assertEqual(line.puesto_operativo_snapshot, 'CAJAS')
+
+    def test_historico_incompleto_no_inventa_puesto_sucursal_ni_sueldo_actual(self):
+        from reportes.services_personal_registrado import leer_personal_registrado
+        suc = Sucursal.objects.create(codigo='ACT', nombre='Sucursal actual')
+        emp = Empleado.objects.create(codigo='actual', nombre='Persona', departamento='VENTAS',
+            puesto_operativo='CAJAS', nivel_organizacional='JEFATURA', sucursal_ref=suc,
+            salario_diario=500)
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2025,1,1),
+            fecha_fin=date(2025,1,31), estatus='CERRADA')
+        line = NominaLinea.objects.create(periodo=period, empleado=emp,
+            snapshot_origen=NominaLinea.SNAPSHOT_HISTORICA, departamento_snapshot='VENTAS',
+            dias_trabajados=15, salario_base=0, bonos=100)
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION',
+            codigo_concepto='17', nombre='Ajuste comprobado', importe=100)
+        row = leer_personal_registrado(date(2025,1,1), date(2025,2,1))[date(2025,1,1)]
+        self.assertIsNone(line.sucursal_snapshot_id)
+        self.assertEqual(line.salario_base, D(0))
+        self.assertEqual(row['total'], D(100))
+        self.assertEqual(row['grupos'][0]['destino'], 'ventas_pendiente')
+        self.assertTrue(row['pendientes'])
+
     def test_rrhh_muestra_funcion_existente_cuando_no_hay_descriptivo(self):
         from rrhh.services_catalogos import puesto_operativo_choices
         e=Empleado.objects.create(codigo='visible',nombre='Persona',departamento='VENTAS',

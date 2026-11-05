@@ -273,6 +273,8 @@ def importar_lista_raya_nomina(
                     empleado=empleado,
                     sucursal_snapshot_id=empleado.sucursal_ref_id,
                     departamento_snapshot=empleado.departamento or "",
+                    puesto_operativo_snapshot=empleado.puesto_operativo or "",
+                    nivel_organizacional_snapshot=empleado.nivel_organizacional or "",
                     snapshot_origen=NominaLinea.SNAPSHOT_LISTA_RAYA,
                     snapshot_capturado_en=snapshot_capturado_en,
                     dias_trabajados=row.dias_pagados,
