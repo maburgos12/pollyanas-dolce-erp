@@ -132,3 +132,20 @@ class PersonalHistoricoResultadoTests(TestCase):
         row=build_reporte_mensual_consolidado(hasta=self.month,meses=1,sucursal_id=self.branch.pk)['filas'][0]
         self.assertIsNone(row['resultado_empresa_parcial'])
         self.assertIsNone(row['central_registrado'])
+
+    def test_selector_incluye_todos_los_meses_con_fuente_historica(self):
+        FactVentaDiaria.objects.create(fecha=date(2025,1,1),sucursal=self.branch,
+            producto_clave='LAB-ENERO',cantidad=1,venta_neta=100,source_kind='AUTHORITATIVE')
+        self.client.force_login(get_user_model().objects.create_superuser('lab-selector',password='test-only'))
+        for params in [{'periodo':'2025-09'},{'periodo':'2026-10'}]:
+            with self.subTest(params=params):
+                page=self.client.get('/rentabilidad/',params)
+                self.assertIn(date(2025,1,1),page.context['periodos_disponibles'])
+                self.assertIn(date(2025,9,1),page.context['periodos_disponibles'])
+
+    def test_selector_del_cierre_2026_conserva_el_acceso_a_2025(self):
+        from unittest.mock import patch
+        self.client.force_login(get_user_model().objects.create_superuser('lab-cierre-selector',password='test-only'))
+        with patch('rentabilidad.views_rentabilidad.leer_cierre_conciliado',return_value={'detalle':[],'errores':[]}):
+            page=self.client.get('/rentabilidad/',{'periodo':'2026-09'})
+        self.assertIn(self.month,page.context['periodos_disponibles'])

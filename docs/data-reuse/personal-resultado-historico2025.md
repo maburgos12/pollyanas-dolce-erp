@@ -28,7 +28,7 @@ El costo laboral conciliado existe en el ERP, pero el resultado de empresa de Re
 
 Reutilizar `build_personnel_plan` y `leer_personal_mensual`, exclusivamente en la lectura de 2025. Mostrar nómina, IMSS, RCV/Infonavit, ISN y servicio de vales en el desglose central existente como costo de empresa sin distribución histórica. Descontar lo que ya se reconoce por sucursal. Los controles presupuestales de las mismas fuentes no se suman sobre los recibos; si un control mezcla fuentes laborales y no laborales, conservarlo y dejar pendiente el componente afectado hasta conciliar su desglose.
 
-No crear tablas, migraciones, capturas, equivalencias de personas, prorrateos, provisiones ni escrituras financieras. Conservar el diseño de la pantalla. El reporte mensual debe descubrir también los meses con ventas históricas canónicas sin snapshot.
+No crear tablas, migraciones, capturas, equivalencias de personas, prorrateos, provisiones ni escrituras financieras. Conservar el diseño de la pantalla. El reporte mensual y el selector, incluso desde la vista del cierre de 2026, deben descubrir también los meses con ventas históricas canónicas sin snapshot.
 
 Procedimiento reproducible: `inventario_fuentes_datos --term nomina --term cedula --term rentabilidad`; lectura de `personal2025-puente-resultado-comprobacion.json` en el expediente privado de cierre. El grafo MCP devolvió `Transport closed`; descubrimiento acotado sobre los lectores y todos sus consumidores.
 
