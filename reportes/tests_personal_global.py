@@ -188,6 +188,9 @@ class PersonalGlobalTests(TestCase):
         self.assertTrue(selected['global']['isn_calculado'])
         self.assertTrue(selected['global']['personal_cerrado'])
         self.assertEqual(selected['global']['costo_integral'], D('609.20'))
+        branches = selected['registered']['sucursales_ventas']
+        self.assertEqual([b['costo_personal'] for b in branches], [D('110'), D('132.40')])
+        self.assertEqual(sum(g['costo_personal'] for g in selected['registered']['grupos']), D('507.20'))
         self.client.force_login(get_user_model().objects.create_superuser('cargas', password='test-only'))
         with patch('reportes.views_planeacion_personal.build_personnel_plan', return_value=data):
             url = '/reportes/planeacion-personal/?mes=2026-10'

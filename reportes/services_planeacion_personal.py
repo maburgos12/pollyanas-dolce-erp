@@ -273,6 +273,17 @@ def build_personnel_plan(cutoff=None):
         control = row['cargas_nomina']
         if control['error']:
             row['errors'].append(control['error'])
+        if row['registered']:
+            cargas_cubiertas = row['registered']['cargas_cubiertas'] and not control['error']
+            for group in row['registered']['grupos']:
+                group['cargas'] = (group['cargas_sin_isn'] + sum(
+                    (control['reparto'][p] for p in group['personas_cargas']), ZERO)
+                    if cargas_cubiertas else None)
+                group['costo_personal'] = group['total'] + group['cargas'] if cargas_cubiertas else None
+            for branch in row['registered']['sucursales_ventas']:
+                branch['cargas'] = sum((g['cargas'] for g in row['registered']['grupos']
+                    if g['sucursal_id'] == branch['sucursal_id'] and g['destino'] == 'tienda'), ZERO) if cargas_cubiertas else None
+                branch['costo_personal'] = branch['total'] + branch['cargas'] if cargas_cubiertas else None
         for key in control['usados']:
             row[key] = control['valores'][key]
             row['sources'].append(dict(
@@ -328,6 +339,8 @@ def build_personnel_plan(cutoff=None):
             branch['ventas'] = branch_sales.get((month, branch['sucursal_id'])) if branch['sucursal_id'] else None
             branch['porcentaje'] = (money(branch['total'] / branch['ventas'] * 100)
                 if branch['ventas'] and registered_row['mes_cubierto'] else None)
+            branch['costo_porcentaje'] = (money(branch['costo_personal'] / branch['ventas'] * 100)
+                if branch['ventas'] and branch['costo_personal'] is not None else None)
     for branch in branch_rows:
         recent_sales = []
         for month in recent:

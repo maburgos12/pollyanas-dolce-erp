@@ -55,11 +55,12 @@ def planeacion_personal(request):
         writer.writerow([])
         writer.writerow(['Periodo', 'Ventas por sucursal', 'Personas en nómina', 'Venta con impuestos',
                          'Percepciones', 'Despensa adicional', 'Subtotal registrado', '% subtotal sobre venta',
-                         'Puestos pendientes'])
+                         'Puestos pendientes', 'Cargas patronales e ISN', 'Costo del personal', '% costo sobre venta'])
         for row in data['months']:
             for branch in (row['registered'] or {}).get('sucursales_ventas', []):
                 writer.writerow([row['month']] + [branch[k] for k in ('sucursal', 'personas', 'ventas',
-                    'percepciones', 'despensa', 'total', 'porcentaje', 'puestos_pendientes')])
+                    'percepciones', 'despensa', 'total', 'porcentaje', 'puestos_pendientes',
+                    'cargas', 'costo_personal', 'costo_porcentaje')])
         writer.writerow([])
         writer.writerow(['Periodo', 'Fuente', 'ID ERP', 'Referencia', 'Importe'])
         for source in data['sources']:

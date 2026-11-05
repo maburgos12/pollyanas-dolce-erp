@@ -63,7 +63,7 @@ def leer_personal_registrado(start, end):
         group = row['grupos'].setdefault(key, dict(sucursal_id=line.sucursal_snapshot_id,
             sucursal=line.sucursal_snapshot.nombre if line.sucursal_snapshot else 'Sin sucursal histórica',
             destino=destination, percepciones=Decimal(0), despensa=Decimal(0), total=Decimal(0), personas=set(),
-            cargas_sin_isn=Decimal(0)))
+            cargas_sin_isn=Decimal(0), personas_cargas=[]))
         prefijo = f'M{month:%Y%m}:'
         cargas = [c for c in line.conceptos.all() if c.tipo == 'OBLIGACION'
                   and c.codigo_concepto.startswith(prefijo)]
@@ -74,6 +74,7 @@ def leer_personal_registrado(start, end):
                 row['errores_cargas'].append(f'Línea {line.pk}: cargas mensuales incompletas o duplicadas.')
             else:
                 row['destinos_cargas'][emp.pk] = destination
+                group['personas_cargas'].append(emp.pk)
                 for col, cargo in zip(columnas, cargas):
                     row['componentes_cargas'][col] = row['componentes_cargas'].get(col, Decimal(0)) + cargo.importe
                     if col != 'AY':

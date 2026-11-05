@@ -41,3 +41,5 @@ El lector distingue esa confirmación de la ausencia de información: solo una c
 Los comprobantes estatales de peaje o calcomanía vehicular se excluyen de la lectura de ISN mediante identificación positiva de sus conceptos; no se presentan como documentos de nómina sin lectura. Los comprobantes de ISN y los casos desconocidos conservan su validación estricta.
 
 El reparto anual verifica la historia del mes consultado. Si otro mes de la cobertura carece de historia, el lector conserva ese mes sin certificar, pero permite el importe mensual del mes que sí tiene reglas acreditadas; conserva el residuo de centavos en el último mes.
+
+La tabla por sucursal y su CSV conservan nómina y vales separados y añaden las cargas mensuales e ISN del mismo grupo histórico de nómina; el porcentaje de costo usa las ventas de esa sucursal. Los cargos no se copian a otros grupos cuando una persona aparece en más de una quincena. El servicio de vales permanece en el total de empresa, sin asignación por sucursal inventada.
