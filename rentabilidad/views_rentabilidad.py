@@ -282,6 +282,8 @@ def _render_cierre_dashboard(request, cierre, periodo, sucursal_id=None):
     ranking = sorted(context["filas"], key=lambda fila: fila["utilidad"], reverse=True)
     periodos = set(SucursalRentabilidad.objects.values_list("periodo", flat=True))
     periodos.update(date(2026, fila["mes"], 1) for fila in cierre["detalle"])
+    periodos.update(selected_sales_facts(start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31)).dates("fecha", "month"))
     periodos.add(periodo)
     context.update(cierre_conciliado=True, active_tab="diagnostico" if request.GET.get("tab") == "diagnostico" else "resumen",
                    periodos_disponibles=sorted(periodos, reverse=True)[:24],
@@ -328,7 +330,9 @@ def dashboard_rentabilidad(request):
         .distinct()
         .order_by("-periodo")[:24]
     )
-    periodos_disponibles = sorted({periodo, *periodos_disponibles}, reverse=True)
+    historicos = selected_sales_facts(start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31)).dates("fecha", "month")
+    periodos_disponibles = sorted({periodo, *periodos_disponibles, *historicos}, reverse=True)
 
     # Registros del periodo seleccionado
     registros = registros_del_mes(periodo, costos_mensuales)
