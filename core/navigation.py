@@ -278,6 +278,7 @@ NAV_GROUPS = [
             ("rrhh", "empleados", "Gafetes", "/rrhh/gafetes/", ["/rrhh/gafetes/"]),
             ("rrhh", "cumpleanos", "Cumpleaños", "/rrhh/cumpleanos/", ["/rrhh/cumpleanos/"]),
             ("rrhh", "clima", "Clima laboral", "/rrhh/clima/", ["/rrhh/clima/"]),
+            ("rrhh", "empleado_mes", "Empleado del mes CEDIS", "/rrhh/empleado-del-mes/", ["/rrhh/empleado-del-mes/"]),
             ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
             ("rrhh", "suspensiones", "Suspensiones", "/rrhh/suspensiones/", ["/rrhh/suspensiones/"]),
             ("rrhh", "incapacidades", "Incapacidades", "/rrhh/incapacidades/", ["/rrhh/incapacidades/"]),
@@ -368,6 +369,11 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
                 from reportes.services_mano_obra_mensual import puede_revisar
                 if not puede_revisar(user):
                     continue
+            if module == "rrhh" and submodule == "empleado_mes":
+                from rrhh.services_empleado_mes import puede_acceder
+
+                if not puede_acceder(user):
+                    continue
             if module == "rrhh" and submodule == "clima":
                 from core.access import can_manage_rrhh
 
@@ -381,6 +387,8 @@ def build_nav_groups(user, current_path: str) -> list[dict]:
             if module == "rrhh" and submodule == "mi_equipo" and not tiene_equipo:
                 continue
             tiene_acceso_personal = module == "seguimiento" and submodule in seguimiento_asignado
+            if module == "rrhh" and submodule == "empleado_mes":
+                tiene_acceso_personal = True
             if module == "rrhh" and submodule == "mi_equipo":
                 tiene_acceso_personal = True
             if module == "rrhh" and submodule == "cumpleanos":

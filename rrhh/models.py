@@ -2950,3 +2950,5 @@ class RespuestaClima(models.Model):
     campana = models.ForeignKey(CampanaClima, on_delete=models.CASCADE, related_name="respuestas")
     departamento = models.CharField(max_length=40, blank=True)
     respuestas = models.JSONField()
+
+from .models_empleado_mes import EvaluacionEmpleadoMes, PeriodoEmpleadoMes  # noqa: E402,F401
