@@ -10,6 +10,7 @@
 
 {% block content %}
 <div class="insumo-audit-shell">
+  <p>Este reporte contiene consumos calculados. Un resultado OK no acredita consumo físico. <a href="{% url 'reportes:auditoria_documental' %}?mes={{ selected_period }}">Revisar documentos, cantidades y excepciones</a>.</p>
   <nav class="module-tabs">
     {% for tab in module_tabs %}
     <a class="module-tab {% if tab.active %}active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
