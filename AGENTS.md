@@ -5,6 +5,13 @@ Sistema ERP operativo para Pollyana's Dolce, cadena de pastelerías con 9 sucurs
 Sinaloa, México (Guasave: 8 · Guamúchil: 1). Director General: Mauricio Burgos.
 Sistema de uso interno para el equipo operativo.
 
+## Correo entre personal — prioridad institucional
+
+- Para correos entre el personal, usar en primera instancia el correo institucional de Pollyana’s Dolce, tanto al preparar borradores como al enviar mensajes autorizados.
+- Verificar la cuenta institucional remitente y los destinatarios antes de crear el borrador o enviar. No usar una cuenta personal de Gmail por estar conectada o disponible.
+- Si el correo institucional no está disponible, informar el bloqueo; usar otra cuenta únicamente por indicación expresa de Mauricio.
+- Crear un borrador no autoriza su envío.
+
 ## Servidor de producción
 - Host: 68.183.165.47 · Usuario: root · SSH: ~/.ssh/agente_dg_ops
 - Directorio: /opt/pastelerias-erp
