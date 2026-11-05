@@ -49,8 +49,9 @@ def _texto(value):
 
 
 def componente(persona):
-    puesto = _texto(persona['empleado__puesto_operativo'])
-    cargo = _texto(persona['empleado__puesto'])
+    historica = persona.get('snapshot_origen') == 'HISTORICA'
+    puesto = _texto(persona.get('puesto_operativo_snapshot') if historica else persona['empleado__puesto_operativo'])
+    cargo = '' if historica else _texto(persona['empleado__puesto'])
     if puesto == 'ENVIO_SUCURSAL':
         return 'despacho'
     if puesto in {'HORNOS', 'ARMADO', 'EMBETUNADO', 'PREPARACION', 'CUARTOS_FRIOS'}:
@@ -74,6 +75,7 @@ def leer_fuentes(periodo):
         'periodos': periodos.values('id', 'fecha_inicio', 'fecha_fin', 'estatus'),
         'nomina': NominaLinea.objects.filter(periodo_id__in=periodos.values('id'), departamento_snapshot='PRODUCCION').values(
             'id', 'periodo_id', 'empleado_id', 'total_percepciones', 'departamento_snapshot',
+            'snapshot_origen', 'puesto_operativo_snapshot',
             'empleado__nombre', 'empleado__puesto', 'empleado__puesto_operativo'),
         'sin_departamento': NominaLinea.objects.filter(periodo_id__in=periodos.values('id'), departamento_snapshot='').values('id'),
         'produccion': PointProductionLine.objects.filter(production_date__range=(inicio, fin)).values(
@@ -181,7 +183,8 @@ def calcular(periodo, fuentes=None):
             pendiente_nomina += monto
             pendientes.append(f"Clasificar el puesto de {n['empleado__nombre']}.")
         p = personas.setdefault(n['empleado_id'], {'id': n['empleado_id'], 'nombre': n['empleado__nombre'],
-            'puesto': n['empleado__puesto'] or n['empleado__puesto_operativo'],
+            'puesto': (n.get('puesto_operativo_snapshot') or 'Sin puesto histórico') if n.get('snapshot_origen') == 'HISTORICA'
+                else n['empleado__puesto'] or n['empleado__puesto_operativo'],
             'componente': COMPONENTES.get(key, 'Pendiente'), 'monto': Decimal('0')})
         p['monto'] += monto
     if not personas:

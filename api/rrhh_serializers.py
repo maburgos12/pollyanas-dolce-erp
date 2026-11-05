@@ -101,6 +101,7 @@ class RRHHNominaLineaSerializer(serializers.ModelSerializer):
             "bonos",
             "descuentos",
             "total_percepciones",
+            "otros_pagos",
             "neto_calculado",
             "observaciones",
             "created_at",
@@ -109,6 +110,7 @@ class RRHHNominaLineaSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "total_percepciones",
+            "otros_pagos",
             "neto_calculado",
             "created_at",
             "updated_at",

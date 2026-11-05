@@ -34,6 +34,7 @@ class Command(BaseCommand):
                     periodo__fecha_fin__year=periodo.year,
                     periodo__fecha_fin__month=periodo.month,
                 )
+                .exclude(snapshot_origen=NominaLinea.SNAPSHOT_HISTORICA)
                 .select_related("empleado", "empleado__sucursal_ref", "periodo")
                 .order_by("periodo__fecha_inicio", "empleado_id", "id")
             )
@@ -83,6 +84,8 @@ class Command(BaseCommand):
             for linea in pendientes:
                 linea.sucursal_snapshot_id = linea.empleado.sucursal_ref_id
                 linea.departamento_snapshot = linea.empleado.departamento
+                linea.puesto_operativo_snapshot = linea.empleado.puesto_operativo or ""
+                linea.nivel_organizacional_snapshot = linea.empleado.nivel_organizacional or ""
                 linea.snapshot_origen = NominaLinea.SNAPSHOT_CAPTURA_EXPLICITA
                 linea.snapshot_capturado_en = capturado_en
             if pendientes:
@@ -91,6 +94,8 @@ class Command(BaseCommand):
                     [
                         "sucursal_snapshot",
                         "departamento_snapshot",
+                        "puesto_operativo_snapshot",
+                        "nivel_organizacional_snapshot",
                         "snapshot_origen",
                         "snapshot_capturado_en",
                     ],

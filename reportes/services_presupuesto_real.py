@@ -26,7 +26,7 @@ from django.db.models import Sum
 from django.db.models.functions import Trim, Upper
 from django.utils import timezone
 
-from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de
+from .clasificacion_nomina import DESTINOS_VALIDOS, destino_de, aplicar_identidad_historica
 from .models import (
     GastoOperativoMensual,
     ExpedienteISN,
@@ -412,7 +412,7 @@ class PresupuestoRealConsolidacionService:
         from rrhh.models import NominaLinea, NominaPeriodo
 
         agregados = {campo: Sum(campo) for campo in NOMINA_CAMPOS_VALIDOS}
-        return list(
+        filas = list(
             NominaLinea.objects.filter(
                 periodo__fecha_fin__year=periodo.year,
                 periodo__fecha_fin__month=periodo.month,
@@ -426,9 +426,12 @@ class PresupuestoRealConsolidacionService:
                 # y quién no. Ver reportes.clasificacion_nomina.
                 "empleado__nivel_organizacional",
                 "empleado__puesto_operativo",
+                "snapshot_origen", "departamento_snapshot", "sucursal_snapshot_id",
+                "puesto_operativo_snapshot", "nivel_organizacional_snapshot",
             )
             .annotate(**agregados)
         )
+        return [aplicar_identidad_historica(fila) for fila in filas]
 
     def _monto_nomina(self, regla: ReglaFuenteRubro, nomina_index: list[dict]) -> tuple[Decimal, bool]:
         filtros = regla.filtros or {}
@@ -464,7 +467,7 @@ class PresupuestoRealConsolidacionService:
         """Conceptos de nómina pagada/cerrada, sin reinterpretar importes."""
         from rrhh.models import NominaConceptoLinea, NominaPeriodo
 
-        return list(
+        filas = list(
             NominaConceptoLinea.objects.filter(
                 linea__periodo__fecha_fin__year=periodo.year,
                 linea__periodo__fecha_fin__month=periodo.month,
@@ -482,9 +485,12 @@ class PresupuestoRealConsolidacionService:
                 # dentro de un mismo departamento.
                 "linea__empleado__nivel_organizacional",
                 "linea__empleado__puesto_operativo",
+                "linea__snapshot_origen", "linea__departamento_snapshot", "linea__sucursal_snapshot_id",
+                "linea__puesto_operativo_snapshot", "linea__nivel_organizacional_snapshot",
             )
             .annotate(importe=Sum("importe"))
         )
+        return [aplicar_identidad_historica(fila, "linea__") for fila in filas]
 
     def _monto_nomina_concepto(
         self, regla: ReglaFuenteRubro, concepto_index: list[dict]
