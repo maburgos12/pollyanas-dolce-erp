@@ -183,6 +183,14 @@ def build_personnel_plan(cutoff=None):
             reconciled=not diferencia_aceptada,
         ))
 
+    # La discrepancia histórica nunca convierte el comprobante en costo conciliado.
+    for expediente in ExpedienteISN.objects.filter(periodo__gte=start, periodo__lt=end,
+            periodo__year=2025, estado=ExpedienteISN.ESTADO_DISCREPANCIA,
+            metadata__metodo='EMPRESA_HISTORICA_2025_V1'):
+        rows[expediente.periodo]['errors'].append(
+            f"ISN empresa: expediente #{expediente.pk} con diferencia de "
+            f"{expediente.metadata.get('diferencia_isn', 'N/D')} contra nómina histórica; pendiente.")
+
     # Una sola entidad; el receptor individual nunca se exporta.
     invoices = CfdiDescargado.objects.filter(
         Q(rfc_emisor=RFC, tipo_comprobante='N', tipo_cfdi='emitido') |
