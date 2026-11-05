@@ -57,11 +57,12 @@ def planeacion_personal(request):
         writer.writerow([])
         writer.writerow(['Periodo', 'Ventas por sucursal', 'Personas en nómina', 'Venta con impuestos',
                          'Percepciones', 'Despensa adicional', 'Subtotal registrado', '% subtotal sobre venta',
-                         'Puestos pendientes'])
+                         'Puestos pendientes', 'Cargas patronales e ISN', 'Costo del personal', '% costo sobre venta'])
         for row in data['months']:
             for branch in (row['registered'] or {}).get('sucursales_ventas', []):
                 writer.writerow([row['month']] + [branch[k] for k in ('sucursal', 'personas', 'ventas',
-                    'percepciones', 'despensa', 'total', 'porcentaje', 'puestos_pendientes')])
+                    'percepciones', 'despensa', 'total', 'porcentaje', 'puestos_pendientes',
+                    'cargas', 'costo_personal', 'costo_porcentaje')])
         writer.writerow([])
         writer.writerow(['Periodo', 'Fuente', 'ID ERP', 'Referencia', 'Importe'])
         for source in data['sources']:
@@ -69,25 +70,41 @@ def planeacion_personal(request):
         global_row = data['selected']['global']
         writer.writerow([])
         writer.writerow(['Global por departamento', 'Personas', 'Percepciones', 'Vales adicionales',
-                         'Nomina registrada', '% ventas totales'])
+                         'Nomina registrada', 'Cargas patronales e ISN', 'Personal con cargas sin provisiones', '% ventas totales'])
         for group in global_row['departamentos']:
             writer.writerow([group[k] for k in ('destino_label', 'personas', 'percepciones',
-                                               'despensa', 'total', 'porcentaje')])
+                                               'despensa', 'total', 'cargas', 'costo_personal', 'costo_porcentaje')])
         writer.writerow(['Total nomina y vales', global_row['personas'], '', '',
-                         global_row['nomina'], global_row['nomina_porcentaje']])
+                         global_row['nomina'], global_row['cargas_total'],
+                         global_row['costo_departamentos'], global_row['costo_departamentos_porcentaje']])
         writer.writerow([])
         writer.writerow(['Gastos operativos por area', 'Importe mensual', '% ventas totales', 'Registros parciales'])
         for area in global_row['gastos_areas']:
             writer.writerow([area[k] for k in ('nombre', 'total', 'porcentaje', 'parciales')])
         writer.writerow([])
+        if global_row['referencias_consumo']:
+            writer.writerow(['Referencia mensual estimada, no sumable al gasto', 'Gasto ERP', 'Centro',
+                             'Servicio', 'Desde', 'Hasta', 'Dias entre lecturas', 'Dias del mes',
+                             'Importe facturado', 'Referencia mensual estimada', 'CFDI'])
+            for reference in global_row['referencias_consumo']:
+                writer.writerow(['Estimacion de referencia'] + [reference[k] for k in ('gasto_id',
+                    'centro', 'concepto', 'desde', 'hasta', 'dias', 'dias_mes', 'importe_facturado',
+                    'referencia_mensual', 'cfdi')])
+            writer.writerow([])
         writer.writerow(['Resumen final', 'Importe del mes', '% ventas totales'])
         writer.writerow(['Ventas totales con impuestos', global_row['ventas']])
         for component in global_row['componentes']:
             writer.writerow([component[k] for k in ('nombre', 'monto', 'porcentaje')])
+        if global_row['prestaciones_al_pago']:
+            writer.writerow(['Criterio de prestaciones', 'Reconocimiento al pago, confirmado por DG'])
+            writer.writerow(['Prestaciones pagadas ya incluidas en percepciones, no volver a sumar',
+                             global_row['prestaciones_pagadas']])
+            writer.writerow(['Apartados bancarios', 'Ahorro interno; no son gasto adicional'])
         writer.writerow(['Subtotal personal con cargas identificadas', global_row['personal_subtotal'],
                          global_row['personal_porcentaje']])
         writer.writerow(['Subtotal personal y gastos identificados', global_row['subtotal'], global_row['porcentaje']])
-        writer.writerow(['Costo integral cerrado', 'Pendiente de conciliacion'])
+        writer.writerow(['Costo integral cerrado', global_row['costo_integral']
+                         if global_row['costo_integral'] is not None else 'Pendiente de conciliacion'])
         writer.writerow(['Alcance', 'No incluye materia prima, empaque de fabricacion ni inversiones. '
                          'No sumar subtotales entre si ni CFDI a listas. Vacio significa pendiente, no cero.'])
         writer.writerow(['Diferencia CFDI menos lista, no sumable', data['selected']['payroll_difference']])

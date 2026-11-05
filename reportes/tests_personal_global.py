@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal as D
 from unittest.mock import patch
 
@@ -10,7 +10,7 @@ from django.core.files.storage import default_storage
 from django.test.utils import CaptureQueriesContext
 
 from core.models import Sucursal
-from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
 from .models import AreaPresupuesto, CategoriaGasto, CentroCosto, GastoOperativoMensual, ObligacionGasto, RubroPresupuesto
 from .services_personal_global import resumen_personal_global
 from .services_personal_registrado import leer_personal_registrado
@@ -46,6 +46,18 @@ class PersonalGlobalTests(TestCase):
         default_storage.save('test/renta.pdf', ContentFile(b'Comprobante de prueba'))
         self.addCleanup(default_storage.delete, 'test/renta.pdf')
 
+    def test_referencia_mensual_separa_estimacion_del_total_comprobado(self):
+        gasto = GastoOperativoMensual.objects.first()
+        gasto.monto = D('12060.20')
+        gasto.servicio_desde, gasto.servicio_hasta = date(2026, 8, 17), date(2026, 10, 19)
+        gasto.save(update_fields=['monto','servicio_desde','servicio_hasta'])
+        ObligacionGasto.objects.filter(gasto_operativo=gasto).update(monto_reconocido=gasto.monto)
+        resultado = resumen_personal_global(self.selected())
+        self.assertEqual(resultado['gastos_total'], D('12060.20'))
+        self.assertEqual(resultado['subtotal'], D('12522.20'))
+        self.assertEqual(len(resultado['referencias_consumo']), 1)
+        self.assertEqual(resultado['referencias_consumo'][0]['referencia_mensual'], D('5934.38'))
+
     def test_nombre_de_archivo_inexistente_no_acredita_importe(self):
         default_storage.delete('test/renta.pdf')
         result = resumen_personal_global(self.selected())
@@ -53,11 +65,153 @@ class PersonalGlobalTests(TestCase):
         self.assertEqual(result['gastos_parciales'], 1)
         self.assertEqual(result['subtotal'], D(462))
 
+    def test_honorarios_corporativos_aparecen_una_vez_en_administracion(self):
+        from .models import ReglaFuenteRubro
+        area = AreaPresupuesto.objects.create(codigo='administracion', nombre='Administración')
+        category = CategoriaGasto.objects.create(codigo='ADMIN_CORP', nombre='Administración corporativa',
+            capa_objetivo='EMPRESA', bucket='CORPORATIVO')
+        center = CentroCosto.objects.create(codigo='GLOBAL-CORP', nombre='Corporativo', tipo='CORPORATIVO')
+        rubro = RubroPresupuesto.objects.create(area=area, concepto='Honorarios personas fisicas', tipo='EGRESO')
+        ReglaFuenteRubro.objects.create(rubro=rubro, tipo_fuente='OBLIGACION_GASTO',
+            filtros={'desde': '2026-10'})
+        expense = GastoOperativoMensual.objects.create(periodo=self.month, centro_costo=center,
+            categoria_gasto=category, monto=D('122999.97'), archivo_soporte='test/renta.pdf')
+        ObligacionGasto.objects.create(origen='VARIABLE', area=area, rubro=rubro, centro_costo=center,
+            categoria_gasto=category, concepto='Honorarios octubre', periodo=self.month,
+            fecha_gasto=self.month, fecha_vencimiento=self.month, monto_reconocido=expense.monto,
+            gasto_operativo=expense)
+        result = resumen_personal_global(self.selected())
+        admin = next(row for row in result['gastos_areas'] if row['codigo'] == 'administracion')
+        self.assertEqual(admin['total'], D('122999.97'))
+        self.assertEqual(admin['registros'], 1)
+        self.assertEqual(result['gastos_total'], D('123099.97'))
+        self.assertEqual(result['nomina'], D(440))
+
     def selected(self):
         return dict(month=self.month, sales=D(1000),
             registered=leer_personal_registrado(self.month, date(2026, 11, 1))[self.month],
             imss=D(20), rcv=None, isn=D(0), fees=D(2), ordinary=D(999), extraordinary=D(50),
             payroll_difference=D(609))
+
+    def cargas_mensuales(self):
+        for employee in Empleado.objects.all():
+            line = employee.lineas_nomina.order_by('-periodo__fecha_fin').first()
+            for column, amount in {'AU':2, 'AW':3, 'AZ':4, 'BC':1,
+                                   'AV':5, 'AX':2, 'BB':3, 'AY':999, 'BD':0}.items():
+                NominaConceptoLinea.objects.create(linea=line, tipo='OBLIGACION',
+                    codigo_concepto=f'M202610:{column}', nombre=column, importe=amount)
+
+    def criterio_al_pago(self):
+        NominaImportacion.objects.create(archivo_nombre='cierre-test.xlsx', archivo_hash='a'*64,
+            periodo=NominaPeriodo.objects.get(fecha_fin=date(2026,10,31)), estatus='IMPORTADA',
+            resumen={'criterio_prestaciones': {'mes':'2026-10', 'metodo':'AL_PAGO',
+                'provision_contable_mes':'0.00', 'fuente':'CONFIRMACION_DG'}})
+
+    def test_prestaciones_pagadas_no_se_suman_otra_vez_ni_se_inventa_provision(self):
+        self.criterio_al_pago()
+        line = NominaLinea.objects.order_by('pk').first()
+        line.bonos = D(5)
+        line.save()
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION',
+            codigo_concepto='19', nombre='Vacaciones a tiempo', importe=5)
+        result = resumen_personal_global(self.selected())
+        self.assertTrue(result['prestaciones_al_pago'])
+        self.assertEqual(result['prestaciones_pagadas'], D(5))
+        self.assertEqual(result['nomina'], D(445))
+        self.assertEqual(result['personal_subtotal'], D(467))
+        self.assertEqual(next(c['monto'] for c in result['componentes'] if c['clave']=='provisiones'), D(0))
+        self.assertFalse(result['personal_cerrado'])
+
+    def test_cargas_mensuales_e_isn_devengado_concilian_departamentos_sin_duplicar(self):
+        self.cargas_mensuales()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        selected = self.selected()
+        selected.update(imss=None, rcv=None, isn=None)
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases):
+            result = resumen_personal_global(selected)
+        components = {c['clave']:c['monto'] for c in result['componentes']}
+        self.assertEqual(components['imss'], D(30))
+        self.assertEqual(components['rcv'], D(30))
+        self.assertEqual(components['isn'], D('7.20'))
+        self.assertEqual(result['costo_departamentos'], D('507.20'))
+        self.assertEqual(result['personal_subtotal'], D('509.20'))
+        self.assertEqual(result['cargas_total'], D('67.20'))
+        self.assertEqual(result['costo_departamentos_porcentaje'], D('50.72'))
+        self.assertEqual(result['cargas_error'], '')
+        self.assertEqual(sum(g['costo_personal'] for g in result['departamentos']), D('507.20'))
+        self.assertEqual(result['nomina'], D(440))
+        self.assertTrue(result['isn_calculado'])
+
+    def test_cargas_mensuales_incompletas_no_se_presentan_como_costo_completo(self):
+        self.cargas_mensuales()
+        NominaConceptoLinea.objects.filter(codigo_concepto='M202610:BD').first().delete()
+        selected = self.selected()
+        selected.update(imss=None, rcv=None, isn=None)
+        self.assertFalse(selected['registered']['cargas_cubiertas'])
+        result = resumen_personal_global(selected)
+        self.assertIsNone(result['costo_departamentos'])
+        self.assertTrue(all(g['costo_personal'] is None for g in result['departamentos']))
+
+    def test_control_patronal_distinto_no_se_reparte_como_si_conciliara(self):
+        self.cargas_mensuales()
+        selected = self.selected()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases):
+            result = resumen_personal_global(selected)
+        self.assertIsNone(result['costo_departamentos'])
+        self.assertIn('no concilian', result['cargas_error'])
+        self.assertEqual(next(c['monto'] for c in result['componentes'] if c['clave']=='imss'), D(20))
+
+    def test_cargas_no_completan_un_mes_al_que_le_falta_una_quincena(self):
+        self.cargas_mensuales()
+        NominaPeriodo.objects.get(fecha_fin=date(2026,10,15)).delete()
+        selected = self.selected()
+        self.assertFalse(selected['registered']['mes_cubierto'])
+        self.assertFalse(selected['registered']['cargas_cubiertas'])
+        self.assertIsNone(resumen_personal_global(selected)['costo_departamentos'])
+
+    def test_periodo_y_resumen_final_comparten_las_mismas_cargas(self):
+        from sat_client.models import CfdiDescargado
+        from .services_planeacion_personal import build_personnel_plan, RFC
+        from .tests_planeacion_personal import payroll_xml
+        self.cargas_mensuales()
+        self.criterio_al_pago()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        CfdiDescargado.objects.create(uuid='GLOBAL-NOMINA', rfc_emisor=RFC,
+            rfc_receptor='PERSONA', subtotal=440, total=440, tipo_cfdi='emitido',
+            tipo_comprobante='N', fecha_emision=datetime(2026,10,31,tzinfo=timezone.utc),
+            xml_raw=payroll_xml('2026-10-31','O','440'))
+        CfdiDescargado.objects.create(uuid='GLOBAL-COMISION', rfc_emisor='EDENRED',
+            nombre_emisor='EDENRED', rfc_receptor=RFC, subtotal=2, total=2,
+            tipo_cfdi='recibido', tipo_comprobante='I',
+            fecha_emision=datetime(2026,10,31,tzinfo=timezone.utc),
+            xml_raw='<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4" Fecha="2026-10-31">'
+                    '<c:Conceptos><c:Concepto Descripcion="COMISION"/></c:Conceptos></c:Comprobante>')
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases),\
+             patch('reportes.services_planeacion_personal.timezone.localdate', return_value=date(2026,11,5)):
+            data = build_personnel_plan(date(2026,10,31))
+            selected = data['selected']
+        self.assertEqual(selected['imss'], D(30))
+        self.assertEqual(selected['rcv'], D(30))
+        self.assertEqual(selected['isn'], D('7.20'))
+        self.assertEqual(selected['payroll_difference'], D(0))
+        self.assertEqual(selected['documented'], D('509.20'))
+        self.assertEqual(selected['global']['personal_subtotal'], selected['documented'])
+        self.assertTrue(selected['global']['isn_calculado'])
+        self.assertTrue(selected['global']['personal_cerrado'])
+        self.assertEqual(selected['global']['costo_integral'], D('609.20'))
+        branches = selected['registered']['sucursales_ventas']
+        self.assertEqual([b['costo_personal'] for b in branches], [D('110'), D('132.40')])
+        self.assertEqual(sum(g['costo_personal'] for g in selected['registered']['grupos']), D('507.20'))
+        self.client.force_login(get_user_model().objects.create_superuser('cargas', password='test-only'))
+        with patch('reportes.views_planeacion_personal.build_personnel_plan', return_value=data):
+            url = '/reportes/planeacion-personal/?mes=2026-10'
+            self.assertContains(self.client.get(url), 'Cargas patronales e ISN')
+            exported = self.client.get(url+'&formato=json').json()['selected']['global']
+            self.assertEqual(D(exported['costo_departamentos']), D('507.20'))
+            self.assertContains(self.client.get(url+'&formato=csv'),
+                                'Total nomina y vales,3,,,440.00,67.20,507.20,')
+            self.assertContains(self.client.get(url+'&formato=csv'), 'Costo integral cerrado,609.20')
 
     def test_transfer_counts_once_and_departments_reconcile(self):
         selected = self.selected()

@@ -43,6 +43,63 @@ class ConciliacionDocumentalCombustibleTests(TestCase):
         CargaCombustibleUnidad.objects.filter(pk=obj.pk).update(fecha_registro=datetime(2026,9,12,13,tzinfo=ZoneInfo('America/Mazatlan')))
         return obj
 
+    def test_global_suma_consumo_cruzado_una_vez_sin_sumar_anticipo(self):
+        from .services_personal_global import resumen_personal_global
+        self.factura()
+        self.factura(clave='84111506', descripcion='Anticipo del bien o servicio', importe='4000')
+        carga = self.carga()
+        resultado = resumen_personal_global(dict(month=self.periodo, registered=None,
+            sales=Decimal('10000'), imss=None, rcv=None, isn=None, fees=None))
+        self.assertEqual(resultado['gastos_total'], Decimal('1200'))
+        self.assertEqual(resultado['gastos_areas'][0]['codigo'], 'logistica')
+        self.assertEqual(resultado['fuentes_gastos'][0]['registro_id'], carga.pk)
+        self.assertIn('CFDI ', resultado['fuentes_gastos'][0]['referencia_soporte'])
+        self.assertIsNone(resultado['nomina'])
+
+    def test_reconocimiento_DG_sin_ticket_no_finge_auditoria_documental_y_caduca_si_cambia_importe(self):
+        from .services_personal_global import gastos_combustible_reconocidos
+        carga = self.carga(estado='error')
+        self.assertEqual(gastos_combustible_reconocidos(self.periodo)['filas'], [])
+        carga.auditoria_detalle['reconocimiento_costo'] = dict(carga_id=carga.pk,
+            periodo='2026-09', importe='1200.00', fuente='CONFIRMACION_DG', criterio='SIN_TICKET')
+        carga.save(update_fields=['auditoria_detalle'])
+        resultado = gastos_combustible_reconocidos(self.periodo)
+        self.assertEqual([f['monto_mensual'] for f in resultado['filas']], [Decimal('1200')])
+        self.assertIn('sin ticket', resultado['filas'][0]['referencia_soporte'])
+        carga.refresh_from_db()
+        self.assertEqual(carga.auditoria_estado, 'error')
+        CargaCombustibleUnidad.objects.filter(pk=carga.pk).update(importe_total=Decimal('1300'))
+        resultado = gastos_combustible_reconocidos(self.periodo)
+        self.assertEqual(resultado['filas'], [])
+        self.assertEqual(len(resultado['pendientes']), 1)
+
+    def test_ticket_cotejado_requiere_archivo_hash_y_fecha_del_mes(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        from .services_personal_global import gastos_combustible_reconocidos
+        archivo = default_storage.save('test/manual-combustible.jpg', ContentFile(b'ticket de prueba'))
+        self.addCleanup(default_storage.delete, archivo)
+        carga = self.carga(estacion='ESTACION AUN SIN ALIAS')
+        carga.foto_ticket = archivo
+        carga.ticket_sha256 = 'a' * 64
+        reconocimiento = dict(carga_id=carga.pk, periodo='2026-09', importe='1200.00',
+            fuente='REVISION_DOCUMENTAL', criterio='TICKET_ORIGINAL', sha256='a' * 64,
+            folio='2979907', fecha_ticket='2026-09-12')
+        carga.auditoria_detalle['reconocimiento_costo'] = reconocimiento
+        carga.save(update_fields=['foto_ticket','ticket_sha256','auditoria_detalle'])
+        self.assertEqual(len(gastos_combustible_reconocidos(self.periodo)['filas']), 1)
+        reconocimiento['fecha_ticket'] = '2026-08-31'
+        carga.save(update_fields=['auditoria_detalle'])
+        self.assertFalse(gastos_combustible_reconocidos(self.periodo)['filas'])
+        reconocimiento['fecha_ticket'] = '2026-09-12'
+        carga.ticket_sha256 = 'b' * 64
+        carga.save(update_fields=['auditoria_detalle','ticket_sha256'])
+        self.assertFalse(gastos_combustible_reconocidos(self.periodo)['filas'])
+        carga.ticket_sha256 = 'a' * 64
+        carga.save(update_fields=['ticket_sha256'])
+        default_storage.delete(archivo)
+        self.assertFalse(gastos_combustible_reconocidos(self.periodo)['filas'])
+
     def test_ribbon_premium_no_es_gasolina(self):
         self.factura(clave='44103124',descripcion='Ribbon Resina Premium para impresora',importe='2157.99',rfc_emisor='ETI200904JL7')
         datos=conciliar_combustible(self.periodo)

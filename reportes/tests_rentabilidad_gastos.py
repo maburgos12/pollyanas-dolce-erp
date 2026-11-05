@@ -6,6 +6,7 @@ import importlib.util
 from django.test import SimpleTestCase, TestCase
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from core.models import Sucursal
 from .models import (AreaPresupuesto, CategoriaGasto, CentroCosto, GastoOperativoMensual,
                      GastoRecurrente, GastoRecurrenteVersion, LineaPresupuestoMensual,
@@ -200,6 +201,71 @@ class LectorGastosMensualesTests(TestCase):
         resultado = self.leer()
         self.assertEqual(resultado, {"filas": [], "pendientes": []})
 
+    def test_consolidado_incluye_indirecto_planta_sin_sumar_fabricacion_y_empaque(self):
+        from .services_rentabilidad_gastos import leer_gastos_mensuales
+        centro = CentroCosto.objects.create(codigo="PLANTA", nombre="Planta", tipo="PRODUCCION")
+        indirecto = CategoriaGasto.objects.create(codigo="INDIRECTO_PROD", nombre="Indirecto planta",
+            capa_objetivo="FABRICACION", bucket="INDIRECTO_PROD")
+        rubro = RubroPresupuesto.objects.create(area=self.produccion,
+            concepto="Fumigación y sanitización", tipo="EGRESO")
+        self.regla(rubro=rubro, centro_costo=centro, categoria_gasto=indirecto)
+        gasto = self.gasto(centro_costo=centro, categoria_gasto=indirecto, monto=Decimal("511.56"))
+        self.categoria.capa_objetivo = "FABRICACION"
+        self.categoria.save(update_fields=["capa_objetivo"])
+        self.gasto()
+        empaque = CategoriaGasto.objects.create(codigo="EMPAQUE", nombre="Empaque",
+            capa_objetivo="FABRICACION", bucket="EMPAQUE_PROD")
+        self.gasto(categoria_gasto=empaque)
+        self.assertFalse(self.leer()["filas"])
+        filas = leer_gastos_mensuales(self.mes, incluir_indirectos_produccion=True)["filas"]
+        self.assertEqual([(f["registro_id"], f["monto_mensual"], f["area"], f["sucursal_id"])
+            for f in filas], [(gasto.pk, Decimal("511.56"), "produccion", None)])
+
+    def test_referencia_por_dias_no_modifica_importe_real(self):
+        gasto = self.gasto(monto=Decimal("12060.20"), servicio_desde=date(2026, 8, 17),
+            servicio_hasta=date(2026, 10, 19), periodo=date(2026, 10, 1))
+        fila = self.leer(date(2026, 10, 1))["filas"][0]
+        self.assertEqual(fila["monto_mensual"], Decimal("12060.20"))
+        referencia = fila['referencia_servicio']
+        self.assertEqual(referencia['dias'], 63)
+        self.assertEqual(referencia['dias_mes'], 31)
+        self.assertEqual(referencia['referencia_mensual'], Decimal('5934.38'))
+        gasto.refresh_from_db()
+        self.assertEqual(gasto.monto, Decimal('12060.20'))
+
+    def test_periodo_servicio_exige_dos_fechas_y_duracion_positiva(self):
+        from django.core.exceptions import ValidationError
+        from django.db import IntegrityError, transaction
+        gasto = self.gasto()
+        for desde, hasta in [(self.mes, None), (None, self.mes), (self.mes, self.mes),
+                              (date(2026, 2, 1), self.mes)]:
+            gasto.servicio_desde, gasto.servicio_hasta = desde, hasta
+            with self.assertRaises(ValidationError):
+                gasto.full_clean()
+            with self.assertRaises(IntegrityError), transaction.atomic():
+                gasto.save(update_fields=['servicio_desde', 'servicio_hasta'])
+
+    def test_rutas_alternativas_no_exigen_segundo_recibo_del_mismo_rubro(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save('test/ruta-alternativa.txt', ContentFile(b'soporte'))
+        self.addCleanup(default_storage.delete, archivo)
+        self.gasto(archivo_soporte=archivo)
+        self.regla(centro_costo=self.centro)
+        self.regla(centro_costo=self.compartido, modo_asignacion='DISTRIBUCION',
+            filtros={'desde':'2026-01','porcentaje':100})
+        resultado = self.leer()
+        self.assertEqual(len(resultado['filas']), 1)
+        self.assertEqual(resultado['pendientes'], [])
+        otro = RubroPresupuesto.objects.create(area=self.area, concepto='Otro arrendamiento',
+            tipo='EGRESO', sucursal=self.sucursal)
+        contrato = GastoRecurrente.objects.create(area=self.area, rubro=otro,
+            centro_costo=self.centro, categoria_gasto=self.categoria, concepto='Otro contrato')
+        version = GastoRecurrenteVersion.objects.create(gasto_recurrente=contrato,
+            vigencia_inicio=self.mes, monto=Decimal('300'))
+        self.assertTrue(any(f['origen']=='GASTO_RECURRENTE_VERSION' and f['registro_id']==version.pk
+            for f in self.leer()['pendientes']))
+
     def test_categoria_generica_usa_rubro_exacto_no_keyword(self):
         categoria = CategoriaGasto.objects.create(codigo="SERVICIOS", nombre="Servicios", capa_objetivo="SUCURSAL")
         self.gasto(categoria_gasto=categoria)
@@ -302,6 +368,74 @@ class LectorGastosMensualesTests(TestCase):
         self.assertEqual({f["registro_id"] for f in resultado["pendientes"]
                           if f["origen"] == "GASTO_RECURRENTE_VERSION"}, {versiones[1].pk})
 
+    def test_version_sustituida_no_se_exige_como_otro_gasto_del_mismo_mes(self):
+        recurrente = GastoRecurrente.objects.create(area=self.area, rubro=self.rubro,
+            centro_costo=self.centro, categoria_gasto=self.categoria, concepto="Renta vigente")
+        GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=date(2025, 1, 1), monto=Decimal("90.00"))
+        vigente = GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=self.mes, monto=Decimal("100.00"))
+        self.obligacion(self.gasto(monto=Decimal("100.00")), gasto_recurrente=recurrente,
+            version_recurrente=vigente, monto_reconocido=Decimal("100.00"))
+        resultado = self.leer()
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal("100.00"))
+        self.assertFalse(any(f["origen"] == "GASTO_RECURRENTE_VERSION" for f in resultado["pendientes"]))
+
+    def test_facturas_globales_acreditan_contratos_solo_con_reparto_e_importe_completos(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save("test/factura-global.txt", ContentFile(b"soporte de prueba"))
+        self.addCleanup(default_storage.delete, archivo)
+        otra = Sucursal.objects.create(codigo="LECTOR-GLOBAL", nombre="Otra")
+        otro_centro = CentroCosto.objects.create(codigo="LECTOR-GLOBAL", nombre="Otra",
+            tipo="SUCURSAL_VENTA", sucursal=otra)
+        otro_rubro = RubroPresupuesto.objects.create(area=self.area, concepto="Arrendamiento local",
+            tipo="EGRESO", sucursal=otra)
+        for rubro, centro, monto in [(self.rubro, self.centro, 20), (otro_rubro, otro_centro, 80)]:
+            recurrente = GastoRecurrente.objects.create(area=self.area, rubro=rubro,
+                centro_costo=centro, categoria_gasto=self.categoria, concepto="Contrato mensual")
+            GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+                vigencia_inicio=self.mes, monto=Decimal(monto))
+            self.regla(rubro=rubro, centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
+                filtros={"desde":"2026-01", "porcentaje":monto})
+            self.regla(rubro=rubro, tipo_fuente="OBLIGACION_GASTO", categoria_gasto=None)
+            self.regla(rubro=rubro, centro_costo=centro)
+        for monto in (40, 60):
+            self.gasto(centro_costo=self.compartido, monto=Decimal(monto), archivo_soporte=archivo)
+        resultado = self.leer()
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal(100))
+        self.assertEqual(resultado["pendientes"], [])
+        default_storage.delete(archivo)
+        self.assertEqual(sum(f["origen"] == "GASTO_RECURRENTE_VERSION"
+            for f in self.leer()["pendientes"]), 2)
+
+    def test_factura_indirecta_compartida_acredita_contrato_planta_por_rubro_exacto(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save("test/fumigacion-global.txt", ContentFile(b"soporte"))
+        self.addCleanup(default_storage.delete, archivo)
+        origen = CategoriaGasto.objects.create(codigo="INDIRECTO_SUC", nombre="Indirecto sucursal")
+        destino = CategoriaGasto.objects.create(codigo="INDIRECTO_PROD", nombre="Indirecto planta",
+            bucket="INDIRECTO_PROD", capa_objetivo="FABRICACION", metadata={"familia":"otros"})
+        centro = CentroCosto.objects.create(codigo="PLANTA", nombre="Planta", tipo="PRODUCCION")
+        rubro = RubroPresupuesto.objects.create(area=self.produccion, concepto="Fumigación", tipo="EGRESO")
+        recurrente = GastoRecurrente.objects.create(area=self.produccion, rubro=rubro,
+            centro_costo=centro, categoria_gasto=destino, concepto="Fumigación planta")
+        version = GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=self.mes, monto=Decimal("100"))
+        self.regla(rubro=rubro, categoria_gasto=origen, centro_costo=self.compartido,
+            modo_asignacion="DISTRIBUCION", filtros={"desde":"2026-01", "porcentaje":100})
+        self.regla(rubro=rubro, tipo_fuente="OBLIGACION_GASTO", categoria_gasto=None)
+        self.gasto(centro_costo=self.compartido, categoria_gasto=origen,
+            monto=Decimal("100"), archivo_soporte=archivo)
+        resultado = self.leer()
+        self.assertEqual(resultado["pendientes"], [])
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal("100"))
+        destino.codigo = "SERVICIO_DISTINTO"
+        destino.save(update_fields=["codigo"])
+        self.assertTrue(any(f["registro_id"] == version.pk and f["origen"] == "GASTO_RECURRENTE_VERSION"
+            for f in self.leer()["pendientes"]))
+
     def test_regla_sin_historia_deja_pendiente_especifico_sucursal(self):
         regla = self.regla(centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
                            filtros={"porcentaje": 20})
@@ -317,6 +451,19 @@ class LectorGastosMensualesTests(TestCase):
         resultado = self.leer()
         self.assertFalse(resultado["filas"])
         self.assertTrue(any("historia" in f["detalle"] for f in resultado["pendientes"]))
+
+    def test_cobertura_anual_no_bloquea_mes_con_reparto_ya_registrado(self):
+        self.gasto(centro_costo=self.compartido, monto=Decimal("120.01"),
+                   cobertura_mes_inicio=self.mes, cobertura_mes_fin=date(2026, 12, 1))
+        regla = self.regla(centro_costo=self.compartido, filtros={"porcentaje": 100})
+        ReglaFuenteRubro.objects.filter(pk=regla.pk).update(
+            actualizado_en=timezone.now().replace(year=2026, month=9, day=1))
+        octubre = self.leer(date(2026, 10, 1))
+        diciembre = self.leer(date(2026, 12, 1))
+        self.assertEqual([f["monto_mensual"] for f in octubre["filas"]], [Decimal("10.00")])
+        self.assertEqual([f["monto_mensual"] for f in diciembre["filas"]], [Decimal("10.01")])
+        self.assertEqual(octubre["pendientes"], [])
+        self.assertEqual(self.leer()["filas"], [])
 
     def test_fila_contrato_conserva_version_vigencia_y_base_asignada(self):
         recurrente = GastoRecurrente.objects.create(area=self.area, rubro=self.rubro,
@@ -360,8 +507,12 @@ class LectorGastosMensualesTests(TestCase):
                             and "cobertura" in f["detalle"].lower() for f in resultado["pendientes"]))
 
     def test_rubro_compuesto_no_oculta_regla_sin_su_fuente(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save('test/rubro-compuesto.txt', ContentFile(b'soporte'))
+        self.addCleanup(default_storage.delete, archivo)
         self.regla()
-        self.gasto()
+        self.gasto(archivo_soporte=archivo)
         telefono = CategoriaGasto.objects.create(codigo="TELEFONO_SUC", nombre="Teléfono", capa_objetivo="SUCURSAL")
         regla_faltante = self.regla(categoria_gasto=telefono)
         resultado = self.leer()

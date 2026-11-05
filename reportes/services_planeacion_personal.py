@@ -19,7 +19,7 @@ from .models import ExpedienteCedulaIMSS, ExpedienteISN, FactVentaDiaria
 from .sales_confidence import selected_sales_facts
 from .services_isn import extraer_isn_cfdi
 from .services_personal_registrado import leer_personal_registrado
-from .services_personal_global import resumen_personal_global
+from .services_personal_global import cargas_mensuales_personal, resumen_personal_global
 from .services_cedula_pago import leer_pago_conciliado
 
 ZERO = Decimal('0')
@@ -226,7 +226,10 @@ def build_personnel_plan(cutoff=None):
                     try:
                         month, amount = extraer_isn_cfdi(invoice)
                     except ValueError:
-                        ajeno = descriptions and all(any(word in d for word in (
+                        identifica_nomina = any('NOMINA' in (
+                            c.attrib.get('NoIdentificacion', '') + ' ' + c.attrib.get('Descripcion', '')
+                            ).upper().replace('Ó', 'O') for c in concepts)
+                        ajeno = not identifica_nomina and descriptions and all(any(word in d for word in (
                             'PEAJE', 'PLACA', 'CALCOMANIA', 'PROEDUC', 'CRUZROJA', 'CUOTADIF'))
                             for d in descriptions)
                         if not ajeno:
@@ -338,6 +341,30 @@ def build_personnel_plan(cutoff=None):
     registered = leer_personal_registrado(start, end)
     adjustments = _ajustes_conciliados(registered, fiscal_uuids)
     for row in rows.values():
+        row['registered'] = registered.get(row['month'])
+        row['cargas_nomina'] = cargas_mensuales_personal(row)
+        control = row['cargas_nomina']
+        if control['error']:
+            row['errors'].append(control['error'])
+        if row['registered']:
+            cargas_cubiertas = row['registered']['cargas_cubiertas'] and not control['error']
+            for group in row['registered']['grupos']:
+                group['cargas'] = (group['cargas_sin_isn'] + sum(
+                    (control['reparto'][p] for p in group['personas_cargas']), ZERO)
+                    if cargas_cubiertas else None)
+                group['costo_personal'] = group['total'] + group['cargas'] if cargas_cubiertas else None
+            for branch in row['registered']['sucursales_ventas']:
+                branch['cargas'] = sum((g['cargas'] for g in row['registered']['grupos']
+                    if g['sucursal_id'] == branch['sucursal_id'] and g['destino'] == 'tienda'), ZERO) if cargas_cubiertas else None
+                branch['costo_personal'] = branch['total'] + branch['cargas'] if cargas_cubiertas else None
+        for key in control['usados']:
+            row[key] = control['valores'][key]
+            row['sources'].append(dict(
+                kind=('ISN · devengado calculado en ERP' if key == 'isn'
+                      else key.upper() + ' · cargas mensuales de nómina'),
+                id=max(p['id'] for p in row['registered']['periodos']),
+                reference=f'Conceptos mensuales M{row["month"]:%Y%m}', amount=row[key],
+            ))
         if not row['cfdis']:
             row['ordinary'] = row['extraordinary'] = None
         components = [row[k] for k in ('ordinary', 'extraordinary', 'imss', 'rcv', 'isn', 'fees')]
@@ -356,7 +383,6 @@ def build_personnel_plan(cutoff=None):
                         if row['sales'] and row['documented'] is not None else None)
         row['target'] = money(row['sales'] * Decimal('.25')) if row['sales'] else None
         row['ceiling'] = money(row['sales'] * Decimal('.27')) if row['sales'] else None
-        row['registered'] = registered.get(row['month'])
         row['payroll_difference'] = (row['ordinary'] + row['extraordinary'] - row['registered']['total']
             if row['cfdis'] and row['registered'] else None)
         control = adjustments.get(row['month'], dict(amount=ZERO, count=0, errors=[]))
@@ -412,6 +438,8 @@ def build_personnel_plan(cutoff=None):
             branch['ventas'] = branch_sales.get((month, branch['sucursal_id'])) if branch['sucursal_id'] else None
             branch['porcentaje'] = (money(branch['total'] / branch['ventas'] * 100)
                 if branch['ventas'] and registered_row['mes_cubierto'] else None)
+            branch['costo_porcentaje'] = (money(branch['costo_personal'] / branch['ventas'] * 100)
+                if branch['ventas'] and branch['costo_personal'] is not None else None)
     for branch in branch_rows:
         recent_sales = []
         for month in recent:

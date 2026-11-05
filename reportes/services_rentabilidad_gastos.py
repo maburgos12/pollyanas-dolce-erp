@@ -1,5 +1,6 @@
 """Lectura de gastos mensuales reales; nunca consolida ni modifica sus fuentes."""
 from datetime import date
+from calendar import monthrange
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
 from django.db.models import Q
@@ -16,7 +17,8 @@ FAMILIAS = {"renta", "electricidad", "telefono", "sistemas", "alarmas", "manteni
 FAMILIA_CODIGO = {"RENTA": "renta", "RENTA_SUC": "renta", "LUZ_SUC": "electricidad",
                   "TELEFONO_SUC": "telefono", "SISTEMAS_CORP": "sistemas",
                   "MANTENIMIENTO": "mantenimiento", "AGUA_SUC": "otros",
-                  "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros"}
+                  "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros",
+                  "ADMIN_CORP": "otros", "INDIRECTO_PROD": "otros"}
 FAMILIA_CONCEPTO = {"arrendamiento local": "renta", "energía eléctrica": "electricidad",
                     "teléfono e internet": "telefono", "mantenimiento equipo/maquinaria": "mantenimiento",
                     "licencias y servicios de sistemas": "sistemas",
@@ -99,23 +101,33 @@ def _asignar_cobertura(monto, centro, reglas, inicio, fin, periodo, reparto_docu
                   (inicio.year * 12 + inicio.month - 1 + n) % 12 + 1, 1)
              for n in range((fin.year - inicio.year) * 12 + fin.month - inicio.month + 1)]
     juegos = {}
+    historia_incompleta = False
     for mes in meses:
         vigentes = _reglas_del_mes(reglas, mes)
         if not vigentes:
+            if mes != periodo:
+                historia_incompleta = True
+                continue
             raise ValueError("Falta historia de reparto para un mes de la cobertura.")
+        verificables = True
         for regla in vigentes:
             directo = centro.tipo == "SUCURSAL_VENTA" and centro.sucursal_id == _sucursal(regla)
-            if not directo and not (regla.filtros or {}).get("desde") and regla.actualizado_en.date().replace(day=1) > inicio:
+            if not directo and not (regla.filtros or {}).get("desde") and regla.actualizado_en.date().replace(day=1) > mes:
                 documentado = (reparto_documentado or {}).get(regla.pk)
                 esperado = _repartir(monto, centro, [regla])[0][0][2]
                 if inicio != fin or documentado != esperado:
-                    raise ValueError("Sin historia verificable para aplicar el reparto actual.")
+                    if mes == periodo:
+                        raise ValueError("Sin historia verificable para aplicar el reparto actual.")
+                    verificables = False
+        if not verificables:
+            historia_incompleta = True
+            continue
         juegos[mes] = _repartir(monto, centro, vigentes)
     # Cambiar solo la identidad/version de una regla no cambia sus proporciones.
     def firma(asignaciones):
         return sorted((a[3], a[4] or 0, a[1], a[0].signo) for a in asignaciones)
     actual, incompleto = juegos[periodo]
-    cambio = any(firma(asignaciones) != firma(actual) for asignaciones, _ in juegos.values())
+    cambio = historia_incompleta or any(firma(asignaciones) != firma(actual) for asignaciones, _ in juegos.values())
     if cambio:
         if any(parcial for _, parcial in juegos.values()):
             raise ValueError("La historia de reparto no cubre el 100% de cada mes del recibo.")
@@ -167,7 +179,7 @@ def _importe_mensual(monto, inicio, fin, periodo):
     return monto - base * (meses - 1) if periodo == fin else base
 
 
-def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
+def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_indirectos_produccion=False):
     """Devuelve filas económicas y pendientes; importes originales siempre intactos.
 
     ``filas`` contiene importes sumables COMPLETO/PARCIAL. ``pendientes`` nunca
@@ -203,6 +215,7 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
     versiones = list(GastoRecurrenteVersion.objects.filter(
         gasto_recurrente__activo=True, vigencia_inicio__lte=periodo)
         .filter(Q(vigencia_fin__isnull=True) | Q(vigencia_fin__gte=periodo))
+        .order_by("gasto_recurrente_id", "-vigencia_inicio", "-pk").distinct("gasto_recurrente_id")
         .select_related("gasto_recurrente__area", "gasto_recurrente__rubro",
                         "gasto_recurrente__categoria_gasto", "gasto_recurrente__centro_costo"))
     gastos = list(GastoOperativoMensual.objects.filter(tipo_dato="REAL", es_estimado=False)
@@ -218,12 +231,14 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
                 .exclude(estado="CANCELADO").select_related("categoria_gasto", "centro_costo", "rubro", "area", "version_recurrente")
                 .prefetch_related("pagos")]
     vistas_reglas, vistas_versiones, rubros_con_fuente = set(), set(), set()
+    destinos_cubiertos = set()
     for gasto, obligacion in fuentes:
         fuente = gasto or obligacion
         categoria, centro = fuente.categoria_gasto, fuente.centro_costo
         if (categoria.codigo in PERSONAL_CODIGOS | {"INVERSION", "CAPEX"}
                 or categoria.bucket in {"MANO_OBRA_PROD", "EMPAQUE_PROD"}
-                or categoria.capa_objetivo == "FABRICACION"):
+                or (categoria.capa_objetivo == "FABRICACION" and not (
+                    incluir_indirectos_produccion and categoria.bucket == "INDIRECTO_PROD"))):
             continue
         if categoria.codigo == "OPEX_TOTAL_SUC":
             continue  # Agregado de otras fuentes, nunca una fuente adicional.
@@ -270,7 +285,8 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
                      and v.gasto_recurrente.centro_costo_id == centro.pk
                      and (not rubro or v.gasto_recurrente.rubro_id == rubro.pk)]
         version = obligacion.version_recurrente if obligacion else None
-        version_fuente = version or (contratos[0] if not obligacion and len(contratos) == 1 else None)
+        version_fuente = version or (contratos[0] if not obligacion and len(contratos) == 1
+            and all(r.rubro_id == contratos[0].gasto_recurrente.rubro_id for r in candidatas) else None)
         if version_fuente:
             fila.update(version_recurrente_id=version_fuente.pk, vigencia_inicio=version_fuente.vigencia_inicio,
                         vigencia_fin=version_fuente.vigencia_fin)
@@ -330,6 +346,17 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
                 salida.update(estado="PARCIAL", detalle="El gasto y la obligación difieren; se conserva el gasto y el importe original de la obligación como evidencia.")
             if reparto_incompleto:
                 salida.update(estado="PARCIAL", detalle="El reparto registrado no cubre el 100% del origen.")
+            if gasto and gasto.servicio_desde and gasto.servicio_hasta:
+                dias = (gasto.servicio_hasta - gasto.servicio_desde).days
+                if dias > 0:
+                    dias_mes = monthrange(periodo.year, periodo.month)[1]
+                    salida['referencia_servicio'] = dict(gasto_id=gasto.pk,
+                        centro=centro.nombre, concepto=fila['concepto'], cfdi=referencia_cfdi,
+                        desde=gasto.servicio_desde, hasta=gasto.servicio_hasta,
+                        dias=dias, dias_mes=dias_mes, importe_facturado=monto,
+                        referencia_mensual=(monto * dias_mes / dias).quantize(CENTAVO, rounding=ROUND_HALF_UP))
+            if regla and salida['estado'] == 'COMPLETO':
+                destinos_cubiertos.add((regla.rubro_id, categoria.pk, area, salida['sucursal_id']))
             resultado["filas"].append(salida)
             if regla:
                 vistas_reglas.add(regla.pk)
@@ -387,10 +414,36 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
             resultado["filas"].append(fila)
             rubros_con_fuente.add(rubro.pk)
 
+    # Una factura global repartida puede acreditar varios contratos, sin copiar el CFDI.
+    for version in versiones:
+        recurrente = version.gasto_recurrente
+        equivalentes = [v for v in versiones if v.gasto_recurrente.rubro_id == recurrente.rubro_id]
+        if version.pk in vistas_versiones or version.periodicidad_meses != 1 or len(equivalentes) != 1:
+            continue
+        reglas_reparto = {r.pk for r in reglas if r.tipo_fuente == "GASTO_OPERATIVO"
+            and r.modo_asignacion == "DISTRIBUCION" and r.rubro_id == recurrente.rubro_id
+            and (r.categoria_gasto_id == recurrente.categoria_gasto_id or (
+                r.categoria_gasto and r.categoria_gasto.codigo in {"INDIRECTO_PROD", "INDIRECTO_SUC"}
+                and recurrente.categoria_gasto.codigo in {"INDIRECTO_PROD", "INDIRECTO_SUC"}))}
+        partes = [f for f in resultado["filas"] if f["regla_id"] in reglas_reparto
+            and f["estado"] == "COMPLETO" and not f["soporte"].get("obligacion_id")
+            and f["sucursal_id"] == recurrente.centro_costo.sucursal_id]
+        if partes and sum((f["monto_mensual"] for f in partes), Decimal(0)) == version.monto:
+            vistas_versiones.add(version.pk)
+            vistas_reglas.update(r.pk for r in reglas if r.rubro_id == recurrente.rubro_id
+                and _vigente(r, periodo) and (r.tipo_fuente == "OBLIGACION_GASTO" or (
+                    r.tipo_fuente == "GASTO_OPERATIVO" and r.modo_asignacion == "CANONICA"
+                    and r.categoria_gasto_id == recurrente.categoria_gasto_id
+                    and r.centro_costo_id in (None, recurrente.centro_costo_id)
+                    and _sucursal(r) == recurrente.centro_costo.sucursal_id)))
+
     for regla in reglas:
         familia = _familia(regla.categoria_gasto, regla.rubro)
         if (not _vigente(regla, periodo) or not familia or regla.pk in vistas_reglas
-                or (regla.tipo_fuente == "MANUAL" and regla.rubro_id in rubros_con_fuente)):
+                or (regla.tipo_fuente == "MANUAL" and regla.rubro_id in rubros_con_fuente)
+                or (regla.tipo_fuente == "GASTO_OPERATIVO" and (
+                    regla.rubro_id, regla.categoria_gasto_id, regla.rubro.area.codigo,
+                    None if regla.rubro.area.codigo == 'produccion' else _sucursal(regla)) in destinos_cubiertos)):
             continue
         fila = _fila("REGLA_FUENTE", regla.pk, sucursal_id=_sucursal(regla), area=regla.rubro.area.codigo,
                      familia=familia, concepto=regla.rubro.concepto, inicio=periodo, fin=periodo, regla=regla)
