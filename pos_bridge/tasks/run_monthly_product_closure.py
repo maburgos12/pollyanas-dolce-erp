@@ -11,7 +11,8 @@ from django.utils import timezone
 from core.branch_catalog import canonical_point_network_branch_qs
 from inventario.conteos_nocturna import conciliar_conteos_nocturnos
 from inventario.models_conteos import ConteoSucursal
-from pos_bridge.models import PointSyncJob
+from pos_bridge.management.commands import capture_point_historical_closing as historical_closing
+from pos_bridge.models import PointHistoricalInventoryClosing, PointSyncJob
 from pos_bridge.utils.source_retry import source_error_metadata
 from pos_bridge.services.conversion_sync_service import sync_conversion_lines
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
@@ -91,12 +92,53 @@ def _is_transient_source_error(exc: Exception) -> bool:
     return bool(source_error_metadata(exc)["retryable"])
 
 
-def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=None) -> list[dict[str, object]]:
-    """Refresh the four range-capable Point authorities for one exact month.
+def _capture_historical_closing(*, operational_date: date) -> dict[str, object]:
+    existing = (
+        PointHistoricalInventoryClosing.objects.filter(
+            operational_date=operational_date,
+            status=PointHistoricalInventoryClosing.STATUS_VERIFIED,
+        )
+        .order_by("-id")
+        .first()
+    )
+    if existing is not None:
+        return {
+            "status": PointSyncJob.STATUS_SUCCESS,
+            "closing_id": existing.id,
+            "resolved": existing.lines.count(),
+            "unresolved": 0,
+            "reused": True,
+        }
 
-    Point inventory has no historical range endpoint: opening and closing are
-    therefore verified from the persisted Point snapshots by the canonical
-    balance build instead of relabelling a current capture as a past one.
+    result = historical_closing.HistoricalPointInventoryClosingCapture(
+        client=historical_closing.PointHttpSessionClient(
+            historical_closing.load_point_bridge_settings()
+        )
+    ).capture(
+        operational_date=operational_date,
+        branches=historical_closing.select_default_branches(operational_date),
+        products=historical_closing.select_default_products(),
+    )
+    verified = (
+        result.closing.status == PointHistoricalInventoryClosing.STATUS_VERIFIED
+        and result.unresolved_count == 0
+    )
+    return {
+        "status": PointSyncJob.STATUS_SUCCESS if verified else PointSyncJob.STATUS_PARTIAL,
+        "closing_id": result.closing.id,
+        "resolved": result.resolved_count,
+        "unresolved": result.unresolved_count,
+        "reused": False,
+        "issues": [] if verified else [f"Cierre histórico con {result.unresolved_count} pendientes."],
+    }
+
+
+def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=None) -> list[dict[str, object]]:
+    """Refresh the range-capable Point authorities and the exact final stock.
+
+    Point inventory has no historical range report, so the final balance is
+    reconstructed from Point's official stock history instead of relabelling a
+    current snapshot as a past closing.
     """
     steps: list[dict[str, object]] = []
     movement_service = PointMovementSyncService()
@@ -138,6 +180,10 @@ def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=N
                 date_to=month_end,
                 branch_filter=None,
             ),
+        ),
+        (
+            "historical_closing",
+            lambda: _capture_historical_closing(operational_date=month_end),
         ),
     )
     # One Point account invalidates its prior session on a new login. Keep the
