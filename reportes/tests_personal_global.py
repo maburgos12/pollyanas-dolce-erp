@@ -81,6 +81,54 @@ class PersonalGlobalTests(TestCase):
             imss=D(20), rcv=None, isn=D(0), fees=D(2), ordinary=D(999), extraordinary=D(50),
             payroll_difference=D(609))
 
+    def cargas_mensuales(self):
+        for employee in Empleado.objects.all():
+            line = employee.lineas_nomina.order_by('-periodo__fecha_fin').first()
+            for column, amount in {'AU':2, 'AW':3, 'AZ':4, 'BC':1,
+                                   'AV':5, 'AX':2, 'BB':3, 'AY':999, 'BD':0}.items():
+                NominaConceptoLinea.objects.create(linea=line, tipo='OBLIGACION',
+                    codigo_concepto=f'M202610:{column}', nombre=column, importe=amount)
+
+    def test_cargas_mensuales_e_isn_devengado_concilian_departamentos_sin_duplicar(self):
+        self.cargas_mensuales()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        selected = self.selected()
+        selected.update(imss=None, rcv=None, isn=None)
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases):
+            result = resumen_personal_global(selected)
+        components = {c['clave']:c['monto'] for c in result['componentes']}
+        self.assertEqual(components['imss'], D(30))
+        self.assertEqual(components['rcv'], D(30))
+        self.assertEqual(components['isn'], D('7.20'))
+        self.assertEqual(result['costo_departamentos'], D('507.20'))
+        self.assertEqual(result['personal_subtotal'], D('509.20'))
+        self.assertEqual(result['cargas_total'], D('67.20'))
+        self.assertEqual(result['costo_departamentos_porcentaje'], D('50.72'))
+        self.assertEqual(result['cargas_error'], '')
+        self.assertEqual(sum(g['costo_personal'] for g in result['departamentos']), D('507.20'))
+        self.assertEqual(result['nomina'], D(440))
+        self.assertTrue(result['isn_calculado'])
+
+    def test_cargas_mensuales_incompletas_no_se_presentan_como_costo_completo(self):
+        self.cargas_mensuales()
+        NominaConceptoLinea.objects.filter(codigo_concepto='M202610:BD').first().delete()
+        selected = self.selected()
+        selected.update(imss=None, rcv=None, isn=None)
+        self.assertFalse(selected['registered']['cargas_cubiertas'])
+        result = resumen_personal_global(selected)
+        self.assertIsNone(result['costo_departamentos'])
+        self.assertTrue(all(g['costo_personal'] is None for g in result['departamentos']))
+
+    def test_control_patronal_distinto_no_se_reparte_como_si_conciliara(self):
+        self.cargas_mensuales()
+        selected = self.selected()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases):
+            result = resumen_personal_global(selected)
+        self.assertIsNone(result['costo_departamentos'])
+        self.assertIn('no concilian', result['cargas_error'])
+        self.assertEqual(next(c['monto'] for c in result['componentes'] if c['clave']=='imss'), D(20))
+
     def test_transfer_counts_once_and_departments_reconcile(self):
         selected = self.selected()
         result = resumen_personal_global(selected)

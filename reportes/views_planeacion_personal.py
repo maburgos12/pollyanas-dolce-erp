@@ -67,12 +67,13 @@ def planeacion_personal(request):
         global_row = data['selected']['global']
         writer.writerow([])
         writer.writerow(['Global por departamento', 'Personas', 'Percepciones', 'Vales adicionales',
-                         'Nomina registrada', '% ventas totales'])
+                         'Nomina registrada', 'Cargas patronales e ISN', 'Personal con cargas sin provisiones', '% ventas totales'])
         for group in global_row['departamentos']:
             writer.writerow([group[k] for k in ('destino_label', 'personas', 'percepciones',
-                                               'despensa', 'total', 'porcentaje')])
+                                               'despensa', 'total', 'cargas', 'costo_personal', 'costo_porcentaje')])
         writer.writerow(['Total nomina y vales', global_row['personas'], '', '',
-                         global_row['nomina'], global_row['nomina_porcentaje']])
+                         global_row['nomina'], global_row['cargas_total'],
+                         global_row['costo_departamentos'], global_row['costo_departamentos_porcentaje']])
         writer.writerow([])
         writer.writerow(['Gastos operativos por area', 'Importe mensual', '% ventas totales', 'Registros parciales'])
         for area in global_row['gastos_areas']:

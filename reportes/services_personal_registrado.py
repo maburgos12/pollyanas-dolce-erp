@@ -6,6 +6,8 @@ from decimal import Decimal
 from rrhh.models import NominaLinea
 from .clasificacion_nomina import destino_de
 
+COLUMNAS_CARGAS = frozenset(('AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BB', 'BC', 'BD'))
+
 
 def leer_personal_registrado(start, end):
     rows = {}
@@ -18,7 +20,8 @@ def leer_personal_registrado(start, end):
         period, emp = line.periodo, line.empleado
         month = period.fecha_fin.replace(day=1)
         row = rows.setdefault(month, dict(percepciones=Decimal(0), despensa=Decimal(0),
-            total=Decimal(0), periodos={}, grupos={}, pendientes=[], dias=set()))
+            total=Decimal(0), periodos={}, grupos={}, pendientes=[], dias=set(),
+            componentes_cargas={}, destinos_cargas={}, errores_cargas=[]))
         if period.pk not in row['periodos']:
             row['periodos'][period.pk] = dict(id=period.pk, inicio=period.fecha_inicio,
                 fin=period.fecha_fin, estatus=period.estatus)
@@ -57,7 +60,22 @@ def leer_personal_registrado(start, end):
         key = (line.sucursal_snapshot_id, destination)
         group = row['grupos'].setdefault(key, dict(sucursal_id=line.sucursal_snapshot_id,
             sucursal=line.sucursal_snapshot.nombre if line.sucursal_snapshot else 'Sin sucursal histórica',
-            destino=destination, percepciones=Decimal(0), despensa=Decimal(0), total=Decimal(0), personas=set()))
+            destino=destination, percepciones=Decimal(0), despensa=Decimal(0), total=Decimal(0), personas=set(),
+            cargas_sin_isn=Decimal(0)))
+        prefijo = f'M{month:%Y%m}:'
+        cargas = [c for c in line.conceptos.all() if c.tipo == 'OBLIGACION'
+                  and c.codigo_concepto.startswith(prefijo)]
+        columnas = [c.codigo_concepto[len(prefijo):] for c in cargas]
+        if cargas:
+            if (len(columnas) != len(COLUMNAS_CARGAS) or set(columnas) != COLUMNAS_CARGAS
+                    or emp.pk in row['destinos_cargas']):
+                row['errores_cargas'].append(f'Línea {line.pk}: cargas mensuales incompletas o duplicadas.')
+            else:
+                row['destinos_cargas'][emp.pk] = destination
+                for col, cargo in zip(columnas, cargas):
+                    row['componentes_cargas'][col] = row['componentes_cargas'].get(col, Decimal(0)) + cargo.importe
+                    if col != 'AY':
+                        group['cargas_sin_isn'] += cargo.importe
         group['personas'].add(emp.pk)
         for target in (row, group):
             target['percepciones'] += line.total_percepciones
@@ -76,7 +94,8 @@ def leer_personal_registrado(start, end):
         for group in row['grupos']:
             departamento = departamentos.setdefault(group['destino'], dict(
                 destino=group['destino'], personas=set(), percepciones=Decimal(0),
-                despensa=Decimal(0), total=Decimal(0)))
+                despensa=Decimal(0), total=Decimal(0), cargas_sin_isn=Decimal(0)))
+            departamento['cargas_sin_isn'] += group['cargas_sin_isn']
             departamento['personas'].update(group['personas'])
             personas_mes.update(group['personas'])
             for field in ('percepciones', 'despensa', 'total'):
@@ -103,6 +122,8 @@ def leer_personal_registrado(start, end):
         for departamento in row['departamentos']:
             departamento['personas'] = len(departamento['personas'])
         row['personas'] = len(personas_mes)
+        row['cargas_cubiertas'] = (set(row['destinos_cargas']) == personas_mes
+                                   and not row['errores_cargas'])
         row['sucursales_ventas'] = sorted(sucursales.values(), key=lambda b: b['sucursal'])
         for branch in row['sucursales_ventas']:
             branch['personas'] = len(branch['personas'])
