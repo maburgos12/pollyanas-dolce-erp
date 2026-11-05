@@ -141,7 +141,7 @@
     row.innerHTML = `<div class="avatar"></div><div><div class="employee-name"></div><div class="employee-meta"><span class="badge"></span><span class="employee-location"></span></div><div class="employee-bonus"></div></div><button class="assign-action ${actionClass}" type="button"></button>`;
     row.querySelector(".avatar").textContent = initials(employee.nombre);
     row.querySelector(".employee-name").textContent = employee.nombre;
-    row.querySelector(".badge").textContent = state.mode === "produccion" ? (employee.puesto_operativo || "SIN FUNCIÓN") : (employee.puesto_presentacion || employee.puesto_operativo || "Puesto pendiente");
+    row.querySelector(".badge").textContent = employee.puesto_presentacion || employee.puesto_operativo || "Puesto pendiente";
     row.querySelector(".employee-location").textContent = employee.sucursal ? ` · ${employee.sucursal}` : "";
     const bonus = row.querySelector(".employee-bonus");
     if (state.mode === "produccion") {
