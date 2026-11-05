@@ -220,13 +220,16 @@ def task_inventory_sync(
     capture_costs: bool | None = None,
     triggered_by_id: int | None = None,
 ):
-    return _run_with_optional_user(
+    result = _run_with_optional_user(
         run_inventory_sync,
         triggered_by_id=triggered_by_id,
         branch_filter=branch_filter,
         limit_branches=limit_branches,
         capture_costs=capture_costs,
     )
+    if result["status"] == PointSyncJob.STATUS_FAILED:
+        raise self.retry(exc=RuntimeError(result["error_message"] or "Falló la sincronización de inventario Point."))
+    return result
 
 
 @shared_task(name="pos_bridge.purchase_resale_cost_sync", bind=True, max_retries=1, default_retry_delay=600, acks_late=True)

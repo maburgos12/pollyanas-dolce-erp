@@ -127,6 +127,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "pos_bridge: costos reventa desde compras Point",
                 "pos_bridge: compras Point al kardex",
                 "pos_bridge: inventario cierre diario",
+                "pos_bridge: inventario previo a conteos",
                 "pos_bridge: mermas diario",
                 "pos_bridge: produccion diario",
                 "pos_bridge: transferencias diario",
@@ -164,7 +165,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 46)
+        self.assertEqual(PeriodicTask.objects.count(), 47)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
@@ -220,6 +221,13 @@ class SetupCelerySchedulesCommandTests(TestCase):
         self.assertEqual(inventory_close.crontab.hour, "23")
         self.assertEqual(inventory_close.crontab.minute, "0")
         self.assertEqual(inventory_close.kwargs, '{"capture_costs": false}')
+        before_count = PeriodicTask.objects.get(name="pos_bridge: inventario previo a conteos")
+        self.assertTrue(before_count.enabled)
+        self.assertEqual(before_count.task, "pos_bridge.inventory_sync")
+        self.assertEqual(before_count.crontab.hour, "7,17,19,21")
+        self.assertEqual(before_count.crontab.minute, "0")
+        self.assertEqual(str(before_count.crontab.timezone), "America/Mazatlan")
+        self.assertEqual(json.loads(before_count.kwargs), {"capture_costs": False})
         open_logistics = PeriodicTask.objects.get(
             name="pos_bridge: transferencias abiertas diario"
         )
