@@ -91,6 +91,8 @@ class Insumo(models.Model):
 
     def save(self, *args, **kwargs):
         self.nombre_normalizado = " ".join(unidecode((self.nombre or "")).lower().strip().split())
+        if kwargs.get("update_fields") and "nombre" in kwargs["update_fields"]:
+            kwargs["update_fields"] = set(kwargs["update_fields"]) | {"nombre_normalizado"}
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:

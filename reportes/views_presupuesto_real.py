@@ -1118,6 +1118,7 @@ def cedula_imss_importar(request: HttpRequest) -> HttpResponse:
 @login_required
 def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
     from .views import _reportes_module_tabs
+    from .services_cedula_pago import leer_pago_conciliado
 
     if not _puede_subir_cedulas(request.user):
         raise PermissionDenied("No tienes permisos para consultar expedientes del IMSS.")
@@ -1126,6 +1127,11 @@ def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
         pk=pk,
     )
     documentos = list(expediente.documentos.all())
+    pago_conciliado, error_pago = None, ''
+    try:
+        pago_conciliado = leer_pago_conciliado(expediente)
+    except ValueError as exc:
+        error_pago = str(exc)
     pago_bimestral = None
     if expediente.tipo == ExpedienteCedulaIMSS.TIPO_BIMESTRAL:
         referencia_pago = expediente.metadata or {}
@@ -1145,7 +1151,7 @@ def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
         (
             documento
             for documento in documentos
-            if documento.clase == DocumentoCedulaIMSS.CLASE_SUA_XLS
+            if documento.clase in (DocumentoCedulaIMSS.CLASE_SUA_XLS, DocumentoCedulaIMSS.CLASE_SUA_PDF)
         ),
         None,
     )
@@ -1173,6 +1179,8 @@ def cedula_imss_detalle(request: HttpRequest, pk: int) -> HttpResponse:
             "expediente": expediente,
             "documentos": documentos,
             "pago_bimestral": pago_bimestral,
+            "pago_conciliado": pago_conciliado,
+            "error_pago": error_pago,
             "detalles": detalles,
         },
     )

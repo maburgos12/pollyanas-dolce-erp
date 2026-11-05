@@ -51,6 +51,8 @@ def _reconciliar(expediente_id: int, *, aplicar: bool, usuario) -> ResultadoCruc
     expediente = queryset.get(pk=expediente_id)
     if expediente.estado != ExpedienteCedulaIMSS.ESTADO_APLICADO:
         raise ValueError("Solo se reconcilian expedientes aplicados.")
+    if (expediente.metadata or {}).get("identidad_historica_contpaqi"):
+        raise ValueError("El expediente histórico conserva los cruces de CONTPAQi; no se reclasifica con RRHH actual.")
     suas = list(expediente.documentos.filter(clase=DocumentoCedulaIMSS.CLASE_SUA_XLS))
     if len(suas) != 1:
         raise ValueError("El expediente no tiene un SUA único.")

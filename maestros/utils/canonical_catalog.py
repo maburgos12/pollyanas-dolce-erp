@@ -129,7 +129,7 @@ def duplicate_priority(insumo: Insumo) -> int:
     return score
 
 
-def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
+def _build_canonicalized_active_insumos(limit_safe: int | None) -> list[dict]:
     active_insumos = list(
         Insumo.objects.filter(activo=True)
         .select_related("unidad_base", "proveedor_principal")
@@ -141,14 +141,24 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
         )
         .order_by("nombre")
     )
-    grouped: dict[str, list[Insumo]] = {}
-    insumo_norm_by_id: dict[int, str] = {}
+    grouped: dict[tuple[str, str], list[Insumo]] = {}
+    insumo_norm_by_id: dict[int, tuple[str, str]] = {}
     for insumo in active_insumos:
-        key = insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or "")
+        key = (insumo.nombre_normalizado or normalizar_nombre(insumo.nombre or ""), "")
         grouped.setdefault(key, []).append(insumo)
         insumo_norm_by_id[insumo.id] = key
 
-    latest_cost_by_norm: dict[str, Decimal] = {}
+    # Un nombre compartido no demuestra identidad entre códigos Point distintos.
+    for name, items in list(grouped.items()):
+        codes = {(item.codigo_point or "").strip().upper() for item in items} - {""}
+        if len(codes) > 1:
+            del grouped[name]
+            for item in items:
+                key = (name[0], (item.codigo_point or "").strip().upper())
+                grouped.setdefault(key, []).append(item)
+                insumo_norm_by_id[item.id] = key
+
+    latest_cost_by_norm: dict[tuple[str, str], Decimal] = {}
     if insumo_norm_by_id:
         latest_cost_rows = (
             CostoInsumo.objects.filter(insumo_id__in=list(insumo_norm_by_id.keys()))
@@ -178,7 +188,7 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
         canonical_rows.append(
             {
                 "canonical": canonical,
-                "normalized_name": normalized_name,
+                "normalized_name": normalized_name[0],
                 "items": ordered,
                 "member_ids": canonical.member_ids,
                 "variant_count": len(ordered),
@@ -189,8 +199,8 @@ def _build_canonicalized_active_insumos(limit_safe: int) -> list[dict]:
     return canonical_rows[:limit_safe]
 
 
-def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
-    limit_safe = max(100, min(int(limit or 1500), 5000))
+def canonicalized_active_insumos(limit: int | None = 1500) -> list[dict]:
+    limit_safe = None if limit is None else max(100, min(int(limit or 1500), 5000))
     atomic_cache = _atomic_runtime_cache()
     if connection.in_atomic_block and atomic_cache is None:
         return _build_canonicalized_active_insumos(limit_safe)
@@ -200,7 +210,7 @@ def canonicalized_active_insumos(limit: int = 1500) -> list[dict]:
             atomic_cache[key] = _build_canonicalized_active_insumos(limit_safe)
         return atomic_cache[key]
     return get_or_set_versioned_cache(
-        key_parts=("erp", "catalog", "canonicalized-insumos", f"limit{limit_safe}"),
+        key_parts=("erp", "catalog", "canonicalized-insumos", "point-identity-v2", f"limit{limit_safe}"),
         scopes=("insumos",),
         builder=lambda: _build_canonicalized_active_insumos(limit_safe),
     )
@@ -223,7 +233,7 @@ def canonical_catalog_maps(limit: int = 1500) -> tuple[list[dict], dict[int, dic
 def _build_canonical_membership_maps() -> tuple[dict[int, int], dict[int, tuple[int, ...]]]:
     member_to_canonical_id: dict[int, int] = {}
     canonical_to_member_ids: dict[int, tuple[int, ...]] = {}
-    for row in canonicalized_active_insumos(limit=5000):
+    for row in canonicalized_active_insumos(limit=None):
         canonical_id = row["canonical"].id
         member_ids = tuple(int(member_id) for member_id in row["member_ids"])
         canonical_to_member_ids[canonical_id] = member_ids
