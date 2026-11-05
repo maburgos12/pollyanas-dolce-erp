@@ -152,10 +152,21 @@ def puesto_operativo_values() -> frozenset[str]:
     return frozenset(value for value, _label in puesto_operativo_choices())
 
 
-def puesto_presentacion(empleado, catalogo):
-    """Etiqueta de la ficha sin copiar el catálogo a campos históricos."""
+def puesto_canonico(empleado, catalogo):
+    """Completa la función conocida sin convertir un puesto específico en un área."""
     clave = Empleado._clave_funcion(empleado.puesto_operativo)
-    return empleado.puesto or catalogo.get(clave) or empleado.puesto_operativo or "Puesto pendiente"
+    puesto = (empleado.puesto or "").strip()
+    etiqueta = catalogo.get(clave)
+    equivalentes = {clave, Empleado._clave_funcion(etiqueta)}
+    if clave == "CAJAS":
+        equivalentes.update({"CAJA", "CAJERO", "CAJERA", "CAJEROS", "CAJERAS"})
+    if etiqueta and (not puesto or Empleado._clave_funcion(puesto) in equivalentes):
+        return etiqueta
+    return puesto
+
+
+def puesto_presentacion(empleado, catalogo):
+    return puesto_canonico(empleado, catalogo) or empleado.puesto_operativo or "Puesto pendiente"
 
 
 def etiquetas_puestos():

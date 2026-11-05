@@ -297,6 +297,10 @@ class GastoOperativoMensual(models.Model):
     )
     fuente = models.CharField(max_length=20, choices=FUENTE_CHOICES, default=FUENTE_MANUAL)
     comentario = models.TextField(blank=True, default="")
+    cfdi_soporte = models.ForeignKey(
+        "sat_client.CfdiDescargado", null=True, blank=True,
+        on_delete=models.PROTECT, related_name="gastos_respaldados",
+    )
     archivo_soporte = models.CharField(max_length=300, blank=True, default="")
     es_estimado = models.BooleanField(default=False)
     capturado_por = models.ForeignKey(

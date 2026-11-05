@@ -93,10 +93,10 @@ def planeacion_personal(request):
         writer.writerow(['Pendientes lista', '; '.join((data['selected']['registered'] or {}).get('pendientes', []))])
         writer.writerow([])
         writer.writerow(['Fuentes de gastos / pendientes', 'ID', 'Clave de asignacion', 'Area',
-                         'Concepto', 'Importe mensual', 'Estado', 'Detalle'])
+                         'Concepto', 'Importe mensual', 'Estado', 'Detalle', 'Comprobante vinculado'])
         for expense in global_row['fuentes_gastos'] + global_row['pendientes_gastos']:
             writer.writerow([expense[k] for k in ('origen', 'registro_id', 'clave', 'area', 'concepto',
-                                                  'monto_mensual', 'estado', 'detalle')])
+                                                  'monto_mensual', 'estado', 'detalle', 'referencia_soporte')])
         response = HttpResponse('\ufeff' + output.getvalue(), content_type='text/csv; charset=utf-8')
         response['Content-Disposition'] = 'attachment; filename="planeacion_personal.csv"'
         return response

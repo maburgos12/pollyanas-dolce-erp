@@ -4,7 +4,9 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.db import connection
-from django.test import TestCase
+from django.test import TestCase, override_settings
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.test.utils import CaptureQueriesContext
 
 from core.models import Sucursal
@@ -14,6 +16,7 @@ from .services_personal_global import resumen_personal_global
 from .services_personal_registrado import leer_personal_registrado
 
 
+@override_settings(STORAGES={'default': {'BACKEND': 'django.core.files.storage.InMemoryStorage'}, 'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}})
 class PersonalGlobalTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -38,6 +41,17 @@ class PersonalGlobalTests(TestCase):
         ObligacionGasto.objects.create(origen='VARIABLE', area=area, rubro=rubro, centro_costo=center,
             categoria_gasto=category, concepto='Renta', periodo=cls.month, fecha_gasto=cls.month,
             fecha_vencimiento=cls.month, monto_reconocido=100, gasto_operativo=expense)
+
+    def setUp(self):
+        default_storage.save('test/renta.pdf', ContentFile(b'Comprobante de prueba'))
+        self.addCleanup(default_storage.delete, 'test/renta.pdf')
+
+    def test_nombre_de_archivo_inexistente_no_acredita_importe(self):
+        default_storage.delete('test/renta.pdf')
+        result = resumen_personal_global(self.selected())
+        self.assertIsNone(result['gastos_total'])
+        self.assertEqual(result['gastos_parciales'], 1)
+        self.assertEqual(result['subtotal'], D(462))
 
     def selected(self):
         return dict(month=self.month, sales=D(1000),

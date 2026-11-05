@@ -27,6 +27,57 @@ from .models import (
 CENTAVO = Decimal("0.01")
 
 
+def validar_cfdi_soporte(gasto, cfdi):
+    """Contrasta el comprobante conservado por SAT, sin copiarlo ni inferir un pago."""
+    from xml.etree import ElementTree
+
+    if (cfdi.tipo_cfdi != 'recibido' or cfdi.tipo_comprobante != 'I'
+            or cfdi.estatus.lower() != 'vigente' or cfdi.moneda != 'MXN'
+            or cfdi.total != gasto.monto):
+        raise ValidationError('El CFDI debe ser recibido, vigente, de ingreso, en MXN y por el importe del gasto.')
+    xml = cfdi.xml_raw or ''
+    if not xml or len(xml) > 10_000_000 or '<!DOCTYPE' in xml.upper() or '<!ENTITY' in xml.upper():
+        raise ValidationError('El XML del comprobante no es verificable.')
+    try:
+        root = ElementTree.fromstring(xml)
+        timbre = root.find('.//{http://www.sat.gob.mx/TimbreFiscalDigital}TimbreFiscalDigital')
+        emisor = next((e for e in root if e.tag.endswith('}Emisor')), None)
+        receptor = next((e for e in root if e.tag.endswith('}Receptor')), None)
+        if (timbre is None or timbre.get('UUID', '').upper() != cfdi.uuid.upper()
+                or Decimal(root.get('Total', 'NaN')) != cfdi.total
+                or root.get('Moneda') != 'MXN' or root.get('TipoDeComprobante') != 'I'
+                or emisor is None or emisor.get('Rfc') != cfdi.rfc_emisor
+                or receptor is None or receptor.get('Rfc') != cfdi.rfc_receptor):
+            raise ValueError('El XML no coincide con el registro fiscal.')
+    except (ElementTree.ParseError, ValueError, ArithmeticError) as exc:
+        raise ValidationError('El XML no coincide con UUID, moneda e importe del CFDI.') from exc
+
+
+@transaction.atomic
+def vincular_cfdi_soporte(gasto, cfdi, *, usuario, motivo):
+    from core.models import AuditLog
+
+    gasto = GastoOperativoMensual.objects.select_for_update().get(pk=gasto.pk)
+    if not can_manage_module(usuario, 'reportes'):
+        raise PermissionDenied('Se requiere gestión de reportes para vincular el comprobante.')
+    if not motivo.strip():
+        raise ValidationError('Documenta la coincidencia de concepto, proveedor y periodo antes de vincular.')
+    cfdi = type(cfdi).objects.select_for_update().get(pk=cfdi.pk)
+    validar_cfdi_soporte(gasto, cfdi)
+    if GastoOperativoMensual.objects.filter(cfdi_soporte=cfdi).exclude(pk=gasto.pk).exists():
+        raise ValidationError('Este CFDI ya respalda otro gasto; no duplicar el importe.')
+    if gasto.cfdi_soporte_id == cfdi.pk:
+        return gasto
+    if gasto.cfdi_soporte_id:
+        raise ValidationError('El gasto ya tiene otro CFDI vinculado; requiere conciliación.')
+    gasto.cfdi_soporte = cfdi
+    gasto.save(update_fields=['cfdi_soporte', 'actualizado_en'])
+    AuditLog.objects.create(user=usuario, action='UPDATE', model='reportes.GastoOperativoMensual',
+        object_id=str(gasto.pk), payload={'antes': {'cfdi_soporte_id': None},
+            'despues': {'cfdi_soporte_id': cfdi.pk}, 'uuid': cfdi.uuid, 'motivo': motivo})
+    return gasto
+
+
 def usuario_puede_capturar_area(usuario, area: AreaPresupuesto) -> bool:
     if not getattr(usuario, "is_authenticated", False):
         return False

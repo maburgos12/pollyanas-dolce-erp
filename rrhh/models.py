@@ -285,6 +285,14 @@ class Empleado(models.Model):
         # destino por omisión sin que nadie lo note. Se normaliza aquí para que
         # el dato entre limpio y sirva igual a todos sus consumidores.
         self.puesto_operativo = self._resolver_funcion_operativa(self.puesto_operativo)
+        if update_fields is None or {"puesto", "puesto_operativo"}.intersection(update_fields):
+            from .services_catalogos import etiquetas_puestos, puesto_canonico
+
+            canonico = puesto_canonico(self, etiquetas_puestos())
+            if self.puesto != canonico:
+                self.puesto = canonico
+                if update_fields is not None:
+                    kwargs["update_fields"] = set(kwargs["update_fields"]) | {"puesto"}
         self.nivel_organizacional = normalizar_nombre(self.nivel_organizacional or "").upper()
         if not self.codigo:
             self.codigo = self._generate_codigo()
