@@ -1,6 +1,7 @@
 from argparse import ArgumentTypeError
 from datetime import date
 from decimal import Decimal, InvalidOperation
+import json
 
 from django.core.management.base import BaseCommand, CommandError
 
@@ -68,6 +69,8 @@ class Command(BaseCommand):
             help="Sobrescribe una proporcion exenta; puede repetirse.",
         )
         parser.add_argument("--apply", action="store_true")
+        parser.add_argument("--empresa-2025", action="store_true",
+                            help="Conciliación histórica corporativa sin distribución.")
         parser.add_argument(
             "--aceptar-diferencia-isn",
             action="store_true",
@@ -83,6 +86,22 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        if options["empresa_2025"]:
+            from reportes.services_isn_historico import preparar_isn_empresa_2025, aplicar_isn_empresa_2025
+            if (options["base_declarada"] is not None or options["exencion"]
+                    or options["aceptar_diferencia_isn"] or options["motivo_diferencia_isn"]):
+                raise CommandError("El histórico no admite exenciones ni diferencias aceptadas manualmente.")
+            try:
+                preview = preparar_isn_empresa_2025(parse_period(options["periodo"]), uuid=options["uuid"])
+                self.stdout.write(json.dumps(preview, ensure_ascii=False))
+                if options["apply"]:
+                    expediente = aplicar_isn_empresa_2025(preview)
+                    self.stdout.write(f"{expediente.estado} expediente={expediente.pk}; sin distribución")
+                else:
+                    self.stdout.write("DRY-RUN: sin cambios")
+            except ValueError as exc:
+                raise CommandError(str(exc)) from exc
+            return
         try:
             preview = preparar_expediente_isn(
                 parse_period(options["periodo"]),
