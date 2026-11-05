@@ -10,6 +10,8 @@ from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from reportes.models import FactVentaDiaria
 from rentabilidad.services_resultado import leer_resultado_mensual
 from rentabilidad.views_rentabilidad import _build_productos_panel
+from reportes.models import ProductoReventaCosto
+from reportes.sales_confidence import build_sales_confidence
 
 
 class VentasHistoricasRentabilidadTests(TestCase):
@@ -64,3 +66,60 @@ class VentasHistoricasRentabilidadTests(TestCase):
         self.assertEqual(response.context["totales"]["ventas_netas"], self.fact.venta_neta)
         self.assertContains(response, 'value="2025-09" selected')
         self.assertFalse(response.context["totales"]["margen_disponible"])
+
+    def producto_con_costo(self, external_id="9310", name="PRODUCTO HISTÓRICO", sku="H1", fecha=None):
+        producto = PointProduct.objects.create(external_id=external_id, sku=sku, name=name)
+        ProductoReventaCosto.objects.create(producto_point=producto,
+            fecha_vigencia=fecha or self.periodo, costo_unitario=20,
+            source_hash="hist-" + external_id, metadata={"point_name": name, "point_code": sku})
+        return producto
+
+    def test_sku_y_nombre_unicos_recuperan_compra_historica_en_todos_los_lectores(self):
+        producto = self.producto_con_costo()
+        PointProduct.objects.create(external_id="official:H1", sku="H1", name=producto.name)
+        fila = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(fila["costo_reventa"], 40)
+        self.assertEqual(fila["pendientes"], [])
+        panel = _build_productos_panel(self.periodo, self.periodo, date(2025, 9, 30))
+        self.assertEqual(panel["riesgo_margen"][0]["utilidad"], Decimal("910"))
+        evidencia = build_sales_confidence(start_date=self.periodo, end_date=date(2025, 9, 30))
+        self.assertEqual(evidencia["margin"], Decimal("910"))
+        self.fact.refresh_from_db()
+        self.assertIsNone(self.fact.point_product_id)
+        self.assertEqual(self.fact.costo_estimado, 600)
+        self.assertEqual(self.fact.cantidad, 2)
+        self.assertEqual(self.fact.venta_neta, 950)
+
+    def test_dos_identidades_nativas_no_eligen_el_primer_costo(self):
+        self.producto_con_costo()
+        self.producto_con_costo(external_id="9311")
+        fila = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(fila["costo_reventa"], 0)
+        self.assertTrue(fila["pendientes"])
+        self.assertIsNone(build_sales_confidence(start_date=self.periodo, end_date=date(2025, 9, 30))["margin"])
+
+    def test_nombre_distinto_codigo_distinto_y_espejo_solo_no_acreditan_costo(self):
+        for kwargs in [dict(name="Otro producto"), dict(sku="0H1"), dict(external_id="official:H1")]:
+            with self.subTest(kwargs=kwargs):
+                producto = self.producto_con_costo(**kwargs)
+                fila = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+                self.assertEqual(fila["costo_reventa"], 0)
+                self.assertTrue(fila["pendientes"])
+                producto.delete()
+
+    def test_enlace_no_anticipa_costo_futuro_ni_modifica_2026(self):
+        self.producto_con_costo(fecha=date(2025, 10, 1))
+        fila = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(fila["costo_reventa"], 0)
+        FactVentaDiaria.objects.filter(pk=self.fact.pk).update(fecha=date(2026, 9, 1))
+        fila = leer_resultado_mensual(date(2026, 9, 1))["sucursales"][self.sucursal.pk]
+        self.assertEqual(fila["costo_reventa"], 0)
+        self.assertTrue(fila["pendientes"])
+        self.assertIsNone(build_sales_confidence(start_date=date(2026, 9, 1), end_date=date(2026, 9, 30))["margin"])
+
+    def test_relacion_explicita_existente_se_conserva(self):
+        producto = self.producto_con_costo()
+        self.producto_con_costo(external_id="9311")
+        FactVentaDiaria.objects.filter(pk=self.fact.pk).update(point_product=producto)
+        fila = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(fila["costo_reventa"], 40)

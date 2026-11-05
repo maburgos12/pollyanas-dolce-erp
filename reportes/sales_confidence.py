@@ -19,7 +19,12 @@ Q2 = Decimal("0.01")
 def _cost_evidence(groups, end_date):
     from pos_bridge.models import PointProduct
     from recetas.utils.normalizacion import normalizar_nombre
-    from rentabilidad.services_costos import asignar_costos_filas
+    from rentabilidad.services_costos import asignar_costos_filas, productos_nativos_por_sku
+
+    for group in groups:
+        group["product_id"] = group["point_product_id"]
+        group["product__sku"] = group["producto_clave"]
+    nativos = productos_nativos_por_sku([g for g in groups if g["month"].year == 2025])
 
     ids = {g["point_product_id"] for g in groups if g["point_product_id"]}
     keys = {g["producto_clave"] for g in groups if g["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE and not g["point_product_id"]}
@@ -30,14 +35,18 @@ def _cost_evidence(groups, end_date):
         identities[(product.external_id.removeprefix("official:"), normalizar_nombre(product.name))].add(product.pk)
     for group in groups:
         product_id = group["point_product_id"]
-        if not product_id and group["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE:
+        if not product_id and group["month"].year == 2025 and group["producto_clave"] in nativos:
+            candidates = nativos[group["producto_clave"]].get(normalizar_nombre(group["producto_nombre"]), set())
+            if len(candidates) == 1:
+                product_id = next(iter(candidates))
+        elif not product_id and group["source_kind"] == FactVentaDiaria.SOURCE_AUTHORITATIVE:
             candidates = identities.get((group["producto_clave"], normalizar_nombre(group["producto_nombre"])), set())
             if len(candidates) == 1:
                 product_id = next(iter(candidates))
         group["resale_product_id"] = product_id
         group["product_id"] = product_id
         product = products.get(product_id)
-        group["product__sku"] = product.sku if product else ""
+        group["product__sku"] = product.sku if product else (group["producto_clave"] if group["month"].year == 2025 else "")
         group["product__name"] = group["producto_nombre"]
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
