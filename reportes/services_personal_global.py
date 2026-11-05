@@ -40,7 +40,6 @@ def resumen_personal_global(selected):
     components += [dict(clave=key, nombre=selected.get(key + '_label', label), monto=selected[key]) for key, label in (
         ('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
         ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA'))]
-    components += [dict(clave='provisiones', nombre='Prestaciones devengadas no pagadas · por conciliar', monto=None)]
     labor_total = (sum((c['monto'] for c in components if c['monto'] is not None), ZERO)
                    if registered else None)
     components.append(dict(clave='gastos', nombre='Gastos operativos identificados', monto=expense_total))

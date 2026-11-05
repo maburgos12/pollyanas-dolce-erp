@@ -19,7 +19,7 @@
 </section>
 <section class="card">
   <h2>Nómina registrada · {{ selected.month|date:"m/Y" }}</h2>
-  <p class="reading"><strong>El costo integral aún requiere conciliación.</strong> La lista de raya y los CFDI son fuentes que se comparan, no importes que se suman entre sí. Los límites de planeación no representan saldo disponible para contratar. Además de las cargas patronales, deben verificarse las prestaciones devengadas del mes y los pagos extraordinarios.</p>
+  <p class="reading"><strong>El costo integral aún requiere conciliación.</strong> La lista de raya y los CFDI son fuentes que se comparan, no importes que se suman entre sí. Los límites de planeación no representan saldo disponible para contratar. Se usan las percepciones y prestaciones pagadas registradas. Las reservas para prestaciones futuras se planean por separado.</p>
   {% if selected.registered %}
   <p>Lista de raya con despensa: <strong>${{ selected.registered.total|floatformat:2|intcomma }}</strong> · Diferencia de percepciones CFDI menos lista: <strong>{{ selected.payroll_difference|default_if_none:"Sin CFDI comparable"|intcomma }}</strong>.</p>
   <p>{% if selected.registered.mes_cubierto %}Los periodos registrados cubren el mes.{% else %}<strong>Los periodos registrados no cubren el mes completo.</strong>{% endif %} {% for p in selected.registered.periodos %}Nómina #{{ p.id }}: {{ p.inicio|date:"d/m" }}–{{ p.fin|date:"d/m" }} ({{ p.estatus }}). {% endfor %}</p>
@@ -34,7 +34,7 @@
   {% for g in selected.registered.otros_costos %}<tr><td>{{ g.destino_label }} · {{ g.sucursal }}</td><td>{{ g.personas }}</td><td>{{ g.percepciones|floatformat:2|intcomma }}</td><td>{{ g.despensa|floatformat:2|intcomma }}</td><td>{{ g.total|floatformat:2|intcomma }}</td></tr>{% endfor %}
   </tbody></table></div>
   <p>Otros equipos: <strong>${{ selected.registered.total_otros|floatformat:2|intcomma }}</strong> · Total conciliado con listas: <strong>${{ selected.registered.total|floatformat:2|intcomma }}</strong>.</p>
-  <p class="caption">Matriz como adscripción no significa que todo ese costo pertenezca a la tienda. Limpieza, almacén, cuartos fríos, producción, administración/jefaturas, logística y call center se muestran aparte. Función actual de RRHH y sucursal histórica de nómina; no son una plantilla vigente. Personas únicas por grupo: un traslado puede aparecer en más de uno. Percepciones y despensa se concilian sin duplicarlas. Faltan cargas patronales y provisiones: no usar estos porcentajes como disponibilidad para contratar.</p>
+  <p class="caption">Matriz como adscripción no significa que todo ese costo pertenezca a la tienda. Limpieza, almacén, cuartos fríos, producción, administración/jefaturas, logística y call center se muestran aparte. Función y sucursal conservadas en la nómina histórica; no son una plantilla vigente. Personas únicas por grupo: un traslado puede aparecer en más de uno. Percepciones y despensa se concilian sin duplicarlas. Las cargas constan en el resumen final; no usar estos porcentajes como disponibilidad para contratar.</p>
   {% if selected.registered.pendientes %}<details><summary>Pendientes de la lista de raya ({{ selected.registered.pendientes|length }})</summary><ul>{% for item in selected.registered.pendientes %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
   {% else %}<p>Sin listas de raya cerradas o pagadas para este corte.</p>{% endif %}
 </section>
@@ -72,9 +72,9 @@
 </section>
 <section class="card">
   <h2>Ventas y límites por mes</h2>
-  <div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Ventas con impuestos</th><th>Distribución de ventas</th><th>25%</th><th>27%</th><th>Licencias Point</th></tr></thead><tbody>
+  <div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Ventas con impuestos</th><th>Distribución de ventas</th><th>25%</th><th>27%</th><th>Referencias de sucursal</th></tr></thead><tbody>
   {% for row in months %}<tr><td>{{ row.month|date:"m/Y" }}</td><td>{% if row.sales is not None %}${{ row.sales|floatformat:2|intcomma }}{% else %}Sin registro{% endif %}</td><td>{% if row.sales %}<progress class="sale-bar" value="{{ row.sales|unlocalize }}" max="{{ sales_total|unlocalize }}" aria-label="Participación de la venta mensual"></progress>{% endif %}</td><td>{{ row.target|default_if_none:"—"|intcomma }}</td><td>{{ row.ceiling|default_if_none:"—"|intcomma }}</td><td>{{ row.branches|default:"—" }}</td></tr>{% endfor %}
-  </tbody></table></div><p class="caption">PointDailySale.total_amount: venta después de descuentos, con impuestos. No es una conciliación de depósitos bancarios. Las licencias Point conservan su historial aunque cambie el nombre del local; no son un conteo de locales físicos.</p>
+  </tbody></table></div><p class="caption">Venta después de descuentos, con impuestos: reporte oficial Point e histórico autoritativo 2025 del ERP para los días sin captura oficial. Una sola fuente por sucursal y día. Las referencias conservan su historial aunque cambie el nombre del local; no son un conteo de locales físicos ni una conciliación bancaria.</p>
 </section>
 <section class="card">
   <h2>Costo documentado por periodo</h2>
@@ -84,11 +84,12 @@
   </tbody></table></div>
   <p class="caption">“—” significa que no existe importe identificado para esa familia en el corte; nunca se transforma en cero. La suma documentada no representa costo integral cerrado ni efectivo pagado. RCV/Infonavit conserva la distribución mensual del control SIPARE; no se vuelve a dividir el bimestre. Las distribuciones por área no se suman al control corporativo.</p>
   {% if unparsed %}<p>Comprobantes que requieren lectura del original: {{ unparsed|join:", " }}. Sus importes no se incorporan automáticamente.</p>{% endif %}
+  {% if excluded_fiscal %}<details><summary>Comprobantes ajenos al costo de personal ({{ excluded_fiscal|length }})</summary><ul>{% for item in excluded_fiscal %}<li>CFDI #{{ item.id }}: {{ item.reason }}</li>{% endfor %}</ul></details>{% endif %}
   <details><summary>Ver documentos y registros que componen cada importe</summary><div class="table-responsive"><table><thead><tr><th>Periodo</th><th>Fuente</th><th>ID ERP</th><th>Referencia</th><th>Importe</th></tr></thead><tbody>{% for source in sources %}<tr><td>{{ source.month|date:"m/Y" }}</td><td class="source">{{ source.kind }}</td><td>{{ source.id }}</td><td class="source">{{ source.reference }}</td><td>{{ source.amount|intcomma }}</td></tr>{% endfor %}</tbody></table></div></details>
 </section>
 <section class="card">
-  <h2>Ventas por licencia Point</h2>
-  <div class="table-responsive"><table><thead><tr><th>Licencia · nombre actual</th><th>ID Point / ERP</th><th>Primera venta del periodo</th><th>Última venta del periodo</th><th>Venta acumulada</th><th>Promedio últimos 3 meses</th></tr></thead><tbody>{% for branch in branches %}<tr><td>{{ branch.branch__name }}</td><td>{{ branch.branch_id }} / {{ branch.branch__erp_branch_id|default_if_none:"—" }}</td><td>{{ branch.first|date:"d/m/Y" }}</td><td>{{ branch.last|date:"d/m/Y" }}</td><td>{{ branch.amount|intcomma }}</td><td>{{ branch.recent_average|default_if_none:"—"|intcomma }}</td></tr>{% endfor %}</tbody></table></div>
+  <h2>Ventas por licencia Point o referencia histórica ERP</h2>
+  <div class="table-responsive"><table><thead><tr><th>Licencia o sucursal histórica</th><th>ID Point / ERP</th><th>Primera venta del periodo</th><th>Última venta del periodo</th><th>Venta acumulada</th><th>Promedio últimos 3 meses</th></tr></thead><tbody>{% for branch in branches %}<tr><td>{{ branch.branch__name }}</td><td>{{ branch.branch_id|default_if_none:"—" }} / {{ branch.branch__erp_branch_id|default_if_none:"—" }}</td><td>{{ branch.first|date:"d/m/Y" }}</td><td>{{ branch.last|date:"d/m/Y" }}</td><td>{{ branch.amount|intcomma }}</td><td>{{ branch.recent_average|default_if_none:"—"|intcomma }}</td></tr>{% endfor %}</tbody></table></div>
   <p class="caption">Primera y última venta corresponden a la actividad de la licencia, no a la apertura o cierre del local. Crucero → Bamoa conserva la misma licencia, según la operación confirmada por Dirección: su historial se cuenta una sola vez. El nombre actual Bamoa no reclasifica las ventas anteriores como ventas de ese local. Las licencias nuevas sólo aportan ventas cuando existen registros reales.</p>
 </section>
 <section class="card">
@@ -111,8 +112,9 @@
     <tr><th scope="row">Personal + gastos operativos identificados · subtotal</th><td><strong>{{ selected.global.subtotal|default_if_none:"Pendiente"|intcomma }}</strong></td><td><strong>{{ selected.global.porcentaje|default_if_none:"—" }}</strong></td></tr>
     <tr><th scope="row">Costo integral cerrado</th><td colspan="2">Pendiente de conciliación</td></tr>
   </tfoot></table></div>
-  <p class="caption">Los dos subtotales son niveles del mismo costo: no se suman entre sí. Bonos, horas extra y prestaciones pagadas que ya forman parte de percepciones se cuentan una sola vez. Las provisiones corresponden únicamente a prestaciones devengadas aún no reconocidas, por conciliar.</p>
-  <p class="reading"><strong>Cobertura pendiente:</strong> {{ selected.global.pendientes_gastos|length }} referencias de gastos pendientes y {{ selected.global.gastos_parciales }} registros parciales. Las cargas sin importe aparecen como pendientes, no como cero. Falta conciliar la diferencia entre CFDI y listas: {{ selected.payroll_difference|default_if_none:"sin comparación disponible"|intcomma }}. Esa diferencia y el total fiscal no se agregan automáticamente a este subtotal.</p>
+  <p class="caption">Los dos subtotales son niveles del mismo costo: no se suman entre sí. Bonos, horas extra y prestaciones pagadas que ya forman parte de percepciones se cuentan una sola vez. Las reservas para prestaciones futuras son planeación y no forman parte de este costo real.</p>
+  <p class="reading"><strong>Cobertura pendiente:</strong> {{ selected.global.pendientes_gastos|length }} referencias de gastos pendientes y {{ selected.global.gastos_parciales }} registros parciales. Las cargas sin importe aparecen como pendientes, no como cero. {% if selected.payroll_reconciled %}Los CFDI y las listas de raya concilian{% if selected.payroll_adjustment_count %} considerando {{ selected.payroll_adjustment_count }} ajustes reales documentados por {{ selected.payroll_adjustments|intcomma }}{% endif %}.{% else %}Diferencia fiscal sin conciliar: {{ selected.payroll_unexplained|default_if_none:"sin comparación disponible"|intcomma }}.{% endif %} Esa diferencia y el total fiscal no se agregan automáticamente a este subtotal.</p>
+  {% if selected.errors %}<ul>{% for error in selected.errors %}<li>{{ error }}</li>{% endfor %}</ul>{% endif %}
   {% if selected.registered and not selected.registered.mes_cubierto %}<p><strong>La nómina no cubre el mes completo; el subtotal y su porcentaje son parciales.</strong></p>{% endif %}
   {% if selected.registered.pendientes %}<p><strong>Hay {{ selected.registered.pendientes|length }} observaciones de conciliación en las listas de raya.</strong></p>{% endif %}
   <p class="caption">No es utilidad, costo total de fabricar ni saldo disponible para contratar. Materia prima, empaque de fabricación e inversiones quedan fuera de este resumen de personal y gastos operativos.</p>
