@@ -53,6 +53,8 @@ def cargas_mensuales_personal(selected):
     patronal = {'imss': None, 'rcv': None, 'isn': None}
     cargas_error = ''
     isn_calculado = False
+    if (registered or {}).get('rcv_cubierto'):
+        patronal['rcv'] = registered['rcv_nomina']
     if cargas_cubiertas:
         patronal['imss'] = sum((cargas[c] for c in ('AU', 'AW', 'AZ', 'BC')), ZERO)
         patronal['rcv'] = sum((cargas[c] for c in ('AV', 'AX', 'BB')), ZERO)
