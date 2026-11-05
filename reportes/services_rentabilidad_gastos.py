@@ -1,5 +1,6 @@
 """Lectura de gastos mensuales reales; nunca consolida ni modifica sus fuentes."""
 from datetime import date
+from calendar import monthrange
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
 from django.db.models import Q
@@ -230,6 +231,7 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                 .exclude(estado="CANCELADO").select_related("categoria_gasto", "centro_costo", "rubro", "area", "version_recurrente")
                 .prefetch_related("pagos")]
     vistas_reglas, vistas_versiones, rubros_con_fuente = set(), set(), set()
+    destinos_cubiertos = set()
     for gasto, obligacion in fuentes:
         fuente = gasto or obligacion
         categoria, centro = fuente.categoria_gasto, fuente.centro_costo
@@ -283,7 +285,8 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                      and v.gasto_recurrente.centro_costo_id == centro.pk
                      and (not rubro or v.gasto_recurrente.rubro_id == rubro.pk)]
         version = obligacion.version_recurrente if obligacion else None
-        version_fuente = version or (contratos[0] if not obligacion and len(contratos) == 1 else None)
+        version_fuente = version or (contratos[0] if not obligacion and len(contratos) == 1
+            and all(r.rubro_id == contratos[0].gasto_recurrente.rubro_id for r in candidatas) else None)
         if version_fuente:
             fila.update(version_recurrente_id=version_fuente.pk, vigencia_inicio=version_fuente.vigencia_inicio,
                         vigencia_fin=version_fuente.vigencia_fin)
@@ -343,6 +346,17 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                 salida.update(estado="PARCIAL", detalle="El gasto y la obligación difieren; se conserva el gasto y el importe original de la obligación como evidencia.")
             if reparto_incompleto:
                 salida.update(estado="PARCIAL", detalle="El reparto registrado no cubre el 100% del origen.")
+            if gasto and gasto.servicio_desde and gasto.servicio_hasta:
+                dias = (gasto.servicio_hasta - gasto.servicio_desde).days
+                if dias > 0:
+                    dias_mes = monthrange(periodo.year, periodo.month)[1]
+                    salida['referencia_servicio'] = dict(gasto_id=gasto.pk,
+                        centro=centro.nombre, concepto=fila['concepto'], cfdi=referencia_cfdi,
+                        desde=gasto.servicio_desde, hasta=gasto.servicio_hasta,
+                        dias=dias, dias_mes=dias_mes, importe_facturado=monto,
+                        referencia_mensual=(monto * dias_mes / dias).quantize(CENTAVO, rounding=ROUND_HALF_UP))
+            if regla and salida['estado'] == 'COMPLETO':
+                destinos_cubiertos.add((regla.rubro_id, categoria.pk, area, salida['sucursal_id']))
             resultado["filas"].append(salida)
             if regla:
                 vistas_reglas.add(regla.pk)
@@ -426,7 +440,10 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
     for regla in reglas:
         familia = _familia(regla.categoria_gasto, regla.rubro)
         if (not _vigente(regla, periodo) or not familia or regla.pk in vistas_reglas
-                or (regla.tipo_fuente == "MANUAL" and regla.rubro_id in rubros_con_fuente)):
+                or (regla.tipo_fuente == "MANUAL" and regla.rubro_id in rubros_con_fuente)
+                or (regla.tipo_fuente == "GASTO_OPERATIVO" and (
+                    regla.rubro_id, regla.categoria_gasto_id, regla.rubro.area.codigo,
+                    None if regla.rubro.area.codigo == 'produccion' else _sucursal(regla)) in destinos_cubiertos)):
             continue
         fila = _fila("REGLA_FUENTE", regla.pk, sucursal_id=_sucursal(regla), area=regla.rubro.area.codigo,
                      familia=familia, concepto=regla.rubro.concepto, inicio=periodo, fin=periodo, regla=regla)

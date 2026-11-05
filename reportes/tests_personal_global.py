@@ -46,6 +46,18 @@ class PersonalGlobalTests(TestCase):
         default_storage.save('test/renta.pdf', ContentFile(b'Comprobante de prueba'))
         self.addCleanup(default_storage.delete, 'test/renta.pdf')
 
+    def test_referencia_mensual_separa_estimacion_del_total_comprobado(self):
+        gasto = GastoOperativoMensual.objects.first()
+        gasto.monto = D('12060.20')
+        gasto.servicio_desde, gasto.servicio_hasta = date(2026, 8, 17), date(2026, 10, 19)
+        gasto.save(update_fields=['monto','servicio_desde','servicio_hasta'])
+        ObligacionGasto.objects.filter(gasto_operativo=gasto).update(monto_reconocido=gasto.monto)
+        resultado = resumen_personal_global(self.selected())
+        self.assertEqual(resultado['gastos_total'], D('12060.20'))
+        self.assertEqual(resultado['subtotal'], D('12522.20'))
+        self.assertEqual(len(resultado['referencias_consumo']), 1)
+        self.assertEqual(resultado['referencias_consumo'][0]['referencia_mensual'], D('5934.38'))
+
     def test_nombre_de_archivo_inexistente_no_acredita_importe(self):
         default_storage.delete('test/renta.pdf')
         result = resumen_personal_global(self.selected())

@@ -221,6 +221,51 @@ class LectorGastosMensualesTests(TestCase):
         self.assertEqual([(f["registro_id"], f["monto_mensual"], f["area"], f["sucursal_id"])
             for f in filas], [(gasto.pk, Decimal("511.56"), "produccion", None)])
 
+    def test_referencia_por_dias_no_modifica_importe_real(self):
+        gasto = self.gasto(monto=Decimal("12060.20"), servicio_desde=date(2026, 8, 17),
+            servicio_hasta=date(2026, 10, 19), periodo=date(2026, 10, 1))
+        fila = self.leer(date(2026, 10, 1))["filas"][0]
+        self.assertEqual(fila["monto_mensual"], Decimal("12060.20"))
+        referencia = fila['referencia_servicio']
+        self.assertEqual(referencia['dias'], 63)
+        self.assertEqual(referencia['dias_mes'], 31)
+        self.assertEqual(referencia['referencia_mensual'], Decimal('5934.38'))
+        gasto.refresh_from_db()
+        self.assertEqual(gasto.monto, Decimal('12060.20'))
+
+    def test_periodo_servicio_exige_dos_fechas_y_duracion_positiva(self):
+        from django.core.exceptions import ValidationError
+        from django.db import IntegrityError, transaction
+        gasto = self.gasto()
+        for desde, hasta in [(self.mes, None), (None, self.mes), (self.mes, self.mes),
+                              (date(2026, 2, 1), self.mes)]:
+            gasto.servicio_desde, gasto.servicio_hasta = desde, hasta
+            with self.assertRaises(ValidationError):
+                gasto.full_clean()
+            with self.assertRaises(IntegrityError), transaction.atomic():
+                gasto.save(update_fields=['servicio_desde', 'servicio_hasta'])
+
+    def test_rutas_alternativas_no_exigen_segundo_recibo_del_mismo_rubro(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save('test/ruta-alternativa.txt', ContentFile(b'soporte'))
+        self.addCleanup(default_storage.delete, archivo)
+        self.gasto(archivo_soporte=archivo)
+        self.regla(centro_costo=self.centro)
+        self.regla(centro_costo=self.compartido, modo_asignacion='DISTRIBUCION',
+            filtros={'desde':'2026-01','porcentaje':100})
+        resultado = self.leer()
+        self.assertEqual(len(resultado['filas']), 1)
+        self.assertEqual(resultado['pendientes'], [])
+        otro = RubroPresupuesto.objects.create(area=self.area, concepto='Otro arrendamiento',
+            tipo='EGRESO', sucursal=self.sucursal)
+        contrato = GastoRecurrente.objects.create(area=self.area, rubro=otro,
+            centro_costo=self.centro, categoria_gasto=self.categoria, concepto='Otro contrato')
+        version = GastoRecurrenteVersion.objects.create(gasto_recurrente=contrato,
+            vigencia_inicio=self.mes, monto=Decimal('300'))
+        self.assertTrue(any(f['origen']=='GASTO_RECURRENTE_VERSION' and f['registro_id']==version.pk
+            for f in self.leer()['pendientes']))
+
     def test_categoria_generica_usa_rubro_exacto_no_keyword(self):
         categoria = CategoriaGasto.objects.create(codigo="SERVICIOS", nombre="Servicios", capa_objetivo="SUCURSAL")
         self.gasto(categoria_gasto=categoria)
@@ -462,8 +507,12 @@ class LectorGastosMensualesTests(TestCase):
                             and "cobertura" in f["detalle"].lower() for f in resultado["pendientes"]))
 
     def test_rubro_compuesto_no_oculta_regla_sin_su_fuente(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save('test/rubro-compuesto.txt', ContentFile(b'soporte'))
+        self.addCleanup(default_storage.delete, archivo)
         self.regla()
-        self.gasto()
+        self.gasto(archivo_soporte=archivo)
         telefono = CategoriaGasto.objects.create(codigo="TELEFONO_SUC", nombre="Teléfono", capa_objetivo="SUCURSAL")
         regla_faltante = self.regla(categoria_gasto=telefono)
         resultado = self.leer()

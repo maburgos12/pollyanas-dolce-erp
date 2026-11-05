@@ -82,6 +82,15 @@ def planeacion_personal(request):
         for area in global_row['gastos_areas']:
             writer.writerow([area[k] for k in ('nombre', 'total', 'porcentaje', 'parciales')])
         writer.writerow([])
+        if global_row['referencias_consumo']:
+            writer.writerow(['Referencia mensual estimada, no sumable al gasto', 'Gasto ERP', 'Centro',
+                             'Servicio', 'Desde', 'Hasta', 'Dias entre lecturas', 'Dias del mes',
+                             'Importe facturado', 'Referencia mensual estimada', 'CFDI'])
+            for reference in global_row['referencias_consumo']:
+                writer.writerow(['Estimacion de referencia'] + [reference[k] for k in ('gasto_id',
+                    'centro', 'concepto', 'desde', 'hasta', 'dias', 'dias_mes', 'importe_facturado',
+                    'referencia_mensual', 'cfdi')])
+            writer.writerow([])
         writer.writerow(['Resumen final', 'Importe del mes', '% ventas totales'])
         writer.writerow(['Ventas totales con impuestos', global_row['ventas']])
         for component in global_row['componentes']:

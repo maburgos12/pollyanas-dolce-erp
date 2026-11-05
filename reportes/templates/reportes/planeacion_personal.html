@@ -105,6 +105,15 @@
   <ol><li>Comparar el costo habitual completo con el objetivo; reservar dentro de él prestaciones y cargas, sin duplicar pagos ya reconocidos.</li><li>Evaluar refuerzos por pedidos, turnos y capacidad de producción. Restar del límite el costo integral habitual y los refuerzos ya comprometidos; no convertir toda la diferencia entre 25% y 27% en plazas.</li><li>Comprobar el efectivo disponible después de insumos, operación e impuestos antes de comprometer una contratación.</li><li>Evaluar el trimestre sumando costos y ventas del mismo periodo. No promediar porcentajes mensuales ni eliminar la PTU por ser extraordinaria.</li></ol>
   <p>Este módulo calcula límites y muestra sus fuentes. No autoriza contrataciones ni atribuye a un local ventas anteriores a su apertura.</p>
 </section>
+{% if selected.global.referencias_consumo %}
+<section class="card" aria-labelledby="referencias-consumo">
+  <h2 id="referencias-consumo">Referencia mensual de servicios · estimación para comparar</h2>
+  <p class="caption">El gasto comprobado conserva su importe original. La referencia usa el promedio diario entre las fechas del recibo multiplicado por los días del mes; no es consumo mensual medido ni se suma al gasto o al costo de personal.</p>
+  <div class="table-responsive"><table><thead><tr><th scope="col">Centro</th><th scope="col">Servicio</th><th scope="col">Periodo del recibo</th><th scope="col">Importe facturado</th><th scope="col">Referencia mensual estimada</th><th scope="col">Cálculo</th></tr></thead><tbody>
+  {% for r in selected.global.referencias_consumo %}<tr><th scope="row">{{ r.centro }}</th><td>{{ r.concepto }}</td><td>{{ r.desde|date:"d/m/Y" }}–{{ r.hasta|date:"d/m/Y" }}</td><td>${{ r.importe_facturado|floatformat:2|intcomma }}</td><td>${{ r.referencia_mensual|floatformat:2|intcomma }}</td><td>{{ r.dias }} días entre lecturas · {{ r.dias_mes }} días del mes</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endif %}
 <section class="card" aria-labelledby="resumen-global">
   <h2 id="resumen-global">Resumen final · peso sobre las ventas totales</h2>
   <p class="reading">Corte {{ selected.month|date:"m/Y" }}. Ventas Point con impuestos: <strong>{% if selected.global.ventas is not None %}${{ selected.global.ventas|floatformat:2|intcomma }}{% else %}Sin registro{% endif %}</strong>. Los porcentajes son costo registrado ÷ venta del mes × 100.</p>
