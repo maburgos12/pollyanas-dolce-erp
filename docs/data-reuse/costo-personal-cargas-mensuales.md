@@ -39,3 +39,5 @@ Dirección confirmó que vacaciones, prima y aguinaldo se reconocen al pagarse, 
 El lector distingue esa confirmación de la ausencia de información: solo una confirmación válida permite mostrar cero de provisión adicional. Los conceptos pagados 19/20/21/22/24 ya están en percepciones; su desglose informativo no se suma de nuevo. Cero de provisión contable adicional no significa que no existan derechos laborales acumulados ni que los ahorros bancarios sean un gasto.
 
 Los comprobantes estatales de peaje o calcomanía vehicular se excluyen de la lectura de ISN mediante identificación positiva de sus conceptos; no se presentan como documentos de nómina sin lectura. Los comprobantes de ISN y los casos desconocidos conservan su validación estricta.
+
+El reparto anual verifica la historia del mes consultado. Si otro mes de la cobertura carece de historia, el lector conserva ese mes sin certificar, pero permite el importe mensual del mes que sí tiene reglas acreditadas; conserva el residuo de centavos en el último mes.

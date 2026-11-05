@@ -1,11 +1,12 @@
 """Cargas del costeo gerencial; conserva el periodo fiscal y no modifica expedientes."""
-from collections import defaultdict
-from datetime import date
+from collections import Counter, defaultdict
+from datetime import date, timedelta
 from decimal import Decimal
 
 from .models import ExpedienteCedulaIMSS, ExpedienteISN
 from .services_cedula_imss import DEPARTAMENTO_A_AREA, AREA_RESPALDO
 from .services_rentabilidad_personal import _normalizar_registro_patronal, REGISTRO_PATRONAL_AUTORIZADO
+from .services_cedula_pago import leer_pago_conciliado
 
 ZERO = Decimal('0')
 # Confirmación de Dirección en este análisis; no inferir pagos de otros meses.
@@ -30,6 +31,11 @@ def clasificar_detalle(detalle, produccion, *, es_isn=False):
 
 
 def leer_cargas_pagadas(periodo, personas):
+    conciliadas = list(ExpedienteCedulaIMSS.objects.filter(
+        estado='APLICADO', metadata__pago_conciliado__fecha_pago__startswith=periodo.strftime('%Y-%m-')
+    ).prefetch_related('documentos__detalles__sucursal'))
+    if conciliadas:
+        return _leer_cargas_conciliadas(periodo, conciliadas)
     cobertura = PAGOS_CONFIRMADOS.get(periodo)
     resultado = {'confirmado': cobertura is not None, 'periodo_pago': periodo,
                  'cobertura': cobertura, 'filas': [], 'fuentes': [], 'pendientes': [], 'total': ZERO}
@@ -46,7 +52,7 @@ def leer_cargas_pagadas(periodo, personas):
             resultado['pendientes'].append(f'{tipo}: falta un expediente aplicado único del periodo confirmado.')
             continue
         e = candidatos[0]
-        documentos = [d for d in e.documentos.all() if d.clase == 'SUA_XLS']
+        documentos = [d for d in e.documentos.all() if d.clase in ('SUA_XLS', 'SUA_PDF')]
         if len(documentos) != 1:
             resultado['pendientes'].append(f'{tipo}: falta documento SUA único.')
             continue
@@ -84,4 +90,57 @@ def leer_cargas_pagadas(periodo, personas):
                 'estado': 'COMPLETO' if area != 'sin_asignar' else 'PENDIENTE', 'soporte': soporte,
                 'detalle': 'Periodo fiscal agosto; pago en septiembre confirmado por Dirección. No es conciliación bancaria.'})
         resultado['total'] += total
+    return resultado
+
+
+def _leer_cargas_conciliadas(periodo, expedientes):
+    resultado = {'confirmado': True, 'periodo_pago': periodo, 'cobertura': None,
+                 'filas': [], 'fuentes': [], 'pendientes': [], 'total': ZERO}
+    expedientes = [e for e in expedientes if _normalizar_registro_patronal(e.registro_patronal) == REGISTRO_PATRONAL_AUTORIZADO]
+    familias = Counter((e.tipo, e.periodo) for e in expedientes)
+    coberturas = {e.periodo for e in expedientes}
+    resultado['cobertura'] = next(iter(coberturas)) if len(coberturas) == 1 else None
+    for expediente in expedientes:
+        if familias[(expediente.tipo, expediente.periodo)] != 1:
+            resultado['pendientes'].append(f'Control duplicado: {expediente.tipo} {expediente.periodo}.')
+            continue
+        try:
+            pago = leer_pago_conciliado(expediente)
+            documento = next(d for d in expediente.documentos.all() if d.clase in ('SUA_XLS', 'SUA_PDF'))
+            detalles = list(documento.detalles.all())
+            if (not detalles or any(d.cuota_patronal < 0 for d in detalles)
+                    or sum((d.cuota_patronal for d in detalles), ZERO) != expediente.total_patronal):
+                raise ValueError('El detalle no concilia con el control patronal.')
+        except ValueError as exc:
+            resultado['pendientes'].append(str(exc))
+            continue
+        importes = defaultdict(lambda: ZERO)
+        for detalle in detalles:
+            area = detalle.area_codigo
+            if area not in {'produccion', 'administracion', 'logistica', 'gastos-venta'} or (
+                    area == 'gastos-venta' and detalle.sucursal_id is None):
+                area = 'sin_asignar'
+            importes[(area, detalle.sucursal_id)] += detalle.cuota_patronal
+        # Lo absorbido por la empresa no se reparte con porcentajes supuestos.
+        residual = pago['gasto_empresa'] - expediente.total_patronal
+        if residual:
+            importes[('sin_asignar', None)] += residual
+        concepto = 'IMSS' if expediente.tipo == 'MENSUAL' else 'RCV e Infonavit'
+        resultado['fuentes'].append({'concepto': concepto, 'origen': 'CEDULA_IMSS',
+            'expediente_id': expediente.pk, 'periodo_pago': periodo, 'cobertura': expediente.periodo,
+            'monto': pago['gasto_empresa'], 'soporte': pago['soporte']})
+        for (area, sid), monto in importes.items():
+            resultado['filas'].append({'origen': 'CEDULA_IMSS', 'registro_id': expediente.pk,
+                'clave': f'CEDULA_IMSS:{expediente.pk}:{area}:{sid}', 'area': area, 'sucursal_id': sid,
+                'sucursal_nombre': next((d.sucursal.nombre for d in detalles if sid and d.sucursal_id == sid), 'Sin asignación histórica'),
+                'familia': 'cargas_patronales', 'concepto': concepto, 'monto_original': monto,
+                'monto_mensual': monto, 'cobertura_inicio': (
+                    (expediente.periodo - timedelta(days=1)).replace(day=1)
+                    if expediente.tipo == 'BIMESTRAL' else expediente.periodo),
+                'cobertura_fin': expediente.periodo, 'periodo_pago': periodo, 'regla_id': None,
+                'porcentaje': None, 'estado': 'PENDIENTE' if area == 'sin_asignar' else 'COMPLETO',
+                'soporte': pago['soporte'], 'detalle': 'Pago conciliado; gasto excluye retenciones y cuentas por cobrar. Asignación histórica del documento.'})
+        resultado['total'] += pago['gasto_empresa']
+    resultado['confirmado'] = bool(resultado['fuentes'])
+    resultado['pendientes'].append('ISN: el pago no está incluido en la conciliación bancaria de estas cédulas.')
     return resultado

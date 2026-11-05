@@ -90,6 +90,7 @@ def resumen_personal_global(selected):
                                      ('despensa', 'Vales adicionales, no incluidos en percepciones'))]
     for key, label in (('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
                        ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA')):
+        label = selected.get(key + '_label', label)
         amount = selected[key]
         if amount is None and patronal.get(key) is not None:
             amount = patronal[key]

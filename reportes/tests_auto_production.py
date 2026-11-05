@@ -384,7 +384,7 @@ class ProductionSupplyContextTests(TestCase):
             PointInsumoInventorySnapshot.objects.create(
                 branch=point_cedis,
                 insumo=insumo,
-                point_code=f"SUP-{insumo.id}",
+                point_code=insumo.codigo_point,
                 point_name=insumo.nombre,
                 point_quantity=quantity,
                 point_unit=insumo.unidad_base.codigo,
@@ -430,6 +430,14 @@ class ProductionSupplyContextTests(TestCase):
         recipe_items = {item["insumo_nombre"]: item for item in recipe_row["items"]}
         self.assertEqual(recipe_items["Huevo Supply"]["status_label"], "Disponible")
         self.assertEqual(recipe_items["Harina Supply"]["status_label"], "Stock parcial")
+
+    def test_supply_context_rejects_snapshot_from_another_point_code(self):
+        PointInsumoInventorySnapshot.objects.filter(insumo=self.insumo_harina).update(point_code="OTHER")
+        context = build_production_supply_context(target_date=self.target_date)
+        self.assertFalse(context["inventory_ready"])
+        self.assertEqual(context["rows"], [])
+        self.assertEqual(context["orders"], {})
+        self.assertEqual(context["summary"]["shortage_insumos"], 0)
 
     def test_supply_context_presenta_masa_en_kg_sin_cambiar_calculo_base(self):
         self.unit_kg.codigo = "g"
@@ -553,7 +561,7 @@ class ProductionSupplyViewTests(TestCase):
         PointInsumoInventorySnapshot.objects.create(
             branch=point_cedis,
             insumo=insumo,
-            point_code="SCREEN-INSUMO",
+            point_code=insumo.codigo_point,
             point_name=insumo.nombre,
             point_quantity=Decimal("12"),
             point_unit="pza",

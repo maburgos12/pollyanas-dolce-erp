@@ -13,6 +13,30 @@ from pos_bridge.tasks.celery_tasks import task_canonical_insumo_inventory_sync
 
 
 class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
+    def test_different_articles_with_same_code_and_zero_balance_are_blocked(self):
+        unit = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
+        insumo = Insumo.objects.create(nombre="Etiqueta Día de Muerto", codigo_point="311026", unidad_base=unit)
+        PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+        rows = [SimpleNamespace(**{**vars(self._row("0", "pza")), "point_code": "311026", "point_name": name})
+                for name in ("Etiqueta Día de Muerto", "Stickers Halloween")]
+        result = CanonicalInsumoInventoryCaptureService(
+            capture_service=SimpleNamespace(capture_all_rows=lambda **kwargs: rows),
+        ).capture(sync_job=job, locations=["ALMACEN"])
+        self.assertFalse(PointInsumoInventorySnapshot.objects.filter(insumo=insumo).exists())
+        self.assertEqual(result["blockers"][0]["reason"], "IDENTIDAD_POINT_DUPLICADA")
+
+    def test_name_match_with_different_code_is_not_persisted(self):
+        unit = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
+        Insumo.objects.create(nombre="Fresa Fresca", codigo_point="OTHER", unidad_base=unit)
+        PointBranch.objects.create(external_id="9", name="Almacen")
+        job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
+        result = CanonicalInsumoInventoryCaptureService(
+            capture_service=SimpleNamespace(capture_all_rows=lambda **kwargs: [self._row("0", "pza")]),
+        ).capture(sync_job=job, locations=["ALMACEN"])
+        self.assertFalse(PointInsumoInventorySnapshot.objects.exists())
+        self.assertEqual(result["blockers"][0]["reason"], "CODIGO_POINT_NO_COINCIDE")
+
     @patch("pos_bridge.tasks.celery_tasks.CanonicalInsumoInventoryCaptureService")
     def test_central_task_marks_cycle_success_only_after_complete_capture(self, service_class):
         service_class.return_value.capture.return_value = {

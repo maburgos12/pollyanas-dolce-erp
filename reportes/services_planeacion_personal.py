@@ -19,6 +19,7 @@ from .models import ExpedienteCedulaIMSS, ExpedienteISN
 from .services_isn import extraer_isn_cfdi
 from .services_personal_registrado import leer_personal_registrado
 from .services_personal_global import cargas_mensuales_personal, resumen_personal_global
+from .services_cedula_pago import leer_pago_conciliado
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -225,21 +226,28 @@ def build_personnel_plan(cutoff=None):
     for expediente in expedientes:
         if _normalizar_registro_patronal(expediente.registro_patronal) != REGISTRO:
             continue
+        try:
+            pago = leer_pago_conciliado(expediente)
+        except ValueError as exc:
+            for row in rows.values():
+                row['errors'].append(str(exc))
+            continue
+        costo = pago['gasto_empresa'] if pago else expediente.total_patronal
         if expediente.tipo == ExpedienteCedulaIMSS.TIPO_MENSUAL:
             key = 'imss'
-            distribucion = [(expediente.periodo, expediente.total_patronal)]
+            distribucion = [(expediente.periodo, costo)]
         elif expediente.tipo == ExpedienteCedulaIMSS.TIPO_BIMESTRAL:
             key = 'rcv'
             primer_mes = month_shift(expediente.periodo, -1)
-            primera_mitad = (expediente.total_patronal / 2).quantize(CENT)
+            primera_mitad = (costo / 2).quantize(CENT)
             distribucion = [
                 (primer_mes, primera_mitad),
-                (expediente.periodo, expediente.total_patronal - primera_mitad),
+                (expediente.periodo, costo - primera_mitad),
             ]
         else:
             continue
         documento = next(
-            (item for item in expediente.documentos.all() if item.clase == 'SUA_XLS'),
+            (item for item in expediente.documentos.all() if item.clase in ('SUA_XLS', 'SUA_PDF')),
             None,
         )
         reference = documento.nombre_original if documento else f'Expediente IMSS #{expediente.pk}'
@@ -251,8 +259,10 @@ def build_personnel_plan(cutoff=None):
                 row['errors'].append('Control patronal duplicado: ' + key)
                 continue
             row[key] = monto
+            if pago:
+                row[key + '_label'] = ('IMSS' if key == 'imss' else 'RCV / Infonavit') + ' · gasto de empresa conciliado'
             row['sources'].append(dict(
-                kind=key + ' · control patronal', id=expediente.pk,
+                kind=key + (' · gasto de empresa conciliado con pago' if pago else ' · control patronal'), id=expediente.pk,
                 reference=reference, amount=monto,
             ))
 

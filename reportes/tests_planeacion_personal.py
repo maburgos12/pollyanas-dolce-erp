@@ -11,6 +11,7 @@ from rrhh.models import Empleado
 from sat_client.models import CfdiDescargado
 from reportes.models import (
     AreaPresupuesto,
+    DocumentoCedulaIMSS,
     ExpedienteCedulaIMSS,
     ExpedienteISN,
     LineaPresupuestoMensual,
@@ -353,6 +354,23 @@ class PersonnelPlanTests(TestCase):
         agosto = build_personnel_plan()['months'][-1]
         self.assertEqual(agosto['rcv'], D(200))
         self.assertIsNone(agosto['imss'])
+
+    def test_pago_conciliado_mensualiza_gasto_sin_sumar_retenciones(self, _):
+        expediente = ExpedienteCedulaIMSS.objects.create(tipo='BIMESTRAL', periodo=date(2026, 8, 1),
+            registro_patronal='E5240157100', estado='APLICADO', total_patronal=D('400'),
+            metadata={'pago_conciliado': dict(version=1, importe_pagado='600.00', gasto_empresa='500.01',
+                retenciones='79.99', cuentas_por_cobrar='20.00', fecha_pago='2026-09-07',
+                soporte_pago_sha256='a'*64, soporte_conciliacion_sha256='b'*64, sua_sha256='c'*64)})
+        DocumentoCedulaIMSS.objects.create(expediente=expediente, clase='SUA_PDF',
+            nombre_original='sua.pdf', archivo='sua.pdf', sha256='c'*64, tamano=1, mime_type='application/pdf')
+        rows = {r['month']: r for r in build_personnel_plan()['months']}
+        self.assertEqual(rows[date(2026, 7, 1)]['rcv'] + rows[date(2026, 8, 1)]['rcv'], D('500.01'))
+        self.assertIn('gasto de empresa', rows[date(2026, 8, 1)]['rcv_label'])
+        expediente.metadata['pago_conciliado']['gasto_empresa'] = '600.00'
+        expediente.save(update_fields=['metadata'])
+        row = build_personnel_plan()['months'][-1]
+        self.assertIsNone(row['rcv'])
+        self.assertTrue(any('no concilia' in error for error in row['errors']))
 
     def test_sipare_usa_expediente_aunque_metadata_legada_no_tenga_registro(self, _):
         ExpedienteCedulaIMSS.objects.create(

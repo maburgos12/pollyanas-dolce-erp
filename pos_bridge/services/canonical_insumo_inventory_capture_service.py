@@ -10,6 +10,7 @@ from pos_bridge.services.recipe_identity_service import PointRecipeIdentityServi
 from pos_bridge.services.unidades import cantidad_en_unidad_erp
 from recetas.utils.costeo_snapshot import POINT_UNIT_ALIASES
 from maestros.utils.canonical_catalog import canonical_insumo_by_id
+from recetas.models import normalizar_codigo_point
 
 
 class CanonicalInsumoInventoryCaptureService:
@@ -36,6 +37,7 @@ class CanonicalInsumoInventoryCaptureService:
                 if getattr(row, "kind", "supply") == "supply"
             ]
             seen = {}
+            seen_identity = {}
             conflicted_insumo_ids = set()
             for row in rows:
                 resolved = self.identity_service.resolve_insumo(
@@ -45,10 +47,15 @@ class CanonicalInsumoInventoryCaptureService:
                 method = str(getattr(resolved, "method", "") or "")
                 score = float(getattr(resolved, "score", 0) or 0)
                 insumo = getattr(resolved, "insumo", None)
+                if method == "INACTIVE_POINT_CODE":
+                    continue
                 if insumo is None or method not in TRUSTED_INSUMO_MATCH_METHODS or score < 100:
                     blockers.append({"location": location, "point_code": row.point_code, "reason": "MATCH_NO_CONFIABLE"})
                     continue
                 insumo = canonical_insumo_by_id(insumo.id) or insumo
+                if not insumo.activo or normalizar_codigo_point(insumo.codigo_point) != normalizar_codigo_point(row.point_code):
+                    blockers.append({"location": location, "point_code": row.point_code, "reason": "CODIGO_POINT_NO_COINCIDE"})
+                    continue
                 normalized_unit = " ".join(str(row.unit or "").strip().lower().split())
                 if normalized_unit not in POINT_UNIT_ALIASES:
                     blockers.append({"location": location, "point_code": row.point_code, "reason": "UNIDAD_DESCONOCIDA"})
@@ -58,11 +65,13 @@ class CanonicalInsumoInventoryCaptureService:
                     blockers.append({"location": location, "point_code": row.point_code, "reason": note})
                     continue
                 previous = seen.get(insumo.id)
+                identity = (str(getattr(row, "point_internal_id", "") or ""), row.point_name.strip().casefold())
                 quantity_base = Decimal(str(quantity_base))
                 if insumo.id in conflicted_insumo_ids:
                     continue
-                if previous is not None and previous != quantity_base:
-                    blockers.append({"location": location, "point_code": row.point_code, "reason": "SALDO_DUPLICADO_CONFLICTIVO"})
+                if previous is not None and (previous != quantity_base or seen_identity[insumo.id] != identity):
+                    reason = "SALDO_DUPLICADO_CONFLICTIVO" if previous != quantity_base else "IDENTIDAD_POINT_DUPLICADA"
+                    blockers.append({"location": location, "point_code": row.point_code, "reason": reason})
                     conflicted_insumo_ids.add(insumo.id)
                     PointInsumoInventorySnapshot.objects.filter(
                         sync_job=sync_job,
@@ -71,6 +80,7 @@ class CanonicalInsumoInventoryCaptureService:
                     ).delete()
                     continue
                 seen[insumo.id] = quantity_base
+                seen_identity[insumo.id] = identity
                 PointInsumoInventorySnapshot.objects.update_or_create(
                     sync_job=sync_job,
                     branch=branch,

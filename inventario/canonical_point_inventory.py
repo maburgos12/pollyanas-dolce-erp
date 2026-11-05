@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from inventario.units import presentation_quantity
 from pos_bridge.models import PointInsumoInventorySnapshot, PointSyncJob
+from recetas.models import normalizar_codigo_point
 
 
 class InventoryLocation(StrEnum):
@@ -120,12 +121,16 @@ class CanonicalPointInventoryService:
             .select_related("insumo", "sync_job")
         )
         latest = {row.insumo_id: row for row in rows}
+        blockers = {normalizar_codigo_point(row.get("point_code")): row.get("reason", "")
+                    for row in (latest_job.result_summary or {}).get("blockers", [])
+                    if row.get("location") == location.value}
         return {
             item.id: self._reading(
                 item=canonical_by_input[item.id],
                 location=location,
                 snapshot=latest.get(canonical_by_input[item.id].id),
                 now=now,
+                blocker=blockers.get(normalizar_codigo_point(canonical_by_input[item.id].codigo_point)),
             )
             for item in insumos
         }
@@ -141,7 +146,7 @@ class CanonicalPointInventoryService:
             raise CanonicalInventoryUnavailable(invalid)
         return readings
 
-    def _reading(self, *, item, location, snapshot, now):
+    def _reading(self, *, item, location, snapshot, now, blocker=None):
         code = (item.codigo_point or "").strip()
         base_unit = getattr(item.unidad_base, "codigo", "") or ""
         if not code:
@@ -149,7 +154,21 @@ class CanonicalPointInventoryService:
         if item.unidad_base_id is None:
             return self._missing(item, location, code, base_unit, "El insumo no tiene unidad base ERP.")
         if snapshot is None:
+            if blocker:
+                reason = {
+                    "MATCH_NO_CONFIABLE": "no hay una vinculación inequívoca con el catálogo activo",
+                    "CODIGO_POINT_NO_COINCIDE": "el código Point no coincide con el insumo",
+                    "UNIDAD_DESCONOCIDA": "la unidad de Point no tiene una equivalencia reconocida",
+                    "SALDO_DUPLICADO_CONFLICTIVO": "Point reporta saldos distintos para el mismo código",
+                    "IDENTIDAD_POINT_DUPLICADA": "Point reporta artículos distintos con el mismo código",
+                }.get(blocker, blocker)
+                return self._missing(item, location, code, base_unit,
+                                     f"Captura rechazada: {reason}.", freshness=InventoryFreshness.ERROR)
             return self._missing(item, location, code, base_unit, "Point no tiene captura para esta ubicación.")
+
+        if normalizar_codigo_point(snapshot.point_code) != normalizar_codigo_point(code):
+            return self._error(item, location, code, base_unit, snapshot, snapshot.point_unit,
+                               "El código de la captura Point no coincide con el insumo. Revisar vinculación.")
 
         point_unit = snapshot.point_unit
         if not point_unit:
@@ -207,7 +226,7 @@ class CanonicalPointInventoryService:
         )
 
     @staticmethod
-    def _missing(item, location, code, base_unit, error):
+    def _missing(item, location, code, base_unit, error, *, freshness=InventoryFreshness.MISSING):
         return CanonicalInventoryReading(
             insumo_id=item.id,
             codigo_point=code,
@@ -219,7 +238,7 @@ class CanonicalPointInventoryService:
             point_quantity=None,
             point_unit="",
             captured_at=None,
-            freshness=InventoryFreshness.MISSING,
+            freshness=freshness,
             error=error,
         )
 

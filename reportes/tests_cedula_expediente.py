@@ -913,6 +913,12 @@ class ExpedienteCedulaIMSSDatabaseTests(TestCase):
 
         self.assertEqual(expediente.documentos.filter(pk__in=[ema.pk, eba.pk]).count(), 2)
 
+    def test_sua_pdf_no_duplica_control_xls(self):
+        expediente = self.crear_expediente()
+        self.crear_documento_sua(expediente, clase='SUA_PDF', mime_type='application/pdf')
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.crear_documento_sua(expediente, sha256='f' * 64)
+
     def test_no_permite_repetir_nss_dentro_del_mismo_documento(self):
         expediente = self.crear_expediente()
         documento = self.crear_documento_sua(expediente)
