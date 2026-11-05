@@ -15,7 +15,8 @@ class PersonalRegistradoTests(TestCase):
         emp = Empleado.objects.create(codigo='prestamo', nombre='Persona',
             departamento='VENTAS', puesto_operativo='CAJAS', salario_diario=500)
         period = NominaPeriodo.objects.create(fecha_inicio=date(2025,1,1),
-            fecha_fin=date(2025,1,31), estatus='CERRADA')
+            fecha_fin=date(2025,1,31), estatus='CERRADA',
+            tipo_periodo=NominaPeriodo.TIPO_EXTRAORDINARIA)
         line = NominaLinea.objects.create(periodo=period, empleado=emp,
             snapshot_origen=NominaLinea.SNAPSHOT_HISTORICA, salario_base=100,
             otros_pagos=3000, descuentos=10)

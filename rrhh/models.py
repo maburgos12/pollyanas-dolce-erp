@@ -501,10 +501,12 @@ class NominaPeriodo(models.Model):
     TIPO_SEMANAL = "SEMANAL"
     TIPO_QUINCENAL = "QUINCENAL"
     TIPO_MENSUAL = "MENSUAL"
+    TIPO_EXTRAORDINARIA = "EXTRAORDINARIA"
     TIPO_CHOICES = [
         (TIPO_SEMANAL, "Semanal"),
         (TIPO_QUINCENAL, "Quincenal"),
         (TIPO_MENSUAL, "Mensual"),
+        (TIPO_EXTRAORDINARIA, "Extraordinaria"),
     ]
 
     ESTATUS_BORRADOR = "BORRADOR"
