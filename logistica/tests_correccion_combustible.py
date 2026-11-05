@@ -221,3 +221,22 @@ class CorreccionCombustibleTests(TestCase):
             auditar_carga_combustible(self.carga.pk)
         self.carga.refresh_from_db()
         self.assertEqual(self.carga.auditoria_estado, 'pendiente')
+
+    def test_reauditoria_conserva_reconocimiento_agregado_durante_lectura(self):
+        from logistica.services_combustible_auditoria import auditar_carga_combustible
+        reconocimiento = dict(carga_id=self.carga.pk, periodo='2026-10', importe='1200.00',
+            fuente='CONFIRMACION_DG', criterio='SIN_TICKET')
+        def lectura(_):
+            actual = CargaCombustibleUnidad.objects.get(pk=self.carga.pk)
+            actual.auditoria_detalle['reconocimiento_costo'] = reconocimiento
+            actual.save(update_fields=['auditoria_detalle'])
+            return {'es_ticket': False, 'legible': True, 'folio': '', 'litros': None,
+                    'importe_total': None, 'precio_por_litro': None}
+        with patch('logistica.services_combustible_auditoria.leer_ticket', side_effect=lectura), \
+             patch('logistica.services_combustible_auditoria._sha256_field_file', return_value=''), \
+             patch('logistica.services_combustible_auditoria._analizar_imagen', return_value={'score':0,'motivos':[],'detalle':{}}):
+            auditar_carga_combustible(self.carga.pk)
+        self.carga.refresh_from_db()
+        self.assertEqual(self.carga.auditoria_detalle['reconocimiento_costo'], reconocimiento)
+        self.assertFalse(self.carga.auditoria_detalle['ticket_leido']['es_ticket'])
+        self.assertNotEqual(self.carga.auditoria_estado, 'ok')

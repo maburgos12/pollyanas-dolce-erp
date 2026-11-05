@@ -10,6 +10,42 @@ from .services_isn import bases_gravadas_empleados, calcular_isn_sinaloa, prorra
 ZERO = Decimal('0')
 
 
+def gastos_combustible_reconocidos(periodo):
+    from logistica.models import CargaCombustibleUnidad
+    from .services_conciliacion_combustible import conciliar_combustible
+    datos = conciliar_combustible(periodo)
+    registros = CargaCombustibleUnidad.objects.in_bulk([f['id'] for f in datos['cargas']])
+    resultado = {'filas': [], 'pendientes': []}
+    for fila in datos['cargas']:
+        carga = registros[fila['id']]
+        reconocimiento = (carga.auditoria_detalle or {}).get('reconocimiento_costo', {})
+        vigente = (isinstance(reconocimiento, dict)
+            and reconocimiento.get('periodo') == periodo.strftime('%Y-%m')
+            and reconocimiento.get('carga_id') == carga.pk
+            and reconocimiento.get('importe') == str(carga.importe_total))
+        dg = (vigente and reconocimiento.get('fuente') == 'CONFIRMACION_DG'
+            and reconocimiento.get('criterio') == 'SIN_TICKET')
+        documental = (vigente and reconocimiento.get('fuente') == 'REVISION_DOCUMENTAL'
+            and reconocimiento.get('criterio') == 'TICKET_ORIGINAL'
+            and len(carga.ticket_sha256) == 64 and bool(reconocimiento.get('folio'))
+            and str(reconocimiento.get('fecha_ticket', ''))[:7] == periodo.strftime('%Y-%m')
+            and fila['estado'] != 'DUPLICADO_REVISAR'
+            and reconocimiento.get('sha256') == carga.ticket_sha256
+            and carga.foto_ticket and carga.foto_ticket.storage.exists(carga.foto_ticket.name))
+        cruce = fila['estado'] == 'CRUCE_DOCUMENTAL'
+        completo = bool(cruce or dg or documental)
+        referencia = ('CFDI ' + fila['uuid_cfdi'] if cruce else
+            'Confirmación de Dirección: gasto real autorizado sin ticket' if dg else
+            'Ticket original cotejado; SHA256 ' + carga.ticket_sha256 if documental else '')
+        salida = dict(origen='CARGA_COMBUSTIBLE', registro_id=carga.pk,
+            clave='CARGA_COMBUSTIBLE:' + str(carga.pk), area='logistica', familia='otros',
+            concepto='Combustible · ' + fila['unidad'], monto_mensual=fila['importe'] if completo else None,
+            estado='COMPLETO' if completo else 'PENDIENTE', referencia_soporte=referencia,
+            detalle='' if completo else 'Carga registrada sin reconocimiento acreditado del costo.')
+        resultado['filas' if completo else 'pendientes'].append(salida)
+    return resultado
+
+
 def cargas_mensuales_personal(selected):
     registered = selected['registered']
     cargas = (registered or {}).get('componentes_cargas', {})
@@ -70,6 +106,9 @@ def resumen_personal_global(selected):
             department.setdefault(key, None)
     expenses = leer_gastos_mensuales(selected['month'], usar_reparto_consolidado=True,
                                       incluir_indirectos_produccion=True)
+    combustible = gastos_combustible_reconocidos(selected['month'])
+    expenses['filas'].extend(combustible['filas'])
+    expenses['pendientes'].extend(combustible['pendientes'])
     # Un importe con evidencia incompleta no forma parte del total respaldado.
     incompletos = [dict(f, monto_mensual=None) for f in expenses['filas'] if f['estado'] != 'COMPLETO']
     expenses['pendientes'].extend(incompletos)
