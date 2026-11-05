@@ -399,6 +399,23 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
             resultado["filas"].append(fila)
             rubros_con_fuente.add(rubro.pk)
 
+    # Una factura global repartida puede acreditar varios contratos, sin copiar el CFDI.
+    for version in versiones:
+        recurrente = version.gasto_recurrente
+        equivalentes = [v for v in versiones if v.gasto_recurrente.rubro_id == recurrente.rubro_id]
+        if version.pk in vistas_versiones or version.periodicidad_meses != 1 or len(equivalentes) != 1:
+            continue
+        reglas_reparto = {r.pk for r in reglas if r.tipo_fuente == "GASTO_OPERATIVO"
+            and r.modo_asignacion == "DISTRIBUCION" and r.rubro_id == recurrente.rubro_id
+            and r.categoria_gasto_id == recurrente.categoria_gasto_id}
+        partes = [f for f in resultado["filas"] if f["regla_id"] in reglas_reparto
+            and f["estado"] == "COMPLETO" and not f["soporte"].get("obligacion_id")
+            and f["sucursal_id"] == recurrente.centro_costo.sucursal_id]
+        if partes and sum((f["monto_mensual"] for f in partes), Decimal(0)) == version.monto:
+            vistas_versiones.add(version.pk)
+            vistas_reglas.update(r.pk for r in reglas if r.tipo_fuente == "OBLIGACION_GASTO"
+                and r.rubro_id == recurrente.rubro_id and _vigente(r, periodo))
+
     for regla in reglas:
         familia = _familia(regla.categoria_gasto, regla.rubro)
         if (not _vigente(regla, periodo) or not familia or regla.pk in vistas_reglas

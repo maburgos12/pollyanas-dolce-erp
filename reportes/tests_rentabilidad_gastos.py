@@ -316,6 +316,33 @@ class LectorGastosMensualesTests(TestCase):
         self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal("100.00"))
         self.assertFalse(any(f["origen"] == "GASTO_RECURRENTE_VERSION" for f in resultado["pendientes"]))
 
+    def test_facturas_globales_acreditan_contratos_solo_con_reparto_e_importe_completos(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save("test/factura-global.txt", ContentFile(b"soporte de prueba"))
+        self.addCleanup(default_storage.delete, archivo)
+        otra = Sucursal.objects.create(codigo="LECTOR-GLOBAL", nombre="Otra")
+        otro_centro = CentroCosto.objects.create(codigo="LECTOR-GLOBAL", nombre="Otra",
+            tipo="SUCURSAL_VENTA", sucursal=otra)
+        otro_rubro = RubroPresupuesto.objects.create(area=self.area, concepto="Arrendamiento local",
+            tipo="EGRESO", sucursal=otra)
+        for rubro, centro, monto in [(self.rubro, self.centro, 20), (otro_rubro, otro_centro, 80)]:
+            recurrente = GastoRecurrente.objects.create(area=self.area, rubro=rubro,
+                centro_costo=centro, categoria_gasto=self.categoria, concepto="Contrato mensual")
+            GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+                vigencia_inicio=self.mes, monto=Decimal(monto))
+            self.regla(rubro=rubro, centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
+                filtros={"desde":"2026-01", "porcentaje":monto})
+            self.regla(rubro=rubro, tipo_fuente="OBLIGACION_GASTO", categoria_gasto=None)
+        for monto in (40, 60):
+            self.gasto(centro_costo=self.compartido, monto=Decimal(monto), archivo_soporte=archivo)
+        resultado = self.leer()
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal(100))
+        self.assertEqual(resultado["pendientes"], [])
+        default_storage.delete(archivo)
+        self.assertEqual(sum(f["origen"] == "GASTO_RECURRENTE_VERSION"
+            for f in self.leer()["pendientes"]), 2)
+
     def test_regla_sin_historia_deja_pendiente_especifico_sucursal(self):
         regla = self.regla(centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
                            filtros={"porcentaje": 20})
