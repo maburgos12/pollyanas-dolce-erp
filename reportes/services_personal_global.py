@@ -68,7 +68,8 @@ def resumen_personal_global(selected):
     for department in departments:
         for key in ('cargas', 'costo_personal', 'costo_porcentaje'):
             department.setdefault(key, None)
-    expenses = leer_gastos_mensuales(selected['month'], usar_reparto_consolidado=True)
+    expenses = leer_gastos_mensuales(selected['month'], usar_reparto_consolidado=True,
+                                      incluir_indirectos_produccion=True)
     # Un importe con evidencia incompleta no forma parte del total respaldado.
     incompletos = [dict(f, monto_mensual=None) for f in expenses['filas'] if f['estado'] != 'COMPLETO']
     expenses['pendientes'].extend(incompletos)

@@ -17,7 +17,7 @@ FAMILIA_CODIGO = {"RENTA": "renta", "RENTA_SUC": "renta", "LUZ_SUC": "electricid
                   "TELEFONO_SUC": "telefono", "SISTEMAS_CORP": "sistemas",
                   "MANTENIMIENTO": "mantenimiento", "AGUA_SUC": "otros",
                   "INDIRECTO_SUC": "otros", "SEGUROS_ESTABLECIMIENTO": "otros",
-                  "ADMIN_CORP": "otros"}
+                  "ADMIN_CORP": "otros", "INDIRECTO_PROD": "otros"}
 FAMILIA_CONCEPTO = {"arrendamiento local": "renta", "energía eléctrica": "electricidad",
                     "teléfono e internet": "telefono", "mantenimiento equipo/maquinaria": "mantenimiento",
                     "licencias y servicios de sistemas": "sistemas",
@@ -178,7 +178,7 @@ def _importe_mensual(monto, inicio, fin, periodo):
     return monto - base * (meses - 1) if periodo == fin else base
 
 
-def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
+def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_indirectos_produccion=False):
     """Devuelve filas económicas y pendientes; importes originales siempre intactos.
 
     ``filas`` contiene importes sumables COMPLETO/PARCIAL. ``pendientes`` nunca
@@ -235,7 +235,8 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
         categoria, centro = fuente.categoria_gasto, fuente.centro_costo
         if (categoria.codigo in PERSONAL_CODIGOS | {"INVERSION", "CAPEX"}
                 or categoria.bucket in {"MANO_OBRA_PROD", "EMPAQUE_PROD"}
-                or categoria.capa_objetivo == "FABRICACION"):
+                or (categoria.capa_objetivo == "FABRICACION" and not (
+                    incluir_indirectos_produccion and categoria.bucket == "INDIRECTO_PROD"))):
             continue
         if categoria.codigo == "OPEX_TOTAL_SUC":
             continue  # Agregado de otras fuentes, nunca una fuente adicional.
@@ -407,7 +408,9 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
             continue
         reglas_reparto = {r.pk for r in reglas if r.tipo_fuente == "GASTO_OPERATIVO"
             and r.modo_asignacion == "DISTRIBUCION" and r.rubro_id == recurrente.rubro_id
-            and r.categoria_gasto_id == recurrente.categoria_gasto_id}
+            and (r.categoria_gasto_id == recurrente.categoria_gasto_id or (
+                r.categoria_gasto and r.categoria_gasto.codigo in {"INDIRECTO_PROD", "INDIRECTO_SUC"}
+                and recurrente.categoria_gasto.codigo in {"INDIRECTO_PROD", "INDIRECTO_SUC"}))}
         partes = [f for f in resultado["filas"] if f["regla_id"] in reglas_reparto
             and f["estado"] == "COMPLETO" and not f["soporte"].get("obligacion_id")
             and f["sucursal_id"] == recurrente.centro_costo.sucursal_id]

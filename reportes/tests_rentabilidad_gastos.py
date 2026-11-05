@@ -201,6 +201,26 @@ class LectorGastosMensualesTests(TestCase):
         resultado = self.leer()
         self.assertEqual(resultado, {"filas": [], "pendientes": []})
 
+    def test_consolidado_incluye_indirecto_planta_sin_sumar_fabricacion_y_empaque(self):
+        from .services_rentabilidad_gastos import leer_gastos_mensuales
+        centro = CentroCosto.objects.create(codigo="PLANTA", nombre="Planta", tipo="PRODUCCION")
+        indirecto = CategoriaGasto.objects.create(codigo="INDIRECTO_PROD", nombre="Indirecto planta",
+            capa_objetivo="FABRICACION", bucket="INDIRECTO_PROD")
+        rubro = RubroPresupuesto.objects.create(area=self.produccion,
+            concepto="Fumigación y sanitización", tipo="EGRESO")
+        self.regla(rubro=rubro, centro_costo=centro, categoria_gasto=indirecto)
+        gasto = self.gasto(centro_costo=centro, categoria_gasto=indirecto, monto=Decimal("511.56"))
+        self.categoria.capa_objetivo = "FABRICACION"
+        self.categoria.save(update_fields=["capa_objetivo"])
+        self.gasto()
+        empaque = CategoriaGasto.objects.create(codigo="EMPAQUE", nombre="Empaque",
+            capa_objetivo="FABRICACION", bucket="EMPAQUE_PROD")
+        self.gasto(categoria_gasto=empaque)
+        self.assertFalse(self.leer()["filas"])
+        filas = leer_gastos_mensuales(self.mes, incluir_indirectos_produccion=True)["filas"]
+        self.assertEqual([(f["registro_id"], f["monto_mensual"], f["area"], f["sucursal_id"])
+            for f in filas], [(gasto.pk, Decimal("511.56"), "produccion", None)])
+
     def test_categoria_generica_usa_rubro_exacto_no_keyword(self):
         categoria = CategoriaGasto.objects.create(codigo="SERVICIOS", nombre="Servicios", capa_objetivo="SUCURSAL")
         self.gasto(categoria_gasto=categoria)
@@ -343,6 +363,33 @@ class LectorGastosMensualesTests(TestCase):
         default_storage.delete(archivo)
         self.assertEqual(sum(f["origen"] == "GASTO_RECURRENTE_VERSION"
             for f in self.leer()["pendientes"]), 2)
+
+    def test_factura_indirecta_compartida_acredita_contrato_planta_por_rubro_exacto(self):
+        from django.core.files.base import ContentFile
+        from django.core.files.storage import default_storage
+        archivo = default_storage.save("test/fumigacion-global.txt", ContentFile(b"soporte"))
+        self.addCleanup(default_storage.delete, archivo)
+        origen = CategoriaGasto.objects.create(codigo="INDIRECTO_SUC", nombre="Indirecto sucursal")
+        destino = CategoriaGasto.objects.create(codigo="INDIRECTO_PROD", nombre="Indirecto planta",
+            bucket="INDIRECTO_PROD", capa_objetivo="FABRICACION", metadata={"familia":"otros"})
+        centro = CentroCosto.objects.create(codigo="PLANTA", nombre="Planta", tipo="PRODUCCION")
+        rubro = RubroPresupuesto.objects.create(area=self.produccion, concepto="Fumigación", tipo="EGRESO")
+        recurrente = GastoRecurrente.objects.create(area=self.produccion, rubro=rubro,
+            centro_costo=centro, categoria_gasto=destino, concepto="Fumigación planta")
+        version = GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=self.mes, monto=Decimal("100"))
+        self.regla(rubro=rubro, categoria_gasto=origen, centro_costo=self.compartido,
+            modo_asignacion="DISTRIBUCION", filtros={"desde":"2026-01", "porcentaje":100})
+        self.regla(rubro=rubro, tipo_fuente="OBLIGACION_GASTO", categoria_gasto=None)
+        self.gasto(centro_costo=self.compartido, categoria_gasto=origen,
+            monto=Decimal("100"), archivo_soporte=archivo)
+        resultado = self.leer()
+        self.assertEqual(resultado["pendientes"], [])
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal("100"))
+        destino.codigo = "SERVICIO_DISTINTO"
+        destino.save(update_fields=["codigo"])
+        self.assertTrue(any(f["registro_id"] == version.pk and f["origen"] == "GASTO_RECURRENTE_VERSION"
+            for f in self.leer()["pendientes"]))
 
     def test_regla_sin_historia_deja_pendiente_especifico_sucursal(self):
         regla = self.regla(centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
