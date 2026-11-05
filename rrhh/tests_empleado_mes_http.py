@@ -16,7 +16,7 @@ class EmpleadoMesHTTPTests(TestCase):
         backend.EmpleadoMesTests.setUpTestData.__func__(cls)
 
     def setUp(self):
-        self.p = s.abrir_periodo(self.rh, self.hoy.replace(day=1), self.hoy)
+        self.p = s.abrir_periodo(self.rh, self.hoy.replace(day=1))
         self.url = reverse('rrhh:empleado_mes_detalle', args=[self.p.pk])
 
     def test_vistas_y_navegacion_sin_acceso_rrhh_general(self):
@@ -33,6 +33,29 @@ class EmpleadoMesHTTPTests(TestCase):
         self.assertEqual(self.client.get(self.url).status_code, 403)
         self.assertNotIn('/rrhh/empleado-del-mes/', str(build_nav_groups(ventas, '/')))
         self.assertIn('/rrhh/empleado-del-mes/', str(build_nav_groups(self.jefes['PRODUCCION'], '/')))
+
+    def test_abrir_mes_anterior_sin_fecha_limite(self):
+        mes = (self.hoy.replace(day=1) - timedelta(days=1)).replace(day=1)
+        self.client.force_login(self.rh)
+        response = self.client.post(reverse('rrhh:empleado_mes'), {'mes': mes.strftime('%Y-%m')})
+        periodo = PeriodoEmpleadoMes.objects.get(mes=mes)
+        self.assertRedirects(response, reverse('rrhh:empleado_mes_detalle', args=[periodo.pk]))
+        self.assertIsNone(periodo.fecha_limite)
+        url = reverse('rrhh:empleado_mes_detalle', args=[periodo.pk])
+        self.assertContains(self.client.get(url), 'Captura abierta hasta la elección de RRHH')
+        self.client.force_login(self.jefes['PRODUCCION'])
+        self.assertContains(self.client.get(url), 'Postular y evaluar')
+        self.client.force_login(self.dg)
+        self.assertNotContains(self.client.get(url), 'Postular y evaluar')
+
+    def test_retirar_fecha_limite_desde_formulario(self):
+        PeriodoEmpleadoMes.objects.filter(pk=self.p.pk).update(fecha_limite=self.hoy-timedelta(days=1))
+        self.client.force_login(self.rh)
+        response = self.client.post(self.url, {'accion': 'plazo', 'version': 0, 'motivo': 'Permitir concluir las evaluaciones'})
+        self.assertRedirects(response, self.url)
+        self.p.refresh_from_db()
+        self.assertIsNone(self.p.fecha_limite)
+        self.assertContains(self.client.get(self.url), 'Captura abierta hasta la elección de RRHH')
 
     def test_ciclo_formularios_y_aislamiento(self):
         enviados = []

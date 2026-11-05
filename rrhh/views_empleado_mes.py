@@ -117,7 +117,7 @@ def detalle(request, pk):
             grupos.append({"nombre": nombre, "filas": filas, "enviadas": sum(e.estado == "enviada" for e in filas)})
     ganador = periodo.ganador if service.puede_ver_todo(request.user) or any(e.pk == periodo.ganador_id for e in evaluaciones) else None
     historial = _historial("rrhh.PeriodoEmpleadoMes", periodo.pk) if service.puede_ver_todo(request.user) else []
-    return render(request, "rrhh/empleado_mes/detalle.html", {"periodo": periodo, "grupos": grupos, "forms": forms_by_action, "gestiona": gestiona, "ganador": ganador, "ver_todo": service.puede_ver_todo(request.user), "puede_postular": opciones.exists() and not periodo.ganador_id and periodo.fecha_limite >= timezone.localdate(), "historial": historial, "listo": len(evaluaciones) == 4 and all(e.estado == "enviada" for e in evaluaciones), "vencido": periodo.fecha_limite < timezone.localdate()})
+    return render(request, "rrhh/empleado_mes/detalle.html", {"periodo": periodo, "grupos": grupos, "forms": forms_by_action, "gestiona": gestiona, "ganador": ganador, "ver_todo": service.puede_ver_todo(request.user), "puede_postular": opciones.exists() and not periodo.ganador_id and not periodo.plazo_vencido, "historial": historial, "listo": len(evaluaciones) == 4 and all(e.estado == "enviada" for e in evaluaciones), "vencido": periodo.plazo_vencido, "fin_mes": periodo.mes.replace(day=monthrange(periodo.mes.year, periodo.mes.month)[1])})
 
 
 @login_required
