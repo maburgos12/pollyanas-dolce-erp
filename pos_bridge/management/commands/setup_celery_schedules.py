@@ -52,6 +52,17 @@ class Command(BaseCommand):
                       "enabled": preserve_enabled("reportes: auditor inventario diario")},
         )
 
+        documentary_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="0", hour="9", day_of_week="*", day_of_month="*",
+            month_of_year="*", timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="Auditoría documental de compras e insumos (09:00)",
+            defaults={"task": "inventario.auditar_compras_produccion", "crontab": documentary_cron,
+                      "interval": None, "kwargs": "{}",
+                      "enabled": preserve_enabled("Auditoría documental de compras e insumos (09:00)")},
+        )
+
         sales_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="1",

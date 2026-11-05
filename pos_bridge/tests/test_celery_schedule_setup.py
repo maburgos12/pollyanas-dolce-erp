@@ -83,6 +83,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
         names = [
             "pos_bridge: inventario realtime",
             "pos_bridge: retry jobs fallidos",
+            "Auditoría documental de compras e insumos (09:00)",
         ]
         PeriodicTask.objects.filter(name__in=names).update(enabled=False)
 
@@ -94,7 +95,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 .order_by("name")
                 .values_list("enabled", flat=True)
             ),
-            [False, False],
+            [False, False, False],
         )
 
     def test_registers_expected_periodic_tasks_idempotently(self):
@@ -141,6 +142,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "proyecciones: producción semana siguiente",
                 "proyecciones: forecast quincenal semanal",
                 "inventario: consumos BOM día anterior",
+                "Auditoría documental de compras e insumos (09:00)",
                 "core: verificar datos mes anterior",
                 "core: cierre automático mes anterior",
                 "recetas: consolidado nocturno CEDIS",
@@ -162,7 +164,7 @@ class SetupCelerySchedulesCommandTests(TestCase):
                 "reportes: consolidar presupuesto real nocturno",
             },
         )
-        self.assertEqual(PeriodicTask.objects.count(), 45)
+        self.assertEqual(PeriodicTask.objects.count(), 46)
         reporte_diario = PeriodicTask.objects.get(name="reportes: enviar reporte diario")
         self.assertEqual(reporte_diario.task, "reportes.enviar_reporte_diario")
         self.assertEqual(reporte_diario.crontab.hour, "4")
