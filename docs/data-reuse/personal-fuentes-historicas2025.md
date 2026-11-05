@@ -14,7 +14,7 @@ Comparar personal real con ventas del mismo periodo, conservando el contraste fi
 | Venta histórica | FactVentaDiaria | Export autoritativo materializado; selección existente selected_sales_facts | Sucursal ERP, día, producto y procedencia | 97,312 filas AUTHORITATIVE 2025; venta con impuestos 44,418,445.59 antes de selección de linaje | Rentabilidad, analítica |
 | Percepciones reales | NominaLinea y NominaConceptoLinea | CONTPAQi y recibos conciliados | Periodo, empleado y snapshot histórico | 1,764 líneas, 75 periodos, 8,018,073.26; auditorías 42539 y 42578 | Personal, rentabilidad |
 | Contraste y ajustes | CfdiDescargado y NominaImportacion.resumen | SAT e importación conciliada | UUID vigente, periodo e importación IMPORTADA | Nueve ajustes con estados de conciliación explícitos, suma -1,476.44 | Contraste fiscal; nunca otro gasto |
-| ISN y otros CFDI estatales | ExpedienteISN y CfdiDescargado | Expediente aplicado y XML original | Periodo fiscal y código de concepto | 43 alertas eran peajes, trámites vehiculares y documentos en cero; 13 fuera de 2025 | Cargas documentales |
+| ISN, trámites y avisos sin movimientos | ExpedienteISN y CfdiDescargado | Expediente aplicado y XML original | Periodo fiscal y código de concepto | 43 alertas: 20 peajes/trámites de 2025, 10 avisos Edenred SIN MOVIMIENTOS con total cero y 13 trámites fuera de 2025 | Cargas documentales |
 
 ## Alias y equivalencias
 
@@ -27,6 +27,8 @@ Reutilizar selected_sales_facts y su exclusión de exportaciones reflejadas. Inc
 Conservar la diferencia fiscal original y explicar por separado los ajustes conciliados de la importación. Solo cierra aritméticamente si los UUID corresponden a los CFDI leídos, los importes son válidos, los estados están conciliados y no se repiten. Un ajuste inválido sigue como pendiente; no cambia percepciones ni XML.
 
 Clasificar como ajenos al ISN solamente los conceptos vehiculares inequívocos y documentos exactamente sin movimientos con importe cero. Mantener visibles las exclusiones del corte. Un concepto fiscal desconocido continúa pendiente. Las reservas futuras no se incluyen en los componentes de costo real.
+
+La comprobación en producción identificó los diez avisos SIN MOVIMIENTOS como Edenred, no como Gobierno de Sinaloa. La exclusión de ese documento exacto con total cero se aplica antes de distinguir al emisor; un servicio desconocido en cero continúa pendiente. No altera XML, comisiones ni saldos de vales.
 
 Procedimiento: inventario_fuentes_datos --term ventas; consulta acotada FactVentaDiaria por source_kind en 2025; lectura de los XML de las alertas y metadatos de importación. No se modifican esas fuentes.
 
