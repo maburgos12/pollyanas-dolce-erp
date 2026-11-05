@@ -3,7 +3,7 @@ from decimal import Decimal as D
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.db import connection
+from django.db import connection, transaction
 from django.test import TestCase, override_settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -106,6 +106,59 @@ class PersonalGlobalTests(TestCase):
             periodo=NominaPeriodo.objects.get(fecha_fin=date(2026,10,31)), estatus='IMPORTADA',
             resumen={'criterio_prestaciones': {'mes':'2026-10', 'metodo':'AL_PAGO',
                 'provision_contable_mes':'0.00', 'fuente':'CONFIRMACION_DG'}})
+
+    def test_rcv_mensual_completo_se_lee_sin_exigir_imss_en_la_misma_fuente(self):
+        self.cargas_mensuales()
+        NominaConceptoLinea.objects.filter(tipo='OBLIGACION').exclude(
+            codigo_concepto__in=['M202610:AV', 'M202610:AX', 'M202610:BB']).delete()
+        selected = self.selected()
+        result = resumen_personal_global(selected)
+        components = {c['clave']: c for c in result['componentes']}
+        self.assertEqual(components['rcv']['monto'], D(30))
+        self.assertIn('registrado en nómina', components['rcv']['nombre'])
+        self.assertEqual(components['imss']['monto'], D(20))
+        self.assertIsNone(result['costo_departamentos'])
+        self.assertFalse(result['personal_cerrado'])
+        selected['rcv'] = D(27)
+        self.assertEqual(next(c['monto'] for c in resumen_personal_global(selected)['componentes']
+                              if c['clave'] == 'rcv'), D(27))
+        from .services_planeacion_personal import build_personnel_plan
+        with patch('reportes.services_planeacion_personal.timezone.localdate', return_value=date(2026,11,5)):
+            row = build_personnel_plan(date(2026,10,31))['selected']
+        self.assertEqual(row['rcv'], D(30))
+        self.assertTrue(any(s['kind'] == 'RCV · cargas mensuales de nómina' for s in row['sources']))
+        self.assertEqual(next(c['monto'] for c in row['global']['componentes'] if c['clave'] == 'rcv'), D(30))
+
+    def test_rcv_incompleto_duplicado_o_de_otro_mes_no_rellena_el_total(self):
+        for case in ('persona_ausente', 'componente_ausente', 'componente_duplicado',
+                     'persona_duplicada', 'otro_mes', 'mes_incompleto'):
+            with self.subTest(case=case), transaction.atomic():
+                self.cargas_mensuales()
+                cargos = NominaConceptoLinea.objects.filter(tipo='OBLIGACION')
+                cargos.exclude(codigo_concepto__in=['M202610:AV', 'M202610:AX', 'M202610:BB']).delete()
+                cargo = cargos.first()
+                if case == 'persona_ausente':
+                    cargos.filter(linea=cargo.linea).delete()
+                elif case == 'componente_ausente':
+                    cargo.delete()
+                elif case == 'componente_duplicado':
+                    cargo.pk = None
+                    cargo.save()
+                elif case == 'persona_duplicada':
+                    line = NominaLinea.objects.get(periodo__fecha_fin=date(2026,10,15))
+                    for original in cargos.filter(linea__empleado=line.empleado):
+                        original.pk, original.linea = None, line
+                        original.save()
+                elif case == 'otro_mes':
+                    for original in cargos:
+                        original.codigo_concepto = original.codigo_concepto.replace('M202610:', 'M202609:')
+                        original.save(update_fields=['codigo_concepto'])
+                else:
+                    NominaPeriodo.objects.get(fecha_fin=date(2026,10,15)).delete()
+                result = resumen_personal_global(self.selected())
+                self.assertIsNone(next(c['monto'] for c in result['componentes'] if c['clave'] == 'rcv'))
+                self.assertFalse(result['personal_cerrado'])
+                transaction.set_rollback(True)
 
     def test_prestaciones_pagadas_no_se_suman_otra_vez_ni_se_inventa_provision(self):
         self.criterio_al_pago()

@@ -7,6 +7,7 @@ from rrhh.models import NominaLinea
 from .clasificacion_nomina import destino_de
 
 COLUMNAS_CARGAS = frozenset(('AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BB', 'BC', 'BD'))
+COLUMNAS_RCV = frozenset(('AV', 'AX', 'BB'))
 
 
 def leer_personal_registrado(start, end):
@@ -21,7 +22,8 @@ def leer_personal_registrado(start, end):
         month = period.fecha_fin.replace(day=1)
         row = rows.setdefault(month, dict(percepciones=Decimal(0), despensa=Decimal(0),
             total=Decimal(0), periodos={}, grupos={}, pendientes=[], dias=set(),
-            componentes_cargas={}, destinos_cargas={}, errores_cargas=[], prestaciones_pagadas=Decimal(0)))
+            componentes_cargas={}, destinos_cargas={}, errores_cargas=[], prestaciones_pagadas=Decimal(0),
+            personas_rcv=set(), rcv_nomina=Decimal(0)))
         if period.pk not in row['periodos']:
             row['periodos'][period.pk] = dict(id=period.pk, inicio=period.fecha_inicio,
                 fin=period.fecha_fin, estatus=period.estatus)
@@ -69,16 +71,21 @@ def leer_personal_registrado(start, end):
                   and c.codigo_concepto.startswith(prefijo)]
         columnas = [c.codigo_concepto[len(prefijo):] for c in cargas]
         if cargas:
-            if (len(columnas) != len(COLUMNAS_CARGAS) or set(columnas) != COLUMNAS_CARGAS
-                    or emp.pk in row['destinos_cargas']):
+            completas = len(columnas) == len(COLUMNAS_CARGAS) and set(columnas) == COLUMNAS_CARGAS
+            solo_rcv = len(columnas) == len(COLUMNAS_RCV) and set(columnas) == COLUMNAS_RCV
+            if not (completas or solo_rcv) or emp.pk in row['personas_rcv']:
                 row['errores_cargas'].append(f'Línea {line.pk}: cargas mensuales incompletas o duplicadas.')
             else:
-                row['destinos_cargas'][emp.pk] = destination
-                group['personas_cargas'].append(emp.pk)
-                for col, cargo in zip(columnas, cargas):
-                    row['componentes_cargas'][col] = row['componentes_cargas'].get(col, Decimal(0)) + cargo.importe
-                    if col != 'AY':
-                        group['cargas_sin_isn'] += cargo.importe
+                row['personas_rcv'].add(emp.pk)
+                row['rcv_nomina'] += sum((c.importe for col, c in zip(columnas, cargas)
+                                         if col in COLUMNAS_RCV), Decimal(0))
+                if completas:
+                    row['destinos_cargas'][emp.pk] = destination
+                    group['personas_cargas'].append(emp.pk)
+                    for col, cargo in zip(columnas, cargas):
+                        row['componentes_cargas'][col] = row['componentes_cargas'].get(col, Decimal(0)) + cargo.importe
+                        if col != 'AY':
+                            group['cargas_sin_isn'] += cargo.importe
         group['personas'].add(emp.pk)
         for target in (row, group):
             target['percepciones'] += line.total_percepciones
@@ -125,6 +132,9 @@ def leer_personal_registrado(start, end):
         for departamento in row['departamentos']:
             departamento['personas'] = len(departamento['personas'])
         row['personas'] = len(personas_mes)
+        # Una familia completa acredita su importe, sin cerrar las demás cargas ni su reparto.
+        row['rcv_cubierto'] = (row.pop('personas_rcv') == personas_mes
+                              and row['mes_cubierto'] and not row['errores_cargas'])
         row['cargas_cubiertas'] = (set(row['destinos_cargas']) == personas_mes
                                    and row['mes_cubierto'] and not row['pendientes']
                                    and not row['errores_cargas'])
