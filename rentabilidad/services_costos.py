@@ -3,6 +3,20 @@ from calendar import monthrange
 from decimal import Decimal
 
 
+def productos_nativos_por_sku(filas):
+    """Candidatos por clave exacta; conserva colisiones para no elegir el primero."""
+    from collections import defaultdict
+    from pos_bridge.models import PointProduct
+    from recetas.utils.normalizacion import normalizar_nombre
+
+    codigos = {fila["product__sku"] for fila in filas if not fila["product_id"] and fila["product__sku"]}
+    candidatos = defaultdict(lambda: defaultdict(set))
+    for producto in PointProduct.objects.filter(sku__in=codigos).only("id", "external_id", "sku", "name"):
+        if producto.external_id.isdigit():
+            candidatos[producto.sku][normalizar_nombre(producto.name)].add(producto.pk)
+    return candidatos
+
+
 def _costos_recetas_para_periodo(receta_ids, periodo, fin_periodo):
     return {pk: fuente["cost"] for pk, fuente in _fuentes_recetas_para_periodo(receta_ids, periodo, fin_periodo).items()}
 
@@ -138,6 +152,14 @@ def asignar_recetas_identificadas(filas):
 def asignar_costos_filas(filas, periodo, fin_periodo):
     """Misma precedencia de receta, adquisición y decisión DG en todos los lectores."""
     from recetas.models import Receta
+    from recetas.utils.normalizacion import normalizar_nombre
+    # shortcut: regla revisada solo para 2025; ampliar tras auditar otro ejercicio.
+    if periodo.year == 2025:
+        productos = productos_nativos_por_sku(filas)
+        for fila in filas:
+            ids = productos.get(fila["product__sku"], {}).get(normalizar_nombre(fila["product__name"]), set())
+            if not fila["product_id"] and len(ids) == 1:
+                fila["product_id"] = next(iter(ids))
     asignar_recetas_identificadas(filas)
     ids = {f["receta_id"] for f in filas if f["receta_id"]}
     recipes = _fuentes_recetas_para_periodo(ids, periodo, fin_periodo)
