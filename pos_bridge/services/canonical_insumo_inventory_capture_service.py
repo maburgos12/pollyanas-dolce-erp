@@ -30,7 +30,7 @@ class CanonicalInsumoInventoryCaptureService:
             branch = self._official_branch(location)
             rows = [
                 row
-                for row in self.capture_service.capture_all_rows(
+                for row in self.capture_service.capture_supply_rows(
                     branch_hint=location,
                     branch_external_id=branch.external_id,
                 )
