@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from maestros.models import CostoInsumo, Proveedor
 from pos_bridge.models import PointProduct
@@ -12,6 +12,8 @@ from pos_bridge.browser.inventory_page import PointInventoryPage
 from pos_bridge.browser.session import BrowserSessionManager
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.services.auth_service import PointAuthService
+from pos_bridge.services.point_http_client import PointHttpSessionClient
+from pos_bridge.utils.exceptions import ExtractionError
 from pos_bridge.services.point_cost_validation import validate_point_inventory_cost_row
 from pos_bridge.services.recipe_identity_service import PointRecipeIdentityService
 from reportes.models import ProductoReventaCosto
@@ -296,6 +298,41 @@ class PointInventoryCostCaptureService:
                         continue
                     if normalized_queries and any(query and query in haystack for query in normalized_queries):
                         results.append(normalized)
+        return results
+
+    def capture_supply_rows(self, *, branch_hint: str, branch_external_id: str) -> list[PointInventoryCostRow]:
+        if not str(branch_external_id or "").strip().isdigit():
+            raise ExtractionError("Se requiere el identificador numérico de la ubicación Point.")
+        results = []
+        with PointHttpSessionClient(self.settings) as client:
+            client.login(branch_hint=self.INVENTORY_LOGIN_WORKSPACE)
+            categories = client.get_insumo_categories()
+            if not categories:
+                raise ExtractionError("Point no devolvió el catálogo de categorías de insumos.")
+            for category in categories:
+                if not isinstance(category, dict) or category.get("PK_Categoria_insumo") in (None, ""):
+                    raise ExtractionError("Point devolvió una categoría de insumos sin identificador.")
+                category_name = str(category.get("Categoria") or "")
+                records = client.get_branch_insumos(
+                    branch_id=str(branch_external_id).strip(), category_id=category["PK_Categoria_insumo"],
+                )
+                for record in records:
+                    required = ("PK_articulo", "Codigo", "Nombre", "Cantidad", "Unidad")
+                    if not isinstance(record, dict) or any(record.get(key) in (None, "") for key in required):
+                        raise ExtractionError("Point devolvió una existencia de insumo incompleta.")
+                    try:
+                        quantity = Decimal(str(record["Cantidad"]))
+                    except (InvalidOperation, ValueError, TypeError) as exc:
+                        raise ExtractionError("Point devolvió una cantidad de insumo inválida.") from exc
+                    if not quantity.is_finite():
+                        raise ExtractionError("Point devolvió una cantidad de insumo no finita.")
+                    cells = [record["PK_articulo"], record["Codigo"], record["Nombre"],
+                             record.get("Categoria") or category_name, quantity, record["Unidad"],
+                             record.get("Costo_unitario", 0), record.get("Costo_total", 0), record.get("Ult_Mov", "")]
+                    results.append(self._normalize_supply_row(
+                        category_name=category_name, branch_name=branch_hint,
+                        row=[str(value) if value is not None else "" for value in cells],
+                    ))
         return results
 
     def capture_all_rows(
