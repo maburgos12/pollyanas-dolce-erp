@@ -1043,6 +1043,48 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.branch_id, self.centro.id)
         self.assertEqual(issue.source_ids, (ambiguous.id,))
 
+    def test_current_product_name_resolves_when_historical_key_is_stale(self):
+        PointProduct.objects.filter(pk=self.product.pk).update(
+            normalized_name="nombre historico"
+        )
+        self.product.refresh_from_db()
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+
+        resolved = self.service._resolve_product(
+            SimpleNamespace(
+                product_id=None,
+                item_code="",
+                item_name=self.product.name,
+            ),
+            indexes,
+        )
+
+        self.assertEqual(resolved, (self.product.id, "PRODUCT_RESOLVED_BY_NAME"))
+
+    def test_unique_name_disambiguates_duplicate_sku(self):
+        target = PointProduct.objects.create(
+            external_id="818",
+            sku="0160",
+            name="Bollo Lotus",
+        )
+        PointProduct.objects.create(
+            external_id="160",
+            sku="0160",
+            name="Producto distinto",
+        )
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+
+        resolved = self.service._resolve_product(
+            SimpleNamespace(
+                product_id=None,
+                item_code="0160",
+                item_name="Bollo Lotus",
+            ),
+            indexes,
+        )
+
+        self.assertEqual(resolved, (target.id, "PRODUCT_RESOLVED_BY_NAME"))
+
     def test_production_original_product_pk_resolves_ambiguous_sku(self):
         target = PointProduct.objects.create(external_id="112", sku="0112", name="Ciruela")
         PointProduct.objects.create(external_id="948", sku="0112", name="Otro producto")
