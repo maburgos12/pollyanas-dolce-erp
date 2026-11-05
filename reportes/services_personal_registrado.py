@@ -55,7 +55,8 @@ def leer_personal_registrado(start, end):
         default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
             'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'ventas_pendiente'),
             'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
-            'RRHH': 'administracion', 'LOGISTICA': 'logistica'}.get(department, 'sin_clasificar')
+            'RRHH': 'administracion', 'LOGISTICA': 'logistica',
+            'MANTENIMIENTO': 'mantenimiento'}.get(department, 'sin_clasificar')
         destination = destino_de(level, function, predeterminado=default).lower()
         if emp._clave_funcion(level) not in ('JEFATURA', 'DIRECCION'):
             destination = {'LIMPIEZA': 'limpieza', 'ALMACEN': 'almacen'}.get(function, destination)
@@ -124,6 +125,7 @@ def leer_personal_registrado(start, end):
             group['personas'] = len(group['personas'])
             group['destino_label'] = {'tienda': 'Personal de tienda', 'logistica': 'Logística',
                 'administracion': 'Administración', 'produccion': 'Producción', 'cedis': 'Cuartos fríos',
+                'mantenimiento': 'Mantenimiento',
                 'call_center': 'Call center', 'limpieza': 'Limpieza', 'almacen': 'Almacén',
                 'ventas_pendiente': 'Ventas · puesto específico pendiente',
                 'sin_clasificar': 'Departamento o función pendiente'}[group['destino']]

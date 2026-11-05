@@ -8,6 +8,32 @@ from rrhh.models import Empleado, NominaPeriodo, NominaLinea, NominaConceptoLine
 
 
 class PersonalRegistradoTests(TestCase):
+    def test_mantenimiento_registrado_no_se_marca_sin_funcion_ni_como_personal_de_tienda(self):
+        from reportes.services_personal_registrado import leer_personal_registrado
+        sucursal = Sucursal.objects.create(codigo='MANT', nombre='Matriz')
+        empleado = Empleado.objects.create(codigo='mantenimiento', nombre='Persona de mantenimiento',
+            departamento='MANTENIMIENTO', puesto='Mantenimiento', puesto_operativo='MANTENIMIENTO',
+            nivel_organizacional='COLABORADOR', sucursal_ref=sucursal, activo=False)
+        for inicio, fin in [(1,15), (16,30)]:
+            periodo = NominaPeriodo.objects.create(fecha_inicio=date(2026,9,inicio),
+                fecha_fin=date(2026,9,fin), estatus='PAGADA')
+            linea = NominaLinea.objects.create(periodo=periodo, empleado=empleado, salario_base=100)
+            NominaConceptoLinea.objects.create(linea=linea, tipo='PERCEPCION',
+                codigo_concepto='1', nombre='Sueldo', importe=100)
+        antes = list(NominaLinea.objects.filter(empleado=empleado).order_by('pk').values())
+        registro = leer_personal_registrado(date(2026,9,1), date(2026,10,1))[date(2026,9,1)]
+        self.assertEqual(registro['pendientes'], [])
+        self.assertEqual(registro['total'], D(200))
+        self.assertEqual(registro['departamentos'][0]['destino'], 'mantenimiento')
+        self.assertEqual(registro['departamentos'][0]['destino_label'], 'Mantenimiento')
+        self.assertEqual(registro['departamentos'][0]['personas'], 1)
+        self.assertEqual(registro['departamentos'][0]['total'], D(200))
+        self.assertEqual(registro['sucursales_ventas'], [])
+        self.assertEqual(list(NominaLinea.objects.filter(empleado=empleado).order_by('pk').values()), antes)
+        empleado.refresh_from_db()
+        self.assertFalse(empleado.activo)
+        self.assertEqual(empleado.departamento, 'MANTENIMIENTO')
+
     def test_fabricacion_no_asume_etapa_actual_para_un_documento_historico(self):
         from reportes.services_mano_obra_mensual import componente
         row = {'snapshot_origen':'HISTORICA', 'puesto_operativo_snapshot':'',
