@@ -7,15 +7,16 @@ from decimal import Decimal, ROUND_HALF_UP
 import re
 from xml.etree import ElementTree as ET
 
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import Count, Exists, Max, Min, OuterRef, Q, Sum
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
 from core.models import Sucursal
-from rrhh.models import Empleado
+from rrhh.models import Empleado, NominaImportacion
 from sat_client.models import CfdiDescargado
 from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
-from .models import ExpedienteCedulaIMSS, ExpedienteISN
+from .models import ExpedienteCedulaIMSS, ExpedienteISN, FactVentaDiaria
+from .sales_confidence import selected_sales_facts
 from .services_isn import extraer_isn_cfdi
 from .services_personal_registrado import leer_personal_registrado
 from .services_personal_global import resumen_personal_global
@@ -65,6 +66,44 @@ def parse_payroll(xml):
     return end.replace(day=1), amount, payroll.attrib.get('TipoNomina', ''), root
 
 
+def _ajustes_conciliados(registered, fiscal_uuids):
+    controls = {month: dict(amount=ZERO, count=0, errors=[]) for month in registered}
+    period_ids = {p['id'] for row in registered.values() for p in row['periodos']}
+    accepted = {'CARGO_GLOBAL_Y_ASIGNACION_AUTORIZADA_CONCILIADOS',
+                'PAGO_CONCILIADO_CON_LISTA', 'ASIGNACION_EDENRED_Y_SALIDA_BANCARIA_CONCILIADAS'}
+    seen = set()
+    for source in NominaImportacion.objects.filter(
+            periodo_id__in=period_ids, estatus='IMPORTADA').select_related('periodo'):
+        control = controls[source.periodo.fecha_fin.replace(day=1)]
+        try:
+            adjustments = (source.resumen or {}).get('ajustes_por_uuid', {})
+            if not adjustments:
+                continue
+            if not re.fullmatch('[0-9a-f]{64}', source.archivo_hash):
+                raise ValueError
+            amount, count, uuids = ZERO, 0, set()
+            for uuid, items in adjustments.items():
+                uuid = uuid.upper()
+                if uuid in seen or uuid in uuids or uuid not in fiscal_uuids.get(source.periodo.fecha_fin.replace(day=1), set()):
+                    raise ValueError
+                if not items or uuid not in {u.upper() for u in source.resumen.get('uuids', [])}:
+                    raise ValueError
+                for item in items:
+                    value = Decimal(item['importe'])
+                    if (item['estado'] not in accepted or not item.get('soporte') or not value.is_finite()
+                            or value != value.quantize(CENT)):
+                        raise ValueError
+                    amount += value
+                    count += 1
+                uuids.add(uuid)
+            control['amount'] += amount
+            control['count'] += count
+            seen.update(uuids)
+        except (ValueError, TypeError, KeyError, ArithmeticError, AttributeError):
+            control['errors'].append(f'Importación de nómina #{source.pk}: ajustes sin conciliación comprobable.')
+    return controls
+
+
 def build_personnel_plan(cutoff=None):
     today = timezone.localdate()
     last_month = today.replace(day=1) - timedelta(days=1)
@@ -84,6 +123,24 @@ def build_personnel_plan(cutoff=None):
         if hasattr(month, 'date'):
             month = month.date()
         rows[month].update(sales=item['amount'], branches=item['branches'])
+
+    # El export histórico cubre días sin captura oficial; nunca se suman ambas fuentes del mismo local/día.
+    # shortcut: histórico auditado de 2025; ampliar tras verificar identidades y linaje de otros ejercicios.
+    historical_candidates = selected_sales_facts(start_date=start, end_date=end - timedelta(days=1)).filter(
+        source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE, fecha__year=2025)
+    for item in historical_candidates.filter(sucursal_id__isnull=True).annotate(
+            month=TruncMonth('fecha')).values('month').annotate(count=Count('id')):
+        rows[item['month']]['errors'].append(
+            f"{item['count']} ventas históricas sin sucursal: no se incorporan sin resolver su identidad.")
+    historical = historical_candidates.filter(sucursal_id__isnull=False).annotate(point_day=Exists(sales.filter(
+        sale_date=OuterRef('fecha'), branch__erp_branch_id=OuterRef('sucursal_id'),
+    ))).filter(point_day=False)
+    historical_months = list(historical.annotate(month=TruncMonth('fecha')).values(
+        'month', 'sucursal_id', 'sucursal__nombre').annotate(
+            amount=Sum('venta_total'), first=Min('fecha'), last=Max('fecha')))
+    for item in historical_months:
+        row = rows[item['month']]
+        row['sales'] = (row['sales'] or ZERO) + item['amount']
 
     # El expediente aplicado es el control fiscal canónico del ISN. Se carga
     # antes que los CFDI para que el comprobante fuente no se sume otra vez.
@@ -138,7 +195,8 @@ def build_personnel_plan(cutoff=None):
     ).only('id', 'uuid', 'xml_raw', 'tipo_comprobante', 'tipo_cfdi',
            'nombre_emisor', 'fecha_emision', 'total', 'rfc_emisor',
            'rfc_receptor', 'estatus').order_by('id')
-    unparsed = []
+    unparsed, excluded_fiscal = [], []
+    fiscal_uuids = {m: set() for m in periods}
     for invoice in invoices.iterator():
         try:
             source_reconciled = None
@@ -151,12 +209,28 @@ def build_personnel_plan(cutoff=None):
                 key = 'ordinary' if kind == 'O' else 'extraordinary'
                 rows[month][key] += amount
                 rows[month]['cfdis'] += 1
+                fiscal_uuids[month].add(invoice.uuid.upper())
                 detail = 'Nómina ordinaria' if kind == 'O' else 'Nómina extraordinaria'
             else:
                 root = ET.fromstring((invoice.xml_raw or '').lstrip('\ufeff'))
                 concepts = root.findall('.//' + CFDI_NS + 'Concepto')
                 if invoice.rfc_emisor == 'GES8101015I7':
-                    month, amount = extraer_isn_cfdi(invoice)
+                    try:
+                        month, amount = extraer_isn_cfdi(invoice)
+                    except ValueError:
+                        descriptions = [re.sub('[^A-Z]', '', c.attrib.get('Descripcion', '').upper())
+                                        for c in concepts]
+                        ajeno = descriptions and (all(any(word in d for word in (
+                            'PEAJE', 'PLACA', 'CALCOMANIA', 'PROEDUC', 'CRUZROJA', 'CUOTADIF'))
+                            for d in descriptions) or (invoice.total == ZERO
+                            and all(d == 'SINMOVIMIENTOS' for d in descriptions)))
+                        if not ajeno:
+                            raise
+                        issued = timezone.localtime(invoice.fecha_emision).date()
+                        if start <= issued < end:
+                            excluded_fiscal.append(dict(id=invoice.pk,
+                                reason='Peaje, trámite vehicular o documento sin movimientos; no es ISN.'))
+                        continue
                     if month not in rows or month in periodos_isn_aplicados:
                         continue
                     key, detail = 'isn', 'ISN · CFDI estatal sin expediente'
@@ -257,6 +331,7 @@ def build_personnel_plan(cutoff=None):
             ))
 
     registered = leer_personal_registrado(start, end)
+    adjustments = _ajustes_conciliados(registered, fiscal_uuids)
     for row in rows.values():
         if not row['cfdis']:
             row['ordinary'] = row['extraordinary'] = None
@@ -279,6 +354,15 @@ def build_personnel_plan(cutoff=None):
         row['registered'] = registered.get(row['month'])
         row['payroll_difference'] = (row['ordinary'] + row['extraordinary'] - row['registered']['total']
             if row['cfdis'] and row['registered'] else None)
+        control = adjustments.get(row['month'], dict(amount=ZERO, count=0, errors=[]))
+        row['payroll_adjustments'] = control['amount']
+        row['payroll_adjustment_count'] = control['count']
+        row['payroll_unexplained'] = (row['payroll_difference'] + control['amount']
+                                     if row['payroll_difference'] is not None else None)
+        row['payroll_reconciled'] = row['payroll_unexplained'] == ZERO and not control['errors']
+        row['errors'].extend(control['errors'])
+        if control['errors']:
+            row['reconciled_components'] = False
 
     recent = [month_shift(end, n) for n in (-3, -2, -1)]
     policy = budget_policy([rows.get(m, {}).get('sales') for m in recent])
@@ -287,11 +371,28 @@ def build_personnel_plan(cutoff=None):
         .order_by('branch__name'))
     branch_months = list(sales.annotate(month=TruncMonth('sale_date')).values(
         'branch_id', 'month').annotate(amount=Sum('total_amount')))
-    branch_ids = {b['branch_id']: b['branch__erp_branch_id'] for b in branch_rows}
+    for item in branch_rows + branch_months:
+        item['branch_key'] = str(item['branch_id'])
+    historical_branches = {}
+    for item in historical_months:
+        key = f"ERP:{item['sucursal_id']}"
+        branch_months.append(dict(branch_key=key, month=item['month'], amount=item['amount']))
+        branch = historical_branches.setdefault(key, dict(branch_key=key, branch_id=None,
+            branch__erp_branch_id=item['sucursal_id'], branch__name=item['sucursal__nombre'],
+            first=item['first'], last=item['last'], amount=ZERO))
+        branch['first'], branch['last'] = min(branch['first'], item['first']), max(branch['last'], item['last'])
+        branch['amount'] += item['amount']
+    branch_rows.extend(historical_branches.values())
+    branch_ids = {b['branch_key']: b['branch__erp_branch_id'] for b in branch_rows}
     branch_sales = {}
+    month_branches = {m: set() for m in periods}
     for item in branch_months:
-        key = (item['month'], branch_ids[item['branch_id']])
+        sid = branch_ids[item['branch_key']]
+        month_branches[item['month']].add(('ERP', sid) if sid is not None else ('POINT', item['branch_key']))
+        key = (item['month'], sid)
         branch_sales[key] = branch_sales.get(key, ZERO) + item['amount']
+    for month, branches in month_branches.items():
+        rows[month]['branches'] = len(branches) if branches else None
     for month, registered_row in registered.items():
         unclassified = {g['sucursal_id'] for g in registered_row['grupos']
                         if g['destino'] in ('sin_clasificar', 'ventas_pendiente')}
@@ -310,7 +411,7 @@ def build_personnel_plan(cutoff=None):
         recent_sales = []
         for month in recent:
             values = [r['amount'] for r in branch_months
-                      if r['branch_id'] == branch['branch_id'] and r['month'] == month]
+                      if r['branch_key'] == branch['branch_key'] and r['month'] == month]
             recent_sales.append(values[0] if len(values) == 1 else None)
         branch['recent_average'] = money(sum(recent_sales, ZERO) / 3) if all(
             value is not None for value in recent_sales) else None
@@ -327,7 +428,7 @@ def build_personnel_plan(cutoff=None):
                 months=list(rows.values()), selected=rows[month_shift(end, -1)],
                 policy=policy, recent=recent, branches=branch_rows,
                 staff=staff, people=sum(s['people'] for s in staff), sources=sources,
-                unparsed=unparsed, rfc=RFC,
+                unparsed=unparsed, excluded_fiscal=excluded_fiscal, rfc=RFC,
                 sales_total=sum((r['sales'] or ZERO for r in rows.values()), ZERO),
                 documented_total=sum((r['documented'] or ZERO for r in rows.values()), ZERO),
                 branch_catalog=list(Sucursal.objects.values('codigo', 'nombre', 'activa', 'fecha_apertura')))

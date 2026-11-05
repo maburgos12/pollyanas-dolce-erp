@@ -83,7 +83,7 @@ class PersonalGlobalTests(TestCase):
         self.assertIsNone(components['rcv']['porcentaje'])
         self.assertEqual(components['isn']['monto'], D(0))
         self.assertEqual(components['isn']['porcentaje'], D('0.00'))
-        self.assertIsNone(components['provisiones']['monto'])
+        self.assertNotIn('provisiones', components)
 
     def test_missing_sales_payroll_and_expenses_never_claim_zero_complete_cost(self):
         selected = self.selected()
