@@ -40,6 +40,9 @@ worktree="$(json_field "$record" worktree)"
 base="$(json_field "$record" base_commit)"
 scope="$(json_field "$record" scope)"
 owner="$(json_field "$record" owner)"
+if [[ "$state" == "merged" && -f "$registry/factory/$task.json" ]]; then
+  python3 "$SCRIPT_DIR/task_factory.py" --repo "$repo" --task "$task" check-close
+fi
 # Un cierre interrumpido puede dejar el worktree ya removido y la tarea todavía
 # activa. Ese reintento debe poder completarse: solo se exige auditoría manual
 # cuando Git aún lo lista, porque ahí sí hay un estado inconsistente que revisar.
