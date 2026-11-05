@@ -28,6 +28,8 @@ Agregar otros_pagos y el tipo de concepto OTRO_PAGO para conservar el neto sin i
 
 Conservar el tipo EXTRAORDINARIA de los recibos de aguinaldo, PTU y finiquitos; no etiquetarlos como nómina quincenal ordinaria. El lector incluye ambos tipos sin sumar otra vez sus documentos fiscales.
 
+Los índices de Presupuesto vs Real (totales y conceptos), la lectura de rentabilidad por sucursal, fabricación mensual y reparto también respetan el origen histórico. Una función o sucursal histórica desconocida permanece pendiente; no se completa con la relación actual. Se comprueba que un repartidor histórico hoy asignado a cajas conserve su costo en logística y no vuelva a contarse como nómina de tienda.
+
 Procedimiento: inventario_fuentes_datos --term nomina en PostgreSQL; inspección del importador y lectores; consulta acotada de conteos de 2025; pruebas de inmutabilidad histórica, preservación de faltantes, neto con préstamo, importación y consumidores de rentabilidad.
 
 ## Límites y verificación

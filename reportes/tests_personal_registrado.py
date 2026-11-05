@@ -8,6 +8,40 @@ from rrhh.models import Empleado, NominaPeriodo, NominaLinea, NominaConceptoLine
 
 
 class PersonalRegistradoTests(TestCase):
+    def test_fabricacion_no_asume_etapa_actual_para_un_documento_historico(self):
+        from reportes.services_mano_obra_mensual import componente
+        row = {'snapshot_origen':'HISTORICA', 'puesto_operativo_snapshot':'',
+            'empleado__puesto_operativo':'HORNOS', 'empleado__puesto':'Jefe de producción'}
+        self.assertIsNone(componente(row))
+        row['puesto_operativo_snapshot'] = 'ENVIO_SUCURSAL'
+        self.assertEqual(componente(row), 'despacho')
+
+    def test_consumidores_no_reconstruyen_asignacion_historica_con_rrhh_actual(self):
+        from reportes.services_presupuesto_real import PresupuestoRealConsolidacionService
+        from reportes.services_rentabilidad_personal import leer_personal_mensual
+        from reportes.services_costeo_etapas import leer_logistica
+        suc = Sucursal.objects.create(codigo='HOY', nombre='Actual')
+        emp = Empleado.objects.create(codigo='movido', nombre='Persona', departamento='VENTAS',
+            puesto_operativo='CAJAS', nivel_organizacional='JEFATURA', sucursal_ref=suc)
+        period = NominaPeriodo.objects.create(fecha_inicio=date(2025,1,1),
+            fecha_fin=date(2025,1,31), estatus='CERRADA')
+        line = NominaLinea.objects.create(periodo=period, empleado=emp, salario_base=100,
+            snapshot_origen=NominaLinea.SNAPSHOT_HISTORICA, departamento_snapshot='LOGISTICA',
+            puesto_operativo_snapshot='REPARTIDOR', nivel_organizacional_snapshot='')
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION',
+            codigo_concepto='1', nombre='Sueldo', importe=100)
+        index = PresupuestoRealConsolidacionService._build_nomina_index(date(2025,1,1))
+        concepts = PresupuestoRealConsolidacionService._build_nomina_concepto_index(date(2025,1,1))
+        for row, prefix in [(index[0], ''), (concepts[0], 'linea__')]:
+            self.assertEqual(row[prefix+'empleado__departamento'], 'LOGISTICA')
+            self.assertEqual(row[prefix+'empleado__puesto_operativo'], 'REPARTIDOR')
+            self.assertEqual(row[prefix+'empleado__nivel_organizacional'], '')
+            self.assertIsNone(row[prefix+'empleado__sucursal_ref_id'])
+        self.assertFalse([r for r in leer_personal_mensual(date(2025,1,1))['filas'] if r['familia']=='nomina'])
+        logistics = leer_logistica(date(2025,1,1), date(2025,1,31), {'personas': []})
+        self.assertEqual(len(logistics['personal']), 1)
+        self.assertEqual(logistics['personal'][0]['monto'], D(100))
+
     def test_otro_pago_conserva_neto_sin_sumarlo_al_costo_salarial(self):
         from reportes.services_personal_registrado import leer_personal_registrado
         from django.core.management import call_command

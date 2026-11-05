@@ -10,6 +10,7 @@ from logistica.models import (BitacoraSalidaLlegada, CargaCombustibleUnidad,
 from pos_bridge.models import PointSalesDailyProductFact
 from reportes.models import LineaPresupuestoMensual, ReglaAsignacionGasto, RecetaCostoHistoricoMensual, ProductoReventaCostoHistoricoMensual
 from reportes.services_costeo_cargas import leer_cargas_pagadas
+from reportes.clasificacion_nomina import aplicar_identidad_historica
 from reportes.services_costeo_logistica import leer_reparto_logistico
 from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
 from reportes.services_rentabilidad_personal import leer_personal_mensual
@@ -42,13 +43,17 @@ def leer_logistica(inicio, fin, mo):
     usuarios = dict(Repartidor.objects.filter(id__in=ids).values_list('id', 'user_id'))
     produccion_ids = {p['id'] for p in mo['personas']}
     nominas = list(NominaLinea.objects.filter(
-        Q(empleado__usuario_erp_id__in=usuarios.values()) | Q(empleado__puesto_operativo='REPARTIDOR') | Q(empleado_id__in=produccion_ids),
+        Q(empleado__usuario_erp_id__in=usuarios.values()) | Q(empleado__puesto_operativo='REPARTIDOR') | Q(empleado_id__in=produccion_ids) |
+        Q(snapshot_origen='HISTORICA', puesto_operativo_snapshot='REPARTIDOR'),
         periodo__fecha_fin__range=(inicio, fin), periodo__estatus__in=['CERRADA', 'PAGADA'])
         .values('id', 'empleado_id', 'empleado__nombre', 'empleado__puesto_operativo',
             'empleado__usuario_erp_id', 'empleado__departamento', 'empleado__sucursal_ref_id',
-            'departamento_snapshot', 'total_percepciones', 'horas_trabajadas'))
+            'departamento_snapshot', 'sucursal_snapshot_id', 'snapshot_origen',
+            'puesto_operativo_snapshot', 'nivel_organizacional_snapshot',
+            'total_percepciones', 'horas_trabajadas'))
     personal, exclusiones, candidatos = {}, defaultdict(lambda: ZERO), []
     for n in nominas:
+        aplicar_identidad_historica(n)
         if n['empleado_id'] in produccion_ids:
             if n['empleado__departamento'] == 'VENTAS' and n['empleado__sucursal_ref_id']:
                 exclusiones[n['empleado__sucursal_ref_id']] += n['total_percepciones']
