@@ -510,9 +510,13 @@ class BranchInventoryTraceabilityService:
             sku = product.sku.strip()
             if sku:
                 sku_candidates.setdefault(sku, []).append(product.id)
-            normalized_name = product.normalized_name.strip()
-            if normalized_name:
-                name_candidates.setdefault(normalized_name, []).append(product.id)
+            for normalized_name in (
+                product.normalized_name.strip(),
+                _normalize_name(product.name),
+            ):
+                candidates = name_candidates.setdefault(normalized_name, [])
+                if normalized_name and product.id not in candidates:
+                    candidates.append(product.id)
         return MappingProxyType(
             {
                 "id": MappingProxyType(by_id),
@@ -1674,6 +1678,9 @@ class BranchInventoryTraceabilityService:
     @staticmethod
     def _resolve_product_identity(code, name, indexes):
         item_code = str(code or "").strip()
+        name_matches = indexes["normalized_name"].get(
+            _normalize_name(str(name or "")), ()
+        )
         if item_code:
             external_match = indexes["external_id"].get(item_code)
             if external_match is not None:
@@ -1682,10 +1689,14 @@ class BranchInventoryTraceabilityService:
             if len(sku_matches) == 1:
                 return int(sku_matches[0]), "PRODUCT_RESOLVED_BY_SKU"
             if len(sku_matches) > 1:
+                narrowed = tuple(
+                    product_id
+                    for product_id in sku_matches
+                    if product_id in name_matches
+                )
+                if len(narrowed) == 1:
+                    return int(narrowed[0]), "PRODUCT_RESOLVED_BY_NAME"
                 return None, "AMBIGUOUS_PRODUCT"
-        name_matches = indexes["normalized_name"].get(
-            _normalize_name(str(name or "")), ()
-        )
         if len(name_matches) == 1:
             return int(name_matches[0]), "PRODUCT_RESOLVED_BY_NAME"
         if len(name_matches) > 1:
@@ -1697,25 +1708,11 @@ class BranchInventoryTraceabilityService:
         direct_product_id = getattr(row, "product_id", None)
         if direct_product_id in indexes["id"]:
             return int(direct_product_id), None
-
-        item_code = str(getattr(row, "item_code", "") or "").strip()
-        if item_code:
-            external_match = indexes["external_id"].get(item_code)
-            if external_match is not None:
-                return int(external_match), None
-            sku_matches = indexes["sku"].get(item_code, ())
-            if len(sku_matches) == 1:
-                return int(sku_matches[0]), "PRODUCT_RESOLVED_BY_SKU"
-            if len(sku_matches) > 1:
-                return None, "AMBIGUOUS_PRODUCT"
-
-        normalized_name = _normalize_name(str(getattr(row, "item_name", "") or ""))
-        name_matches = indexes["normalized_name"].get(normalized_name, ())
-        if len(name_matches) == 1:
-            return int(name_matches[0]), "PRODUCT_RESOLVED_BY_NAME"
-        if len(name_matches) > 1:
-            return None, "AMBIGUOUS_PRODUCT"
-        return None, "UNRESOLVED_PRODUCT"
+        return BranchInventoryTraceabilityService._resolve_product_identity(
+            getattr(row, "item_code", ""),
+            getattr(row, "item_name", ""),
+            indexes,
+        )
 
     @classmethod
     def _resolve_production_product(cls, row, indexes) -> tuple[int | None, str | None]:
