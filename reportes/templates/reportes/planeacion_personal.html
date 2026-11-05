@@ -4,7 +4,7 @@
 {% block page_title %}Planeación de personal{% endblock %}
 {% block extra_css %}
 <style>
-.personal-plan{display:grid;gap:24px}.personal-plan .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.personal-plan .metric{border-top:3px solid var(--vino);padding-top:16px}.personal-plan .metric strong{display:block;font-size:1.7rem;font-variant-numeric:tabular-nums;margin:8px 0}.personal-plan table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.personal-plan th,.personal-plan td{padding:12px;text-align:right;border-bottom:1px solid var(--gris-suave)}.personal-plan th:first-child,.personal-plan td:first-child{text-align:left}.personal-plan th{background:var(--rosa);color:var(--texto)}.personal-plan .table-responsive{overflow:auto}.personal-plan .reading{max-width:85ch;line-height:1.6}.personal-plan .tools{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.personal-plan h2{font-size:1.3rem}.personal-plan .period-label{font-weight:700;color:var(--vino)}.personal-plan details summary{cursor:pointer;padding:12px 0}.personal-plan .source{white-space:normal}.personal-plan .sale-bar{height:8px;background:var(--vino);border-radius:2px;min-width:2px}.personal-plan .caption{font-size:.9rem;color:var(--texto-light)}
+.personal-plan{display:grid;gap:24px}.personal-plan .metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.personal-plan .metric{border-top:3px solid var(--vino);padding-top:16px}.personal-plan .metric strong{display:block;font-size:1.7rem;font-variant-numeric:tabular-nums;margin:8px 0}.personal-plan table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}.personal-plan th,.personal-plan td{padding:12px;text-align:right;border-bottom:1px solid var(--gris-suave)}.personal-plan th:first-child,.personal-plan td:first-child{text-align:left}.personal-plan thead th{background:var(--rosa);color:var(--texto)}.personal-plan .table-responsive{overflow:auto}.personal-plan tfoot{font-weight:700;background:var(--rosa)}.personal-plan tbody th{font-weight:600}.personal-plan tbody th,.personal-plan tfoot th{text-transform:none;letter-spacing:normal}.personal-plan .reading{max-width:85ch;line-height:1.6}.personal-plan .tools{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.personal-plan h2{font-size:1.3rem}.personal-plan .period-label{font-weight:700;color:var(--vino)}.personal-plan details summary{cursor:pointer;padding:12px 0}.personal-plan .source{white-space:normal}.personal-plan .sale-bar{height:8px;background:var(--vino);border-radius:2px;min-width:2px}.personal-plan .caption{font-size:.9rem;color:var(--texto-light)}
 @media(max-width:800px){.personal-plan .metrics{grid-template-columns:1fr}.personal-plan .metric strong{font-size:1.4rem}}
 @media print{.sidebar,.topbar,.module-tabs,.personal-plan .tools{display:none!important}.main-content{margin:0!important}.personal-plan .table-responsive{overflow:visible}.personal-plan th,.personal-plan td{white-space:normal;padding:5px;font-size:9pt}.personal-plan .card{break-inside:avoid}.personal-plan{gap:14px}details{display:none}}
 </style>
@@ -37,6 +37,27 @@
   <p class="caption">Matriz como adscripción no significa que todo ese costo pertenezca a la tienda. Limpieza, almacén, cuartos fríos, producción, administración/jefaturas, logística y call center se muestran aparte. Función actual de RRHH y sucursal histórica de nómina; no son una plantilla vigente. Personas únicas por grupo: un traslado puede aparecer en más de uno. Percepciones y despensa se concilian sin duplicarlas. Faltan cargas patronales y provisiones: no usar estos porcentajes como disponibilidad para contratar.</p>
   {% if selected.registered.pendientes %}<details><summary>Pendientes de la lista de raya ({{ selected.registered.pendientes|length }})</summary><ul>{% for item in selected.registered.pendientes %}<li>{{ item }}</li>{% endfor %}</ul></details>{% endif %}
   {% else %}<p>Sin listas de raya cerradas o pagadas para este corte.</p>{% endif %}
+</section>
+<section class="card" aria-labelledby="departamentos-global">
+  <h2 id="departamentos-global">Global por departamento · {{ selected.month|date:"m/Y" }}</h2>
+  <p class="reading">Personal de todas las ubicaciones, agrupado por función. Matriz es una ubicación física; producción, cuartos fríos y logística se mantienen separados de la venta de tienda. Cada porcentaje usa las ventas totales de la empresa del mismo mes.</p>
+  {% if selected.registered %}
+  <div class="table-responsive"><table><thead><tr><th scope="col">Departamento / función</th><th scope="col">Personas</th><th scope="col">Percepciones</th><th scope="col">Vales adicionales</th><th scope="col">Nómina registrada</th><th scope="col">% de ventas totales</th></tr></thead><tbody>
+  {% for g in selected.global.departamentos %}<tr><th scope="row">{{ g.destino_label }}</th><td>{{ g.personas }}</td><td>{{ g.percepciones|floatformat:2|intcomma }}</td><td>{{ g.despensa|floatformat:2|intcomma }}</td><td>{{ g.total|floatformat:2|intcomma }}</td><td>{{ g.porcentaje|default_if_none:"—" }}</td></tr>{% endfor %}
+  </tbody><tfoot><tr><th scope="row">Total de nómina y vales</th><td>{{ selected.global.personas }}</td><td>{{ selected.registered.percepciones|floatformat:2|intcomma }}</td><td>{{ selected.registered.despensa|floatformat:2|intcomma }}</td><td><strong>{{ selected.global.nomina|floatformat:2|intcomma }}</strong></td><td><strong>{{ selected.global.nomina_porcentaje|default_if_none:"—" }}</strong></td></tr></tfoot></table></div>
+  <p class="caption">Personas únicas dentro de cada función y en el total: un traslado entre sucursales no duplica a la persona. Una persona con más de una función histórica puede aparecer en varios grupos. Las cargas patronales y prestaciones pendientes se muestran en el resumen final; no se distribuyen por departamento sin respaldo.</p>
+  {% else %}<p>Sin listas de raya para consolidar departamentos en este mes.</p>{% endif %}
+  <h3>Gastos operativos por área registrada</h3>
+  <div class="table-responsive"><table><thead><tr><th scope="col">Área de gasto</th><th scope="col">Importe mensual identificado</th><th scope="col">% de ventas totales</th><th scope="col">Registros con soporte o reparto parcial</th></tr></thead><tbody>
+  {% for g in selected.global.gastos_areas %}<tr><th scope="row">{{ g.nombre }}</th><td>{{ g.total|floatformat:2|intcomma }}</td><td>{{ g.porcentaje|default_if_none:"—" }}</td><td>{{ g.parciales }} de {{ g.registros }}</td></tr>{% empty %}<tr><td colspan="4">Sin gastos operativos identificados para sumar en este corte; no equivale a gasto cero.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="caption">Se reutilizan las fuentes y repartos documentados de Rentabilidad. Las áreas de gasto pueden agrupar varias funciones de personal: no se reparte administración entre limpieza o almacén por suposición. Este bloque no incluye materia prima, empaque de fabricación ni inversiones; tampoco vuelve a sumar nómina o bonos. Un importe parcial no constituye cierre del área.</p>
+  <details><summary>Ver gastos incluidos ({{ selected.global.fuentes_gastos|length }}) y pendientes ({{ selected.global.pendientes_gastos|length }})</summary>
+    <div class="table-responsive"><table><thead><tr><th>Fuente / ID</th><th>Área / concepto</th><th>Importe mensual</th><th>Estado / pendiente</th></tr></thead><tbody>
+    {% for f in selected.global.fuentes_gastos %}<tr><td>{{ f.origen }} #{{ f.registro_id }}</td><td class="source">{{ f.area }} · {{ f.concepto }}</td><td>{{ f.monto_mensual|floatformat:2|intcomma }}</td><td class="source">{{ f.estado }} {{ f.detalle }}</td></tr>{% endfor %}
+    {% for f in selected.global.pendientes_gastos %}<tr><td>{{ f.origen }} #{{ f.registro_id }}</td><td class="source">{{ f.area }} · {{ f.concepto }}</td><td>Pendiente</td><td class="source">{{ f.detalle }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  </details>
 </section>
 <section class="card">
 {% if policy %}
@@ -79,6 +100,22 @@
   <h2>Reglas para utilizar el presupuesto</h2>
   <ol><li>Comparar el costo habitual completo con el objetivo; reservar dentro de él prestaciones y cargas, sin duplicar pagos ya reconocidos.</li><li>Evaluar refuerzos por pedidos, turnos y capacidad de producción. Restar del límite el costo integral habitual y los refuerzos ya comprometidos; no convertir toda la diferencia entre 25% y 27% en plazas.</li><li>Comprobar el efectivo disponible después de insumos, operación e impuestos antes de comprometer una contratación.</li><li>Evaluar el trimestre sumando costos y ventas del mismo periodo. No promediar porcentajes mensuales ni eliminar la PTU por ser extraordinaria.</li></ol>
   <p>Este módulo calcula límites y muestra sus fuentes. No autoriza contrataciones ni atribuye a un local ventas anteriores a su apertura.</p>
+</section>
+<section class="card" aria-labelledby="resumen-global">
+  <h2 id="resumen-global">Resumen final · peso sobre las ventas totales</h2>
+  <p class="reading">Corte {{ selected.month|date:"m/Y" }}. Ventas Point con impuestos: <strong>{% if selected.global.ventas is not None %}${{ selected.global.ventas|floatformat:2|intcomma }}{% else %}Sin registro{% endif %}</strong>. Los porcentajes son costo registrado ÷ venta del mes × 100.</p>
+  <div class="table-responsive"><table><thead><tr><th scope="col">Componente</th><th scope="col">Importe del mes</th><th scope="col">% de ventas totales</th></tr></thead><tbody>
+  {% for c in selected.global.componentes %}<tr><th scope="row">{{ c.nombre }}</th><td>{% if c.monto is not None %}{{ c.monto|floatformat:2|intcomma }}{% else %}Pendiente{% endif %}</td><td>{{ c.porcentaje|default_if_none:"—" }}</td></tr>{% endfor %}
+  </tbody><tfoot>
+    <tr><th scope="row">Personal con cargas identificadas · subtotal</th><td>{{ selected.global.personal_subtotal|default_if_none:"Pendiente"|intcomma }}</td><td>{{ selected.global.personal_porcentaje|default_if_none:"—" }}</td></tr>
+    <tr><th scope="row">Personal + gastos operativos identificados · subtotal</th><td><strong>{{ selected.global.subtotal|default_if_none:"Pendiente"|intcomma }}</strong></td><td><strong>{{ selected.global.porcentaje|default_if_none:"—" }}</strong></td></tr>
+    <tr><th scope="row">Costo integral cerrado</th><td colspan="2">Pendiente de conciliación</td></tr>
+  </tfoot></table></div>
+  <p class="caption">Los dos subtotales son niveles del mismo costo: no se suman entre sí. Bonos, horas extra y prestaciones pagadas que ya forman parte de percepciones se cuentan una sola vez. Las provisiones corresponden únicamente a prestaciones devengadas aún no reconocidas, por conciliar.</p>
+  <p class="reading"><strong>Cobertura pendiente:</strong> {{ selected.global.pendientes_gastos|length }} referencias de gastos pendientes y {{ selected.global.gastos_parciales }} registros parciales. Las cargas sin importe aparecen como pendientes, no como cero. Falta conciliar la diferencia entre CFDI y listas: {{ selected.payroll_difference|default_if_none:"sin comparación disponible"|intcomma }}. Esa diferencia y el total fiscal no se agregan automáticamente a este subtotal.</p>
+  {% if selected.registered and not selected.registered.mes_cubierto %}<p><strong>La nómina no cubre el mes completo; el subtotal y su porcentaje son parciales.</strong></p>{% endif %}
+  {% if selected.registered.pendientes %}<p><strong>Hay {{ selected.registered.pendientes|length }} observaciones de conciliación en las listas de raya.</strong></p>{% endif %}
+  <p class="caption">No es utilidad, costo total de fabricar ni saldo disponible para contratar. Materia prima, empaque de fabricación e inversiones quedan fuera de este resumen de personal y gastos operativos.</p>
 </section>
 </main>
 {% endblock %}
