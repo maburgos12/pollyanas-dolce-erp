@@ -155,6 +155,16 @@ def build_personnel_plan(cutoff=None):
                 root = ET.fromstring((invoice.xml_raw or '').lstrip('\ufeff'))
                 concepts = root.findall('.//' + CFDI_NS + 'Concepto')
                 if invoice.rfc_emisor == 'GES8101015I7':
+                    descriptions = [c.attrib.get('Descripcion', '').upper() for c in concepts]
+                    peajes = descriptions and all('PEAJE' in d for d in descriptions)
+                    vehicular = (any('CALCOMANIA PART.' in d for d in descriptions)
+                        and all(any(t in d for t in ('CALCOMANIA PART.', 'PRO-EDUC.', 'CRUZ ROJA'))
+                                for d in descriptions))
+                    identifica_nomina = any('NOMINA' in (
+                        c.attrib.get('NoIdentificacion', '') + ' ' + c.attrib.get('Descripcion', '')
+                        ).upper().replace('Ó', 'O') for c in concepts)
+                    if (peajes or vehicular) and not identifica_nomina:
+                        continue  # Son otros gastos estatales; no son comprobantes de ISN.
                     month, amount = extraer_isn_cfdi(invoice)
                     if month not in rows or month in periodos_isn_aplicados:
                         continue

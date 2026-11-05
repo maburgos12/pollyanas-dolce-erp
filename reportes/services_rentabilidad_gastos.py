@@ -100,23 +100,33 @@ def _asignar_cobertura(monto, centro, reglas, inicio, fin, periodo, reparto_docu
                   (inicio.year * 12 + inicio.month - 1 + n) % 12 + 1, 1)
              for n in range((fin.year - inicio.year) * 12 + fin.month - inicio.month + 1)]
     juegos = {}
+    historia_incompleta = False
     for mes in meses:
         vigentes = _reglas_del_mes(reglas, mes)
         if not vigentes:
+            if mes != periodo:
+                historia_incompleta = True
+                continue
             raise ValueError("Falta historia de reparto para un mes de la cobertura.")
+        verificables = True
         for regla in vigentes:
             directo = centro.tipo == "SUCURSAL_VENTA" and centro.sucursal_id == _sucursal(regla)
-            if not directo and not (regla.filtros or {}).get("desde") and regla.actualizado_en.date().replace(day=1) > inicio:
+            if not directo and not (regla.filtros or {}).get("desde") and regla.actualizado_en.date().replace(day=1) > mes:
                 documentado = (reparto_documentado or {}).get(regla.pk)
                 esperado = _repartir(monto, centro, [regla])[0][0][2]
                 if inicio != fin or documentado != esperado:
-                    raise ValueError("Sin historia verificable para aplicar el reparto actual.")
+                    if mes == periodo:
+                        raise ValueError("Sin historia verificable para aplicar el reparto actual.")
+                    verificables = False
+        if not verificables:
+            historia_incompleta = True
+            continue
         juegos[mes] = _repartir(monto, centro, vigentes)
     # Cambiar solo la identidad/version de una regla no cambia sus proporciones.
     def firma(asignaciones):
         return sorted((a[3], a[4] or 0, a[1], a[0].signo) for a in asignaciones)
     actual, incompleto = juegos[periodo]
-    cambio = any(firma(asignaciones) != firma(actual) for asignaciones, _ in juegos.values())
+    cambio = historia_incompleta or any(firma(asignaciones) != firma(actual) for asignaciones, _ in juegos.values())
     if cambio:
         if any(parcial for _, parcial in juegos.values()):
             raise ValueError("La historia de reparto no cubre el 100% de cada mes del recibo.")

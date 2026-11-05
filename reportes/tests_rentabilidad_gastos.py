@@ -6,6 +6,7 @@ import importlib.util
 from django.test import SimpleTestCase, TestCase
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from core.models import Sucursal
 from .models import (AreaPresupuesto, CategoriaGasto, CentroCosto, GastoOperativoMensual,
                      GastoRecurrente, GastoRecurrenteVersion, LineaPresupuestoMensual,
@@ -317,6 +318,19 @@ class LectorGastosMensualesTests(TestCase):
         resultado = self.leer()
         self.assertFalse(resultado["filas"])
         self.assertTrue(any("historia" in f["detalle"] for f in resultado["pendientes"]))
+
+    def test_cobertura_anual_no_bloquea_mes_con_reparto_ya_registrado(self):
+        self.gasto(centro_costo=self.compartido, monto=Decimal("120.01"),
+                   cobertura_mes_inicio=self.mes, cobertura_mes_fin=date(2026, 12, 1))
+        regla = self.regla(centro_costo=self.compartido, filtros={"porcentaje": 100})
+        ReglaFuenteRubro.objects.filter(pk=regla.pk).update(
+            actualizado_en=timezone.now().replace(year=2026, month=9, day=1))
+        octubre = self.leer(date(2026, 10, 1))
+        diciembre = self.leer(date(2026, 12, 1))
+        self.assertEqual([f["monto_mensual"] for f in octubre["filas"]], [Decimal("10.00")])
+        self.assertEqual([f["monto_mensual"] for f in diciembre["filas"]], [Decimal("10.01")])
+        self.assertEqual(octubre["pendientes"], [])
+        self.assertEqual(self.leer()["filas"], [])
 
     def test_fila_contrato_conserva_version_vigencia_y_base_asignada(self):
         recurrente = GastoRecurrente.objects.create(area=self.area, rubro=self.rubro,

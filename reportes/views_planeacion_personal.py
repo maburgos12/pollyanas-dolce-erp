@@ -83,10 +83,16 @@ def planeacion_personal(request):
         writer.writerow(['Ventas totales con impuestos', global_row['ventas']])
         for component in global_row['componentes']:
             writer.writerow([component[k] for k in ('nombre', 'monto', 'porcentaje')])
+        if global_row['prestaciones_al_pago']:
+            writer.writerow(['Criterio de prestaciones', 'Reconocimiento al pago, confirmado por DG'])
+            writer.writerow(['Prestaciones pagadas ya incluidas en percepciones, no volver a sumar',
+                             global_row['prestaciones_pagadas']])
+            writer.writerow(['Apartados bancarios', 'Ahorro interno; no son gasto adicional'])
         writer.writerow(['Subtotal personal con cargas identificadas', global_row['personal_subtotal'],
                          global_row['personal_porcentaje']])
         writer.writerow(['Subtotal personal y gastos identificados', global_row['subtotal'], global_row['porcentaje']])
-        writer.writerow(['Costo integral cerrado', 'Pendiente de conciliacion'])
+        writer.writerow(['Costo integral cerrado', global_row['costo_integral']
+                         if global_row['costo_integral'] is not None else 'Pendiente de conciliacion'])
         writer.writerow(['Alcance', 'No incluye materia prima, empaque de fabricacion ni inversiones. '
                          'No sumar subtotales entre si ni CFDI a listas. Vacio significa pendiente, no cero.'])
         writer.writerow(['Diferencia CFDI menos lista, no sumable', data['selected']['payroll_difference']])

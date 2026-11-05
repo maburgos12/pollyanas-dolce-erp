@@ -10,7 +10,7 @@ from django.core.files.storage import default_storage
 from django.test.utils import CaptureQueriesContext
 
 from core.models import Sucursal
-from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriodo
+from rrhh.models import Empleado, NominaConceptoLinea, NominaImportacion, NominaLinea, NominaPeriodo
 from .models import AreaPresupuesto, CategoriaGasto, CentroCosto, GastoOperativoMensual, ObligacionGasto, RubroPresupuesto
 from .services_personal_global import resumen_personal_global
 from .services_personal_registrado import leer_personal_registrado
@@ -89,6 +89,27 @@ class PersonalGlobalTests(TestCase):
                 NominaConceptoLinea.objects.create(linea=line, tipo='OBLIGACION',
                     codigo_concepto=f'M202610:{column}', nombre=column, importe=amount)
 
+    def criterio_al_pago(self):
+        NominaImportacion.objects.create(archivo_nombre='cierre-test.xlsx', archivo_hash='a'*64,
+            periodo=NominaPeriodo.objects.get(fecha_fin=date(2026,10,31)), estatus='IMPORTADA',
+            resumen={'criterio_prestaciones': {'mes':'2026-10', 'metodo':'AL_PAGO',
+                'provision_contable_mes':'0.00', 'fuente':'CONFIRMACION_DG'}})
+
+    def test_prestaciones_pagadas_no_se_suman_otra_vez_ni_se_inventa_provision(self):
+        self.criterio_al_pago()
+        line = NominaLinea.objects.order_by('pk').first()
+        line.bonos = D(5)
+        line.save()
+        NominaConceptoLinea.objects.create(linea=line, tipo='PERCEPCION',
+            codigo_concepto='19', nombre='Vacaciones a tiempo', importe=5)
+        result = resumen_personal_global(self.selected())
+        self.assertTrue(result['prestaciones_al_pago'])
+        self.assertEqual(result['prestaciones_pagadas'], D(5))
+        self.assertEqual(result['nomina'], D(445))
+        self.assertEqual(result['personal_subtotal'], D(467))
+        self.assertEqual(next(c['monto'] for c in result['componentes'] if c['clave']=='provisiones'), D(0))
+        self.assertFalse(result['personal_cerrado'])
+
     def test_cargas_mensuales_e_isn_devengado_concilian_departamentos_sin_duplicar(self):
         self.cargas_mensuales()
         bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
@@ -142,6 +163,7 @@ class PersonalGlobalTests(TestCase):
         from .services_planeacion_personal import build_personnel_plan, RFC
         from .tests_planeacion_personal import payroll_xml
         self.cargas_mensuales()
+        self.criterio_al_pago()
         bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
         CfdiDescargado.objects.create(uuid='GLOBAL-NOMINA', rfc_emisor=RFC,
             rfc_receptor='PERSONA', subtotal=440, total=440, tipo_cfdi='emitido',
@@ -164,6 +186,8 @@ class PersonalGlobalTests(TestCase):
         self.assertEqual(selected['documented'], D('509.20'))
         self.assertEqual(selected['global']['personal_subtotal'], selected['documented'])
         self.assertTrue(selected['global']['isn_calculado'])
+        self.assertTrue(selected['global']['personal_cerrado'])
+        self.assertEqual(selected['global']['costo_integral'], D('609.20'))
         self.client.force_login(get_user_model().objects.create_superuser('cargas', password='test-only'))
         with patch('reportes.views_planeacion_personal.build_personnel_plan', return_value=data):
             url = '/reportes/planeacion-personal/?mes=2026-10'
@@ -172,6 +196,7 @@ class PersonalGlobalTests(TestCase):
             self.assertEqual(D(exported['costo_departamentos']), D('507.20'))
             self.assertContains(self.client.get(url+'&formato=csv'),
                                 'Total nomina y vales,3,,,440.00,67.20,507.20,')
+            self.assertContains(self.client.get(url+'&formato=csv'), 'Costo integral cerrado,609.20')
 
     def test_transfer_counts_once_and_departments_reconcile(self):
         selected = self.selected()

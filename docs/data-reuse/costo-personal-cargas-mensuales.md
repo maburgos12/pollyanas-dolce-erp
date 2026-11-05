@@ -31,3 +31,11 @@ El costo de departamentos incluye nómina, vales y cargas verificadas, antes del
 ## Verificación
 
 Pruebas con traslado entre sucursales, cobertura completa e incompleta de cargas, impuesto estatal del tabular deliberadamente distinto, cálculo de ISN reutilizado, control patronal discordante y conservación de los totales anteriores. Pantalla y CSV consumen el mismo consolidado. El detalle de auditoría y respaldos operativos permanece fuera del repositorio.
+
+## Reconocimiento de prestaciones confirmado por Dirección
+
+Dirección confirmó que vacaciones, prima y aguinaldo se reconocen al pagarse, y que los apartados bancarios son ahorro interno sin provisión contable mensual documentada. Se conserva esta confirmación, para el mes analizado, en `NominaImportacion.resumen.criterio_prestaciones`, con fuente CONFIRMACION_DG, método AL_PAGO y provisión contable adicional 0.00; AuditLog conserva la actualización. No se modifican el archivo original, los importes de nómina ni los pagos.
+
+El lector distingue esa confirmación de la ausencia de información: solo una confirmación válida permite mostrar cero de provisión adicional. Los conceptos pagados 19/20/21/22/24 ya están en percepciones; su desglose informativo no se suma de nuevo. Cero de provisión contable adicional no significa que no existan derechos laborales acumulados ni que los ahorros bancarios sean un gasto.
+
+Los comprobantes estatales de peaje o calcomanía vehicular se excluyen de la lectura de ISN mediante identificación positiva de sus conceptos; no se presentan como documentos de nómina sin lectura. Los comprobantes de ISN y los casos desconocidos conservan su validación estricta.

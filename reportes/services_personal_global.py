@@ -1,6 +1,8 @@
 """Consolidado mensual de fuentes existentes, sin recalcular ni prorratear gastos."""
 from decimal import Decimal, ROUND_HALF_UP
 
+from rrhh.models import NominaImportacion
+
 from .models import AreaPresupuesto
 from .services_rentabilidad_gastos import leer_gastos_mensuales
 from .services_isn import bases_gravadas_empleados, calcular_isn_sinaloa, prorratear_isn
@@ -96,7 +98,14 @@ def resumen_personal_global(selected):
         components.append(dict(clave=key, nombre=label, monto=amount))
     if cargas_cubiertas and cargas.get('BD'):
         components.append(dict(clave='otras_cargas', nombre='Otras obligaciones registradas en nómina', monto=cargas['BD']))
-    components += [dict(clave='provisiones', nombre='Prestaciones devengadas no pagadas · por conciliar', monto=None)]
+    criterios = list(NominaImportacion.objects.filter(estatus='IMPORTADA',
+        resumen__criterio_prestaciones__mes=selected['month'].strftime('%Y-%m'))
+        .values_list('resumen__criterio_prestaciones', flat=True)) if registered else []
+    prestaciones_al_pago = bool(criterios) and all(
+        isinstance(c, dict) and c.get('metodo') == 'AL_PAGO' and c.get('provision_contable_mes') == '0.00'
+        and c.get('fuente') == 'CONFIRMACION_DG' for c in criterios)
+    components += [dict(clave='provisiones', nombre='Provisiones contables adicionales de prestaciones',
+                        monto=ZERO if prestaciones_al_pago else None)]
     labor_total = (sum((c['monto'] for c in components if c['monto'] is not None), ZERO)
                    if registered else None)
     components.append(dict(clave='gastos', nombre='Gastos operativos identificados', monto=expense_total))
@@ -104,6 +113,10 @@ def resumen_personal_global(selected):
         component['porcentaje'] = porcentaje(component['monto'])
     # Los CFDI y la diferencia fiscal son contraste, nunca otra percepción sumable.
     total = labor_total + (expense_total or ZERO) if labor_total is not None else None
+    personal_cerrado = bool(registered and registered['mes_cubierto'] and not registered['pendientes']
+        and cargas_cubiertas and not cargas_error and prestaciones_al_pago
+        and selected.get('payroll_difference') == ZERO
+        and all(c['monto'] is not None for c in components if c['clave'] != 'gastos'))
     # Sólo se exporta la trazabilidad necesaria; no pagos, cuentas ni archivos privados.
     fields = ('origen', 'registro_id', 'clave', 'area', 'concepto', 'monto_mensual', 'estado', 'detalle', 'referencia_soporte')
     costo_departamentos = (sum((g['costo_personal'] for g in departments), ZERO)
@@ -111,12 +124,15 @@ def resumen_personal_global(selected):
     return dict(
         ventas=sales, departamentos=departments, personas=(registered or {}).get('personas'),
         cargas_error=cargas_error, isn_calculado=isn_calculado,
+        prestaciones_al_pago=prestaciones_al_pago,
+        prestaciones_pagadas=(registered or {}).get('prestaciones_pagadas'), personal_cerrado=personal_cerrado,
         costo_departamentos=costo_departamentos, costo_departamentos_porcentaje=porcentaje(costo_departamentos),
         cargas_total=costo_departamentos - registered['total'] if costo_departamentos is not None else None,
         nomina=(registered or {}).get('total'), nomina_porcentaje=porcentaje((registered or {}).get('total')),
         gastos_areas=sorted(areas.values(), key=lambda g: g['nombre']), gastos_total=expense_total,
         componentes=components, personal_subtotal=labor_total, personal_porcentaje=porcentaje(labor_total),
-        subtotal=total, porcentaje=porcentaje(total), costo_integral=None,
+        subtotal=total, porcentaje=porcentaje(total),
+        costo_integral=total if personal_cerrado and expense_total is not None and not expenses['pendientes'] else None,
         fuentes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['filas']],
         pendientes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['pendientes']],
         gastos_parciales=len(incompletos),

@@ -21,7 +21,7 @@ def leer_personal_registrado(start, end):
         month = period.fecha_fin.replace(day=1)
         row = rows.setdefault(month, dict(percepciones=Decimal(0), despensa=Decimal(0),
             total=Decimal(0), periodos={}, grupos={}, pendientes=[], dias=set(),
-            componentes_cargas={}, destinos_cargas={}, errores_cargas=[]))
+            componentes_cargas={}, destinos_cargas={}, errores_cargas=[], prestaciones_pagadas=Decimal(0)))
         if period.pk not in row['periodos']:
             row['periodos'][period.pk] = dict(id=period.pk, inicio=period.fecha_inicio,
                 fin=period.fecha_fin, estatus=period.estatus)
@@ -32,6 +32,8 @@ def leer_personal_registrado(start, end):
                 row['dias'].add(day.day)
                 day += timedelta(days=1)
         concepts = [c for c in line.conceptos.all() if c.tipo == 'PERCEPCION']
+        row['prestaciones_pagadas'] += sum((c.importe for c in concepts
+            if c.codigo_concepto in ('19', '20', '21', '22', '24')), Decimal(0))
         concept_total = sum((c.importe for c in concepts), Decimal(0))
         vouchers = sum((c.importe for c in concepts if c.codigo_concepto == '32'), Decimal(0))
         extra = Decimal(0)
