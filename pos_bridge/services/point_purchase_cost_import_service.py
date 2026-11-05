@@ -59,6 +59,10 @@ class PointPurchaseCostImportService:
         alias_target = ARTICLE_ALIASES.get(article_name.upper())
         if alias_target:
             return Insumo.objects.filter(nombre__iexact=alias_target).first()
+        if article_name.strip():
+            point_matches = list(Insumo.objects.filter(nombre_point__iexact=article_name)[:2])
+            if len(point_matches) == 1:
+                return point_matches[0]
         return None
 
     @staticmethod
