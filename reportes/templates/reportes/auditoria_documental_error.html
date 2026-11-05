@@ -1,0 +1,2 @@
+{% extends "base.html" %}
+{% block content %}<h1>No se registró la revisión</h1><p role="alert">{{ error }}</p><label for="nota-resguardada">Tu texto se conserva aquí para copiarlo</label><textarea id="nota-resguardada" readonly rows="8">{{ nota }}</textarea><p><a href="{{ back_url }}">Volver al caso</a></p>{% endblock %}
