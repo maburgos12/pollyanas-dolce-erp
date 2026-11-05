@@ -56,3 +56,14 @@ class PersonalFuenteUnicaTests(TestCase):
         baja = Empleado.objects.create(nombre='Baja', nivel_organizacional='JEFATURA', activo=False)
         with self.assertRaises(ValidationError):
             _resolver_jefe_directo_desde_post({'jefe_directo':str(baja.pk)}, {'departamento':'VENTAS'}, jefa)
+
+    def test_organizacion_reutiliza_puesto_especifico_sin_inventar_funcion(self):
+        jefa = Empleado.objects.create(nombre='Jefa con puesto', puesto='Jefe de Ventas',
+            nivel_organizacional='JEFATURA', departamento='VENTAS')
+        vacio = Empleado.objects.create(nombre='Sin información', puesto='', puesto_operativo='')
+        response = self.client.get('/rrhh/organizacion/')
+        rows = {e.pk: e for e in response.context['empleados']}
+        self.assertEqual(rows[jefa.pk].funcion_presentacion, 'Jefe de Ventas')
+        self.assertEqual(rows[vacio.pk].funcion_presentacion, 'Puesto pendiente')
+        jefa.refresh_from_db()
+        self.assertEqual(jefa.puesto_operativo, '')

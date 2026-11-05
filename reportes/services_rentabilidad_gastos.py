@@ -3,6 +3,9 @@ from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
 from django.db.models import Q
+from django.core.exceptions import ValidationError
+from django.core.exceptions import SuspiciousFileOperation
+from django.core.files.storage import default_storage
 
 from .models import (GastoOperativoMensual, GastoRecurrenteVersion,
                      LineaPresupuestoMensual, ObligacionGasto, ReglaFuenteRubro)
@@ -20,6 +23,15 @@ FAMILIA_CONCEPTO = {"arrendamiento local": "renta", "energía eléctrica": "elec
                     "servicio de monitoreo de alarmas y seguridad": "alarmas"}
 PERSONAL_FUENTES = {"NOMINA", "NOMINA_CONCEPTO", "BONO_PRODUCCION", "BONO_VENTAS"}
 PERSONAL_CODIGOS = {"NOMINA", "NOMINA_SUC", "NOMINA_PROD", "NOMINA_CORP", "SIPARE", "IMSS", "INFONAVIT"}
+
+
+def _archivo_disponible(nombre):
+    if not nombre:
+        return False
+    try:
+        return default_storage.exists(nombre) and default_storage.size(nombre) > 0
+    except (OSError, SuspiciousFileOperation, ValueError):
+        return False
 
 
 def _familia(categoria=None, rubro=None):
@@ -197,7 +209,8 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
                   .filter(Q(periodo=periodo) | Q(cobertura_mes_inicio__lte=periodo, cobertura_mes_fin__gte=periodo))
                   .exclude(obligacion_gasto__estado="CANCELADO")
                   .select_related("categoria_gasto", "centro_costo", "obligacion_gasto__rubro",
-                                  "obligacion_gasto__area", "obligacion_gasto__version_recurrente")
+                                  "obligacion_gasto__area", "obligacion_gasto__version_recurrente",
+                                  "cfdi_soporte")
                   .prefetch_related("obligacion_gasto__pagos")
                   .order_by("pk"))
     fuentes = [(g, getattr(g, "obligacion_gasto", None)) for g in gastos]
@@ -229,6 +242,16 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
         fin = gasto.cobertura_mes_fin if gasto else None
         monto = gasto.monto if gasto else obligacion.monto_reconocido
         archivo = (gasto.archivo_soporte if gasto else "") or (obligacion.archivo_soporte if obligacion else "")
+        archivo_disponible = _archivo_disponible(archivo)
+        referencia_cfdi = ''
+        error_cfdi = ''
+        if gasto and gasto.cfdi_soporte_id:
+            from .services_gastos_compromisos import validar_cfdi_soporte
+            try:
+                validar_cfdi_soporte(gasto, gasto.cfdi_soporte)
+                referencia_cfdi = gasto.cfdi_soporte.uuid
+            except ValidationError as exc:
+                error_cfdi = '; '.join(exc.messages)
         soporte = {"archivo": archivo, "gasto_operativo_id": gasto.pk if gasto else None}
         if obligacion:
             soporte.update(obligacion_id=obligacion.pk, monto_obligacion=obligacion.monto_reconocido,
@@ -300,8 +323,9 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
                               vigencia_fin=_fecha_filtro((regla.filtros or {}).get("hasta")))
             mensual = asignado if asignacion_mensualizada else _importe_mensual(asignado, inicio, fin, periodo)
             salida.update(monto_mensual=mensual * (regla.signo if regla else 1), base_asignada=asignado,
-                          estado="COMPLETO" if archivo else "PARCIAL",
-                          detalle="" if archivo else "Importe registrado sin archivo de soporte verificable.")
+                          estado="COMPLETO" if (archivo_disponible or referencia_cfdi) and not error_cfdi else "PARCIAL",
+                          referencia_soporte=f'CFDI {referencia_cfdi}' if referencia_cfdi else ('Documento adjunto disponible' if archivo_disponible else ''),
+                          detalle=error_cfdi or ("" if archivo_disponible or referencia_cfdi else "El soporte no está enlazado a un CFDI ni a un archivo disponible; importe excluido del total respaldado."))
             if obligacion and obligacion.monto_reconocido != monto:
                 salida.update(estado="PARCIAL", detalle="El gasto y la obligación difieren; se conserva el gasto y el importe original de la obligación como evidencia.")
             if reparto_incompleto:

@@ -18,7 +18,7 @@ class PersonalRegistradoTests(TestCase):
         self.assertEqual(response.context['empleados'][0].puesto_presentacion,expected)
         self.assertContains(response,f'<td class="cell-wrap">{expected}</td>',html=True)
         e.refresh_from_db()
-        self.assertEqual(e.puesto,'')
+        self.assertEqual(e.puesto,expected)
 
     def test_dos_quincenas_despensa_y_funciones_conservan_total(self):
         from reportes.services_personal_registrado import leer_personal_registrado
