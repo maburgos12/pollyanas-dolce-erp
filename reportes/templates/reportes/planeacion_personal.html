@@ -19,7 +19,7 @@
 </section>
 <section class="card">
   <h2>Nómina registrada · {{ selected.month|date:"m/Y" }}</h2>
-  {% if selected.global.personal_cerrado %}<p class="reading"><strong>Las percepciones, cargas y prestaciones del personal del mes están identificadas.</strong> Las prestaciones pagadas se reconocen dentro de la nómina. Los gastos operativos conservan su propio detalle de cobertura.</p>{% else %}
+  {% if selected.global.personal_cerrado %}<p class="reading"><strong>Las percepciones, cargas y prestaciones del personal del mes están identificadas.</strong> Las prestaciones pagadas se reconocen dentro de la nómina. Los gastos conservan su propio detalle de cobertura.</p>{% else %}
   <p class="reading"><strong>El costo integral aún requiere conciliación.</strong> La lista de raya y los CFDI son fuentes que se comparan, no importes que se suman entre sí. Los límites de planeación no representan saldo disponible para contratar. Además de las cargas patronales, deben verificarse las prestaciones devengadas del mes y los pagos extraordinarios.</p>{% endif %}
   {% if selected.registered %}
   <p>Lista de raya con despensa: <strong>${{ selected.registered.total|floatformat:2|intcomma }}</strong> · Diferencia de percepciones CFDI menos lista: <strong>{{ selected.payroll_difference|default_if_none:"Sin CFDI comparable"|intcomma }}</strong>.</p>
@@ -50,7 +50,7 @@
   {% else %}<p>Sin listas de raya para consolidar departamentos en este mes.</p>{% endif %}
   {% if selected.global.cargas_error %}<p class="reading">{{ selected.global.cargas_error }}</p>{% endif %}
   {% if selected.global.isn_calculado %}<p class="caption">El ISN es el devengo calculado para el mes; su importe se distingue del pago de impuestos. No se usa el 2% del tabular como determinación fiscal.</p>{% endif %}
-  <h3>Gastos operativos por área registrada</h3>
+  <h3>Gastos operativos y financieros por área registrada</h3>
   <div class="table-responsive"><table><thead><tr><th scope="col">Área de gasto</th><th scope="col">Importe mensual identificado</th><th scope="col">% de ventas totales</th><th scope="col">Registros respaldados</th></tr></thead><tbody>
   {% for g in selected.global.gastos_areas %}<tr><th scope="row">{{ g.nombre }}</th><td>{{ g.total|floatformat:2|intcomma }}</td><td>{{ g.porcentaje|default_if_none:"—" }}</td><td>{{ g.registros }}</td></tr>{% empty %}<tr><td colspan="4">Sin gastos operativos identificados para sumar en este corte; no equivale a gasto cero.</td></tr>{% endfor %}
   </tbody></table></div>
@@ -111,14 +111,14 @@
   {% for c in selected.global.componentes %}<tr><th scope="row">{{ c.nombre }}</th><td>{% if c.monto is not None %}{{ c.monto|floatformat:2|intcomma }}{% else %}Pendiente{% endif %}</td><td>{{ c.porcentaje|default_if_none:"—" }}</td></tr>{% endfor %}
   </tbody><tfoot>
     <tr><th scope="row">Personal con cargas identificadas · subtotal</th><td>{{ selected.global.personal_subtotal|default_if_none:"Pendiente"|intcomma }}</td><td>{{ selected.global.personal_porcentaje|default_if_none:"—" }}</td></tr>
-    <tr><th scope="row">Personal + gastos operativos identificados · subtotal</th><td><strong>{{ selected.global.subtotal|default_if_none:"Pendiente"|intcomma }}</strong></td><td><strong>{{ selected.global.porcentaje|default_if_none:"—" }}</strong></td></tr>
+    <tr><th scope="row">Personal + gastos identificados · subtotal</th><td><strong>{{ selected.global.subtotal|default_if_none:"Pendiente"|intcomma }}</strong></td><td><strong>{{ selected.global.porcentaje|default_if_none:"—" }}</strong></td></tr>
     <tr><th scope="row">Costo integral cerrado</th>{% if selected.global.costo_integral is not None %}<td>{{ selected.global.costo_integral|floatformat:2|intcomma }}</td><td>{{ selected.global.porcentaje|default_if_none:"—" }}</td>{% else %}<td colspan="2">Pendiente de conciliación</td>{% endif %}</tr>
   </tfoot></table></div>
   <p class="caption">Los dos subtotales son niveles del mismo costo: no se suman entre sí. Bonos, horas extra y prestaciones pagadas que ya forman parte de percepciones se cuentan una sola vez. {% if selected.global.prestaciones_al_pago %}Las prestaciones se reconocen al pagar: ${{ selected.global.prestaciones_pagadas|floatformat:2|intcomma }} de vacaciones, prima y aguinaldo ya están dentro de las percepciones. No existe provisión contable mensual adicional; los apartados bancarios son ahorro interno y no otro gasto.{% else %}Las provisiones corresponden únicamente a prestaciones devengadas aún no reconocidas, por conciliar.{% endif %}</p>
   <p class="reading">{% if selected.global.pendientes_gastos or selected.global.gastos_parciales %}<strong>Cobertura de gastos por conciliar:</strong> {{ selected.global.pendientes_gastos|length }} referencias y {{ selected.global.gastos_parciales }} registros parciales.{% else %}<strong>Cobertura de gastos completa.</strong>{% endif %} {% if not selected.global.personal_cerrado %}El personal conserva partidas sin conciliación.{% endif %} Diferencia de percepciones CFDI menos listas: {{ selected.payroll_difference|default_if_none:"sin comparación disponible"|intcomma }}. Esa diferencia y el total fiscal no se agregan automáticamente a este subtotal.</p>
   {% if selected.registered and not selected.registered.mes_cubierto %}<p><strong>La nómina no cubre el mes completo; el subtotal y su porcentaje son parciales.</strong></p>{% endif %}
   {% if selected.registered.pendientes %}<p><strong>Hay {{ selected.registered.pendientes|length }} observaciones de conciliación en las listas de raya.</strong></p>{% endif %}
-  <p class="caption">No es utilidad, costo total de fabricar ni saldo disponible para contratar. Materia prima, empaque de fabricación e inversiones quedan fuera de este resumen de personal y gastos operativos.</p>
+  <p class="caption">No es utilidad, costo total de fabricar ni saldo disponible para contratar. Materia prima, empaque de fabricación e inversiones quedan fuera de este resumen de personal y gastos.</p>
 </section>
 </main>
 {% endblock %}

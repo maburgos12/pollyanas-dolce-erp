@@ -109,7 +109,7 @@ def resumen_personal_global(selected):
                         monto=ZERO if prestaciones_al_pago else None)]
     labor_total = (sum((c['monto'] for c in components if c['monto'] is not None), ZERO)
                    if registered else None)
-    components.append(dict(clave='gastos', nombre='Gastos operativos identificados', monto=expense_total))
+    components.append(dict(clave='gastos', nombre='Gastos operativos y financieros identificados', monto=expense_total))
     for component in components:
         component['porcentaje'] = porcentaje(component['monto'])
     # Los CFDI y la diferencia fiscal son contraste, nunca otra percepción sumable.
