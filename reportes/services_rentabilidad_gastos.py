@@ -413,8 +413,12 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
             and f["sucursal_id"] == recurrente.centro_costo.sucursal_id]
         if partes and sum((f["monto_mensual"] for f in partes), Decimal(0)) == version.monto:
             vistas_versiones.add(version.pk)
-            vistas_reglas.update(r.pk for r in reglas if r.tipo_fuente == "OBLIGACION_GASTO"
-                and r.rubro_id == recurrente.rubro_id and _vigente(r, periodo))
+            vistas_reglas.update(r.pk for r in reglas if r.rubro_id == recurrente.rubro_id
+                and _vigente(r, periodo) and (r.tipo_fuente == "OBLIGACION_GASTO" or (
+                    r.tipo_fuente == "GASTO_OPERATIVO" and r.modo_asignacion == "CANONICA"
+                    and r.categoria_gasto_id == recurrente.categoria_gasto_id
+                    and r.centro_costo_id in (None, recurrente.centro_costo_id)
+                    and _sucursal(r) == recurrente.centro_costo.sucursal_id)))
 
     for regla in reglas:
         familia = _familia(regla.categoria_gasto, regla.rubro)

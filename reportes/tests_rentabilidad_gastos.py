@@ -334,6 +334,7 @@ class LectorGastosMensualesTests(TestCase):
             self.regla(rubro=rubro, centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
                 filtros={"desde":"2026-01", "porcentaje":monto})
             self.regla(rubro=rubro, tipo_fuente="OBLIGACION_GASTO", categoria_gasto=None)
+            self.regla(rubro=rubro, centro_costo=centro)
         for monto in (40, 60):
             self.gasto(centro_costo=self.compartido, monto=Decimal(monto), archivo_soporte=archivo)
         resultado = self.leer()
