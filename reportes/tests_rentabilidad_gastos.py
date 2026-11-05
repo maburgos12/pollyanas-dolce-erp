@@ -303,6 +303,19 @@ class LectorGastosMensualesTests(TestCase):
         self.assertEqual({f["registro_id"] for f in resultado["pendientes"]
                           if f["origen"] == "GASTO_RECURRENTE_VERSION"}, {versiones[1].pk})
 
+    def test_version_sustituida_no_se_exige_como_otro_gasto_del_mismo_mes(self):
+        recurrente = GastoRecurrente.objects.create(area=self.area, rubro=self.rubro,
+            centro_costo=self.centro, categoria_gasto=self.categoria, concepto="Renta vigente")
+        GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=date(2025, 1, 1), monto=Decimal("90.00"))
+        vigente = GastoRecurrenteVersion.objects.create(gasto_recurrente=recurrente,
+            vigencia_inicio=self.mes, monto=Decimal("100.00"))
+        self.obligacion(self.gasto(monto=Decimal("100.00")), gasto_recurrente=recurrente,
+            version_recurrente=vigente, monto_reconocido=Decimal("100.00"))
+        resultado = self.leer()
+        self.assertEqual(sum(f["monto_mensual"] for f in resultado["filas"]), Decimal("100.00"))
+        self.assertFalse(any(f["origen"] == "GASTO_RECURRENTE_VERSION" for f in resultado["pendientes"]))
+
     def test_regla_sin_historia_deja_pendiente_especifico_sucursal(self):
         regla = self.regla(centro_costo=self.compartido, modo_asignacion="DISTRIBUCION",
                            filtros={"porcentaje": 20})

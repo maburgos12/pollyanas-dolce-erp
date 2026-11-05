@@ -43,3 +43,5 @@ Los comprobantes estatales de peaje o calcomanía vehicular se excluyen de la le
 El reparto anual verifica la historia del mes consultado. Si otro mes de la cobertura carece de historia, el lector conserva ese mes sin certificar, pero permite el importe mensual del mes que sí tiene reglas acreditadas; conserva el residuo de centavos en el último mes.
 
 La tabla por sucursal y su CSV conservan nómina y vales separados y añaden las cargas mensuales e ISN del mismo grupo histórico de nómina; el porcentaje de costo usa las ventas de esa sucursal. Los cargos no se copian a otros grupos cuando una persona aparece en más de una quincena. El servicio de vales permanece en el total de empresa, sin asignación por sucursal inventada.
+
+Para contratos con versiones superpuestas se elige la versión vigente más reciente, igual que la generación canónica de obligaciones. Una versión anterior sustituida no genera una segunda exigencia de gasto del mismo contrato y mes. Las obligaciones y gastos históricos existentes permanecen intactos.

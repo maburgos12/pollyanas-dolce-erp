@@ -214,6 +214,7 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False):
     versiones = list(GastoRecurrenteVersion.objects.filter(
         gasto_recurrente__activo=True, vigencia_inicio__lte=periodo)
         .filter(Q(vigencia_fin__isnull=True) | Q(vigencia_fin__gte=periodo))
+        .order_by("gasto_recurrente_id", "-vigencia_inicio", "-pk").distinct("gasto_recurrente_id")
         .select_related("gasto_recurrente__area", "gasto_recurrente__rubro",
                         "gasto_recurrente__categoria_gasto", "gasto_recurrente__centro_costo"))
     gastos = list(GastoOperativoMensual.objects.filter(tipo_dato="REAL", es_estimado=False)
