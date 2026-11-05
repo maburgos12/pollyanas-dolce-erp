@@ -25,7 +25,9 @@ class CargasCosteoTests(SimpleTestCase):
         self.assertEqual(clasificar_detalle(self.detalle(area_codigo='RRHH'), {}, es_isn=True), ('administracion', None))
 
     def test_no_infiere_fecha_de_pago_en_otros_meses(self):
-        self.assertFalse(leer_cargas_pagadas(date(2026, 10, 1), [])['confirmado'])
+        with patch('reportes.services_costeo_cargas.ExpedienteCedulaIMSS') as imss:
+            imss.objects.filter.return_value.prefetch_related.return_value = []
+            self.assertFalse(leer_cargas_pagadas(date(2026, 10, 1), [])['confirmado'])
 
     def test_exp_aplicado_no_duplica_componentes_y_rechaza_desfase(self):
         detalle = self.detalle(retiro=D('20'), cesantia_patronal=D('30'), aportacion_vivienda=D('50'))
@@ -34,7 +36,11 @@ class CargasCosteoTests(SimpleTestCase):
         exp = SimpleNamespace(pk=1, tipo='BIMESTRAL', total_patronal=D('100'), registro_patronal='E52-40157-10-0', documentos=MagicMock())
         exp.documentos.all.return_value = [doc]
         with patch('reportes.services_costeo_cargas.ExpedienteCedulaIMSS') as imss, patch('reportes.services_costeo_cargas.ExpedienteISN') as isn:
-            imss.objects.filter.return_value.prefetch_related.return_value = [exp]
+            def filtered(**kwargs):
+                query = MagicMock()
+                query.prefetch_related.return_value = [] if 'metadata__pago_conciliado__fecha_pago__startswith' in kwargs else [exp]
+                return query
+            imss.objects.filter.side_effect = filtered
             isn.objects.filter.return_value.select_related.return_value.prefetch_related.return_value = []
             d = leer_cargas_pagadas(date(2026, 9, 1), [])
             self.assertEqual(d['total'], D('100'))
