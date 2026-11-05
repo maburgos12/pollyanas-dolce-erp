@@ -174,6 +174,16 @@ def _refresh_month_sources(*, month_start: date, month_end: date, triggered_by=N
             ),
         ),
         (
+            "transfers",
+            lambda: movement_service.run_transfer_sync(
+                start_date=month_start,
+                end_date=month_end,
+                branch_filter=None,
+                triggered_by=triggered_by,
+                apply_inventory=False,
+            ),
+        ),
+        (
             "conversions",
             lambda: sync_conversion_lines(
                 date_from=month_start,

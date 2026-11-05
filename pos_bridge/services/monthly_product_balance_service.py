@@ -509,13 +509,6 @@ def _snapshot_canonical_consistency(lines, *, snapshots, reconciliations, cutoff
                     or any(json.dumps(row.raw_payload, sort_keys=True) != json.dumps(expected[row.row_number], sort_keys=True)
                            for row in rows if row.row_number in expected)):
                 continue
-            month_start = datetime.combine(month, time.min, tzinfo=POINT_BUSINESS_TIMEZONE) if month else cutoff
-            if any((datetime.fromisoformat(gap["previous_movement_at"]) < cutoff
-                    <= datetime.fromisoformat(gap["movement_at"]))
-                    or month_start <= datetime.fromisoformat(gap["movement_at"]) < cutoff
-                    for gap in original_batch["stock_chain_gaps"]):
-                results[key]["reason"] = "ORIGINAL_BATCH_STOCK_CHAIN_CONTRADICTION"
-                continue
         count, limit, ids = metadata.get("fetched_rows"), metadata.get("history_limit"), metadata.get("fetched_movement_ids")
         if ("fetched_rows" in metadata and (type(count) is not int or count < 0)
                 or "history_limit" in metadata and (type(limit) is not int or limit <= 0)
