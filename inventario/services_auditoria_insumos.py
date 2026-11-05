@@ -6,6 +6,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from calendar import monthrange
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Count, Sum
 from django.utils import timezone
 
@@ -122,7 +123,11 @@ def _pct(value: Decimal) -> Decimal:
 class ConsumoInsumoAuditService:
     """Calcula consumo teórico vs consumo real disponible sin mutar fuentes operativas."""
 
+    @transaction.atomic
     def calcular_periodo(self, periodo: date, *, dry_run: bool = False) -> ConsumoAuditSummary:
+        if not dry_run:
+            from .services_consumo_bom import bloquear_consumos_fusion
+            bloquear_consumos_fusion()
         period_start, period_end = period_bounds(periodo)
         start_dt = timezone.make_aware(datetime.combine(period_start, time.min))
         end_dt = timezone.make_aware(datetime.combine(period_end, time.max))
@@ -158,7 +163,8 @@ class ConsumoInsumoAuditService:
             costo_unitario = costo_info.costo
             real_data = real_by_insumo.get(insumo.id) or self._empty_real_data()
             excluido = Decimal(str(real_data.get("consumo_excluido", 0)))
-            teorico = _q4(teorico - excluido)
+            excluido_teorico = Decimal(str(real_data.get("consumo_excluido_teorico", excluido)))
+            teorico = _q4(teorico - excluido_teorico)
             if teorico < 0:
                 raise ValidationError(f"Revisar exclusión de costeo del insumo {insumo.pk}: cambió la receta fuente.")
             consumo_real = _q4(real_data["consumo_real"])
@@ -173,6 +179,7 @@ class ConsumoInsumoAuditService:
                 alerta = ConsumoInsumoMensual.ALERTA_SIN_DATOS
             metadata = {
                 "consumo_excluido": str(excluido),
+                "consumo_excluido_teorico": str(excluido_teorico),
                 "ajuste_saldo_inicial": str(real_data.get("ajuste_saldo_inicial", 0)),
                 "metodo_consumo": real_data["metodo_consumo"],
                 "produccion_recetas": real_data.get("produccion_recetas", 0),
@@ -415,10 +422,16 @@ class ConsumoInsumoAuditService:
             ).values("insumo_id").annotate(total=Sum("cantidad"))
         }
         excluidos: dict[int, Decimal] = {}
-        for movimiento in MovimientoInventario.objects.filter(
+        excluidos_teorico: dict[int, Decimal] = {}
+        movimientos_excluidos = list(MovimientoInventario.objects.filter(
             insumo_id__in=insumo_ids, fecha__range=(start_dt, end_dt),
             trazabilidad__has_key="exclusion_costeo",
-        ):
+        ))
+        canonicos = MovimientoInventario.objects.in_bulk({
+            c['movimiento_canonico_id'] for m in movimientos_excluidos
+            if isinstance(c := m.trazabilidad['exclusion_costeo'], dict)
+            and type(c.get('movimiento_canonico_id')) is int})
+        for movimiento in movimientos_excluidos:
             correccion = movimiento.trazabilidad["exclusion_costeo"]
             try:
                 cantidad = Decimal(correccion["cantidad"])
@@ -435,6 +448,20 @@ class ConsumoInsumoAuditService:
                 valida = False
             if not valida:
                 raise ValidationError(f"Revisar exclusión de costeo del movimiento {movimiento.pk}: la fuente cambió o la evidencia es inválida.")
+            if 'movimiento_canonico_id' in correccion:
+                if type(correccion['movimiento_canonico_id']) is not int:
+                    raise ValidationError(f'Revisar exclusión del movimiento {movimiento.pk}: identificador canónico inválido.')
+                canonico = canonicos.get(correccion['movimiento_canonico_id'])
+                if (not canonico or canonico.pk == movimiento.pk
+                        or canonico.tipo != MovimientoInventario.TIPO_CONSUMO
+                        or canonico.insumo_id != movimiento.insumo_id
+                        or canonico.referencia != movimiento.referencia or canonico.fecha != movimiento.fecha
+                        or canonico.cantidad != movimiento.cantidad or cantidad != movimiento.cantidad
+                        or canonico.source_hash != correccion.get('source_hash_canonico')
+                        or 'exclusion_costeo' in (canonico.trazabilidad or {})):
+                    raise ValidationError(f'Revisar exclusión del movimiento {movimiento.pk}: cambió el consumo canónico duplicado.')
+            else:
+                excluidos_teorico[movimiento.insumo_id] = excluidos_teorico.get(movimiento.insumo_id, DECIMAL_ZERO) + cantidad
             excluidos[movimiento.insumo_id] = excluidos.get(movimiento.insumo_id, DECIMAL_ZERO) + cantidad
 
         after_start = self._signed_rows_by_insumo(after_start_rows)
@@ -459,6 +486,7 @@ class ConsumoInsumoAuditService:
             real_data_limited = metodo_consumo != "CONSUMO_DIRECTO"
             result[insumo_id] = {
                 "consumo_excluido": excluido,
+                "consumo_excluido_teorico": excluidos_teorico.get(insumo_id, DECIMAL_ZERO),
                 "ajuste_saldo_inicial": saldo if metodo_consumo == "DIFERENCIAL" else DECIMAL_ZERO,
                 "stock_inicial": stock_inicial,
                 "stock_final": stock_final,

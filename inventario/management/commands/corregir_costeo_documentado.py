@@ -28,6 +28,8 @@ class Command(BaseCommand):
 
     @transaction.atomic
     def handle(self, *args, **options):
+        from inventario.services_consumo_bom import bloquear_consumos_fusion
+        bloquear_consumos_fusion()
         plan = json.load(sys.stdin)
         fingerprint = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
         if AuditLog.objects.filter(action='CORRECCION_COSTEO', object_id=fingerprint).exists():
@@ -78,7 +80,7 @@ class Command(BaseCommand):
                 raise CommandError(f'La fuente no confirma el plan para {row.pk}: {nuevo}')
             before['consumos'].append(snapshot(row))
             row.consumo_real = nuevo
-            row.consumo_teorico = _q4(row.consumo_teorico - data['consumo_excluido'])
+            row.consumo_teorico = _q4(row.consumo_teorico - data['consumo_excluido_teorico'])
             if row.consumo_teorico < 0:
                 raise CommandError(f'La receta cambió: consumo teórico insuficiente {row.pk}')
             costo = Decimal(item['costo_unitario'])
@@ -90,6 +92,7 @@ class Command(BaseCommand):
             row.alerta = service.clasificar_alerta(row.consumo_teorico, nuevo, row.diferencia_pct, data)
             row.metadata = {**row.metadata, 'correccion_costeo': fingerprint,
                 'consumo_excluido': str(data['consumo_excluido']), 'ajuste_saldo_inicial': str(data['ajuste_saldo_inicial'])}
+            row.metadata['consumo_excluido_teorico'] = str(data['consumo_excluido_teorico'])
             row.save()
             after['consumos'].append(snapshot(row))
         indices = {}

@@ -136,3 +136,34 @@ class CorreccionesCosteoTests(TestCase):
         self.ejecutar(plan, True)
         linea.refresh_from_db()
         self.assertEqual(linea.monto_real, Decimal('127.50'))
+
+    def plan_duplicado_fusion(self):
+        plan, mov, row, linea = self.plan()
+        canonico = self.movimiento('CONSUMO', 850, source_hash='hash-canonico', referencia=mov.referencia)
+        row.consumo_real = 1700; row.costo_real = Decimal('255.00'); row.save()
+        linea.monto_real = Decimal('255.00'); linea.save()
+        plan['exclusiones'][0].update(cantidad='850', movimiento_canonico_id=canonico.pk,
+                                     source_hash_canonico=canonico.source_hash)
+        plan['consumos'][0].update(consumo_anterior='1700', costo_anterior='255.00', consumo_corregido='850')
+        return plan, mov, row, linea, canonico
+
+    def test_duplicado_fusion_excluye_solo_real_y_conserva_teorico_y_stock(self):
+        plan, mov, row, linea, canonico = self.plan_duplicado_fusion()
+        self.ejecutar(plan, True)
+        row.refresh_from_db();linea.refresh_from_db();self.stock.refresh_from_db()
+        self.assertEqual(row.consumo_real, 850)
+        self.assertEqual(row.consumo_teorico, 850)
+        self.assertEqual(row.costo_real, Decimal('127.50'))
+        self.assertEqual(linea.monto_real, Decimal('127.50'))
+        self.assertEqual(self.stock.stock_actual, 10)
+        canonico.cantidad = 849;canonico.save(update_fields=['cantidad'])
+        with self.assertRaises(ValidationError):self.resultado()
+
+    def test_duplicado_sin_canonico_igual_rechaza_toda_la_correccion(self):
+        plan, mov, row, linea, canonico = self.plan_duplicado_fusion()
+        plan['exclusiones'][0]['source_hash_canonico'] = 'otro-hash'
+        with self.assertRaises(ValidationError):self.ejecutar(plan, True)
+        mov.refresh_from_db();row.refresh_from_db();linea.refresh_from_db()
+        self.assertEqual(mov.trazabilidad, {})
+        self.assertEqual(row.consumo_real, 1700)
+        self.assertEqual(linea.monto_real, Decimal('255.00'))

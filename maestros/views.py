@@ -9,7 +9,7 @@ from decimal import Decimal
 from django.contrib import messages
 from django.core.cache import cache
 from django.http import HttpResponse
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.shortcuts import render, redirect, get_object_or_404
 from django.core.paginator import Paginator
 from django.views.generic import ListView, CreateView, UpdateView, DeleteView
@@ -3032,37 +3032,40 @@ def insumo_resolve_duplicate(request):
         _upsert_alias,
     )
 
-    with transaction.atomic():
-        merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
-        ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
-        if ok_alias:
-            _remove_pending_name_from_session(request, alias_norm)
-            _remove_pending_name_from_recent_runs(alias_norm)
-            _resolve_cross_source_with_alias(source.nombre, target)
+    try:
+        with transaction.atomic():
+            merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
+            ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+            if ok_alias:
+                _remove_pending_name_from_session(request, alias_norm)
+                _remove_pending_name_from_recent_runs(alias_norm)
+                _resolve_cross_source_with_alias(source.nombre, target)
 
-    messages.success(
-        request,
-        (
-            f"Consolidado en artículo estándar: '{source.nombre}' → '{target.nombre}'. "
-            f"Referencias {merge_stats['aliases_updated']}, Costos {merge_stats['costos_updated']}, "
-            f"Líneas receta {merge_stats['lineas_updated']}, Movimientos {merge_stats['movimientos_updated']}, "
-            f"Ajustes {merge_stats['ajustes_updated']}, Solicitudes {merge_stats['solicitudes_updated']}."
-        ),
-    )
-    log_event(
-        request.user,
-        "MASTER_DUPLICATE_RESOLVE_INSUMO",
-        "maestros.Insumo",
-        target.id,
-        payload={
-            "source_id": source.id,
-            "target_id": target.id,
-            "source_nombre": source.nombre,
-            "target_nombre": target.nombre,
-            **merge_stats,
-            "source": "maestros.insumo_list",
-        },
-    )
+        messages.success(
+            request,
+            (
+                f"Consolidado en artículo estándar: '{source.nombre}' → '{target.nombre}'. "
+                f"Referencias {merge_stats['aliases_updated']}, Costos {merge_stats['costos_updated']}, "
+                f"Líneas receta {merge_stats['lineas_updated']}, Movimientos {merge_stats['movimientos_updated']}, "
+                f"Ajustes {merge_stats['ajustes_updated']}, Solicitudes {merge_stats['solicitudes_updated']}."
+            ),
+        )
+        log_event(
+            request.user,
+            "MASTER_DUPLICATE_RESOLVE_INSUMO",
+            "maestros.Insumo",
+            target.id,
+            payload={
+                "source_id": source.id,
+                "target_id": target.id,
+                "source_nombre": source.nombre,
+                "target_nombre": target.nombre,
+                **merge_stats,
+                "source": "maestros.insumo_list",
+            },
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
     return redirect(next_url)
 
 
@@ -3122,39 +3125,42 @@ def insumo_resolve_duplicate_group(request):
         "existencia_merged": 0,
     }
 
-    with transaction.atomic():
-        for source in sources:
-            merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
-            totals["sources_resolved"] += 1
-            for key, value in merge_stats.items():
-                totals[key] += int(value or 0)
-            ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
-            if ok_alias:
-                _remove_pending_name_from_session(request, alias_norm)
-                _remove_pending_name_from_recent_runs(alias_norm)
-                _resolve_cross_source_with_alias(source.nombre, target)
+    try:
+        with transaction.atomic():
+            for source in sources:
+                merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
+                totals["sources_resolved"] += 1
+                for key, value in merge_stats.items():
+                    totals[key] += int(value or 0)
+                ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+                if ok_alias:
+                    _remove_pending_name_from_session(request, alias_norm)
+                    _remove_pending_name_from_recent_runs(alias_norm)
+                    _resolve_cross_source_with_alias(source.nombre, target)
 
-    messages.success(
-        request,
-        (
-            f"Grupo consolidado en artículo estándar: '{target.nombre}'. "
-            f"Fuentes {totals['sources_resolved']}, Referencias {totals['aliases_updated']}, "
-            f"Costos {totals['costos_updated']}, Líneas receta {totals['lineas_updated']}."
-        ),
-    )
-    log_event(
-        request.user,
-        "MASTER_DUPLICATE_RESOLVE_GROUP",
-        "maestros.Insumo",
-        target.id,
-        payload={
-            "duplicate_key": duplicate_key,
-            "target_id": target.id,
-            "target_nombre": target.nombre,
-            "source": "maestros.insumo_list",
-            **totals,
-        },
-    )
+        messages.success(
+            request,
+            (
+                f"Grupo consolidado en artículo estándar: '{target.nombre}'. "
+                f"Fuentes {totals['sources_resolved']}, Referencias {totals['aliases_updated']}, "
+                f"Costos {totals['costos_updated']}, Líneas receta {totals['lineas_updated']}."
+            ),
+        )
+        log_event(
+            request.user,
+            "MASTER_DUPLICATE_RESOLVE_GROUP",
+            "maestros.Insumo",
+            target.id,
+            payload={
+                "duplicate_key": duplicate_key,
+                "target_id": target.id,
+                "target_nombre": target.nombre,
+                "source": "maestros.insumo_list",
+                **totals,
+            },
+        )
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages))
     return redirect(next_url)
 
 

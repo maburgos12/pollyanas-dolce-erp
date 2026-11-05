@@ -2177,6 +2177,7 @@ def _export_master_duplicates_xlsx(groups: list[dict[str, object]]) -> HttpRespo
     return response
 
 
+@transaction.atomic
 def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> dict[str, int]:
     if source.id == target.id:
         return {
@@ -2189,6 +2190,11 @@ def _merge_insumo_into_target(source: Insumo, target: Insumo, acted_by=None) -> 
             "existencia_merged": 0,
         }
 
+    from .services_consumo_bom import ConsumoInsumoAutoService, bloquear_consumos_fusion
+
+    bloquear_consumos_fusion()
+    list(Insumo.objects.select_for_update().filter(pk__in=[source.pk, target.pk]).order_by('pk'))
+    ConsumoInsumoAutoService().reidentificar_consumos_fusion(source, target, acted_by=acted_by)
     alias_count = InsumoAlias.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
     costo_count = CostoInsumo.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
     linea_count = LineaReceta.objects.filter(insumo_id=source.id).update(insumo_id=target.id)
@@ -2832,35 +2838,38 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
             elif source.id == target.id:
                 messages.error(request, "Origen y destino no pueden ser el mismo insumo.")
             else:
-                with transaction.atomic():
-                    merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
-                    ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
-                    if ok_alias:
-                        _remove_pending_name_from_session(request, alias_norm)
-                        _remove_pending_name_from_recent_runs(alias_norm)
-                        _resolve_cross_source_with_alias(source.nombre, target)
-                messages.success(
-                    request,
-                    (
-                        f"Duplicado resuelto: '{source.nombre}' → '{target.nombre}'. "
-                        f"Referencias {merge_stats['aliases_updated']}, Costos {merge_stats['costos_updated']}, "
-                        f"Líneas receta {merge_stats['lineas_updated']}, Movimientos {merge_stats['movimientos_updated']}, "
-                        f"Ajustes {merge_stats['ajustes_updated']}, Solicitudes {merge_stats['solicitudes_updated']}."
-                    ),
-                )
-                log_event(
-                    request.user,
-                    "MASTER_DUPLICATE_RESOLVE_INSUMO",
-                    "maestros.Insumo",
-                    target.id,
-                    payload={
-                        "source_id": source.id,
-                        "target_id": target.id,
-                        "source_nombre": source.nombre,
-                        "target_nombre": target.nombre,
-                        **merge_stats,
-                    },
-                )
+                try:
+                    with transaction.atomic():
+                        merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
+                        ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+                        if ok_alias:
+                            _remove_pending_name_from_session(request, alias_norm)
+                            _remove_pending_name_from_recent_runs(alias_norm)
+                            _resolve_cross_source_with_alias(source.nombre, target)
+                    messages.success(
+                        request,
+                        (
+                            f"Duplicado resuelto: '{source.nombre}' → '{target.nombre}'. "
+                            f"Referencias {merge_stats['aliases_updated']}, Costos {merge_stats['costos_updated']}, "
+                            f"Líneas receta {merge_stats['lineas_updated']}, Movimientos {merge_stats['movimientos_updated']}, "
+                            f"Ajustes {merge_stats['ajustes_updated']}, Solicitudes {merge_stats['solicitudes_updated']}."
+                        ),
+                    )
+                    log_event(
+                        request.user,
+                        "MASTER_DUPLICATE_RESOLVE_INSUMO",
+                        "maestros.Insumo",
+                        target.id,
+                        payload={
+                            "source_id": source.id,
+                            "target_id": target.id,
+                            "source_nombre": source.nombre,
+                            "target_nombre": target.nombre,
+                            **merge_stats,
+                        },
+                    )
+                except ValidationError as exc:
+                    messages.error(request, "; ".join(exc.messages))
         elif action == "resolve_duplicate_insumo_group":
             duplicate_key = normalizar_nombre((request.POST.get("duplicate_key") or "").strip())
             target_id_raw = (request.POST.get("target_insumo_id") or "").strip()
@@ -2889,39 +2898,42 @@ def aliases_catalog(request: HttpRequest) -> HttpResponse:
                         "solicitudes_updated": 0,
                         "existencia_merged": 0,
                     }
-                    with transaction.atomic():
-                        for source in sources:
-                            merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
-                            totals["sources_resolved"] += 1
-                            for k, v in merge_stats.items():
-                                totals[k] += int(v or 0)
-                            ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
-                            if ok_alias:
-                                _remove_pending_name_from_session(request, alias_norm)
-                                _remove_pending_name_from_recent_runs(alias_norm)
-                                _resolve_cross_source_with_alias(source.nombre, target)
+                    try:
+                        with transaction.atomic():
+                            for source in sources:
+                                merge_stats = _merge_insumo_into_target(source, target, acted_by=request.user)
+                                totals["sources_resolved"] += 1
+                                for k, v in merge_stats.items():
+                                    totals[k] += int(v or 0)
+                                ok_alias, alias_norm, _ = _upsert_alias(source.nombre, target)
+                                if ok_alias:
+                                    _remove_pending_name_from_session(request, alias_norm)
+                                    _remove_pending_name_from_recent_runs(alias_norm)
+                                    _resolve_cross_source_with_alias(source.nombre, target)
 
-                    messages.success(
-                        request,
-                        (
-                            f"Grupo '{duplicate_key}' resuelto hacia '{target.nombre}'. "
-                            f"Fuentes consolidadas {totals['sources_resolved']}. "
-                            f"Referencias {totals['aliases_updated']}, Costos {totals['costos_updated']}, "
-                            f"Líneas receta {totals['lineas_updated']}."
-                        ),
-                    )
-                    log_event(
-                        request.user,
-                        "MASTER_DUPLICATE_RESOLVE_GROUP",
-                        "maestros.Insumo",
-                        target.id,
-                        payload={
-                            "duplicate_key": duplicate_key,
-                            "target_id": target.id,
-                            "target_nombre": target.nombre,
-                            **totals,
-                        },
-                    )
+                        messages.success(
+                            request,
+                            (
+                                f"Grupo '{duplicate_key}' resuelto hacia '{target.nombre}'. "
+                                f"Fuentes consolidadas {totals['sources_resolved']}. "
+                                f"Referencias {totals['aliases_updated']}, Costos {totals['costos_updated']}, "
+                                f"Líneas receta {totals['lineas_updated']}."
+                            ),
+                        )
+                        log_event(
+                            request.user,
+                            "MASTER_DUPLICATE_RESOLVE_GROUP",
+                            "maestros.Insumo",
+                            target.id,
+                            payload={
+                                "duplicate_key": duplicate_key,
+                                "target_id": target.id,
+                                "target_nombre": target.nombre,
+                                **totals,
+                            },
+                        )
+                    except ValidationError as exc:
+                        messages.error(request, "; ".join(exc.messages))
 
         base_url = reverse("inventario:aliases_catalog")
         redirect_params = {}
