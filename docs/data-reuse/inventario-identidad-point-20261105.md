@@ -72,3 +72,16 @@ reescribir snapshots históricos. Una nueva captura reemplaza el ciclo operativo
 Rollback de código mediante revert y despliegue oficial; la corrección del nombre
 normalizado es independiente y no requiere deshacer referencias ni existencias.
 Los negativos se entregan a revisión humana, no se regularizan automáticamente.
+
+
+## Verificación de extracción completa por categoría
+
+La captura visual posterior al despliegue reportó SUCCESS pero obtuvo solo
+278/333 insumos utilizables frente a 352/352 en la lectura oficial por categoría.
+Faltaban categorías completas y había filas repetidas entre selecciones. La
+captura canónica reutiliza `PointHttpSessionClient.get_insumo_categories` y
+`get_branch_insumos` (`/Stock/GetInsumosPA`, parámetros `almacen` y `categoria`),
+ya existentes en la consulta oficial de stock. Cada categoría se consulta por
+ID y cada respuesta se analiza antes de seguir. No se cambia la captura visual
+de productos/costos ni se introduce otra fuente o tabla. Una cantidad ausente,
+inválida o no finita rechaza la captura; cero explícito se conserva como dato.

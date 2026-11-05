@@ -21,7 +21,7 @@ class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
         rows = [SimpleNamespace(**{**vars(self._row("0", "pza")), "point_code": "311026", "point_name": name})
                 for name in ("Etiqueta Día de Muerto", "Stickers Halloween")]
         result = CanonicalInsumoInventoryCaptureService(
-            capture_service=SimpleNamespace(capture_all_rows=lambda **kwargs: rows),
+            capture_service=SimpleNamespace(capture_supply_rows=lambda **kwargs: rows),
         ).capture(sync_job=job, locations=["ALMACEN"])
         self.assertFalse(PointInsumoInventorySnapshot.objects.filter(insumo=insumo).exists())
         self.assertEqual(result["blockers"][0]["reason"], "IDENTIDAD_POINT_DUPLICADA")
@@ -32,7 +32,7 @@ class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
         PointBranch.objects.create(external_id="9", name="Almacen")
         job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_INVENTORY)
         result = CanonicalInsumoInventoryCaptureService(
-            capture_service=SimpleNamespace(capture_all_rows=lambda **kwargs: [self._row("0", "pza")]),
+            capture_service=SimpleNamespace(capture_supply_rows=lambda **kwargs: [self._row("0", "pza")]),
         ).capture(sync_job=job, locations=["ALMACEN"])
         self.assertFalse(PointInsumoInventorySnapshot.objects.exists())
         self.assertEqual(result["blockers"][0]["reason"], "CODIGO_POINT_NO_COINCIDE")
@@ -75,11 +75,11 @@ class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
         }
         captured_branches = []
 
-        def capture_all_rows(*, branch_hint, branch_external_id):
+        def capture_supply_rows(*, branch_hint, branch_external_id):
             captured_branches.append((branch_hint, branch_external_id))
             return rows[branch_hint]
 
-        capture = SimpleNamespace(capture_all_rows=capture_all_rows)
+        capture = SimpleNamespace(capture_supply_rows=capture_supply_rows)
         identity = SimpleNamespace(
             resolve_insumo=lambda **kwargs: SimpleNamespace(
                 insumo=insumo,
@@ -118,7 +118,7 @@ class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
         valid = SimpleNamespace(**{**vars(self._row("3", "pza")), "point_code": "OK-01"})
         unmatched = SimpleNamespace(**{**vars(self._row("4", "pza")), "point_code": "UNKNOWN-01"})
         capture = SimpleNamespace(
-            capture_all_rows=lambda **kwargs: [valid, unmatched]
+            capture_supply_rows=lambda **kwargs: [valid, unmatched]
         )
 
         def resolve_insumo(*, point_code, point_name):
@@ -154,7 +154,7 @@ class CanonicalInsumoInventoryCaptureServiceTests(TestCase):
         )
         first = SimpleNamespace(**{**vars(self._row("3", "pza")), "point_code": "DUP-01"})
         second = SimpleNamespace(**{**vars(self._row("4", "pza")), "point_code": "DUP-01"})
-        capture = SimpleNamespace(capture_all_rows=lambda **kwargs: [first, second])
+        capture = SimpleNamespace(capture_supply_rows=lambda **kwargs: [first, second])
         identity = SimpleNamespace(
             resolve_insumo=lambda **kwargs: SimpleNamespace(insumo=insumo, method="POINT_CODE", score=100)
         )

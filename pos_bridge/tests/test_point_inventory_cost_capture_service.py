@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from django.test import TestCase
-from unittest.mock import patch
+from unittest.mock import patch, call
 
 from maestros.models import CostoInsumo, Insumo, InsumoAlias, UnidadMedida
 from pos_bridge.models import PointProduct
@@ -11,6 +11,52 @@ from reportes.models import ProductoReventaCosto
 
 
 class PointInventoryCostCaptureServiceTests(TestCase):
+    @patch("pos_bridge.services.point_inventory_cost_capture_service.PointHttpSessionClient")
+    def test_supply_capture_queries_every_category_for_exact_branch(self, client_class):
+        client = client_class.return_value.__enter__.return_value
+        client.get_insumo_categories.return_value = [
+            {"PK_Categoria_insumo": 5, "Categoria": "HARINAS"},
+            {"PK_Categoria_insumo": 12, "Categoria": "FRUTAS"},
+        ]
+        client.get_branch_insumos.side_effect = [[], [{
+            "PK_articulo": 17, "Codigo": "017", "Nombre": "Fresa Fresca",
+            "Categoria": "FRUTAS", "Cantidad": 0, "Unidad": "KG",
+            "Costo_unitario": 25, "Costo_total": 0, "Ult_Mov": "2026-11-05",
+        }]]
+        with patch("pos_bridge.services.point_inventory_cost_capture_service.PlaywrightBrowserClient") as browser:
+            rows = PointInventoryCostCaptureService().capture_supply_rows(branch_hint="ALMACEN", branch_external_id="9")
+        browser.assert_not_called()
+        client.login.assert_called_once_with(branch_hint="MATRIZ")
+        self.assertEqual(client.get_branch_insumos.call_args_list, [
+            call(branch_id="9", category_id=5), call(branch_id="9", category_id=12),
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].point_code, "017")
+        self.assertEqual(rows[0].point_internal_id, "17")
+        self.assertEqual(rows[0].quantity, 0)
+        self.assertEqual(rows[0].raw_row[4], "0")
+
+    @patch("pos_bridge.services.point_inventory_cost_capture_service.PointHttpSessionClient")
+    def test_supply_capture_rejects_missing_or_invalid_quantity(self, client_class):
+        from pos_bridge.utils.exceptions import ExtractionError
+        client = client_class.return_value.__enter__.return_value
+        client.get_insumo_categories.return_value = [{"PK_Categoria_insumo": 5, "Categoria": "HARINAS"}]
+        for quantity in (None, "no disponible", "NaN", "Infinity"):
+            client.get_branch_insumos.return_value = [{
+                "PK_articulo": 1, "Codigo": "001", "Nombre": "Harina", "Unidad": "KG", "Cantidad": quantity,
+            }]
+            with self.subTest(quantity=quantity), self.assertRaises(ExtractionError):
+                PointInventoryCostCaptureService().capture_supply_rows(branch_hint="CEDIS", branch_external_id="8")
+
+    @patch("pos_bridge.services.point_inventory_cost_capture_service.PointHttpSessionClient")
+    def test_supply_capture_rejects_missing_category_catalog(self, client_class):
+        from pos_bridge.utils.exceptions import ExtractionError
+        client = client_class.return_value.__enter__.return_value
+        client.get_insumo_categories.return_value = []
+        with self.assertRaises(ExtractionError):
+            PointInventoryCostCaptureService().capture_supply_rows(branch_hint="CEDIS", branch_external_id="8")
+        client.get_branch_insumos.assert_not_called()
+
     def test_insumo_no_se_asocia_por_id_interno_de_otro_catalogo(self):
         PointProduct.objects.create(external_id="267", sku="0227", name="Extra 10")
         service = PointInventoryCostCaptureService()
