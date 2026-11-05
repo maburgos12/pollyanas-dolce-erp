@@ -130,6 +130,7 @@ class RRHHAsignacionSucursalTests(TestCase):
         self.assertNotIn("CRUCERO", {row["puesto_operativo"] for row in data["areas"]})
         empleado = next(row for row in data["empleados"] if row["nombre"] == "Hornos con area antigua")
         self.assertEqual(empleado["puesto_operativo"], "HORNOS")
+        self.assertEqual(empleado["puesto_presentacion"], "Hornos")
         self.assertEqual(empleado["area"], "PRODUCCION")
 
     def test_asignacion_produccion_solo_muestra_colaboradores_operativos(self):
