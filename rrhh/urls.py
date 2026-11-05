@@ -1,3 +1,4 @@
+from . import views_empleado_mes
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
@@ -29,6 +30,9 @@ router.register(r"api/vacaciones", api_views.SolicitudVacacionesViewSet, basenam
 router.register(r"api/prestamos", api_views.PrestamoViewSet, basename="prestamo")
 
 urlpatterns = [
+    path("empleado-del-mes/", views_empleado_mes.periodos, name="empleado_mes"),
+    path("empleado-del-mes/<int:pk>/", views_empleado_mes.detalle, name="empleado_mes_detalle"),
+    path("empleado-del-mes/evaluacion/<int:pk>/", views_empleado_mes.evaluacion, name="empleado_mes_evaluacion"),
     path("mi-equipo/", views_equipo.mi_equipo, name="mi_equipo"),
     path("clima/", views_clima.campanas_clima, name="clima_campanas"),
     path("clima/<int:pk>/", views_clima.detalle_clima, name="clima_detalle"),

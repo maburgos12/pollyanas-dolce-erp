@@ -173,6 +173,7 @@ ACCESS_SUBMODULES = {
     ],
     "rrhh": [
         ("clima", "Clima laboral"),
+        ("empleado_mes", "Empleado del mes CEDIS"),
         ("cumpleanos", "Cumpleaños"),
         ("dashboard", "Dashboard"),
         ("indicadores", "Indicadores"),
