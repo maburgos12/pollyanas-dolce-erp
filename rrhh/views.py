@@ -2772,7 +2772,7 @@ def organizacion_ch(request):
     etiquetas = etiquetas_puestos()
     for empleado in empleados:
         empleado.puesto_presentacion = puesto_presentacion(empleado, etiquetas)
-        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_operativo or "Puesto pendiente")
+        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_presentacion)
     departamentos = (
         empleados.values("departamento")
         .annotate(
@@ -2806,7 +2806,7 @@ def organizacion_ch(request):
     )
     for empleado in equipo_jefatura:
         empleado.puesto_presentacion = puesto_presentacion(empleado, etiquetas)
-        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_operativo or "Puesto pendiente")
+        empleado.funcion_presentacion = etiquetas.get(Empleado._clave_funcion(empleado.puesto_operativo), empleado.puesto_presentacion)
     sin_jefe = empleados.filter(jefe_directo__isnull=True).exclude(nivel_organizacional="DIRECCION")
     identity_map = _identity_map_context(limit=80)
     reglamento = ReglamentoLaboral.objects.filter(estado=ReglamentoLaboral.ESTADO_VIGENTE).first()
