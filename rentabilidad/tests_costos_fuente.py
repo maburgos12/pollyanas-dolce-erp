@@ -1,19 +1,109 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.utils import timezone
 from control.models import MermaMensualSucursal
 from core.models import Sucursal
 from pos_bridge.models import PointProduct, PointBranch, PointDailySale, PointRecipeNode, PointRecipeExtractionRun
-from recetas.models import Receta, RecetaAgrupacionAddon
+from recetas.models import Receta, RecetaAgrupacionAddon, RecetaCodigoPointAlias, RecetaCostoVersion
 from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual, RecetaCostoHistoricoMensual
 from reportes.services_historical_costing import MonthlyHistoricalCostingService
 from .agente_rentabilidad import analizar_sucursal
 from .models_rentabilidad import SucursalRentabilidad
 from .services_costos import _costos_reventa_para_periodo
 from .services_resultado import leer_resultado_mensual
+
+
+class AliasCanonicoCosto2026Tests(TestCase):
+    def setUp(self):
+        self.periodo = date(2026, 6, 1)
+        self.sucursal = Sucursal.objects.create(codigo="AC26", nombre="Alias canónico")
+        branch = PointBranch.objects.create(external_id="AC26", name="Alias canónico", erp_branch=self.sucursal)
+        product = PointProduct.objects.create(external_id="239", sku="0239", name="CAJA G PARA VENTA")
+        self.receta = Receta.objects.create(nombre=product.name, codigo_point=product.sku,
+            hash_contenido="alias-caja", modo_costeo=Receta.MODO_COSTEO_FABRICADO)
+        self.alias = RecetaCodigoPointAlias.objects.create(receta=self.receta,
+            codigo_point=product.sku, nombre_point=product.name)
+        self.costo = RecetaCostoVersion.objects.create(receta=self.receta, version_num=1,
+            hash_snapshot="alias-costo", costo_total=Decimal("19.87"), rendimiento_cantidad=1,
+            creado_en=timezone.make_aware(datetime(2026, 5, 21)))
+        self.venta = PointDailySale.objects.create(branch=branch, product=product,
+            sale_date=self.periodo, quantity=2, gross_amount=50)
+
+    def test_alias_guardado_recupera_costo_vigente_sin_modificar_la_venta(self):
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], Decimal("39.74"))
+        self.assertEqual(row["pendientes"], [])
+        self.venta.refresh_from_db()
+        self.assertIsNone(self.venta.receta_id)
+
+    def test_alias_inactivo_no_acredita_identidad(self):
+        self.alias.activo = False
+        self.alias.save()
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 0)
+        self.assertEqual(len(row["pendientes"]), 1)
+
+    def test_codigo_reutilizado_con_nombre_distinto_no_transfiere_costo(self):
+        self.alias.nombre_point = "Manga para decorar"
+        self.alias.save()
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 0)
+        self.assertEqual(len(row["pendientes"]), 1)
+
+    def test_alias_y_nodo_con_recetas_distintas_no_eligen_el_primer_costo(self):
+        otra = Receta.objects.create(nombre=self.receta.nombre, hash_contenido="alias-conflicto")
+        RecetaCostoHistoricoMensual.objects.create(periodo=self.periodo, receta=otra,
+            costo_total=100, coverage_pct=100)
+        run = PointRecipeExtractionRun.objects.create()
+        PointRecipeNode.objects.create(run=run,
+            identity_key="PRODUCT:239", point_code="0239", point_name=self.receta.nombre, erp_recipe=self.receta)
+        PointRecipeNode.objects.create(run=run,
+            identity_key="PRODUCT:otro", point_code="0239", point_name=self.receta.nombre, erp_recipe=otra)
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 0)
+        self.assertEqual(len(row["pendientes"]), 1)
+
+    def test_alias_no_sustituye_un_costo_de_compra_ya_disponible(self):
+        ProductoReventaCosto.objects.create(producto_point=self.venta.product,
+            fecha_vigencia=self.periodo, costo_unitario=3, source_hash="alias-compra-vigente",
+            fuente=ProductoReventaCosto.FUENTE_POINT_HISTORIAL)
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_reventa"], 6)
+        self.assertEqual(row["costo_materia_prima"], 0)
+        self.assertEqual(row["pendientes"], [])
+
+    def test_identidad_existente_no_anticipa_un_precio_futuro(self):
+        self.costo.creado_en = timezone.make_aware(datetime(2026, 7, 1))
+        self.costo.save()
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 0)
+        self.assertIn(f"Costo sin confirmar: producto {self.venta.product_id}, receta {self.receta.pk}", row["pendientes"])
+
+    def test_alias_no_sustituye_una_receta_ya_registrada_en_ventas(self):
+        otra = Receta.objects.create(nombre="Otra receta", hash_contenido="alias-registrada")
+        RecetaCostoHistoricoMensual.objects.create(periodo=self.periodo, receta=otra,
+            costo_total=10, coverage_pct=100)
+        self.venta.receta = otra
+        self.venta.save()
+        row = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 20)
+        self.venta.refresh_from_db()
+        self.assertEqual(self.venta.receta_id, otra.pk)
+
+    def test_no_extiende_la_regla_a_2025_ni_a_octubre2026(self):
+        for periodo in [date(2025, 6, 1), date(2026, 10, 1)]:
+            with self.subTest(periodo=periodo):
+                self.venta.sale_date = periodo
+                self.venta.save()
+                RecetaCostoHistoricoMensual.objects.create(periodo=periodo, receta=self.receta,
+                    costo_total=20, coverage_pct=100)
+                row = leer_resultado_mensual(periodo)["sucursales"][self.sucursal.pk]
+                self.assertEqual(row["costo_materia_prima"] + row["costo_reventa"], 0)
+                self.assertEqual(len(row["pendientes"]), 1)
 
 
 class CostosFuenteTests(TestCase):
