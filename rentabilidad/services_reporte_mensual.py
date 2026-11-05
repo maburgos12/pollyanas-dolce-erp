@@ -56,6 +56,9 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     periodos = set(SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta).order_by().values_list("periodo", flat=True))
     fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
     periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
+    from reportes.sales_confidence import selected_sales_facts
+    periodos.update(selected_sales_facts(start_date=desde, end_date=fin).filter(
+        fecha__year=2025).dates("fecha", "month"))
     from .services_resultado import leer_cierre_conciliado, resumen_cierre_mensual
     cierre = leer_cierre_conciliado() if desde <= date(2026, 9, 1) and hasta >= date(2026, 1, 1) else None
     if cierre and cierre["errores"]:

@@ -15,6 +15,49 @@ ZERO = Decimal("0")
 CENTRALES = {"produccion", "logistica", "administracion"}
 
 
+def _personal_historico(periodo, centrales):
+    """Reconoce el gasto corporativo sin inventar su distribución por sucursal."""
+    from reportes.services_planeacion_personal import build_personnel_plan
+    from reportes.services_rentabilidad_personal import leer_personal_mensual
+
+    fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
+    selected = build_personnel_plan(fin)["selected"]
+    registered = selected["registered"]
+    montos = {"nomina": registered["total"] if registered else None,
+              **{key: selected[key] for key in ("imss", "rcv", "isn", "fees")}}
+    if any(s.get("reconciled") is False and s["kind"].startswith("ISN") for s in selected["sources"]):
+        montos["isn"] = None
+    for fila in centrales:
+        for key in fila.get("personal_en_conflicto", []):
+            montos[key] = None
+    # Los controles de los mismos recibos no son otro gasto sobre la nómina real.
+    centrales = [f for f in centrales if montos.get(f.get("personal_clave")) is None]
+    directos = defaultdict(lambda: ZERO)
+    for fila in leer_personal_mensual(periodo)["filas"]:
+        if fila["familia"] == "nomina":
+            directos["nomina"] += fila["monto_mensual"]
+        elif fila["familia"] == "cargas_patronales":
+            key = "imss" if fila["concepto"].startswith("IMSS ·") else "rcv"
+            directos[key] += fila["monto_mensual"]
+    for key, label in (("nomina", "Nómina real de empresa"), ("imss", "IMSS conciliado"),
+                       ("rcv", "RCV / Infonavit conciliado"), ("isn", "ISN conciliado"),
+                       ("fees", "Servicio de vales")):
+        monto = montos[key]
+        pendiente = monto is None or directos[key] < ZERO or directos[key] > monto
+        if key == "nomina":
+            referencia = "Periodos de nómina: " + ", ".join(str(p["id"]) for p in (registered or {}).get("periodos", []))
+        else:
+            referencia = "; ".join(f"{s['kind']} #{s['id']}" for s in selected["sources"]
+                                   if s["kind"].lower().startswith(key if key != "fees" else "servicio de vales"))
+        centrales.append(dict(id=None, area="Sin distribución histórica", concepto=label,
+            monto=None if pendiente else monto - directos[key], pendiente=pendiente,
+            fuente=(f"Total empresa: ${monto}; ya reconocido por sucursal: ${directos[key]}. "
+                    "El remanente no se prorratea." if not pendiente else
+                    "Falta fuente conciliada, hay un control mixto por conciliar o el importe por sucursal excede el control de empresa."),
+            referencia=referencia))
+    return centrales
+
+
 def ventas_para_costeo(desde, hasta):
     """Recupera meses históricos oficiales sin sumar su espejo de Point."""
     ventas = ventas_con_identidad_historica(desde, hasta)
@@ -90,9 +133,27 @@ def leer_resultado_mensual(periodo):
             x.get("tipo_fuente") == "CONSUMO_MP" for x in meta.get("real_breakdown", [])
         ):
             continue
+        fuentes = {x["tipo_fuente"] for x in meta.get("real_breakdown", []) if x.get("tipo_fuente")}
+        if linea.fuente_real.startswith("AUTO:"):
+            fuentes.update(linea.fuente_real.removeprefix("AUTO:").split("+"))
+        fuentes_nomina = {"NOMINA", "NOMINA_CONCEPTO", "BONO_PRODUCCION", "BONO_VENTAS"}
+        personales = {"nomina"} if fuentes & fuentes_nomina else set()
+        if "ISN_CFDI" in fuentes:
+            personales.add("isn")
+        if "SIPARE" in fuentes:
+            clave_sipare = {"imss": "imss", "infonavit": "rcv", "infonavit rcv": "rcv"}.get(
+                " ".join(unidecode(linea.rubro.concepto).lower().split()))
+            personales.update({clave_sipare} if clave_sipare else {"imss", "rcv"})
+        mixto = len(personales) > 1 or bool(fuentes - fuentes_nomina - {"ISN_CFDI", "SIPARE"})
         centrales.append({"id": linea.pk, "area": linea.rubro.area.nombre,
             "concepto": linea.rubro.concepto, "monto": linea.monto_real,
-            "fuente": linea.fuente_real, "pendiente": linea.monto_real is None or bool(meta.get("sin_datos_fuente"))})
+            "fuente": linea.fuente_real,
+            "personal_clave": next(iter(personales)) if len(personales) == 1 and not mixto else None,
+            "personal_en_conflicto": sorted(personales) if mixto else [],
+            "pendiente": linea.monto_real is None or bool(meta.get("sin_datos_fuente"))})
+    # shortcut: el cierre documentado y conciliado corresponde a 2025.
+    if periodo.year == 2025:
+        centrales = _personal_historico(periodo, centrales)
     return {"sucursales": dict(sucursales), "centrales": centrales,
         "central_registrado": sum((f["monto"] for f in centrales if not f["pendiente"]), ZERO),
         "fuente": ventas.aggregate(max_sale_date=Max("sale_date"), rows=Count("id"))}
