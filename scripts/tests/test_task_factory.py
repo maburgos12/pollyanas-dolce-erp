@@ -232,6 +232,17 @@ class FactoryTests(unittest.TestCase):
         self.factory.worktree = self.root / "already-removed"
         self.factory.check_close(refresh=False)
 
+    def test_closed_task_has_no_next_step(self):
+        self.through_integration()
+        self.run_stage("verify")
+        self.run_stage("cleanup")
+        closed = self.registry / "closed"
+        closed.mkdir()
+        self.record.rename(closed / self.record.name)
+        state = self.module.Factory(self.repo, "example").status()
+        self.assertEqual(state["lifecycle"], "closed")
+        self.assertIsNone(state["next_step"])
+
 
 if __name__ == "__main__":
     unittest.main()

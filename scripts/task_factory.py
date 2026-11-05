@@ -140,7 +140,7 @@ class Factory:
         dirty = False if terminal else bool(self.git("status", "--porcelain"))
         next_step = next((s for s in self.stages() if s not in valid), "close")
         return data | dict(lifecycle=self.record_path.parent.name, sha=sha, dirty=dirty,
-                           next_step="local" if dirty else next_step,
+                           next_step=None if terminal else ("local" if dirty else next_step),
                            executing=self.lock_path.exists(), completed=list(valid))
 
     def require(self, stage, sha):
