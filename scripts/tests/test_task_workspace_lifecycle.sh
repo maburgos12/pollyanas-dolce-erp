@@ -45,8 +45,9 @@ assert_failure() {
 
 setup_repo() {
   TEST_TMP="$(mktemp -d)"
+  trap 'rm -rf "$TEST_TMP"' EXIT
   export TEST_TMP
-  git init --bare "$TEST_TMP/origin.git" >/dev/null
+  git init --bare -b main "$TEST_TMP/origin.git" >/dev/null
   git init -b main "$TEST_TMP/repo" >/dev/null
   git -C "$TEST_TMP/repo" config user.name Test
   git -C "$TEST_TMP/repo" config user.email test@example.com
