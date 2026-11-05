@@ -11,7 +11,7 @@ from core.branch_catalog import display_branch_name
 from core.access import can_manage_rrhh, can_view_rrhh
 from core.models import Sucursal, UserProfile
 from rrhh.models import Empleado
-from rrhh.services_catalogos import funciones_operativas_catalogo
+from rrhh.services_catalogos import etiquetas_puestos, funciones_operativas_catalogo, puesto_presentacion
 
 
 @login_required
@@ -46,6 +46,7 @@ def asignacion_produccion_api(request):
     ]
     from bonos_produccion.empleados import empleados_elegibles_bonos_produccion
     elegibles_ids = set(empleados_elegibles_bonos_produccion().values_list("id", flat=True))
+    puestos_catalogo = etiquetas_puestos()
     empleados = [
         {
             "id": empleado.id,
@@ -53,6 +54,7 @@ def asignacion_produccion_api(request):
             "nombre": empleado.nombre,
             "area": empleado.area,
             "puesto_operativo": empleado.puesto_operativo,
+            "puesto_presentacion": puesto_presentacion(empleado, puestos_catalogo),
             "sucursal": empleado.sucursal_display,
             "participa_bonos_produccion": empleado.id in elegibles_ids,
         }
