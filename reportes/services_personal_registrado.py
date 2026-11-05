@@ -39,13 +39,18 @@ def leer_personal_registrado(start, end):
         else:
             row['pendientes'].append(f'Línea {line.pk}: percepciones sin conciliación de conceptos.')
         department = line.departamento_snapshot
-        function = emp._clave_funcion(emp.puesto_operativo)
+        historica = line.snapshot_origen == NominaLinea.SNAPSHOT_HISTORICA
+        # Las filas legadas sin snapshot conservan su lectura; el histórico nunca toma el puesto actual.
+        function = emp._clave_funcion(line.puesto_operativo_snapshot if
+            line.puesto_operativo_snapshot is not None or historica else emp.puesto_operativo)
+        level = line.nivel_organizacional_snapshot if (
+            line.nivel_organizacional_snapshot is not None or historica) else emp.nivel_organizacional
         default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
             'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'ventas_pendiente'),
             'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
             'RRHH': 'administracion', 'LOGISTICA': 'logistica'}.get(department, 'sin_clasificar')
-        destination = destino_de(emp.nivel_organizacional, function, predeterminado=default).lower()
-        if emp._clave_funcion(emp.nivel_organizacional) not in ('JEFATURA', 'DIRECCION'):
+        destination = destino_de(level, function, predeterminado=default).lower()
+        if emp._clave_funcion(level) not in ('JEFATURA', 'DIRECCION'):
             destination = {'LIMPIEZA': 'limpieza', 'ALMACEN': 'almacen'}.get(function, destination)
         if destination in ('sin_clasificar', 'ventas_pendiente'):
             row['pendientes'].append(f'Línea {line.pk}: función pendiente de clasificar en RRHH.')

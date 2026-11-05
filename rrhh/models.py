@@ -501,10 +501,12 @@ class NominaPeriodo(models.Model):
     TIPO_SEMANAL = "SEMANAL"
     TIPO_QUINCENAL = "QUINCENAL"
     TIPO_MENSUAL = "MENSUAL"
+    TIPO_EXTRAORDINARIA = "EXTRAORDINARIA"
     TIPO_CHOICES = [
         (TIPO_SEMANAL, "Semanal"),
         (TIPO_QUINCENAL, "Quincenal"),
         (TIPO_MENSUAL, "Mensual"),
+        (TIPO_EXTRAORDINARIA, "Extraordinaria"),
     ]
 
     ESTATUS_BORRADOR = "BORRADOR"
@@ -569,10 +571,12 @@ class NominaLinea(models.Model):
     SNAPSHOT_CREACION = "CREACION"
     SNAPSHOT_LISTA_RAYA = "LISTA_RAYA"
     SNAPSHOT_CAPTURA_EXPLICITA = "CAPTURA_EXPLICITA"
+    SNAPSHOT_HISTORICA = "HISTORICA"
     SNAPSHOT_ORIGEN_CHOICES = [
         (SNAPSHOT_CREACION, "Creación de línea"),
         (SNAPSHOT_LISTA_RAYA, "Importación de lista de raya"),
         (SNAPSHOT_CAPTURA_EXPLICITA, "Captura explícita posterior"),
+        (SNAPSHOT_HISTORICA, "Documento histórico conciliado"),
     ]
 
     periodo = models.ForeignKey(NominaPeriodo, on_delete=models.CASCADE, related_name="lineas")
@@ -585,6 +589,8 @@ class NominaLinea(models.Model):
         related_name="lineas_nomina_snapshot",
     )
     departamento_snapshot = models.CharField(max_length=50, blank=True, default="")
+    puesto_operativo_snapshot = models.CharField(max_length=80, null=True, blank=True, default=None)
+    nivel_organizacional_snapshot = models.CharField(max_length=30, null=True, blank=True, default=None)
     snapshot_origen = models.CharField(
         max_length=24,
         choices=SNAPSHOT_ORIGEN_CHOICES,
@@ -604,6 +610,7 @@ class NominaLinea(models.Model):
     bonos = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     descuentos = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     total_percepciones = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
+    otros_pagos = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     neto_calculado = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     observaciones = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -620,10 +627,16 @@ class NominaLinea(models.Model):
 
     def save(self, *args, **kwargs):
         if self._state.adding:
-            if self.sucursal_snapshot_id is None:
+            historica = self.snapshot_origen == self.SNAPSHOT_HISTORICA
+            if self.sucursal_snapshot_id is None and not historica:
                 self.sucursal_snapshot_id = self.empleado.sucursal_ref_id
-            if not self.departamento_snapshot:
+            if not self.departamento_snapshot and not historica:
                 self.departamento_snapshot = self.empleado.departamento or ""
+            if not historica:
+                if self.puesto_operativo_snapshot is None:
+                    self.puesto_operativo_snapshot = self.empleado.puesto_operativo or ""
+                if self.nivel_organizacional_snapshot is None:
+                    self.nivel_organizacional_snapshot = self.empleado.nivel_organizacional or ""
             if self.sucursal_snapshot_id and self.departamento_snapshot:
                 self.snapshot_origen = self.snapshot_origen or self.SNAPSHOT_CREACION
                 self.snapshot_capturado_en = self.snapshot_capturado_en or timezone.now()
@@ -631,18 +644,22 @@ class NominaLinea(models.Model):
             snapshot_actual = type(self).objects.filter(pk=self.pk).values(
                 "sucursal_snapshot_id",
                 "departamento_snapshot",
+                "puesto_operativo_snapshot",
+                "nivel_organizacional_snapshot",
                 "snapshot_origen",
                 "snapshot_capturado_en",
             ).first()
             if snapshot_actual:
                 self.sucursal_snapshot_id = snapshot_actual["sucursal_snapshot_id"]
                 self.departamento_snapshot = snapshot_actual["departamento_snapshot"]
+                self.puesto_operativo_snapshot = snapshot_actual["puesto_operativo_snapshot"]
+                self.nivel_organizacional_snapshot = snapshot_actual["nivel_organizacional_snapshot"]
                 self.snapshot_origen = snapshot_actual["snapshot_origen"]
                 self.snapshot_capturado_en = snapshot_actual["snapshot_capturado_en"]
-        if (self.salario_base or Decimal("0")) <= 0 and (self.empleado.salario_diario or Decimal("0")) > 0:
+        if self.snapshot_origen != self.SNAPSHOT_HISTORICA and (self.salario_base or Decimal("0")) <= 0 and (self.empleado.salario_diario or Decimal("0")) > 0:
             self.salario_base = (self.empleado.salario_diario or Decimal("0")) * (self.dias_trabajados or Decimal("0"))
         self.total_percepciones = (self.salario_base or Decimal("0")) + (self.bonos or Decimal("0"))
-        self.neto_calculado = self.total_percepciones - (self.descuentos or Decimal("0"))
+        self.neto_calculado = self.total_percepciones + (self.otros_pagos or Decimal("0")) - (self.descuentos or Decimal("0"))
         super().save(*args, **kwargs)
 
 
@@ -650,10 +667,12 @@ class NominaConceptoLinea(models.Model):
     TIPO_PERCEPCION = "PERCEPCION"
     TIPO_DEDUCCION = "DEDUCCION"
     TIPO_OBLIGACION = "OBLIGACION"
+    TIPO_OTRO_PAGO = "OTRO_PAGO"
     TIPO_CHOICES = [
         (TIPO_PERCEPCION, "Percepción"),
         (TIPO_DEDUCCION, "Deducción"),
         (TIPO_OBLIGACION, "Obligación"),
+        (TIPO_OTRO_PAGO, "Otro pago sin percepción salarial"),
     ]
 
     linea = models.ForeignKey(NominaLinea, on_delete=models.CASCADE, related_name="conceptos")

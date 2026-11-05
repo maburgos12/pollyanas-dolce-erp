@@ -102,10 +102,13 @@ def leer_personal_mensual(periodo: date) -> dict:
     )
     for linea in nominas:
         # Producción ya pertenece al costo de fabricación, no a ventas.
-        departamento = (linea.departamento_snapshot or linea.empleado.departamento or "").upper()
+        historica = linea.snapshot_origen == NominaLinea.SNAPSHOT_HISTORICA
+        departamento = (linea.departamento_snapshot if historica else
+            linea.departamento_snapshot or linea.empleado.departamento or "").upper()
         if departamento in {"PRODUCCION", "LOGISTICA", "ADMINISTRACION"}:
             continue
-        sucursal_id = linea.sucursal_snapshot_id or linea.empleado.sucursal_ref_id
+        sucursal_id = linea.sucursal_snapshot_id if historica else (
+            linea.sucursal_snapshot_id or linea.empleado.sucursal_ref_id)
         if departamento != "VENTAS" or sucursal_id is None:
             pendientes.append(_fila(
                 periodo, origen="NOMINA", registro_id=linea.periodo_id,

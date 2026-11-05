@@ -12,6 +12,19 @@ dos de cada tres expedientes.
 """
 from __future__ import annotations
 
+
+def aplicar_identidad_historica(fila, prefijo=""):
+    """Conserva las claves del índice sin completar el histórico con la ficha actual."""
+    if fila.get(prefijo + "snapshot_origen") == "HISTORICA":
+        for campo, snapshot in (
+            ("departamento", "departamento_snapshot"),
+            ("sucursal_ref_id", "sucursal_snapshot_id"),
+            ("puesto_operativo", "puesto_operativo_snapshot"),
+            ("nivel_organizacional", "nivel_organizacional_snapshot"),
+        ):
+            fila[prefijo + "empleado__" + campo] = fila[prefijo + snapshot]
+    return fila
+
 DESTINO_PRODUCCION = "PRODUCCION"
 DESTINO_CEDIS = "CEDIS"
 DESTINO_LOGISTICA = "LOGISTICA"
