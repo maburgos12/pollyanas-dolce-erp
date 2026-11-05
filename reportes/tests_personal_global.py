@@ -129,6 +129,14 @@ class PersonalGlobalTests(TestCase):
         self.assertIn('no concilian', result['cargas_error'])
         self.assertEqual(next(c['monto'] for c in result['componentes'] if c['clave']=='imss'), D(20))
 
+    def test_cargas_no_completan_un_mes_al_que_le_falta_una_quincena(self):
+        self.cargas_mensuales()
+        NominaPeriodo.objects.get(fecha_fin=date(2026,10,15)).delete()
+        selected = self.selected()
+        self.assertFalse(selected['registered']['mes_cubierto'])
+        self.assertFalse(selected['registered']['cargas_cubiertas'])
+        self.assertIsNone(resumen_personal_global(selected)['costo_departamentos'])
+
     def test_transfer_counts_once_and_departments_reconcile(self):
         selected = self.selected()
         result = resumen_personal_global(selected)

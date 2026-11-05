@@ -123,6 +123,7 @@ def leer_personal_registrado(start, end):
             departamento['personas'] = len(departamento['personas'])
         row['personas'] = len(personas_mes)
         row['cargas_cubiertas'] = (set(row['destinos_cargas']) == personas_mes
+                                   and row['mes_cubierto'] and not row['pendientes']
                                    and not row['errores_cargas'])
         row['sucursales_ventas'] = sorted(sucursales.values(), key=lambda b: b['sucursal'])
         for branch in row['sucursales_ventas']:
