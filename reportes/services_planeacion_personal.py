@@ -18,7 +18,7 @@ from ventas.services.sales_canonical_source import official_point_sales_rows_for
 from .models import ExpedienteCedulaIMSS, ExpedienteISN
 from .services_isn import extraer_isn_cfdi
 from .services_personal_registrado import leer_personal_registrado
-from .services_personal_global import resumen_personal_global
+from .services_personal_global import cargas_mensuales_personal, resumen_personal_global
 
 ZERO = Decimal('0')
 CENT = Decimal('0.01')
@@ -248,6 +248,19 @@ def build_personnel_plan(cutoff=None):
 
     registered = leer_personal_registrado(start, end)
     for row in rows.values():
+        row['registered'] = registered.get(row['month'])
+        row['cargas_nomina'] = cargas_mensuales_personal(row)
+        control = row['cargas_nomina']
+        if control['error']:
+            row['errors'].append(control['error'])
+        for key in control['usados']:
+            row[key] = control['valores'][key]
+            row['sources'].append(dict(
+                kind=('ISN · devengado calculado en ERP' if key == 'isn'
+                      else key.upper() + ' · cargas mensuales de nómina'),
+                id=max(p['id'] for p in row['registered']['periodos']),
+                reference=f'Conceptos mensuales M{row["month"]:%Y%m}', amount=row[key],
+            ))
         if not row['cfdis']:
             row['ordinary'] = row['extraordinary'] = None
         components = [row[k] for k in ('ordinary', 'extraordinary', 'imss', 'rcv', 'isn', 'fees')]
@@ -266,7 +279,6 @@ def build_personnel_plan(cutoff=None):
                         if row['sales'] and row['documented'] is not None else None)
         row['target'] = money(row['sales'] * Decimal('.25')) if row['sales'] else None
         row['ceiling'] = money(row['sales'] * Decimal('.27')) if row['sales'] else None
-        row['registered'] = registered.get(row['month'])
         row['payroll_difference'] = (row['ordinary'] + row['extraordinary'] - row['registered']['total']
             if row['cfdis'] and row['registered'] else None)
 

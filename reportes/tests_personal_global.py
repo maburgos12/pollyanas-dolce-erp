@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal as D
 from unittest.mock import patch
 
@@ -136,6 +136,42 @@ class PersonalGlobalTests(TestCase):
         self.assertFalse(selected['registered']['mes_cubierto'])
         self.assertFalse(selected['registered']['cargas_cubiertas'])
         self.assertIsNone(resumen_personal_global(selected)['costo_departamentos'])
+
+    def test_periodo_y_resumen_final_comparten_las_mismas_cargas(self):
+        from sat_client.models import CfdiDescargado
+        from .services_planeacion_personal import build_personnel_plan, RFC
+        from .tests_planeacion_personal import payroll_xml
+        self.cargas_mensuales()
+        bases = {emp.pk:D(100) for emp in Empleado.objects.all()}
+        CfdiDescargado.objects.create(uuid='GLOBAL-NOMINA', rfc_emisor=RFC,
+            rfc_receptor='PERSONA', subtotal=440, total=440, tipo_cfdi='emitido',
+            tipo_comprobante='N', fecha_emision=datetime(2026,10,31,tzinfo=timezone.utc),
+            xml_raw=payroll_xml('2026-10-31','O','440'))
+        CfdiDescargado.objects.create(uuid='GLOBAL-COMISION', rfc_emisor='EDENRED',
+            nombre_emisor='EDENRED', rfc_receptor=RFC, subtotal=2, total=2,
+            tipo_cfdi='recibido', tipo_comprobante='I',
+            fecha_emision=datetime(2026,10,31,tzinfo=timezone.utc),
+            xml_raw='<c:Comprobante xmlns:c="http://www.sat.gob.mx/cfd/4" Fecha="2026-10-31">'
+                    '<c:Conceptos><c:Concepto Descripcion="COMISION"/></c:Conceptos></c:Comprobante>')
+        with patch('reportes.services_personal_global.bases_gravadas_empleados', return_value=bases),\
+             patch('reportes.services_planeacion_personal.timezone.localdate', return_value=date(2026,11,5)):
+            data = build_personnel_plan(date(2026,10,31))
+            selected = data['selected']
+        self.assertEqual(selected['imss'], D(30))
+        self.assertEqual(selected['rcv'], D(30))
+        self.assertEqual(selected['isn'], D('7.20'))
+        self.assertEqual(selected['payroll_difference'], D(0))
+        self.assertEqual(selected['documented'], D('509.20'))
+        self.assertEqual(selected['global']['personal_subtotal'], selected['documented'])
+        self.assertTrue(selected['global']['isn_calculado'])
+        self.client.force_login(get_user_model().objects.create_superuser('cargas', password='test-only'))
+        with patch('reportes.views_planeacion_personal.build_personnel_plan', return_value=data):
+            url = '/reportes/planeacion-personal/?mes=2026-10'
+            self.assertContains(self.client.get(url), 'Cargas patronales e ISN')
+            exported = self.client.get(url+'&formato=json').json()['selected']['global']
+            self.assertEqual(D(exported['costo_departamentos']), D('507.20'))
+            self.assertContains(self.client.get(url+'&formato=csv'),
+                                'Total nomina y vales,3,,,440.00,67.20,507.20,')
 
     def test_transfer_counts_once_and_departments_reconcile(self):
         selected = self.selected()

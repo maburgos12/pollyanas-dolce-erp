@@ -8,16 +8,8 @@ from .services_isn import bases_gravadas_empleados, calcular_isn_sinaloa, prorra
 ZERO = Decimal('0')
 
 
-def resumen_personal_global(selected):
+def cargas_mensuales_personal(selected):
     registered = selected['registered']
-    sales = selected['sales']
-
-    def porcentaje(amount):
-        return ((amount / sales * 100).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
-                if amount is not None and sales is not None and sales > 0 else None)
-
-    departments = [dict(g, porcentaje=porcentaje(g['total']))
-                   for g in (registered or {}).get('departamentos', [])]
     cargas = (registered or {}).get('componentes_cargas', {})
     cargas_cubiertas = (registered or {}).get('cargas_cubiertas', False)
     patronal = {'imss': None, 'rcv': None, 'isn': None}
@@ -40,14 +32,37 @@ def resumen_personal_global(selected):
             for key in ('imss', 'rcv'):
                 if selected[key] is not None and selected[key] != patronal[key]:
                     raise ValueError('Las cargas de nómina no concilian con el control patronal aplicado.')
-            for department in departments:
-                department['isn'] = sum((monto for persona, monto in reparto.items()
-                    if registered['destinos_cargas'][persona] == department['destino']), ZERO)
-                department['cargas'] = department['cargas_sin_isn'] + department['isn']
-                department['costo_personal'] = department['total'] + department['cargas']
-                department['costo_porcentaje'] = porcentaje(department['costo_personal'])
         except ValueError as exc:
             cargas_error = str(exc)
+    return dict(valores=patronal, error=cargas_error, isn_calculado=isn_calculado,
+                reparto=reparto if not cargas_error and cargas_cubiertas else {},
+                usados=[k for k, v in patronal.items() if selected[k] is None and v is not None])
+
+
+def resumen_personal_global(selected):
+    registered = selected['registered']
+    sales = selected['sales']
+
+    def porcentaje(amount):
+        return ((amount / sales * 100).quantize(Decimal('.01'), rounding=ROUND_HALF_UP)
+                if amount is not None and sales is not None and sales > 0 else None)
+
+    departments = [dict(g, porcentaje=porcentaje(g['total']))
+                   for g in (registered or {}).get('departamentos', [])]
+    cargas = (registered or {}).get('componentes_cargas', {})
+    cargas_cubiertas = (registered or {}).get('cargas_cubiertas', False)
+    control_cargas = selected.get('cargas_nomina') or cargas_mensuales_personal(selected)
+    patronal = control_cargas['valores']
+    cargas_error = control_cargas['error']
+    isn_calculado = control_cargas['isn_calculado']
+    if cargas_cubiertas and not cargas_error:
+        reparto = control_cargas['reparto']
+        for department in departments:
+            department['isn'] = sum((monto for persona, monto in reparto.items()
+                if registered['destinos_cargas'][persona] == department['destino']), ZERO)
+            department['cargas'] = department['cargas_sin_isn'] + department['isn']
+            department['costo_personal'] = department['total'] + department['cargas']
+            department['costo_porcentaje'] = porcentaje(department['costo_personal'])
     for department in departments:
         for key in ('cargas', 'costo_personal', 'costo_porcentaje'):
             department.setdefault(key, None)
@@ -76,6 +91,7 @@ def resumen_personal_global(selected):
         amount = selected[key]
         if amount is None and patronal.get(key) is not None:
             amount = patronal[key]
+        if key in control_cargas['usados']:
             label += ' · devengado calculado en ERP' if key == 'isn' else ' · registrado en nómina'
         components.append(dict(clave=key, nombre=label, monto=amount))
     if cargas_cubiertas and cargas.get('BD'):
