@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -70,12 +71,18 @@ def _line_matches(pattern: re.Pattern[str], text: str) -> list[str]:
 def iter_ui_files(base_dir: Path) -> list[Path]:
     suffixes = {".html", ".css"}
     files: list[Path] = []
-    for path in base_dir.rglob("*"):
-        if _is_skipped(path) or not path.is_file() or path.suffix not in suffixes:
-            continue
-        if path.suffix == ".html" and "/templates/" not in path.as_posix() and path.parent.name != "templates":
-            continue
-        files.append(path)
+    if _is_skipped(base_dir):
+        return files
+    for directory, children, names in os.walk(base_dir):
+        # Podar antes de entrar evita recorrer los soportes montados desde NAS.
+        children[:] = [name for name in children if name not in SKIP_DIR_PARTS]
+        for name in names:
+            path = Path(directory) / name
+            if _is_skipped(path) or path.suffix not in suffixes or not path.is_file():
+                continue
+            if path.suffix == ".html" and "/templates/" not in path.as_posix() and path.parent.name != "templates":
+                continue
+            files.append(path)
     return sorted(files)
 
 
