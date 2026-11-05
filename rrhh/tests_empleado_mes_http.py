@@ -22,7 +22,9 @@ class EmpleadoMesHTTPTests(TestCase):
     def test_vistas_y_navegacion_sin_acceso_rrhh_general(self):
         for user in (self.rh, self.dg, self.jefes['PRODUCCION'], self.jefes['ADMINISTRACION']):
             self.client.force_login(user)
-            self.assertContains(self.client.get(reverse('rrhh:empleado_mes')), 'Empleado del mes CEDIS')
+            response = self.client.get(reverse('rrhh:empleado_mes'))
+            self.assertContains(response, 'Empleado del mes')
+            self.assertNotContains(response, 'Empleado del mes CEDIS')
             self.assertEqual(self.client.get(self.url).status_code, 200)
         ventas = get_user_model().objects.create_user('ventas_em_mes')
         ventas.groups.add(Group.objects.get_or_create(name='Ventas')[0])
