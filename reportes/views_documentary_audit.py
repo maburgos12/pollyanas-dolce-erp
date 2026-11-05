@@ -1,5 +1,6 @@
 import csv
 import json
+import re
 from datetime import timedelta
 from uuid import UUID, uuid4
 
@@ -26,6 +27,8 @@ def _access(user):
 
 def _csv_cell(value):
     text = '' if value is None else str(value)
+    if re.fullmatch(r"-?\d+(?:\.\d+)?", text):
+        return text
     return "'" + text if text.lstrip().startswith(('=', '+', '-', '@')) else text
 
 

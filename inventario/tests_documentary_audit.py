@@ -211,6 +211,17 @@ class DocumentaryAuditViewTests(TestCase):
         with patch('reportes.views_documentary_audit.can_view_reportes', return_value=True), patch('reportes.views_documentary_audit.can_manage_module', return_value=False):
             self.assertEqual(self.post().status_code, 403)
 
+    def test_csv_preserves_negative_numbers_without_allowing_formulas(self):
+        import csv
+        self.move(-25, 'AJUSTE')
+        refresh_report(self.period)
+        response = self.client.get(self.url, {'mes': self.period.strftime('%Y-%m'), 'export': 'csv', 'ubicacion': 'ALMACEN'})
+        row = next(csv.DictReader(StringIO(response.content.decode('utf-8-sig'))))
+        self.assertEqual(Decimal(row['ajustes']), -25)
+        self.assertEqual(Decimal(row['neto_libro']), -25)
+        from reportes.views_documentary_audit import _csv_cell
+        self.assertEqual(_csv_cell('-1+SUM(A1:A2)'), "'-1+SUM(A1:A2)")
+
     def test_csv_formula_injection_and_full_filtered_export(self):
         Insumo.objects.filter(pk=self.item.pk).update(nombre='=HYPERLINK("bad")')
         refresh_report(self.period)
