@@ -278,7 +278,7 @@ NAV_GROUPS = [
             ("rrhh", "empleados", "Gafetes", "/rrhh/gafetes/", ["/rrhh/gafetes/"]),
             ("rrhh", "cumpleanos", "Cumpleaños", "/rrhh/cumpleanos/", ["/rrhh/cumpleanos/"]),
             ("rrhh", "clima", "Clima laboral", "/rrhh/clima/", ["/rrhh/clima/"]),
-            ("rrhh", "empleado_mes", "Empleado del mes CEDIS", "/rrhh/empleado-del-mes/", ["/rrhh/empleado-del-mes/"]),
+            ("rrhh", "empleado_mes", "Empleado del mes", "/rrhh/empleado-del-mes/", ["/rrhh/empleado-del-mes/"]),
             ("rrhh", "permisos", "Permisos", "/rrhh/permisos/", ["/rrhh/permisos/"]),
             ("rrhh", "suspensiones", "Suspensiones", "/rrhh/suspensiones/", ["/rrhh/suspensiones/"]),
             ("rrhh", "incapacidades", "Incapacidades", "/rrhh/incapacidades/", ["/rrhh/incapacidades/"]),
