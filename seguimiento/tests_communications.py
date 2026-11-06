@@ -26,6 +26,14 @@ class CommunicationClientTests(SimpleTestCase):
         self.assertFalse(request.call_args.kwargs["json"]["force_resend"])
 
 
+    def test_users_response_must_be_a_collection_of_records(self):
+        from seguimiento import agente_dg_client
+        for payload in ({"error": "unavailable"}, ["invalid row"]):
+            with self.subTest(payload=payload), patch.object(agente_dg_client, "_request", return_value=Mock(status_code=200, json=lambda: payload)):
+                with self.assertRaises(agente_dg_client.AgenteDGError):
+                    agente_dg_client.get_users()
+
+
 @override_settings(SECURE_SSL_REDIRECT=False)
 class AgreementCommunicationTests(TestCase):
     def setUp(self):
@@ -46,7 +54,7 @@ class AgreementCommunicationTests(TestCase):
 
     def _create(self, action):
         with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
-             patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.recipient.email}]), \
+             patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.recipient.email, "role": "RESPONSABLE", "is_active": True}]), \
              patch("seguimiento.agente_dg_client.create_minute_agreement", return_value=self.payload), \
              patch("seguimiento.agente_dg_client.send_minute_agreement", return_value={"minute_id": 104, "channels": {
                  "email": {"status": "accepted"}, "whatsapp": {"status": "failed", "error": "No disponible"}}}) as send:
@@ -98,7 +106,7 @@ class AgreementCommunicationTests(TestCase):
         session["agreement_creation_request_id"] = "699d69f3-9be1-4a43-89f0-6ff51939d83f"
         session.save()
         with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
-             patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.recipient.email}]), \
+             patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.recipient.email, "role": "RESPONSABLE", "is_active": True}]), \
              patch("seguimiento.agente_dg_client.create_minute_agreement", side_effect=Timeout) as create:
             self.client.post("/seguimiento/panel/crear-agente-dg/", self.form)
         self.assertEqual(create.call_args.kwargs["request_id"], session["agreement_creation_request_id"])
@@ -321,3 +329,32 @@ class AgreementCommunicationTests(TestCase):
         attachment = _adjuntos_acuerdo(request)[0]
         self.assertEqual(attachment["filename"], "documentos.zip")
         self.assertEqual(attachment["mime_type"], "application/zip")
+
+    def test_create_selector_uses_only_unique_active_responsables_from_app(self):
+        unlinked = get_user_model().objects.create_user(username="sin.app", email="sin-app@example.test")
+        with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+             patch("seguimiento.agente_dg_client.get_users", return_value=[
+                 {"id": 45, "email": self.recipient.email, "role": "RESPONSABLE", "is_active": True},
+                 {"id": 1, "email": self.dg.email, "role": "DG", "is_active": True},
+                 {"id": 46, "email": unlinked.email, "role": "RESPONSABLE", "is_active": False}]):
+            response = self.client.get("/seguimiento/panel/")
+        self.assertEqual(list(response.context["usuarios_crear_acuerdo"]), [self.recipient])
+
+    def test_create_rejects_ineligible_source_role_before_mutating_origin(self):
+        with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+             patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.recipient.email, "role": "DG", "is_active": True}]), \
+             patch("seguimiento.agente_dg_client.create_minute_agreement") as create:
+            self.client.post("/seguimiento/panel/crear-agente-dg/", self.form)
+        create.assert_not_called()
+        self.assertFalse(SeguimientoItem.objects.exists())
+
+    def test_source_directory_failure_keeps_panel_readable_and_explains_creation_block(self):
+        from seguimiento.agente_dg_client import AgenteDGError
+        with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+             patch("seguimiento.agente_dg_client.get_users", side_effect=AgenteDGError("unavailable")):
+            response = self.client.get("/seguimiento/panel/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["usuarios_crear_acuerdo"], [])
+        self.assertContains(response, "No se pudieron consultar los colaboradores disponibles")
+        body = response.content.decode()
+        self.assertLess(body.index("No se pudieron consultar los colaboradores disponibles"), body.index("<dialog "))

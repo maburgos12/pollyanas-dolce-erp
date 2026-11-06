@@ -105,7 +105,10 @@ def get_users() -> list:
     resp = _request("GET", "/api/users/")
     if resp.status_code >= 400:
         raise AgenteDGError(f"GET users falló: {resp.status_code} {resp.text[:160]}")
-    return resp.json()
+    data = resp.json()
+    if not isinstance(data, list) or any(not isinstance(row, dict) for row in data):
+        raise AgenteDGError("No se pudo validar el catálogo de colaboradores del origen.")
+    return data
 
 
 def create_minute_agreement(**fields) -> dict:

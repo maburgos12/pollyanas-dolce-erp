@@ -18,10 +18,11 @@
       <h1>Panel de acuerdos</h1>
       <p>Consulta cada tipo de acuerdo con sus propios estados y responsables.</p>
     </div>
-    <button class="btn btn-secondary panel-dg-new-button" type="button" data-panel-dialog-open {% if not writeback_activo %}disabled{% endif %}>
+    <button class="btn btn-secondary panel-dg-new-button" type="button" data-panel-dialog-open {% if not writeback_activo or creation_error %}disabled{% endif %}>
       <i class="ti ti-plus" aria-hidden="true"></i><span>Nuevo acuerdo</span>
     </button>
   </header>
+  {% if creation_error %}<p role="alert">{{ creation_error }}</p>{% endif %}
   {% if creation_pending %}
   <section class="bi-card"><p>Una creación anterior quedó sin confirmación completa. Consulta esa solicitud antes de volver a capturar el acuerdo.</p>
     <form method="post" action="{% url 'seguimiento:recuperar_creacion_acuerdo' %}">{% csrf_token %}<button class="btn btn-secondary">Consultar creación pendiente</button></form>
@@ -139,13 +140,13 @@
     <form method="post" enctype="multipart/form-data" action="{% url 'seguimiento:crear_acuerdo_agente_dg' %}" class="panel-dg-create-form">
       {% csrf_token %}
       <input type="hidden" name="request_id" value="{{ creation_request_id }}">
-      <div class="bi-control"><label for="nuevo-responsable">Colaborador</label><select id="nuevo-responsable" name="responsable_user_id" required {% if not writeback_activo %}disabled{% endif %}><option value="">Seleccionar</option>{% for user in usuarios_crear_acuerdo %}<option value="{{ user.pk }}">{{ user.get_full_name|default:user.username }} · {{ user.email|default:user.username }}</option>{% endfor %}</select></div>
-      <div class="bi-control"><label for="nuevo-titulo">Acuerdo</label><input id="nuevo-titulo" name="titulo" type="text" maxlength="300" required placeholder="Título del acuerdo" {% if not writeback_activo %}disabled{% endif %}></div>
-      <div class="bi-control"><label for="nuevo-fecha">Fecha límite</label><input id="nuevo-fecha" name="fecha_limite" type="date" required {% if not writeback_activo %}disabled{% endif %}></div>
-      <div class="bi-control"><label for="nuevo-hora">Hora</label><input id="nuevo-hora" name="hora_limite" type="time" value="18:00" required {% if not writeback_activo %}disabled{% endif %}></div>
-      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-descripcion">Detalle</label><textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
+      <div class="bi-control"><label for="nuevo-responsable">Colaborador</label><select id="nuevo-responsable" name="responsable_user_id" required {% if not writeback_activo or creation_error %}disabled{% endif %}><option value="">Seleccionar</option>{% for user in usuarios_crear_acuerdo %}<option value="{{ user.pk }}">{{ user.get_full_name|default:user.username }} · {{ user.email|default:user.username }}</option>{% endfor %}</select></div>
+      <div class="bi-control"><label for="nuevo-titulo">Acuerdo</label><input id="nuevo-titulo" name="titulo" type="text" maxlength="300" required placeholder="Título del acuerdo" {% if not writeback_activo or creation_error %}disabled{% endif %}></div>
+      <div class="bi-control"><label for="nuevo-fecha">Fecha límite</label><input id="nuevo-fecha" name="fecha_limite" type="date" required {% if not writeback_activo or creation_error %}disabled{% endif %}></div>
+      <div class="bi-control"><label for="nuevo-hora">Hora</label><input id="nuevo-hora" name="hora_limite" type="time" value="18:00" required {% if not writeback_activo or creation_error %}disabled{% endif %}></div>
+      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-descripcion">Detalle</label><textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo or creation_error %}disabled{% endif %}></textarea></div>
       <div class="bi-control panel-dg-control-span-2"><label for="nuevo-reunion">Reunión o contexto</label><input id="nuevo-reunion" name="meeting_label" maxlength="200"></div>
-      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-checklist">Checklist opcional</label><textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
+      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-checklist">Checklist opcional</label><textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo or creation_error %}disabled{% endif %}></textarea></div>
       <div class="bi-control panel-dg-control-span-2"><label for="nuevo-archivos">Adjuntos (máximo 5, hasta 10 MB cada uno)</label><input id="nuevo-archivos" type="file" name="archivos" multiple><small>Hasta 5 archivos de 10 MB cada uno.</small></div>
       <fieldset class="panel-dg-control-span-2"><legend>Notificaciones</legend>
         <label><input type="checkbox" name="send_email" checked> Correo institucional</label>
@@ -158,8 +159,8 @@
         <select id="nuevo-recurrencia" name="recurring_frequency"><option value="">Una vez</option><option value="WEEKLY">Semanal</option><option value="BIWEEKLY">Quincenal</option><option value="MONTHLY">Mensual</option><option value="BIMONTHLY">Bimestral</option><option value="QUARTERLY">Trimestral</option><option value="SEMIANNUAL">Semestral</option><option value="ANNUAL">Anual</option></select>
       </fieldset>
       <div class="panel-dg-form-actions">
-        <button class="btn btn-secondary" type="submit" name="accion" value="guardar" {% if not writeback_activo %}disabled{% endif %}>Guardar</button>
-        <button class="btn btn-primary" type="submit" name="accion" value="notificar" {% if not writeback_activo %}disabled{% endif %}>Guardar y notificar</button>
+        <button class="btn btn-secondary" type="submit" name="accion" value="guardar" {% if not writeback_activo or creation_error %}disabled{% endif %}>Guardar</button>
+        <button class="btn btn-primary" type="submit" name="accion" value="notificar" {% if not writeback_activo or creation_error %}disabled{% endif %}>Guardar y notificar</button>
       </div>
     </form>
   </dialog>

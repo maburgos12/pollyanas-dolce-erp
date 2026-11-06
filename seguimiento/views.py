@@ -4,6 +4,7 @@ import logging
 import os
 import base64
 import uuid
+from collections import Counter
 from requests.exceptions import RequestException
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -320,16 +321,21 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
     item.visual_bucket_label = PANEL_BUCKETS[item.visual_bucket]
 
 
-def _agente_dg_user_id_para_erp_user(user) -> int | None:
-    if not user.email:
-        return None
+def _responsables_origen_por_correo():
     from .agente_dg_client import get_users
-    matches = [row for row in get_users()
-               if str(row.get("email") or "").strip().casefold() == user.email.strip().casefold()]
-    if len(matches) != 1:
+    rows = get_users()
+    counts = Counter(str(row.get("email") or "").strip().casefold() for row in rows)
+    return {str(row.get("email") or "").strip().casefold(): row for row in rows
+            if row.get("role") == "RESPONSABLE" and row.get("is_active", True)
+            and row.get("email") and counts[str(row["email"]).strip().casefold()] == 1}
+
+
+def _agente_dg_user_id_para_erp_user(user) -> int | None:
+    if not user.email or get_user_model().objects.filter(is_active=True, email__iexact=user.email).count() != 1:
         return None
+    row = _responsables_origen_por_correo().get(user.email.strip().casefold())
     try:
-        return int(matches[0]["id"])
+        return int(row["id"]) if row else None
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -1289,7 +1295,7 @@ def crear_acuerdo_agente_dg(request):
         messages.error(request, "No se pudo consultar usuarios de app.pollyanasdolce.com para asignar el acuerdo.")
         return redirect("seguimiento:panel_dg")
     if not agente_user_id:
-        messages.error(request, "Ese colaborador no tiene usuario ligado en app.pollyanasdolce.com; primero hay que crearlo o vincularlo.")
+        messages.error(request, "El colaborador necesita una cuenta activa de responsable en la app, vinculada por su correo institucional.")
         return redirect("seguimiento:panel_dg")
 
     due_at = timezone.make_aware(datetime.combine(fecha, hora), timezone.get_current_timezone())
@@ -1660,11 +1666,22 @@ def panel_dg(request):
         )
         item.es_en_revision = item.estatus == SeguimientoItem.ESTATUS_EN_REVISION
 
-    usuarios_crear_acuerdo = (
-        get_user_model().objects.filter(is_active=True)
-        .exclude(username__startswith="service")
-        .order_by("first_name", "last_name", "username")
-    )
+    usuarios_crear_acuerdo = []
+    creation_error = ""
+    from .agente_dg_client import AgenteDGError, is_configured
+    if _writeback_activo() and is_configured():
+        try:
+            source_users = _responsables_origen_por_correo()
+            users = list(get_user_model().objects.filter(is_active=True).order_by("first_name", "last_name", "username"))
+            counts = Counter(user.email.strip().casefold() for user in users)
+            usuarios_crear_acuerdo = [user for user in users if user.email.strip().casefold() in source_users
+                                      and counts[user.email.strip().casefold()] == 1]
+            if not usuarios_crear_acuerdo:
+                creation_error = "No hay colaboradores activos vinculados disponibles. Revisa su correo institucional y acceso como responsable en la app."
+        except (AgenteDGError, RequestException):
+            creation_error = "No se pudieron consultar los colaboradores disponibles. Actualiza antes de crear un acuerdo."
+    elif _writeback_activo():
+        creation_error = "La integración no está disponible para crear acuerdos. Solicita revisar su configuración."
 
     return render(request, "seguimiento/panel_dg.html", {
         "creation_request_id": request.session.setdefault("agreement_creation_request_id", str(uuid.uuid4())),
@@ -1709,6 +1726,7 @@ def panel_dg(request):
         "ESTATUS_EN_REVISION": SeguimientoItem.ESTATUS_EN_REVISION,
         "ESTATUS_COMPLETADO": SeguimientoItem.ESTATUS_COMPLETADO,
         "usuarios_crear_acuerdo": usuarios_crear_acuerdo,
+        "creation_error": creation_error,
         "writeback_activo": _writeback_activo(),
     })
 

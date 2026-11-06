@@ -733,7 +733,7 @@ class SeguimientoColaboradorTests(TestCase):
 
         with patch.dict(os.environ, {"AGENTE_DG_WRITEBACK_ENABLED": "true"}), \
             patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
-            patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.user.email}]), \
+            patch("seguimiento.agente_dg_client.get_users", return_value=[{"id": 45, "email": self.user.email, "role": "RESPONSABLE", "is_active": True}]), \
             patch("seguimiento.agente_dg_client.create_minute_agreement", return_value=created_payload) as create_minute:
             response = self.client.post(
                 "/seguimiento/panel/crear-agente-dg/",
