@@ -263,7 +263,8 @@ class GitHub:
         valid_ci = valid_ci and len(required) == 1 and required[0]['conclusion'] == 'SUCCESS'
         if not valid_ci:
             result = {'approved': False, 'reason': 'ci_not_green', 'sha': sha}
-        final = policy.approval(self.pr(number), comments, sha)
+        final_comments = self.comments(number)
+        final = policy.approval(self.pr(number), final_comments, sha)
         if final['reason'] in {'pr_mismatch', 'invalid_evidence'}:
             return {'approved': False, 'reason': 'pr_changed', 'sha': sha}
-        return result
+        return final if valid_ci else result

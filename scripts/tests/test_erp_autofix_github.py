@@ -206,6 +206,26 @@ class GitHubTests(unittest.TestCase):
         self.assertEqual(base64.b64decode(encoded), b'x-access-token:secret')
         self.assertNotIn('HOME', env)
 
+    def test_approval_refreshes_revocation_after_checks_and_preserves_ci_gate(self):
+        pr = {'state': 'open', 'base': {'ref': 'main'},
+              'head': {'sha': SHA, 'repo': {'full_name': 'maburgos12/pollyanas-dolce-erp'}}}
+        approved = {'id': 1, 'user': {'id': 260828669, 'type': 'User'}, 'body': 'APRUEBO PUBLICAR '+SHA}
+        revoked = dict(approved, id=2, body='REVOCO PUBLICAR '+SHA)
+        green = [{'name': 'test', 'status': 'COMPLETED', 'conclusion': 'SUCCESS'}]
+        with patch.object(self.client, 'pr', return_value=pr), \
+             patch.object(self.client, 'comments', side_effect=[[approved], [approved, revoked]]) as comments, \
+             patch.object(self.client, 'checks', return_value=green):
+            result = self.client.approval(1, SHA)
+            self.assertFalse(result['approved'])
+            self.assertEqual(result['reason'], 'revoked')
+            self.assertEqual(comments.call_count, 2)
+        with patch.object(self.client, 'pr', return_value=pr), \
+             patch.object(self.client, 'comments', side_effect=[[], [approved]]), \
+             patch.object(self.client, 'checks', return_value=[]):
+            result = self.client.approval(1, SHA)
+            self.assertFalse(result['approved'])
+            self.assertEqual(result['reason'], 'ci_not_green')
+
     def test_approval_binds_actor_ci_and_final_sha(self):
         pr = {'state': 'open', 'base': {'ref': 'main'},
               'head': {'sha': SHA, 'repo': {'full_name': 'maburgos12/pollyanas-dolce-erp'}}}
