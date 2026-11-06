@@ -267,6 +267,23 @@ class AgreementCommunicationTests(TestCase):
         from seguimiento.views import _validar_archivo_evidencia
         self.assertIsNotNone(_validar_archivo_evidencia(SimpleUploadedFile("avance.txt", b"dato"), origen_minuta=True))
         self.assertIsNone(_validar_archivo_evidencia(SimpleUploadedFile("avance.png", b"png", content_type="image/png"), origen_minuta=True))
+        self.assertIsNone(_validar_archivo_evidencia(SimpleUploadedFile("avance.pptx", b"presentacion", content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"), origen_minuta=True))
         large = SimpleUploadedFile("avance.png", b"png", content_type="image/png")
         large.size = 10 * 1024 * 1024 + 1
         self.assertIsNotNone(_validar_archivo_evidencia(large, origen_minuta=True))
+
+    def test_source_submission_accepts_app_pptx_format(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        item = SeguimientoItem.objects.create(tipo="MINUTA", titulo="Entrega", responsable_user=self.recipient,
+            metadata={"source": "agente_dg", "source_table": "minute_agreements", "source_id": 104, "source_user_id": 45})
+        self.client.force_login(self.recipient)
+        with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+             patch("seguimiento.agente_dg_client.get_minute_agreement", return_value=self.payload), \
+             patch("seguimiento.minuta_checklist.sincronizar_checklist_minuta"), \
+             patch("seguimiento.agente_dg_client.post_minute_evidence", return_value={"id": "synthetic"}) as upload, \
+             patch("seguimiento.views._refresh_minute"):
+            response = self.client.post(f"/seguimiento/{item.pk}/entregar/", {"archivo": SimpleUploadedFile("avance.pptx", b"presentacion", content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")})
+        self.assertEqual(response.status_code, 302)
+        upload.assert_called_once()
+        item.refresh_from_db()
+        self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)

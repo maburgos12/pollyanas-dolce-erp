@@ -541,7 +541,8 @@ def _validar_archivo_evidencia(archivo, *, origen_minuta=False) -> str | None:
         return f"El archivo excede el máximo permitido de {max_mb:g} MB."
 
     extension = Path(archivo.name or "").suffix.lower()
-    if extension not in EVIDENCIA_ALLOWED_EXTENSIONS:
+    allowed_extensions = {".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls", ".docx", ".pptx"} if origen_minuta else EVIDENCIA_ALLOWED_EXTENSIONS
+    if extension not in allowed_extensions:
         return "Tipo de archivo no permitido para evidencia."
 
     content_type = (getattr(archivo, "content_type", "") or "").split(";", 1)[0].strip().lower()
@@ -1768,7 +1769,7 @@ def entregar_para_revision(request, pk):
         return _revision_response(request, item, "Completa los puntos pendientes antes de entregar. Puedes registrar un avance parcial.", status=409)
     archivo = request.FILES.get("archivo")
     if archivo:
-        error = _validar_archivo_evidencia(archivo)
+        error = _validar_archivo_evidencia(archivo, origen_minuta=(item.metadata or {}).get("source_table") == "minute_agreements")
         if error:
             return _revision_response(request, item, error, status=400)
     source = _agente_dg_source(item)
