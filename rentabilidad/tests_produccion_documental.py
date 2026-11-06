@@ -128,6 +128,48 @@ class ProduccionDocumentalTests(TestCase):
         self.group["cost_total"] = "80"
         self.assertIsNone(self.evidence())
 
+    def test_explicit_native_unit_is_not_a_conversion(self):
+        self.group["unit"] = "PZA"
+        self.assertIsNone(self.evidence())
+        for row, expected in zip(self.rows, self.group["lines"]):
+            row.raw_payload["detail"]["Unidad"] = "PZA"
+            row.source_hash = payload_hash(row.raw_payload)
+            row.unit = "PZA"
+            row.save()
+            expected["source_hash"] = row.source_hash
+        self.assertIsNotNone(self.evidence())
+        self.group["unit"] = "KG"
+        self.assertIsNone(self.evidence())
+
+    def test_native_name_difference_requires_exact_reviewed_literal(self):
+        for row, expected in zip(self.rows, self.group["lines"]):
+            row.item_name += " "
+            row.raw_payload["detail"]["Nombre"] = row.item_name
+            row.source_hash = payload_hash(row.raw_payload)
+            row.save()
+            expected["source_hash"] = row.source_hash
+        self.assertIsNone(self.evidence())
+        self.group["native_name"] = self.product.name + " "
+        self.assertIsNotNone(self.evidence())
+        self.group["name"] = "Different product"
+        self.product.name = self.group["name"]
+        self.product.save()
+        self.assertIsNone(self.evidence())
+
+    def test_multiple_native_branches_require_per_line_evidence(self):
+        branch = PointBranch.objects.create(external_id="8", name="CEDIS")
+        row = self.rows[1]
+        row.branch = branch
+        row.raw_payload["historical_cost_review"]["branch_external_id"] = "8"
+        row.source_hash = payload_hash(row.raw_payload)
+        row.save()
+        self.group["lines"][1]["source_hash"] = row.source_hash
+        self.assertIsNone(self.evidence())
+        self.group["lines"][1]["branch_external_id"] = "8"
+        self.assertIsNotNone(self.evidence())
+        PointProductionLine.objects.filter(pk=row.pk).update(branch=self.branch)
+        self.assertIsNone(self.evidence())
+
     def test_partial_month_never_uses_monthly_native_average(self):
         row = dict(product_id=self.product.pk, product__sku=self.product.sku,
                    product__name=self.product.name, receta_id=None)
@@ -169,9 +211,12 @@ class ManifestDocumentalTests(TestCase):
     def test_reviewed_manifest_has_exact_scope_and_unique_pairs(self):
         manifest = _manifest()
         self.assertEqual(manifest["source"], SOURCE)
-        self.assertEqual(len(manifest["groups"]), 20)
+        self.assertEqual(len(manifest["groups"]), 76)
         lines = [line for group in manifest["groups"] for line in group["lines"]]
-        self.assertEqual(len(lines), 216)
-        self.assertEqual(len({(line["order"], line["detail"]) for line in lines}), 216)
-        self.assertEqual({g["external_id"] for g in manifest["groups"]}, {"875", "876"})
+        self.assertEqual(len(lines), 453)
+        self.assertEqual(len({(line["order"], line["detail"]) for line in lines}), 453)
+        cookies = [g for g in manifest["groups"] if g["external_id"] in {"875", "876"}]
+        self.assertEqual(len(cookies), 20)
+        self.assertEqual(sum(len(g["lines"]) for g in cookies), 216)
+        self.assertEqual({g.get("unit", "U") for g in manifest["groups"]}, {"U", "PZA"})
         self.assertTrue(all(g["period"].startswith("2025-") for g in manifest["groups"]))

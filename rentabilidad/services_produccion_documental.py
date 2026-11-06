@@ -33,10 +33,13 @@ def _valid_line(row, expected, group):
     production, detail = raw["production"], raw["detail"]
     review = raw["historical_cost_review"]
     production_date = date.fromisoformat(production["Fecha"][:10])
+    branch_external_id = expected.get("branch_external_id", group["branch_external_id"])
+    unit = group.get("unit", "U")
+    native_name = group.get("native_name", group["name"])
     if (review["source"] != SOURCE or row.is_insumo or row.insumo_id or row.receta_id
             or row.erp_branch_id or row.sync_job_id
-            or row.branch.external_id != group["branch_external_id"]
-            or review["branch_external_id"] != group["branch_external_id"]
+            or row.branch.external_id != branch_external_id
+            or review["branch_external_id"] != branch_external_id
             or production_date.replace(day=1).isoformat() != group["period"]
             or row.production_date != production_date
             or str(production["FK_Produccion"]) != row.production_external_id
@@ -44,9 +47,10 @@ def _valid_line(row, expected, group):
             or str(detail["PK_Producto"]) != group["external_id"]
             or production["Activo"] is not True or production["Status"] != 3
             or detail["Status"] != 3 or detail["IsInsumo"] is not False
-            or detail["Unidad"] != "U" or row.unit != "U"
+            or unit not in {"U", "PZA"} or detail["Unidad"] != unit or row.unit != unit
             or detail["Codigo"] != group["sku"] or row.item_code != group["sku"]
-            or detail["Nombre"] != group["name"] or row.item_name != group["name"]):
+            or native_name.rstrip() != group["name"]
+            or detail["Nombre"] != native_name or row.item_name != native_name):
         return False
     # PostgreSQL Numeric rounds ties away from zero; preserve full raw precision
     # for the average, comparing only the storage representation to each column.
