@@ -101,7 +101,8 @@ def resumen_personal_global(selected):
             department['isn'] = sum((monto for persona, monto in reparto.items()
                 if registered['destinos_cargas'][persona] == department['destino']), ZERO)
             department['cargas'] = department['cargas_sin_isn'] + department['isn']
-            department['costo_personal'] = department['total'] + department['cargas']
+            department['costo_personal'] = (department['total'] + department['cargas']
+                                             + department.get('ajuste_pago_real', ZERO))
             department['costo_porcentaje'] = porcentaje(department['costo_personal'])
     for department in departments:
         for key in ('cargas', 'costo_personal', 'costo_porcentaje'):
@@ -130,6 +131,10 @@ def resumen_personal_global(selected):
     components = [dict(clave=key, nombre=label, monto=(registered or {}).get(key))
                   for key, label in (('percepciones', 'Percepciones de las listas de raya'),
                                      ('despensa', 'Vales adicionales, no incluidos en percepciones'))]
+    ajuste_pago_real = (registered or {}).get('ajuste_pago_real', ZERO)
+    if (registered or {}).get('pagos_reales'):
+        components.append(dict(clave='ajuste_pago_real',
+            nombre='Conciliación por fecha de pago real, sin duplicar nómina fiscal', monto=ajuste_pago_real))
     for key, label in (('imss', 'IMSS patronal'), ('rcv', 'RCV / Infonavit patronal'),
                        ('isn', 'Impuesto sobre nómina'), ('fees', 'Servicio de vales, con IVA')):
         label = selected.get(key + '_label', label)
@@ -172,7 +177,9 @@ def resumen_personal_global(selected):
         prestaciones_al_pago=prestaciones_al_pago,
         prestaciones_pagadas=(registered or {}).get('prestaciones_pagadas'), personal_cerrado=personal_cerrado,
         costo_departamentos=costo_departamentos, costo_departamentos_porcentaje=porcentaje(costo_departamentos),
-        cargas_total=costo_departamentos - registered['total'] if costo_departamentos is not None else None,
+        cargas_total=(sum((g['cargas'] for g in departments), ZERO)
+                      if costo_departamentos is not None else None),
+        ajuste_pago_real=ajuste_pago_real, pagos_reales=(registered or {}).get('pagos_reales', []),
         nomina=(registered or {}).get('total'), nomina_porcentaje=porcentaje((registered or {}).get('total')),
         gastos_areas=sorted(areas.values(), key=lambda g: g['nombre']), gastos_total=expense_total,
         componentes=components, personal_subtotal=labor_total, personal_porcentaje=porcentaje(labor_total),

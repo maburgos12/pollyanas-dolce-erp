@@ -276,9 +276,12 @@ class PresupuestoRealConsolidacionService:
                 return (Decimal("0"), False)
             return (indices["obligacion_gasto"][rubro_id], True)
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA:
-            if "nomina" not in indices:
-                indices["nomina"] = self._build_nomina_index(periodo)
-            return self._monto_nomina(regla, indices["nomina"])
+            financiero = (regla.rubro.area.codigo != 'nomina'
+                          and (regla.filtros or {}).get('campo_monto', 'total_percepciones') == 'total_percepciones')
+            key = 'nomina_financiera' if financiero else 'nomina'
+            if key not in indices:
+                indices[key] = self._build_nomina_index(periodo, financiero=financiero)
+            return self._monto_nomina(regla, indices[key])
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO:
             if "nomina_concepto" not in indices:
                 indices["nomina_concepto"] = self._build_nomina_concepto_index(periodo)
@@ -406,7 +409,7 @@ class PresupuestoRealConsolidacionService:
         }
 
     @staticmethod
-    def _build_nomina_index(periodo: date) -> list[dict]:
+    def _build_nomina_index(periodo: date, *, financiero=False) -> list[dict]:
         """Nómina cerrada/pagada del mes agrupada por departamento × sucursal.
 
         Un periodo de nómina pertenece al mes donde termina (fecha_fin).
@@ -434,6 +437,19 @@ class PresupuestoRealConsolidacionService:
             )
             .annotate(**agregados)
         )
+        if financiero:
+            from .services_nomina_pagos_reales import ajustes_pagos_reales
+            from .services_planeacion_personal import month_shift
+            for ajuste in ajustes_pagos_reales(periodo, month_shift(periodo, 1)):
+                line = ajuste['linea']
+                fila = {campo: Decimal('0') for campo in NOMINA_CAMPOS_VALIDOS}
+                fila['total_percepciones'] = ajuste['ajuste']
+                fila.update({f'empleado__{campo}': getattr(line.empleado, campo) for campo in (
+                    'departamento', 'sucursal_ref_id', 'nivel_organizacional', 'puesto_operativo')})
+                fila.update({campo: getattr(line, campo) for campo in (
+                    'snapshot_origen', 'departamento_snapshot', 'sucursal_snapshot_id',
+                    'puesto_operativo_snapshot', 'nivel_organizacional_snapshot')})
+                filas.append(fila)
         return [aplicar_identidad_historica(fila) for fila in filas]
 
     def _monto_nomina(self, regla: ReglaFuenteRubro, nomina_index: list[dict]) -> tuple[Decimal, bool]:
