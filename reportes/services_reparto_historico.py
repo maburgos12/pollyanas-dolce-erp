@@ -27,6 +27,8 @@ def ventas_con_identidad_historica(desde, hasta):
 
 
 def etapa_sucursal(codigo, mes):
+    if codigo == 'SINALOA_LEYVA' and mes < 10:
+        return 'Preapertura'
     if codigo == 'BAMOA':
         if mes < 7:
             return 'Registro anterior a apertura'

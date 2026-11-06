@@ -45,3 +45,28 @@ Riesgos y pendientes: un real consolidado anteriormente se conserva con adverten
 de fuente sin datos; su conciliación requiere revisar el origen, no borrarlo por
 esta corrección. Esta entrega de código no contabiliza las facturas pendientes ni
 certifica el cierre anual.
+
+
+## Lectura del cierre de septiembre de 2026
+
+La revisión posterior de las capturas históricas de renta identificó que el
+lector mensual habilitaba el reparto consolidado solamente hasta agosto, aunque
+el cierre conciliado y el Estado de resultados cubren enero–septiembre. La renta
+compartida ya existe como gasto2121, obligación704 y contrato112; las partidas12857
+y19905 contienen sus dos destinos guardados. La pantalla de gastos debe reutilizar
+ese mismo desglose del mes, conservando el origen y el total.
+
+Se extiende exclusivamente hasta septiembre el uso existente de
+`usar_reparto_consolidado`. El lector conserva sus validaciones de sumas, tipos,
+reglas y bandera `sin_datos_fuente`; octubre y otros años siguen con el criterio
+anterior. No se crean gastos, repartos, equivalencias, contratos ni pagos.
+
+Consumidores: `leer_costos_mensuales`, panel y detalle de rentabilidad, recálculo
+mensual y lectores de sus resultados. La regresión usa un recibo compartido con
+centavos, comprueba la participación de venta y producción, el total conservado,
+la ausencia de escrituras y que octubre no adopte el reparto histórico.
+
+Verificación de fuentes: `inventario_fuentes_datos --term renta` sobre PostgreSQL16
+aislado de `reportes-etapa-sinaloa2026`, grafo de llamadas y lecturas acotadas de
+producción. Los originales y las exclusiones de capturas históricas se conservan
+en el expediente privado; no se usa una constante manual como prueba de importe.
