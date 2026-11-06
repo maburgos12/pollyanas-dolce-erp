@@ -156,6 +156,39 @@ def asignar_recetas_identificadas(filas, *, incluir_aliases=False):
             fila["receta_id"] = receta_id
 
 
+def _asignar_recetas_historicas_2025(filas, periodo):
+    """Recupera la identidad que acredita el costo documental del mismo mes."""
+    if not filas:
+        return
+    from collections import defaultdict
+    from pos_bridge.models import PointProduct
+    from recetas.utils.normalizacion import normalizar_nombre
+    from reportes.models import RecetaCostoHistoricoMensual
+
+    productos = dict(PointProduct.objects.filter(
+        pk__in={f["product_id"] for f in filas if f["product_id"]},
+    ).values_list("pk", "external_id"))
+    identidades = defaultdict(set)
+    for historico in RecetaCostoHistoricoMensual.objects.filter(
+        periodo=periodo, coverage_pct__gte=100,
+        metadata__source="POINT_PRODUCTION_UNIT_VALUATION_2025",
+        metadata__unit_of_analysis="ONE_NATIVE_FINISHED_PRODUCT_UNIT",
+    ).select_related("receta"):
+        meta = historico.metadata
+        codigo, nombre = meta.get("historical_sku"), normalizar_nombre(meta.get("historical_name") or "")
+        externo = meta.get("point_product_external_id")
+        if (codigo and nombre and externo and meta.get("source_rows")
+                and codigo == historico.receta.codigo_point
+                and nombre == normalizar_nombre(historico.receta.nombre)
+                and (historico.costo_por_unidad_rendimiento or historico.costo_total) > 0):
+            identidades[(externo, codigo, nombre)].add(historico.receta_id)
+    for fila in filas:
+        ids = identidades.get((productos.get(fila["product_id"]), fila["product__sku"],
+                               normalizar_nombre(fila["product__name"])), set())
+        if len(ids) == 1:
+            fila["receta_id"] = next(iter(ids))
+
+
 def asignar_costos_filas(filas, periodo, fin_periodo):
     """Misma precedencia de receta, adquisición y decisión DG en todos los lectores."""
     from recetas.models import Receta
@@ -169,12 +202,15 @@ def asignar_costos_filas(filas, periodo, fin_periodo):
                 fila["product_id"] = next(iter(ids))
     asignar_recetas_identificadas(filas)
     resale = _fuentes_reventa_para_periodo({f["product_id"] for f in filas if f["product_id"]}, periodo, fin_periodo)
-    # shortcut: aliases revisados para ene-sep2026, ampliar tras auditar otros periodos.
-    if periodo.year == 2026 and periodo.month <= 9:
+    # shortcut: identidades documentales 2025 y aliases ene-sep2026; otros periodos requieren auditoría.
+    if periodo.year == 2025 or (periodo.year == 2026 and periodo.month <= 9):
         pendientes = [f for f in filas if f["receta_id"] is None and not (
             resale.get(f["product_id"]) and (resale[f["product_id"]]["cost"] > 0
                                              or resale[f["product_id"]].get("authorized")))]
-        asignar_recetas_identificadas(pendientes, incluir_aliases=True)
+        if periodo.year == 2025:
+            _asignar_recetas_historicas_2025(pendientes, periodo)
+        else:
+            asignar_recetas_identificadas(pendientes, incluir_aliases=True)
     ids = {f["receta_id"] for f in filas if f["receta_id"]}
     recipes = _fuentes_recetas_para_periodo(ids, periodo, fin_periodo)
     resale_recipes = set(Receta.objects.filter(pk__in=ids, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
