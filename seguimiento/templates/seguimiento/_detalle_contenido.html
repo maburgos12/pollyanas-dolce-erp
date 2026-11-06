@@ -91,7 +91,7 @@
       <div class="bi-control"><label for="editar-punto-{{ forloop.counter }}">Punto {{ forloop.counter }}</label><textarea id="editar-punto-{{ forloop.counter }}" name="punto_{{ point.id }}" required>{{ point.text }}</textarea></div>
       {% endfor %}
       <div class="bi-control"><label for="editar-nuevos-puntos">Añadir puntos</label><textarea id="editar-nuevos-puntos" name="nuevos_puntos" placeholder="Un punto por línea"></textarea></div>
-      <div class="bi-control"><label for="editar-archivos">Añadir adjuntos</label><input id="editar-archivos" name="archivos" type="file" multiple><small>Hasta 15 MB en total.</small></div>
+      <div class="bi-control"><label for="editar-archivos">Añadir adjuntos</label><input id="editar-archivos" name="archivos" type="file" multiple><small>Hasta 5 archivos de 10 MB cada uno.</small></div>
       <fieldset><legend>Notificaciones</legend>
         <label><input type="checkbox" name="send_email" {% if item.metadata.send_email_on_create %}checked{% endif %}> Correo institucional</label>
         <label><input type="checkbox" name="send_whatsapp" {% if item.metadata.send_whatsapp_on_create %}checked{% endif %}> WhatsApp</label>

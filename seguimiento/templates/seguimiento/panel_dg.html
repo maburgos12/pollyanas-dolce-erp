@@ -146,7 +146,7 @@
       <div class="bi-control panel-dg-control-span-2"><label for="nuevo-descripcion">Detalle</label><textarea id="nuevo-descripcion" name="descripcion" rows="3" placeholder="Resultado esperado, contexto o instrucción" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
       <div class="bi-control panel-dg-control-span-2"><label for="nuevo-reunion">Reunión o contexto</label><input id="nuevo-reunion" name="meeting_label" maxlength="200"></div>
       <div class="bi-control panel-dg-control-span-2"><label for="nuevo-checklist">Checklist opcional</label><textarea id="nuevo-checklist" name="checklist" rows="3" placeholder="Un punto por línea" {% if not writeback_activo %}disabled{% endif %}></textarea></div>
-      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-archivos">Adjuntos</label><input id="nuevo-archivos" type="file" name="archivos" multiple><small>Hasta 15 MB en total.</small></div>
+      <div class="bi-control panel-dg-control-span-2"><label for="nuevo-archivos">Adjuntos (máximo 5, hasta 10 MB cada uno)</label><input id="nuevo-archivos" type="file" name="archivos" multiple><small>Hasta 5 archivos de 10 MB cada uno.</small></div>
       <fieldset class="panel-dg-control-span-2"><legend>Notificaciones</legend>
         <label><input type="checkbox" name="send_email" checked> Correo institucional</label>
         <label><input type="checkbox" name="send_whatsapp"> WhatsApp</label>

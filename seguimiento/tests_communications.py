@@ -288,3 +288,36 @@ class AgreementCommunicationTests(TestCase):
         upload.assert_called_once()
         item.refresh_from_db()
         self.assertEqual(item.estatus, SeguimientoItem.ESTATUS_EN_REVISION)
+
+    def test_attachments_match_app_count_and_per_file_size_without_a_lower_total_limit(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import RequestFactory
+        from seguimiento.views import _adjuntos_acuerdo
+        files = [SimpleUploadedFile(f"adjunto{i}.png", b"png", content_type="image/png") for i in range(6)]
+        request = RequestFactory().post("/", {"archivos": files})
+        with self.assertRaisesMessage(ValueError, "Máximo 5"):
+            _adjuntos_acuerdo(request)
+        files = [SimpleUploadedFile(f"adjunto{i}.png", b"png", content_type="image/png") for i in range(2)]
+        request = RequestFactory().post("/", {"archivos": files})
+        for file in request.FILES.getlist("archivos"):
+            file.size = 10 * 1024 * 1024
+        self.assertEqual(len(_adjuntos_acuerdo(request)), 2)
+        request.FILES.getlist("archivos")[0].size += 1
+        with self.assertRaisesMessage(ValueError, "Cada adjunto"):
+            _adjuntos_acuerdo(request)
+
+    def test_agreement_attachment_accepts_app_pptx_format(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import RequestFactory
+        from seguimiento.views import _adjuntos_acuerdo
+        request = RequestFactory().post("/", {"archivos": SimpleUploadedFile("avance.pptx", b"presentacion", content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")})
+        self.assertEqual(_adjuntos_acuerdo(request)[0]["filename"], "avance.pptx")
+
+    def test_director_attachments_follow_source_generic_contract_not_evidence_extensions(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from django.test import RequestFactory
+        from seguimiento.views import _adjuntos_acuerdo
+        request = RequestFactory().post("/", {"archivos": SimpleUploadedFile("documentos.zip", b"archivo sintetico", content_type="application/zip")})
+        attachment = _adjuntos_acuerdo(request)[0]
+        self.assertEqual(attachment["filename"], "documentos.zip")
+        self.assertEqual(attachment["mime_type"], "application/zip")

@@ -398,13 +398,13 @@ DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 def _adjuntos_acuerdo(request):
     files = request.FILES.getlist("archivos")
-    if sum(file.size for file in files) > DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES:
-        raise ValueError("Los adjuntos no pueden exceder 15 MB en total.")
+    if len(files) > 5:
+        raise ValueError("Máximo 5 adjuntos por carga.")
+    if any(file.size > 10 * 1024 * 1024 for file in files):
+        raise ValueError("Cada adjunto admite hasta 10 MB.")
     result = []
     for file in files:
-        error = _validar_archivo_evidencia(file)
-        if error:
-            raise ValueError(error)
+        # Adjuntos DG y evidencia son contratos distintos; el origen valida los adjuntos genéricos.
         result.append({"filename": Path(file.name).name, "mime_type": file.content_type or "application/octet-stream",
                        "content_base64": base64.b64encode(file.read()).decode("ascii")})
     return result
