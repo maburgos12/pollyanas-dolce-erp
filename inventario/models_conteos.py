@@ -42,6 +42,10 @@ class LineaConteoSucursal(models.Model):
     def tipo(self):
         return 'producto' if self.producto_id else 'insumo'
 
+    @property
+    def codigo_unico(self):
+        return f'POINT_PRODUCT:{self.producto.external_id}' if self.producto_id else f'ERP_INSUMO:{self.insumo_id}'
+
     class Meta:
         ordering = ['nombre','pk']
         constraints = [

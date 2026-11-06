@@ -195,8 +195,7 @@ def validar_payload(payload, *, bloquear=False):
             raise CommandError("Cada sucursal requiere entre 1 y 2000 conteos.")
         lines = [_resolver_linea(raw, bloquear=bloquear) for raw in raw_lines]
         identities = [(line["domain"], line["catalogo_id"]) for line in lines]
-        physical_codes = [line["frozen"]["codigo"] for line in lines]
-        if len(identities) != len(set(identities)) or len(physical_codes) != len(set(physical_codes)):
+        if len(identities) != len(set(identities)):
             raise CommandError(f"La sucursal {branch.codigo} contiene un artículo duplicado.")
         request_id = uuid5(
             IMPORT_NAMESPACE,

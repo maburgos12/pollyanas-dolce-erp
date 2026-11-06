@@ -67,7 +67,7 @@ def _context(request, count, *, ack='', ack_version=None):
     review_recount = reviewer and count.estado == 'RECONTEO' and _namespace(request) == 'inventario:conteos_erp'
     capture_requested = request.GET.get('capturar') == '1'
     editable = puede_capturar(request.user, count) and count.estado in ('CAPTURA','RECONTEO') and (not review_recount or capture_requested)
-    readings = (list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda=count.ronda).select_related('linea').order_by('linea__nombre')) if editable else lecturas_efectivas(count))
+    readings = (list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda=count.ronda).select_related('linea','linea__producto').order_by('linea__nombre')) if editable else lecturas_efectivas(count))
     if review_recount and not editable:
         # The new blind round must not replace the submitted evidence in review.
         readings = list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda__lt=count.ronda)
@@ -251,10 +251,9 @@ def _catalogo(tipo, query, sucursal=None, *, diario=False):
             qs=qs.filter(codigo_point__in=habitual)
             if diario:
                 qs=qs.filter(tipo_item=Insumo.TIPO_INTERNO).exclude(nombre__icontains='crema')
-        return [{'key':f'i{x.pk}','nombre':x.nombre,'codigo':x.codigo_point,'unidad':x.unidad_base.codigo if x.unidad_base_id else '',
+        return [{'key':f'i{x.pk}','nombre':x.nombre,'codigo':x.codigo_point,'codigo_unico':f'ERP_INSUMO:{x.pk}','unidad':x.unidad_base.codigo if x.unidad_base_id else '',
                  'selected':not query and bool(x.unidad_base_id)} for x in qs.order_by('nombre')[:200]]
-    # shortcut: internal-input code collisions retain legacy deduplication until their identities are reviewed.
-    qs = PointProduct.objects.filter(active=True).exclude(sku='').exclude(sku__in=Insumo.objects.filter(activo=True,tipo_item=Insumo.TIPO_INTERNO).exclude(codigo_point='').values('codigo_point'))
+    qs = PointProduct.objects.filter(active=True).exclude(sku='')
     from recetas.models import Receta
     # Branches receive and count the baked input, not the presentations made
     # on sale. Keep this same identity rule in initial scope and live search.
@@ -275,14 +274,8 @@ def _catalogo(tipo, query, sucursal=None, *, diario=False):
             qs=qs.exclude(name__iregex=r'(^|\s)(velas?|pirotecnia|tarjetas?)(\s|$)')
             qs=qs.exclude(category__in=['Alegría','Glow','Granmark','Pillines','Plásticos','Viva party'])
             qs=qs.exclude(name__iregex=r'^(servicio|extra|recetario)(\s|$)').exclude(name__iexact='Litro crema')
-    # Point replicas can carry multiple rows for one physical code. Prefer a
-    # row with verified unit evidence, then the most recently refreshed one.
-    products = sorted(qs, key=lambda x:(bool(unidad_conteo(x)[0]), x.updated_at, x.pk), reverse=True)
-    unique = {}
-    for product in products:
-        unique.setdefault(product.sku, product)
-    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'unidad':unidad_conteo(x)[0],
-             'selected':not query and bool(unidad_conteo(x)[0])} for x in sorted(unique.values(), key=lambda x:x.name.casefold())[:200]]
+    return [{'key':f'p{x.pk}','nombre':x.name,'codigo':x.sku,'codigo_unico':f'POINT_PRODUCT:{x.external_id}','unidad':unidad_conteo(x)[0],
+             'selected':not query and bool(unidad_conteo(x)[0])} for x in qs.order_by('name','pk')[:200]]
 
 
 @login_required
@@ -300,11 +293,9 @@ def catalogo(request, pk):
         return JsonResponse({'ok':True,'resultados':[]})
     existing_products = set(count.lineas.exclude(producto=None).values_list('producto_id',flat=True))
     existing_inputs = set(count.lineas.exclude(insumo=None).values_list('insumo_id',flat=True))
-    existing_codes = set(count.lineas.values_list('codigo',flat=True))
     results = [
         item for item in _catalogo(tipo, query, count.sucursal)
-        if item['codigo'] not in existing_codes
-        and (int(item['key'][1:]) not in (existing_products if tipo == 'producto' else existing_inputs))
+        if int(item['key'][1:]) not in (existing_products if tipo == 'producto' else existing_inputs)
     ][:20]
     return JsonResponse({'ok':True,'resultados':results})
 
@@ -408,13 +399,13 @@ def exportar(request, pk):
     wb = Workbook()
     sheet=wb.active
     sheet.title='Conteo físico'
-    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada'])
+    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Código único','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada'])
     readings = [row['lectura'] for row in context['rows']] if context['resumen_reconteo'] else lecturas_efectivas(count)
     for r in readings:
         line=r.linea
         ref=count.referencia.get('lineas',{}).get(str(line.pk),{})
         qty=Decimal(ref['cantidad']) if ref.get('cantidad') is not None else None
-        sheet.append([f'CF-{count.pk}',_excel_text(count.sucursal.nombre),count.fecha.isoformat(),count.estado,_excel_text(line.codigo),_excel_text(line.nombre),_excel_text(line.unidad),r.ronda,
+        sheet.append([f'CF-{count.pk}',_excel_text(count.sucursal.nombre),count.fecha.isoformat(),count.estado,_excel_text(line.codigo),_excel_text(line.codigo_unico),_excel_text(line.nombre),_excel_text(line.unidad),r.ronda,
                       _excel_number(r.cantidad),_excel_text(r.incidencia),_excel_number(qty),
                       _excel_number(r.cantidad-qty) if r.cantidad is not None and qty is not None else None,ref.get('capturado_en',''),
                       'Declaración de corte por revisor' if count.referencia.get('corte_verificado') else 'Pendiente de conciliación temporal',
@@ -423,10 +414,10 @@ def exportar(request, pk):
     history=wb.create_sheet('Historial')
     history.append(['Fecha','Acción','Usuario','Detalle'])
     readings=wb.create_sheet('Lecturas históricas')
-    readings.append(['Evento','Fecha','Acción','Usuario','Artículo','Código','Ronda','Cantidad','Incidencia','Hora física declarada'])
+    readings.append(['Evento','Fecha','Acción','Usuario','Artículo','Código','Código único','Ronda','Cantidad','Incidencia','Hora física declarada'])
     references=wb.create_sheet('Referencias históricas')
-    references.append(['Evento','Fecha','Artículo','Código','Cantidad','Unidad','Ciclo Point','Snapshot Point','Extracción','Estado','Corte declarado','Error'])
-    lines={str(line.pk):line for line in count.lineas.all()}
+    references.append(['Evento','Fecha','Artículo','Código','Código único','Cantidad','Unidad','Ciclo Point','Snapshot Point','Extracción','Estado','Corte declarado','Error'])
+    lines={str(line.pk):line for line in count.lineas.select_related('producto')}
     import json
     for e in count.eventos.select_related('actor'):
         safe_payload={k:v for k,v in e.payload.items() if k not in {'archivo','snapshot','lecturas','referencia','articulos'}}
@@ -436,17 +427,17 @@ def exportar(request, pk):
         historical=e.payload.get('snapshot') or [{'linea_id':key,'ronda':e.payload.get('resultado',{}).get('ronda'),**value} for key,value in e.payload.get('lecturas',{}).items()]
         for item in historical:
             line=lines.get(str(item['linea_id']))
-            readings.append([e.pk,e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),item.get('ronda'),_excel_text(item.get('cantidad')),_excel_text(item.get('incidencia')),_excel_text(item.get('contado_en',''))])
+            readings.append([e.pk,e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),_excel_text(line.codigo_unico if line else ''),item.get('ronda'),_excel_text(item.get('cantidad')),_excel_text(item.get('incidencia')),_excel_text(item.get('contado_en',''))])
         for key,item in reference.get('lineas',{}).items():
             line=lines.get(str(key))
-            references.append([e.pk,e.creado_en.isoformat(),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),_excel_text(item.get('cantidad')),_excel_text(item.get('unidad')),item.get('sync_job_id'),item.get('snapshot_id'),item.get('capturado_en'),reference.get('estado'),bool(reference.get('corte_verificado')),_excel_text(item.get('error'))])
+            references.append([e.pk,e.creado_en.isoformat(),_excel_text(line.nombre if line else ''),_excel_text(line.codigo if line else ''),_excel_text(line.codigo_unico if line else ''),_excel_text(item.get('cantidad')),_excel_text(item.get('unidad')),item.get('sync_job_id'),item.get('snapshot_id'),item.get('capturado_en'),reference.get('estado'),bool(reference.get('corte_verificado')),_excel_text(item.get('error'))])
         history.append([e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(json.dumps(safe_payload,ensure_ascii=False))])
     nightly=wb.create_sheet('Conciliación nocturna')
-    nightly.append(['Código','Artículo','Hora física declarada','Cierre','Estado','Físico al cierre','Point al cierre','Diferencia','Motivo pendiente','Movimientos físicos','Movimientos Point','Posteriores al cierre','Snapshot','Ciclo Point','Historial','SHA historial'])
+    nightly.append(['Código','Código único','Artículo','Hora física declarada','Cierre','Estado','Físico al cierre','Point al cierre','Diferencia','Motivo pendiente','Movimientos físicos','Movimientos Point','Posteriores al cierre','Snapshot','Ciclo Point','Historial','SHA historial'])
     for row in context['rows']:
         r, line, result = row['lectura'],row['linea'],row['conciliacion']
         number = lambda key: _excel_number(Decimal(result[key])) if result.get(key) is not None else None
-        nightly.append([_excel_text(line.codigo),_excel_text(line.nombre),r.contado_en.isoformat() if r.contado_en else '',context['conciliacion'].get('cierre_en',''),
+        nightly.append([_excel_text(line.codigo),_excel_text(line.codigo_unico),_excel_text(line.nombre),r.contado_en.isoformat() if r.contado_en else '',context['conciliacion'].get('cierre_en',''),
             result.get('estado','PENDIENTE'),number('fisico_al_cierre'),number('point_al_cierre'),number('diferencia'),_excel_text(result.get('motivo','Conciliación nocturna aún no ejecutada.')),
             json.dumps(result.get('movimientos_fisico',[])),json.dumps(result.get('movimientos_point',[])),json.dumps(result.get('posteriores_cierre',[])),
             result.get('snapshot_id'),result.get('sync_job_id'),result.get('historial_id'),result.get('historial_sha256','')])

@@ -92,7 +92,7 @@ def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, reque
         return previous
     if not sucursal.esta_operativa() or not sucursal.esta_operativa(fecha): raise ConteoError('Sucursal no operativa.')
     if not autorizado_sucursal(responsable,sucursal): raise ConteoError('Responsable sin acceso vigente a la sucursal.')
-    frozen, seen, codes = [], set(), set()
+    frozen, seen = [], set()
     for item in items:
         if not isinstance(item,dict) or set(item)-{'producto_id','insumo_id','unidad','fuente_unidad'}: raise ConteoError('Artículo inválido.')
         kind = 'producto_id' if item.get('producto_id') else 'insumo_id'
@@ -102,12 +102,9 @@ def preparar_conteo(*, actor, sucursal, responsable, fecha, titulo, items, reque
         if (kind,ident) in seen: raise ConteoError('Artículo duplicado.')
         seen.add((kind,ident))
         resolved = resolver_articulo_conteo(('p' if kind == 'producto_id' else 'i') + str(ident))
-        code = resolved['codigo']
-        if code in codes: raise ConteoError('Código físico duplicado entre artículos.')
-        codes.add(code)
         frozen.append(resolved)
     overlap = Q(producto_id__in=[x['producto_id'] for x in frozen if 'producto_id' in x])|Q(insumo_id__in=[x['insumo_id'] for x in frozen if 'insumo_id' in x])
-    if LineaConteoSucursal.objects.filter(overlap | Q(codigo__in=codes), conteo__sucursal=sucursal,conteo__fecha=fecha,conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO']).exists():
+    if LineaConteoSucursal.objects.filter(overlap, conteo__sucursal=sucursal,conteo__fecha=fecha,conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO']).exists():
         raise ConteoConflict('Ya existe un conteo activo para estos artículos, sucursal y fecha.')
     try:
         # Different branches lock different rows; the UUID remains globally unique.
@@ -220,10 +217,10 @@ def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
         _guardar(count, actor, saved)
         frozen = resolver_articulo_conteo(payload['articulo'])
         source_filter = Q(producto_id=frozen['producto_id']) if 'producto_id' in frozen else Q(insumo_id=frozen['insumo_id'])
-        if count.lineas.filter(source_filter | Q(codigo=frozen['codigo'])).exists():
+        if count.lineas.filter(source_filter).exists():
             raise ConteoError('Este artículo ya forma parte del conteo.')
         if LineaConteoSucursal.objects.filter(
-            source_filter | Q(codigo=frozen['codigo']),
+            source_filter,
             conteo__sucursal=count.sucursal, conteo__fecha=count.fecha,
             conteo__estado__in=['CAPTURA','RECONTEO','ENVIADO'],
         ).exclude(conteo=count).exists():

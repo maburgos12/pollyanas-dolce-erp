@@ -165,17 +165,21 @@ class ConteoViewsTests(TestCase):
         self.assertEqual(response.status_code,200)
         self.assertContains(response,'Sin referencia')
         self.assertContains(response,'Solicitar reconteo')
+        self.assertContains(response,f'POINT_PRODUCT:{self.product.external_id}')
         exported=self.client.get(reverse('inventario:conteos_erp:exportar',args=[self.count.pk]))
         self.assertEqual(exported.status_code,200)
-        row=list(load_workbook(BytesIO(exported.content)).active.values)[1]
-        self.assertEqual(row[8],0)
-        self.assertIsNone(row[10])
-        self.assertIsNone(row[11])
+        active=load_workbook(BytesIO(exported.content)).active
+        headers=[cell.value for cell in active[1]]
+        row=list(active.values)[1]
+        self.assertEqual(row[headers.index('Contado')],0)
+        self.assertIsNone(row[headers.index('Referencia Point')])
+        self.assertIsNone(row[headers.index('Diferencia informativa')])
+        self.assertEqual(row[headers.index('Código único')],f'POINT_PRODUCT:{self.product.external_id}')
         book=load_workbook(BytesIO(exported.content))
         self.assertIn('Lecturas históricas',book.sheetnames)
         self.assertIn('Referencias históricas',book.sheetnames)
         self.assertEqual(book['Lecturas históricas'].max_row,2)
-        self.assertEqual(book['Lecturas históricas'].cell(2,8).value,'0.000000')
+        self.assertEqual(book['Lecturas históricas'].cell(2,9).value,'0.000000')
 
     def test_recount_reviewer_sees_submitted_round_and_capture_stays_blind(self):
         from inventario.services_conteos import ejecutar_accion
@@ -210,7 +214,8 @@ class ConteoViewsTests(TestCase):
         from io import BytesIO
         from openpyxl import load_workbook
         book = load_workbook(BytesIO(self.client.get(reverse('inventario:conteos_erp:exportar', args=[self.count.pk])).content))
-        self.assertEqual(book.active.cell(2, 9).value, 7)
+        headers=[cell.value for cell in book.active[1]]
+        self.assertEqual(book.active.cell(2, headers.index('Contado') + 1).value, 7)
 
         capture = self.client.get(url + '?capturar=1')
         self.assertTrue(capture.context['editable'])

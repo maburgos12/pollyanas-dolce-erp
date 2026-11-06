@@ -178,11 +178,31 @@ class BranchCountCatalogTests(TestCase):
             self.assertFalse(rows[0]['selected'])
         self.assertFalse(_catalogo('diario','fresas chico inexistente',self.branch))
 
-    def test_internal_input_deduplication_is_preserved(self):
+    def test_product_and_internal_input_with_same_code_remain_available(self):
         from maestros.models import Insumo
         from inventario.views_conteos import _catalogo
         product=PointProduct.objects.create(external_id='internal-cookie',sku='01GCM01',name='Galleta Chocolate Mini')
         internal=Insumo.objects.create(nombre='Galleta Chispas Mini',codigo_point=product.sku,tipo_item=Insumo.TIPO_INTERNO)
-        self.assertNotIn(f'p{product.pk}',{r['key'] for r in _catalogo('producto',product.sku,self.branch)})
+        self.assertIn(f'p{product.pk}',{r['key'] for r in _catalogo('producto',product.sku,self.branch)})
         self.assertIn(f'i{internal.pk}',{r['key'] for r in _catalogo('insumo',product.sku,self.branch)})
         self.assertEqual({r['key'] for r in _catalogo('insumo','galleta mini',self.branch)},{f'i{internal.pk}'})
+
+    def test_duplicate_point_skus_are_addressable_and_existing_identity_is_filtered(self):
+        from inventario.views_conteos import _catalogo
+        duplicate=PointProduct.objects.create(external_id='same-sku-other-id',sku=self.product.sku,name='Otra presentación',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':self.product.sku,'Unidad':'PZA'})})
+        rows=_catalogo('producto',self.product.sku,self.branch)
+        self.assertIn(f'p{self.product.pk}',{row['key'] for row in rows})
+        self.assertIn(f'p{duplicate.pk}',{row['key'] for row in rows})
+        self.assertEqual({row['codigo_unico'] for row in rows if row['key'] in {f'p{self.product.pk}',f'p{duplicate.pk}'}},
+                         {f'POINT_PRODUCT:{self.product.external_id}','POINT_PRODUCT:same-sku-other-id'})
+        self.client.force_login(self.operator)
+        from uuid import uuid4
+        response=self.client.post(reverse('operacion:conteos_app:accion',args=[self.count.pk]),
+            {'action':'iniciar','version':self.count.version,'request_id':str(uuid4())},HTTP_X_REQUESTED_WITH='XMLHttpRequest')
+        self.assertEqual(response.status_code,200)
+        response=self.client.get(reverse('operacion:conteos_app:catalogo',args=[self.count.pk]),
+            {'q':self.product.sku,'tipo':'producto'})
+        keys={row['key'] for row in response.json()['resultados']}
+        self.assertNotIn(f'p{self.product.pk}',keys)
+        self.assertIn(f'p{duplicate.pk}',keys)

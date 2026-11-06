@@ -235,6 +235,19 @@ class ImportarConteosHistoricosTests(TestCase):
         self.run_import(aplicar=True)
         self.assertEqual(ConteoSucursal.objects.count(), 4)
 
+    def test_same_legacy_code_across_domains_preserves_exact_identity(self):
+        self.insumo.codigo_point = self.product.sku
+        self.insumo.save(update_fields=['codigo_point'])
+        payload = json.loads(json.dumps(self.payload))
+        for branch in payload['sucursales']:
+            insumo = next(row for row in branch['conteos'] if row['domain'] == 'insumo')
+            insumo['codigo_point'] = self.product.sku
+        self.run_import(aplicar=True, payload=payload)
+        lines=LineaConteoSucursal.objects.filter(conteo__sucursal=self.branches[0]).select_related('producto')
+        self.assertEqual(set(lines.values_list('codigo',flat=True)),{self.product.sku})
+        self.assertEqual({line.codigo_unico for line in lines},
+                         {f'POINT_PRODUCT:{self.product.external_id}',f'ERP_INSUMO:{self.insumo.pk}'})
+
     def test_inactive_identifier_rejects_and_rolls_back_all(self):
         self.product.active = False
         self.product.save(update_fields=["active"])
