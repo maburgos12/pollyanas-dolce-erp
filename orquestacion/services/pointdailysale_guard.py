@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import fnmatch
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +55,7 @@ POINT_DAILY_SALE_IGNORED_GLOBS = (
     ".git/**",
     ".venv/**",
     "docs/**",
+    "storage/nas/**",
     "**/__pycache__/**",
     "**/migrations/*.py",
     "**/tests.py",
@@ -89,7 +91,17 @@ def scan_pointdailysale_usage(*, base_dir: str | Path) -> GuardScanResult:
     violations: list[GuardViolation] = []
     checked_files = 0
 
-    for path in sorted(root.rglob("*.py")):
+    paths: list[Path] = []
+    for directory, subdirectories, filenames in os.walk(root, onerror=_raise_scan_error, followlinks=False):
+        current = Path(directory)
+        # Excluir antes de descender evita recorrer los montajes remotos del NAS.
+        subdirectories[:] = [
+            name for name in subdirectories
+            if not _matches_any((current / name).relative_to(root).as_posix() + "/", POINT_DAILY_SALE_IGNORED_GLOBS)
+        ]
+        paths.extend(current / name for name in filenames if name.endswith(".py"))
+
+    for path in sorted(paths):
         relative_path = path.relative_to(root).as_posix()
         if _matches_any(relative_path, POINT_DAILY_SALE_IGNORED_GLOBS):
             continue
@@ -115,6 +127,10 @@ def scan_pointdailysale_usage(*, base_dir: str | Path) -> GuardScanResult:
             )
 
     return GuardScanResult(checked_files=checked_files, violations=tuple(violations))
+
+
+def _raise_scan_error(error: OSError) -> None:
+    raise error
 
 
 def is_allowed_pointdailysale_path(relative_path: str) -> bool:

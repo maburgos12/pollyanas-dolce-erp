@@ -5,7 +5,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from django.db.models import Count, Max, Min, Q, Sum
+from django.db.models import Case, Count, F, IntegerField, Max, Min, Q, Sum, Value, When
 from django.db.models.functions import TruncMonth
 
 from core.cache_versions import get_or_set_versioned_cache
@@ -32,6 +32,31 @@ FACT_SOURCE_PRIORITY = [
 def point_sales_evidence_by_ids(*, sale_ids: list[int]):
     """Read referenced evidence as stored, without source selection or aggregation."""
     return PointDailySale.objects.filter(pk__in=sale_ids).select_related("branch")
+
+
+def point_sales_with_historical_branch_identity(*, start_date: date, end_date: date):
+    """Annotate the existing 2026 Point 2 identity without changing stored sales.
+
+    Both dates are inclusive. Preserve every source, amount and quantity; absent
+    CRUCERO deliberately leaves the historical identity null, never guessed.
+    """
+    crucero = Sucursal.objects.filter(codigo="CRUCERO").values_list("pk", flat=True).first()
+    return PointDailySale.objects.filter(sale_date__range=(start_date, end_date)).annotate(
+        sucursal_historica_id=Case(
+            When(
+                branch__external_id="2",
+                sale_date__range=(date(2026, 1, 1), date(2026, 6, 30)),
+                then=Value(crucero),
+            ),
+            default=F("branch__erp_branch_id"),
+            output_field=IntegerField(),
+        )
+    )
+
+
+def point_sales_evidence_months(*, start_date: date, end_date: date):
+    """Months with raw Point evidence, inclusive dates and no source selection."""
+    return PointDailySale.objects.filter(sale_date__range=(start_date, end_date)).dates("sale_date", "month")
 
 
 def _resolve_sucursal_id(sucursal: Sucursal | int) -> int:

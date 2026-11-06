@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import date, datetime
 from io import StringIO
 from pathlib import Path
@@ -58,6 +59,63 @@ class PointDailySaleGuardTests(SimpleTestCase):
         self.assertTrue(result.has_violations)
         self.assertEqual(len(result.violations), 2)
         self.assertTrue(all(violation.relative_path == "api/bad_reader.py" for violation in result.violations))
+
+    def test_guard_prunes_nas_and_ignored_trees_before_entering_them(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            ignored = ("storage/nas", ".git", ".venv", "docs", "api/__pycache__")
+            checked = (
+                "api/nested/reader.py", "src/docs/reader.py", "src/storage/nas/reader.py",
+                "storage/imports.py", "storage/nasx/reader.py",
+            )
+            source = "from pos_bridge.models import PointDailySale\nrows = PointDailySale.objects.all()\n"
+            for relative in (*checked, *(f"{directory}/nested/reader.py" for directory in ignored)):
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(source, encoding="utf-8")
+            real_scandir = os.scandir
+
+            def guarded_scandir(path):
+                relative = Path(path).relative_to(root).as_posix()
+                if any(relative == directory or relative.startswith(directory + "/") for directory in ignored):
+                    self.fail(f"El scanner entró en un árbol excluido: {relative}")
+                return real_scandir(path)
+
+            with patch("os.scandir", side_effect=guarded_scandir):
+                result = scan_pointdailysale_usage(base_dir=root)
+
+        self.assertEqual(result.checked_files, len(checked))
+        self.assertEqual(
+            [(v.relative_path, v.line_number) for v in result.violations],
+            [(path, line) for path in sorted(checked) for line in (1, 2)],
+        )
+
+    def test_guard_fails_if_source_directory_cannot_be_scanned(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            inaccessible = root / "api"
+            inaccessible.mkdir()
+            real_scandir = os.scandir
+
+            def guarded_scandir(path):
+                if Path(path) == inaccessible:
+                    raise PermissionError("source directory inaccessible")
+                return real_scandir(path)
+
+            with patch("os.scandir", side_effect=guarded_scandir):
+                with self.assertRaisesRegex(PermissionError, "source directory inaccessible"):
+                    scan_pointdailysale_usage(base_dir=root)
+
+    def test_guard_propagates_source_read_and_parse_errors(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir).resolve()
+            source = root / "reader.py"
+            source.write_text("from pos_bridge.models import PointDailySale\nbroken = (", encoding="utf-8")
+            with self.assertRaises(SyntaxError):
+                scan_pointdailysale_usage(base_dir=root)
+            with patch.object(Path, "read_text", side_effect=PermissionError("source file inaccessible")):
+                with self.assertRaisesRegex(PermissionError, "source file inaccessible"):
+                    scan_pointdailysale_usage(base_dir=root)
 
 
 class ProtectedSalesReaderGuardTests(SimpleTestCase):

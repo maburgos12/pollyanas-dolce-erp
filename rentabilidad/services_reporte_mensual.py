@@ -52,10 +52,10 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
     from rentabilidad.models_rentabilidad import SucursalRentabilidad
 
     from .services_resultado import registros_del_mes
-    from pos_bridge.models.sales import PointDailySale
+    from ventas.services.sales_read_service import point_sales_evidence_months
     periodos = set(SucursalRentabilidad.objects.filter(periodo__gte=desde, periodo__lte=hasta).order_by().values_list("periodo", flat=True))
     fin = date(hasta.year, hasta.month, monthrange(hasta.year, hasta.month)[1])
-    periodos.update(PointDailySale.objects.filter(sale_date__range=(desde, fin)).dates("sale_date", "month"))
+    periodos.update(point_sales_evidence_months(start_date=desde, end_date=fin))
     from reportes.sales_confidence import selected_sales_facts
     periodos.update(selected_sales_facts(start_date=desde, end_date=fin).filter(
         fecha__year=2025).dates("fecha", "month"))
