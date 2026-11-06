@@ -8,6 +8,7 @@ Type=oneshot
 User=root
 Group=erp-observer
 Environment=DOCKER_CONFIG=/nonexistent
+Environment=GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_OPTIONAL_LOCKS=0
 ExecStart=/usr/bin/python3 -B /opt/erp-observer/current/ops/erp-observer/collect.py
 TimeoutStartSec=75
 UMask=0027

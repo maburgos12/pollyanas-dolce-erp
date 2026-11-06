@@ -6,12 +6,12 @@ from pathlib import Path
 import re
 import subprocess
 
-from observer import atomic_json, project_meta, timestamp
+from observer import atomic_json, project_meta
 
 WORKER = "pastelerias-erp-worker-1"
 REPO = "/opt/pastelerias-erp"
 OUTPUT = Path("/var/lib/erp-observer-source/doctor.json")
-TASK = re.compile(r"Task reportes\.erp_doctor_daily_report\[([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\] (?:succeeded|failed)")
+TASK = re.compile(r"Task reportes\.erp_doctor_daily_report\[([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\] (?:succeeded|failed|raised (?:unexpected|expected):)")
 QUERY = '''
 import json, sys, signal
 signal.alarm(12)
@@ -41,12 +41,11 @@ def collect():
     snapshot["worker_started_at"] = command(["docker", "inspect", "--format", "{{.State.StartedAt}}", WORKER]).strip()
     logs = subprocess.run(["docker", "logs", "--since", "48h", "--tail", "12000", WORKER],
                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=20, check=True).stdout
-    candidates = list(dict.fromkeys(TASK.findall(logs)))[-8:]
+    candidates = TASK.findall(logs)[-1:]
     if candidates:
-        rows = json.loads(command(["docker", "exec", "-i", WORKER, "/opt/venv/bin/python", "-c", QUERY], input=json.dumps(candidates)))
-        completed = [row for row in rows if row.get("date_done")]
-        if completed:
-            snapshot.update(project_meta(max(completed, key=lambda row: timestamp(row["date_done"]))))
+        rows = json.loads(command(["docker", "exec", "-i", WORKER, "/opt/venv/bin/python", "-B", "-c", QUERY], input=json.dumps(candidates)))
+        if rows:
+            snapshot.update(project_meta(rows[-1]))
     return snapshot
 
 

@@ -9,8 +9,8 @@ despliega la aplicación ERP.
 ## Componentes y límites
 
 - `collect.py`: lector fijo ejecutado por root cada 60 segundos mediante su propio
-  timer. Consulta hasta 12 000 líneas/48 horas del worker y hasta ocho UUID
-  terminados en el backend JSON existente. No ejecuta Doctor, fix, email, NAS,
+  timer. Consulta hasta 12 000 líneas/48 horas del worker y el último UUID
+  terminado en el backend JSON existente. No ejecuta Doctor, fix, email, NAS,
   tareas Celery, consultas SQL ni cambios de horarios. El acceso privilegiado a
   Docker queda en este lector revisado, sin modelo ni comandos tomados de logs.
 - `observer.py`: proceso `erp-observer`, sin red, credenciales ni acceso a Docker

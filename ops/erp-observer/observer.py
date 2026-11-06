@@ -70,8 +70,11 @@ def classify(snapshot, now):
         if not isinstance(snapshot.get("checks"), list):
             return "invalid"
         # Reuse the projection validator at this trust boundary too.
-        project_meta(dict(result=dict(status=snapshot["doctor_status"], checks=snapshot["checks"])))
-        return {"OK": "healthy", "WARN": "doctor_warn", "FAIL": "doctor_fail"}[snapshot["doctor_status"]]
+        projected = project_meta(dict(result=dict(status=snapshot["doctor_status"], checks=snapshot["checks"])))
+        severity = {"OK": 0, "SKIPPED": 0, "WARN": 1, "FAIL": 2}
+        highest = max([severity[projected["doctor_status"]]] +
+                      [severity[check["status"]] for check in projected["checks"]])
+        return {0: "healthy", 1: "doctor_warn", 2: "doctor_fail"}[highest]
     except (KeyError, TypeError, ValueError, AttributeError):
         return "invalid"
 
