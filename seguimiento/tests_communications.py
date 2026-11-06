@@ -9,6 +9,7 @@ from django.test import TestCase, SimpleTestCase, override_settings
 from django.utils import timezone
 
 from core.access import ROLE_DG
+from seguimiento import minuta_checklist
 from seguimiento.models import SeguimientoItem
 from seguimiento.services import upsert_agente_dg_payload
 
@@ -279,7 +280,7 @@ class AgreementCommunicationTests(TestCase):
         self.client.force_login(self.recipient)
         with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
              patch("seguimiento.agente_dg_client.get_minute_agreement", return_value=self.payload), \
-             patch("seguimiento.minuta_checklist.sincronizar_checklist_minuta"), \
+             patch.object(minuta_checklist, "sincronizar_checklist_minuta"), \
              patch("seguimiento.agente_dg_client.post_minute_evidence", return_value={"id": "synthetic"}) as upload, \
              patch("seguimiento.views._refresh_minute"):
             response = self.client.post(f"/seguimiento/{item.pk}/entregar/", {"archivo": SimpleUploadedFile("avance.pptx", b"presentacion", content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation")})
