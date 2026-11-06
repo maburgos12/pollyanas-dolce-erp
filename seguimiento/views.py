@@ -103,12 +103,15 @@ def _writeback_agente_dg_item(item: SeguimientoItem, *, accion: str, comentario:
             if comentario:
                 payload["completion_note"] = comentario
             patch_minute_agreement(source_id, **payload)
+            item.refresh_from_db()
             return True
         if accion == "devolver":
             patch_minute_agreement(source_id, status="IN_PROGRESS")
+            item.refresh_from_db()
             return True
         if accion == "feedback" and comentario:
             patch_minute_agreement(source_id, completion_note=comentario)
+            item.refresh_from_db()
             return True
         return False
 
@@ -1822,8 +1825,9 @@ def completar_directamente(request, pk):
 
     comentario_texto = (request.POST.get("comentario") or "").strip()
     try:
+        _verify_source_assignment(request, item)
         _writeback_agente_dg_item(item, accion="completar", comentario=comentario_texto)
-    except AgenteDGError as exc:
+    except (AgenteDGError, RequestException) as exc:
         logger.warning("Write-back completar Agente DG falló (item %s): %s", item.pk, exc)
         messages.error(request, "No se pudo cerrar en app.pollyanasdolce.com. El acuerdo no se marcó como completado en ERP; intenta de nuevo.")
         return redirect("seguimiento:detalle", pk=pk)

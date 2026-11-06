@@ -239,3 +239,25 @@ class AgreementCommunicationTests(TestCase):
         _store_result(item, event)
         _store_result(item, {**event, "channels": {"email": {"status": "not_requested"}, "whatsapp": {"status": "accepted"}}})
         self.assertEqual(item.metadata["communications"][0]["channels"]["email"]["provider_message_id"], "synthetic")
+
+    def test_status_writeback_preserves_metadata_updated_by_synchronous_webhook(self):
+        from seguimiento.views import _writeback_agente_dg_item
+        item = SeguimientoItem.objects.create(tipo="MINUTA", titulo="Estado", responsable_user=self.recipient,
+            metadata={"source": "agente_dg", "source_table": "minute_agreements", "source_id": 104})
+        def webhook(*args, **kwargs):
+            SeguimientoItem.objects.filter(pk=item.pk).update(metadata={**item.metadata, "content_version": "fresh"})
+        with patch("seguimiento.agente_dg_client.is_configured", return_value=True), \
+             patch("seguimiento.agente_dg_client.patch_minute_agreement", side_effect=webhook):
+            self.assertTrue(_writeback_agente_dg_item(item, accion="aprobar"))
+        self.assertEqual(item.metadata["content_version"], "fresh")
+
+    def test_reassigned_former_owner_cannot_close_directly(self):
+        item = SeguimientoItem.objects.create(tipo="MINUTA", titulo="Estado", responsable_user=self.recipient, requiere_aprobacion=False,
+            metadata={"source": "agente_dg", "source_table": "minute_agreements", "source_id": 104, "source_user_id": 45})
+        self.client.force_login(self.recipient)
+        with patch("seguimiento.agente_dg_client.get_minute_agreement", return_value={**self.payload, "collaborator_user_id": 46}), \
+             patch("seguimiento.agente_dg_client.patch_minute_agreement") as change:
+            self.client.post(f"/seguimiento/{item.pk}/completar/")
+        change.assert_not_called()
+        item.refresh_from_db()
+        self.assertFalse(item.esta_cerrado)
