@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from maestros.models import CostoInsumo, Insumo
 from pos_bridge.models import PointTransferLine, PointSyncJob
-from pos_bridge.services.inventory_baseline import point_transfer_origin_exit_hash
+from pos_bridge.services.inventory_baseline import point_transfer_origin_exit_hash, latest_point_almacen_baseline_run
 from recetas.utils.costeo_snapshot import POINT_UNIT_ALIASES
 from recetas.models import normalizar_codigo_point
 from reportes.models import ProductInventoryAuditCase
@@ -132,6 +132,8 @@ class InsumoReconciliationAgent:
         self.purchase_dates = sorted({str(c.fecha) for c in costs})
 
     def transfers(self):
+        baseline = latest_point_almacen_baseline_run()
+        cutover = getattr(baseline, 'finished_at', None)
         period_query = Q(sent_at__gte=self.start, sent_at__lt=self.end) | Q(received_at__gte=self.start, received_at__lt=self.end)
         lines = list(PointTransferLine.objects.filter(period_query, is_insumo=True, is_current_snapshot=True)
             .filter(Q(origin_branch__normalized_name__in=['almacen','cedis']) | Q(destination_branch__normalized_name__in=['almacen','cedis']))
@@ -142,7 +144,7 @@ class InsumoReconciliationAgent:
         for line in lines:
             documents[line.transfer_external_id].append(line)
         for document, rows in documents.items():
-            problems, records = [], []
+            problems, records, limits = [], [], []
             for line in rows:
                 item = line.insumo
                 unit = item.unidad_base.codigo if item and item.unidad_base_id else ''
@@ -171,6 +173,16 @@ class InsumoReconciliationAgent:
                     if not location:
                         continue
                     move = moves.get(key)
+                    # El importador solo materializa salidas Almacén→CEDIS posteriores al baseline.
+                    sent_stamp = line.sent_at or line.registered_at
+                    origin_expected = (cutover and sent_stamp and sent_stamp > cutover
+                        and line.origin_branch.normalized_name == 'almacen'
+                        and line.destination_branch.normalized_name == 'cedis')
+                    if kind == 'SALIDA' and move is None and not origin_expected:
+                        limit = f'Detalle {line.detail_external_id}: la salida no está contemplada por la integración vigente (solo Almacén→CEDIS posterior al corte inicial). No es prueba de faltante.'
+                        limits.append(limit)
+                        representations.append({'hash':key,'ausente':True,'limite_integracion':limit})
+                        continue
                     representations.append(evidence(move, cantidad=move.cantidad, fecha=move.fecha) if move else {'hash':key,'ausente':True})
                     if (move is None or not item or move.insumo_id != item.pk or move.tipo != kind or
                             move.almacen != location or qty is None or abs(move.cantidad-qty)>TOLERANCE):
@@ -187,11 +199,13 @@ class InsumoReconciliationAgent:
                 (timezone.localdate(l.sent_at).replace(day=1) != timezone.localdate(l.received_at).replace(day=1)) for l in rows)
             self.add('transfer:'+hashlib.sha256(str(document).encode()).hexdigest()[:32], 'TRANSFERENCIA',
                 f'Transferencia {document}', '; '.join(problems) if problems else
-                ('Envío y recepción conciliados con sus movimientos. Cruza cortes: se conserva cada fecha sin compensar meses.' if crossed else
+                ('Envío y recepción documentales coinciden. '+ ' '.join(limits) if limits else
+                 'Envío y recepción conciliados con sus movimientos. Cruza cortes: se conserva cada fecha sin compensar meses.' if crossed else
                  'Envío, recepción y sus movimientos coinciden por identidad, fecha, ubicación y cantidad.'),
-                {'documento':str(document),'lineas':records,'cruza_cortes':crossed},
+                {'documento':str(document),'lineas':records,'cruza_cortes':crossed,
+                 'limites_integracion':limits,'corte_inicial':cutover,'baseline_id':baseline.pk if baseline else None},
                 pending=('Adjuntar remisión y recepción o aclaración por línea:\n'+'\n'.join(problems)) if problems else '',
-                area=AREAS.LOGISTICS, explained=crossed)
+                area=AREAS.LOGISTICS, explained=crossed or bool(limits))
 
     def coverage(self):
         latest = CostoInsumo.objects.filter(raw__source=SOURCE_PURCHASE).aggregate(ultima=Max('fecha'))['ultima']
