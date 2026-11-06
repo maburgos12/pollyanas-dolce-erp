@@ -81,6 +81,17 @@ class ObserverTests(unittest.TestCase):
         self.assertEqual(projected["doctor_status"], "FAIL")
         self.assertNotIn("SECRET", json.dumps(projected))
 
+    def test_failure_or_old_metadata_cannot_persist_unknown_status_text(self):
+        with self.assertRaises(ValueError):
+            observer.project_meta(dict(status="FAILURE", result=dict(status="SECRET")))
+        for overrides in [dict(celery_status="FAILURE"), dict(date_done=(NOW-timedelta(days=2)).isoformat())]:
+            value = sample(doctor_status="SECRET", **overrides)
+            self.assertEqual(observer.classify(value, NOW), "invalid")
+            with tempfile.TemporaryDirectory() as temporary:
+                state = Path(temporary) / "state.json"
+                observer.observe(value, state, NOW)
+                self.assertNotIn("SECRET", state.read_text())
+
     def test_invalid_json_oversize_and_corrupt_state(self):
         with tempfile.TemporaryDirectory() as temporary:
             source = Path(temporary) / "source.json"

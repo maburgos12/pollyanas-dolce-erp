@@ -23,6 +23,10 @@ def timestamp(value):
 def project_meta(meta):
     result = meta.get("result")
     result = result if isinstance(result, dict) else {}
+    if result.get("status") not in {None, "OK", "WARN", "FAIL"}:
+        raise ValueError("invalid Doctor status")
+    if meta.get("status") not in {None, "SUCCESS", "FAILURE", "REVOKED", "PENDING", "STARTED", "RETRY", "RECEIVED"}:
+        raise ValueError("invalid Celery status")
     checks = result.get("checks", [])
     if not isinstance(checks, list) or len(checks) > 64:
         raise ValueError("invalid checks")
@@ -54,6 +58,7 @@ def classify(snapshot, now):
         if not re.fullmatch(r"[0-9a-f]{40}", snapshot["revision_hint"]):
             return "invalid"
         status = snapshot["celery_status"]
+        project_meta(dict(status=status, result=dict(status=snapshot.get("doctor_status"))))
         if status in {"PENDING", "STARTED", "RETRY", "RECEIVED"}:
             return "incomplete"
         done = timestamp(snapshot["date_done"])
