@@ -161,6 +161,7 @@ def _asignar_recetas_historicas_2025(filas, periodo):
     if not filas:
         return
     from collections import defaultdict
+    from django.db.models import Q
     from pos_bridge.models import PointProduct
     from recetas.utils.normalizacion import normalizar_nombre
     from reportes.models import RecetaCostoHistoricoMensual
@@ -170,9 +171,11 @@ def _asignar_recetas_historicas_2025(filas, periodo):
     ).values_list("pk", "external_id"))
     identidades = defaultdict(set)
     for historico in RecetaCostoHistoricoMensual.objects.filter(
+        Q(metadata__source="POINT_PRODUCTION_UNIT_VALUATION_2025",
+          metadata__unit_of_analysis="ONE_NATIVE_FINISHED_PRODUCT_UNIT")
+        | Q(metadata__source="POINT_CONVERSION_UNIT_VALUATION_2025",
+            metadata__unit_of_analysis="ONE_NATIVE_CONVERTED_PRODUCT_UNIT"),
         periodo=periodo, coverage_pct__gte=100,
-        metadata__source="POINT_PRODUCTION_UNIT_VALUATION_2025",
-        metadata__unit_of_analysis="ONE_NATIVE_FINISHED_PRODUCT_UNIT",
     ).select_related("receta"):
         meta = historico.metadata
         codigo, nombre = meta.get("historical_sku"), normalizar_nombre(meta.get("historical_name") or "")
