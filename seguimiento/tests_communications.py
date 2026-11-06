@@ -261,3 +261,12 @@ class AgreementCommunicationTests(TestCase):
         change.assert_not_called()
         item.refresh_from_db()
         self.assertFalse(item.esta_cerrado)
+
+    def test_source_evidence_uses_the_same_type_and_size_limits_as_app(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from seguimiento.views import _validar_archivo_evidencia
+        self.assertIsNotNone(_validar_archivo_evidencia(SimpleUploadedFile("avance.txt", b"dato"), origen_minuta=True))
+        self.assertIsNone(_validar_archivo_evidencia(SimpleUploadedFile("avance.png", b"png", content_type="image/png"), origen_minuta=True))
+        large = SimpleUploadedFile("avance.png", b"png", content_type="image/png")
+        large.size = 10 * 1024 * 1024 + 1
+        self.assertIsNotNone(_validar_archivo_evidencia(large, origen_minuta=True))

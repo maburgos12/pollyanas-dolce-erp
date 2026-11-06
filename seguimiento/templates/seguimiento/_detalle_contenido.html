@@ -342,11 +342,12 @@
 
       <details>
         <summary>Agregar evidencia</summary>
+        {% if item.metadata.source_table == 'minute_agreements' %}<p>PDF, JPG, PNG, XLSX, XLS, DOCX o PPTX; hasta 10 MB.</p>{% endif %}
         <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" class="seg-next-form">
           {% csrf_token %}
           <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}"
             required>
           <textarea name="comentario" placeholder="Nota sobre el archivo (opcional)"></textarea>
           <button class="btn btn-secondary btn-sm" type="submit">Subir evidencia</button>
@@ -538,7 +539,7 @@
         <div class="seg-form-grid">
           <textarea name="comentario" placeholder="Observación o resultado final (opcional)"></textarea>
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}">
           <div class="seg-entregar-actions">
             <button class="btn btn-primary" type="submit">
               {% if checklist_completo %}Cerrar acuerdo{% else %}Marcar como completado{% endif %}
@@ -583,7 +584,7 @@
         <div class="seg-form-grid">
           <textarea name="comentario" aria-label="Resultado de la entrega" placeholder="¿Qué se hizo? ¿Cuál es el resultado? (opcional)">{{ revision_comentario }}</textarea>
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}">
           <div class="seg-entregar-actions">
             <button class="btn btn-primary" type="submit">Enviar a revisión</button>
           </div>

@@ -530,8 +530,12 @@ def archivo_origen(request, pk, kind, file_id):
     return response
 
 
-def _validar_archivo_evidencia(archivo) -> str | None:
+def _validar_archivo_evidencia(archivo, *, origen_minuta=False) -> str | None:
     max_bytes = int(getattr(settings, "SEGUIMIENTO_EVIDENCIA_MAX_UPLOAD_BYTES", DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES))
+    if origen_minuta:
+        max_bytes = min(max_bytes, 10 * 1024 * 1024)
+        if Path(archivo.name or "").suffix.lower() not in {".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".xls", ".docx", ".pptx"}:
+            return "La evidencia de acuerdos admite PDF, JPG, PNG, XLSX, XLS, DOCX o PPTX, hasta 10 MB."
     if archivo.size and archivo.size > max_bytes:
         max_mb = max_bytes / (1024 * 1024)
         return f"El archivo excede el máximo permitido de {max_mb:g} MB."
@@ -1023,10 +1027,8 @@ def subir_evidencia(request, pk):
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
         return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
-    error_archivo = _validar_archivo_evidencia(archivo)
     source = _agente_dg_source(item)
-    if source and source[0] == "minute_agreements" and archivo.size > 10 * 1024 * 1024:
-        error_archivo = "La evidencia de origen admite hasta 10 MB."
+    error_archivo = _validar_archivo_evidencia(archivo, origen_minuta=bool(source and source[0] == "minute_agreements"))
     if error_archivo:
         messages.error(request, error_archivo)
         return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
@@ -1720,8 +1722,8 @@ def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
         actor = request.user.get_full_name() or request.user.username
         text = f"[ERP · {actor} · {prefijo}] {comentario_texto}"
         if archivo:
-            error = _validar_archivo_evidencia(archivo)
-            if error or archivo.size > 10 * 1024 * 1024:
+            error = _validar_archivo_evidencia(archivo, origen_minuta=True)
+            if error:
                 messages.error(request, error or "La evidencia de origen admite hasta 10 MB.")
                 return False
         def publish(source_id):
