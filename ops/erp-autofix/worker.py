@@ -306,7 +306,7 @@ def run_job(entry, observation, config, ledger, cause):
     # Record intent before network effects. Unknown effects are reconciled, never blindly repeated.
     ledger.update(cause, phase='push_intent', candidate_sha=candidate)
     environment = dict(os.environ, **client.push_env())
-    subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', 'push', 'origin',
+    subprocess.run(['git', '-c', 'core.hooksPath=/dev/null', 'push', '--set-upstream', 'origin',
                     'HEAD:refs/heads/' + branch], cwd=worktree, env=environment, check=True, timeout=120,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     ledger.update(cause, phase='draft_intent')

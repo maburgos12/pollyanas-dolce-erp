@@ -215,6 +215,21 @@ class RuntimeTests(unittest.TestCase):
         with patch.object(runtime.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, b'1\n'), subprocess.CompletedProcess([], 1)]):
             self.assertFalse(sandbox._postgres_ready())
 
+    def test_only_initial_migration_gets_extended_timeout(self):
+        for arguments, expected in ((['manage.py', 'migrate', '--noinput'], 900),
+                                    (['manage.py', 'migrate', '--check'], 600),
+                                    (['manage.py', 'test', 'core.tests'], 600)):
+            with self.subTest(arguments=arguments), tempfile.TemporaryDirectory() as temporary:
+                sandbox = runtime.Sandbox(Path(temporary), Path(temporary), 'tools', 'postgres')
+                sandbox.job_id = 'autofix-' + 'a'*16 + '-1'
+                sandbox.pg_id = 'b'*64
+                identifier = 'c'*64
+                item = {**self.candidate_policy(sandbox), 'Id': identifier,
+                        'State': {'Running': False, 'ExitCode': 0}}
+                with patch.object(runtime, '_docker', side_effect=[identifier, identifier, '', '']), patch.object(runtime, '_inspect', return_value=item), patch.object(runtime, '_limited', return_value=subprocess.CompletedProcess([], 0)) as limited:
+                    sandbox.run(arguments, 'check.log')
+                    self.assertEqual(limited.call_args.kwargs['timeout'], expected)
+
 
 if __name__ == '__main__':
     unittest.main()

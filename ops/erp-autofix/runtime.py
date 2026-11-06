@@ -386,7 +386,8 @@ class Sandbox:
         try:
             self._record(log_name + '-resources-before.json', item)
             self._validate_policy(item, candidate=True)
-            attached = _limited([DOCKER, 'start', '--attach', identifier], self.job_dir / log_name)
+            attached = _limited([DOCKER, 'start', '--attach', identifier], self.job_dir / log_name,
+                                timeout=900 if arguments == ['manage.py', 'migrate', '--noinput'] else 600)
             state = self._owned(identifier).get('State', {})
             if (state.get('Running') is not False or type(state.get('ExitCode')) is not int
                     or attached.returncode not in (0, state['ExitCode'])):
