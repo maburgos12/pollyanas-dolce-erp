@@ -103,6 +103,7 @@ jobs:
           python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
           python -m unittest discover -s scripts/tests -p test_task_factory.py
           python -m unittest discover -s scripts/tests -p test_erp_observer.py
+          python -m unittest discover -s scripts/tests -p 'test_erp_autofix_*.py'
           bash scripts/tests/test_task_workspace_lifecycle.sh
           cmp AGENTS.md CLAUDE.md
       - name: Verify migrations are committed and applicable

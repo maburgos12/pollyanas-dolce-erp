@@ -1,0 +1,11 @@
+[Unit]
+Description=Dispatch one eligible ERP incident; never publish
+
+[Timer]
+OnBootSec=90
+OnUnitInactiveSec=60
+AccuracySec=5
+Unit=erp-autofix.service
+
+[Install]
+WantedBy=timers.target
