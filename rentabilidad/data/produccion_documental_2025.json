@@ -1300,6 +1300,1866 @@
           "source_hash": "d168995b15f29a9c8e4414a469dadd7a60d44a0b776784a1a64aa5d72c962395"
         }
       ]
+    },
+    {
+      "period": "2025-01-01",
+      "external_id": "871",
+      "sku": "0625",
+      "name": "Rosca Edición Lotus",
+      "unit": "U",
+      "quantity": "65.0",
+      "cost_total": "11323.9316700",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "15917",
+          "detail": "52857",
+          "source_hash": "5deba1d95c30b6bf343cf2cef7b3bca7c37f94ba2db5de67a934bf1dc9b37f01"
+        },
+        {
+          "order": "15960",
+          "detail": "52998",
+          "source_hash": "54af0f3b83aac05eaac9a4aad771c17f49620d1021ae96f48cfd2149a3181386"
+        },
+        {
+          "order": "16158",
+          "detail": "53464",
+          "source_hash": "58dbebd1b4d0e48b56a893c28b8677716d17849c1e7e297c65340045e84411e5"
+        }
+      ]
+    },
+    {
+      "period": "2025-01-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "12.0",
+      "cost_total": "1611.5420500",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16251",
+          "detail": "53891",
+          "source_hash": "638288151f68daea7f9a31250bb3d07e8c9152a332c3864b94ccbcc44896f7dd"
+        },
+        {
+          "order": "16265",
+          "detail": "53943",
+          "source_hash": "09e7878dd0f52bbbc4ebe08b1d5d31deaeb50aafc940f6af686dc82653dd5a22"
+        },
+        {
+          "order": "16276",
+          "detail": "54025",
+          "source_hash": "7434301054e66b63728689cd5f06c23f7a85db72f38720037deff6c819638819"
+        },
+        {
+          "order": "16313",
+          "detail": "54176",
+          "source_hash": "4df60d99d0355188f43f971b9be479a5e5bca64a5a6b004071920790486852b0"
+        },
+        {
+          "order": "16366",
+          "detail": "54418",
+          "source_hash": "0eac4bc763157f74925e22195d77d1017009c9530f60b22ea838e6ebefcff53a"
+        }
+      ]
+    },
+    {
+      "period": "2025-01-01",
+      "external_id": "874",
+      "sku": "CHEESETORTCH",
+      "name": "Cheesecake Tortuga Chico",
+      "unit": "PZA",
+      "quantity": "12.0",
+      "cost_total": "1162.4639020",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16276",
+          "detail": "54023",
+          "source_hash": "1e227ffcaec9266612d0d359b5323cfd48eb0885254f37c0af02b428b28c1c88"
+        },
+        {
+          "order": "16313",
+          "detail": "54174",
+          "source_hash": "bdca97be7d409968e25faadf74ba784b4212e6b8dceafb66e89ee5133eaf4a05"
+        },
+        {
+          "order": "16353",
+          "detail": "54364",
+          "source_hash": "84ed5f17dc5c16c10de2205233a120578d8d327c24aae6d83685832e6bf8b8bf"
+        }
+      ]
+    },
+    {
+      "period": "2025-01-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "12.0",
+      "cost_total": "3046.6531360",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16324",
+          "detail": "54230",
+          "source_hash": "56fe3005cb2d3ff9a3c6a991b3e2ccac8442a44cb07a064b09dfdb5216562b93"
+        },
+        {
+          "order": "16361",
+          "detail": "54410",
+          "source_hash": "a7616fe4c73b6df24d81545af08a7b7bfe08735fb4dbc882c354fe7a3c85d642"
+        },
+        {
+          "order": "16366",
+          "detail": "54420",
+          "source_hash": "1172393e01670bef4c5b15b34d75fc5ed4dc40f14a6e33e56cd652979962bbff"
+        },
+        {
+          "order": "16388",
+          "detail": "54533",
+          "source_hash": "64b96c1009f452c610b976f2ab2ef1bde722ffc957cf922bfef76d26fcd64708"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "31.0",
+      "cost_total": "7356.3519590",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16415",
+          "detail": "54625",
+          "source_hash": "e1abd923ace22ade7483a7620ef4e31b5ed93646b99ba66a59d2f14c25fabae5"
+        },
+        {
+          "order": "16484",
+          "detail": "54899",
+          "source_hash": "9890cddc8b71cbf24e78a26fd288d7de6409a19cfbae9f254cbcdc929633aadb"
+        },
+        {
+          "order": "16503",
+          "detail": "54972",
+          "source_hash": "6a7be789b5162eba02f43cae66cb55c20e643033b51f78aedcd404554d551c09"
+        },
+        {
+          "order": "16582",
+          "detail": "55203",
+          "source_hash": "286a34f1fab5d588f00e0f9632311d57ff52d44904ef95518c6512416ffb7f1e"
+        },
+        {
+          "order": "16665",
+          "detail": "55558",
+          "source_hash": "65e3d5bcb9f387cd13b3634a3121dfe39836174e41eadab1d3dca01e67ae6365"
+        },
+        {
+          "order": "16675",
+          "detail": "55620",
+          "source_hash": "92d0e2e4c81722e9521aa572e6446a55c8728d8f8730ed73f19ff4710df0b9ac"
+        },
+        {
+          "order": "16700",
+          "detail": "55743",
+          "source_hash": "3d600d591ce82c25770d341778bb6a6029ee573947bf1352f3baf73363054509"
+        },
+        {
+          "order": "16709",
+          "detail": "55781",
+          "source_hash": "b0e4e49f269e3a134a0371ebed935118e5decddbb604743d1b00a4dac0a8e569"
+        },
+        {
+          "order": "16718",
+          "detail": "55842",
+          "source_hash": "98684eadab975bf769f3f6da025b79baf66b5de6c2aa6bf99bcba17ef1479bfd"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "7.0",
+      "cost_total": "1010.7039660",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16426",
+          "detail": "54688",
+          "source_hash": "6c4a232035b28ffb773b90efb95b268fe387070b9d8066dc8ecbdcef96a82113"
+        },
+        {
+          "order": "16582",
+          "detail": "55200",
+          "source_hash": "0fb592a9f279c1e2ae148a4e91a71f0b8ea2ad0f8b95f660d6ef8a0212980c43"
+        },
+        {
+          "order": "16736",
+          "detail": "55912",
+          "source_hash": "097795153d54bd808c4574ae04ea518356a294fb15d94c30b8f1944b2849d60b"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "external_id": "888",
+      "sku": "01PBCH",
+      "name": "Pastel Brownie Lotus Chico",
+      "unit": "U",
+      "quantity": "3.0",
+      "cost_total": "499.7318410",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16488",
+          "detail": "54921",
+          "source_hash": "1b818bd7ad39e63ad0b74ba3096cc43ab2102a41cb056e3de46681faa2b43fa1"
+        },
+        {
+          "order": "16552",
+          "detail": "55134",
+          "source_hash": "a14c06ea8759efa340d90a9235d02a560e6f30328c8054d3fbe0bf9014a25b9e"
+        },
+        {
+          "order": "16618",
+          "detail": "55331",
+          "source_hash": "b63c619ca757bbe7803ff784448aee4e1632706f687503b18a3353e69c26a5a1"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "external_id": "880",
+      "sku": "01PLOTUSG",
+      "name": "Pastel Lotus Grande",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "323.3209380",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16505",
+          "detail": "55012",
+          "source_hash": "0cfd224e95b44811884a1b4fc5391a1c437082089a039662d3c5e7142160ea86"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "external_id": "874",
+      "sku": "CHEESETORTCH",
+      "name": "Cheesecake Tortuga Chico",
+      "unit": "PZA",
+      "quantity": "6.0",
+      "cost_total": "673.7583720",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16551",
+          "detail": "55114",
+          "source_hash": "bb911ae296838d8322cbff6f9b18e0192bd73fd456b95dba43b54d6530efda6b"
+        },
+        {
+          "order": "16582",
+          "detail": "55201",
+          "source_hash": "405d2f25111fd19874fe84bba6f1687986b95f2be76ef9e13f766c5f3fd1e536"
+        }
+      ]
+    },
+    {
+      "period": "2025-03-01",
+      "external_id": "888",
+      "sku": "01PBCH",
+      "name": "Pastel Brownie Lotus Chico",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "157.3049450",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16783",
+          "detail": "56154",
+          "source_hash": "18c1187160107d28e98f242cc5221254f1e267cf2055a8a15c1509c0fb3e86b2"
+        }
+      ]
+    },
+    {
+      "period": "2025-03-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "30.0",
+      "cost_total": "7729.2037270",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16832",
+          "detail": "56408",
+          "source_hash": "c03c4cbee7e1f26e05578d5c8ab38b7163a014d95579c9f3880daf7621efb426"
+        },
+        {
+          "order": "16840",
+          "detail": "56449",
+          "source_hash": "dec840106d1e2e10396aadfee599e92b907c273882172245581f299045cd2205"
+        },
+        {
+          "order": "16854",
+          "detail": "56518",
+          "source_hash": "780a3c1101481a0f3f360f05dd078f8d17d6b55c0d7923e29fe9273d56bea865"
+        },
+        {
+          "order": "16861",
+          "detail": "56578",
+          "source_hash": "fff21fcb84b1cd30edf0233f7b699f7007dd42141310daae94b7f947ac5a3bf6"
+        },
+        {
+          "order": "16890",
+          "detail": "56705",
+          "source_hash": "975a8db59b0db076daae9097841add320b9fdaae515a9d02bc727722883d7f90"
+        },
+        {
+          "order": "16922",
+          "detail": "56852",
+          "source_hash": "00c6fe873c5872e8bc6c6984c9227d2ae7f28299c87dcc544d5a31a8e56a15bf"
+        },
+        {
+          "order": "16958",
+          "detail": "56991",
+          "source_hash": "a43c69a4cb2e41ea72c1bb1022b9618647c2f67478973b0376f101a9b23b21e3"
+        },
+        {
+          "order": "16972",
+          "detail": "57047",
+          "source_hash": "9a3778f19afcb2eb0e8da82de36a95fbe3568dee06c24bd22693afe33f62b3e7"
+        },
+        {
+          "order": "16987",
+          "detail": "57112",
+          "source_hash": "590ea6d0e9b5022b7fcb25d4c6e0165cae2451d3db660609090c176913d0ae6b"
+        },
+        {
+          "order": "17015",
+          "detail": "57246",
+          "source_hash": "3fdd192396e6c91d57a77db4f58f8c1046727208a1a43a5c88d3182ef4a006d4"
+        },
+        {
+          "order": "17026",
+          "detail": "57306",
+          "source_hash": "c831c887dbd6354bd3f68fb133eb5b0cfbb1711da732b771ea0c09ff1f1be0eb"
+        },
+        {
+          "order": "17039",
+          "detail": "57386",
+          "source_hash": "d61343ea14b90ef755a09c54401a409b1ff9290110b82793285d8d2550640bc6"
+        },
+        {
+          "order": "17060",
+          "detail": "57459",
+          "source_hash": "bb4a75d903cf37e7fd44e178a73cfe9898f6e5e0617d1b8d4e75d2b1139c6ddb"
+        },
+        {
+          "order": "17085",
+          "detail": "57589",
+          "source_hash": "bd4a84efee44c24843716e5b09ab9e5ba7060d1b22d883c084da2cf645026ebd"
+        }
+      ]
+    },
+    {
+      "period": "2025-03-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "3.0",
+      "cost_total": "441.3161690",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "16880",
+          "detail": "56639",
+          "source_hash": "190af2490a25e8200b510740d30b931df77a83081c796c0eee5735bdd4c87812"
+        },
+        {
+          "order": "16936",
+          "detail": "56915",
+          "source_hash": "b762290a9ea2fec27b319f517e4ffa6c5e1f6d8813323fa869396b9ec222bcaf"
+        },
+        {
+          "order": "17071",
+          "detail": "57525",
+          "source_hash": "3c4a1980765f5fa58b2153ff8c3db99361ba68a2971163b0a45d7cbf8da77d04"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "external_id": "899",
+      "sku": "0689",
+      "name": "Pastel Día del niño 2025",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "197.7000670",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17109",
+          "detail": "57735",
+          "source_hash": "eb7afbfd443befa457c87c27be8b53d6da5b642d1d609b11c9becd5bd9a94b57"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "2.0",
+      "cost_total": "287.189990",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17107",
+          "detail": "57716",
+          "source_hash": "8128b51ab8d0f6b2b85ee58ed2628df069c294ddb9095dc1b280a9220e3a8d1b"
+        },
+        {
+          "order": "17245",
+          "detail": "58371",
+          "source_hash": "178280eb2580b6976332d1b73be84816c4c877dbe53b12199cc4dca06236ec67"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "external_id": "895",
+      "sku": "013LL",
+      "name": "Pastel de 3 Leches Lotus Mediano",
+      "unit": "U",
+      "quantity": "33.0",
+      "cost_total": "6338.8215560",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17123",
+          "detail": "57781",
+          "source_hash": "92b66b1b520715912461c215dd0b8d9d88992b059056e80e86d5a7e313023ffa"
+        },
+        {
+          "order": "17162",
+          "detail": "57928",
+          "source_hash": "67088155fb1d1fe53bb7a57f5ce6277a21890de2805526df358bd1b7df96276f"
+        },
+        {
+          "order": "17184",
+          "detail": "58036",
+          "source_hash": "946ff2dd192977f9a5563f657ab2c09b304597a3de255c9974a232d13d60beba"
+        },
+        {
+          "order": "17221",
+          "detail": "58222",
+          "source_hash": "650cee70eaa4f44ab484df9eee82e6308ad55c49f975c6c54b7e0258a1dd1f98"
+        },
+        {
+          "order": "17312",
+          "detail": "58665",
+          "source_hash": "ad1bdc7cbe549afe3cddfb62aed0a48e9c94f5abc374c2efd25e1c5b6d58afbd"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "external_id": "888",
+      "sku": "01PBCH",
+      "name": "Pastel Brownie Lotus Chico",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "157.6191410",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17162",
+          "detail": "57929",
+          "source_hash": "44589431b4d294053788e6f05120b50d7eea69a3c7d242dd71dd7c73bcc83515"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "143.4262010",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17499",
+          "detail": "59386",
+          "source_hash": "6a32879f7691933f27f1c206cc4cbdae2570b925c097fe280e5dca913decf47a"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "external_id": "897",
+      "sku": "CHEESEZARZM",
+      "name": "Cheesecake Zarzamora M",
+      "unit": "PZA",
+      "quantity": "31.0",
+      "cost_total": "9013.4385590",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17513",
+          "detail": "59467",
+          "source_hash": "4c2b2c3d2ce4571a7c32f073de46d0ba494e2b63e37b47e92c2486604dd43700"
+        },
+        {
+          "order": "17573",
+          "detail": "59630",
+          "source_hash": "91f0399706807035a4480b52e08b5a29cb85030f016b48e01834bb3d5af7b809"
+        },
+        {
+          "order": "17625",
+          "detail": "59723",
+          "source_hash": "21427a6d6b68b87832dacb940838af253de7128762f926fb83fa7d1e1de466fa"
+        },
+        {
+          "order": "17682",
+          "detail": "59843",
+          "source_hash": "0ea0ba6b02b2578f931a9cff1d4796f7f6770f7e4630288cf4ff9506972176eb"
+        },
+        {
+          "order": "17717",
+          "detail": "59977",
+          "source_hash": "eb51f2371ee8c37a954ea32416f40a3e06ab8f1ddb207f082effabe3a169a519"
+        },
+        {
+          "order": "17737",
+          "detail": "60094",
+          "source_hash": "79f6dec5e660386f9d30a8139731ef8ed65d7c53c715022c7528006e42b23ea0"
+        },
+        {
+          "order": "17759",
+          "detail": "60207",
+          "source_hash": "bf5cd10dae6c9960740754e022706ee926ac03171ff295224f69dbbbacf940e4"
+        },
+        {
+          "order": "17775",
+          "detail": "60270",
+          "source_hash": "2bc7e194d473691ad580a64e635c97a78a874dcaf62463ebab4ef68fdd4d2a94"
+        },
+        {
+          "order": "17815",
+          "detail": "60473",
+          "source_hash": "209072317f2b749266da8c30abdd6bd678f54ca8aaade8b32b4318fbbd882f9b"
+        },
+        {
+          "order": "17827",
+          "detail": "60524",
+          "source_hash": "2c55fd8da309906cd48d71cbe6194898da5c3f60fd442442eeddb9eaae619599"
+        },
+        {
+          "order": "17856",
+          "detail": "60646",
+          "source_hash": "771de4ef1090406f51365b67904e7310dd52d6668f41f2068dd90cdba3b49422"
+        },
+        {
+          "order": "17883",
+          "detail": "60775",
+          "source_hash": "5ce1c8e1b450f1a2daf88d4c9933cc07bc99f75958b3061ade7e506a13b0a74b"
+        },
+        {
+          "order": "17905",
+          "detail": "60934",
+          "source_hash": "b9f46f5c63d5de9b99f50899f427726f484b5151e474bc4c19dbfadea0224118"
+        },
+        {
+          "order": "17917",
+          "detail": "60966",
+          "source_hash": "f1cdf9214b748f37c1cb59de56a646101ccc365d48104dea433ddee21e759042"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "17.0",
+      "cost_total": "5393.9546520",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17513",
+          "detail": "59468",
+          "source_hash": "6c565a1906d32de0d01f62017e7e82855ec6abcb5f55f7704834dab93c27c8c3"
+        },
+        {
+          "order": "17625",
+          "detail": "59724",
+          "source_hash": "e4acde3b12e5d7cc1e4973ef2abe80a21a36ca02f5e379c219080729252e0028"
+        },
+        {
+          "order": "17839",
+          "detail": "60584",
+          "source_hash": "661775fa05cf92a8830c69152236a493172466d0cc147f7d701caa1eccc50000"
+        },
+        {
+          "order": "17856",
+          "detail": "60647",
+          "source_hash": "a8460a34f631f5584bece1a5de8e20205423ad806722fab73dc91d9e000b9c27"
+        },
+        {
+          "order": "17883",
+          "detail": "60776",
+          "source_hash": "cb19b9fd6eff97efef136261328763be11bdb629d6650076e7d9cd1beb7b8e62"
+        },
+        {
+          "order": "17905",
+          "detail": "60935",
+          "source_hash": "8b7d977e022521f12965b6419874c82ffb53a6c269aa2d1269fe95b70e03439a"
+        },
+        {
+          "order": "17917",
+          "detail": "60967",
+          "source_hash": "d85796d12d4635fb46d864f1651aebe995bb8d1e4f27aa9ef45b6dae418d9467"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "external_id": "895",
+      "sku": "013LL",
+      "name": "Pastel de 3 Leches Lotus Mediano",
+      "unit": "U",
+      "quantity": "5.0",
+      "cost_total": "941.8050280",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17686",
+          "detail": "59850",
+          "source_hash": "d4de875db6ea7716341b18ecd3aadd35ae01e66d397db8d9c8cb64b43a8a1324"
+        },
+        {
+          "order": "17704",
+          "detail": "59945",
+          "source_hash": "b351b5949a7d6f485cd2d705f672a2c409e4be9c07e5261ce0ad40290669650d"
+        },
+        {
+          "order": "17840",
+          "detail": "60592",
+          "source_hash": "bbbdb02dd84a5dc4a9d7a065cce88cdba45ffc9805f3145508236cacb491bcdc"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "external_id": "874",
+      "sku": "CHEESETORTCH",
+      "name": "Cheesecake Tortuga Chico",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "115.81810",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17682",
+          "detail": "59841",
+          "source_hash": "8687ef9ceda937b61d137e4a77f016f39691186c2e9f0e54399e358b6144c09e"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "external_id": "897",
+      "sku": "CHEESEZARZM",
+      "name": "Cheesecake Zarzamora M",
+      "unit": "PZA",
+      "quantity": "26.0",
+      "cost_total": "7563.7029640",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17936",
+          "detail": "61113",
+          "source_hash": "c38c1f82f809481c1e409c1bd7a1d818853572e363fb4a4a942645c019d6a57a"
+        },
+        {
+          "order": "17946",
+          "detail": "61165",
+          "source_hash": "ee606a5991ee0f90483edf1993a0ad05e9939d6c0e0e636260c7a045c2e69faf"
+        },
+        {
+          "order": "17959",
+          "detail": "61275",
+          "source_hash": "4e83bfe3ab5567130654025eb31ded0c83b3e541948328b5a8ecbc70d6db3cab"
+        },
+        {
+          "order": "17986",
+          "detail": "61419",
+          "source_hash": "175225eeea99054de1ef788192c1d4651f075d99f73338abe14f185c0bc681e7"
+        },
+        {
+          "order": "18038",
+          "detail": "61646",
+          "source_hash": "9675693f64b3a37dffa718ddb03f5eb0e0c538d580191ccbc81c38caa1c37fed"
+        },
+        {
+          "order": "18142",
+          "detail": "61953",
+          "source_hash": "34da935c5e15134ccbdde2683b6f8fc65e619ca3f210360bd8e53c6e945bfd1f"
+        },
+        {
+          "order": "18161",
+          "detail": "62070",
+          "source_hash": "15194f205285452837d05382ec53e9b452ca9ce3f32ace10560fe285f4a82855"
+        },
+        {
+          "order": "18184",
+          "detail": "62145",
+          "source_hash": "6e9851cc933d771fcab4b79a056b7c5b8d673719e55e53112b3cb82bb9da6cf8"
+        },
+        {
+          "order": "18197",
+          "detail": "62249",
+          "source_hash": "60988a5ca3ff71ddabd9aca2f9946d6857985d27b9a9ed717ba73796591d75c0"
+        },
+        {
+          "order": "18235",
+          "detail": "62435",
+          "source_hash": "595a373fbbdc1f5fa933f26b957d88d8b3891479c97753f47eb9392fc6845e48"
+        },
+        {
+          "order": "18273",
+          "detail": "62630",
+          "source_hash": "ac6588a4facf774daf9088cefd193406a27c1bd0f2e0008a5f152b62adfda135"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "26.0",
+      "cost_total": "8719.1568720",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "17936",
+          "detail": "61114",
+          "source_hash": "cb4fb680e71022814dc8eb34e9fa6c64592e15f74f1c4fc070cf3b774fb37559"
+        },
+        {
+          "order": "17946",
+          "detail": "61166",
+          "source_hash": "d35237fcd00977a1992aca38ea1906f07ecb213f381b1ad07c29bb6c4fea5b1d"
+        },
+        {
+          "order": "17959",
+          "detail": "61276",
+          "source_hash": "b9a42b6a3b715daeeda64694a1d42082390b7d3b15cea648709060b0d8255a67"
+        },
+        {
+          "order": "17973",
+          "detail": "61331",
+          "source_hash": "3836d3eefb647218bdc279632251ad332bbf700fb382e47479bee5e55a4399de"
+        },
+        {
+          "order": "18038",
+          "detail": "61647",
+          "source_hash": "8d6c6d75f9434a5e187d16aafe48167eb079e33efffecff9032236e2753053e8"
+        },
+        {
+          "order": "18142",
+          "detail": "61954",
+          "source_hash": "7982dd5634b6ea108edd289c9ddbb2982046a6a92cd3c47c8fdbd350c564577c"
+        },
+        {
+          "order": "18184",
+          "detail": "62146",
+          "source_hash": "ce135d519ce6a1bcc530beb1cd9fab4e9116c7ac40ce4a11e3b545d941aa57d3"
+        },
+        {
+          "order": "18197",
+          "detail": "62250",
+          "source_hash": "075e22bfe53a02805c8de9f075a7263df3383df4045bc7c893c9f54b3cfda6a3"
+        },
+        {
+          "order": "18273",
+          "detail": "62631",
+          "source_hash": "53d8dee95aa6d92c26eff599a83ee83a3cb008a0fee485c622ff334bc3b25795"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "external_id": "909",
+      "sku": "PASTPAPA0610",
+      "name": "Pastel Día del Padre Chico",
+      "unit": "PZA",
+      "quantity": "7.0",
+      "cost_total": "1029.5732090",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18098",
+          "detail": "61836",
+          "source_hash": "27caff4501217d43c3a29186c0b2cd64efe59f4f75039121cd2e8dd720401e83"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "external_id": "910",
+      "sku": "PASTPAPA680",
+      "name": "Pastel Día del Padre Mediano",
+      "unit": "PZA",
+      "quantity": "11.0",
+      "cost_total": "2218.9346670",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18098",
+          "detail": "61837",
+          "source_hash": "79ee4ba9f2681fbcd7584f07ca853b4694b863d59165c95792025d1b81744453"
+        },
+        {
+          "order": "18227",
+          "detail": "62392",
+          "source_hash": "899ed3270a7e5e47ce04eeb00f85ee124dbf7c9721405ddf51916373dcc2c51e"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "external_id": "895",
+      "sku": "013LL",
+      "name": "Pastel de 3 Leches Lotus Mediano",
+      "unit": "U",
+      "quantity": "2.0",
+      "cost_total": "377.3968010",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18203",
+          "detail": "62269",
+          "source_hash": "eb85f9eec9eaf29481ee43bbe31e4ff4a8bfe3b7f7742cb15178a4136a529cc3"
+        },
+        {
+          "order": "18284",
+          "detail": "62694",
+          "source_hash": "9be31ccdba3d7aa55e82776824e1e2dc4b3968d056d8f8370f09ad4d67570860"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "903",
+      "sku": "01DCHOC",
+      "name": "Dona Chocolate",
+      "unit": "PZA",
+      "quantity": "7.0",
+      "cost_total": "30.6489620",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18350",
+          "detail": "62986",
+          "source_hash": "ffc4aa068ffb369fc475cf992eac96cf58d7b8317aa2713fd39d19f3e714c271"
+        },
+        {
+          "order": "18428",
+          "detail": "63435",
+          "source_hash": "b5d63a64188b84ecc05e0d15bf67174498aaa5c6f4ab87ad05cf302403d2eb62",
+          "branch_external_id": "1"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "895",
+      "sku": "013LL",
+      "name": "Pastel de 3 Leches Lotus Mediano",
+      "unit": "U",
+      "quantity": "2.0",
+      "cost_total": "385.6541000",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18358",
+          "detail": "63033",
+          "source_hash": "1e1f0368e87ed2b9e3d0f26b7efbdb77950990ed80ce2926487b2db97dc456a4"
+        },
+        {
+          "order": "18506",
+          "detail": "63835",
+          "source_hash": "09fa42f55297ae4704fc11446dcaff4d49693fcdee8ad73859cb1f74c02ea454"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "897",
+      "sku": "CHEESEZARZM",
+      "name": "Cheesecake Zarzamora M",
+      "unit": "PZA",
+      "quantity": "20.0",
+      "cost_total": "5834.4975990",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18356",
+          "detail": "63001",
+          "source_hash": "935ac1e5934a23b076ca0b64686c264e7cd52b63f9fc3991625007a7a71e80db"
+        },
+        {
+          "order": "18379",
+          "detail": "63132",
+          "source_hash": "2f4bb6b6cc6733b593ed8577e27fdad634989ce9166176e911691872ce2ced40"
+        },
+        {
+          "order": "18402",
+          "detail": "63313",
+          "source_hash": "c45248269cfc2337c6abbda78ea151a51d0967d55472519c6fd97e969cfcc397"
+        },
+        {
+          "order": "18421",
+          "detail": "63399",
+          "source_hash": "690f84c47b37ba46c8310a49e1845f0d22fdf1ad62e14675f0b3c7536a911d72"
+        },
+        {
+          "order": "18445",
+          "detail": "63553",
+          "source_hash": "c80ed8a210bb08b2ba85f6f83d6f1b8163e4e42d55edc164fec4a55e8ccefce6"
+        },
+        {
+          "order": "18479",
+          "detail": "63726",
+          "source_hash": "31b00cc293ab0f34fb7244e8fd683a08dabf7fe8eefdec51389dcd5bcfcb1ad0"
+        },
+        {
+          "order": "18494",
+          "detail": "63760",
+          "source_hash": "cbcc5f15aa428ed4f07627b0cfe387dfaad8a4a2481d8ca386119c361eba85fe"
+        },
+        {
+          "order": "18505",
+          "detail": "63831",
+          "source_hash": "0c07690f0513f4bf2f864b7550458a2b93a5c3c9a9eb023c983bf01e6926f1ab"
+        },
+        {
+          "order": "18520",
+          "detail": "63929",
+          "source_hash": "c4bc3357cabecea825e6f6c10e8df5ab0bedcfee2345f2ff4174f77e98f89cda"
+        },
+        {
+          "order": "18528",
+          "detail": "63956",
+          "source_hash": "8197f0fe2bc8f6db53a1b7167090e36ce09a6bb371ff21350533e9ea306b36a3"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "13.0",
+      "cost_total": "4344.5178810",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18379",
+          "detail": "63133",
+          "source_hash": "6fa4db5c9bb573b416eb4fcd9ab0f5fa6108a1e7a535ec3b07cd8d3f99fdd3f0"
+        },
+        {
+          "order": "18402",
+          "detail": "63314",
+          "source_hash": "33e676a676d1e86fd2417daffbfd63b3eb5f9969742ed5102f6da01209b84398"
+        },
+        {
+          "order": "18421",
+          "detail": "63400",
+          "source_hash": "9087b5ddac90fe574c9f449ee3f6d4ae903fc778fb4477114bff6254d5106c3d"
+        },
+        {
+          "order": "18453",
+          "detail": "63579",
+          "source_hash": "cbb1882d22796ef2466dd086e83dd63e5f075e97d60bcd61996c3e1e1165f89c"
+        },
+        {
+          "order": "18494",
+          "detail": "63761",
+          "source_hash": "beaef7f8a7d8c962d316cebca7874d358e18138392032aa1e0006387cd0e53c6"
+        },
+        {
+          "order": "18505",
+          "detail": "63832",
+          "source_hash": "3eacb518ff2447de5e072c94680a37cb01263b86927da3193b727d487916b57b"
+        },
+        {
+          "order": "18520",
+          "detail": "63930",
+          "source_hash": "cd3c4d68ce1a9f5f4828e8fe244c738d62e2de1c7810d67e22457977bd47c573"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "846",
+      "sku": "5346",
+      "name": "Cheesecakes Lotus Ch",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "146.3956220",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18430",
+          "detail": "63442",
+          "source_hash": "9bee36f9b414b3f66e9a4b6fce49a6c18e1916e947cd2ede51a8d74a811fa9e1"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "888",
+      "sku": "01PBCH",
+      "name": "Pastel Brownie Lotus Chico",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "237.3055670",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18477",
+          "detail": "63710",
+          "source_hash": "afad2bae91575c9bb0a61bf8551e235dbf8fb6c3eee1cc60ffbdae8cbeed6182"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "external_id": "874",
+      "sku": "CHEESETORTCH",
+      "name": "Cheesecake Tortuga Chico",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "117.0528490",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18524",
+          "detail": "63944",
+          "source_hash": "ed5df7f6f5fa6266f8188887b318ffc74ba8cca93556bae57491808a00bd7248"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "external_id": "919",
+      "sku": "CHCAKEINDBROWNIE",
+      "name": "Cheesecake Brownie Individual",
+      "unit": "PZA",
+      "quantity": "134.0",
+      "cost_total": "7133.9494020",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18635",
+          "detail": "64533",
+          "source_hash": "3058c1e3d7ad1b63ca15ff1395b359cb0113fdcfeb4e201720c30cd529bd6e16"
+        },
+        {
+          "order": "18639",
+          "detail": "64582",
+          "source_hash": "6ffae21af510358b6276c45c00323d1965ccb106336de02eab8efdde58ac1068"
+        },
+        {
+          "order": "18663",
+          "detail": "64723",
+          "source_hash": "3bd7b3d61fda8267a4133532c5bee11e6f125ad8d6f76fe7b582b25c67a68df2"
+        },
+        {
+          "order": "18682",
+          "detail": "64850",
+          "source_hash": "05e2f1bd1eaec0419d1c94899b5012a3a5d9da96c577137d26269642b3830b9a"
+        },
+        {
+          "order": "18698",
+          "detail": "64931",
+          "source_hash": "d0d0264b83606b296617de69b83c755712f0d99248accb996075edb01d64a1a2"
+        },
+        {
+          "order": "18713",
+          "detail": "65038",
+          "source_hash": "0a342e2f0a4d17d6ea8e3c82b399719129ddd67d5eece919027d241770a1e99e"
+        },
+        {
+          "order": "18725",
+          "detail": "65124",
+          "source_hash": "d974ece9b97ecc69763e0a4638420effbbbfcb982ae52d486111917012b11955"
+        },
+        {
+          "order": "18736",
+          "detail": "65163",
+          "source_hash": "77ab1ef7bff417d0e477e55059404fd1710f02e677f7f328bb702adcd8cad72b"
+        },
+        {
+          "order": "18761",
+          "detail": "65308",
+          "source_hash": "d733231f0e916b18a65713cc89c0b339da9817eb50ba77c05dfbef54becd614c"
+        },
+        {
+          "order": "18784",
+          "detail": "65423",
+          "source_hash": "94e0502c1db35e3568389f4a58559c749fe9492f505f5ad5b80d6346951dffcd"
+        },
+        {
+          "order": "18795",
+          "detail": "65495",
+          "source_hash": "46bc29c0986153b5284ef7dd563dd0e896c4c747318fa2cb97f6590f2080553e"
+        },
+        {
+          "order": "18804",
+          "detail": "65572",
+          "source_hash": "4cf4d6428e3c8a78ec40dcdfbf0e1e31c1960b6ea020c70ed5e11c7b94de0c48"
+        },
+        {
+          "order": "18813",
+          "detail": "65641",
+          "source_hash": "b85dccbcd8a3a479ef590fd7e2bf3f3cb8e35fdff5e5be19b1a819c41748f46c"
+        },
+        {
+          "order": "18848",
+          "detail": "65814",
+          "source_hash": "c2b90a8559706dadeb26c20dc3a4ed233787495678c30128d0c9eab2af329dba"
+        },
+        {
+          "order": "18860",
+          "detail": "65894",
+          "source_hash": "6ae795e2f3b59c322966e7be98c504dc0d49e3c153f3e778a2747b9a3b4867b7"
+        },
+        {
+          "order": "18874",
+          "detail": "65966",
+          "source_hash": "7235329be98d81f7876ec610e4d05763a61e3c3df8e38e4c0cf9b581913fc5c7"
+        },
+        {
+          "order": "18886",
+          "detail": "66049",
+          "source_hash": "6b10c3bbf2cf9837f8014142a9b49a55d31a0c6999573642fc75cde2fcd2f3cf"
+        },
+        {
+          "order": "18902",
+          "detail": "66132",
+          "source_hash": "bb0c4b0e02357756b4e3f04f23c9ed064314a5c5487fab3ca68877554366f22b"
+        },
+        {
+          "order": "18932",
+          "detail": "66253",
+          "source_hash": "6443d93076e8e86924a18cd67004d8aa4a758089678f8c958474879287369c8a"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "external_id": "918",
+      "sku": "CHCAKEINDZAR",
+      "name": "Cheesecake Zarzamora Individual",
+      "unit": "PZA",
+      "quantity": "127.0",
+      "cost_total": "7108.1621850",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18635",
+          "detail": "64535",
+          "source_hash": "7d08b88655f2f52c0bdda8d5569cbb84e73b2ce2eb77a4da00684091058b6a8e"
+        },
+        {
+          "order": "18639",
+          "detail": "64585",
+          "source_hash": "b9d23cb0558f2fb0d89074e0489a4df9fee3cec26a0b118bfb1f29dba877ae3b"
+        },
+        {
+          "order": "18653",
+          "detail": "64658",
+          "source_hash": "b255a2658ac09a129f9f76070220c14a419000ee5cfb33e84c509c104bffe114"
+        },
+        {
+          "order": "18663",
+          "detail": "64725",
+          "source_hash": "b3c21f67adc6dc9c6c9d706a1584a695d694ec70b003288fcdd7179d07d4c974"
+        },
+        {
+          "order": "18698",
+          "detail": "64933",
+          "source_hash": "865a6952f359401cf1984a0af8597268c3ebc74a69cf4b2d78fe25f9907d6e9c"
+        },
+        {
+          "order": "18705",
+          "detail": "64992",
+          "source_hash": "754b3fe48e0fd07846781a46ab47e2461d1f8c7fe558403f375843d80f49fe37"
+        },
+        {
+          "order": "18713",
+          "detail": "65039",
+          "source_hash": "c32a0c1995a4fc8957df6f118ecf0ab846b4a992f91a066ffe3e62e6b75f6989"
+        },
+        {
+          "order": "18725",
+          "detail": "65127",
+          "source_hash": "7a10758d32ee53f63ca2c4f9f9380a7d0cb7adf7fcd42ce3abcefe46918546ec"
+        },
+        {
+          "order": "18736",
+          "detail": "65165",
+          "source_hash": "bd462914f28e403097ebb0723157d471321154ec54e72d654ea7e246dece7273"
+        },
+        {
+          "order": "18747",
+          "detail": "65229",
+          "source_hash": "4d638e0e925af39c9b8164b7b6632efeca2347489e2d165723e730d7b9645e44"
+        },
+        {
+          "order": "18784",
+          "detail": "65426",
+          "source_hash": "0c8aacb4c2d3ac93402397d63659167261338005d91c83e8171e24b8762e10c7"
+        },
+        {
+          "order": "18795",
+          "detail": "65497",
+          "source_hash": "6c63a82dc5e300efd160c9dc6d8e8d180b28a2e4472aa69450e38cd63923e58a"
+        },
+        {
+          "order": "18804",
+          "detail": "65575",
+          "source_hash": "fa0f5f648a77a9762336a555b409c142ef64f844f3d02319db62759b5cc66ba1"
+        },
+        {
+          "order": "18813",
+          "detail": "65643",
+          "source_hash": "8ea91c40d9a956f758bbc63a38841178ae9831f8ac3a2457239e2519188aeba4"
+        },
+        {
+          "order": "18860",
+          "detail": "65898",
+          "source_hash": "0def7d779a14653044af1630285d9aabc219172de3a92850f324f451206c05c4"
+        },
+        {
+          "order": "18874",
+          "detail": "65969",
+          "source_hash": "a994e56df1ac3fde2c571d9311a5adb58066ebd94f97acbe15c86d30d9617a1d"
+        },
+        {
+          "order": "18886",
+          "detail": "66051",
+          "source_hash": "f6b59f1fbfdd3f3ff5e8956f66ff1af9f1209185a0b7d1046148f638196a2e19"
+        },
+        {
+          "order": "18932",
+          "detail": "66255",
+          "source_hash": "5aa22ae19798add9888f0618afe23e4fe94cf0b5a9413bf5e9feaabfaea76a1e"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "3.0",
+      "cost_total": "1007.9117880",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18635",
+          "detail": "64536",
+          "source_hash": "f2ec7be2f9a9c76a75768c7874feb79eecde1e9a7827c5a56fb6aa8177f4d8d1"
+        },
+        {
+          "order": "18682",
+          "detail": "64852",
+          "source_hash": "51f6963dcb8c2a841107c7e46f244e2a984bb1b497427bd3fc6df1dba8d5af23"
+        },
+        {
+          "order": "18860",
+          "detail": "65895",
+          "source_hash": "6dfede8dbfd342e27fb69a51a17bd6d9407669946ac9d61754377862a485939a"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "external_id": "874",
+      "sku": "CHEESETORTCH",
+      "name": "Cheesecake Tortuga Chico",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "116.8620190",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18624",
+          "detail": "64482",
+          "source_hash": "c85916c0b1e05041933322c98bae5b50f34c6a54825621272dee362deeb7c6d8"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "external_id": "897",
+      "sku": "CHEESEZARZM",
+      "name": "Cheesecake Zarzamora M",
+      "unit": "PZA",
+      "quantity": "2.0",
+      "cost_total": "586.4191680",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18766",
+          "detail": "65339",
+          "source_hash": "8c564c9170d0ebfa35ce8d38abc7c81c1d79a201d15387bff877d806445993e8"
+        },
+        {
+          "order": "18874",
+          "detail": "65971",
+          "source_hash": "f0da8a7bc8b8d4770306bdcd65699f59875bf7bc59d403b4aaa4a0d06d7a4f7a"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "external_id": "918",
+      "sku": "CHCAKEINDZAR",
+      "name": "Cheesecake Zarzamora Individual",
+      "unit": "PZA",
+      "quantity": "75.0",
+      "cost_total": "4211.3882400",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18948",
+          "detail": "66360",
+          "source_hash": "fc5f649bbfeb1f5dc88120d6a2c308d803ceb4c30ac18f736695b5591d5564a3"
+        },
+        {
+          "order": "18968",
+          "detail": "66474",
+          "source_hash": "efc031df3b2c20df17f4dbeb9841fda9772796ef410e09deac8c495adf85b4af"
+        },
+        {
+          "order": "18991",
+          "detail": "66613",
+          "source_hash": "901038663a5f6973eda6c812bd4ba2a279890483b4cf9239df4e606dff225165"
+        },
+        {
+          "order": "19009",
+          "detail": "66695",
+          "source_hash": "a97bd68e6cf7c2c548fea9cd9aa1348a72e78dde8333221d94bf99e47ef802ef"
+        },
+        {
+          "order": "19046",
+          "detail": "66909",
+          "source_hash": "25afdc09547970bfd73f5dc409655baabf34daadb6802566c823da6f3ecbdff3"
+        },
+        {
+          "order": "19058",
+          "detail": "67005",
+          "source_hash": "aa282be60fa9020a1f20da23ea4fb7e5c9877b0e3ebef659b91a43bc4cca4172"
+        },
+        {
+          "order": "19100",
+          "detail": "67266",
+          "source_hash": "1582b60b056c90254fd84408cf093a300b9aefa11af9d865debbb1091fd015ad"
+        },
+        {
+          "order": "19152",
+          "detail": "67510",
+          "source_hash": "ae9e756e605d17aa5bfd51167b23d3c99da6b983255c0947cd8954472739986c"
+        },
+        {
+          "order": "19179",
+          "detail": "67688",
+          "source_hash": "99b86ecb82ea174e47eec6aa45260aa3803f6a2c4edf6120b0ce5530c0276944"
+        },
+        {
+          "order": "19202",
+          "detail": "67822",
+          "source_hash": "3e78afa6eaa80d9a791c9cca1fc4d8b561484e7aa3bcce8f46cedc269e093ea0"
+        },
+        {
+          "order": "19218",
+          "detail": "67905",
+          "source_hash": "bc3417e2b818f539fec16244c9242ac4dac3422c3356a89875265b53d5b59059"
+        },
+        {
+          "order": "19238",
+          "detail": "67967",
+          "source_hash": "b2d5d006db60071d6cc0f3d4ebe9a59e88e653d75fc1df94711aa4f77e694cc0"
+        },
+        {
+          "order": "19250",
+          "detail": "68064",
+          "source_hash": "a2f668ffb0d6dfcf84a25fd088b3d764b3ad281fd2fb4311bc0cca513db0f605"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "external_id": "919",
+      "sku": "CHCAKEINDBROWNIE",
+      "name": "Cheesecake Brownie Individual",
+      "unit": "PZA",
+      "quantity": "65.0",
+      "cost_total": "3513.5074200",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "18961",
+          "detail": "66430",
+          "source_hash": "b05eb5afedf8d107c80e2efb735bdc4141246a971c066077ca9f862df7818fb6"
+        },
+        {
+          "order": "18980",
+          "detail": "66528",
+          "source_hash": "640f59d5624ea58e2812bd65d040e3de4b7d388812e3c154afdfd7c9acf9285a"
+        },
+        {
+          "order": "19009",
+          "detail": "66694",
+          "source_hash": "de41f5207731ec2753d54fbb1f26db7c5be4fae8b35db8ee56e9c457317731a2"
+        },
+        {
+          "order": "19046",
+          "detail": "66906",
+          "source_hash": "25ca2e57544bc38158b5f90115717a5cd964fd50b33116cfacb227e4e35fe289"
+        },
+        {
+          "order": "19058",
+          "detail": "67002",
+          "source_hash": "4063f9a339a62ab044028b329bea501023a8a835df93a4c8bf8ab648446abbce"
+        },
+        {
+          "order": "19100",
+          "detail": "67263",
+          "source_hash": "672c7978c0f89e2da8db128f73fa3aab803e5b1b9ebbd03e7de9cd0744c17bd1"
+        },
+        {
+          "order": "19152",
+          "detail": "67507",
+          "source_hash": "8f4484ae833389ae2691110b9455a3723240466b70b5c3f0f7200067ced19b6e"
+        },
+        {
+          "order": "19179",
+          "detail": "67684",
+          "source_hash": "41cd2682b16519d210842cbff37b1116607923f308d68d776815e0b810aca113"
+        },
+        {
+          "order": "19202",
+          "detail": "67819",
+          "source_hash": "5683a1672af0a11a3977146dbb2ca72960e03a4d917af5e219e5beb086665376"
+        },
+        {
+          "order": "19218",
+          "detail": "67903",
+          "source_hash": "5a003ef0686f0261f352f935c0cfe6d615e46322ec726ff9b0eb0d8441b2ac06"
+        },
+        {
+          "order": "19238",
+          "detail": "67964",
+          "source_hash": "532804c79d69aeb8b1d7044cb349a57b61911b19c932ad099eed49750f1bb22c"
+        },
+        {
+          "order": "19250",
+          "detail": "68061",
+          "source_hash": "00bc0e3e00e3ddf739c078de8c05cc924e30625fdf06ddf875609380fa0b17cc"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "2.0",
+      "cost_total": "693.4239860",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19082",
+          "detail": "67164",
+          "source_hash": "0736698a1e19180b7f78980ea6b22672ac69a4cd6819a54d3901fdb848a8320b"
+        },
+        {
+          "order": "19116",
+          "detail": "67346",
+          "source_hash": "d126c24de382d14c8e7f875f0ebaaff3c0443ccfc0a4903ee9d7a0c98e0f357d"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "external_id": "888",
+      "sku": "01PBCH",
+      "name": "Pastel Brownie Lotus Chico",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "246.1598280",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19192",
+          "detail": "67732",
+          "source_hash": "6f16bff48fab14592176df11f2b44b8796d3637186c67a389f95b5017975dc0f"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "external_id": "895",
+      "sku": "013LL",
+      "name": "Pastel de 3 Leches Lotus Mediano",
+      "unit": "U",
+      "quantity": "1.0",
+      "cost_total": "188.7889470",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19226",
+          "detail": "67926",
+          "source_hash": "140d6e152725ae761cee1cbbba7d357fdd2634e800d95435d4a7093b5001083b"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "918",
+      "sku": "CHCAKEINDZAR",
+      "name": "Cheesecake Zarzamora Individual",
+      "unit": "PZA",
+      "quantity": "35.0",
+      "cost_total": "1964.2475100",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19259",
+          "detail": "68129",
+          "source_hash": "a87dc1d56fe0339bd3ec45a80f9254ce7111c157d74cb937e2a62cd020b864bd"
+        },
+        {
+          "order": "19280",
+          "detail": "68261",
+          "source_hash": "f79c68436756190af45e76ba4ebe9ebab79d8b69e822d1bae9ca765645971369"
+        },
+        {
+          "order": "19437",
+          "detail": "69181",
+          "source_hash": "8b6afd3751bab9be7fde610606197a35b2a792fe763884dae0f9fdbac14c6125"
+        },
+        {
+          "order": "19445",
+          "detail": "69222",
+          "source_hash": "3e34a2c9581c8c7696ba96cdd9fa34f867074e71c6d84890a8ba6a6d1e822b39"
+        },
+        {
+          "order": "19493",
+          "detail": "69467",
+          "source_hash": "523f657b0c447c2cd3428895e741416208ea6211a14539b555586c3b05efb226"
+        },
+        {
+          "order": "19516",
+          "detail": "69619",
+          "source_hash": "24ad6aed1ccdc6e7f8f5bc5727677eca1dcc2437beb284af60a731c9d4a5b2a1"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "919",
+      "sku": "CHCAKEINDBROWNIE",
+      "name": "Cheesecake Brownie Individual",
+      "unit": "PZA",
+      "quantity": "15.0",
+      "cost_total": "755.3325850",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19270",
+          "detail": "68192",
+          "source_hash": "2dc7a3a7a6e5fda34cbd0411c2f1c6e61f28c21630f53aeee8fffd31b5cf5b3c"
+        },
+        {
+          "order": "19280",
+          "detail": "68260",
+          "source_hash": "5e271e3c4ff486f8fd37a04c4710199ecf6c5e36824798b135b6ff961f9a116f"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "931",
+      "sku": "CHCAKEINDMANZANA",
+      "name": "Cheesecake Manzana Individual",
+      "unit": "PZA",
+      "quantity": "84.0",
+      "cost_total": "4263.7705320",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19346",
+          "detail": "68619",
+          "source_hash": "185aeae7d4f60fd6c5573a4cb3c1ada929f1ad879fcc4fdb723e3b78f0b075e9"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "877",
+      "sku": "CHEESETORBROWNIE",
+      "name": "Cheesecakes Brownie M",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "303.5362690",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19374",
+          "detail": "68782",
+          "source_hash": "d78e8d6b929012d66697cbf6d56855737c817df3a674e2c2b64174bd7f968451"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "897",
+      "sku": "CHEESEZARZM",
+      "name": "Cheesecake Zarzamora M",
+      "unit": "PZA",
+      "quantity": "1.0",
+      "cost_total": "293.597750",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19395",
+          "detail": "68922",
+          "source_hash": "0c933c5aac41da87b47949cc9f4d6e5e2dbf3553746cf2f1c4e2d5e3a9029da8"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "943",
+      "sku": "9653",
+      "name": "Bollo Halloween Momia  🎃",
+      "unit": "PZA",
+      "quantity": "27.0",
+      "cost_total": "316.3846230",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19529",
+          "detail": "69671",
+          "source_hash": "000646909f9f6e96103a65773ab64de1d52de171af351cc526ae11928f76e5b9"
+        },
+        {
+          "order": "19538",
+          "detail": "69741",
+          "source_hash": "a6cd95edd2d57a4b7d8dc819d6c7639c7a9e6a83bd98ebf9b427f6f59a788915"
+        },
+        {
+          "order": "19555",
+          "detail": "69839",
+          "source_hash": "d0e5faad5cbf21c1c16067e0eb5966968f6dd735ac5fd8b5a45eba529c82087a"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "941",
+      "sku": "1684",
+      "name": "Bollo Halloween Monstruo 👾",
+      "unit": "PZA",
+      "quantity": "27.0",
+      "cost_total": "370.9047240",
+      "branch_external_id": "8",
+      "native_name": "Bollo Halloween Monstruo 👾 ",
+      "lines": [
+        {
+          "order": "19529",
+          "detail": "69672",
+          "source_hash": "92e096096899963b7658aef3fa98208209a13cda3153e895c7b19ed4fcc96b2b"
+        },
+        {
+          "order": "19538",
+          "detail": "69742",
+          "source_hash": "411de85fbd0edd90300d570a961e7f990ff7f6b170c945797dc384a4acf8dbed"
+        },
+        {
+          "order": "19555",
+          "detail": "69840",
+          "source_hash": "ecfbc1dbf6637a985b2c65d91f2601d97e61e3ac682bf1065a341a95f29081b7"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "external_id": "942",
+      "sku": "6911",
+      "name": "Bollo Halloween Ojo Verde 👁 🎃",
+      "unit": "PZA",
+      "quantity": "27.0",
+      "cost_total": "328.1995530",
+      "branch_external_id": "8",
+      "native_name": "Bollo Halloween Ojo Verde 👁 🎃 ",
+      "lines": [
+        {
+          "order": "19529",
+          "detail": "69673",
+          "source_hash": "570d7b5448a84bfdf4369c8932f731dc6dd999a8ccedd9e014172496a959c5bd"
+        },
+        {
+          "order": "19538",
+          "detail": "69743",
+          "source_hash": "6b470578f17786ee9b463e5ded13ecfce4979782f21e18eaa7d25f34b9433eac"
+        },
+        {
+          "order": "19555",
+          "detail": "69841",
+          "source_hash": "ca4c213cc9065dae6c20004b8d1f2df10eaebd71d44f5ba8f396259a02111d03"
+        }
+      ]
+    },
+    {
+      "period": "2025-11-01",
+      "external_id": "918",
+      "sku": "CHCAKEINDZAR",
+      "name": "Cheesecake Zarzamora Individual",
+      "unit": "PZA",
+      "quantity": "35.0",
+      "cost_total": "1915.4039200",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19566",
+          "detail": "69885",
+          "source_hash": "8e09372fa77214e14282bd2a799f3c270783b33f9522effea7fd9cc4f021e4a7"
+        },
+        {
+          "order": "19575",
+          "detail": "69947",
+          "source_hash": "bbb0085ad069502b6180df3a8f375d65d75bf72f5c1dab335f1f9418da61ecf5"
+        },
+        {
+          "order": "19646",
+          "detail": "70406",
+          "source_hash": "945669c3990871e776d6c786de966198baee31da59e1ab5b57abce3e532d85ec"
+        },
+        {
+          "order": "19686",
+          "detail": "70617",
+          "source_hash": "8e1c9a932c632234cd6d50ca4ee821dc9e5b2f5aa3b025b33b4fc3d9df2ea9c4"
+        },
+        {
+          "order": "19746",
+          "detail": "70950",
+          "source_hash": "74caa048d43e19557d66fd799d80d48e697e263fdbcd5b6e34b9a6798f22f048"
+        },
+        {
+          "order": "19810",
+          "detail": "71333",
+          "source_hash": "45fe38190c765a1db4edd711052452841894953efa71600ec7b44dc0a2a67ffc"
+        }
+      ]
+    },
+    {
+      "period": "2025-12-01",
+      "external_id": "918",
+      "sku": "CHCAKEINDZAR",
+      "name": "Cheesecake Zarzamora Individual",
+      "unit": "PZA",
+      "quantity": "5.0",
+      "cost_total": "279.7258750",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "19831",
+          "detail": "71485",
+          "source_hash": "3aa5c1691d35924f627a69a4cf30dc27cb1a506562717fb49b9226bf02734618"
+        }
+      ]
+    },
+    {
+      "period": "2025-12-01",
+      "external_id": "948",
+      "sku": "0112",
+      "name": "Pastel 3 Pecados Edicion Navideño C",
+      "unit": "PZA",
+      "quantity": "3.0",
+      "cost_total": "395.5399860",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "20223",
+          "detail": "72999",
+          "source_hash": "1e10fcdc35d4d4f62cb14899c235520dbf07f904b05393428415ce0c417c4491"
+        }
+      ]
+    },
+    {
+      "period": "2025-12-01",
+      "external_id": "949",
+      "sku": "0121",
+      "name": "Pastel 3 Pecados Edicion Navideño M",
+      "unit": "PZA",
+      "quantity": "11.0",
+      "cost_total": "2244.383240",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "20223",
+          "detail": "73000",
+          "source_hash": "a8bf1bd87e7ca07c8c4df2d0bcd46447e6d6bb47cd5031526bd4ee891bf34f19"
+        }
+      ]
+    },
+    {
+      "period": "2025-12-01",
+      "external_id": "946",
+      "sku": "01010",
+      "name": "Pastel Crunch Edicion Navideño C",
+      "unit": "PZA",
+      "quantity": "6.0",
+      "cost_total": "783.8439300",
+      "branch_external_id": "8",
+      "lines": [
+        {
+          "order": "20223",
+          "detail": "73001",
+          "source_hash": "7435a73f32d235f0c27d1a19ded9a5303186f2154929b43bccf999428fbfa0f7"
+        }
+      ]
     }
   ]
 }
