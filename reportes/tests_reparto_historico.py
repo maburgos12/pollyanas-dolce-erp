@@ -1,4 +1,5 @@
 import csv
+from copy import deepcopy
 from datetime import date
 from decimal import Decimal as D
 from io import StringIO
@@ -69,6 +70,35 @@ class RepartoHistoricoTests(TestCase):
         self.assertEqual(result['filas'],[])
         self.client.force_login(self.user)
         self.assertEqual(self.client.get('/reportes/estado-resultados/?year=2026&export=reparto').status_code,409)
+
+    def test_sinaloa_preopening_preserves_expense_and_csv_stage(self):
+        anterior = self.calculate()['total']
+        sucursal = Sucursal.objects.create(
+            codigo='SINALOA_LEYVA', nombre='Sinaloa de Leyva', fecha_apertura=date(2026, 10, 3))
+        rubro = RubroPresupuesto.objects.create(
+            area=AreaPresupuesto.objects.get(codigo='gastos-venta'),
+            concepto='Gasto de preapertura', sucursal=sucursal, tipo='EGRESO')
+        gasto = D('13')
+        linea = LineaPresupuestoMensual.objects.create(
+            rubro=rubro, periodo=date(2026, 9, 1), monto_real=gasto, fuente_real='AUTO:LEGADO')
+        buckets = deepcopy(self.buckets)
+        buckets['gastos-venta'][9]['real'] += gasto
+        result = reparto_historico(buckets, LineaPresupuestoMensual.objects.select_related('rubro__area'))
+        fila = next(r for r in result['detalle'] if r['sucursal_id'] == sucursal.pk)
+        self.assertEqual((fila['ventas'], fila['gasto_directo'], fila['utilidad']), (D(0), gasto, -gasto))
+        self.assertEqual(fila['etapa'], 'Preapertura')
+        self.assertEqual(result['total'], anterior - gasto)
+        self.assertEqual(etapa_sucursal(sucursal.codigo, 1), 'Preapertura')
+        self.assertEqual(etapa_sucursal(sucursal.codigo, 10), 'Operación')
+        self.client.force_login(self.user)
+        response = self.client.get('/reportes/estado-resultados/?year=2026&export=reparto')
+        self.assertEqual(response.status_code, 200)
+        rows = list(csv.DictReader(StringIO(response.content.decode('utf-8-sig'))))
+        exported = next(r for r in rows if r['Sucursal'] == sucursal.nombre)
+        self.assertEqual(exported['Etapa'], 'Preapertura')
+        self.assertEqual(D(exported['Utilidad operativa asignada']), -gasto)
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, gasto)
 
     def test_unmapped_expense_is_not_dropped(self):
         line=LineaPresupuestoMensual.objects.filter(rubro__sucursal=self.crucero).first()
