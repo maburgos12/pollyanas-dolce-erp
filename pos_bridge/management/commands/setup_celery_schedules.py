@@ -63,6 +63,17 @@ class Command(BaseCommand):
                       "enabled": preserve_enabled("Auditoría documental de compras e insumos (09:00)")},
         )
 
+        reconciliation_cron, _ = CrontabSchedule.objects.get_or_create(
+            minute="15", hour="7,9,11,13,15,17,19", day_of_week="*", day_of_month="*",
+            month_of_year="*", timezone=timezone_name,
+        )
+        PeriodicTask.objects.update_or_create(
+            name="Conciliador de insumos (cada dos horas)",
+            defaults={"task": "inventario.conciliar_documentos_insumos", "crontab": reconciliation_cron,
+                      "interval": None, "kwargs": "{}",
+                      "enabled": preserve_enabled("Conciliador de insumos (cada dos horas)")},
+        )
+
         sales_cron, _ = CrontabSchedule.objects.get_or_create(
             minute="30",
             hour="1",

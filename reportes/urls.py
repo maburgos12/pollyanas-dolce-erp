@@ -1,6 +1,7 @@
 from django.urls import path
 
 from . import views
+from . import views_reconciliation_agent
 from . import views_documentary_audit
 from . import investment_views
 from . import views_inventory_traceability
@@ -14,6 +15,7 @@ from .views_produccion import ProducidoVsVendidoMermaView
 app_name = "reportes"
 
 urlpatterns = [
+    path("conciliacion-insumos/", views_reconciliation_agent.dashboard, name="conciliacion_insumos"),
     path("auditoria-compras-produccion/", views_documentary_audit.dashboard, name="auditoria_documental"),
     path("auditoria-compras-produccion/<int:snapshot_id>/revision/", views_documentary_audit.review, name="auditoria_documental_revision"),
     path('mano-obra-mensual/', views_mano_obra_mensual.mensual, name='mano_obra_mensual'),

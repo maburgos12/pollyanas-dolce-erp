@@ -225,6 +225,7 @@ NAV_GROUPS = [
                 ["/inventario/"],
             ),
             ("reportes", "consumo", "Auditoría de insumos", "/reportes/auditoria-compras-produccion/", ["/reportes/auditoria-compras-produccion/"]),
+            ("reportes", "consumo", "Conciliación de insumos", "/reportes/conciliacion-insumos/", ["/reportes/conciliacion-insumos/"]),
             ("inventario", "conteos_sucursales", "Conteos de sucursales", "/inventario/conteos-sucursales/", ["/inventario/conteos-sucursales/"]),
             (
                 "maestros",

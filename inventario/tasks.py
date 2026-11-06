@@ -54,3 +54,18 @@ def auditar_compras_produccion(self):
             raise self.retry(countdown=1800, exc=RuntimeError('Periodo en revisión; auditoría diferida.'))
         results.append({'period': str(period), 'snapshot_id': snapshot.pk if snapshot else None})
     return results
+
+
+@shared_task(bind=True, name='inventario.conciliar_documentos_insumos', max_retries=3)
+def conciliar_documentos_insumos(self):
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import InsumoReconciliationCase
+    from .services_reconciliation_agent import InsumoReconciliationAgent
+    current=timezone.localdate().replace(day=1)
+    periods={current,(current-timedelta(days=1)).replace(day=1)}
+    periods.update(InsumoReconciliationCase.objects.filter(estado__in=['ACLARACION','RESPUESTA']).values_list('periodo',flat=True).distinct())
+    results=[InsumoReconciliationAgent().run(period) for period in sorted(periods)]
+    if any(r['status']=='busy' for r in results):
+        raise self.retry(countdown=900,exc=RuntimeError('Conciliación del periodo ya activa.'))
+    return results
