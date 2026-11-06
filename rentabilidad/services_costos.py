@@ -217,9 +217,19 @@ def asignar_costos_filas(filas, periodo, fin_periodo):
     ids = {f["receta_id"] for f in filas if f["receta_id"]}
     recipes = _fuentes_recetas_para_periodo(ids, periodo, fin_periodo)
     resale_recipes = set(Receta.objects.filter(pk__in=ids, modo_costeo=Receta.MODO_COSTEO_REVENTA).values_list("pk", flat=True))
+    from .services_produccion_documental import fuentes_produccion_documental
+    manufactured = fuentes_produccion_documental(
+        {f["product_id"] for f in filas if f["product_id"] and f["receta_id"] is None
+         and f["product_id"] not in resale}, periodo, fin_periodo)
     for row in filas:
         evidence = recipes.get(row["receta_id"])
         acquisition = resale.get(row["product_id"])
         is_resale = not row["receta_id"] or bool(acquisition and (acquisition.get("authorized") or (row["receta_id"] in resale_recipes and acquisition["cost"] > 0)))
         row["cost_evidence"] = acquisition if is_resale else evidence
         row["cost_is_resale"] = is_resale
+        native = manufactured.get(row["product_id"])
+        if (row["receta_id"] is None and acquisition is None and native
+                and row["product__sku"] == native["historical_sku"]
+                and row["product__name"] == native["historical_name"]):
+            row["cost_evidence"] = native
+            row["cost_is_resale"] = False
