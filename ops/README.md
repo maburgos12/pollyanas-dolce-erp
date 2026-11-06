@@ -10,6 +10,7 @@ Cada subcarpeta documenta su ruta de despliegue y como publicar cambios.
 | Carpeta | Que hace | Despliegue |
 |---|---|---|
 | `agente-hikconnect/` | Trae las checadas desde Hik-Connect Cloud al receptor del ERP, mas su catch-up diario | `/opt/agente-hikconnect` |
+| `erp-observer/` | Observa resultados existentes de Doctor; no ejecuta agentes ni reparaciones | `/opt/erp-observer/current` |
 
 **Ningun secreto se versiona aqui.** Los `.env`, sesiones y bases de estado viven solo en el servidor;
 cada subcarpeta trae su `.env.example`.
