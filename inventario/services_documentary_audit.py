@@ -17,11 +17,12 @@ from maestros.models import CostoInsumo, Insumo
 from pos_bridge.models import PointProductionLine, PointTransferLine, PointWasteLine
 from pos_bridge.services.inventory_baseline import point_transfer_origin_exit_hash
 from recetas.models import LineaReceta, normalizar_codigo_point
+from recetas.utils.costeo_snapshot import POINT_UNIT_ALIASES
 from .canonical_point_inventory import CanonicalPointInventoryService
 from .models import InsumoAuditSnapshot, MovimientoInventario
 from .services_auditoria_insumos import ConsumoInsumoAuditService
 
-VERSION = 1
+VERSION = 2
 ZERO = Decimal('0')
 LOCATIONS = {'ALMACEN_1': 'ALMACEN', 'CUARTO_FRIO': 'CEDIS'}
 SOURCE_PURCHASE = 'POINT_COMPRAS_HISTORICAS'
@@ -72,6 +73,10 @@ def convert(quantity, source, target):
     quantity = decimal(quantity)
     if quantity is None:
         return None
+    source = POINT_UNIT_ALIASES.get(normalized(source), source)
+    target = POINT_UNIT_ALIASES.get(normalized(target), target)
+    if source and target and normalized(source) == normalized(target):
+        return quantity
     # Sólo equivalencias dimensionales existentes; jamás densidades o presentaciones inferidas.
     return ConsumoInsumoAuditService()._convert_quantity(quantity, source, target)
 

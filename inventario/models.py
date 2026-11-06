@@ -604,3 +604,39 @@ from .models_conteos import (  # noqa: F401,E402
     AccesoConteoSucursal, ConteoSucursal, EventoConteoSucursal,
     LecturaConteoSucursal, LineaConteoSucursal, OperacionConteoSucursal,
 )
+
+
+class InsumoReconciliationCase(models.Model):
+    """Expediente de conciliación; no concede autoridad sobre el inventario."""
+    key = models.CharField(max_length=160, unique=True)
+    periodo = models.DateField(db_index=True)
+    kind = models.CharField(max_length=32)
+    titulo = models.CharField(max_length=220)
+    insumo = models.ForeignKey('maestros.Insumo', null=True, blank=True, on_delete=models.PROTECT)
+    ubicacion = models.CharField(max_length=20, blank=True)
+    estado = models.CharField(max_length=24, choices=[
+        ('CONCILIADO', 'Conciliado documentalmente'), ('EXPLICADO', 'Causa explicada'),
+        ('ACLARACION', 'Aclaración pendiente'), ('RESPUESTA', 'Respuesta por verificar'),
+    ], db_index=True)
+    conclusion = models.TextField()
+    evidencia = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
+    fingerprint = models.CharField(max_length=64)
+    solicitud = models.OneToOneField('seguimiento.SeguimientoItem', null=True, blank=True,
+        on_delete=models.PROTECT, related_name='conciliacion_insumo')
+    actualizado_en = models.DateTimeField(default=timezone.now)
+    comprobado_en = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['estado', 'kind', 'titulo', 'pk']
+
+
+class InsumoReconciliationEvent(models.Model):
+    caso = models.ForeignKey(InsumoReconciliationCase, on_delete=models.PROTECT, related_name='eventos')
+    fingerprint = models.CharField(max_length=64)
+    resultado = models.JSONField(default=dict, encoder=DjangoJSONEncoder)
+    creado_en = models.DateTimeField(default=timezone.now)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValidationError('La investigación anterior no se sobrescribe.')
+        super().save(*args, **kwargs)

@@ -6,6 +6,7 @@
 {% block content %}
 <div class="documentary-audit">
   <header><h1>De la compra a producción</h1><p>Revisa documentos, cantidades y pendientes de Almacén y CEDIS. Una diferencia requiere evidencia; no demuestra uso indebido.</p></header>
+  <p><a href="{% url 'reportes:conciliacion_insumos' %}?mes={{ selected_period }}">Ver investigaciones del agente y solicitudes de aclaración</a></p>
   <form method="get" class="audit-filters">
     <label>Periodo<input type="month" name="mes" value="{{ selected_period }}" required></label>
     <label>Ubicación<select name="ubicacion"><option value="">Almacén y CEDIS</option><option value="ALMACEN" {% if location == 'ALMACEN' %}selected{% endif %}>Almacén</option><option value="CEDIS" {% if location == 'CEDIS' %}selected{% endif %}>CEDIS</option></select></label>
