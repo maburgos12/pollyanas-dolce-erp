@@ -99,6 +99,14 @@ def planeacion_personal(request):
                     'centro', 'concepto', 'desde', 'hasta', 'dias', 'dias_mes', 'importe_facturado',
                     'referencia_mensual', 'cfdi')])
             writer.writerow([])
+        if global_row.get('ciclos_facturacion'):
+            writer.writerow(['CFE: meses intermedios de facturacion bimestral; importes no sumables',
+                             'Gasto', 'Centro', 'Mes de factura', 'Servicio desde', 'Servicio hasta',
+                             'Importe facturado en su mes', 'CFDI', 'Detalle'])
+            for ciclo in global_row['ciclos_facturacion']:
+                writer.writerow(['Ciclo documentado'] + [ciclo[k] for k in ('gasto_id', 'centro',
+                    'mes_factura', 'servicio_desde', 'servicio_hasta', 'importe_facturado', 'uuid', 'detalle')])
+            writer.writerow([])
         writer.writerow(['Resumen final', 'Importe del mes', '% ventas totales'])
         writer.writerow(['Ventas totales con impuestos', global_row['ventas']])
         for component in global_row['componentes']:
