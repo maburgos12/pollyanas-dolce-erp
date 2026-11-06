@@ -193,6 +193,7 @@ def run_job(entry, observation, config, ledger, cause):
     base = entry['revision']
     if git('rev-parse', 'HEAD', cwd=worktree) != base:
         raise ValueError('base_changed_before_work')
+    command(['bash', str(worktree / 'scripts/git_workspace_preflight.sh'), '--write'], cwd=worktree)
     readable_checkout(worktree)
     factory = VPSFactory(REPO, task)
     factory.initialize('Reproduce failure, preserve tests, isolated PostgreSQL16 checks, independent review, draft PR only',

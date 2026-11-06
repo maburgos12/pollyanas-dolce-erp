@@ -25,8 +25,10 @@ de importación → corrección → GREEN sin reducir descubrimiento → check D
 migraciones PG16 → commit → revisión independiente ligada al SHA → push de rama
 `codex/autofix-*` → PR borrador → CI completo → espera de aprobación.
 
-Los paths automáticos están definidos en `policy.py`: solo código técnico y
-regresiones permitidos. Datos, nómina, RRHH, integraciones, modelos/migraciones,
+Los paths automáticos están definidos en `policy.py`: solo Python técnico,
+regresiones y archivos Python del observador ya permitidos. Templates y estáticos
+quedan excluidos: los casos visuales y PWA requieren operador hasta disponer de
+un gate de navegador real y gestión verificada de versiones de Service Worker. Datos, nómina, RRHH, integraciones, modelos/migraciones,
 autenticación/permisos, configuración, cachés, SW, workflows, despliegues y el
 propio controlador quedan fuera. Los tests existentes solo admiten adiciones.
 Los casos fuera de alcance se entregan para decisión; no se cambia la regla de

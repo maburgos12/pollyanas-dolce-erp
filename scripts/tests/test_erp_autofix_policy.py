@@ -72,9 +72,16 @@ class ApprovalTests(unittest.TestCase):
 
 class PathTests(unittest.TestCase):
     def test_narrow_allowed_paths(self):
-        paths = ['core/views/dashboard.py', 'core/templates/core/dashboard.html',
-                 'core/static/core/dashboard.js', 'scripts/tests/test_regression.py', 'ops/erp-observer/observer.py']
+        paths = ['core/views/dashboard.py', 'core/utils.py',
+                 'scripts/tests/test_regression.py', 'ops/erp-observer/observer.py']
         self.assertEqual(policy.validate_paths(paths), paths)
+
+    def test_visual_and_pwa_files_require_operator_browser_validation(self):
+        for path in ['core/templates/core/dashboard.html', 'core/static/core/dashboard.js',
+                     'core/static/core/dashboard.css', 'logistica/templates/logistica/home.html',
+                     'recetas/static/recetas/planning.js', 'core/templates/core/helper.py']:
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                policy.validate_paths([path])
 
     def test_email_rendering_drill_is_an_exact_path_exception(self):
         paths = ['core/email_rendering.py', 'scripts/tests/test_autofix_drill_email_styles.py']

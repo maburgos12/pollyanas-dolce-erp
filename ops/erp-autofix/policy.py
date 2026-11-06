@@ -12,10 +12,6 @@ REPOSITORY = 'maburgos12/pollyanas-dolce-erp'
 SHA = re.compile(r'[0-9a-f]{40}')
 CAUSE = re.compile(r'[0-9a-f]{64}')
 STATUSES = {'running', 'failed', 'awaiting_approval', 'blocked', 'completed'}
-APPS = {'core', 'maestros', 'recetas', 'compras', 'activos', 'control', 'crm',
-        'visitas_sucursal', 'logistica', 'fallas', 'mantenimiento', 'seguimiento',
-        'mermas', 'operacion', 'horarios_especiales', 'reportes', 'proyecciones',
-        'orquestacion', 'consejo_ia'}
 PROTECTED = re.compile(r'auth|permission|middleware|model|migration|setting|deploy|backup|'
                        r'service.?worker|(^|[/._-])sw([/._-]|$)|requirement|agents|claude', re.I)
 
@@ -86,8 +82,6 @@ def validate_paths(paths):
         allowed = (len(parts) == 3 and parts[:2] in (['scripts', 'tests'], ['ops', 'erp-observer'])
                    and path.endswith('.py'))
         allowed |= path == 'core/email_rendering.py'
-        allowed |= (len(parts) >= 4 and parts[0] in APPS and parts[1] in {'templates', 'static'}
-                    and PurePosixPath(path).suffix in {'.html', '.css', '.js'})
         allowed |= (parts[0] == 'core' and path.endswith('.py') and
                     (parts[1] in {'views', 'utils', 'templatetags'} and len(parts) >= 3 or
                      len(parts) == 2 and parts[1] == 'utils.py'))
