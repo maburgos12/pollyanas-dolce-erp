@@ -388,6 +388,80 @@ class PresupuestoRealConsolidacionTests(TestCase):
         linea.refresh_from_db()
         self.assertEqual(linea.monto_real, Decimal("310.00"))
 
+    def test_gasto_operativo_no_aplica_regla_de_octubre_en_otros_meses(self):
+        rubro, _ = self.crear_linea(concepto="Point octubre")
+        regla = self.crear_regla_gasto(
+            rubro, centro_costo=self.corporativo,
+            filtros={"desde": "2026-10", "hasta": "2026-10", "porcentaje": "9.600"},
+        )
+        service = PresupuestoRealConsolidacionService()
+        for mes in (1, 9, 11):
+            periodo = date(2026, mes, 1)
+            self.crear_gasto("14500", periodo=periodo, centro=self.corporativo)
+            indices = {}
+            with self.subTest(mes=mes), self.assertNumQueries(0):
+                self.assertEqual(service._monto_regla(regla, periodo, indices), (Decimal("0"), False))
+            self.assertNotIn("gasto", indices)
+
+    def test_gasto_operativo_incluye_limites_y_conserva_porcentaje(self):
+        rubro, _ = self.crear_linea(concepto="Point vigencia")
+        regla = self.crear_regla_gasto(
+            rubro, centro_costo=self.corporativo,
+            filtros={"desde": "2026-09-01", "hasta": "2026-10", "porcentaje": "9.600"},
+        )
+        for mes in (9, 10):
+            periodo = date(2026, mes, 1)
+            self.crear_gasto("14500", periodo=periodo, centro=self.corporativo)
+            with self.subTest(mes=mes):
+                self.assertEqual(
+                    PresupuestoRealConsolidacionService()._monto_regla(regla, periodo, {}),
+                    (Decimal("1392.00"), True),
+                )
+
+    def test_gasto_operativo_fecha_invalida_no_publica_real(self):
+        rubro, linea = self.crear_linea(concepto="Point fecha inválida")
+        self.crear_regla_gasto(rubro, filtros={"hasta": "2026-13"})
+        self.crear_gasto("9744")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertIsNone(linea.monto_real)
+        self.assertEqual(linea.fuente_real, "")
+        self.assertEqual(summary.actualizadas, 0)
+        self.assertEqual(summary.sin_datos_fuente, 1)
+        self.assertTrue(linea.metadata["sin_datos_fuente"])
+
+    def test_gasto_operativo_particiones_temporales_no_suman_dos_veces(self):
+        rubro, linea = self.crear_linea(concepto="Point histórico")
+        for filtros in (
+            {"desde": "2026-01", "hasta": "2026-08"},
+            {"desde": "2026-10", "hasta": "2026-10"},
+        ):
+            self.crear_regla_gasto(rubro, filtros=filtros, modo_asignacion=ReglaFuenteRubro.MODO_CONTROL)
+        self.crear_gasto("9744")
+
+        self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("9744.00"))
+        self.assertEqual(linea.monto_presupuesto, Decimal("1000.00"))
+
+    def test_gasto_operativo_fuera_vigencia_conserva_real_anterior(self):
+        rubro, linea = self.crear_linea(
+            concepto="Point conservado", monto_real=Decimal("321.45"), fuente_real="AUTO:LEGADO",
+        )
+        self.crear_regla_gasto(rubro, filtros={"desde": "2026-10", "hasta": "2026-10"})
+        self.crear_gasto("9744")
+
+        summary = self.consolidar()
+
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("321.45"))
+        self.assertEqual(linea.fuente_real, "AUTO:LEGADO")
+        self.assertEqual(summary.actualizadas, 0)
+        self.assertTrue(linea.metadata["sin_datos_fuente"])
+
     def test_nomina_filtra_campo_estatus_mes_departamento_y_sucursal(self):
         """NOMINA suma salario base cerrado/pagado del departamento y sucursal."""
         rubro, linea = self.crear_linea(concepto="Sueldos ventas", sucursal=self.sucursal)
