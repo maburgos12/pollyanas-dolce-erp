@@ -425,7 +425,8 @@ def once(config):
         current = ledger.read()['causes'][cause]
         safe_retry = isinstance(error, RuntimeFailure) and reason in {
             'test_execution_failed', 'model_schema_invalid', 'model_result_invalid'} and not current.get('pr_url')
-        cleanup_pending = reason in {'resource_cleanup_failed','docker_command_failed','model_cleanup_failed'}
+        cleanup_pending = isinstance(error, subprocess.TimeoutExpired) or reason in {
+            'resource_cleanup_failed', 'docker_command_failed', 'model_cleanup_failed', 'dispatcher_interrupted'}
         ledger.update(cause, status='running' if cleanup_pending else 'failed' if safe_retry else 'blocked',
                       reason=reason, phase='cleanup_pending' if cleanup_pending else current.get('phase','failed'))
         if not cleanup_pending:
@@ -453,7 +454,12 @@ def reconcile(config, ledger):
             continue
         job_id = entry['job_id']
         job = STATE / 'jobs' / job_id
-        intent = json.loads((job / 'intent.json').read_text())
+        try:
+            intent = json.loads((job / 'intent.json').read_text())
+        except FileNotFoundError:
+            # A durable claim can precede its intent; unknown resource ownership forbids deletion.
+            ledger.update(cause, status='blocked', phase='ownership_review', reason='interrupted_missing_intent')
+            continue
         if intent.get('owner') != 'erp-autofix' or intent['entry']['job_id'] != job_id:
             raise ValueError('interrupted_ownership_unknown')
         for phase in ['diagnosis', 'repair', 'review']:

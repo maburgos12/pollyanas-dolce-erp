@@ -1,4 +1,6 @@
 import importlib.util
+import subprocess
+from types import SimpleNamespace
 from pathlib import Path
 import sys
 import tempfile
@@ -84,6 +86,44 @@ class WorkerTests(unittest.TestCase):
                       'diff --git a/scripts/tests/test_x.py b/scripts/tests/test_x.py\n--- a/scripts/tests/test_x.py\n+++ b/scripts/tests/test_x.py\n@@ -1 +1 @@\n-assert True\n+pass\n']:
             with self.assertRaises(ValueError):
                 worker.patch_paths(patch)
+
+    def test_missing_intent_blocks_one_cause_without_guessing_resource_ownership(self):
+        import worker
+        with tempfile.TemporaryDirectory() as temporary, patch.object(worker, 'STATE', Path(temporary)), \
+                patch.object(worker, '_docker') as docker, patch.object(worker, '_stop_model_unit') as stop:
+            ledger = worker.Ledger(Path(temporary) / 'ledger.json')
+            cause = 'c' * 64
+            ledger.claim(cause, 'a' * 40, 'interrupted')
+            worker.reconcile({}, ledger)
+            entry = ledger.read()['causes'][cause]
+            self.assertEqual(entry['status'], 'blocked')
+            self.assertEqual(entry['phase'], 'ownership_review')
+            self.assertEqual(entry['reason'], 'interrupted_missing_intent')
+            docker.assert_not_called()
+            stop.assert_not_called()
+
+    def test_uncertain_subprocess_effects_require_startup_cleanup(self):
+        import worker
+        original_read = Path.read_text
+        def read(path, *args, **kwargs):
+            if str(path) == '/proc/meminfo':
+                return 'MemAvailable: 4194304 kB\n'
+            return original_read(path, *args, **kwargs)
+        for error in [subprocess.TimeoutExpired(['docker', 'create'], 30),
+                      worker.RuntimeFailure('dispatcher_interrupted')]:
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(worker, 'STATE', Path(temporary)), patch.object(worker, 'reconcile'), \
+                    patch.object(worker, 'detect', return_value={'kind': 'synthetic', 'checks': [], 'task_id': 'test'}), \
+                    patch.object(worker, 'git', return_value='a'*40), patch.object(worker, 'command'), \
+                    patch.object(worker, 'GitHub') as client, \
+                    patch.object(worker.shutil, 'disk_usage', return_value=SimpleNamespace(free=20*1024**3)), \
+                    patch.object(Path, 'read_text', read), patch.object(worker, 'run_job', side_effect=error):
+                client.return_value.open_prs.return_value = []
+                with self.assertRaises(type(error)):
+                    worker.once({})
+                entry = next(iter(worker.Ledger(Path(temporary)/'ledger.json').read()['causes'].values()))
+                self.assertEqual(entry['status'], 'running')
+                self.assertEqual(entry['phase'], 'cleanup_pending')
 
     def test_new_regression_patch_is_accepted(self):
         import worker
