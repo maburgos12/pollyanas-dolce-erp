@@ -2,6 +2,7 @@ from datetime import timedelta
 from decimal import Decimal
 from hashlib import sha256
 from unittest.mock import patch
+from types import SimpleNamespace
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -163,6 +164,32 @@ class ReconciliationAgentTests(TestCase):
         self.assertEqual(case.estado,'ACLARACION')
         self.assertEqual(case.evidencia['investigacion']['movimientos'][0]['id'],123)
         self.assertIn('medición de origen',case.solicitud.entregable_esperado)
+
+    def test_transfer_missing_origin_respects_importer_scope_and_cutover(self):
+        branch=PointBranch.objects.create(external_id='centro',name='Centro')
+        for document,origin,destination,sent_at in [
+            ('OUTSIDE',self.destination,branch,self.start+timedelta(days=1)),
+            ('BEFORE',self.origin,self.destination,self.start-timedelta(hours=1)),
+            ('EXPECTED',self.origin,self.destination,self.start+timedelta(days=1)),
+        ]:
+            line=PointTransferLine.objects.create(origin_branch=origin,destination_branch=destination,
+                insumo=self.item,transfer_external_id=document,detail_external_id=document,source_hash=document,
+                registered_at=sent_at,sent_at=sent_at,received_at=self.start+timedelta(days=2),
+                item_name=self.item.nombre,item_code='MASK',unit='U',sent_quantity=10,received_quantity=10,is_insumo=True,is_received=True)
+            if destination==self.destination:
+                MovimientoInventario.objects.create(insumo=self.item,tipo='ENTRADA',almacen='CUARTO_FRIO',
+                    source_hash=document,cantidad=10,fecha=line.received_at)
+        with patch('inventario.services_reconciliation_agent.latest_point_almacen_baseline_run',
+                   return_value=SimpleNamespace(pk=77,finished_at=self.start)):
+            self.run_agent()
+        for document in ('OUTSIDE','BEFORE'):
+            case=InsumoReconciliationCase.objects.get(titulo='Transferencia '+document)
+            self.assertEqual(case.estado,'EXPLICADO')
+            self.assertIsNone(case.solicitud_id)
+            self.assertIn('No es prueba de faltante',case.conclusion)
+        expected=InsumoReconciliationCase.objects.get(titulo='Transferencia EXPECTED')
+        self.assertEqual(expected.estado,'ACLARACION')
+        self.assertIn('SALIDA',expected.solicitud.entregable_esperado)
 
     def test_old_open_period_is_revisited_by_scheduled_task(self):
         from inventario.tasks import conciliar_documentos_insumos
