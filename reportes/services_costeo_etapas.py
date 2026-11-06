@@ -155,6 +155,7 @@ def calcular_etapas(mo):
         personal = {key: [f for f in personal[key] if f['familia'] != 'cargas_patronales']
                     for key in ('filas', 'pendientes')}
     costos = {key: gastos[key] + personal[key] for key in ('filas', 'pendientes')}
+    costos['ciclos_facturacion'] = gastos.get('ciclos_facturacion', [])
     costos['filas'] += [f for f in cargas['filas'] if f['area'] == 'gastos-venta']
     cargas_logistica = sum((f['monto_mensual'] for f in cargas['filas'] if f['area'] == 'logistica'), ZERO)
     logistica['cargas_patronales'] = cargas_logistica

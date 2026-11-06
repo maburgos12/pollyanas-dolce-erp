@@ -71,6 +71,13 @@
     {% for f in selected.global.pendientes_gastos %}<tr><td>{{ f.origen }} #{{ f.registro_id }}</td><td class="source">{{ f.area }} · {{ f.concepto }}</td><td>Pendiente</td><td class="source">{{ f.detalle }}</td></tr>{% endfor %}
     </tbody></table></div>
   </details>
+  {% if selected.global.ciclos_facturacion %}
+  <h3>CFE: mes intermedio de facturación bimestral</h3>
+  <p class="caption">Estas facturas ya se reconocieron en el mes indicado. Se muestra el ciclo documentado para explicar por qué no se exige otro recibo mensual. No se suman de nuevo ni representan consumo cero; una referencia de consumo mensual es distinta del gasto facturado.</p>
+  <div class="table-responsive"><table><thead><tr><th scope="col">Ubicación</th><th scope="col">Periodo de servicio</th><th scope="col">Mes de factura</th><th scope="col">Importe ya facturado</th><th scope="col">Documento</th></tr></thead><tbody>
+  {% for c in selected.global.ciclos_facturacion %}<tr><th scope="row">{{ c.centro }}</th><td>{{ c.servicio_desde|date:"d/m/Y" }} al {{ c.servicio_hasta|date:"d/m/Y" }}</td><td>{{ c.mes_factura|date:"m/Y" }}</td><td>{{ c.importe_facturado|floatformat:2|intcomma }}</td><td class="source">Gasto #{{ c.gasto_id }} · CFDI {{ c.uuid }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% endif %}
 </section>
 <section class="card">
 {% if policy %}
