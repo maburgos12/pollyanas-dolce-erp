@@ -14,6 +14,7 @@ from core.models import Sucursal
 from reportes.models import CategoriaGasto, CentroCosto, GastoOperativoMensual, ProyectoInversion
 from reportes.services_investment_projects import ProyectoInversionRefreshService
 from reportes.services_operating_finance import OperatingFinanceBootstrapService
+from reportes.services_operating_finance_io import validar_reimportacion_gastos_documentados
 
 
 SUPPORTED_TYPE_VALUES = {
@@ -321,12 +322,13 @@ class BranchRealOperatingExpenseImportService:
     ) -> BranchRealOperatingExpenseImportSummary:
         if non_real_policy not in {NON_REAL_POLICY_IGNORE, NON_REAL_POLICY_REJECT}:
             raise ValueError(f"non_real_policy inválida: {non_real_policy}")
-        OperatingFinanceBootstrapService().bootstrap()
         workbook = Path(workbook_path).expanduser().resolve()
         if not workbook.exists():
             raise FileNotFoundError(workbook)
 
         selected_sheet, payload_rows = self._load_sheet_rows(workbook, sheet_name=sheet_name)
+        validar_reimportacion_gastos_documentados(row.get("external_key") for row in payload_rows)
+        OperatingFinanceBootstrapService().bootstrap()
         summary, normalized_rows = self._validate_rows(
             rows=payload_rows,
             workbook_name=workbook.name,
