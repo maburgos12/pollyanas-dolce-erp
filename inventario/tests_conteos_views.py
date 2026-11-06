@@ -177,6 +177,55 @@ class ConteoViewsTests(TestCase):
         self.assertEqual(book['Lecturas históricas'].max_row,2)
         self.assertEqual(book['Lecturas históricas'].cell(2,8).value,'0.000000')
 
+    def test_recount_reviewer_sees_submitted_round_and_capture_stays_blind(self):
+        from inventario.services_conteos import ejecutar_accion
+        from inventario.conteos_nocturna import huella_lecturas
+        from django.utils import timezone
+        line = self.count.lineas.get()
+        for version, action, payload in [
+            (1, 'iniciar', {}),
+            (2, 'enviar', {'lecturas': {str(line.pk): {'cantidad': '7', 'incidencia': ''}}}),
+            (3, 'reconteo', {'linea_ids': [line.pk], 'motivo': 'Verificar cantidad'}),
+        ]:
+            ejecutar_accion(conteo_id=self.count.pk, actor=self.admin if action == 'reconteo' else self.operator,
+                           action=action, version=version, request_id=uuid4(), payload=payload)
+        self.count.refresh_from_db()
+        from inventario.models_conteos import LecturaConteoSucursal
+        previous = list(LecturaConteoSucursal.objects.filter(linea=line, ronda=1).select_related('linea'))
+        self.count.conciliacion = {'huella_lecturas': huella_lecturas(previous), 'estado': 'CALCULADA',
+            'cierre_en': timezone.now().isoformat(), 'procesado_en': timezone.now().isoformat(),
+            'lineas': {str(line.pk): {'estado': 'CALCULADA', 'diferencia': '-1', 'fisico_al_cierre': '7', 'point_al_cierre': '8'}}}
+        self.count.save(update_fields=['conciliacion'])
+        self.client.force_login(self.admin)
+        url = reverse('inventario:conteos_erp:detalle', args=[self.count.pk])
+        response = self.client.get(url)
+        self.assertFalse(response.context['editable'])
+        self.assertEqual(response.context['rows'][0]['cantidad_visible'], '7')
+        self.assertEqual(response.context['rows'][0]['lectura'].ronda, 1)
+        self.assertEqual(response.context['conciliacion']['estado'], 'CALCULADA')
+        self.assertContains(response, 'Último conteo enviado')
+        self.assertContains(response, 'Historial')
+        self.assertNotContains(response, 'Comenzar conteo')
+        self.assertEqual(self.client.get(url + '?imprimir=1').status_code, 200)
+        from io import BytesIO
+        from openpyxl import load_workbook
+        book = load_workbook(BytesIO(self.client.get(reverse('inventario:conteos_erp:exportar', args=[self.count.pk])).content))
+        self.assertEqual(book.active.cell(2, 9).value, 7)
+
+        capture = self.client.get(url + '?capturar=1')
+        self.assertTrue(capture.context['editable'])
+        self.assertNotContains(capture, 'Último conteo enviado')
+        self.assertNotContains(capture, 'Historial')
+        self.assertIn('?capturar=1', capture.context['accion_url'])
+        self.client.force_login(self.operator)
+        blind = self.client.get(self.url() + '?resumen=1')
+        self.assertTrue(blind.context['editable'])
+        self.assertIsNone(blind.context['rows'][0]['lectura'].cantidad)
+        self.assertNotContains(blind, 'Historial')
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.version, 4)
+        self.assertEqual(self.count.estado, 'RECONTEO')
+
     def test_get_never_changes_version(self):
         self.client.force_login(self.admin)
         version = self.count.version

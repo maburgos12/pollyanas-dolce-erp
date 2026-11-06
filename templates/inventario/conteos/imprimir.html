@@ -20,6 +20,7 @@
       <h1>Comparativa de inventario al cierre</h1>
       <p class="identity"><strong>CF-{{ conteo.pk }} · {{ conteo.sucursal.nombre }}</strong> · {{ conteo.fecha|date:'d/m/Y' }}</p>
       <p>{{ conteo.titulo }} · {{ conteo.get_estado_display }}</p>
+      {% if resumen_reconteo %}<p><strong>Último conteo enviado · reconteo pendiente.</strong> Las cantidades corresponden al envío anterior.</p>{% endif %}
       <p>Responsable: {{ conteo.responsable.get_full_name|default:conteo.responsable.username }}</p>
     </header>
     {% timezone 'America/Mazatlan' %}
@@ -35,12 +36,13 @@
     {% endtimezone %}
     <div class="table-scroll" role="region" aria-label="Comparativas por artículo" tabindex="0">
       <table>
-        <thead><tr><th scope="col">Artículo / Código</th><th scope="col">Unidad</th><th scope="col" class="number">Físico al cierre</th><th scope="col" class="number">Point al cierre</th><th scope="col" class="number">Diferencia al cierre</th><th scope="col">Estado / Observación</th></tr></thead>
+        <thead><tr><th scope="col">Artículo / Código</th><th scope="col">Unidad</th><th scope="col" class="number">Cantidad capturada</th><th scope="col" class="number">Físico al cierre</th><th scope="col" class="number">Point al cierre</th><th scope="col" class="number">Diferencia al cierre</th><th scope="col">Estado / Observación</th></tr></thead>
         <tbody>
         {% for row in rows %}
           <tr>
             <th scope="row">{{ row.linea.nombre }}<small>{{ row.linea.codigo }}</small></th>
             <td>{{ row.linea.unidad }}</td>
+            <td class="number">{{ row.cantidad_visible|default:"Sin cantidad" }}</td>
             {% if row.conciliacion.estado == 'CALCULADA' %}
             <td class="number">{{ row.conciliacion.fisico_al_cierre_visible }}</td>
             <td class="number">{{ row.conciliacion.point_al_cierre_visible }}</td>
@@ -51,7 +53,7 @@
             <td><strong>Pendiente</strong><small>{{ row.conciliacion.motivo|default:'Pendiente de procesamiento nocturno.' }}</small>{% if row.lectura.incidencia %}<small>{{ row.lectura.incidencia }}</small>{% endif %}</td>
             {% endif %}
           </tr>
-        {% empty %}<tr><td colspan="6">No hay artículos registrados.</td></tr>{% endfor %}
+        {% empty %}<tr><td colspan="7">No hay artículos registrados.</td></tr>{% endfor %}
         </tbody>
       </table>
     </div>
