@@ -238,7 +238,10 @@ def run_job(entry, observation, config, ledger, cause):
         prompt = ('Return a standard unified Git diff and summary for this incident. No tools or shell. '
                   'Edit only supplied paths, preserve all validations/error handling. Existing test changes must '
                   'be additions only. Add a regression which fails before the fix and passes after it. '
+                  'For scripts/tests files, use unittest.TestCase subclasses with test_* methods and real assertions. '
+                  'The runner is unittest discovery: do not use pytest-style module functions, fixtures or new dependencies. '
                   'Do not touch data, schemas, settings, auth, workflows, controller, guards, approvals or deploy.\n'
+                  + 'EXACT REGRESSION COMMANDS: ' + json.dumps(commands) + '\n'
                   + json.dumps(observation) + files_context(worktree, paths))
         repair = model(job, 'repair', prompt, object_schema(dict(patch=text_schema(), summary=text_schema())))
         write(job / 'repair.json', repair)
@@ -278,7 +281,7 @@ def run_job(entry, observation, config, ledger, cause):
     git('diff', '--check', cwd=worktree)
     actual = git('diff', '--name-only', cwd=worktree).splitlines()
     untracked = git('ls-files', '--others', '--exclude-standard', cwd=worktree).splitlines()
-    validate_paths(actual + untracked)
+    candidate_paths = validate_paths(actual + untracked)
     git('add', '--', *changed, cwd=worktree)
     git('commit', '-m', 'Autofix técnico aislado ' + task, cwd=worktree)
     candidate = git('rev-parse', 'HEAD', cwd=worktree)
@@ -313,7 +316,11 @@ def run_job(entry, observation, config, ledger, cause):
     body = ('ERP autofix: ' + task + '\n\n' + ('**Ensayo sintético; no es un fallo productivo.**\n\n'
             if observation['kind'] == 'synthetic' else '') + 'Causa: `' + cause + '`\nSHA candidato: `' + candidate +
             '`\n\nPostgreSQL16 aislado, pruebas de regresión RED/GREEN y revisión independiente aprobados. '
-            'CI completo pendiente. No hay publicación automática.\n\n'
+            'CI completo pendiente. No hay publicación automática.\n\nArchivos principales: '
+            + ', '.join('`' + name + '`' for name in candidate_paths) + '.\n\n'
+            'Sin validación en navegador/producción: candidato técnico aislado, sin deploy. '
+            'Worktree y evidencia conservados en VPS, responsable erp-autofix, revisión en tres días. '
+            'Sin cambios propios pendientes de commit ni stashes.\n\n'
             'Para autorizar publicación de esta revisión, Mauricio debe escribir exactamente:\n\n'
             '`APRUEBO PUBLICAR ' + candidate + '`\n\nUn HEAD distinto o revocación posterior invalida la autorización.')
     pr = client.draft(branch, body)
