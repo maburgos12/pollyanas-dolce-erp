@@ -64,13 +64,19 @@ def _cantidad_visible(value):
 def _context(request, count, *, ack='', ack_version=None):
     server_now = timezone.now()
     reviewer = puede_revisar(request.user, count)
-    editable = puede_capturar(request.user, count) and count.estado in ('CAPTURA','RECONTEO')
+    review_recount = reviewer and count.estado == 'RECONTEO' and _namespace(request) == 'inventario:conteos_erp'
+    capture_requested = request.GET.get('capturar') == '1'
+    editable = puede_capturar(request.user, count) and count.estado in ('CAPTURA','RECONTEO') and (not review_recount or capture_requested)
     readings = (list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda=count.ronda).select_related('linea').order_by('linea__nombre')) if editable else lecturas_efectivas(count))
+    if review_recount and not editable:
+        # The new blind round must not replace the submitted evidence in review.
+        readings = list(LecturaConteoSucursal.objects.filter(linea__conteo=count, ronda__lt=count.ronda)
+                        .select_related('linea', 'linea__producto').order_by('linea_id', '-ronda').distinct('linea_id'))
     rows = []
     reconciliation = {}
     if reviewer and not editable and count.conciliacion:
         from .conteos_nocturna import huella_lecturas
-        if count.conciliacion.get('huella_lecturas') == huella_lecturas(lecturas_efectivas(count)):
+        if count.conciliacion.get('huella_lecturas') == huella_lecturas(readings):
             reconciliation = {**count.conciliacion,
                 'cierre_visible':parse_datetime(count.conciliacion['cierre_en']),
                 'procesado_visible':parse_datetime(count.conciliacion['procesado_en'])}
@@ -106,12 +112,14 @@ def _context(request, count, *, ack='', ack_version=None):
         history.append({'evento':event,'motivo':summary,'lecturas':historical_rows})
     return {'server_now':server_now.isoformat(), 'server_offset_minutes':int(server_now.astimezone(ZoneInfo('America/Mazatlan')).utcoffset().total_seconds()/60),
             'base_template':_base(request),'conteo':count,'rows':rows,'editable':editable,
+            'resumen_reconteo':review_recount and not editable,
+            'captura_url':_url(request,'detalle',count.pk)+'?capturar=1' if review_recount and puede_capturar(request.user,count) else '',
             'revisor':reviewer,'referencia':reference,'conciliacion':reconciliation,'historial':history,
             'motivo_reconteo':(count.eventos.filter(action='reconteo').order_by('-pk').values_list('payload__motivo',flat=True).first() or '') if editable and count.ronda > 1 else '',
             'capturados':captured,'total':len(readings),'total_productos':total_productos,'total_insumos':total_insumos,
             'avance':round(captured*100/len(readings)) if readings else 0,
             'request_id':str(uuid4()),'action_ids':{key:str(uuid4()) for key in ('start','reference','recount','accept','verify','evidence','cancel')},'ack':ack,'ack_version':ack_version,
-            'lista_url':_url(request,'lista'),'accion_url':_url(request,'accion',count.pk),
+            'lista_url':_url(request,'lista'),'accion_url':_url(request,'accion',count.pk)+('?capturar=1' if review_recount and capture_requested else ''),
             'detalle_url':_url(request,'detalle',count.pk),'export_url':_url(request,'exportar',count.pk),
             'catalogo_url':_url(request,'catalogo',count.pk),
             'diagnostico_url':_url(request,'diagnostico',count.pk),
@@ -396,11 +404,13 @@ def _excel_number(value):
 def exportar(request, pk):
     count = _count(request,pk)
     if not puede_revisar(request.user,count): raise PermissionDenied
+    context = _context(request,count)
     wb = Workbook()
     sheet=wb.active
     sheet.title='Conteo físico'
     sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada'])
-    for r in lecturas_efectivas(count):
+    readings = [row['lectura'] for row in context['rows']] if context['resumen_reconteo'] else lecturas_efectivas(count)
+    for r in readings:
         line=r.linea
         ref=count.referencia.get('lineas',{}).get(str(line.pk),{})
         qty=Decimal(ref['cantidad']) if ref.get('cantidad') is not None else None
@@ -433,7 +443,6 @@ def exportar(request, pk):
         history.append([e.creado_en.isoformat(),e.action,_excel_text(e.actor.username if e.actor_id else 'Sistema'),_excel_text(json.dumps(safe_payload,ensure_ascii=False))])
     nightly=wb.create_sheet('Conciliación nocturna')
     nightly.append(['Código','Artículo','Hora física declarada','Cierre','Estado','Físico al cierre','Point al cierre','Diferencia','Motivo pendiente','Movimientos físicos','Movimientos Point','Posteriores al cierre','Snapshot','Ciclo Point','Historial','SHA historial'])
-    context = _context(request,count)
     for row in context['rows']:
         r, line, result = row['lectura'],row['linea'],row['conciliacion']
         number = lambda key: _excel_number(Decimal(result[key])) if result.get(key) is not None else None
