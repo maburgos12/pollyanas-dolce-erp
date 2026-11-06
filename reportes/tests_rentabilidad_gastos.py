@@ -530,6 +530,33 @@ class LectorGastosMensualesTests(TestCase):
 
 
 class RepartoDocumentadoCosteoTests(LectorGastosMensualesTests):
+    def test_septiembre_lee_reparto_guardado_y_conserva_el_total_compartido(self):
+        from .services_rentabilidad_mensual import leer_costos_mensuales, costos_de_sucursal
+        self.mes = date(2026, 9, 1)
+        monto = Decimal('100.03')
+        venta = self.regla(centro_costo=self.compartido, modo_asignacion='DISTRIBUCION',
+                           filtros={'porcentaje': 35})
+        rubro_prod = RubroPresupuesto.objects.create(
+            area=self.produccion, concepto='Arrendamiento compartido', tipo='EGRESO')
+        produccion = self.regla(rubro=rubro_prod, centro_costo=self.compartido,
+                               modo_asignacion='DISTRIBUCION', filtros={'porcentaje': 65})
+        for mes in (self.mes, date(2026, 10, 1)):
+            self.gasto(periodo=mes, centro_costo=self.compartido, monto=monto)
+            for regla, parte in ((venta, '35.01'), (produccion, '65.02')):
+                LineaPresupuestoMensual.objects.create(
+                    periodo=mes, rubro=regla.rubro, monto_real=Decimal(parte),
+                    fuente_real='AUTO:GASTO_OPERATIVO', metadata={'real_breakdown': [
+                        {'regla_id': regla.pk, 'tipo_fuente': 'GASTO_OPERATIVO', 'monto': parte}]})
+        antes = list(LineaPresupuestoMensual.objects.order_by('pk').values())
+        resultado = leer_costos_mensuales(self.mes)
+        renta = [f for f in resultado['filas'] if f['familia'] == 'renta']
+        self.assertEqual(sum((f['monto_mensual'] for f in renta), Decimal(0)), monto)
+        self.assertEqual(costos_de_sucursal(resultado, self.sucursal.pk)['totales']['renta'], Decimal('35.01'))
+        self.assertEqual(next(f['monto_mensual'] for f in renta if f['area'] == 'produccion'), Decimal('65.02'))
+        octubre = leer_costos_mensuales(date(2026, 10, 1))
+        self.assertFalse(any(f['familia'] == 'renta' for f in octubre['filas']))
+        self.assertEqual(list(LineaPresupuestoMensual.objects.order_by('pk').values()), antes)
+
     def test_costeo_acepta_reparto_guardado_sin_inventar_vigencia(self):
         from .services_rentabilidad_gastos import leer_gastos_mensuales
         self.gasto(centro_costo=self.compartido, monto=Decimal('100'))
