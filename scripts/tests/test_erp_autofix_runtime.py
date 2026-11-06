@@ -200,6 +200,19 @@ class RuntimeTests(unittest.TestCase):
             self.assertIs(evidence['host_policy']['ReadonlyRootfs'], False)
             self.assertNotIn('Env', evidence)
 
+    def test_postgres_readiness_rejects_temporary_initdb_server(self):
+        sandbox = runtime.Sandbox(Path('/source'), Path('/job'), 'tools', 'postgres')
+        sandbox.pg_id = 'a'*64
+        with patch.object(runtime.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'42\n')) as run:
+            self.assertFalse(sandbox._postgres_ready())
+            self.assertEqual(run.call_count, 1)
+        with patch.object(runtime.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, b'1\n'), subprocess.CompletedProcess([], 0)]) as run:
+            self.assertTrue(sandbox._postgres_ready())
+            self.assertIn('postmaster.pid', run.call_args_list[0].args[0][-1])
+            self.assertEqual(run.call_args_list[1].args[0][3], 'pg_isready')
+        with patch.object(runtime.subprocess, 'run', side_effect=[subprocess.CompletedProcess([], 0, b'1\n'), subprocess.CompletedProcess([], 1)]):
+            self.assertFalse(sandbox._postgres_ready())
+
 
 if __name__ == '__main__':
     unittest.main()

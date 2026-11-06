@@ -280,16 +280,27 @@ class Sandbox:
             self._validate_policy(pg, candidate=False)
             _docker(['start', self.pg_id])
             for _ in range(30):
-                ready = subprocess.run([DOCKER, 'exec', self.pg_id, 'pg_isready', '-h', '/pgsocket', '-U', 'postgres', '-d', 'pastelerias_erp'],
-                                       env=CLEAN_ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.DEVNULL, timeout=10, check=False)
-                if ready.returncode == 0:
+                if self._postgres_ready():
                     return self
                 time.sleep(1)
             raise RuntimeFailure('postgres_not_ready')
         except BaseException:
             self.__exit__(None, None, None)
             raise
+
+    def _postgres_ready(self):
+        # initdb's temporary server also accepts connections; only PID 1 is final.
+        pid = subprocess.run([DOCKER, 'exec', self.pg_id, 'head', '-n', '1',
+                              '/var/lib/postgresql/data/postmaster.pid'],
+                             env=CLEAN_ENV, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, timeout=10, check=False)
+        if pid.returncode or pid.stdout.strip() != b'1':
+            return False
+        ready = subprocess.run([DOCKER, 'exec', self.pg_id, 'pg_isready', '-h', '/pgsocket',
+                                '-U', 'postgres', '-d', 'pastelerias_erp'],
+                               env=CLEAN_ENV, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=10, check=False)
+        return ready.returncode == 0
 
     def _plan(self, filename, name, image, mounts, tmpfs):
         _private_file(self.job_dir / filename, json.dumps({
