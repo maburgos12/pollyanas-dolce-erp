@@ -30,3 +30,34 @@ Procedimiento reproducible: `inventario_fuentes_datos --term costo --term receta
 ## Límites y validación
 
 Esta corrección permite consumir costos documentados; no valida inventario físico, costo integral ni utilidad anual. Pruebas: recuperación en el resultado mensual, ausencia de escrituras, identidad incompleta/distinta/ambigua, exclusión de otro mes y ejercicio, conservación de receta registrada y precedencia de adquisición. Debe verificarse también el reporte de producción después del despliegue.
+
+## Costos de conversión de 2025
+
+Se reutiliza el mismo modelo mensual para seis recetas existentes con código y nombre
+idénticos al producto nativo. La fuente `POINT_CONVERSION_UNIT_VALUATION_2025`
+representa una pieza resultante (`ONE_NATIVE_CONVERTED_PRODUCT_UNIT`): suma del valor
+documentado de los productos de origen dividida entre las piezas realmente obtenidas
+en el mes. No se aplica un rendimiento fijo ni se recuperan fórmulas actuales de 2026.
+El lector admite exclusivamente cada pareja correcta de fuente y unidad.
+
+Se recuperaron 1,168 entradas nativas tipo 21 en 84 historiales de seis productos y
+14 ubicaciones. Sus originales de entrada y salida comparten cabecera, y las salidas
+se contrastan con historiales tipo 22 por producto, ubicación, cantidad y costo.
+La fecha de Stock es UTC y se convierte a America/Mazatlan antes de agrupar por mes;
+enero coincide con los ocho grupos comparables de la exportación mensual nativa.
+
+De 67 combinaciones producto/mes, 43 tienen todos sus movimientos valorados y
+verificados, importados mediante la auditoría 43069 sin modificar los 1,804
+históricos anteriores, incluidos los 593 de producción de 2025.
+Las otras 24 conservan excepciones: 19 orígenes sin costo, seis
+rendimientos que no acreditan fraccionamiento y diez movimientos en Devoluciones
+sin trazabilidad a venta. No se completan con otros meses ni se omiten movimientos
+para declarar cobertura completa. Tampoco se acredita empaque adicional, mano de
+obra ni utilidad integral por haber valorado el producto de origen.
+
+Evidencia privada congelada: `costos-conversiones2025-lote43-validado.json` y archivo
+de soportes SHA256 `395eb887d3b4dbb9ce0d04360770dd7032472e9ab54a25000784f0d03993c97e`.
+La consulta de fuentes usa `inventario_fuentes_datos` con costo, conversión, receta
+e histórico. Se mantienen los consumidores y contratos ya descritos; las mismas
+pruebas de identidad, mes, ejercicio, cobertura, ambigüedad, precedencia y ausencia
+de escritura se ejecutan para ambas fuentes.

@@ -71,6 +71,16 @@ class IdentidadDocumentalCosto2025Tests(TestCase):
             with self.subTest(periodo=periodo):
                 self.assertIsNone(self.fila(periodo)["cost_evidence"])
 
+    def test_no_combina_fuente_y_unidad_de_distintos_procesos(self):
+        for source, unit in [
+            ("POINT_PRODUCTION_UNIT_VALUATION_2025", "ONE_NATIVE_CONVERTED_PRODUCT_UNIT"),
+            ("POINT_CONVERSION_UNIT_VALUATION_2025", "ONE_NATIVE_FINISHED_PRODUCT_UNIT"),
+        ]:
+            with self.subTest(source=source):
+                self.historico.metadata = {**self.meta, "source": source, "unit_of_analysis": unit}
+                self.historico.save()
+                self.assertIsNone(self.fila()["cost_evidence"])
+
     def test_no_confunde_codigo_reutilizado_ni_producto_oficial_con_id_nativo(self):
         self.assertIsNone(self.fila(product__name="Otro flan")["cost_evidence"])
         self.producto.external_id = "official:1015"
@@ -95,6 +105,15 @@ class IdentidadDocumentalCosto2025Tests(TestCase):
         fila = self.fila()
         self.assertEqual(fila["cost_evidence"]["cost"], 3)
         self.assertTrue(fila["cost_is_resale"])
+
+
+class IdentidadConversionDocumentalCosto2025Tests(IdentidadDocumentalCosto2025Tests):
+    def setUp(self):
+        super().setUp()
+        self.meta.update(source="POINT_CONVERSION_UNIT_VALUATION_2025",
+                         unit_of_analysis="ONE_NATIVE_CONVERTED_PRODUCT_UNIT")
+        self.historico.metadata = self.meta
+        self.historico.save()
 
 
 class AliasCanonicoCosto2026Tests(TestCase):
