@@ -183,12 +183,17 @@ def registros_del_mes(periodo, costos=None):
     registros = list(SucursalRentabilidad.objects.filter(periodo=periodo).select_related("sucursal"))
     from core.models import Sucursal
     existentes = {r.sucursal_id for r in registros}
-    faltantes = set(costos["resultado"]["sucursales"]) - existentes - {None}
+    gastos_historicos = set()
+    if periodo.year == 2025:
+        gastos_historicos = {f["sucursal_id"] for f in costos["filas"]
+                            if f["estado"] == "COMPLETO" and f.get("monto_mensual")}
+    faltantes = (set(costos["resultado"]["sucursales"]) | gastos_historicos) - existentes - {None}
     registros.extend(SucursalRentabilidad(sucursal=s, periodo=periodo)
                      for s in Sucursal.objects.filter(pk__in=faltantes))
     for rent in registros:
         aplicar_costos_en_memoria(rent, costos)
-    return [r for r in registros if r.en_perimetro_fuente or (r.sucursal.activa and r.gasto_fijo_total)]
+    return [r for r in registros if r.en_perimetro_fuente
+            or ((r.sucursal.activa or r.sucursal_id in gastos_historicos) and r.gasto_fijo_total)]
 
 
 def leer_cierre_conciliado():
