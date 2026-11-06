@@ -57,26 +57,34 @@ def planeacion_personal(request):
         writer.writerow([])
         writer.writerow(['Periodo', 'Ventas por sucursal', 'Personas en nómina', 'Venta con impuestos',
                          'Percepciones', 'Despensa adicional', 'Subtotal registrado', '% subtotal sobre venta',
-                         'Puestos pendientes', 'Cargas patronales e ISN', 'Costo del personal', '% costo sobre venta'])
+                         'Puestos pendientes', 'Cargas patronales e ISN', 'Costo del personal', '% costo sobre venta', 'Ajuste por pago real'])
         for row in data['months']:
             for branch in (row['registered'] or {}).get('sucursales_ventas', []):
                 writer.writerow([row['month']] + [branch[k] for k in ('sucursal', 'personas', 'ventas',
                     'percepciones', 'despensa', 'total', 'porcentaje', 'puestos_pendientes',
-                    'cargas', 'costo_personal', 'costo_porcentaje')])
+                    'cargas', 'costo_personal', 'costo_porcentaje', 'ajuste_pago_real')])
         writer.writerow([])
         writer.writerow(['Periodo', 'Fuente', 'ID ERP', 'Referencia', 'Importe'])
         for source in data['sources']:
             writer.writerow([source[k] for k in ('month', 'kind', 'id', 'reference', 'amount')])
         global_row = data['selected']['global']
         writer.writerow([])
+        writer.writerow(['Conciliación por fecha de pago real', 'Código de empleado', 'Línea nómina',
+                         'Fecha bancaria', 'Pago neto acreditado', 'Mes fiscal', 'Bruto fiscal conservado',
+                         'Neto fiscal conservado', 'Diferencia neta fiscal menos banco', 'Ajuste al costo del mes', 'Bitácora soporte'])
+        for row in data['months']:
+            for pago in (row['registered'] or {}).get('pagos_reales', []):
+                writer.writerow([row['month']] + [pago[k] for k in ('codigo', 'linea_id', 'fecha_pago',
+                    'pago_neto', 'mes_fiscal', 'bruto_fiscal', 'neto_fiscal', 'diferencia_neta', 'ajuste', 'soporte_audit_id')])
+        writer.writerow([])
         writer.writerow(['Global por departamento', 'Personas', 'Percepciones', 'Vales adicionales',
-                         'Nomina registrada', 'Cargas patronales e ISN', 'Personal con cargas sin provisiones', '% ventas totales'])
+                         'Nomina registrada', 'Cargas patronales e ISN', 'Personal con cargas sin provisiones', '% ventas totales', 'Ajuste por pago real'])
         for group in global_row['departamentos']:
             writer.writerow([group[k] for k in ('destino_label', 'personas', 'percepciones',
-                                               'despensa', 'total', 'cargas', 'costo_personal', 'costo_porcentaje')])
+                                               'despensa', 'total', 'cargas', 'costo_personal', 'costo_porcentaje', 'ajuste_pago_real')])
         writer.writerow(['Total nomina y vales', global_row['personas'], '', '',
                          global_row['nomina'], global_row['cargas_total'],
-                         global_row['costo_departamentos'], global_row['costo_departamentos_porcentaje']])
+                         global_row['costo_departamentos'], global_row['costo_departamentos_porcentaje'], global_row['ajuste_pago_real']])
         writer.writerow([])
         writer.writerow(['Gastos operativos por area', 'Importe mensual', '% ventas totales', 'Registros parciales'])
         for area in global_row['gastos_areas']:

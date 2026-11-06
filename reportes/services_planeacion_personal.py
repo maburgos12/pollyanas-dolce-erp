@@ -360,11 +360,13 @@ def build_personnel_plan(cutoff=None):
                 group['cargas'] = (group['cargas_sin_isn'] + sum(
                     (control['reparto'][p] for p in group['personas_cargas']), ZERO)
                     if cargas_cubiertas else None)
-                group['costo_personal'] = group['total'] + group['cargas'] if cargas_cubiertas else None
+                group['costo_personal'] = (group['total'] + group['cargas'] + group['ajuste_pago_real']
+                                           if cargas_cubiertas else None)
             for branch in row['registered']['sucursales_ventas']:
                 branch['cargas'] = sum((g['cargas'] for g in row['registered']['grupos']
                     if g['sucursal_id'] == branch['sucursal_id'] and g['destino'] == 'tienda'), ZERO) if cargas_cubiertas else None
-                branch['costo_personal'] = branch['total'] + branch['cargas'] if cargas_cubiertas else None
+                branch['costo_personal'] = (branch['total'] + branch['cargas'] + branch['ajuste_pago_real']
+                                            if cargas_cubiertas else None)
         for key in control['usados']:
             row[key] = control['valores'][key]
             row['sources'].append(dict(

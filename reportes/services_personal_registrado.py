@@ -10,6 +10,26 @@ COLUMNAS_CARGAS = frozenset(('AU', 'AV', 'AW', 'AX', 'AY', 'AZ', 'BB', 'BC', 'BD
 COLUMNAS_RCV = frozenset(('AV', 'AX', 'BB'))
 
 
+def destino_personal(line):
+    emp = line.empleado
+    department = line.departamento_snapshot
+    historica = line.snapshot_origen == NominaLinea.SNAPSHOT_HISTORICA
+    # Las filas legadas sin snapshot conservan su lectura; el histórico nunca toma el puesto actual.
+    function = emp._clave_funcion(line.puesto_operativo_snapshot if
+        line.puesto_operativo_snapshot is not None or historica else emp.puesto_operativo)
+    level = line.nivel_organizacional_snapshot if (
+        line.nivel_organizacional_snapshot is not None or historica) else emp.nivel_organizacional
+    default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
+        'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'ventas_pendiente'),
+        'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
+        'RRHH': 'administracion', 'LOGISTICA': 'logistica',
+        'MANTENIMIENTO': 'mantenimiento'}.get(department, 'sin_clasificar')
+    destination = destino_de(level, function, predeterminado=default).lower()
+    if emp._clave_funcion(level) not in ('JEFATURA', 'DIRECCION'):
+        destination = {'LIMPIEZA': 'limpieza', 'ALMACEN': 'almacen'}.get(function, destination)
+    return destination
+
+
 def leer_personal_registrado(start, end):
     rows = {}
     lines = (NominaLinea.objects.filter(
@@ -45,21 +65,7 @@ def leer_personal_registrado(start, end):
             extra = vouchers
         else:
             row['pendientes'].append(f'Línea {line.pk}: percepciones sin conciliación de conceptos.')
-        department = line.departamento_snapshot
-        historica = line.snapshot_origen == NominaLinea.SNAPSHOT_HISTORICA
-        # Las filas legadas sin snapshot conservan su lectura; el histórico nunca toma el puesto actual.
-        function = emp._clave_funcion(line.puesto_operativo_snapshot if
-            line.puesto_operativo_snapshot is not None or historica else emp.puesto_operativo)
-        level = line.nivel_organizacional_snapshot if (
-            line.nivel_organizacional_snapshot is not None or historica) else emp.nivel_organizacional
-        default = {'VENTAS': {'CAJAS': 'tienda', 'AUXILIAR_CAJAS': 'tienda',
-            'CALL_CENTER': 'call_center', 'REPARTIDOR': 'logistica'}.get(function, 'ventas_pendiente'),
-            'PRODUCCION': 'produccion', 'ADMINISTRACION': 'administracion',
-            'RRHH': 'administracion', 'LOGISTICA': 'logistica',
-            'MANTENIMIENTO': 'mantenimiento'}.get(department, 'sin_clasificar')
-        destination = destino_de(level, function, predeterminado=default).lower()
-        if emp._clave_funcion(level) not in ('JEFATURA', 'DIRECCION'):
-            destination = {'LIMPIEZA': 'limpieza', 'ALMACEN': 'almacen'}.get(function, destination)
+        destination = destino_personal(line)
         if destination in ('sin_clasificar', 'ventas_pendiente'):
             row['pendientes'].append(f'Línea {line.pk}: función pendiente de clasificar en RRHH.')
         key = (line.sucursal_snapshot_id, destination)
@@ -92,7 +98,29 @@ def leer_personal_registrado(start, end):
             target['percepciones'] += line.total_percepciones
             target['despensa'] += extra
             target['total'] += line.total_percepciones + extra
+    from .services_nomina_pagos_reales import ajustes_pagos_reales, detalle_pago_real
+    try:
+        ajustes = ajustes_pagos_reales(start, end)
+        if any(a['mes'] not in rows for a in ajustes):
+            raise ValueError('Pago real en un mes sin listas de raya para comparar.')
+    except ValueError as exc:
+        ajustes = []
+        for row in rows.values():
+            row['pendientes'].append(str(exc))
+    for ajuste in ajustes:
+        line = ajuste['linea']
+        row = rows[ajuste['mes']]
+        key = (line.sucursal_snapshot_id, destino_personal(line))
+        group = row['grupos'].setdefault(key, dict(sucursal_id=key[0],
+            sucursal=line.sucursal_snapshot.nombre if line.sucursal_snapshot else 'Sin sucursal histórica',
+            destino=key[1], percepciones=Decimal(0), despensa=Decimal(0), total=Decimal(0),
+            personas=set(), cargas_sin_isn=Decimal(0), personas_cargas=[]))
+        for target in (row, group):
+            target['ajuste_pago_real'] = target.get('ajuste_pago_real', Decimal(0)) + ajuste['ajuste']
+        row.setdefault('pagos_reales', []).append(detalle_pago_real(ajuste))
     for month, row in rows.items():
+        row.setdefault('ajuste_pago_real', Decimal(0))
+        row.setdefault('pagos_reales', [])
         row['mes_cubierto'] = len(row.pop('dias')) == monthrange(month.year, month.month)[1]
         if not row['mes_cubierto']:
             row['pendientes'].append('Los periodos registrados no cubren todos los días del mes.')
@@ -103,22 +131,23 @@ def leer_personal_registrado(start, end):
         personas_mes = set()
         row['otros_costos'] = []
         for group in row['grupos']:
+            group.setdefault('ajuste_pago_real', Decimal(0))
             departamento = departamentos.setdefault(group['destino'], dict(
                 destino=group['destino'], personas=set(), percepciones=Decimal(0),
-                despensa=Decimal(0), total=Decimal(0), cargas_sin_isn=Decimal(0)))
+                despensa=Decimal(0), total=Decimal(0), cargas_sin_isn=Decimal(0), ajuste_pago_real=Decimal(0)))
             departamento['cargas_sin_isn'] += group['cargas_sin_isn']
             departamento['personas'].update(group['personas'])
             personas_mes.update(group['personas'])
-            for field in ('percepciones', 'despensa', 'total'):
+            for field in ('percepciones', 'despensa', 'total', 'ajuste_pago_real'):
                 departamento[field] += group[field]
             if group['destino'] in ('tienda', 'ventas_pendiente'):
                 branch = sucursales.setdefault(group['sucursal_id'], dict(sucursal_id=group['sucursal_id'],
                     sucursal=group['sucursal'], personas=set(), percepciones=Decimal(0),
-                    despensa=Decimal(0), total=Decimal(0), puestos_pendientes=0))
+                    despensa=Decimal(0), total=Decimal(0), puestos_pendientes=0, ajuste_pago_real=Decimal(0)))
                 branch['personas'].update(group['personas'])
                 if group['destino'] == 'ventas_pendiente':
                     branch['puestos_pendientes'] += len(group['personas'])
-                for field in ('percepciones', 'despensa', 'total'):
+                for field in ('percepciones', 'despensa', 'total', 'ajuste_pago_real'):
                     branch[field] += group[field]
             else:
                 row['otros_costos'].append(group)
