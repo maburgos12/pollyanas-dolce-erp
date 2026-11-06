@@ -19,7 +19,7 @@ from pos_bridge.services.point_http_client import PointHttpSessionClient
 
 from .conteos_conciliacion import MZ, _pendiente, calcular_cierre_linea, cierre_dia
 from .conteos_point import sucursal_point_conteo
-from .models_conteos import ConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal
+from .models_conteos import ConteoSucursal, EventoConteoSucursal
 from .services_conteos import lecturas_efectivas
 
 logger = logging.getLogger(__name__)
@@ -92,23 +92,7 @@ def _publicar(count, readings, result):
         automation = {'accion':'NINGUNA','linea_ids':[]}
         update_fields = ['conciliacion']
         if current.estado == 'ENVIADO' and product_readings and len(calculated_products) == len(product_readings):
-            if differing_line_ids:
-                current.estado = 'RECONTEO'
-                current.ronda += 1
-                current.iniciado_en = None
-                current.referencia = {}
-                current.version += 1
-                LecturaConteoSucursal.objects.bulk_create([
-                    LecturaConteoSucursal(
-                        linea_id=line_id,
-                        ronda=current.ronda,
-                        actor=current.responsable,
-                    )
-                    for line_id in differing_line_ids
-                ])
-                automation = {'accion':'RECONTEO','linea_ids':differing_line_ids}
-                update_fields.extend(['estado','ronda','iniciado_en','referencia','version'])
-            elif len(product_readings) == len(readings):
+            if not differing_line_ids and len(product_readings) == len(readings):
                 current.estado = 'ACEPTADO'
                 current.aceptado_en = timezone.now()
                 current.version += 1

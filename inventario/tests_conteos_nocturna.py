@@ -91,23 +91,28 @@ class NightlyCountTests(TestCase):
             self.assertEqual(conciliar_conteos_nocturnos()['procesados'],0)
             client.assert_not_called()
 
-    def test_difference_opens_recount_only_for_the_affected_product(self):
+    def test_difference_stays_sent_until_reviewer_requests_recount(self):
         reading=self.line.lecturas.get(ronda=1)
         reading.cantidad=Decimal('2')
         reading.save(update_fields=['cantidad'])
-
+        version=self.count.version
+        original=list(self.line.lecturas.values_list('pk','ronda','cantidad','contado_en'))
         with patch('inventario.conteos_nocturna.load_point_bridge_settings',return_value=self.settings), patch('inventario.conteos_nocturna.PointHttpSessionClient',return_value=self.fake):
             summary=conciliar_conteos_nocturnos()
-
+            self.assertEqual(conciliar_conteos_nocturnos()['procesados'],0)
         self.count.refresh_from_db()
         self.assertEqual(summary['calculados'],1)
+        self.assertEqual((self.count.estado,self.count.ronda,self.count.version),('ENVIADO',1,version))
+        self.assertEqual(list(self.line.lecturas.values_list('pk','ronda','cantidad','contado_en')),original)
+        event=self.count.eventos.get(action='conciliacion_nocturna')
+        self.assertEqual(event.payload['automatizacion'],{'accion':'NINGUNA','linea_ids':[]})
+        self.assertNotEqual(Decimal(event.payload['lineas'][str(self.line.pk)]['diferencia']),0)
+        self.action('reconteo',{'linea_ids':[self.line.pk],'motivo':'Revisión explícita'},actor=self.admin)
         self.assertEqual((self.count.estado,self.count.ronda),('RECONTEO',2))
         self.assertIsNone(self.count.iniciado_en)
         self.assertEqual(self.line.lecturas.filter(ronda=2).count(),1)
         self.assertIsNone(self.line.lecturas.get(ronda=2).cantidad)
-        event=self.count.eventos.get(action='conciliacion_nocturna')
-        self.assertEqual(event.payload['automatizacion']['accion'],'RECONTEO')
-        self.assertEqual(event.payload['automatizacion']['linea_ids'],[self.line.pk])
+        self.assertEqual(self.line.lecturas.get(ronda=1).cantidad,Decimal('2'))
 
     def test_legacy_calculated_count_is_accepted_without_recapturing(self):
         with patch('inventario.conteos_nocturna.load_point_bridge_settings',return_value=self.settings), patch('inventario.conteos_nocturna.PointHttpSessionClient',return_value=self.fake):
@@ -305,6 +310,7 @@ class NightlyCountTests(TestCase):
         self.acquire()
         conciliar_conteos_nocturnos()
         self.count.refresh_from_db()
+        self.action('reconteo',{'linea_ids':[self.line.pk],'motivo':'Revisión explícita'},actor=self.admin)
         self.assertEqual(self.count.estado,'RECONTEO')
         self.client.force_login(self.admin)
         response=self.client.get(reverse('inventario:conteos_erp:exportar',args=[self.count.pk]))
