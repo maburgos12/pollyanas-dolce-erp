@@ -270,7 +270,7 @@ class Sandbox:
                    '--tmpfs=/tmp:rw,size=64m,mode=1777', '-v', str(self.socket) + ':/pgsocket:rw',
                    '-e', 'POSTGRES_DB=pastelerias_erp', '-e', 'POSTGRES_USER=postgres',
                    '-e', 'POSTGRES_PASSWORD=postgres', self.pg_image, 'postgres',
-                   '-c', 'listen_addresses=', '-c', 'unix_socket_directories=/pgsocket']
+                   '-c', 'listen_addresses=', '-c', 'unix_socket_directories=/var/run/postgresql,/pgsocket']
         self.pg_id = _docker(command)
         if not re.fullmatch(r'[0-9a-f]{64}', self.pg_id):
             raise RuntimeFailure('invalid_container_id')

@@ -151,6 +151,8 @@ class RuntimeTests(unittest.TestCase):
             calls = iter([identifier, runtime.RuntimeFailure('docker_command_failed'), '', ''])
             def execute(arguments):
                 if arguments[0] == 'create':
+                    self.assertIn('unix_socket_directories=/var/run/postgresql,/pgsocket', arguments)
+                    self.assertIn('listen_addresses=', arguments)
                     plan = json.loads((job / 'planned-resource.json').read_text())
                     self.assertEqual(plan['name'], 'erp-autofix-pg-' + job.name)
                     self.assertIn('/var/lib/postgresql/data', plan['tmpfs'])
