@@ -3,10 +3,10 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum, Case, When, F, Value, IntegerField
+from django.db.models import Sum
 
 from core.models import Sucursal
-from pos_bridge.models import PointDailySale
+from ventas.services.sales_read_service import point_sales_with_historical_branch_identity
 from .services_costeo_logistica import repartir_centavos
 
 ZERO = Decimal('0')
@@ -16,14 +16,7 @@ MESES = ('Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto
 
 def ventas_con_identidad_historica(desde, hasta):
     """La relación actual de Point 2 no cambia las ventas de Crucero en 2026."""
-    crucero = Sucursal.objects.filter(codigo='CRUCERO').values_list('pk', flat=True).first()
-    return PointDailySale.objects.filter(sale_date__range=(desde, hasta)).annotate(
-        sucursal_historica_id=Case(
-            When(branch__external_id='2', sale_date__range=(date(2026, 1, 1), date(2026, 6, 30)),
-                 then=Value(crucero)),
-            default=F('branch__erp_branch_id'), output_field=IntegerField(),
-        )
-    )
+    return point_sales_with_historical_branch_identity(start_date=desde, end_date=hasta)
 
 
 def etapa_sucursal(codigo, mes):
