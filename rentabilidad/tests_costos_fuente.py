@@ -13,8 +13,88 @@ from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoM
 from reportes.services_historical_costing import MonthlyHistoricalCostingService
 from .agente_rentabilidad import analizar_sucursal
 from .models_rentabilidad import SucursalRentabilidad
-from .services_costos import _costos_reventa_para_periodo
+from .services_costos import _costos_reventa_para_periodo, asignar_costos_filas
 from .services_resultado import leer_resultado_mensual
+
+
+class IdentidadDocumentalCosto2025Tests(TestCase):
+    def setUp(self):
+        self.periodo = date(2025, 1, 1)
+        self.sucursal = Sucursal.objects.create(codigo="HD25", nombre="Histórico documental")
+        branch = PointBranch.objects.create(external_id="HD25", name="Histórico", erp_branch=self.sucursal)
+        self.producto = PointProduct.objects.create(external_id="409", sku="1015", name="Flan Individual")
+        self.receta = Receta.objects.create(nombre=self.producto.name, codigo_point=self.producto.sku,
+            hash_contenido="historico-flan", modo_costeo=Receta.MODO_COSTEO_FABRICADO)
+        self.meta = {"source": "POINT_PRODUCTION_UNIT_VALUATION_2025",
+            "unit_of_analysis": "ONE_NATIVE_FINISHED_PRODUCT_UNIT",
+            "historical_sku": "1015", "historical_name": "Flan Individual",
+            "point_product_external_id": "409", "source_rows": [{"movimiento": 1117098}]}
+        self.historico = RecetaCostoHistoricoMensual.objects.create(periodo=self.periodo,
+            receta=self.receta, costo_total=20, costo_por_unidad_rendimiento=20,
+            coverage_pct=100, metadata=self.meta)
+        self.venta = PointDailySale.objects.create(branch=branch, product=self.producto,
+            sale_date=self.periodo, quantity=2, gross_amount=90)
+
+    def fila(self, periodo=None, **cambios):
+        fila = dict(receta_id=None, product_id=self.producto.pk,
+            product__sku=self.producto.sku, product__name=self.producto.name)
+        fila.update(cambios)
+        asignar_costos_filas([fila], periodo or self.periodo, periodo or self.periodo)
+        return fila
+
+    def test_lector_recupera_costo_material_sin_escribir_venta_ni_receta(self):
+        resultado = leer_resultado_mensual(self.periodo)["sucursales"][self.sucursal.pk]
+        self.assertEqual(resultado["costo_materia_prima"], 40)
+        self.assertEqual(resultado["costo_reventa"], 0)
+        self.assertEqual(resultado["pendientes"], [])
+        self.venta.refresh_from_db()
+        self.historico.refresh_from_db()
+        self.assertIsNone(self.venta.receta_id)
+        self.assertEqual(self.historico.metadata, self.meta)
+
+    def test_identidad_incompleta_o_distinta_no_transfiere_costo(self):
+        for key, value in [("source", "OTRO"), ("unit_of_analysis", "BATCH"),
+                           ("historical_sku", "OTRO"), ("historical_name", "Flan Grande"),
+                           ("point_product_external_id", "410"), ("source_rows", [])]:
+            with self.subTest(key=key):
+                self.historico.metadata = {**self.meta, key: value}
+                self.historico.save()
+                self.assertIsNone(self.fila()["cost_evidence"])
+
+    def test_no_usa_costo_incompleto_ni_de_otro_mes_o_ejercicio(self):
+        self.historico.coverage_pct = 99
+        self.historico.save()
+        self.assertIsNone(self.fila()["receta_id"])
+        self.historico.coverage_pct = 100
+        self.historico.save()
+        for periodo in [date(2024, 12, 1), date(2025, 2, 1), date(2026, 1, 1)]:
+            with self.subTest(periodo=periodo):
+                self.assertIsNone(self.fila(periodo)["cost_evidence"])
+
+    def test_no_confunde_codigo_reutilizado_ni_producto_oficial_con_id_nativo(self):
+        self.assertIsNone(self.fila(product__name="Otro flan")["cost_evidence"])
+        self.producto.external_id = "official:1015"
+        self.producto.save()
+        self.assertIsNone(self.fila()["cost_evidence"])
+
+    def test_no_elije_entre_dos_recetas_con_identidad_historica_igual(self):
+        otra = Receta.objects.create(nombre=self.receta.nombre, codigo_point=self.receta.codigo_point,
+            hash_contenido="historico-flan-ambiguo")
+        RecetaCostoHistoricoMensual.objects.create(periodo=self.periodo, receta=otra,
+            costo_total=30, coverage_pct=100, metadata=self.meta)
+        self.assertIsNone(self.fila()["cost_evidence"])
+
+    def test_conserva_receta_registrada_y_precedencia_de_adquisicion(self):
+        otra = Receta.objects.create(nombre="Otra receta", hash_contenido="historico-registrado")
+        RecetaCostoHistoricoMensual.objects.create(periodo=self.periodo, receta=otra,
+            costo_total=10, coverage_pct=100)
+        self.assertEqual(self.fila(receta_id=otra.pk)["cost_evidence"]["cost"], 10)
+        ProductoReventaCosto.objects.create(producto_point=self.producto,
+            fecha_vigencia=self.periodo, costo_unitario=3, source_hash="historico-adquisicion",
+            fuente=ProductoReventaCosto.FUENTE_POINT_HISTORIAL)
+        fila = self.fila()
+        self.assertEqual(fila["cost_evidence"]["cost"], 3)
+        self.assertTrue(fila["cost_is_resale"])
 
 
 class AliasCanonicoCosto2026Tests(TestCase):
