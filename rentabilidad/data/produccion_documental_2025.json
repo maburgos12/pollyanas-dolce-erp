@@ -1,0 +1,1305 @@
+{
+  "source": "POINT_REVIEWED_PRODUCTION_2025",
+  "groups": [
+    {
+      "period": "2025-01-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "24.0",
+      "cost_total": "257.9907840",
+      "lines": [
+        {
+          "order": "16319",
+          "detail": "54197",
+          "source_hash": "5fd9e2f71537e4f7c687a8e5761711435e3cdc68fb9143d8a3cd9f975b2d17f2"
+        },
+        {
+          "order": "16345",
+          "detail": "54317",
+          "source_hash": "95a218b6a5052a8a03c5bdb7068c546a112d96ecff48fb2a6b5fbec9fe0a54da"
+        }
+      ]
+    },
+    {
+      "period": "2025-01-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "94.0",
+      "cost_total": "835.5436910",
+      "lines": [
+        {
+          "order": "16315",
+          "detail": "54192",
+          "source_hash": "42a51231717e0f25606dd0c7956f23b4afdb90ce59dbf45746342fda86916f61"
+        },
+        {
+          "order": "16319",
+          "detail": "54200",
+          "source_hash": "d0fd6746650bee9e7bd6a3bf52c379ee7de389fe3ad914e84323b73f8fbc6bc6"
+        },
+        {
+          "order": "16358",
+          "detail": "54382",
+          "source_hash": "dd238b7a2900da00e6f3b6f7cf492232d8e1035b9f65c9b0dfd6d7e7063e0780"
+        },
+        {
+          "order": "16372",
+          "detail": "54444",
+          "source_hash": "422af7bcad45596fde8e059de11e221ea00444509523f2d4785db1c12c7586d1"
+        },
+        {
+          "order": "16383",
+          "detail": "54503",
+          "source_hash": "4deb4ecd27fdd0611e51c51f755a73048d76757e10721cf09cc8f3646e664b83"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "267.0",
+      "cost_total": "3027.1963500",
+      "lines": [
+        {
+          "order": "16419",
+          "detail": "54642",
+          "source_hash": "d4d72e119998baae105c3dbea23d8703c0bea33dd411d782381ecd6e60e5623d"
+        },
+        {
+          "order": "16435",
+          "detail": "54712",
+          "source_hash": "52d40b48f08d8e727547302dce0634b26eaa86fa579774c39815c35fc3dc7d68"
+        },
+        {
+          "order": "16469",
+          "detail": "54842",
+          "source_hash": "710ea959cf9ed61066b6ac276c485122b58388db5a7c50833bb0082f250d6880"
+        },
+        {
+          "order": "16494",
+          "detail": "54929",
+          "source_hash": "5e2170370ac0b3763217b54ac7811f5100363b83a1a4e40d7c43dcf525a7cfee"
+        },
+        {
+          "order": "16544",
+          "detail": "55080",
+          "source_hash": "3a945192c175e37c5061f35f1e5e11a258be97d9c02efa5c578af4cd44c85f56"
+        },
+        {
+          "order": "16597",
+          "detail": "55261",
+          "source_hash": "63a8789c75facc43f7ea604186495d8fd6dec5c91cba92470a6ca9d69a168640"
+        },
+        {
+          "order": "16610",
+          "detail": "55292",
+          "source_hash": "4de1d4eb5d1b2ab3aaefb6559dba12a6b9d12f426329bc390facd168c5e82dca"
+        },
+        {
+          "order": "16619",
+          "detail": "55334",
+          "source_hash": "0f7adaf58c52b9fe37863d9bb83cd6a2055271c1be0bf49b8ff3541bb2ee434e"
+        },
+        {
+          "order": "16643",
+          "detail": "55458",
+          "source_hash": "d7591b97eab2d45611609aaa713ef796e4aeb63e3e9bbf04c64a6b6d20358e64"
+        },
+        {
+          "order": "16681",
+          "detail": "55660",
+          "source_hash": "3b05c25d0c9e525f1b3cb530411a122c22bb5d0af91fb21496fcff76d10fd0f9"
+        },
+        {
+          "order": "16715",
+          "detail": "55806",
+          "source_hash": "a900a23980972b93ad1d212c82fab39d87433c56dc338d075f8759308982b25c"
+        },
+        {
+          "order": "16726",
+          "detail": "55875",
+          "source_hash": "1513f3ea5f1d3e35054b8d0af6af384d5a2a0bd1100d10519212d62c0267aa2e"
+        }
+      ]
+    },
+    {
+      "period": "2025-02-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "337.0",
+      "cost_total": "3461.3767480",
+      "lines": [
+        {
+          "order": "16401",
+          "detail": "54575",
+          "source_hash": "21adab9525a0b0adcd2abd44f22b18b20ea0789f96847a92fadda2228ebfb634"
+        },
+        {
+          "order": "16419",
+          "detail": "54645",
+          "source_hash": "9d7139216bf59ec689fc5521edb7a24b9a1a8449171d75e557628e389cab2468"
+        },
+        {
+          "order": "16435",
+          "detail": "54715",
+          "source_hash": "1e980bf370065d0520030dfcc54b3288c740743124f0eff7fe52f873cd21a58b"
+        },
+        {
+          "order": "16494",
+          "detail": "54927",
+          "source_hash": "6dda30b7c6471357a0ad786174a8124e66ed2dcbbb5335ce3a2349001706a33e"
+        },
+        {
+          "order": "16525",
+          "detail": "55019",
+          "source_hash": "75e3593db1a385f8670153295b96404f8efdd1210c03999535f5affa8d489a2b"
+        },
+        {
+          "order": "16544",
+          "detail": "55083",
+          "source_hash": "f6cf0fd87fe61ea83d64a7e23f0222e13363f30fd33e3022b1b71bba10b68598"
+        },
+        {
+          "order": "16597",
+          "detail": "55264",
+          "source_hash": "ec2b15f8b927926d21ff6d1bdd33ef3f7eaf7d452ecd2efb85a82156ffea7fc3"
+        },
+        {
+          "order": "16599",
+          "detail": "55272",
+          "source_hash": "7b592d38492869fc46720647b3dbc899314f15a67d40a66ecb8893e9dd887d57"
+        },
+        {
+          "order": "16610",
+          "detail": "55290",
+          "source_hash": "ebef0840b6ed524e8e92db141a76ae72c5cb5988566ae0ad146f87f90562cfc5"
+        },
+        {
+          "order": "16619",
+          "detail": "55337",
+          "source_hash": "2b224334761448c0e8d187d6048eade626a198a836df9a1249a402d43bacf5a8"
+        },
+        {
+          "order": "16643",
+          "detail": "55455",
+          "source_hash": "28eb390609506cf7f66224914c3751ffc480d99ffa2e4c8e8308f79693d3ddcc"
+        },
+        {
+          "order": "16672",
+          "detail": "55606",
+          "source_hash": "b16136b4dfe06eb14f0d8753b71b8288386bdf57aa937dea239cd03ec1a8080e"
+        },
+        {
+          "order": "16681",
+          "detail": "55657",
+          "source_hash": "4589a5f18bf2571aaad38836e4c3e81ac056c73d11b0a07940a1d1eb283ed4ac"
+        },
+        {
+          "order": "16715",
+          "detail": "55809",
+          "source_hash": "2aa2750d9848e1d9ef44e2966b59b3a75d6164ca33436d772fa894ba07df8749"
+        },
+        {
+          "order": "16726",
+          "detail": "55873",
+          "source_hash": "b72542edbe0520893907a6d25c11e762cd339864c454dfcf5a72b7c7de39b832"
+        }
+      ]
+    },
+    {
+      "period": "2025-03-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "277.0",
+      "cost_total": "3247.9104880",
+      "lines": [
+        {
+          "order": "16780",
+          "detail": "56125",
+          "source_hash": "e5156100f934bbadb078b71637991be46b6aff60269ea14d3691b76e9f570ed9"
+        },
+        {
+          "order": "16788",
+          "detail": "56159",
+          "source_hash": "f21d406fa55353b9ef3ba3c2901ed696aeb7f960d723581500af17205bbbfd95"
+        },
+        {
+          "order": "16819",
+          "detail": "56341",
+          "source_hash": "4c0d126a5ec08273cb93f62509a5fac993d370659d7300561ab399e4dc244712"
+        },
+        {
+          "order": "16847",
+          "detail": "56475",
+          "source_hash": "a6aaaca74b1c574012f4390c74e002491c16ba21e89eea4df9feed74eda5406f"
+        },
+        {
+          "order": "16885",
+          "detail": "56662",
+          "source_hash": "586656862850a8b921ecf596d9a863c77229837d735d09edbf38c5eab572e733"
+        },
+        {
+          "order": "16904",
+          "detail": "56746",
+          "source_hash": "f748c385f44ea7477c11571d7cbd98fc7968a9d69c74f1860181a006e010ed72"
+        },
+        {
+          "order": "16914",
+          "detail": "56809",
+          "source_hash": "8b1a61c4186d67540dcce51b81b176f69b264059a5b7321c3a6654583de9a5f9"
+        },
+        {
+          "order": "16964",
+          "detail": "57036",
+          "source_hash": "17b22fe2d6d751a4d3b2755fd8a01f9a18e89170b45ff83351e739bc63433660"
+        },
+        {
+          "order": "16994",
+          "detail": "57144",
+          "source_hash": "89f88fe7a78c1642e4b3e0575cf07cafcb65640da1f34226b6a780673124b719"
+        },
+        {
+          "order": "17019",
+          "detail": "57266",
+          "source_hash": "2da32702fe63108a1c22adc1e45feb15930887ca2c5b97a5aab2f2fb379b6ebc"
+        },
+        {
+          "order": "17047",
+          "detail": "57428",
+          "source_hash": "00c9a903b3ee60d27d157b97019ad98eb36669f24736bae0604c02cc3f82d519"
+        },
+        {
+          "order": "17080",
+          "detail": "57554",
+          "source_hash": "f80b0614b97c0d1e390f756cc7aa452ec8e2ace2ad7d896c2142988e859ab1c6"
+        }
+      ]
+    },
+    {
+      "period": "2025-03-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "270.0",
+      "cost_total": "2678.3957850",
+      "lines": [
+        {
+          "order": "16768",
+          "detail": "56040",
+          "source_hash": "d4fa4c7645b0fe517405b16fc2c5802c9e8cd17a8e934a6d3dff62a7bdc28c29"
+        },
+        {
+          "order": "16780",
+          "detail": "56122",
+          "source_hash": "29174d0a55fa7c10db13897065450d4793443671a8679569b9b3aad677865a76"
+        },
+        {
+          "order": "16788",
+          "detail": "56161",
+          "source_hash": "0b7fc566d9280cca86366f21d942e2caa96fe7b529dafddc640151a89e178976"
+        },
+        {
+          "order": "16847",
+          "detail": "56478",
+          "source_hash": "656f385f58a203214dae895a9ce0bcff4c52cd42fd36d0b422f3f1c84d286a0c"
+        },
+        {
+          "order": "16869",
+          "detail": "56598",
+          "source_hash": "872fcc03388b1a691143b3882b0f0d74b2e72caf1f763f9d13e1b7ff750a83d7"
+        },
+        {
+          "order": "16904",
+          "detail": "56749",
+          "source_hash": "430059500bbf44a5c48cba2c6f5c0f9e183099002fc1bd563b42c5475773d2d1"
+        },
+        {
+          "order": "16914",
+          "detail": "56806",
+          "source_hash": "0a6ca88c3b92be27406d65c92cf5d01ba617a8a9c7e0b0453051629acd425eee"
+        },
+        {
+          "order": "16951",
+          "detail": "56968",
+          "source_hash": "df085d7932e4c9234ec6dbb76ed1d5a4b0e14b210825e1d6c4d940819b8310ac"
+        },
+        {
+          "order": "16981",
+          "detail": "57082",
+          "source_hash": "31441b2d0fbcdb14a5510d6ad90d52a1c2d3a222c528b17403bd146a81b18058"
+        },
+        {
+          "order": "17007",
+          "detail": "57209",
+          "source_hash": "d5ecda360f491be8188310730485e1fe36a5df9f14ae63dd78bcba74fea065b6"
+        },
+        {
+          "order": "17030",
+          "detail": "57331",
+          "source_hash": "a72a7cff370eab9a7f4914c8d2a9c4a5f97f728affa34f17edaa0a48c32ada86"
+        },
+        {
+          "order": "17047",
+          "detail": "57430",
+          "source_hash": "9dda5777672bc8b8d5376a4fd17d35d9f8852460d4f9b91c422ae482c36c92d3"
+        },
+        {
+          "order": "17080",
+          "detail": "57556",
+          "source_hash": "aa2941a9e5578743ca35086d7fb5420895437ab0857db61e3fea559acc8b068a"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "214.0",
+      "cost_total": "2579.1037270",
+      "lines": [
+        {
+          "order": "17150",
+          "detail": "57868",
+          "source_hash": "b95354fba22f1197d967bb8208c609e7be956f87240eb2bcea17d5ee8618f0e6"
+        },
+        {
+          "order": "17178",
+          "detail": "58002",
+          "source_hash": "0461a7df5d015169aa659f6f67ed5d40b801f08ae67f8511c7dc4f5deb00fdda"
+        },
+        {
+          "order": "17201",
+          "detail": "58132",
+          "source_hash": "86925e4eab19705f15ae32d828619ddf640ed0130f57701d13b4bb20fadb7f77"
+        },
+        {
+          "order": "17239",
+          "detail": "58313",
+          "source_hash": "515deb7b4e5d9590fb24e26748925a39eecff6779fc4e2644930cdff958bee6e"
+        },
+        {
+          "order": "17252",
+          "detail": "58388",
+          "source_hash": "1f90d6d5750b9da3b0e6b4d805f6e941c6651c272ddb4ee2261d3ccdfe0c5059"
+        },
+        {
+          "order": "17272",
+          "detail": "58464",
+          "source_hash": "2aadb7f4c1fa6f7893446dff76ffb07941c45a6975ca21cb03bb1899c71e4337"
+        },
+        {
+          "order": "17301",
+          "detail": "58614",
+          "source_hash": "1ddc566c2faece0a21b7644d0506bef4c50f5e6a30db1c99a092bfbbdb39ea33"
+        },
+        {
+          "order": "17317",
+          "detail": "58703",
+          "source_hash": "b2d63a45705cba15959660dff245aae38663c70c17652b9d22a2a50db2718454"
+        },
+        {
+          "order": "17333",
+          "detail": "58790",
+          "source_hash": "7bb20749cc85bfbf70b9771d55c2ce550bca248dd081fdd1c62de0fe81088e3e"
+        },
+        {
+          "order": "17346",
+          "detail": "58853",
+          "source_hash": "353c8c24585cc903ed51b8f27e5e5e16be2142b23d8d37c18e26b3e568a064aa"
+        },
+        {
+          "order": "17396",
+          "detail": "59040",
+          "source_hash": "69c296a863326b57aa7eadbeefd609f24839bad701bcb69168fd812e91a888d5"
+        },
+        {
+          "order": "17421",
+          "detail": "59122",
+          "source_hash": "53ac0cc17c028bbe0c46b360ea87834ab08c8e3cb75ff8f0bd477609c0f5b862"
+        },
+        {
+          "order": "17457",
+          "detail": "59238",
+          "source_hash": "986c594bec93f18f384044b4df9d766a51ff3461d7f7b902f9c6f4b26e4b9a0e"
+        }
+      ]
+    },
+    {
+      "period": "2025-04-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "197.0",
+      "cost_total": "2046.3840670",
+      "lines": [
+        {
+          "order": "17100",
+          "detail": "57674",
+          "source_hash": "eed41d9af5b206740c49f3a2c5ce32a16fc4ee81eec20ddb7e854abb7c5fd9c2"
+        },
+        {
+          "order": "17167",
+          "detail": "57961",
+          "source_hash": "996646da1ebe20d2c6bd06078becdfde52fc0aa5e34512205f3bce139746d323"
+        },
+        {
+          "order": "17178",
+          "detail": "57999",
+          "source_hash": "ae26694b309c7ef1495fb5e09f1cc68fa5edb0c112b1a40d763efb0d51c69474"
+        },
+        {
+          "order": "17201",
+          "detail": "58131",
+          "source_hash": "43fd13b137a62d0f2576b9037e6f8c32185fab6593c02f8a417ceb9ee24c883c"
+        },
+        {
+          "order": "17252",
+          "detail": "58390",
+          "source_hash": "e46b79405eceab64ce9941d2dc1a9a0d9219a4368b89d1ef1b4eecaeeb0a5d84"
+        },
+        {
+          "order": "17272",
+          "detail": "58467",
+          "source_hash": "65128cea2e641f94e073e9fe8cbca0d726ce0d52c6ce528b44f3e691ddbf6c48"
+        },
+        {
+          "order": "17290",
+          "detail": "58541",
+          "source_hash": "7135776eb426c2881ed903452b991c66f94b76fede7ee0613410f509ec490bb0"
+        },
+        {
+          "order": "17301",
+          "detail": "58611",
+          "source_hash": "0eebcbe93b6aae0e529e77a0db7b3b740bb9f3b87404db95b59582e4e3cd9092"
+        },
+        {
+          "order": "17317",
+          "detail": "58700",
+          "source_hash": "0598f64bfb0ccd5d3b64c4bdff6adf2b2b755a26485414046dad38cde93d840e"
+        },
+        {
+          "order": "17358",
+          "detail": "58906",
+          "source_hash": "c3c267926691bede7901e00b69a6ee5bcc98359b909dc0dc948cf82f13cdada1"
+        },
+        {
+          "order": "17396",
+          "detail": "59043",
+          "source_hash": "3707aecb217c885090917bc6c71e19cad2546178827fcd381655f7198c9451e0"
+        },
+        {
+          "order": "17421",
+          "detail": "59124",
+          "source_hash": "c55c7f28b0d17a71d93bb30903aaf5d4fae02cc8630ecfd1785bb99bb2bed954"
+        },
+        {
+          "order": "17457",
+          "detail": "59241",
+          "source_hash": "b7c0e9aeb462088b2a1c2962bb9789f10bc326dc96fb233a97f715e4c123e429"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "230.0",
+      "cost_total": "2761.2331580",
+      "lines": [
+        {
+          "order": "17488",
+          "detail": "59349",
+          "source_hash": "68e4a16b560139d90975eab4fad27d390a7ac64f935a37972deb2ecf56c2cc15"
+        },
+        {
+          "order": "17525",
+          "detail": "59491",
+          "source_hash": "acf0e292642d50671ab2a7cf6efc91dc3be606275f279853d5fd9536377f13ec"
+        },
+        {
+          "order": "17604",
+          "detail": "59677",
+          "source_hash": "fa8b70a1fd91704bb4b32cfa5dc5110cc4952b35900d0a7ba535a8918a9dac59"
+        },
+        {
+          "order": "17695",
+          "detail": "59883",
+          "source_hash": "237e15e52c665bb55ccb1e46288905f95fb2c74be59e9b230e29909101e90e89"
+        },
+        {
+          "order": "17739",
+          "detail": "60118",
+          "source_hash": "984a2434d6708607c572d193f5829218c2c775fbf48d5e31f4406f435f400ae1"
+        },
+        {
+          "order": "17764",
+          "detail": "60235",
+          "source_hash": "6ef1fdebc602bb830b33378d6fffe220ab080d9e1ddc21c42140e0c8ddf31d29"
+        },
+        {
+          "order": "17801",
+          "detail": "60379",
+          "source_hash": "36a3d00adccd608b832118b1ddcfc0e409a8698370102225c010e87a8b79fa22"
+        },
+        {
+          "order": "17822",
+          "detail": "60498",
+          "source_hash": "eff5364219dcb57a2e7bd1776e4da7a6cd7ea56daf195b5f0a6add2f6555f318"
+        },
+        {
+          "order": "17846",
+          "detail": "60608",
+          "source_hash": "bd15c566b044ae4a63471099f3c1181e9fc94c3a17421e40185d35b2f4f499eb"
+        },
+        {
+          "order": "17884",
+          "detail": "60790",
+          "source_hash": "6b59815271a26db4a686a1bc409d771d662a7df545599492c84bb77c48e211e0"
+        },
+        {
+          "order": "17900",
+          "detail": "60886",
+          "source_hash": "5969e0eda283f1743bd7da69700f9dc3973b905e66725a5a0e75af9099c3b882"
+        },
+        {
+          "order": "17933",
+          "detail": "61085",
+          "source_hash": "0ef4fe45110e94b1ab5cca131e88ed9355b42232a145a91c5ee99dc8d3b10c3f"
+        }
+      ]
+    },
+    {
+      "period": "2025-05-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "241.0",
+      "cost_total": "2596.6089190",
+      "lines": [
+        {
+          "order": "17488",
+          "detail": "59347",
+          "source_hash": "e93485aa999398a83e1cbb2ee90744d4402a2006afc29410969ecb78839cd955"
+        },
+        {
+          "order": "17525",
+          "detail": "59488",
+          "source_hash": "443076356a6ab1d5ae27f1e7fe2aaf6b44205e3943fc29127cccc6562c9db271"
+        },
+        {
+          "order": "17649",
+          "detail": "59769",
+          "source_hash": "c771a299b5ec297b151729d220bb9fa06ccd54bb7ff66956e99dc29c87a36a87"
+        },
+        {
+          "order": "17712",
+          "detail": "59935",
+          "source_hash": "72b97cbe7fef8dcb532856fafc3f752d8e80f426f8faee3f15d31844f9f10f6d"
+        },
+        {
+          "order": "17764",
+          "detail": "60232",
+          "source_hash": "1e2b3a4ff47a481b396a0a8bf4c521f7a6c4d94e634e95f58162982f7a45081b"
+        },
+        {
+          "order": "17782",
+          "detail": "60305",
+          "source_hash": "da399c7a67b6a9c8b6dc7156a08dc9d4599bcb21276d5193fcf2e660c7aac313"
+        },
+        {
+          "order": "17801",
+          "detail": "60376",
+          "source_hash": "071bbdb234552ad45382e8bbd4521c4fd26110dbdc2eebac8e95391347e2b8a0"
+        },
+        {
+          "order": "17808",
+          "detail": "60437",
+          "source_hash": "6f1513f3df359045721872e18ab9f3a23f5bd119ffaca259002466dc0216c825"
+        },
+        {
+          "order": "17846",
+          "detail": "60606",
+          "source_hash": "90d8ffffb729ad3fca48fafd3e99f1497a4d42a01d4463c8ed03a46e71c637b0"
+        },
+        {
+          "order": "17874",
+          "detail": "60744",
+          "source_hash": "0a8465d0c9daa0e4b41e85ac9f5d0905222eb133e98ee7ecbd7ee609fd2fd883"
+        },
+        {
+          "order": "17884",
+          "detail": "60787",
+          "source_hash": "fb09677c04c63e773a2f08d49b0eacde3544888892c10ffdbe0ee34bd555adf8"
+        },
+        {
+          "order": "17924",
+          "detail": "61017",
+          "source_hash": "2f337c78b0e0d8ee0f594161a95d168098f926a7638bb9954df55c3f10bcede1"
+        },
+        {
+          "order": "17933",
+          "detail": "61083",
+          "source_hash": "33ca72977a485430b9715f9e3e744484c2d6fa097eb5d508054fabb218d353a1"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "170.0",
+      "cost_total": "2019.9500620",
+      "lines": [
+        {
+          "order": "17950",
+          "detail": "61213",
+          "source_hash": "7a277195eb0ebb7b5d352701a0a6be0fc0d5a6bd0f22eaba28709c6b99a53857"
+        },
+        {
+          "order": "17978",
+          "detail": "61377",
+          "source_hash": "004910ae08fa1e77eecb24dd536a73347bc9c2633a395ea037cb669e6c261b53"
+        },
+        {
+          "order": "17991",
+          "detail": "61456",
+          "source_hash": "8688b5f6ee958978ed8f849d3e1227b37ff871a85fd1ddd758981b78356f8a89"
+        },
+        {
+          "order": "18026",
+          "detail": "61616",
+          "source_hash": "9954325dd6bd4b4ac91767928a4ff094091870028b087c47a02f8cc2cf57de6b"
+        },
+        {
+          "order": "18051",
+          "detail": "61698",
+          "source_hash": "57096198aa2e2a33e0faf762c309881fc51eb1bd243cd718364f32f04c2a3182"
+        },
+        {
+          "order": "18077",
+          "detail": "61775",
+          "source_hash": "d7d6fbb642e1c9de8fceab2880d3c1932af73ba618760cde85c776dcb3f7181f"
+        },
+        {
+          "order": "18189",
+          "detail": "62188",
+          "source_hash": "c8a19bf04ba6f9b2583da4ea3f7d620a9a8c3e8355e2f2f6c6724b0d23b1a1f0"
+        },
+        {
+          "order": "18226",
+          "detail": "62389",
+          "source_hash": "9ca85a65ac9880d6db445fe2a05f10c585656df24862f0e3f4dd94d46a33998b"
+        },
+        {
+          "order": "18240",
+          "detail": "62449",
+          "source_hash": "f6f7e4ffcddce9778888a218e9567f3c8a34cc461b7d7d18c4b0cf4ff639a64f"
+        },
+        {
+          "order": "18277",
+          "detail": "62640",
+          "source_hash": "48819b75f6e7c86b6aa05463eab8906f5af2bfc15d0ed09ea3622a31489be4b7"
+        }
+      ]
+    },
+    {
+      "period": "2025-06-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "150.0",
+      "cost_total": "1617.5171760",
+      "lines": [
+        {
+          "order": "17950",
+          "detail": "61215",
+          "source_hash": "557bc14a6096348103c68ff5ac6179200a9598b8176613f20881abdf6baf8221"
+        },
+        {
+          "order": "17991",
+          "detail": "61458",
+          "source_hash": "0f2a866ed6d406fbceb2da64f34cfd3e22d9f988eb9a2866583aac81bd92ce7d"
+        },
+        {
+          "order": "18001",
+          "detail": "61498",
+          "source_hash": "b0ece444d24535a66462a677e51ce985e2a25ff97c07ba7d90142c52e33ee69b"
+        },
+        {
+          "order": "18010",
+          "detail": "61552",
+          "source_hash": "5bf9dc735c534e1371a5f768975acb0cf8c9300999715559fa5209a1901ba95c"
+        },
+        {
+          "order": "18026",
+          "detail": "61613",
+          "source_hash": "49cf78aa173fdd3e7b2163b272abf56c8fe53b182a6a9fadb0454b8feec52851"
+        },
+        {
+          "order": "18077",
+          "detail": "61776",
+          "source_hash": "197b0abac08105e220ec17c11e8747b3a9513ac85db7406875005c1dfd41b172"
+        },
+        {
+          "order": "18115",
+          "detail": "61873",
+          "source_hash": "6cc1dff0f6c0eaa4edd71cb062618cac4a8419c0352bcab600c4859df68702da"
+        },
+        {
+          "order": "18189",
+          "detail": "62191",
+          "source_hash": "61fc02cd387c8969f03fce7fce27e295714afd17f87c540b375eec9be4eae975"
+        },
+        {
+          "order": "18277",
+          "detail": "62637",
+          "source_hash": "090d57796f0bc6eb60417056513c846083970a6c9dcce20bee589929c1313dbc"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "232.0",
+      "cost_total": "2783.5617930",
+      "lines": [
+        {
+          "order": "18318",
+          "detail": "62845",
+          "source_hash": "682b8b8e0e3b741ac5d0964a2ffca6204f94c21ccda6ef493a4291790956a1dc"
+        },
+        {
+          "order": "18360",
+          "detail": "63058",
+          "source_hash": "040abb6bc53009b7c10c1d39548f5f7245f87b4de4b6c4889acaa8095f9ad9f7"
+        },
+        {
+          "order": "18374",
+          "detail": "63118",
+          "source_hash": "fd8a872b8d585b5855b9272f0c86ac9f98647653435468d09b4d652988f2525a"
+        },
+        {
+          "order": "18384",
+          "detail": "63191",
+          "source_hash": "58942281b2753f1b4b14d89bc9dc7bf7538477ab4bdda0dc84e009b3addf1cdb"
+        },
+        {
+          "order": "18394",
+          "detail": "63256",
+          "source_hash": "ab824f5c3118df739f06c886d0644c4833d69d762707aa9aa88261919e5bd659"
+        },
+        {
+          "order": "18431",
+          "detail": "63446",
+          "source_hash": "1c4c02267a36e93d8b1ba9f7b6bbc8172e8d40689af8f65378e632edb9614d75"
+        },
+        {
+          "order": "18448",
+          "detail": "63564",
+          "source_hash": "3d8bf34b18755a462ea262cd05625b08b4c6c38e481d22f9b8354ef169fe04eb"
+        },
+        {
+          "order": "18457",
+          "detail": "63629",
+          "source_hash": "61cb810caa0f7027149879d7020dc8e60f4eda05fde96fac7a287d597e69e749"
+        },
+        {
+          "order": "18486",
+          "detail": "63749",
+          "source_hash": "38658d5fbcb600368e12e40b91180b733c2a785c5588b116bed5e1d9dd86dee3"
+        },
+        {
+          "order": "18534",
+          "detail": "64000",
+          "source_hash": "869a1393691dca089910884915b782ef81a7d27c78991d769eb55f5f73231980"
+        },
+        {
+          "order": "18551",
+          "detail": "64072",
+          "source_hash": "49eb9b7181ebfe3768fcac3733c3542fbe8979ff08c82b5bdc624b4b3193fa4d"
+        },
+        {
+          "order": "18581",
+          "detail": "64209",
+          "source_hash": "7e6c5f9bd7abc349f065aea5c9b35471f240a5a8be4db03967d2d782381c195c"
+        },
+        {
+          "order": "18591",
+          "detail": "64269",
+          "source_hash": "9eb329ccd6f43c36af58f6353e7d15d135989f98cf16fcccf484f91adbf40119"
+        },
+        {
+          "order": "18602",
+          "detail": "64332",
+          "source_hash": "c0767dac61db0409dbad97ad11287532802cda4fbe085b2d7fd8e571bff5af11"
+        },
+        {
+          "order": "18621",
+          "detail": "64458",
+          "source_hash": "5466e5ceb7aeb847c68318555afcb38afe0b4fea872ab8c72680530c7fb8cedf"
+        }
+      ]
+    },
+    {
+      "period": "2025-07-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "234.0",
+      "cost_total": "2535.0028630",
+      "lines": [
+        {
+          "order": "18306",
+          "detail": "62773",
+          "source_hash": "fb867ce633da7cc1fd8c33db27d768515b196ea9fe77d2672bf8cb6dbdcd85e4"
+        },
+        {
+          "order": "18334",
+          "detail": "62918",
+          "source_hash": "6e716edfc6ec916f69f806531424af241689725b99fac4abdec8595bb0858e07"
+        },
+        {
+          "order": "18374",
+          "detail": "63115",
+          "source_hash": "7372cce84c18f548b11ad6924ae7cb2e3e685032c35ccd4fcb370eea278e3634"
+        },
+        {
+          "order": "18384",
+          "detail": "63193",
+          "source_hash": "3b466c9eda137be79a57750c880a52238c8630c462f0c4b86f8b9e9e07064ac5"
+        },
+        {
+          "order": "18394",
+          "detail": "63254",
+          "source_hash": "514e6c1f8fa35dc5a38ca53e714d4273dd86617fafb1690744c5b22eb9e75729"
+        },
+        {
+          "order": "18415",
+          "detail": "63388",
+          "source_hash": "d6195fb43a490947784bf0ae2251123ac2dab5c78d9b52a6630d3433960f8bfa"
+        },
+        {
+          "order": "18448",
+          "detail": "63562",
+          "source_hash": "cf51d4bc521f0aa0d5d62ed4746da342b35cfed3a58bed596336e87f053308cf"
+        },
+        {
+          "order": "18457",
+          "detail": "63625",
+          "source_hash": "ea35e804083028ab106bbc870f7577a5e72f79d212cb609928fc95304ed4ec33"
+        },
+        {
+          "order": "18474",
+          "detail": "63687",
+          "source_hash": "4ac40fa413b082024ab80a7e01c53b77409cabcd7e91b172d7168bc3332038d6"
+        },
+        {
+          "order": "18534",
+          "detail": "63999",
+          "source_hash": "baf6d0cf4f67a4df4a833b971470c04d00dcd147326cac358f1279154afa55ec"
+        },
+        {
+          "order": "18551",
+          "detail": "64069",
+          "source_hash": "c3bf807945ae6e85b005e07ec99a079387beb3ba1cf43979253894b93c4dbdf5"
+        },
+        {
+          "order": "18581",
+          "detail": "64208",
+          "source_hash": "81aaaa3c9ac9966e3043c3e3d630e29732f29dfe8fbd05fb0d7765005ec8bd67"
+        },
+        {
+          "order": "18621",
+          "detail": "64455",
+          "source_hash": "e434e08f0c754ee51e43ff04f97643633eddb847da78e622e3800ac87f2de5ff"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "197.0",
+      "cost_total": "2372.7963530",
+      "lines": [
+        {
+          "order": "18665",
+          "detail": "64740",
+          "source_hash": "1244de568b6a3f6f45b10a1dd10f777b7ac0d924f32b7250a5deda96a0d00641"
+        },
+        {
+          "order": "18688",
+          "detail": "64869",
+          "source_hash": "56c08ccd2a3727c31993338312322c620b641fb9ff2fefd07da953505b80d465"
+        },
+        {
+          "order": "18708",
+          "detail": "65004",
+          "source_hash": "49041623aeea44ed05bb615beeff8ceffe0e9488f4bb301b34d181a3a93268b2"
+        },
+        {
+          "order": "18730",
+          "detail": "65151",
+          "source_hash": "97464987a3d5f2104618708cd3c5041c9cd87e06a998ed45512ca896986b33dd"
+        },
+        {
+          "order": "18756",
+          "detail": "65281",
+          "source_hash": "1ff28c76b463f5aec1139477adf596c718799eee9b945218c7bd06c4e2a8776f"
+        },
+        {
+          "order": "18781",
+          "detail": "65411",
+          "source_hash": "50bfff3057ad7a2ebcf318c9207d2a08a9063029692ed9fbd236b9bf0918feff"
+        },
+        {
+          "order": "18789",
+          "detail": "65474",
+          "source_hash": "f8e32f1f2e9cb1ead6b38fb8d03fcbb69e444fbe29feb5b2d496239a3a985710"
+        },
+        {
+          "order": "18807",
+          "detail": "65619",
+          "source_hash": "28da01d29a50f7a4c06c892c3187103e2c64d3901027f08bf4fc055a125230f0"
+        },
+        {
+          "order": "18838",
+          "detail": "65766",
+          "source_hash": "a82e7b9fa2372621d986b65243798b7f44b88c4e411d1025ac79068f7361cd4c"
+        },
+        {
+          "order": "18864",
+          "detail": "65908",
+          "source_hash": "7c6aec4c552f35681c596cc02eaf390b40fa4bd384ecd0d117ef3fa2c1ad9c94"
+        },
+        {
+          "order": "18891",
+          "detail": "66066",
+          "source_hash": "06d1fb06332899093e77a25d0af09f84d9d4d51ec6da1b69d6ba58a0cf84b95e"
+        },
+        {
+          "order": "18907",
+          "detail": "66149",
+          "source_hash": "689ada2e03d5841b0fdffec2e91a37c2c146ab674ea336138139cb933f97549d"
+        },
+        {
+          "order": "18938",
+          "detail": "66287",
+          "source_hash": "caf94313d1edc09e03d238f88db78b48b16493c3652cea43d10dea13cadf864a"
+        }
+      ]
+    },
+    {
+      "period": "2025-08-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "213.0",
+      "cost_total": "2317.2137470",
+      "lines": [
+        {
+          "order": "18643",
+          "detail": "64595",
+          "source_hash": "05010a3ce8b0cd58a9945f0c0b6fea39271ecf77906f208f0f753fe40bc12fcd"
+        },
+        {
+          "order": "18665",
+          "detail": "64737",
+          "source_hash": "64dcf0d8e06ba682751be93033ae92669c787e41bfce2b040f5adadd2880364d"
+        },
+        {
+          "order": "18708",
+          "detail": "65002",
+          "source_hash": "dfb3fa82f47dc631c39a1769f8a9ac5152bb9a8c120b30580d81cfb79880d660"
+        },
+        {
+          "order": "18717",
+          "detail": "65067",
+          "source_hash": "61b6c076486d34934bf0c5d81cd45b1fd16a7d003ac468323655ee9f1dc3ce04"
+        },
+        {
+          "order": "18730",
+          "detail": "65149",
+          "source_hash": "fd04c57a577ff425c71bb41083be647fe9f76b4d3c5e8924f9bc7d4e6075076c"
+        },
+        {
+          "order": "18756",
+          "detail": "65280",
+          "source_hash": "3ab6e72cb4afb59a8badca8b8b5ced8ff65c1e3573fb4f5c37dc9225d8564e01"
+        },
+        {
+          "order": "18799",
+          "detail": "65550",
+          "source_hash": "d06c80433c513d7a8935adda215793aa259c7e5c28fdb78bd339cf9f41f5ab63"
+        },
+        {
+          "order": "18807",
+          "detail": "65616",
+          "source_hash": "a1dabbb5695f7bd8a4b034f862f93ea615018ef8f34640cf5876d3292a8522a6"
+        },
+        {
+          "order": "18838",
+          "detail": "65763",
+          "source_hash": "a82c03c91b3de2db781712629e2151176f083a6829909410561baf6faa7477ef"
+        },
+        {
+          "order": "18854",
+          "detail": "65841",
+          "source_hash": "4dc758aa809269f11cd43a14cf3f2db3ee70cc661ec1cbc726404dd801ec2d2b"
+        },
+        {
+          "order": "18864",
+          "detail": "65905",
+          "source_hash": "617219d05f08848f076305a8bfe419c8d6a44b9d84f03108572bfef3a6caabc1"
+        },
+        {
+          "order": "18877",
+          "detail": "65983",
+          "source_hash": "922f7a0ee34b8bc6df238631305569acddeb9e47070131dc6112b0338b49240b"
+        },
+        {
+          "order": "18891",
+          "detail": "66064",
+          "source_hash": "ec16051be6cae192f1fcb2f30350d32aa6aabe05ee1b31371deed1050bdf879d"
+        },
+        {
+          "order": "18924",
+          "detail": "66221",
+          "source_hash": "d4561bad41a6d65415718dbf33b211fb6c17a8f9f94e1a9a663593288bf6caf5"
+        },
+        {
+          "order": "18938",
+          "detail": "66289",
+          "source_hash": "0edb72b820dffaf3760f67c94a0ff163bdbf3ff7405e8f201fb6063c928d7174"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "172.0",
+      "cost_total": "2069.8915160",
+      "lines": [
+        {
+          "order": "18963",
+          "detail": "66438",
+          "source_hash": "0b39236173927bee96d5a13fc415c8e445cc566db12df698f27ce5b90607a466"
+        },
+        {
+          "order": "18988",
+          "detail": "66584",
+          "source_hash": "0afd3b870600a02fb9b5ffebf984a3016bb9b8857d7d1e903926c56be9267f40"
+        },
+        {
+          "order": "19004",
+          "detail": "66673",
+          "source_hash": "26c9b9f5a446de15254b7aca49b2730261076a148589faf6c1c9c256ad0bfbd7"
+        },
+        {
+          "order": "19014",
+          "detail": "66752",
+          "source_hash": "4faa4ff2a1195924afbe7098b4bb47d2fe7b1c5ce23ab5f70eed46b4e1082f86"
+        },
+        {
+          "order": "19027",
+          "detail": "66823",
+          "source_hash": "7f23286d364f5b7e0365610cd69957bf3382cb1787f24724885a11a45aaba51b"
+        },
+        {
+          "order": "19051",
+          "detail": "66967",
+          "source_hash": "c404c3139c6117a8c6815c6fddf9fe6c1a26bebf73c8ce37c7f9797f79f03169"
+        },
+        {
+          "order": "19075",
+          "detail": "67116",
+          "source_hash": "38fd70f87411fc6116cc9b90f87f1122a8a3bb6d5a5f0bf0121df651bddc7a0a"
+        },
+        {
+          "order": "19105",
+          "detail": "67279",
+          "source_hash": "42a62c74398d8fc37eb3d5c9cf0ee1ab2b7ec93ea35fded1e91f07589091dc07"
+        },
+        {
+          "order": "19130",
+          "detail": "67424",
+          "source_hash": "3c5b25e2a092baebe579e889fb4e48252cbcb7a03b88886663c9f936c52368e2"
+        },
+        {
+          "order": "19155",
+          "detail": "67560",
+          "source_hash": "f69605aaaad9fba199b22ba3d5bffc083e8b6f8dc6c9dc0a9a2e547e343f8929"
+        },
+        {
+          "order": "19185",
+          "detail": "67706",
+          "source_hash": "2787167be1ebc6049e21ee4023608046f1d2249bfcc5089d9c2f777dfe4189cd"
+        },
+        {
+          "order": "19205",
+          "detail": "67837",
+          "source_hash": "fcf71259eac47e9d7868b52b6c677d1c2fe0c5dc07a5ef424ac9ae6a53144271"
+        },
+        {
+          "order": "19242",
+          "detail": "67994",
+          "source_hash": "595b346f5c122dba92c20544a76d7e99278706ecd3db0805e037a371ec7afc53"
+        }
+      ]
+    },
+    {
+      "period": "2025-09-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "184.0",
+      "cost_total": "1916.5313360",
+      "lines": [
+        {
+          "order": "18952",
+          "detail": "66374",
+          "source_hash": "95aab4c7b3bf45ed18ed4624a3bbac89e01ed6a600713594a134d4e519999825"
+        },
+        {
+          "order": "18963",
+          "detail": "66435",
+          "source_hash": "fde1056ae7ccc1c8334890575d893efe66f218f2f1b866feaed1d709ca83b7c0"
+        },
+        {
+          "order": "18974",
+          "detail": "66506",
+          "source_hash": "2b888c0bc4f435cc4225167ca8a4ed0e5fcf5a919eea0e71d40961b99d3d941f"
+        },
+        {
+          "order": "19027",
+          "detail": "66825",
+          "source_hash": "b1752af78e05f5614c39eda147c480c586a293d0a6d4c02476e5d40ea1bbb692"
+        },
+        {
+          "order": "19040",
+          "detail": "66897",
+          "source_hash": "924704bed4f269425338d63225e49ea0e6d2a71bd776c43916047138dddb3380"
+        },
+        {
+          "order": "19075",
+          "detail": "67119",
+          "source_hash": "5250ffcc369b94de887919f8564d7fb5b335b4dcacee135b39f6cef5e94695bb"
+        },
+        {
+          "order": "19087",
+          "detail": "67198",
+          "source_hash": "55dfb4edd24492fc6ed96e163a393dea488f3fba7d072e5862cb5e0345c943ba"
+        },
+        {
+          "order": "19105",
+          "detail": "67281",
+          "source_hash": "af5de535adf49e541dc9eee7865a8824cffc74ea0060ef622e600497edbf7d99"
+        },
+        {
+          "order": "19121",
+          "detail": "67357",
+          "source_hash": "0ca65fcb5710ec676626990569e3e9434924e7d5cdced46372720fa1db590cd1"
+        },
+        {
+          "order": "19142",
+          "detail": "67483",
+          "source_hash": "077db64e494bc82674109d8f5651b226321aa2e38ee8816703c1ad507b0cad6b"
+        },
+        {
+          "order": "19169",
+          "detail": "67625",
+          "source_hash": "a4d6559b400ffdd82a5eaa758ba5100b46f857b83c1cac9792ab37fce1d3592f"
+        },
+        {
+          "order": "19197",
+          "detail": "67767",
+          "source_hash": "f0c10e29eff1593bb1967f1b96050a6e38bd7c3f51bc85d1130edb69c97b49f6"
+        },
+        {
+          "order": "19205",
+          "detail": "67834",
+          "source_hash": "317ea340bdd4ee111efa3fbd1c2cb4aeb9b59e316a1fb2c6382f718395ff887e"
+        },
+        {
+          "order": "19242",
+          "detail": "67997",
+          "source_hash": "be6351454679e63069f158e9555ed59105ea0cae8f2c0af77734232fa6645197"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "sku": "01GDL01",
+      "name": "Galleta Dulce de Leche",
+      "external_id": "876",
+      "branch_external_id": "10",
+      "quantity": "32.0",
+      "cost_total": "385.3064960",
+      "lines": [
+        {
+          "order": "19265",
+          "detail": "68140",
+          "source_hash": "bd57b4dbe78b0041b03f1997b10ca022995f6c91397ddabc9de8f0975885e670"
+        },
+        {
+          "order": "19283",
+          "detail": "68276",
+          "source_hash": "1f801b05b4194624dc962e1be9321d971651f6e323cfd3ba984e80097c90a1a0"
+        }
+      ]
+    },
+    {
+      "period": "2025-10-01",
+      "sku": "01GO01",
+      "name": "Galleta Oreo",
+      "external_id": "875",
+      "branch_external_id": "10",
+      "quantity": "28.0",
+      "cost_total": "304.530240",
+      "lines": [
+        {
+          "order": "19265",
+          "detail": "68142",
+          "source_hash": "a0857da639c56d49ee28566e140bf5002cdfe32b3c2d4aa102b75323fe6beda3"
+        },
+        {
+          "order": "19283",
+          "detail": "68273",
+          "source_hash": "d168995b15f29a9c8e4414a469dadd7a60d44a0b776784a1a64aa5d72c962395"
+        }
+      ]
+    }
+  ]
+}
