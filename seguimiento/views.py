@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import logging
 import os
+import base64
+import uuid
 from requests.exceptions import RequestException
 from datetime import datetime, timedelta
 from pathlib import Path
+from io import BytesIO
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.core.mail import send_mail
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse, HttpResponseForbidden
 from django.db import connection, transaction
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -259,6 +262,8 @@ def _bucket_panel_seguimiento(item: SeguimientoItem) -> str:
 
 
 def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> None:
+    from .communications import communication_rows
+    item.communication_rows = communication_rows(item)
     checks = list(checks if checks is not None else item.checklist.all())
     item.checklist_total = len(checks)
     item.checklist_done = sum(1 for c in checks if c.completado)
@@ -313,34 +318,23 @@ def _aplicar_estado_visual_seguimiento(item: SeguimientoItem, checks=None) -> No
 
 
 def _agente_dg_user_id_para_erp_user(user) -> int | None:
-    metadata_match = (
-        SeguimientoItem.objects.filter(responsable_user=user, metadata__source="agente_dg")
-        .exclude(metadata__source_user_id__isnull=True)
-        .values_list("metadata__source_user_id", flat=True)
-        .first()
-    )
-    if metadata_match:
-        try:
-            return int(metadata_match)
-        except (TypeError, ValueError):
-            pass
     if not user.email:
         return None
     from .agente_dg_client import get_users
-
-    for agente_user in get_users():
-        if str(agente_user.get("email") or "").strip().lower() == user.email.strip().lower():
-            try:
-                return int(agente_user.get("id"))
-            except (TypeError, ValueError):
-                return None
-    return None
+    matches = [row for row in get_users()
+               if str(row.get("email") or "").strip().casefold() == user.email.strip().casefold()]
+    if len(matches) != 1:
+        return None
+    try:
+        return int(matches[0]["id"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _record_minuta_agente_dg(payload: dict, responsable_user=None) -> dict:
     checklist_items = payload.get("checklist_items") or []
     checklist_items_json = json_dumps_checklist(checklist_items)
-    return {
+    record = {
         "id": payload.get("id"),
         "titulo": payload.get("title") or "",
         "descripcion": payload.get("agreement_text") or "",
@@ -351,7 +345,12 @@ def _record_minuta_agente_dg(payload: dict, responsable_user=None) -> dict:
         "user_email": getattr(responsable_user, "email", "") or "",
         "user_name": getattr(responsable_user, "get_full_name", lambda: "")() or getattr(responsable_user, "username", "") or "",
         "area_name": payload.get("meeting_label") or "",
+        "updated_at": payload.get("updated_at"),
     }
+    for key in ("communications", "content_version", "attachments", "comments", "extension_requests", "evidence", "send_email_on_create", "send_whatsapp_on_create", "send_calendar_invite_on_create"):
+        if key in payload:
+            record[key] = payload[key]
+    return record
 
 
 def json_dumps_checklist(checklist_items) -> str:
@@ -394,6 +393,20 @@ EVIDENCIA_BLOCKED_CONTENT_TYPES = {
 DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 
+def _adjuntos_acuerdo(request):
+    files = request.FILES.getlist("archivos")
+    if sum(file.size for file in files) > DEFAULT_EVIDENCIA_MAX_UPLOAD_BYTES:
+        raise ValueError("Los adjuntos no pueden exceder 15 MB en total.")
+    result = []
+    for file in files:
+        error = _validar_archivo_evidencia(file)
+        if error:
+            raise ValueError(error)
+        result.append({"filename": Path(file.name).name, "mime_type": file.content_type or "application/octet-stream",
+                       "content_base64": base64.b64encode(file.read()).decode("ascii")})
+    return result
+
+
 def _items_del_usuario(user):
     empleado = empleado_de_usuario(user)
     filters = Q(responsable_user=user) | Q(participantes_user=user)
@@ -420,6 +433,98 @@ def _get_item_para_usuario(user, pk):
     if empleado:
         filters |= Q(pk=pk, responsable_empleado=empleado) | Q(pk=pk, participantes_empleado=empleado)
     return get_object_or_404(SeguimientoItem.objects.filter(filters).distinct(), pk=pk)
+
+
+def _refresh_minute(item):
+    from .agente_dg_client import get_minute_agreement
+    payload = get_minute_agreement(item.metadata["source_id"])
+    upsert_agente_dg_payload({"source_table": "minute_agreements", "source_id": payload["id"],
+                             "record": _record_minuta_actual(payload)})
+    item.refresh_from_db()
+
+
+def _record_minuta_actual(payload):
+    from .agente_dg_client import AgenteDGError, get_users
+    matches = [user for user in get_users() if user.get("id") == payload.get("collaborator_user_id")]
+    if len(matches) != 1:
+        raise AgenteDGError("No se pudo verificar el responsable actual del origen.")
+    record = _record_minuta_agente_dg(payload)
+    record["user_email"] = matches[0].get("email") or ""
+    record["user_name"] = matches[0].get("name") or ""
+    return record
+
+
+def _verify_source_assignment(request, item):
+    from .agente_dg_client import AgenteDGError, get_minute_agreement
+    if can_review_seguimiento_global(request.user):
+        return
+    source = _agente_dg_source(item)
+    if source and source[0] == "minute_agreements":
+        current = get_minute_agreement(source[1])
+        if not item.metadata.get("source_user_id") or current.get("collaborator_user_id") != item.metadata["source_user_id"]:
+            raise AgenteDGError("La asignación cambió en origen. Actualiza tus acuerdos.")
+
+
+def _source_input(request, item, action):
+    """La sesión ERP valida al actor; la API registra la cuenta de integración."""
+    from .agente_dg_client import AgenteDGError, is_configured
+    source = _agente_dg_source(item)
+    if not source or source[0] != "minute_agreements":
+        return False
+    if not _writeback_activo():
+        return False
+    try:
+        if not (_writeback_activo() and is_configured()):
+            raise AgenteDGError("Integración no disponible")
+        _verify_source_assignment(request, item)
+        action(source[1])
+    except (AgenteDGError, RequestException):
+        request.session[f"agreement_source_draft_{item.pk}"] = request.POST.get("comentario", "")
+        messages.error(request, "No se confirmó la operación en origen. Consulta el acuerdo antes de repetir; no se registró un éxito local.")
+        return None
+    request.session.pop(f"agreement_operation_{item.pk}", None)
+    request.session.pop(f"agreement_source_draft_{item.pk}", None)
+    log_event(request.user, "seguimiento.agente_dg.aporte", "SeguimientoItem", item.pk, {"source_id": source[1]})
+    try:
+        _refresh_minute(item)
+    except (AgenteDGError, RequestException):
+        messages.warning(request, "El origen confirmó el registro; su reflejo en ERP está pendiente de actualización.")
+    return True
+
+
+def _origin_actor(request):
+    return {"system": "erp", "user_id": request.user.pk,
+            "name": (request.user.get_full_name() or request.user.username)[:200], "email": request.user.email}
+
+
+def _operation_id(request, item):
+    return request.POST.get("request_id") or request.session.setdefault(f"agreement_operation_{item.pk}", str(uuid.uuid4()))
+
+
+@login_required
+def archivo_origen(request, pk, kind, file_id):
+    from .agente_dg_client import AgenteDGError, get_minute_agreement, get_minute_file
+    is_dg = can_review_seguimiento_global(request.user)
+    item = get_object_or_404(SeguimientoItem, pk=pk) if is_dg else _get_item_para_usuario(request.user, pk)
+    source = _agente_dg_source(item)
+    if not source or source[0] != "minute_agreements" or kind not in {"attachments", "evidence"}:
+        return HttpResponseForbidden("Archivo no disponible.")
+    try:
+        original = get_minute_agreement(source[1])
+        if not is_dg and original.get("collaborator_user_id") != item.metadata.get("source_user_id"):
+            return HttpResponseForbidden("La asignación cambió en origen. Actualiza tus acuerdos.")
+        files = original.get(kind, [])
+        selected = next((row for row in files if str(row.get("id")) == file_id), None)
+        if not selected:
+            return HttpResponseForbidden("Archivo no disponible en este acuerdo.")
+        content = get_minute_file(source[1], kind, file_id)
+    except (AgenteDGError, RequestException):
+        return JsonResponse({"error": "No se pudo recuperar el archivo de origen."}, status=502)
+    filename = Path(selected.get("filename") or selected.get("file_name") or "archivo").name
+    response = FileResponse(BytesIO(content), as_attachment=True, filename=filename)
+    response["Cache-Control"] = "private, no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def _validar_archivo_evidencia(archivo) -> str | None:
@@ -777,6 +882,7 @@ def toggle_checklist(request, pk, check_id):
         try:
             if not (_writeback_activo() and is_configured()):
                 raise AgenteDGError("La sincronización de minutas no está activa.")
+            _verify_source_assignment(request, item)
             sincronizar_checklist_minuta(item, check=check, completado=desired)
         except (AgenteDGError, RequestException) as exc:
             logger.warning("No se confirmó el punto de minuta %s: %s", check.pk, exc)
@@ -869,11 +975,20 @@ def marcar_paso(request, pk, check_id):
 @login_required
 @require_POST
 def registrar_feedback(request, pk):
-    item = _get_item_para_usuario(request.user, pk)
+    item = get_object_or_404(SeguimientoItem, pk=pk) if can_review_seguimiento_global(request.user) else _get_item_para_usuario(request.user, pk)
     comentario = (request.POST.get("comentario") or "").strip()
     if not comentario:
         messages.error(request, "Escribe la retroalimentación antes de enviarla.")
-        return redirect("seguimiento:detalle", pk=pk)
+        return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
+    from .agente_dg_client import post_minute_comment
+    actor = request.user.get_full_name() or request.user.username
+    source_result = _source_input(request, item, lambda source_id: post_minute_comment(
+        source_id, comentario, request_id=_operation_id(request, item), origin_actor=_origin_actor(request),
+        notify_recipient="collaborator" if can_review_seguimiento_global(request.user) else "director"))
+    if source_result is not False:
+        if source_result:
+            messages.success(request, "Comentario registrado en origen; consulta su resultado de comunicación por canal.")
+        return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
     es_revision_dg = can_review_seguimiento_global(request.user)
     SeguimientoComentario.objects.create(
         seguimiento=item,
@@ -894,21 +1009,32 @@ def registrar_feedback(request, pk):
     if can_review_seguimiento_global(request.user):
         notificar_seguimiento_feedback_responsable(item, comentario=comentario, actor=request.user)
     messages.success(request, "Retroalimentación enviada.")
-    return redirect("seguimiento:detalle", pk=item.pk)
+    return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=item.pk)
 
 
 @login_required
 @require_POST
 def subir_evidencia(request, pk):
-    item = _get_item_para_usuario(request.user, pk)
+    item = get_object_or_404(SeguimientoItem, pk=pk) if can_review_seguimiento_global(request.user) else _get_item_para_usuario(request.user, pk)
     archivo = request.FILES.get("archivo")
     if not archivo:
         messages.error(request, "Selecciona un archivo de evidencia.")
-        return redirect("seguimiento:detalle", pk=pk)
+        return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
     error_archivo = _validar_archivo_evidencia(archivo)
+    source = _agente_dg_source(item)
+    if source and source[0] == "minute_agreements" and archivo.size > 10 * 1024 * 1024:
+        error_archivo = "La evidencia de origen admite hasta 10 MB."
     if error_archivo:
         messages.error(request, error_archivo)
-        return redirect("seguimiento:detalle", pk=pk)
+        return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
+    from .agente_dg_client import post_minute_evidence
+    actor = request.user.get_full_name() or request.user.username
+    source_result = _source_input(request, item, lambda source_id: post_minute_evidence(
+        source_id, archivo, request.POST.get('comentario', '').strip(), request_id=_operation_id(request, item), origin_actor=_origin_actor(request)))
+    if source_result is not False:
+        if source_result:
+            messages.success(request, "Evidencia registrada en origen; consulta su resultado de comunicación por canal.")
+        return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=pk)
     SeguimientoEvidencia.objects.create(
         seguimiento=item,
         usuario=request.user,
@@ -922,7 +1048,7 @@ def subir_evidencia(request, pk):
     log_event(request.user, "seguimiento.evidencia", "SeguimientoItem", item.pk, {"archivo": archivo.name})
     notificar_seguimiento_avance(item, actor=request.user, mensaje_extra=f"Archivo: {archivo.name}")
     messages.success(request, "Evidencia subida.")
-    return redirect("seguimiento:detalle", pk=item.pk)
+    return redirect("seguimiento:detalle_dg" if can_review_seguimiento_global(request.user) else "seguimiento:detalle", pk=item.pk)
 
 
 @login_required
@@ -942,6 +1068,15 @@ def solicitar_prorroga(request, pk):
         return redirect("seguimiento:detalle", pk=pk)
     if not motivo:
         messages.error(request, "Escribe el motivo para solicitar más tiempo.")
+        return redirect("seguimiento:detalle", pk=pk)
+
+    from .agente_dg_client import post_minute_extension
+    actor = request.user.get_full_name() or request.user.username
+    source_result = _source_input(request, item, lambda source_id: post_minute_extension(
+        source_id, fecha_solicitada.isoformat(), motivo, request_id=_operation_id(request, item), origin_actor=_origin_actor(request)))
+    if source_result is not False:
+        if source_result:
+            messages.success(request, "Solicitud de prórroga registrada en origen; consulta su comunicación por canal.")
         return redirect("seguimiento:detalle", pk=pk)
 
     SeguimientoProrrogaSolicitud.objects.create(
@@ -1067,6 +1202,19 @@ def resolver_prorroga(request, pk, prorroga_id):
         return redirect("seguimiento:bandeja_revision")
     prorroga = get_object_or_404(SeguimientoProrrogaSolicitud, pk=prorroga_id, seguimiento_id=pk)
     accion = (request.POST.get("accion") or "").strip()
+    if accion in {"aprobar", "rechazar"}:
+        item = prorroga.seguimiento
+        from .agente_dg_client import patch_minute_agreement, post_minute_comment
+        def resolve_source(source_id):
+            if accion == "aprobar":
+                due_at = timezone.make_aware(datetime.combine(prorroga.fecha_solicitada, datetime.min.time().replace(hour=18)), timezone.get_current_timezone())
+                patch_minute_agreement(source_id, due_at=due_at.isoformat(), status="IN_PROGRESS", postpone_reason=prorroga.motivo)
+            else:
+                post_minute_comment(source_id, f"Prórroga rechazada: {prorroga.motivo}", origin_actor=_origin_actor(request),
+                                    request_id=_operation_id(request, item), notify_recipient="collaborator")
+        source_result = _source_input(request, item, resolve_source)
+        if source_result is None:
+            return _redirect_post_resolucion(request, pk)
     if accion == "aprobar":
         item = prorroga.seguimiento
         item.fecha_limite = timezone.make_aware(
@@ -1080,6 +1228,8 @@ def resolver_prorroga(request, pk, prorroga_id):
         prorroga.resuelto_at = timezone.now()
         prorroga.save()
         log_event(request.user, "seguimiento.prorroga.aprobar", "SeguimientoProrrogaSolicitud", prorroga.pk, {})
+        from .communications import dispatch_event
+        dispatch_event(item, "extension_resolved", actor=request.user, message=f"Prórroga aprobada hasta {prorroga.fecha_solicitada}.")
         messages.success(request, f"Prórroga aprobada hasta {prorroga.fecha_solicitada.strftime('%d/%m/%Y')}.")
     elif accion == "rechazar":
         prorroga.estatus = SeguimientoProrrogaSolicitud.ESTATUS_RECHAZADA
@@ -1145,20 +1295,27 @@ def crear_acuerdo_agente_dg(request):
     payload = {
         "collaborator_user_id": agente_user_id,
         "title": titulo,
-        "meeting_label": "ERP Seguimiento",
+        "meeting_label": request.POST.get("meeting_label", "").strip() or None,
         "agreement_text": descripcion,
         "checklist_items": checklist_items or None,
         "due_at": due_at.isoformat(),
-        "send_email_on_create": False,
-        "send_whatsapp_on_create": False,
-        "send_calendar_invite_on_create": False,
-        "create_commitment": False,
+        "send_email_on_create": request.POST.get("send_email") == "on",
+        "send_whatsapp_on_create": request.POST.get("send_whatsapp") == "on",
+        "send_calendar_invite_on_create": request.POST.get("send_calendar") == "on",
+        "create_commitment": request.POST.get("create_commitment") == "on",
+        "recurring_frequency": request.POST.get("recurring_frequency") or None,
+        "origin_actor": _origin_actor(request),
     }
     try:
+        request_id = request.POST.get("request_id") or request.session.setdefault("agreement_creation_request_id", str(uuid.uuid4()))
+        payload["request_id"] = str(uuid.UUID(request_id))
+        request.session["agreement_creation_request_id"] = payload["request_id"]
+        payload["attachments"] = _adjuntos_acuerdo(request)
         created = create_minute_agreement(**payload)
-    except AgenteDGError as exc:
+    except (AgenteDGError, RequestException, ValueError) as exc:
         logger.warning("Crear minuta Agente DG falló: %s", exc)
-        messages.error(request, "No se pudo crear el acuerdo en app.pollyanasdolce.com. No se creó en ERP para evitar desfase.")
+        request.session["agreement_creation_pending"] = True
+        messages.error(request, "No se confirmó la creación en origen. El acuerdo puede estar guardado; reintenta conservando la misma solicitud para recuperarlo sin duplicar.")
         return redirect("seguimiento:panel_dg")
 
     record = _record_minuta_agente_dg(created, responsable_user=responsable)
@@ -1175,17 +1332,146 @@ def crear_acuerdo_agente_dg(request):
             "El acuerdo se creó en app.pollyanasdolce.com, pero no se pudo reflejar inmediatamente en ERP. "
             "El sincronizador debe importarlo en el siguiente ciclo.",
         )
+        request.session["agreement_creation_pending"] = True
+        if request.POST.get("accion") == "notificar":
+            from .communications import notify_agreement
+            notify_agreement(request, None, source_id=created["id"])
         return redirect("seguimiento:panel_dg")
+    request.session.pop("agreement_creation_request_id", None)
+    request.session.pop("agreement_creation_pending", None)
     item = SeguimientoItem.objects.filter(
         metadata__source="agente_dg",
         metadata__source_table="minute_agreements",
         metadata__source_id=created.get("id"),
     ).first()
     log_event(request.user, "seguimiento.agente_dg.crear", "SeguimientoItem", item.pk if item else 0, counters)
-    messages.success(request, "Acuerdo creado en app.pollyanasdolce.com y reflejado en el ERP.")
+    if item and request.POST.get("accion") == "notificar":
+        from .communications import notify_agreement
+        messages.success(request, "Acuerdo creado en app y ERP.")
+        notify_agreement(request, item)
+    else:
+        messages.success(request, "Acuerdo guardado en app y ERP, sin solicitar notificaciones.")
     if item:
         return redirect("seguimiento:detalle_dg", pk=item.pk)
     return redirect("seguimiento:panel_dg")
+
+
+@login_required
+@require_POST
+def gestionar_acuerdo_agente_dg(request, pk):
+    from .agente_dg_client import AgenteDGError, get_minute_agreement, patch_minute_agreement, is_configured
+    from .communications import notify_agreement
+    if not can_review_seguimiento_global(request.user):
+        return JsonResponse({"error": "Acceso restringido a Dirección General."}, status=403)
+    item = get_object_or_404(SeguimientoItem, pk=pk, tipo=SeguimientoItem.TIPO_MINUTA)
+    source = _agente_dg_source(item)
+    if not source or source[0] != "minute_agreements" or not (_writeback_activo() and is_configured()):
+        messages.error(request, "Este acuerdo no tiene una integración de origen disponible.")
+        return redirect("seguimiento:detalle_dg", pk=pk)
+    action = request.POST.get("accion", "guardar")
+    if action not in {"guardar", "notificar", "reintentar", "reenviar", "consultar", "resolver_prorroga", "cancelar"}:
+        return JsonResponse({"error": "Acción no válida."}, status=400)
+    try:
+        original = get_minute_agreement(source[1])
+        if action == "resolver_prorroga":
+            from .agente_dg_client import review_minute_extension
+            request_id = request.POST.get("prorroga_id", "")
+            extension = next((row for row in original.get("extension_requests", []) if str(row.get("id")) == request_id), None)
+            decision = request.POST.get("decision", "")
+            comment = request.POST.get("comentario", "").strip()
+            if not extension or extension.get("status") != "pending" or decision not in {"approved", "rejected"} or not comment:
+                raise ValueError("Selecciona una solicitud pendiente e indica la decisión y su motivo.")
+            review_minute_extension(request_id, status=decision, comment=comment)
+            original = get_minute_agreement(source[1])
+        if action == "cancelar":
+            if request.POST.get("content_version", "") != (original.get("content_version") or ""):
+                raise ValueError("Consulta la versión vigente antes de cancelar.")
+            reason = request.POST.get("comentario", "").strip()
+            if not reason:
+                raise ValueError("Indica el motivo de cancelación.")
+            original = patch_minute_agreement(source[1], status="CANCELLED", completion_note=reason)
+        if action in {"guardar", "notificar"}:
+            if request.POST.get("content_version", "") != (original.get("content_version") or ""):
+                messages.error(request, "El acuerdo cambió en origen. Consulta su versión actual antes de editar.")
+                return redirect("seguimiento:detalle_dg", pk=pk)
+            title = (request.POST.get("titulo") or "").strip()
+            if not title or len(title) > 300:
+                raise ValueError("El título debe contener entre 1 y 300 caracteres.")
+            # Los puntos se editan por su ID original; nunca se reconstruyen desde títulos truncados.
+            points = []
+            for point in original.get("checklist_items") or []:
+                text = (request.POST.get(f"punto_{point['id']}", point["text"]) or "").strip()
+                if not text:
+                    raise ValueError("Los puntos existentes no pueden quedar vacíos.")
+                points.append({**point, "text": text})
+            points.extend({"text": line.strip(), "completed": False} for line in request.POST.get("nuevos_puntos", "").splitlines() if line.strip())
+            fields = {"origin_actor": _origin_actor(request), "title": title, "agreement_text": request.POST.get("descripcion", ""), "checklist_items": points,
+                      "meeting_label": request.POST.get("meeting_label", "").strip() or None,
+                      "send_email_on_create": request.POST.get("send_email") == "on",
+                      "send_whatsapp_on_create": request.POST.get("send_whatsapp") == "on",
+                      "send_calendar_invite_on_create": request.POST.get("send_calendar") == "on"}
+            attachments = _adjuntos_acuerdo(request)
+            if attachments:
+                fields["attachments"] = attachments
+            date = parse_date(request.POST.get("fecha_limite", ""))
+            hour = parse_time(request.POST.get("hora_limite", ""))
+            if not date or not hour:
+                raise ValueError("Selecciona fecha y hora válidas.")
+            fields["due_at"] = timezone.make_aware(datetime.combine(date, hour), timezone.get_current_timezone()).isoformat()
+            if fields["due_at"] != original.get("due_at"):
+                fields["postpone_reason"] = request.POST.get("motivo_fecha", "").strip()
+            original = patch_minute_agreement(source[1], **fields)
+        record = _record_minuta_actual(original)
+        upsert_agente_dg_payload({"source_table": "minute_agreements", "source_id": source[1], "record": record})
+        item.refresh_from_db()
+        log_event(request.user, "seguimiento.agente_dg.gestionar", "SeguimientoItem", item.pk, {"accion": action})
+        if action == "reenviar":
+            if not request.POST.get("motivo_reenvio", "").strip() or not request.POST.get("request_id"):
+                raise ValueError("El reenvío deliberado requiere motivo y una solicitud identificada.")
+            result = notify_agreement(request, item, event_type="updated", force_resend=True)
+            if result and all(state.get("status") in {"not_requested", "accepted", "delivered", "read"} for state in result["channels"].values()):
+                request.session.pop(f"agreement_resend_{item.pk}", None)
+        elif action in {"notificar", "cancelar"}:
+            notify_agreement(request, item, event_type="status_changed" if action == "cancelar" else "updated")
+        elif action == "reintentar":
+            event_key = request.POST.get("event_key", "")
+            event = next((e for e in item.metadata.get("communications", []) if e.get("event_key") == event_key
+                          and e.get("content_version") == request.POST.get("content_version")
+                          and e.get("event_type") == request.POST.get("event_type")), None)
+            if not event:
+                raise ValueError("Consulta el historial antes de seleccionar el envío a recuperar.")
+            notify_agreement(request, item, event_type=event.get("event_type", "assignment"), event_key=event_key,
+                             retry_channels={channel: state.get("status") == "failed" and request.POST.get(f"send_{channel}") == "on"
+                                             for channel, state in event.get("channels", {}).items() if isinstance(state, dict)})
+        else:
+            messages.success(request, "Acuerdo actualizado desde origen." if action in {"consultar", "resolver_prorroga"} else "Cambios guardados sin solicitar notificaciones.")
+    except (AgenteDGError, RequestException, ValueError) as exc:
+        logger.warning("Gestión de acuerdo %s no confirmada: %s", pk, type(exc).__name__)
+        messages.error(request, str(exc) if isinstance(exc, ValueError) else "No se confirmó la operación en origen. Consulta el acuerdo antes de reintentar.")
+    return redirect("seguimiento:detalle_dg", pk=pk)
+
+
+@login_required
+@require_POST
+def recuperar_creacion_acuerdo(request):
+    from .agente_dg_client import AgenteDGError, get_minute_creation
+    if not can_review_seguimiento_global(request.user):
+        return HttpResponseForbidden("Acceso restringido a Dirección General.")
+    token = request.session.get("agreement_creation_request_id")
+    try:
+        if not token:
+            raise ValueError("No hay una creación pendiente identificada en esta sesión.")
+        payload = get_minute_creation(token)
+        record = _record_minuta_actual(payload)
+        upsert_agente_dg_payload({"source_table": "minute_agreements", "source_id": payload["id"], "record": record})
+        item = SeguimientoItem.objects.get(metadata__source="agente_dg", metadata__source_table="minute_agreements", metadata__source_id=payload["id"])
+    except (AgenteDGError, RequestException, ValueError):
+        messages.warning(request, "Todavía no se pudo recuperar una creación confirmada. Conserva la misma solicitud; no se creó otro acuerdo ni se enviaron avisos.")
+        return redirect("seguimiento:panel_dg")
+    request.session.pop("agreement_creation_request_id", None)
+    request.session.pop("agreement_creation_pending", None)
+    messages.success(request, "Acuerdo recuperado desde origen. Revisa el contenido y sus comunicaciones antes de solicitar un envío.")
+    return redirect("seguimiento:detalle_dg", pk=item.pk)
 
 
 @login_required
@@ -1375,6 +1661,8 @@ def panel_dg(request):
     )
 
     return render(request, "seguimiento/panel_dg.html", {
+        "creation_request_id": request.session.setdefault("agreement_creation_request_id", str(uuid.uuid4())),
+        "creation_pending": request.session.get("agreement_creation_pending", False),
         "items": items,
         "items_estado": items,
         "colaboradores_estado": colaboradores_resumen,
@@ -1423,6 +1711,22 @@ def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
     """Guarda comentario y/o evidencia opcionales. Devuelve False si el archivo falla."""
     comentario_texto = (request.POST.get("comentario") or "").strip()
     archivo = request.FILES.get("archivo")
+    source = _agente_dg_source(item)
+    if source and source[0] == "minute_agreements" and _writeback_activo() and (archivo or comentario_texto):
+        from .agente_dg_client import post_minute_evidence, post_minute_comment
+        actor = request.user.get_full_name() or request.user.username
+        text = f"[ERP · {actor} · {prefijo}] {comentario_texto}"
+        if archivo:
+            error = _validar_archivo_evidencia(archivo)
+            if error or archivo.size > 10 * 1024 * 1024:
+                messages.error(request, error or "La evidencia de origen admite hasta 10 MB.")
+                return False
+        def publish(source_id):
+            if archivo:
+                post_minute_evidence(source_id, archivo, text, request_id=_operation_id(request, item), origin_actor=_origin_actor(request))
+            elif comentario_texto:
+                post_minute_comment(source_id, text, request_id=_operation_id(request, item), origin_actor=_origin_actor(request))
+        return _source_input(request, item, publish) is True
     if archivo:
         error_archivo = _validar_archivo_evidencia(archivo)
         if error_archivo:
@@ -1447,9 +1751,7 @@ def _registrar_cierre_opcional(request, item, prefijo: str) -> bool:
 
 @login_required
 @require_POST
-@transaction.atomic
 def entregar_para_revision(request, pk):
-    _lock_revision(pk)
     item = _get_item_para_usuario(request.user, pk)
     if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_BLOQUEADO:
         return _revision_response(request, item, "Este acuerdo no admite una entrega en su estado actual.", status=409)
@@ -1465,24 +1767,36 @@ def entregar_para_revision(request, pk):
         if error:
             return _revision_response(request, item, error, status=400)
     source = _agente_dg_source(item)
-    if source and source[0] == "minute_agreements" and _writeback_activo():
+    source_active = source and source[0] == "minute_agreements" and _writeback_activo()
+    if source_active:
         from .agente_dg_client import AgenteDGError
         from .minuta_checklist import sincronizar_checklist_minuta
         try:
+            _verify_source_assignment(request, item)
             sincronizar_checklist_minuta(item)
         except (AgenteDGError, RequestException) as exc:
             logger.warning("No se confirmó checklist de entrega %s: %s", item.pk, exc)
             return _revision_response(request, item, "No se pudo confirmar la lista de puntos en origen. Actualiza el acuerdo y reintenta.", status=502)
-    if not _registrar_cierre_opcional(request, item, "ENTREGA"):
-        return _revision_response(request, item, "No se pudo guardar la evidencia.", status=400)
-    _guardar_revision(item, SeguimientoItem.ESTATUS_EN_REVISION, request.user)
-    snapshot = [{"id": point.pk, "titulo": point.titulo, "completado": point.completado,
-                 "completado_at": point.completado_at.isoformat() if point.completado_at else None}
-                for point in item.checklist.all()]
-    item.metadata = {**item.metadata, "entrega_snapshot": snapshot}
-    item.save(update_fields=["metadata", "updated_at"])
-    log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True, "checklist": snapshot})
-    transaction.on_commit(lambda: notificar_seguimiento_entrega(item, actor=request.user))
+        # El origen llama al webhook ERP: no sostener una transacción local durante ese HTTP.
+        if not _registrar_cierre_opcional(request, item, "ENTREGA"):
+            return _revision_response(request, item, "No se confirmó la evidencia en origen; consulta antes de repetir.", status=502)
+    with transaction.atomic():
+        _lock_revision(pk)
+        item = _get_item_para_usuario(request.user, pk)
+        if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION:
+            return _revision_response(request, item, "La entrega ya está registrada y espera revisión.")
+        if item.esta_cerrado or item.estatus == SeguimientoItem.ESTATUS_BLOQUEADO or item.checklist.filter(completado=False).exists():
+            return _revision_response(request, item, "El estado cambió durante la entrega. Consulta el acuerdo y su evidencia.", status=409)
+        if not source_active and not _registrar_cierre_opcional(request, item, "ENTREGA"):
+            return _revision_response(request, item, "No se pudo guardar la evidencia.", status=400)
+        _guardar_revision(item, SeguimientoItem.ESTATUS_EN_REVISION, request.user)
+        snapshot = [{"id": point.pk, "titulo": point.titulo, "completado": point.completado,
+                     "completado_at": point.completado_at.isoformat() if point.completado_at else None}
+                    for point in item.checklist.all()]
+        item.metadata = {**item.metadata, "entrega_snapshot": snapshot}
+        item.save(update_fields=["metadata", "estatus", "updated_at"])
+        log_event(request.user, "seguimiento.entrega", "SeguimientoItem", item.pk, {"entrega": True, "checklist": snapshot})
+        transaction.on_commit(lambda: notificar_seguimiento_entrega(item, actor=request.user))
     return _revision_response(request, item, "Entrega registrada. Dirección General puede revisarla.")
 
 
@@ -1526,6 +1840,8 @@ def completar_directamente(request, pk):
 @login_required
 def detalle_item(request, pk, *, fragment=False):
     item = _get_item_para_usuario(request.user, pk)
+    item.operation_request_id = request.session.setdefault(f"agreement_operation_{item.pk}", str(uuid.uuid4()))
+    item.source_draft = request.session.get(f"agreement_source_draft_{item.pk}", "")
     checks = list(item.checklist.all())
     _aplicar_estado_visual_seguimiento(item, checks)
     checklist_total = item.checklist_total
@@ -1685,6 +2001,8 @@ def detalle_item_dg(request, pk, *, fragment=False):
         .prefetch_related("checklist__completado_por", "comentarios__usuario", "evidencias__usuario", "prorrogas"),
         pk=pk,
     )
+    item.operation_request_id = request.session.setdefault(f"agreement_operation_{item.pk}", str(uuid.uuid4()))
+    item.resend_request_id = request.session.setdefault(f"agreement_resend_{item.pk}", str(uuid.uuid4()))
     checks = list(item.checklist.all())
     _aplicar_estado_visual_seguimiento(item, checks)
     checklist_total = item.checklist_total
@@ -1727,6 +2045,7 @@ def detalle_item_dg(request, pk, *, fragment=False):
         "writeback_activo": False,  # DG es solo lectura — nunca activa write-back
         "pasos_a_aprobar": [],      # DG no aprueba pasos individuales
         "es_vista_dg": True,
+        "puede_gestionar_acuerdo": _writeback_activo() and _agente_dg_source(item) is not None and item.tipo == SeguimientoItem.TIPO_MINUTA,
         "puede_resolver_dg": item.estatus == SeguimientoItem.ESTATUS_EN_REVISION,
         "puede_cerrar_minuta_dg": item.puede_cerrar_minuta_dg,
     })

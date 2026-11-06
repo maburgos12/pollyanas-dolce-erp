@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime, time
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import transaction, connection
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 
@@ -49,13 +49,12 @@ AGENTE_DG_SOURCE_TABLE_TYPES = {
     "minute_agreements": SeguimientoItem.TIPO_MINUTA,
     "minute_projects": SeguimientoItem.TIPO_PROYECTO,
 }
-CHECKLIST_TITULO_MAX_LENGTH = 220
 _PRESERVE_CHECKLIST = object()
 
 
-def _truncate_for_charfield(value: str, max_length: int) -> str:
+def _truncate_for_charfield(value: str, max_length: int | None) -> str:
     value = (value or "").strip()
-    if len(value) <= max_length:
+    if max_length is None or len(value) <= max_length:
         return value
     return value[: max_length - 3].rstrip() + "..."
 
@@ -391,18 +390,35 @@ class AgenteDGSeguimientoImporter:
             counters["skipped"] += 1
             return
 
+        # Serializa también el primer webhook contra el espejo del POST, cuando aún no hay fila.
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s), hashtext(%s))", [f"seguimiento:{source_table}", str(row["id"])])
+
         item = SeguimientoItem.objects.select_for_update().filter(
             metadata__source="agente_dg",
             metadata__source_table=source_table,
             metadata__source_id=row["id"],
         ).first()
         user = self._resolve_user(row)
+        if source_table == "minute_agreements" and row.get("user_id") is not None:
+            # El ID de origen no se puede combinar con el nombre del dueño anterior.
+            email = (row.get("user_email") or "").strip()
+            matches = list(get_user_model().objects.filter(is_active=True, email__iexact=email)[:2]) if email else []
+            user = matches[0] if len(matches) == 1 else None
+            if not email and item and (item.metadata or {}).get("source_user_id") == row["user_id"]:
+                user = item.responsable_user if item.responsable_user and item.responsable_user.is_active else None
         empleado = empleado_de_usuario(user) if user else None
         participants_supplied = participants is not None
         participant_users, participant_empleados, participant_payload = self._resolve_participants(participants or [])
         participant_users = [participant for participant in participant_users if not user or participant.pk != user.pk]
         participant_empleados = [participant for participant in participant_empleados if not empleado or participant.pk != empleado.pk]
         previous_participants = (item.metadata or {}).get("source_participants", []) if item else []
+        previous_metadata = (item.metadata or {}) if item else {}
+        incoming_updated = agente_dg_as_datetime(row.get("updated_at"))
+        previous_updated = agente_dg_as_datetime(previous_metadata.get("source_updated_at"))
+        if incoming_updated and previous_updated and incoming_updated < previous_updated:
+            counters["skipped"] += 1
+            return
         metadata = {
             "source": "agente_dg",
             "source_table": source_table,
@@ -416,8 +432,24 @@ class AgenteDGSeguimientoImporter:
             "synced_at": timezone.now().isoformat(),
             "source_participants": participant_payload if participants_supplied else previous_participants,
         }
+        for key in ("communications", "content_version", "attachments", "comments", "extension_requests", "evidence", "send_email_on_create", "send_whatsapp_on_create", "send_calendar_invite_on_create"):
+            if key in row:
+                metadata[key] = row[key]
+            elif key in previous_metadata:
+                metadata[key] = previous_metadata[key]
+        metadata["source_updated_at"] = _json_datetime(row.get("updated_at")) or previous_metadata.get("source_updated_at", "")
+        if source_table == "minute_agreements" and row.get("checklist_items_json") is not None:
+            try:
+                source_points = json.loads(row["checklist_items_json"] or "[]")
+            except (TypeError, ValueError):
+                raise ValueError("Checklist de origen no válido.")
+            if not isinstance(source_points, list):
+                raise ValueError("Checklist de origen no válido.")
+            metadata["source_checklist"] = source_points
+        elif "source_checklist" in previous_metadata:
+            metadata["source_checklist"] = previous_metadata["source_checklist"]
         # Contratos guardados por ERP: nunca aceptar estas claves desde un webhook.
-        for key in ("checklist_writeback", "entrega_snapshot"):
+        for key in ("checklist_writeback", "entrega_snapshot", "notification_events"):
             if item and key in (item.metadata or {}):
                 metadata[key] = item.metadata[key]
         # Solo minutas y proyectos pasan por aprobación del DG. Los compromisos son
@@ -484,6 +516,8 @@ class AgenteDGSeguimientoImporter:
             item.participantes_user.set(participant_users)
             item.participantes_empleado.set(participant_empleados)
 
+        self._sync_communication_notifications(item)
+
         if checklist is _PRESERVE_CHECKLIST:
             return
         if item.estatus == SeguimientoItem.ESTATUS_EN_REVISION and metadata.get("entrega_snapshot"):
@@ -506,6 +540,35 @@ class AgenteDGSeguimientoImporter:
                 "items": [{"text": point["titulo"], "completed": bool(point.get("completado")),
                            "completed_at": point.get("completado_at")} for point in (checklist_payload or [])],
             }
+            item.save(update_fields=["metadata", "updated_at"])
+
+    def _sync_communication_notifications(self, item):
+        from core.notificaciones import crear_notificaciones, usuarios_direccion_general
+        from core.models import Notificacion
+        metadata = item.metadata
+        seen = set(metadata.get("notification_events", []))
+        before = set(seen)
+        labels = {"assignment": "Nuevo acuerdo", "updated": "Acuerdo actualizado", "status_changed": "Estado del acuerdo",
+                  "submitted": "Acuerdo entregado para revisión", "commented": "Comentario en acuerdo", "evidence_added": "Evidencia de acuerdo",
+                  "extension_requested": "Prórroga solicitada", "extension_resolved": "Prórroga resuelta", "reminder": "Recordatorio de acuerdo"}
+        for event in metadata.get("communications", []):
+            if not isinstance(event, dict) or not event.get("event_key"):
+                continue
+            if str(event["event_key"]).startswith("legacy:"):
+                continue
+            identity = json.dumps([event.get(key) for key in ("content_version", "event_type", "event_key")], ensure_ascii=False)
+            if identity in seen:
+                continue
+            kind = event.get("event_type")
+            recipient_id = (event.get("internal_notification") or {}).get("recipient_user_id")
+            to_collaborator = recipient_id and str(recipient_id) == str(metadata.get("source_user_id"))
+            recipients = [item.responsable_user] if to_collaborator else (usuarios_direccion_general() if kind in {"submitted", "commented", "evidence_added", "extension_requested"} else [item.responsable_user])
+            crear_notificaciones(recipients, titulo=f"{labels.get(kind, 'Comunicación de acuerdo')}: {item.titulo}",
+                mensaje="Consulta el acuerdo y el resultado de cada canal.", url=f"/seguimiento/panel/{item.pk}/" if recipients != [item.responsable_user] else f"/seguimiento/{item.pk}/", tipo=Notificacion.TIPO_SEGUIMIENTO,
+                objeto_tipo="seguimiento.SeguimientoItem", objeto_id=item.pk)
+            seen.add(identity)
+        if seen != before:
+            metadata["notification_events"] = sorted(seen)
             item.save(update_fields=["metadata", "updated_at"])
 
     def _resolve_participants(self, participants):
@@ -568,7 +631,7 @@ class AgenteDGSeguimientoImporter:
             titulo_completo = (payload.get("titulo") or "").strip()
             if not titulo_completo:
                 continue
-            titulo = _truncate_for_charfield(titulo_completo, CHECKLIST_TITULO_MAX_LENGTH)
+            titulo = _truncate_for_charfield(titulo_completo, SeguimientoChecklistItem._meta.get_field("titulo").max_length)
             origen_step_id = payload.get("origen_step_id")
             check = existing_by_step.get(origen_step_id) if origen_step_id else None
             if check and check.pk in desired_check_ids:

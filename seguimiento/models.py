@@ -31,7 +31,7 @@ class SeguimientoItem(models.Model):
     ]
 
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES, db_index=True)
-    titulo = models.CharField(max_length=220)
+    titulo = models.CharField(max_length=300)
     descripcion = models.TextField(blank=True, default="")
     entregable_esperado = models.TextField(blank=True, default="")
     responsable_user = models.ForeignKey(
@@ -58,7 +58,7 @@ class SeguimientoItem(models.Model):
         related_name="seguimiento_participaciones",
         blank=True,
     )
-    area = models.CharField(max_length=120, blank=True, default="")
+    area = models.CharField(max_length=200, blank=True, default="")
     fecha_limite = models.DateTimeField(null=True, blank=True, db_index=True)
     estatus = models.CharField(max_length=20, choices=ESTATUS_CHOICES, default=ESTATUS_PENDIENTE, db_index=True)
     requiere_aprobacion = models.BooleanField(default=True)
@@ -106,7 +106,7 @@ class SeguimientoItem(models.Model):
 
 class SeguimientoChecklistItem(models.Model):
     seguimiento = models.ForeignKey(SeguimientoItem, on_delete=models.CASCADE, related_name="checklist")
-    titulo = models.CharField(max_length=220)
+    titulo = models.TextField()
     descripcion = models.TextField(blank=True, default="")
     orden = models.PositiveIntegerField(default=0)
     completado = models.BooleanField(default=False, db_index=True)

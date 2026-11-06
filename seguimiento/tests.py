@@ -1479,7 +1479,7 @@ class SeguimientoColaboradorTests(TestCase):
         self.assertEqual(checks[1].titulo, "Paso uno actualizado")
         self.assertTrue(checks[1].completado)
 
-    def test_importador_trunca_titulo_de_checklist_largo_y_preserva_texto(self):
+    def test_importador_conserva_titulo_completo_de_checklist_largo(self):
         command = ImportarAgenteDGCommand()
         counters = {"created": 0, "updated": 0, "skipped": 0}
         texto_largo = (
@@ -1509,9 +1509,8 @@ class SeguimientoColaboradorTests(TestCase):
 
         item = SeguimientoItem.objects.get(titulo="Refacciones de hornos")
         check = item.checklist.get()
-        self.assertLessEqual(len(check.titulo), 220)
-        self.assertTrue(check.titulo.endswith("..."))
-        self.assertEqual(check.descripcion, texto_largo)
+        self.assertEqual(check.titulo, texto_largo)
+        self.assertEqual(check.descripcion, "")
 
     def test_minute_query_incluye_archivadas_cerradas(self):
         self.assertIn("m.archived_at IS NULL", MINUTE_QUERY)
