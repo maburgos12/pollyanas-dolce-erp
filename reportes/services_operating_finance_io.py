@@ -5,9 +5,10 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from django.db import transaction
+from django.db import connection, transaction
 from openpyxl import Workbook, load_workbook
 
+from core.models import AuditLog
 from reportes.models import CategoriaGasto, CentroCosto, GastoOperativoMensual
 
 
@@ -112,6 +113,31 @@ class OperatingFinanceTemplateService:
         return output
 
 
+def validar_reimportacion_gastos_documentados(external_keys):
+    claves = {str(key or "").strip() for key in external_keys}
+    if not any(key.startswith("2025-") for key in claves):
+        return
+    if not connection.in_atomic_block:
+        raise RuntimeError("La protección documental requiere una transacción.")
+    # El aplicador comparte este bloqueo para no competir con una importación.
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(2025, 531)")
+    auditorias = AuditLog.objects.filter(
+        action="clasificar_gastos2025_documentados",
+        model="reportes.GastoOperativoMensual", object_id="2025",
+    ).values_list("payload", flat=True)
+    for payload in auditorias:
+        protegidas = payload.get("protected_external_keys") if isinstance(payload, dict) else None
+        if (not isinstance(protegidas, list) or not protegidas
+                or any(not isinstance(key, str) or not key.startswith("2025-") for key in protegidas)):
+            raise ValueError("La auditoría de gastos 2025 está incompleta; no se puede reimportar.")
+        if claves.intersection(protegidas):
+            raise ValueError(
+                "El archivo contiene gastos 2025 corregidos documentalmente. "
+                "No se importó ninguna fila; use la conciliación auditada para revisarlos."
+            )
+
+
 class OperatingFinanceExpenseImportService:
     REQUIRED_HEADERS = {
         "external_key",
@@ -137,6 +163,9 @@ class OperatingFinanceExpenseImportService:
             raise ValueError(f"Faltan columnas requeridas: {', '.join(sorted(missing))}.")
 
         header_map = {header: index for index, header in enumerate(headers)}
+        validar_reimportacion_gastos_documentados(
+            row[header_map["external_key"]] for row in rows[1:] if any(row)
+        )
         created = 0
         updated = 0
         periods: set[str] = set()

@@ -257,7 +257,7 @@
           <div>
             <strong>{{ r.sucursal.nombre }}</strong>
             <div class="muted">
-              {% if r.punto_equilibrio_mensual <= 0 %}Sin gasto fijo cargado{% else %}PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% if r.fuente_gastos_incompleta %} · parcial {{ r.cobertura_gastos_pct }}%{% endif %}{% endif %}
+              {% if r.periodo.year == 2025 and r.ventas_netas == 0 and r.gasto_fijo_total %}Sin ventas para estimar PE{% elif r.punto_equilibrio_mensual <= 0 %}Sin gasto fijo cargado{% else %}PE ${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% if r.fuente_gastos_incompleta %} · parcial {{ r.cobertura_gastos_pct }}%{% endif %}{% endif %}
             </div>
           </div>
           <strong>{% if r.punto_equilibrio_mensual <= 0 %}Pendiente{% elif r.porcentaje_avance_pe >= 100 %}Cubierto{% else %}{{ r.porcentaje_avance_pe }}%{% endif %}</strong>
@@ -432,7 +432,9 @@
                 <div class="metric-stack">
                   <strong>{% if r.punto_equilibrio_mensual <= 0 %}No calculable{% else %}${{ r.punto_equilibrio_mensual|floatformat:0|intcomma }}{% endif %}</strong>
                   <span class="cell-note">
-                    {% if r.punto_equilibrio_mensual <= 0 %}
+                    {% if r.periodo.year == 2025 and r.ventas_netas == 0 and r.gasto_fijo_total %}
+                    Sin ventas para estimar PE
+                    {% elif r.punto_equilibrio_mensual <= 0 %}
                     Sin gasto fijo cargado
                     {% elif r.fuente_gastos_incompleta %}
                     PE parcial · {{ r.cobertura_gastos_pct }}% de categorías de gasto
@@ -444,7 +446,9 @@
                   </span>
                 </div>
                 <div class="pe-progress-value">
-                  {% if r.punto_equilibrio_mensual <= 0 %}
+                  {% if r.periodo.year == 2025 and r.ventas_netas == 0 and r.gasto_fijo_total %}
+                  <span class="negative">gasto documentado; sin ventas</span>
+                  {% elif r.punto_equilibrio_mensual <= 0 %}
                   <span class="negative">gastos no cargados</span>
                   {% elif r.brecha_pe > 0 %}
                   <span class="negative">${{ r.brecha_pe|floatformat:0|intcomma }}</span>
