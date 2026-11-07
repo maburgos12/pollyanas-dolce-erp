@@ -75,6 +75,54 @@ class ConteoViewsTests(TestCase):
         self.assertEqual(self.count.version, 3)
         self.assertEqual(str(LecturaConteoSucursal.objects.get(linea=line).cantidad), '2.500000')
 
+    def test_partial_send_exposes_pending_lines_without_turning_them_into_zero(self):
+        import json
+        from django.utils import timezone
+        from inventario.conteos_conciliacion import calcular_cierre_linea, cierre_dia
+        from inventario.conteos_nocturna import _publicar, huella_lecturas
+        from inventario.models_conteos import LecturaConteoSucursal
+        from inventario.services_conteos import ejecutar_accion, lecturas_efectivas
+
+        ejecutar_accion(conteo_id=self.count.pk, actor=self.operator, action='iniciar',
+            version=1, request_id=uuid4(), payload={})
+        second = PointProduct.objects.create(external_id='ct-200', sku='CT200', name='Pendiente de prueba',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'CT200','Unidad':'PZA'})})
+        ejecutar_accion(conteo_id=self.count.pk, actor=self.operator, action='agregar',
+            version=2, request_id=uuid4(), payload={'lecturas':{}, 'articulo':f'p{second.pk}'})
+        self.client.force_login(self.operator)
+        first = self.count.lineas.get(producto=self.product)
+        missing = self.count.lineas.get(producto=second)
+        body = {'action':'enviar', 'version':3, 'request_id':str(uuid4()),
+                'lecturas_json':json.dumps({str(first.pk):{'cantidad':'0'}})}
+        response = self.client.post(self.url('accion'), body, HTTP_ACCEPT='application/json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['result']['estado'], 'ENVIADO')
+        self.count.refresh_from_db()
+        self.assertEqual(self.count.ronda, 1)
+        self.assertIsNone(LecturaConteoSucursal.objects.get(linea=missing).cantidad)
+        snapshot = {row['linea_id']:row['cantidad'] for row in self.count.eventos.get(action='enviar').payload['snapshot']}
+        self.assertIsNone(snapshot[missing.pk])
+        self.assertEqual(snapshot[first.pk], '0.000000')
+
+        readings = lecturas_efectivas(self.count)
+        close = cierre_dia(self.count.fecha)
+        pending = calcular_cierre_linea(next(r for r in readings if r.linea_id == missing.pk),
+            snapshot=None, batch=None, cierre=close, branch_id=1)
+        self.assertIsNone(pending['diferencia'])
+        self.assertFalse(pending['reintentar'])
+        self.assertTrue(_publicar(self.count, readings, {
+            'estado':'PARCIAL', 'cierre_en':close.isoformat(), 'procesado_en':timezone.now().isoformat(),
+            'huella_lecturas':huella_lecturas(readings),
+            'lineas':{str(first.pk):{'estado':'CALCULADA','diferencia':'0'},str(missing.pk):pending},
+        }))
+        self.count.refresh_from_db()
+        self.assertEqual((self.count.estado, self.count.ronda, self.count.version), ('ENVIADO', 1, 4))
+        self.assertEqual(self.count.conciliacion['automatizacion']['accion'], 'NINGUNA')
+        self.client.force_login(self.admin)
+        review_url = reverse('inventario:conteos_erp:detalle', args=[self.count.pk])
+        self.assertContains(self.client.get(review_url), 'Pendiente de contar')
+        self.assertContains(self.client.get(review_url, {'imprimir':'1'}), 'Pendiente de contar')
+
     def test_assigned_capture_is_blind_no_reference_data(self):
         self.client.force_login(self.operator)
         self.count.referencia = {'secret_expected_stock':'314159', 'lineas':{}}
@@ -125,12 +173,12 @@ class ConteoViewsTests(TestCase):
         self.count.refresh_from_db()
         self.assertEqual(self.count.estado, 'ENVIADO')
 
-    def test_missing_cannot_submit(self):
+    def test_empty_count_cannot_submit(self):
         self.client.force_login(self.operator)
         self.client.post(self.url('accion'), {'action':'iniciar','version':1,'request_id':str(uuid4())}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         response = self.client.post(self.url('accion'), {'action':'enviar','version':2,'request_id':str(uuid4())}, HTTP_X_REQUESTED_WITH='XMLHttpRequest')
         self.assertEqual(response.status_code, 400)
-        self.assertIn('Completa cada cantidad',response.json()['toast']['message'])
+        self.assertIn('al menos una cantidad o incidencia',response.json()['toast']['message'])
 
     def test_not_handled_is_retained_without_a_zero_or_numeric_difference(self):
         from inventario.models_conteos import LecturaConteoSucursal

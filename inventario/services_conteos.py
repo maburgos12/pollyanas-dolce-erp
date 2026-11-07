@@ -199,7 +199,8 @@ def ejecutar_accion(*, conteo_id, actor, action, version, request_id, payload):
         _guardar(count,actor,payload)
         if action=='enviar':
             effective=lecturas_efectivas(count)
-            if any(r.cantidad is None and not r.incidencia.strip() for r in effective): raise ConteoError('Completa cada cantidad o registra una incidencia.')
+            if not any(r.ronda == count.ronda and (r.cantidad is not None or r.incidencia.strip()) for r in effective):
+                raise ConteoError('Registra al menos una cantidad o incidencia en esta ronda para enviar.')
             count.estado='ENVIADO'
             count.enviado_en=timezone.now()
             event_payload['snapshot']=[{'linea_id':r.linea_id,'ronda':r.ronda,'cantidad':str(r.cantidad) if r.cantidad is not None else None,'incidencia':r.incidencia,
