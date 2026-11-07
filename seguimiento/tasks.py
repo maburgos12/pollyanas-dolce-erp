@@ -68,6 +68,8 @@ def _conteos_recordatorio_usuario(user, hoy, manana) -> dict[str, int]:
     items = _items_para_usuario(user).exclude(
         estatus__in=[SeguimientoItem.ESTATUS_COMPLETADO, SeguimientoItem.ESTATUS_CANCELADO]
     )
+    # Las minutas de la app tienen un solo emisor de recordatorios: su servicio de origen.
+    items = items.filter(Q(metadata__source_table__isnull=True) | ~Q(metadata__source_table="minute_agreements"))
     items_count = items.filter(fecha_limite__gte=start_dt, fecha_limite__lte=end_dt).count()
     pasos_count = SeguimientoChecklistItem.objects.filter(
         seguimiento__in=items.values("pk"),

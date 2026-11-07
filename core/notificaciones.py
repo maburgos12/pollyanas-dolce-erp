@@ -25,7 +25,8 @@ def _panel_url(pk) -> str:
 def _correo_dg_aplica(item) -> bool:
     """El DG recibe correo solo de minutas. Compromisos y proyectos quedan solo
     como notificación dentro del ERP para no saturar su bandeja."""
-    return getattr(item, "tipo", "") == "MINUTA"
+    return (getattr(item, "tipo", "") == "MINUTA"
+            and (getattr(item, "metadata", {}) or {}).get("source_table") != "minute_agreements")
 
 
 def _enviar_correo_dg(asunto: str, cuerpo: str) -> None:
@@ -243,6 +244,10 @@ def notificar_prestamo_aprobado(prestamo, *, actor=None) -> int:
 
 
 def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "", enviar_correo: bool = True) -> int:
+    if enviar_correo:
+        from seguimiento.communications import dispatch_event
+        if dispatch_event(item, "evidence_added" if mensaje_extra.startswith("Archivo:") else "commented", actor=actor, message=mensaje_extra):
+            return 0
     destinatarios = usuarios_direccion_general()
     titulo = item.titulo[:80]
     responsable = ""
@@ -269,6 +274,9 @@ def notificar_seguimiento_avance(item, *, actor=None, mensaje_extra: str = "", e
 
 
 def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "extension_requested", actor=actor, message=f"Nueva fecha solicitada: {fecha_solicitada:%d/%m/%Y}. {motivo}"):
+        return 0
     destinatarios = usuarios_direccion_general()
     titulo = item.titulo[:80]
     actor_nombre = ""
@@ -298,6 +306,9 @@ def notificar_seguimiento_prorroga(item, fecha_solicitada, motivo: str = "", *, 
 
 
 def notificar_seguimiento_entrega(item, *, actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "submitted", actor=actor, message="Acuerdo entregado para revisión de Dirección General."):
+        return 0
     destinatarios = usuarios_direccion_general()
     titulo = item.titulo[:80]
     actor_nombre = ""
@@ -324,6 +335,9 @@ def notificar_seguimiento_entrega(item, *, actor=None) -> int:
 
 
 def notificar_seguimiento_completado(item, *, actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "status_changed", actor=actor, message="Acuerdo completado."):
+        return 0
     destinatarios = usuarios_direccion_general()
     titulo = item.titulo[:80]
     actor_nombre = ""
@@ -367,6 +381,9 @@ def _responsables_item(item) -> list:
 
 
 def notificar_seguimiento_aprobado(item, *, comentario: str = "", actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "status_changed", actor=actor, message=f"Acuerdo aprobado. {comentario}"):
+        return 0
     """Notifica al responsable que el DG aprobó y cerró su acuerdo."""
     destinatarios = _responsables_item(item)
     titulo = item.titulo[:80]
@@ -389,6 +406,9 @@ def notificar_seguimiento_aprobado(item, *, comentario: str = "", actor=None) ->
 
 
 def notificar_seguimiento_devuelto(item, *, comentario: str = "", actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "status_changed", actor=actor, message=f"Acuerdo devuelto para corrección. {comentario}"):
+        return 0
     """Notifica al responsable que el DG devolvió el acuerdo para corrección."""
     destinatarios = _responsables_item(item)
     titulo = item.titulo[:80]
@@ -458,6 +478,9 @@ def notificar_paso_devuelto_por_colaborador(check, *, motivo: str = "", actor=No
 
 
 def notificar_seguimiento_feedback_responsable(item, *, comentario: str = "", actor=None) -> int:
+    from seguimiento.communications import dispatch_event
+    if dispatch_event(item, "updated", actor=actor, message=comentario):
+        return 0
     """Notifica al responsable que el DG dejó retroalimentación en su acuerdo."""
     destinatarios = _responsables_item(item)
     titulo = item.titulo[:80]
