@@ -305,7 +305,7 @@
       items.forEach(function(item){
         var row=document.createElement('div');row.className='count-catalog-result';
         var copy=document.createElement('span'),name=document.createElement('strong'),meta=document.createElement('small');
-        name.textContent=item.nombre;meta.textContent=item.codigo+(item.unidad?' · '+item.unidad:' · Unidad pendiente');
+        name.textContent=item.nombre;meta.textContent=item.codigo+' · '+item.codigo_unico+(item.unidad?' · '+item.unidad:' · Unidad pendiente');
         copy.append(name,meta);
         var add=document.createElement('button');add.type='button';add.className='count-button secondary';add.textContent='Agregar';
         if(!item.unidad){add.disabled=true;add.title='La unidad debe sincronizarse antes de agregar el artículo.';}

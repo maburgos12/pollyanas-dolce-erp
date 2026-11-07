@@ -332,6 +332,8 @@ class NightlyCountTests(TestCase):
         self.client.force_login(self.admin)
         response=self.client.get(reverse('inventario:conteos_erp:exportar',args=[self.count.pk]))
         workbook=load_workbook(BytesIO(response.content))
-        cells=[row[9] for row in workbook['Lecturas históricas'].iter_rows(min_row=2)]
+        sheet=workbook['Lecturas históricas']
+        physical_time_column=next(cell.column for cell in sheet[1] if cell.value=='Hora física declarada')
+        cells=[row[physical_time_column-1] for row in sheet.iter_rows(min_row=2)]
         preserved=next(cell for cell in cells if cell.value=="'=1+1")
         self.assertEqual(preserved.data_type,'s')

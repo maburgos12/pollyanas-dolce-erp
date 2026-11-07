@@ -1,8 +1,8 @@
-<div class="count-line" data-count-line data-count-type="{{ tipo }}" data-search="{{ row.linea.nombre }} {{ row.linea.codigo }}">
+<div class="count-line" data-count-line data-count-type="{{ tipo }}" data-search="{{ row.linea.nombre }} {{ row.linea.codigo }} {{ row.linea.codigo_unico }}">
   <div class="count-line-main">
     <div class="count-product">
       <label for="cantidad-{{ row.linea.pk }}">{{ row.linea.nombre }}</label>
-      <span class="count-meta">{{ row.linea.codigo }} · {{ row.linea.unidad }}</span>
+      <span class="count-meta">{{ row.linea.codigo }} · {{ row.linea.codigo_unico }} · {{ row.linea.unidad }}</span>
     </div>
     <div class="count-quantity">
       <span class="count-unit" aria-hidden="true">{{ row.linea.unidad }}</span>

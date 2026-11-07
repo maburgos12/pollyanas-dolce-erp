@@ -40,7 +40,7 @@
         <tbody>
         {% for row in rows %}
           <tr>
-            <th scope="row">{{ row.linea.nombre }}<small>{{ row.linea.codigo }}</small></th>
+            <th scope="row">{{ row.linea.nombre }}<small>{{ row.linea.codigo }} · {{ row.linea.codigo_unico }}</small></th>
             <td>{{ row.linea.unidad }}</td>
             <td class="number">{{ row.cantidad_visible|default:"Sin cantidad" }}</td>
             {% if row.conciliacion.estado == 'CALCULADA' %}

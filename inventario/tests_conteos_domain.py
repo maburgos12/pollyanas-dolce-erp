@@ -176,11 +176,21 @@ class ConteosDomainTests(TestCase):
         with self.assertRaises(self.service.ConteoError):
             self.service.preparar_conteo(**{**self.args,'request_id':uuid4(),'items':[{'producto_id':p.pk,'unidad':'pza','fuente_unidad':'catálogo'}]})
 
-    def test_rejects_duplicate_physical_code(self):
-        a=PointProduct.objects.create(external_id='duplicate-a',sku='888',name='A')
-        b=PointProduct.objects.create(external_id='duplicate-b',sku='888',name='B')
-        with self.assertRaises(self.service.ConteoError):
-            self.service.preparar_conteo(**{**self.args,'request_id':uuid4(),'items':[{'producto_id':p.pk,'unidad':'pza','fuente_unidad':'catálogo'} for p in (a,b)]})
+    def test_same_legacy_code_keeps_distinct_product_identities(self):
+        metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'888','Unidad':'pza'})}
+        a=PointProduct.objects.create(external_id='duplicate-a',sku='888',name='A',metadata=metadata)
+        b=PointProduct.objects.create(external_id='duplicate-b',sku='888',name='B',metadata=metadata)
+        count=self.service.preparar_conteo(**{**self.args,'request_id':uuid4(),'items':[{'producto_id':p.pk,'unidad':'pza','fuente_unidad':'catálogo'} for p in (a,b)]})
+        self.assertEqual(set(count.lineas.values_list('codigo',flat=True)),{'888'})
+        self.assertEqual({line.codigo_unico for line in count.lineas.select_related('producto')},{'POINT_PRODUCT:duplicate-a','POINT_PRODUCT:duplicate-b'})
+
+    def test_add_allows_other_identity_with_same_legacy_code(self):
+        self.act('iniciar')
+        product=PointProduct.objects.create(external_id='same-code-other-product',sku='901',name='Otra identidad',
+            metadata={COUNT_UNIT_KEY:catalog_count_unit({'Codigo':'901','Unidad':'pza'})})
+        self.act('agregar',{**self.readings('1'),'articulo':f'p{product.pk}'})
+        self.assertEqual(self.count.lineas.filter(codigo='901').count(),2)
+        self.assertEqual(len({line.codigo_unico for line in self.count.lineas.filter(codigo='901').select_related('producto')}),2)
 
     def test_capture_visibility_is_branch_specific_and_revocable(self):
         from inventario.conteos_access import conteos_visibles
