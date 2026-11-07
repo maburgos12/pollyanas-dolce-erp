@@ -2,6 +2,7 @@ import io
 import json
 import tempfile
 import wave
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -190,11 +191,12 @@ class AgentAudioTests(TransactionTestCase):
 
     def test_spend_and_nonparticipant_deny_before_transcription(self):
         with self.assertRaises(pilot.PilotStopped):pilot.reserve_audio(user=self.other,turn_id=uuid4())
+        near_limit = str(pilot.MAX_USD - Decimal('0.02'))
         AuditLog.objects.create(user=self.user, action=pilot.ACTION,model=pilot.LEDGER_MODEL,object_id=pilot.PILOT_ID,
-            payload={'turn_id':str(uuid4()),'cycle':1,'model':pilot.MODEL,'reserved_usd':'4.98'})
+            payload={'turn_id':str(uuid4()),'cycle':1,'model':pilot.MODEL,'reserved_usd':near_limit})
         messages=self.ingest(); provider=self.provider();self.run_turn(messages,provider)
         provider.audio.transcriptions.create.assert_not_called();provider.responses.create.assert_not_called()
-        self.assertEqual(pilot.pilot_status(self.user)['reserved_usd'],'4.98')
+        self.assertEqual(pilot.pilot_status(self.user)['reserved_usd'],near_limit)
 
     def test_multipart_audio_and_photos_and_csrf(self):
         from django.test import Client
