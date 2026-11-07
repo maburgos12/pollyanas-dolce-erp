@@ -74,7 +74,7 @@ def calcular_cierre_linea(reading, *, snapshot, batch, cierre, branch_id, now=No
     now = now or timezone.now()
     line = reading.linea
     if reading.cantidad is None:
-        return _pendiente('Sin cantidad física; se conserva la incidencia.')
+        return _pendiente('Sin cantidad física.')
     if reading.contado_en is None:
         return _pendiente('Falta hora declarada del conteo; la última edición no la sustituye.')
     if not line.producto_id:
