@@ -35,7 +35,7 @@ from .models import (
     ReglaFuenteRubro,
 )
 from .services_presupuesto_maestro import normalize_header_text
-from .services_rentabilidad_gastos import _vigente
+from .services_rentabilidad_gastos import _coincide, _reglas_del_mes, _repartir, _vigente
 
 AUTO_PREFIX = "AUTO:"
 MANUAL_PREFIX = "MANUAL:"
@@ -265,6 +265,8 @@ class PresupuestoRealConsolidacionService:
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO:
             if not _vigente(regla, periodo):
                 return (Decimal("0"), False)
+            if regla.modo_asignacion == ReglaFuenteRubro.MODO_DISTRIBUCION:
+                return self._monto_gasto_distribuido(regla, periodo, indices)
             if "gasto" not in indices:
                 indices["gasto"] = self._build_gasto_index(periodo)
             return self._monto_gasto_operativo(regla, indices["gasto"])
@@ -342,6 +344,39 @@ class PresupuestoRealConsolidacionService:
                 indices["merma_producto"] = self._build_merma_producto_total(periodo)
             return self._monto_merma_producto(regla, indices["merma_producto"], periodo)
         raise ValueError(f"tipo_fuente no soportado aún: {regla.tipo_fuente}")
+
+    @staticmethod
+    def _monto_gasto_distribuido(regla, periodo, indices):
+        if regla.categoria_gasto_id is None:
+            raise ValueError("regla GASTO_OPERATIVO sin categoria_gasto")
+        if "gastos_documentados_reparto" not in indices:
+            exactos = ReglaFuenteRubro.objects.filter(
+                tipo_fuente=ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO, activa=True,
+            ).values_list("rubro_id", flat=True)
+            indices["gastos_documentados_reparto"] = list(
+                GastoOperativoMensual.objects.filter(periodo=periodo, tipo_dato="REAL")
+                .exclude(obligacion_gasto__rubro_id__in=exactos)
+                .select_related("centro_costo").order_by("pk")
+            )
+            indices["reglas_reparto"] = list(ReglaFuenteRubro.objects.filter(
+                activa=True, tipo_fuente=ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+            ).exclude(modo_asignacion=ReglaFuenteRubro.MODO_CONTROL)
+                .select_related("rubro__area", "rubro__sucursal"))
+        total, hubo_datos = Decimal("0"), False
+        for gasto in indices["gastos_documentados_reparto"]:
+            if not _coincide(regla, gasto.centro_costo, gasto.categoria_gasto_id):
+                continue
+            candidatas = _reglas_del_mes([
+                r for r in indices["reglas_reparto"]
+                if _coincide(r, gasto.centro_costo, gasto.categoria_gasto_id)
+            ], periodo)
+            # El residuo pertenece al mismo comprobante y último destino del lector.
+            asignaciones, _ = _repartir(gasto.monto, gasto.centro_costo, candidatas)
+            for destino, _, monto, _, _ in asignaciones:
+                if destino.pk == regla.pk:
+                    total += monto
+                    hubo_datos = True
+        return total, hubo_datos
 
     @staticmethod
     def _build_gasto_index(periodo: date) -> list[dict]:
