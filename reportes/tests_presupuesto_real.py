@@ -107,6 +107,93 @@ class PresupuestoRealConsolidacionTests(TestCase):
     def consolidar(self, **kwargs):
         return PresupuestoRealConsolidacionService().consolidar(periodo=self.periodo, **kwargs)
 
+    def test_reparto_conserva_centavos_por_comprobante_como_lector_de_gastos(self):
+        from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
+
+        self.categoria.metadata = {"familia": "telefono"}
+        self.categoria.save(update_fields=["metadata"])
+        lineas = []
+        for numero in range(9):
+            rubro, linea = self.crear_linea(concepto=f"Teléfono {numero}")
+            self.crear_regla_gasto(
+                rubro, centro_costo=self.corporativo,
+                filtros={"porcentaje": "11.1111" if numero < 8 else "11.1112",
+                         "desde": self.periodo.isoformat()},
+                modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+            )
+            lineas.append(linea)
+        originales = [self.crear_gasto(m, centro=self.corporativo)
+                      for m in ("4679.06", "549.01", "115.00")]
+
+        resumen = self.consolidar()
+
+        self.assertFalse(resumen.errores)
+        esperado = {}
+        for fila in leer_gastos_mensuales(self.periodo)["filas"]:
+            clave = fila["regla_id"]
+            esperado[clave] = esperado.get(clave, Decimal(0)) + fila["monto_mensual"]
+        importes = []
+        for linea in lineas:
+            linea.refresh_from_db()
+            regla_id = linea.metadata["real_breakdown"][0]["regla_id"]
+            self.assertEqual(linea.monto_real, esperado[regla_id])
+            importes.append(linea.monto_real)
+        self.assertEqual(sum(importes), Decimal("5343.07"))
+        self.assertEqual(importes, [Decimal("593.68")] * 8 + [Decimal("593.63")])
+        self.assertEqual(list(GastoOperativoMensual.objects.filter(
+            pk__in=[g.pk for g in originales]).order_by("pk").values_list("monto", flat=True)),
+            [Decimal("4679.06"), Decimal("549.01"), Decimal("115.00")])
+        self.assertEqual(self.consolidar().sin_cambio, 9)
+
+    def test_reparto_parcial_no_se_completa_artificialmente(self):
+        rubro, linea = self.crear_linea()
+        self.crear_regla_gasto(
+            rubro, centro_costo=self.corporativo,
+            filtros={"porcentaje": 65},
+            modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+        )
+        self.crear_gasto("10.01", centro=self.corporativo)
+        self.consolidar()
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("6.51"))
+
+    def test_reparto_ignora_regla_futura_y_otro_centro(self):
+        rubro, linea = self.crear_linea()
+        self.crear_regla_gasto(
+            rubro, centro_costo=self.corporativo,
+            filtros={"porcentaje": 100},
+            modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+        )
+        futuro, _ = self.crear_linea(concepto="Futuro")
+        self.crear_regla_gasto(
+            futuro, centro_costo=self.corporativo,
+            filtros={"porcentaje": 100, "desde": "2027-01"},
+            modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+        )
+        self.crear_gasto("10.01", centro=self.corporativo)
+        self.crear_gasto("900", centro=self.otro_centro)
+        self.consolidar()
+        linea.refresh_from_db()
+        self.assertEqual(linea.monto_real, Decimal("10.01"))
+
+    def test_reparto_solapado_conserva_el_real_anterior(self):
+        lineas = []
+        for porcentaje in (65, 40):
+            rubro, linea = self.crear_linea(
+                concepto=f"Solapado {porcentaje}", monto_real=Decimal("7"),
+                fuente_real="AUTO:GASTO_OPERATIVO",
+            )
+            self.crear_regla_gasto(
+                rubro, centro_costo=self.corporativo, filtros={"porcentaje": porcentaje},
+                modo_asignacion=ReglaFuenteRubro.MODO_DISTRIBUCION,
+            )
+            lineas.append(linea)
+        self.crear_gasto("10", centro=self.corporativo)
+        self.assertEqual(len(self.consolidar().errores), 2)
+        for linea in lineas:
+            linea.refresh_from_db()
+            self.assertEqual(linea.monto_real, Decimal("7"))
+
     def crear_expediente_isn(self, *, estado=ExpedienteISN.ESTADO_APLICADO, importe="16168.00"):
         cfdi = CfdiDescargado.objects.create(
             uuid=f"ISN-{estado}-{ExpedienteISN.objects.count()}",
