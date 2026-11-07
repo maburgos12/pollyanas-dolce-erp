@@ -16,9 +16,9 @@ class ChecklistSyncTests(TestCase):
     def setUp(self):
         self.user=get_user_model().objects.create_user('puntos.test',email='puntos@example.com')
         self.item=SeguimientoItem.objects.create(tipo='MINUTA',titulo='Minuta prueba',responsable_user=self.user,
-            metadata={'source':'agente_dg','source_table':'minute_agreements','source_id':86})
+            metadata={'source':'agente_dg','source_table':'minute_agreements','source_id':86,'source_user_id':45})
         self.check=SeguimientoChecklistItem.objects.create(seguimiento=self.item,titulo='CFE',orden=1)
-        self.source={'id':86,'status':'OPEN','updated_at':'2026-09-08T20:00:00+00:00',
+        self.source={'id':86,'collaborator_user_id':45,'status':'OPEN','updated_at':'2026-09-08T20:00:00+00:00',
             'checklist_items':[{'id':'original-1','text':'CFE','completed':False,'completed_at':None}]}
         self.client.force_login(self.user)
         self.addCleanup(patch.stopall)
@@ -40,7 +40,7 @@ class ChecklistSyncTests(TestCase):
 
     def sync(self,completed,updated_at='2026-09-08T20:00:00+00:00'):
         upsert_agente_dg_payload({'source_table':'minute_agreements','source_id':86,'record':{
-            'titulo':self.item.titulo,'status':'OPEN','user_email':self.user.email,'updated_at':updated_at,
+            'titulo':self.item.titulo,'status':'OPEN','user_id':45,'user_email':self.user.email,'updated_at':updated_at,
             'checklist_items_json':json.dumps([{'id':'original-1','text':'CFE','completed':completed}])}})
         self.check.refresh_from_db()
         self.item.refresh_from_db()

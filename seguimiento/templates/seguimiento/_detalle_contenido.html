@@ -46,6 +46,118 @@
     {% endif %}
   </article>
 
+  {% if item.metadata.source_table == 'minute_agreements' %}
+  <section class="bi-card" aria-labelledby="seg-communications-title">
+    <h2 id="seg-communications-title">Comunicaciones del acuerdo</h2>
+    <p>El guardado, la aceptación del proveedor y la lectura son confirmaciones distintas.</p>
+    {% for row in item.communication_rows %}
+      <p><strong>{{ row.channel }}</strong>: {{ row.status }}{% if row.updated_at %} · {{ row.updated_at }}{% endif %}{% if row.error %}<br>{{ row.error }}{% endif %}</p>
+    {% empty %}
+      <p>No hay resultados de comunicación sincronizados. Consulta el origen para actualizar el historial.</p>
+    {% endfor %}
+    {% if puede_gestionar_acuerdo %}
+      <form method="post" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">{% csrf_token %}
+        <button class="btn btn-secondary" name="accion" value="consultar">Consultar origen y comunicaciones</button>
+      </form>
+      {% for event in item.metadata.communications %}
+      {% if not event.legacy and event.channels.email.status == "failed" or not event.legacy and event.channels.whatsapp.status == "failed" %}
+      <form method="post" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">{% csrf_token %}
+        <input type="hidden" name="event_key" value="{{ event.event_key }}">
+        <input type="hidden" name="event_type" value="{{ event.event_type }}"><input type="hidden" name="content_version" value="{{ event.content_version }}">
+        {% if event.channels.email.status == "failed" %}<label><input type="checkbox" name="send_email" checked> Correo fallido</label>{% endif %}
+        {% if event.channels.whatsapp.status == "failed" %}<label><input type="checkbox" name="send_whatsapp" checked> WhatsApp fallido</label>{% endif %}
+        <button class="btn btn-secondary" name="accion" value="reintentar">Recuperar canales pendientes</button>
+        <small>Se conservan los canales ya aceptados. {{ event.event_type }}</small>
+      </form>
+      {% endif %}
+      {% endfor %}
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if puede_gestionar_acuerdo %}
+  <details class="bi-card">
+    <summary>Editar acuerdo y notificaciones</summary>
+    <form method="post" enctype="multipart/form-data" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="content_version" value="{{ item.metadata.content_version }}">
+      <div class="bi-control"><label for="editar-titulo">Acuerdo</label><input id="editar-titulo" name="titulo" value="{{ item.titulo }}" maxlength="300" required></div>
+      <div class="bi-control"><label for="editar-descripcion">Detalle</label><textarea id="editar-descripcion" name="descripcion" rows="4">{{ item.descripcion }}</textarea></div>
+      <div class="bi-control"><label for="editar-reunion">Reunión o contexto</label><input id="editar-reunion" name="meeting_label" maxlength="200" value="{{ item.area }}"></div>
+      <div class="bi-control"><label for="editar-fecha">Fecha límite</label><input id="editar-fecha" name="fecha_limite" type="date" value="{{ item.fecha_limite|date:'Y-m-d' }}" required></div>
+      <div class="bi-control"><label for="editar-hora">Hora</label><input id="editar-hora" name="hora_limite" type="time" value="{{ item.fecha_limite|date:'H:i' }}" required></div>
+      <div class="bi-control"><label for="editar-motivo-fecha">Motivo de cambio de fecha</label><input id="editar-motivo-fecha" name="motivo_fecha"></div>
+      {% for point in item.metadata.source_checklist %}
+      <div class="bi-control"><label for="editar-punto-{{ forloop.counter }}">Punto {{ forloop.counter }}</label><textarea id="editar-punto-{{ forloop.counter }}" name="punto_{{ point.id }}" required>{{ point.text }}</textarea></div>
+      {% endfor %}
+      <div class="bi-control"><label for="editar-nuevos-puntos">Añadir puntos</label><textarea id="editar-nuevos-puntos" name="nuevos_puntos" placeholder="Un punto por línea"></textarea></div>
+      <div class="bi-control"><label for="editar-archivos">Añadir adjuntos</label><input id="editar-archivos" name="archivos" type="file" multiple><small>Hasta 5 archivos de 10 MB cada uno.</small></div>
+      <fieldset><legend>Notificaciones</legend>
+        <label><input type="checkbox" name="send_email" {% if item.metadata.send_email_on_create %}checked{% endif %}> Correo institucional</label>
+        <label><input type="checkbox" name="send_whatsapp" {% if item.metadata.send_whatsapp_on_create %}checked{% endif %}> WhatsApp</label>
+        <label><input type="checkbox" name="send_calendar" {% if item.metadata.send_calendar_invite_on_create %}checked{% endif %}> Invitación de calendario</label>
+      </fieldset>
+      <button class="btn btn-secondary" name="accion" value="guardar">Guardar cambios</button>
+      <button class="btn btn-primary" name="accion" value="notificar">Guardar y notificar cambios</button>
+    </form>
+  </details>
+  <details class="bi-card"><summary>Enviar observación al responsable</summary>
+    <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}">{% csrf_token %}
+      <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
+      <label>Observación <textarea name="comentario" required maxlength="2000"></textarea></label>
+      <button class="btn btn-secondary">Registrar observación y comunicar</button>
+    </form>
+  </details>
+  <details class="bi-card"><summary>Reenvío deliberado de la versión actual</summary>
+    <p>Genera otra comunicación. Para recuperar un fallo sin repetir los canales aceptados, usa «Recuperar canales pendientes».</p>
+    <form method="post" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">{% csrf_token %}
+      <input type="hidden" name="request_id" value="{{ item.resend_request_id }}">
+      <label>Motivo del reenvío <input name="motivo_reenvio" required maxlength="500"></label>
+      <label><input type="checkbox" name="send_email" checked> Correo institucional</label>
+      <label><input type="checkbox" name="send_whatsapp" checked> WhatsApp</label>
+      <button class="btn btn-secondary" name="accion" value="reenviar">Reenviar deliberadamente</button>
+    </form>
+  </details>
+  {% if not item.esta_cerrado %}
+  <details class="bi-card"><summary>Cancelar acuerdo</summary>
+    <form method="post" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">{% csrf_token %}
+      <input type="hidden" name="content_version" value="{{ item.metadata.content_version }}">
+      <label>Motivo de cancelación <textarea name="comentario" required></textarea></label>
+      <label><input type="checkbox" name="send_email" checked> Notificar por correo</label>
+      <label><input type="checkbox" name="send_whatsapp" checked> Notificar por WhatsApp</label>
+      <button class="btn btn-secondary" name="accion" value="cancelar">Cancelar y notificar</button>
+    </form>
+  </details>
+  {% endif %}
+  {% endif %}
+
+  {% if item.metadata.comments or item.metadata.extension_requests or item.metadata.attachments or item.metadata.evidence %}
+  <section class="bi-card" aria-labelledby="seg-source-history-title">
+    <h2 id="seg-source-history-title">Documentos y respuestas del acuerdo</h2>
+    {% for comment in item.metadata.comments %}
+      <p><strong>{% if comment.origin_actor %}{{ comment.origin_actor.name }} · ERP{% else %}{{ comment.submitted_by }}{% endif %}</strong> · {{ comment.created_at }}<br>{{ comment.comment|linebreaksbr }}</p>
+    {% endfor %}
+    {% for file in item.metadata.attachments %}
+      <p><a href="{% url 'seguimiento:archivo_origen' item.pk 'attachments' file.id %}">Descargar adjunto: {{ file.filename }}</a></p>
+    {% endfor %}
+    {% for file in item.metadata.evidence %}
+      <p><a href="{% url 'seguimiento:archivo_origen' item.pk 'evidence' file.id %}">Descargar evidencia: {{ file.file_name }}</a> · {{ file.status }}<br>{{ file.comment }}</p>
+    {% endfor %}
+    {% for extension in item.metadata.extension_requests %}
+      <article><h3>Prórroga: {{ extension.requested_date }}</h3><p>{{ extension.reason }}</p><p>Estado: {{ extension.status }}{% if extension.reviewer_comment %} · {{ extension.reviewer_comment }}{% endif %}</p>
+      {% if puede_gestionar_acuerdo and extension.status == 'pending' %}
+      <form method="post" action="{% url 'seguimiento:gestionar_acuerdo_agente_dg' item.pk %}">{% csrf_token %}
+        <input type="hidden" name="accion" value="resolver_prorroga"><input type="hidden" name="prorroga_id" value="{{ extension.id }}">
+        <label for="motivo-prorroga-{{ forloop.counter }}">Motivo de la decisión</label><textarea id="motivo-prorroga-{{ forloop.counter }}" name="comentario" required maxlength="2000"></textarea>
+        <button class="btn btn-primary" name="decision" value="approved">Aprobar prórroga</button>
+        <button class="btn btn-secondary" name="decision" value="rejected">Rechazar prórroga</button>
+      </form>
+      {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+  {% endif %}
+
   <!-- Proceso / Checklist -->
   {% if checks %}
   <section class="bi-panel seg-panel-gap seg-process-panel">
@@ -230,10 +342,12 @@
 
       <details>
         <summary>Agregar evidencia</summary>
+        {% if item.metadata.source_table == 'minute_agreements' %}<p>PDF, JPG, PNG, XLSX, XLS, DOCX o PPTX; hasta 10 MB.</p>{% endif %}
         <form method="post" action="{% url 'seguimiento:subir_evidencia' item.pk %}" enctype="multipart/form-data" class="seg-next-form">
           {% csrf_token %}
+          <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf"
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}"
             required>
           <textarea name="comentario" placeholder="Nota sobre el archivo (opcional)"></textarea>
           <button class="btn btn-secondary btn-sm" type="submit">Subir evidencia</button>
@@ -244,7 +358,8 @@
         <summary>Registrar avance</summary>
         <form method="post" action="{% url 'seguimiento:registrar_feedback' item.pk %}" class="seg-next-form">
           {% csrf_token %}
-          <textarea name="comentario" placeholder="Avance, bloqueo u observación" required></textarea>
+          <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
+          <textarea name="comentario" placeholder="Avance, bloqueo u observación" maxlength="2000" required>{{ item.source_draft }}</textarea>
           <button class="btn btn-secondary btn-sm" type="submit">Guardar avance</button>
         </form>
       </details>
@@ -253,6 +368,7 @@
       <details>
         <summary>Solicitar más tiempo</summary>
         <form method="post" action="{% url 'seguimiento:solicitar_prorroga' item.pk %}" class="seg-next-form">
+          <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
           {% csrf_token %}
           <input type="date" name="fecha_solicitada" required>
           <textarea name="motivo" placeholder="¿Por qué necesitas más tiempo?" required></textarea>
@@ -423,7 +539,7 @@
         <div class="seg-form-grid">
           <textarea name="comentario" placeholder="Observación o resultado final (opcional)"></textarea>
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}">
           <div class="seg-entregar-actions">
             <button class="btn btn-primary" type="submit">
               {% if checklist_completo %}Cerrar acuerdo{% else %}Marcar como completado{% endif %}
@@ -464,10 +580,11 @@
       </p>
       <form method="post" action="{% url 'seguimiento:entregar' item.pk %}" data-async-action enctype="multipart/form-data">
         {% csrf_token %}
+        <input type="hidden" name="request_id" value="{{ item.operation_request_id }}">
         <div class="seg-form-grid">
           <textarea name="comentario" aria-label="Resultado de la entrega" placeholder="¿Qué se hizo? ¿Cuál es el resultado? (opcional)">{{ revision_comentario }}</textarea>
           <input type="file" name="archivo"
-            accept=".csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf">
+            accept="{% if item.metadata.source_table == 'minute_agreements' %}.pdf,.jpg,.jpeg,.png,.xlsx,.xls,.docx,.pptx{% else %}.csv,.doc,.docx,.gif,.heic,.heif,.jpeg,.jpg,.ods,.odt,.pdf,.png,.rtf,.tif,.tiff,.txt,.webp,.xls,.xlsb,.xlsm,.xlsx,image/*,application/pdf{% endif %}">
           <div class="seg-entregar-actions">
             <button class="btn btn-primary" type="submit">Enviar a revisión</button>
           </div>
