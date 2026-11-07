@@ -19,7 +19,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login, logout, get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import Group
-from django.urls import reverse
+from django.urls import Resolver404, resolve, reverse
 from django.utils import timezone
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.cache import never_cache
@@ -254,6 +254,14 @@ def _is_dashboard_redirect(redirect_url: str) -> bool:
 
 
 def _login_redirect_for_user(user, redirect_url: str) -> str:
+    if is_branch_capture_only(user):
+        # Allow returning to a mobile count; the view still checks branch and folio access.
+        try:
+            if resolve(urlsplit(redirect_url).path).view_name == "operacion:conteos_app:detalle":
+                return redirect_url
+        except Resolver404:
+            pass
+        return reverse("recetas:reabasto_cedis_captura")
     if _is_mermas_next_url(redirect_url) and not _can_follow_mermas_next(user):
         return _default_login_redirect_for_user(user)
     if _is_dashboard_redirect(redirect_url) and not _can_open_dashboard(user):
@@ -2747,8 +2755,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
         redirect_url = next_url
 
     if request.user.is_authenticated:
-        if is_branch_capture_only(request.user):
-            return _redirect_capture_module()
         return redirect(_login_redirect_for_user(request.user, redirect_url))
 
     if request.method == "POST":
@@ -2763,8 +2769,6 @@ def login_view(request: HttpRequest) -> HttpResponse:
             if user is not None and user.is_active:
                 login(request, user)
                 logger.info(f"Login successful for user={username}")
-                if is_branch_capture_only(user):
-                    return _redirect_capture_module()
                 return redirect(_login_redirect_for_user(user, redirect_url))
             else:
                 logger.warning(f"Authentication failed for username={username}")

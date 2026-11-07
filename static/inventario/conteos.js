@@ -43,7 +43,7 @@
   }
   function write(root,data) {
     var k=key(root);data.updated_at=new Date().toISOString();memoryFallback[k]=data;
-    try { if(!tabStorage)throw new Error('No tab storage');localStorage.setItem(k,JSON.stringify(data));sessionStorage.setItem('pointer:'+k.split(':t')[0]+':t',k); return true; }
+    try { localStorage.setItem(k,JSON.stringify(data));if(tabStorage){try{sessionStorage.setItem('pointer:'+k.split(':t')[0]+':t',k);}catch(_){tabStorage=false;}}return true; }
     catch (_) { var warning=root.querySelector('[data-draft-warning]'); if(warning){warning.hidden=false;warning.textContent='Este navegador no permite conservar el borrador. Mantén esta página abierta y guarda en el servidor antes de salir.';} return false; }
   }
   function remove(k) {
@@ -110,7 +110,7 @@
     if(!form){
       if(draft){
         var retained=root.querySelector('[data-draft-warning]');retained.hidden=false;
-        retained.textContent='Este dispositivo conserva cambios sin confirmar. Compáralos con la captura recibida que aparece abajo. Si faltan cambios, solicita un reconteo; no se enviarán automáticamente.';
+        retained.textContent='Este dispositivo conserva cambios sin confirmar. Compáralos con la captura recibida que aparece abajo. Si faltan cambios, informa al responsable de la revisión.';
         var pending=document.createElement('ul');
         Object.keys(draft.values||{}).forEach(function(name){
           var ident=name.split('_').pop(),row=root.querySelector('[data-line-id="'+ident+'"]');
@@ -143,7 +143,22 @@
       var reconcile=document.createElement('button');reconcile.type='button';reconcile.className='count-button secondary';reconcile.textContent='He revisado y combinado los datos';
       reconcile.addEventListener('click',function(){conflict=false;warning.hidden=true;form.elements.request_id.value=uuid();persist();});warning.appendChild(reconcile);
     }
-    var saveTimer, saving=false, stopped=Boolean(draft), pending=draft&&draft.pending;
+    var saveTimer, saving=false, stopped=Boolean(draft), mustReenter=false, pending=draft&&draft.pending;
+    function pendingSend() {
+      return pending&&pending.entries.some(function(pair){return pair[0]==='action'&&pair[1]==='enviar';});
+    }
+    if(pendingSend()&&String(draft.version)===root.dataset.version){
+      pending=null;
+      form.elements.request_id.value=uuid();
+    }
+    var recovery=root.querySelector('[data-count-recovery]');
+    function showRecovery(expired) {
+      recovery.hidden=false;
+      recovery.querySelector('[data-recovery-message]').textContent=expired
+        ? 'Tu sesión venció. Vuelve a entrar para continuar en este folio.'
+        : 'La página perdió la conexión con tu sesión. Vuelve a abrir este folio para continuar.';
+      recovery.querySelector('a').focus();
+    }
     var confirmed=serverValues;
     form.noValidate=true;
     function notice(message) {
@@ -170,9 +185,17 @@
     }
     async function save(action,automatic) {
       window.clearTimeout(saveTimer);
-      if(root!==activeRoot)return;
+      if(root!==activeRoot||mustReenter)return;
       if(saving){if(!automatic)notice('Hay un guardado en curso. Espera su confirmación antes de continuar.');return;}
       if(conflict){warning.scrollIntoView({block:'center'});return;}
+      if(pendingSend()&&action!=='enviar'){
+        if(!automatic)notice('Hay un envío pendiente. Pulsa Revisar y enviar para confirmarlo.');
+        return;
+      }
+      if(pendingSend()&&JSON.stringify(values(form))!==JSON.stringify(pending.values)){
+        pending=null;
+        form.elements.request_id.value=uuid();
+      }
       if(!pending&&!valid(!automatic))return;
       if((!('onformdata' in form)&&form.elements.length>900)||new Blob([JSON.stringify(values(form))]).size>1800000){
         stopped=true;notice('La captura es demasiado grande para este navegador. Conserva el borrador y reduce las notas extensas antes de guardar.');return;
@@ -196,8 +219,16 @@
       try{
         var response=await fetch(form.getAttribute('action'),{method:'POST',body:data,credentials:'same-origin',
           headers:{Accept:'application/json','X-Requested-With':'XMLHttpRequest'},signal:controller.signal});
-        if(response.redirected||!(response.headers.get('content-type')||'').includes('application/json')){
-          throw new Error('No se confirmó el guardado. Si tu sesión venció, inicia sesión en otra pestaña y pulsa Guardar avance.');
+        if(response.status===401||response.redirected){
+          if(response.status===401){
+            pending=null;
+            form.elements.request_id.value=uuid();
+          }
+          mustReenter=true;stopped=true;persist();showRecovery(response.status===401);
+          return;
+        }
+        if(!(response.headers.get('content-type')||'').includes('application/json')){
+          throw new Error('El servidor no confirmó el guardado. Revisa la conexión y vuelve a intentarlo.');
         }
         var result=await response.json();
         if(!response.ok||!result.ok){
@@ -337,9 +368,23 @@
     }
     root.querySelector('[data-review-send]').addEventListener('click',function(){
       if(!valid(true))return;
-      var preview=root.querySelector('[data-send-preview]'),lines=root.querySelector('[data-preview-lines]');lines.replaceChildren();var missing=null;
-      root.querySelectorAll('[data-count-line]').forEach(function(row){var q=row.querySelector('input[name^="cantidad_"]'),i=row.querySelector('textarea');if(q.value===''&&!i.value.trim()&&!missing)missing=q;var entry=document.createElement('div');entry.className='count-preview-row';var name=document.createElement('span');name.textContent=row.querySelector('.count-product label').textContent;var amount=document.createElement('strong');amount.textContent=q.value!==''?q.value+' '+row.querySelector('.count-unit').textContent:(i.value.trim()?'Incidencia registrada':'Sin contar');entry.append(name,amount);lines.appendChild(entry);});
-      if(missing){reveal(missing);notice('Falta registrar: '+missing.closest('[data-count-line]').querySelector('.count-product label').textContent+'. Captura su cantidad o marca «No se maneja».');report(root,'captura_incompleta');return;}
+      var preview=root.querySelector('[data-send-preview]'),lines=root.querySelector('[data-preview-lines]');
+      lines.replaceChildren();
+      var pendingCount=0, registered=0;
+      root.querySelectorAll('[data-count-line]').forEach(function(row){
+        var q=row.querySelector('input[name^="cantidad_"]'), i=row.querySelector('textarea');
+        var answered=q.value!==''||i.value.trim()!=='';
+        if(answered)registered++;else pendingCount++;
+        var entry=document.createElement('div'), name=document.createElement('span'), amount=document.createElement('strong');
+        entry.className='count-preview-row';
+        name.textContent=row.querySelector('.count-product label').textContent;
+        amount.textContent=q.value!==''?q.value+' '+row.querySelector('.count-unit').textContent:(answered?'Incidencia registrada':'Pendiente de contar');
+        entry.append(name,amount);lines.appendChild(entry);
+      });
+      if(!registered){notice('Registra al menos una cantidad o incidencia para enviar.');return;}
+      preview.querySelector('[data-preview-pending]').textContent=pendingCount
+        ? 'Líneas pendientes de contar: '+pendingCount+'. El responsable verá cuáles faltan.'
+        : 'Todos los artículos tienen cantidad o incidencia.';
       preview.hidden=false;preview.scrollIntoView({block:'center',behavior:'auto'});
     });
     root.querySelector('[data-close-preview]').addEventListener('click',function(){root.querySelector('[data-send-preview]').hidden=true;});

@@ -6,7 +6,7 @@ const source = fs.readFileSync(require('node:path').join(__dirname, '../../stati
 const start = source.indexOf('    async function save(');
 const code = source.slice(start, source.indexOf('    function persist()', start));
 function setup() {
-  const requests = [], notices = [], stateChanges = [];
+  const requests = [], notices = [], stateChanges = [], recoveries = [];
   let current = { cantidad_1: '2.5' }, receipt, transport;
   const version = { value: '2' };
   const root = { dataset: { count: '44', version: '2' }, querySelectorAll: () => [version] };
@@ -17,11 +17,11 @@ function setup() {
     constructor(input) { this.data = new Map(input ? [['version',version.value],['request_id',elements.request_id.value],['lecturas_json',JSON.stringify(current)]] : []); }
     set(k,v) { this.data.set(k,v); } append(k,v) { this.set(k,v); } get(k) { return this.data.get(k); } entries() { return this.data.entries(); }
   }
-  const context = { root, form, activeRoot: root, saveTimer:null, saving:false, stopped:false, conflict:false, pending:null,
+  const context = { root, form, activeRoot: root, saveTimer:null, saving:false, stopped:false, conflict:false, pending:null, mustReenter:false,
     document:{cookie:'csrftoken=renewed-session-token'}, navigator:{onLine:true}, confirmed:null, valid:()=>true, values:()=>({...current}),
     window:{clearTimeout(){},setTimeout(){return 1;},scrollY:0}, sessionStorage:{setItem(){}},
     state:(_,message)=>stateChanges.push(message), notice:message=>notices.push(message),
-    persist(){}, scheduleSave(){}, remove(){}, key:()=>'', uuid:()=> 'next-intent', report(){},
+    persist(){}, scheduleSave(){}, remove(){}, pendingSend(){return context.pending?.entries.some(([key,value])=>key==='action'&&value==='enviar');}, showRecovery:expired=>recoveries.push(expired), key:()=>'', uuid:()=> 'next-intent', report(){},
     Blob, AbortController, FormData,
     DOMParser:class { parseFromString(){return {querySelector:()=>receipt};} },
     fetch:async(url,options)=>{requests.push({url,body:Object.fromEntries(options.body.entries())});return transport(options);}
@@ -32,7 +32,7 @@ function setup() {
     return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({ok:true,result:{version:3},html:'server html'})};
   };
   transport=success;
-  return {context,requests,notices,stateChanges,form,success,setTransport:fn=>transport=fn,setValues:v=>current=v};
+  return {context,requests,notices,stateChanges,recoveries,form,success,setTransport:fn=>transport=fn,setValues:v=>current=v};
 }
 (async()=>{
   const normal=setup();await normal.context.save('guardar',true);
@@ -51,8 +51,15 @@ function setup() {
   uncertain.setTransport(uncertain.success);await uncertain.context.save('guardar',false);
   assert.deepEqual(uncertain.requests[0].body,uncertain.requests[1].body);
   assert.deepEqual(uncertain.context.values(),{cantidad_1:'7'});
-  const auth=setup();auth.setTransport(()=>({redirected:true,headers:{get:()=> 'text/html'}}));
-  await auth.context.save('guardar',true);assert(auth.context.pending);assert.match(auth.notices[0],/sesión/);
+  const auth=setup();auth.setTransport(()=>({status:401,ok:false,headers:{get:()=> 'application/json'},json:async()=>({ok:false})}));
+  await auth.context.save('enviar',false);
+  await auth.context.save('enviar',false);
+  assert.equal(auth.requests.length,1);assert.deepEqual(auth.recoveries,[true]);
+  assert.deepEqual(auth.context.values(),{cantidad_1:'2.5'});
+  const send=setup();send.setTransport(()=>{throw new Error('connection lost');});
+  await send.context.save('enviar',false);
+  await send.context.save('guardar',false);
+  assert.equal(send.requests.length,1);
   const conflict=setup();conflict.setTransport(()=>({status:409,ok:false,headers:{get:()=> 'application/json'},json:async()=>({ok:false,toast:{message:'El conteo cambió'}})}));
   await conflict.context.save('guardar',true);assert.equal(conflict.context.pending,null);assert.equal(conflict.context.root.dataset.version,'2');assert(conflict.context.stopped);
   const replay=setup();replay.setTransport(options=>replay.success(options,'4'));await replay.context.save('guardar',false);

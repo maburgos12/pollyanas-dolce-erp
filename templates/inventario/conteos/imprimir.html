@@ -42,7 +42,7 @@
           <tr>
             <th scope="row">{{ row.linea.nombre }}<small>{{ row.linea.codigo }} · {{ row.linea.codigo_unico }}</small></th>
             <td>{{ row.linea.unidad }}</td>
-            <td class="number">{{ row.cantidad_visible|default:"Sin cantidad" }}</td>
+            <td class="number">{% if row.pendiente %}Pendiente de contar{% else %}{{ row.cantidad_visible|default:"Sin cantidad" }}{% endif %}</td>
             {% if row.conciliacion.estado == 'CALCULADA' %}
             <td class="number">{{ row.conciliacion.fisico_al_cierre_visible }}</td>
             <td class="number">{{ row.conciliacion.point_al_cierre_visible }}</td>

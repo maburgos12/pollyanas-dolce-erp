@@ -1,6 +1,8 @@
 from datetime import date, timedelta
 from uuid import uuid4
+from django.contrib.sessions.models import Session
 from django.urls import reverse
+from django.utils import timezone
 from django.test import TestCase
 from core.models import UserProfile, Sucursal
 from inventario import tests_conteos_views as fixtures
@@ -19,6 +21,34 @@ class ConteoSesionTests(TestCase):
               'request_id':str(uuid4()),'articulos':[f'p{self.product.pk}']}
         data.update(overrides)
         return data
+
+    def test_capture_renews_a_session_about_to_expire(self):
+        self.client.force_login(self.operator)
+        session = Session.objects.get(session_key=self.client.session.session_key)
+        session.expire_date = timezone.now() + timedelta(minutes=1)
+        session.save(update_fields=['expire_date'])
+        self.assertEqual(self.client.get(self.url()).status_code, 200)
+        session.refresh_from_db()
+        self.assertGreater(session.expire_date, timezone.now() + timedelta(days=1))
+        self.assertEqual(self.client.post(self.url('accion'), {
+            'action':'iniciar', 'version':1, 'request_id':str(uuid4()),
+        }).status_code, 302)
+
+    def test_expired_capture_returns_to_the_same_folio_after_login(self):
+        UserProfile.objects.filter(user=self.operator).update(modo_captura_sucursal=True)
+        self.client.force_login(self.operator)
+        Session.objects.filter(session_key=self.client.session.session_key).update(
+            expire_date=timezone.now()-timedelta(seconds=1))
+        response = self.client.post(self.url('accion'), {'action':'enviar'}, HTTP_ACCEPT='application/json')
+        self.assertEqual(response.status_code, 401)
+        login_url = response.json()['login_url']
+        self.assertContains(self.client.get(login_url), self.url())
+        response = self.client.post(login_url, {
+            'username':self.operator.username, 'password':'test-local', 'next':self.url(),
+        })
+        self.assertRedirects(response, self.url())
+        self.count.refresh_from_db()
+        self.assertEqual((self.count.estado, self.count.version), ('CAPTURA', 1))
 
     def test_app_preparation_has_session_identity_without_selectors(self):
         self.client.force_login(self.operator)

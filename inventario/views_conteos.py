@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import redirect_to_login
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Q
@@ -40,6 +41,18 @@ def _base(request):
 
 def _url(request, name, *args):
     return reverse(_namespace(request) + ':' + name, args=args)
+
+
+def _capture_return_url(request, pk):
+    url = _url(request, 'detalle', pk)
+    return url + '?capturar=1' if request.GET.get('capturar') == '1' else url
+
+
+def _renew_capture_session(request):
+    # Persist activity at most every five minutes. Django retains its session lifetime policy.
+    now = int(timezone.now().timestamp())
+    if now - request.session.get('conteos_ultima_actividad', 0) >= 300:
+        request.session['conteos_ultima_actividad'] = now
 
 
 def _visible(request):
@@ -92,6 +105,7 @@ def _context(request, count, *, ack='', ack_version=None):
             difference = reading.cantidad - Decimal(source['cantidad'])
         rows.append({'lectura':reading, 'linea':line, 'referencia':source, 'conciliacion':nightly, 'diferencia':difference,
                      'cantidad_visible':_cantidad_visible(reading.cantidad),
+                     'pendiente':reading.cantidad is None and not reading.incidencia.strip(),
                      'contado_en_input':reading.contado_en.astimezone(ZoneInfo('America/Mazatlan')).strftime('%Y-%m-%dT%H:%M:%S') if reading.contado_en else '',
                      'diferencia_visible':_cantidad_visible(difference)})
     captured = sum(r.cantidad is not None or bool(r.incidencia) for r in readings)
@@ -116,11 +130,11 @@ def _context(request, count, *, ack='', ack_version=None):
             'captura_url':_url(request,'detalle',count.pk)+'?capturar=1' if review_recount and puede_capturar(request.user,count) else '',
             'revisor':reviewer,'referencia':reference,'conciliacion':reconciliation,'historial':history,
             'motivo_reconteo':(count.eventos.filter(action='reconteo').order_by('-pk').values_list('payload__motivo',flat=True).first() or '') if editable and count.ronda > 1 else '',
-            'capturados':captured,'total':len(readings),'total_productos':total_productos,'total_insumos':total_insumos,
+            'capturados':captured,'pendientes':len(readings)-captured,'total':len(readings),'total_productos':total_productos,'total_insumos':total_insumos,
             'avance':round(captured*100/len(readings)) if readings else 0,
             'request_id':str(uuid4()),'action_ids':{key:str(uuid4()) for key in ('start','reference','recount','accept','verify','evidence','cancel')},'ack':ack,'ack_version':ack_version,
             'lista_url':_url(request,'lista'),'accion_url':_url(request,'accion',count.pk)+('?capturar=1' if review_recount and capture_requested else ''),
-            'detalle_url':_url(request,'detalle',count.pk),'export_url':_url(request,'exportar',count.pk),
+            'detalle_url':_url(request,'detalle',count.pk),'reanudar_url':_capture_return_url(request,count.pk),'export_url':_url(request,'exportar',count.pk),
             'catalogo_url':_url(request,'catalogo',count.pk),
             'diagnostico_url':_url(request,'diagnostico',count.pk),
             'evidencia_url':_url(request,'evidencia',count.pk), 'usuario_id':request.user.pk,
@@ -162,6 +176,8 @@ def detalle(request, pk):
         if not context['revisor'] or context['editable']:
             raise PermissionDenied
         return render(request, 'inventario/conteos/imprimir.html', context)
+    if context['editable']:
+        _renew_capture_session(request)
     return render(request, 'inventario/conteos/detalle.html', context)
 
 
@@ -207,10 +223,18 @@ def _error(request, count, error, status=400):
     return render(request,'inventario/conteos/detalle.html',context,status=status)
 
 
-@login_required
 @never_cache
 @require_POST
 def accion(request, pk):
+    if not request.user.is_authenticated:
+        login = redirect_to_login(_capture_return_url(request, pk))
+        if _async(request):
+            return JsonResponse({
+                'ok': False,
+                'login_url': login.url,
+                'toast': {'type':'warning','message':'Tu sesión venció. Vuelve a entrar al mismo folio para retomar el conteo.'},
+            }, status=401)
+        return login
     count = _count(request,pk)
     action = request.POST.get('action','')
     authorized = puede_capturar(request.user,count) if action in ('iniciar','guardar','enviar','agregar') else puede_revisar(request.user,count)
@@ -221,6 +245,8 @@ def accion(request, pk):
             request_id=request.POST.get('request_id',''), payload=_payload(request,action))
     except ConteoConflict as exc: return _error(request,count,exc,409)
     except (ValidationError,ValueError,TypeError) as exc: return _error(request,count,exc)
+    if action in ('iniciar','guardar','enviar','agregar'):
+        _renew_capture_session(request)
     count.refresh_from_db()
     notice = {'iniciar':'Inicio del conteo registrado. Ya puedes capturar.','guardar':'Avance guardado.','enviar':'Conteo enviado a revisión.','agregar':'Artículo agregado. El avance también quedó guardado.','reconteo':'Reconteo solicitado. Se conserva la captura anterior.',
               'aceptar':'Conteo físico aceptado. No se modificaron existencias.','cancelar':'Conteo cancelado. Se conserva su historial.',
@@ -399,7 +425,7 @@ def exportar(request, pk):
     wb = Workbook()
     sheet=wb.active
     sheet.title='Conteo físico'
-    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Código único','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada'])
+    sheet.append(['Folio','Sucursal','Fecha programada','Estado','Código','Código único','Artículo','Unidad','Ronda','Contado','Incidencia','Referencia Point','Diferencia informativa','Extracción','Conciliación','Inicio ronda actual','Último envío','Observaciones','Fuente de unidad','Ciclo Point','Snapshot Point','Lectura actualizada','Hora física declarada','Estado de captura'])
     readings = [row['lectura'] for row in context['rows']] if context['resumen_reconteo'] else lecturas_efectivas(count)
     for r in readings:
         line=r.linea
@@ -410,7 +436,8 @@ def exportar(request, pk):
                       _excel_number(r.cantidad-qty) if r.cantidad is not None and qty is not None else None,ref.get('capturado_en',''),
                       'Declaración de corte por revisor' if count.referencia.get('corte_verificado') else 'Pendiente de conciliación temporal',
                       count.iniciado_en.isoformat() if count.iniciado_en else '',count.enviado_en.isoformat() if count.enviado_en else '',
-                      _excel_text(count.observaciones),_excel_text(line.fuente_unidad),ref.get('sync_job_id'),ref.get('snapshot_id'),r.actualizado_en.isoformat(),r.contado_en.isoformat() if r.contado_en else ''])
+                      _excel_text(count.observaciones),_excel_text(line.fuente_unidad),ref.get('sync_job_id'),ref.get('snapshot_id'),r.actualizado_en.isoformat(),r.contado_en.isoformat() if r.contado_en else '',
+                      'Contado' if r.cantidad is not None else 'Incidencia registrada' if r.incidencia.strip() else 'Pendiente de contar'])
     history=wb.create_sheet('Historial')
     history.append(['Fecha','Acción','Usuario','Detalle'])
     readings=wb.create_sheet('Lecturas históricas')
