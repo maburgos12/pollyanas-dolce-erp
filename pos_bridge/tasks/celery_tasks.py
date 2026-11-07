@@ -419,12 +419,11 @@ def task_catalog_recipe_sync(self, *, job_id: int):
     try:
         product_codes = None
         if action == "SYNC_ONLY_NEW_PRODUCTS":
-            discovery = service.discover_new_product_codes(branch_hint=branch_hint)
-            product_codes = sorted(
-                set(discovery.get("new_codes") or [])
-                | set(parameters.get("resume_codes") or [])
-            )
-            parameters["resume_codes"] = product_codes
+            retry_codes = parameters.get("new_product_codes") or []
+            discovery = service.discover_new_product_codes(branch_hint=branch_hint, retry_codes=retry_codes)
+            pending_codes = set(discovery.get("new_codes") or []) | set(retry_codes)
+            product_codes = sorted(pending_codes - set(discovery.get("blocked_codes") or []))
+            parameters["new_product_codes"] = sorted(pending_codes)
             job.parameters = parameters
             job.save(update_fields=["parameters", "updated_at"])
             if not product_codes:
@@ -441,7 +440,7 @@ def task_catalog_recipe_sync(self, *, job_id: int):
                 parameters["progress"] = {
                     "stage": "PARTIAL" if incomplete else "COMPLETED",
                     "detail": (
-                        "La revisión terminó con productos pendientes: Point no confirmó su receta/BOM."
+                        "La revisión terminó con productos pendientes de confirmar en Point."
                         if incomplete
                         else "La revisión terminó; Point no reportó productos nuevos importables."
                     ),
@@ -481,13 +480,26 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         elif action != "SYNC_ALL_RECIPES":
             raise ValueError(f"Unsupported catalog recipe sync action: {action}")
 
+        sync_options = {}
+        if discovery is not None:
+            sync_options["discovered_candidates"] = discovery.get("new_candidates") or []
         result = service.sync(
             branch_hint=branch_hint,
             product_codes=product_codes,
             include_without_recipe=include_without_recipe,
             sync_job=job,
+            **sync_options,
         )
         summary = dict(result.summary or {})
+        if discovery is not None:
+            for_review = summary.pop("products_for_review", [])
+            blocked = (discovery.get("blocked_candidates") or []) + for_review
+            discovery.update(
+                blocked_candidates=blocked,
+                blocked_codes=[item["codigo_point"] for item in blocked],
+                blocked_candidates_count=len(blocked),
+            )
+            summary["discovery"] = discovery
         recipe_ids = list(
             PointRecipeNode.objects.filter(
                 run__sync_job=job,
@@ -528,21 +540,25 @@ def task_catalog_recipe_sync(self, *, job_id: int):
             and not validation["search_error"]
             else {"total_items": 0}
         )
-        if discovery is not None:
-            summary["discovery"] = discovery
         summary["weekly_cost_snapshot"] = snapshot
-        incomplete = bool(
+        recipe_pending = bool(
             scope_missing
             or validation["missing_count"]
             or validation["search_error"]
             or summary.get("recipes_with_unresolved_inputs")
             or summary.get("unresolved_inputs_count")
-            or (discovery or {}).get("blocked_candidates_count")
         )
+        blocked_count = (discovery or {}).get("blocked_candidates_count") or 0
+        incomplete = recipe_pending or bool(blocked_count)
+        if discovery is not None and not recipe_pending:
+            parameters["new_product_codes"] = sorted(
+                (set(retry_codes) & set(discovery["blocked_codes"]))
+                | {item["codigo_point"] for item in for_review}
+            )
         parameters["progress"] = {
             "stage": "PARTIAL" if incomplete else "COMPLETED",
             "detail": (
-                "La actualización tiene pendientes de composición o costo. Pulsa de nuevo para retomar; revisa el detalle."
+                "La actualización terminó con productos, composiciones o costos pendientes de revisión."
                 if incomplete
                 else "Composiciones y costos verificados; corte de las recetas afectadas actualizado."
             ),

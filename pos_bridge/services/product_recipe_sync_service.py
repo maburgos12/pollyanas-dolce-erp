@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.utils import timezone
+from requests import RequestException
 
 from core.cache_versions import bump_cache_scopes
 from maestros.models import Insumo, UnidadMedida, seed_unidades_basicas
@@ -110,9 +111,11 @@ class PointProductRecipeSyncService:
         include_without_recipe: bool = False,
         sync_job=None,
         max_depth: int = 3,
+        discovered_candidates: list[dict] | None = None,
     ) -> PointRecipeSyncResult:
         seed_unidades_basicas()
-        selected_codes = {self._norm_code(code) for code in (product_codes or []) if (code or "").strip()}
+        requested_codes = {self._norm_code(code): code for code in (product_codes or []) if (code or "").strip()}
+        selected_codes = set(requested_codes)
         selected_articulos = [c.strip() for c in (articulo_codes or []) if (c or "").strip()]
         summary = {
             "workspace": "",
@@ -154,30 +157,37 @@ class PointProductRecipeSyncService:
                 root_codes=sorted(selected_codes),
                 max_depth=max(1, int(max_depth or 3)),
             )
-            if selected_codes:
-                # Extracción dirigida: 1 búsqueda por código. Pagar la
-                # enumeración completa (~1,500 consultas) por un lote de 15
-                # productos causaba lotes de 3 horas.
-                products = self._fetch_products_by_codes(client=client, selected_codes=selected_codes)
+            if discovered_candidates is not None:
+                review = summary["products_for_review"] = []
+                products = self._confirmed_new_products(
+                    client=client, requested_codes=requested_codes,
+                    candidates=discovered_candidates, review=review,
+                )
             else:
-                products = client.get_all_products()
-                products = self._hydrate_selected_products(client=client, products=products, selected_codes=selected_codes)
-            summary["products_seen"] = len(products)
+                if selected_codes:
+                    rows = self._fetch_products_by_codes(client=client, selected_codes=selected_codes)
+                else:
+                    rows = client.get_all_products()
+                summary["products_seen"] = len(rows)
+                products = ((row, None) for row in rows)
             visited: dict[str, PointRecipeNode] = {}
 
-            for product in products:
+            for product, composition in products:
                 code_norm = self._norm_code(product.get("Codigo") or "")
+                if composition is not None:
+                    summary["products_seen"] += 1
                 if selected_codes and code_norm not in selected_codes:
                     continue
                 if not include_without_recipe and not product.get("hasReceta"):
                     if code_norm not in selected_codes:
                         continue
-                    # El descubrimiento puede confirmar BOM aunque hasReceta
-                    # venga en falso. Verificar la composición real antes de omitir.
+                    # El descubrimiento puede confirmar BOM aunque hasReceta venga en falso.
                     if not client.get_product_bom(product["PK_Producto"]):
                         continue
                     product = {**product, "hasReceta": True}
-                self._upsert_point_product_catalog_signal(product)
+                self._upsert_point_product_catalog_signal(
+                    product, count_unit=product.get(COUNT_UNIT_KEY) if composition is not None else None,
+                )
                 summary["products_selected"] += 1
                 self._extract_product_node(
                     client=client,
@@ -188,6 +198,7 @@ class PointProductRecipeSyncService:
                     visited=visited,
                     summary=summary,
                     node_outcomes=node_outcomes,
+                    composition=composition,
                 )
                 root_node = visited.get(
                     self._identity_key(
@@ -276,7 +287,9 @@ class PointProductRecipeSyncService:
         *,
         branch_hint: str | None = None,
         include_without_recipe: bool = False,
+        retry_codes: list[str] | None = None,
     ) -> dict[str, object]:
+        retry = {self._norm_code(code) for code in (retry_codes or [])}
         with point_account_session_lock(wait=True), self._build_http_client() as client:
             workspace = client.login(branch_hint=branch_hint)
             products = client.get_all_products()
@@ -288,23 +301,25 @@ class PointProductRecipeSyncService:
             )
             code_occurrences: dict[str, int] = {}
             for product in products:
-                point_code = (product.get("Codigo") or "").strip().upper()
-                if point_code:
-                    code_occurrences[point_code] = code_occurrences.get(point_code, 0) + 1
-            new_candidates: list[dict[str, str]] = []
-            blocked_candidates: list[dict[str, str]] = []
+                code = self._norm_code(product.get("Codigo") or "")
+                if code:
+                    code_occurrences[code] = code_occurrences.get(code, 0) + 1
+            new_candidates: list[dict] = []
+            blocked_candidates: list[dict] = []
             ignored_candidates_count = 0
             for product in products:
                 point_code = (product.get("Codigo") or "").strip().upper()
                 point_name = (product.get("Nombre") or "").strip()
                 if not point_code:
                     continue
-                if self.identity_service.resolve_recipe(point_code=point_code, point_name=point_name) is not None:
-                    continue
-                if not self._is_discovery_new_candidate(product=product, discovery_baseline_at=discovery_baseline_at):
-                    ignored_candidates_count += 1
-                    continue
-                if code_occurrences.get(point_code, 0) > 1:
+                code = self._norm_code(point_code)
+                if code not in retry:
+                    if self.identity_service.resolve_recipe(point_code=point_code, point_name=point_name) is not None:
+                        continue
+                    if not self._is_discovery_new_candidate(product=product, discovery_baseline_at=discovery_baseline_at):
+                        ignored_candidates_count += 1
+                        continue
+                if code_occurrences.get(code, 0) > 1:
                     blocked_candidates.append(
                         self._build_discovery_candidate(
                             product=product,
@@ -317,17 +332,27 @@ class PointProductRecipeSyncService:
                 should_probe_bom = self._looks_like_recipe_catalog_candidate(product=product)
                 bom_rows: list[dict] = []
 
-                if has_recipe_flag:
+                if has_recipe_flag or code in retry:
                     new_candidates.append(
                         self._build_discovery_candidate(
                             product=product,
-                            detection_reason="HAS_RECETA_FLAG",
+                            detection_reason="RETRY" if code in retry else "HAS_RECETA_FLAG",
                         )
                     )
                     continue
 
                 if should_probe_bom and product.get("PK_Producto"):
-                    bom_rows = client.get_product_bom(product.get("PK_Producto"))
+                    try:
+                        bom_rows = client.get_product_bom(product["PK_Producto"])
+                    except (ExtractionError, RequestException):
+                        if retry_codes is None:
+                            raise
+                        blocked_candidates.append(self._build_discovery_candidate(
+                            product=product,
+                            detection_reason="POINT_RECIPE_UNAVAILABLE",
+                            message="Point no respondió al consultar la composición.",
+                        ))
+                        continue
 
                 if bom_rows:
                     new_candidates.append(
@@ -372,7 +397,7 @@ class PointProductRecipeSyncService:
         detection_reason: str,
         message: str = "",
         bom_lines: int = 0,
-    ) -> dict[str, str | int]:
+    ) -> dict[str, object]:
         return {
             "codigo_point": ((product.get("Codigo") or "").strip().upper())[:80],
             "nombre": (product.get("Nombre") or "").strip()[:250],
@@ -382,6 +407,7 @@ class PointProductRecipeSyncService:
             "message": message[:280],
             "bom_lines": max(int(bom_lines or 0), 0),
             "point_external_id": str(product.get("PK_Producto") or product.get("external_id") or "")[:120],
+            "catalog_count_unit": catalog_count_unit(product),
         }
 
     def _looks_like_recipe_catalog_candidate(self, *, product: dict) -> bool:
@@ -469,6 +495,40 @@ class PointProductRecipeSyncService:
             seen_external_ids.add(external_id)
         return hydrated
 
+    def _confirmed_new_products(self, *, client, requested_codes, candidates, review):
+        # The catalog already returned the Point ID. A second search by text can omit it.
+        by_code = {self._norm_code(item["codigo_point"]): item for item in candidates}
+        for code, requested_code in requested_codes.items():
+            candidate = by_code.get(code, {"codigo_point": requested_code})
+            product_id = candidate.get("point_external_id")
+            reason = "POINT_PRODUCT_NOT_CONFIRMED"
+            message = "Point no confirmó la identidad del producto en el catálogo vigente."
+            if product_id:
+                try:
+                    detail = client.get_product_detail(product_id)
+                    if (
+                        str(detail.get("PK_Producto") or "") == product_id
+                        and self._norm_code(detail.get("Codigo") or "") == code
+                    ):
+                        bom_rows = client.get_product_bom(product_id)
+                        if bom_rows:
+                            yield {
+                                "PK_Producto": product_id,
+                                "Codigo": detail["Codigo"],
+                                "Nombre": detail.get("Nombre") or candidate.get("nombre") or "",
+                                "Familia": candidate.get("familia") or "",
+                                "Categoria": candidate.get("categoria") or "",
+                                "hasReceta": True,
+                                COUNT_UNIT_KEY: candidate.get("catalog_count_unit"),
+                            }, (detail, bom_rows)
+                            continue
+                        reason = "POINT_NO_BOM"
+                        message = "Point devolvió el producto sin composición."
+                except (ExtractionError, RequestException):
+                    reason = "POINT_RECIPE_UNAVAILABLE"
+                    message = "Point no respondió al consultar el producto o su composición."
+            review.append({**candidate, "detection_reason": reason, "message": message})
+
     def _fetch_products_by_codes(self, *, client, selected_codes: set[str]) -> list[dict]:
         """Trae SOLO los productos pedidos: una consulta dirigida por código,
         con hidratación desde PointProduct para los que la búsqueda no regrese.
@@ -491,7 +551,7 @@ class PointProductRecipeSyncService:
         return products
 
     @transaction.atomic
-    def _upsert_point_product_catalog_signal(self, product: dict) -> PointProduct | None:
+    def _upsert_point_product_catalog_signal(self, product: dict, *, count_unit: dict | None = None) -> PointProduct | None:
         external_id = str(product.get("PK_Producto") or "").strip()
         sku = str(product.get("Codigo") or "").strip()
         name = str(product.get("Nombre") or "").strip()
@@ -503,8 +563,8 @@ class PointProductRecipeSyncService:
             point_product = PointProduct.objects.select_for_update().filter(sku__iexact=sku).order_by("-updated_at", "-id").first()
 
         metadata = dict((point_product.metadata if point_product else {}) or {})
-        count_unit = catalog_count_unit(product)
-        if count_unit:
+        count_unit = count_unit or catalog_count_unit(product)
+        if count_unit and count_unit["codigo"] == sku:
             metadata[COUNT_UNIT_KEY] = count_unit
         metadata.update(
             {
@@ -640,6 +700,7 @@ class PointProductRecipeSyncService:
         visited: dict[str, PointRecipeNode],
         summary: dict,
         node_outcomes: dict[str, dict[str, object]],
+        composition: tuple[dict, list[dict]] | None = None,
     ) -> PointRecipeNode:
         identity_key = self._identity_key(
             source_type=PointRecipeNode.SOURCE_PRODUCT,
@@ -650,8 +711,11 @@ class PointProductRecipeSyncService:
         if identity_key in visited:
             return visited[identity_key]
 
-        detail = client.get_product_detail(product["PK_Producto"])
-        bom_rows = client.get_product_bom(product["PK_Producto"])
+        if composition is None:
+            detail = client.get_product_detail(product["PK_Producto"])
+            bom_rows = client.get_product_bom(product["PK_Producto"])
+        else:
+            detail, bom_rows = composition
         if not bom_rows:
             summary["products_without_recipe_in_point"] += 1
             identity_key = self._identity_key(

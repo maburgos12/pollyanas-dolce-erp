@@ -149,12 +149,28 @@ class CatalogRecoveryTests(TestCase):
         self.assertEqual(CostoInsumo.objects.filter(insumo=self.insumo).count(), 1)
 
     @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
+    def test_new_queue_ignores_general_and_legacy_mixed_resume_codes(self, publish):
+        req = RequestFactory().post("/")
+        req.user = self.user
+        req.session = {}
+        for action in ("SYNC_ALL_RECIPES", "SYNC_ONLY_NEW_PRODUCTS"):
+            with self.subTest(previous_action=action):
+                PointSyncJob.objects.create(
+                    job_type="recipes", status="PARTIAL",
+                    parameters={"action": action, "resume_codes": ["GENERAL"]},
+                )
+                job = _queue_catalog_recipe_sync(req, action_label="SYNC_ONLY_NEW_PRODUCTS")
+                self.assertFalse(job.parameters.get("resume_codes"))
+                self.assertFalse(job.parameters.get("new_product_codes"))
+                job.delete()
+
+    @patch("recetas.views.recetas.task_catalog_recipe_sync.apply_async")
     @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
     def test_retry_includes_already_created_recipe(self, svc, delay):
         PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,
             status="PARTIAL",
-            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS", "resume_codes": ["4358"]},
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS", "new_product_codes": ["4358"]},
         )
         req = RequestFactory().post("/")
         req.user = self.user

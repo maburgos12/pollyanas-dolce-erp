@@ -127,7 +127,7 @@ try:
             job_type="recipes",
             parameters={
                 "action": "SYNC_ONLY_NEW_PRODUCTS",
-                "resume_codes": ["WORKERPROBE"],
+                "new_product_codes": ["WORKERPROBE"],
             },
         )
         task_catalog_recipe_sync.apply_async(
@@ -183,7 +183,7 @@ try:
         job_type="recipes",
         parameters={
             "action": "SYNC_ONLY_NEW_PRODUCTS",
-            "resume_codes": ["WORKERPROBE"],
+            "new_product_codes": ["WORKERPROBE"],
         },
     )
     task_catalog_recipe_sync.apply_async(

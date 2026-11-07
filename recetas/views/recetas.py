@@ -5525,10 +5525,7 @@ def _point_sync_response(
 def _queue_catalog_recipe_sync(
     request: HttpRequest, *, action_label: str
 ) -> PointSyncJob:
-    from pos_bridge.services.catalog_recipe_execution import (
-        recover_abandoned_catalog_jobs,
-        ACTIONS,
-    )
+    from pos_bridge.services.catalog_recipe_execution import recover_abandoned_catalog_jobs
 
     recover_abandoned_catalog_jobs()
     with transaction.atomic():
@@ -5549,24 +5546,15 @@ def _queue_catalog_recipe_sync(
             request.session["recetas_last_point_sync_job_id"] = job.id
             job.catalog_sync_reused = True
             return job
-        previous = (
-            PointSyncJob.objects.filter(
+        new_product_codes = []
+        if action_label == "SYNC_ONLY_NEW_PRODUCTS":
+            previous = PointSyncJob.objects.filter(
                 job_type=PointSyncJob.JOB_TYPE_RECIPES,
-                parameters__action__in=ACTIONS,
-            )
-            .order_by("-created_at", "-id")
-            .first()
-        )
-        resume_codes = []
-        if previous and previous.status in {"FAILED", "PARTIAL"}:
-            resume_codes = list(previous.parameters.get("resume_codes") or [])
-            resume_codes += list(
-                previous.recipe_runs.values_list("nodes__point_code", flat=True).filter(
-                    nodes__depth=0,
-                    nodes__source_type="PRODUCT",
-                )
-            )
-            resume_codes = sorted({code for code in resume_codes if code})
+                parameters__action=action_label,
+            ).order_by("-created_at", "-id").first()
+            if previous and previous.status in {"FAILED", "PARTIAL"}:
+                # The legacy resume_codes could contain roots from an unrelated full sync.
+                new_product_codes = previous.parameters.get("new_product_codes") or []
         job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,
             status=PointSyncJob.STATUS_PENDING,
@@ -5574,7 +5562,7 @@ def _queue_catalog_recipe_sync(
                 "action": action_label,
                 "branch_hint": "MATRIZ",
                 "include_without_recipe": False,
-                "resume_codes": resume_codes,
+                "new_product_codes": new_product_codes,
             },
             triggered_by=request.user,
         )

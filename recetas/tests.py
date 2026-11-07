@@ -642,6 +642,28 @@ class RecetasListCatalogFiltersTests(TestCase):
         )
         self.assertEqual(panel["summary"]["new_preparations_imported"], 1)
 
+    def test_recetas_list_shows_products_pending_point_review(self):
+        PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_PARTIAL,
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"},
+            result_summary={
+                "products_selected": 1,
+                "discovery": {"blocked_candidates": [{
+                    "codigo_point": "NEW-REVIEW",
+                    "nombre": "Pastel pendiente",
+                    "message": "Point devolvió el producto sin composición.",
+                }]},
+            },
+            triggered_by=self.user,
+        )
+
+        response = self.client.get(reverse("recetas:recetas_list"))
+
+        self.assertContains(response, "Ver productos pendientes de revisión (1)")
+        self.assertContains(response, "NEW-REVIEW")
+        self.assertContains(response, "Point devolvió el producto sin composición.")
+
     def test_recetas_list_prioritizes_running_job_and_shows_live_stage(self):
         running_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,
