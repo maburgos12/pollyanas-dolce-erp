@@ -18,6 +18,7 @@ from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
 from django.db import OperationalError, ProgrammingError, connection, transaction
 from django.db.models.deletion import ProtectedError
+from django.db.models.functions import Trim, Upper
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max, Exists
 from django.core.paginator import Paginator
 from django.http import HttpRequest, HttpResponse, JsonResponse
@@ -52,7 +53,11 @@ from pos_bridge.models import (
     PointWasteLine,
     PointProductCategory,
 )
-from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
+from pos_bridge.services.product_recipe_sync_service import (
+    PointProductRecipeSyncService,
+    fixed_commercial_product_names,
+    point_commercial_categories,
+)
 from pos_bridge.tasks import task_catalog_recipe_sync
 from maestros.utils.canonical_catalog import (
     canonical_insumo,
@@ -240,6 +245,18 @@ def _insumo_article_class(insumo: Insumo) -> dict[str, str]:
     }
 
 
+def _manufactured_recipes_queryset():
+    category_matches = point_commercial_categories().filter(
+        codigo_point__iexact=OuterRef("codigo_point"), nombre__iexact=OuterRef("nombre"),
+    )
+    return (
+        Receta.objects.filter(modo_costeo=Receta.MODO_COSTEO_FABRICADO)
+        .alias(_commercial_name=Upper(Trim("nombre")))
+        .exclude(_commercial_name__in=fixed_commercial_product_names())
+        .exclude(Exists(category_matches))
+    )
+
+
 def _filtered_recipe_sync_queryset(params) -> Any:
     vista = (params.get("vista") or "").strip().lower()
     q = (params.get("q") or "").strip()
@@ -248,7 +265,7 @@ def _filtered_recipe_sync_queryset(params) -> Any:
     familia = (params.get("familia") or "").strip()
     categoria = (params.get("categoria") or "").strip()
 
-    qs = Receta.objects.all().order_by("nombre", "id")
+    qs = _manufactured_recipes_queryset().order_by("nombre", "id")
     if vista == "productos":
         qs = qs.filter(tipo=Receta.TIPO_PRODUCTO_FINAL)
     elif vista == "insumos":
@@ -4830,33 +4847,33 @@ def recetas_list(request: HttpRequest) -> HttpResponse:
         ]
     )
 
+    recetas_base = _manufactured_recipes_queryset()
     familias_db = list(
-        Receta.objects.exclude(familia__exact="")
+        recetas_base.exclude(familia__exact="")
         .values_list("familia", flat=True)
         .distinct()
         .order_by("familia")
     )
     familias_catalogo = familias_producto_catalogo(familias_db)
     categorias_catalogo = list(
-        Receta.objects.exclude(categoria__exact="")
+        recetas_base.exclude(categoria__exact="")
         .values_list("categoria", flat=True)
         .distinct()
         .order_by("categoria")
     )
     familias_top = list(
-        Receta.objects.exclude(familia__exact="")
+        recetas_base.exclude(familia__exact="")
         .values("familia")
         .annotate(total=Count("id"))
         .order_by("-total", "familia")[:8]
     )
     categorias_top = list(
-        Receta.objects.exclude(categoria__exact="")
+        recetas_base.exclude(categoria__exact="")
         .values("categoria")
         .annotate(total=Count("id"))
         .order_by("-total", "categoria")[:8]
     )
 
-    recetas_base = Receta.objects.all()
     total_all = recetas_base.count()
     total_productos = recetas_base.filter(tipo=Receta.TIPO_PRODUCTO_FINAL).count()
     total_insumos = recetas_base.filter(tipo=Receta.TIPO_PREPARACION).count()

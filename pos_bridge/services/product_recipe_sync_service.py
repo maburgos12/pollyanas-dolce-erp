@@ -13,7 +13,10 @@ from requests import RequestException
 from core.cache_versions import bump_cache_scopes
 from maestros.models import Insumo, UnidadMedida, seed_unidades_basicas
 from pos_bridge.config import load_point_bridge_settings
-from pos_bridge.models import PointExtractionLog, PointProduct, PointRecipeExtractionRun, PointRecipeNode, PointRecipeNodeLine, PointSyncJob
+from pos_bridge.models import (
+    PointExtractionLog, PointProduct, PointProductCategory, PointRecipeExtractionRun,
+    PointRecipeNode, PointRecipeNodeLine, PointSyncJob,
+)
 from pos_bridge.services.point_http_client import PointHttpSessionClient
 from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.product_count_units import COUNT_UNIT_KEY, catalog_count_unit
@@ -26,6 +29,18 @@ from recetas.models import LineaReceta, Receta
 from recetas.utils.matching import clasificar_match
 from recetas.utils.normalizacion import normalizar_nombre
 from recetas.utils.temporalidad import inferir_temporalidad_receta
+
+
+def point_commercial_categories():
+    return PointProductCategory.objects.filter(category__in=("REVENTA", "SERVICIO_ACCESORIO"))
+
+
+def fixed_commercial_product_names():
+    from reportes.models import ProductBusinessRule
+
+    return ProductBusinessRule.objects.filter(
+        is_fixed=True, classification__in=("REVENTA", "ACCESORIO", "SERVICIO"),
+    ).values_list("normalized_name", flat=True)
 
 
 @dataclass(slots=True)
@@ -112,6 +127,7 @@ class PointProductRecipeSyncService:
         sync_job=None,
         max_depth: int = 3,
         discovered_candidates: list[dict] | None = None,
+        catalog_recipes_only: bool = False,
     ) -> PointRecipeSyncResult:
         seed_unidades_basicas()
         requested_codes = {self._norm_code(code): code for code in (product_codes or []) if (code or "").strip()}
@@ -169,6 +185,8 @@ class PointProductRecipeSyncService:
                 else:
                     rows = client.get_all_products()
                 summary["products_seen"] = len(rows)
+                if catalog_recipes_only:
+                    rows = self._catalog_recipe_rows(rows)
                 products = ((row, None) for row in rows)
             visited: dict[str, PointRecipeNode] = {}
 
@@ -178,6 +196,12 @@ class PointProductRecipeSyncService:
                     summary["products_seen"] += 1
                 if selected_codes and code_norm not in selected_codes:
                     continue
+                if catalog_recipes_only and composition is None:
+                    existing = self.identity_service.resolve_recipe(
+                        point_code=product.get("Codigo") or "", point_name=product.get("Nombre") or "",
+                    )
+                    if existing is not None and existing.modo_costeo != Receta.MODO_COSTEO_FABRICADO:
+                        continue
                 if not include_without_recipe and not product.get("hasReceta"):
                     if code_norm not in selected_codes:
                         continue
@@ -282,6 +306,23 @@ class PointProductRecipeSyncService:
         summary["run_id"] = run.id
         return PointRecipeSyncResult(summary=summary, raw_export_path=str(raw_export_path))
 
+    def _catalog_recipe_rows(self, products):
+        commercial_names = set(fixed_commercial_product_names())
+        commercial_pairs = {
+            (code.strip().upper(), name.strip().upper())
+            for code, name in point_commercial_categories().values_list("codigo_point", "nombre")
+        }
+        return [
+            product for product in products
+            if product.get("hasReceta") is True
+            and product.get("Servicio") is not True
+            and (product.get("Nombre") or "").strip().upper() not in commercial_names
+            and (
+                (product.get("Codigo") or "").strip().upper(),
+                (product.get("Nombre") or "").strip().upper(),
+            ) not in commercial_pairs
+        ]
+
     def discover_new_product_codes(
         self,
         *,
@@ -294,11 +335,12 @@ class PointProductRecipeSyncService:
             workspace = client.login(branch_hint=branch_hint)
             products = client.get_all_products()
             discovery_baseline_at = self._discovery_baseline_at()
-            products = self._hydrate_recent_discovery_products(
-                client=client,
-                products=products,
-                discovery_baseline_at=discovery_baseline_at,
-            )
+            if retry_codes is None:
+                products = self._hydrate_recent_discovery_products(
+                    client=client, products=products, discovery_baseline_at=discovery_baseline_at,
+                )
+            elif not products:
+                raise ExtractionError("Point no devolvió el catálogo de productos para comprobar altas.")
             code_occurrences: dict[str, int] = {}
             for product in products:
                 code = self._norm_code(product.get("Codigo") or "")
@@ -306,15 +348,23 @@ class PointProductRecipeSyncService:
                     code_occurrences[code] = code_occurrences.get(code, 0) + 1
             new_candidates: list[dict] = []
             blocked_candidates: list[dict] = []
-            ignored_candidates_count = 0
-            for product in products:
+            candidates = self._catalog_recipe_rows(products) if retry_codes is not None else products
+            excluded_retry = retry.intersection(code_occurrences) - {
+                self._norm_code(product.get("Codigo") or "") for product in candidates
+            }
+            ignored_candidates_count = len(products) - len(candidates)
+            for product in candidates:
                 point_code = (product.get("Codigo") or "").strip().upper()
                 point_name = (product.get("Nombre") or "").strip()
                 if not point_code:
                     continue
                 code = self._norm_code(point_code)
+                existing = self.identity_service.resolve_recipe(point_code=point_code, point_name=point_name)
+                if code in retry and existing is not None and existing.modo_costeo != Receta.MODO_COSTEO_FABRICADO:
+                    excluded_retry.add(code)
+                    continue
                 if code not in retry:
-                    if self.identity_service.resolve_recipe(point_code=point_code, point_name=point_name) is not None:
+                    if existing is not None:
                         continue
                     if not self._is_discovery_new_candidate(product=product, discovery_baseline_at=discovery_baseline_at):
                         ignored_candidates_count += 1
@@ -328,11 +378,7 @@ class PointProductRecipeSyncService:
                         )
                     )
                     continue
-                has_recipe_flag = bool(product.get("hasReceta"))
-                should_probe_bom = self._looks_like_recipe_catalog_candidate(product=product)
-                bom_rows: list[dict] = []
-
-                if has_recipe_flag or code in retry:
+                if product.get("hasReceta") or code in retry:
                     new_candidates.append(
                         self._build_discovery_candidate(
                             product=product,
@@ -341,18 +387,8 @@ class PointProductRecipeSyncService:
                     )
                     continue
 
-                if should_probe_bom and product.get("PK_Producto"):
-                    try:
-                        bom_rows = client.get_product_bom(product["PK_Producto"])
-                    except (ExtractionError, RequestException):
-                        if retry_codes is None:
-                            raise
-                        blocked_candidates.append(self._build_discovery_candidate(
-                            product=product,
-                            detection_reason="POINT_RECIPE_UNAVAILABLE",
-                            message="Point no respondió al consultar la composición.",
-                        ))
-                        continue
+                should_probe_bom = self._looks_like_recipe_catalog_candidate(product=product)
+                bom_rows = client.get_product_bom(product["PK_Producto"]) if should_probe_bom and product.get("PK_Producto") else []
 
                 if bom_rows:
                     new_candidates.append(
@@ -384,6 +420,7 @@ class PointProductRecipeSyncService:
             "new_codes": [item["codigo_point"] for item in new_candidates],
             "blocked_candidates": blocked_candidates,
             "blocked_codes": [item["codigo_point"] for item in blocked_candidates],
+            "excluded_retry_codes": [code for code in (retry_codes or []) if self._norm_code(code) in excluded_retry],
             "importable_candidates_count": len(new_candidates),
             "blocked_candidates_count": len(blocked_candidates),
             "ignored_candidates_count": ignored_candidates_count,
@@ -509,6 +546,8 @@ class PointProductRecipeSyncService:
                     if (
                         str(detail.get("PK_Producto") or "") == product_id
                         and self._norm_code(detail.get("Codigo") or "") == code
+                        and detail.get("Servicio") is not True
+                        and detail.get("Activo") is not False
                     ):
                         bom_rows = client.get_product_bom(product_id)
                         if bom_rows:

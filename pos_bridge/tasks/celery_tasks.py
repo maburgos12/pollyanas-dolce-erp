@@ -421,7 +421,9 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         if action == "SYNC_ONLY_NEW_PRODUCTS":
             retry_codes = parameters.get("new_product_codes") or []
             discovery = service.discover_new_product_codes(branch_hint=branch_hint, retry_codes=retry_codes)
-            pending_codes = set(discovery.get("new_codes") or []) | set(retry_codes)
+            pending_codes = (set(discovery.get("new_codes") or []) | set(retry_codes)) - set(
+                discovery.get("excluded_retry_codes") or []
+            )
             product_codes = sorted(pending_codes - set(discovery.get("blocked_codes") or []))
             parameters["new_product_codes"] = sorted(pending_codes)
             job.parameters = parameters
@@ -480,7 +482,7 @@ def task_catalog_recipe_sync(self, *, job_id: int):
         elif action != "SYNC_ALL_RECIPES":
             raise ValueError(f"Unsupported catalog recipe sync action: {action}")
 
-        sync_options = {}
+        sync_options = {"catalog_recipes_only": True}
         if discovery is not None:
             sync_options["discovered_candidates"] = discovery.get("new_candidates") or []
         result = service.sync(

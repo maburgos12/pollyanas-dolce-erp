@@ -1379,6 +1379,29 @@ class RecetasListCatalogFiltersTests(TestCase):
         nombres = [r.nombre for r in response.context["page"].object_list]
         self.assertNotIn(reventa.nombre, nombres)
 
+    def test_recetas_list_excludes_commercial_products_even_with_recipe_records(self):
+        from reportes.models import ProductBusinessRule
+
+        reventa = Receta.objects.create(
+            nombre="Té comprado", tipo=Receta.TIPO_PRODUCTO_FINAL,
+            modo_costeo=Receta.MODO_COSTEO_REVENTA, codigo_point="TE-COM", hash_contenido="hash-te-com",
+        )
+        caja = Receta.objects.create(
+            nombre="Caja venta", tipo=Receta.TIPO_PRODUCTO_FINAL, codigo_point="CAJA-COM", hash_contenido="hash-caja-com",
+        )
+        ProductBusinessRule.objects.create(product_name=caja.nombre, classification="REVENTA")
+        self._registrar_venta_point_reciente(reventa, sku=reventa.codigo_point)
+        self._registrar_venta_point_reciente(caja, sku=caja.codigo_point)
+
+        for vista in ("productos", "todo"):
+            with self.subTest(vista=vista):
+                response = self.client.get(reverse("recetas:recetas_list"), {"vista": vista})
+                ids = {receta.id for receta in response.context["page"].object_list}
+                self.assertIn(self.receta_producto.id, ids)
+                self.assertNotIn(reventa.id, ids)
+                self.assertNotIn(caja.id, ids)
+                self.assertEqual(response.context["total_productos"], 1)
+
     def test_recetas_list_filters_by_governance_issue(self):
         self.receta_preparacion.rendimiento_cantidad = None
         self.receta_preparacion.save(update_fields=["rendimiento_cantidad"])

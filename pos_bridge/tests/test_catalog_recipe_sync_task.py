@@ -77,6 +77,7 @@ class CatalogRecipeSyncTaskTests(TestCase):
             product_codes=None,
             include_without_recipe=False,
             sync_job=job,
+            catalog_recipes_only=True,
         )
         self.assertEqual(payload["job_id"], job.id)
         self.assertEqual(payload["status"], PointSyncJob.STATUS_SUCCESS)
@@ -108,6 +109,24 @@ class CatalogRecipeSyncTaskTests(TestCase):
         service_cls.return_value.sync.assert_not_called()
         weekly_snapshot.assert_not_called()
         self.assertEqual(payload["status"], PointSyncJob.STATUS_SUCCESS)
+
+    @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
+    def test_catalog_retry_drops_products_excluded_by_current_catalog(self, service_cls):
+        job = PointSyncJob.objects.create(
+            job_type="recipes",
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS", "new_product_codes": ["ACCESORIO"]},
+        )
+        service_cls.return_value.discover_new_product_codes.return_value = {
+            "new_codes": [], "excluded_retry_codes": ["ACCESORIO"],
+        }
+        service_cls.return_value.sync.side_effect = AssertionError("Un accesorio excluido llegó al importador")
+
+        task_catalog_recipe_sync(job_id=job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "SUCCESS")
+        self.assertEqual(job.parameters["new_product_codes"], [])
+        service_cls.return_value.sync.assert_not_called()
 
     @patch("pos_bridge.tasks.celery_tasks.run_weekly_cost_snapshot")
     @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
