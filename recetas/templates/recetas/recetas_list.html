@@ -108,6 +108,18 @@
         <div><dt>Composiciones completas</dt><dd>{{ point_recipe_sync_panel.summary.recipes_completed_successfully|default:0 }}</dd></div>
         <div><dt>Insumos pendientes</dt><dd>{{ point_recipe_sync_panel.summary.unresolved_inputs_count|default:0 }}</dd></div>
       </dl>
+      {% with pending=point_recipe_sync_panel.summary.discovery.blocked_candidates %}
+      {% if pending %}
+      <details>
+        <summary>Ver productos pendientes de revisión ({{ pending|length }})</summary>
+        <ul>
+          {% for item in pending %}
+          <li><strong>{{ item.codigo_point }}</strong>{% if item.nombre %} · {{ item.nombre }}{% endif %}. {{ item.message }}</li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endif %}
+      {% endwith %}
       {% if point_recipe_sync_panel.summary.cost_validation %}
       <p>Componentes con costo pendiente: <strong>{{ point_recipe_sync_panel.summary.cost_validation.missing_count }}</strong>.</p>
       {% if point_recipe_sync_panel.summary.cost_validation.missing_count %}

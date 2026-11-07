@@ -27,17 +27,17 @@ CODE = "WORKERPROBE"
 PAYLOAD = {
     "products": [
         {
-            "PK_Producto": 99001,
+            "PK_Producto": "99001",
             "Codigo": CODE,
             "Nombre": "Worker probe",
             "hasReceta": True,
         }
     ],
     "details": {
-        99001: {"PK_Producto": 99001, "Codigo": CODE, "Nombre": "Worker probe"}
+        "99001": {"PK_Producto": 99001, "Codigo": CODE, "Nombre": "Worker probe"}
     },
     "boms": {
-        99001: [
+        "99001": [
             {
                 "PK_Articulo": 99002,
                 "Codigo_Articulo": "PROBEINPUT",
@@ -55,9 +55,6 @@ PAYLOAD = {
 class ProbeService(PointProductRecipeSyncService):
     def __init__(self):
         super().__init__(http_client_factory=lambda: FakePointHttpClient(PAYLOAD))
-
-    def discover_new_product_codes(self, **kwargs):
-        return {"new_codes": []}
 
     def _materialize_node_lines(self, **kwargs):
         mode = MODE.read_text().strip()

@@ -142,6 +142,64 @@ class CatalogRecipeSyncTaskTests(TestCase):
         service_cls.return_value.sync.assert_not_called()
         weekly_snapshot.assert_not_called()
 
+    @patch("pos_bridge.tasks.celery_tasks.complete_recipe_costs")
+    @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
+    def test_new_sync_imports_confirmed_recipe_and_reports_unconfirmed_products(self, service_cls, costs):
+        from maestros.models import Insumo, UnidadMedida, seed_unidades_basicas
+        from pos_bridge.models import PointProduct
+        from pos_bridge.services.product_recipe_sync_service import PointProductRecipeSyncService
+        from pos_bridge.services.product_count_units import product_count_unit
+        from pos_bridge.tests.test_product_recipe_sync_service import FakePointHttpClient
+        from pos_bridge.utils.exceptions import ExtractionError
+        from recetas.models import Receta
+
+        products = [
+            {"PK_Producto": str(pk), "Codigo": code, "Nombre": name, "hasReceta": True}
+            for pk, code, name in [(1, "NEW-OK", "Pastel confirmado"), (2, "NEW-FAIL", "Pay sin respuesta"),
+                                   (3, "NEW-EMPTY", "Pastel sin composición")]
+        ]
+        products[0]["Unidad"] = "PZA"
+        seed_unidades_basicas()
+        Insumo.objects.create(
+            nombre="Insumo nuevo", codigo_point="INP-1",
+            unidad_base=UnidadMedida.objects.get(codigo="pza"),
+        )
+        costs.return_value = {"recipe_ids": [], "missing_count": 0, "search_error": ""}
+        client = FakePointHttpClient({
+            "products": products,
+            "details": {"1": products[0], "3": products[2]},
+            "boms": {"1": [{"PK_Articulo": 500, "Codigo_Articulo": "INP-1",
+                            "Articulo": "Insumo nuevo", "Cantidad": 1, "Unidad_corto": "PZA"}], "3": []},
+        })
+        real_detail = client.get_product_detail
+
+        def get_detail(pk):
+            if pk == "2":
+                raise ExtractionError("Point no respondió")
+            return real_detail(pk)
+
+        service_cls.return_value = PointProductRecipeSyncService(http_client_factory=lambda: client)
+        job = PointSyncJob.objects.create(job_type="recipes", parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"})
+        with (
+            patch.object(client, "get_product_detail", side_effect=get_detail),
+            patch.object(client, "get_all_products", return_value=products),
+            patch.object(client, "get_products", return_value=[]),
+        ):
+            task_catalog_recipe_sync(job_id=job.id)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, "PARTIAL")
+        self.assertEqual(job.result_summary["products_selected"], 1)
+        review = job.result_summary["discovery"]["blocked_candidates"]
+        self.assertEqual(
+            {item["codigo_point"]: item["detection_reason"] for item in review},
+            {"NEW-FAIL": "POINT_RECIPE_UNAVAILABLE", "NEW-EMPTY": "POINT_NO_BOM"},
+        )
+        self.assertEqual(job.parameters["new_product_codes"], ["NEW-EMPTY", "NEW-FAIL"])
+        self.assertEqual(product_count_unit(PointProduct.objects.get(sku="NEW-OK"))[0], "PZA")
+        self.assertTrue(Receta.objects.filter(codigo_point="NEW-OK").exists())
+        self.assertFalse(Receta.objects.filter(codigo_point__in=["NEW-FAIL", "NEW-EMPTY"]).exists())
+
     @patch("pos_bridge.tasks.celery_tasks.PointProductRecipeSyncService")
     def test_already_successful_job_is_not_executed_twice(self, service_cls):
         job = PointSyncJob.objects.create(
