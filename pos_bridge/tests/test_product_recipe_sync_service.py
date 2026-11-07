@@ -82,6 +82,53 @@ class PointProductRecipeSyncServiceTests(TestCase):
         self.assertEqual(Insumo.objects.count(), count_before)
         self.assertEqual(client.mock_calls, [])
 
+    def test_catalog_job_only_discovers_products_declared_with_recipe(self):
+        from unittest.mock import patch
+        from pos_bridge.models import PointProductCategory
+        from reportes.models import ProductBusinessRule
+
+        ProductBusinessRule.objects.create(product_name="Caja de reventa", classification="REVENTA")
+        PointProductCategory.objects.create(codigo_point="TE", nombre="Té comprado", category="REVENTA")
+        products = [
+            {"PK_Producto": 1, "Codigo": "PASTEL", "Nombre": "Pastel real", "hasReceta": True, "Produccion": False},
+            {"PK_Producto": 2, "Codigo": "DECO", "Nombre": "Decoración", "Familia": "Bollo"},
+            {"PK_Producto": 3, "Codigo": "TOP", "Nombre": "Topper rosa"},
+            {"PK_Producto": 4, "Codigo": "TOP", "Nombre": "Topper plata"},
+            {"PK_Producto": 5, "Codigo": "CAJA", "Nombre": "Caja de reventa", "hasReceta": True},
+            {"PK_Producto": 6, "Codigo": "CARGO", "Nombre": "Cargo decoración", "hasReceta": True, "Servicio": True},
+            {"PK_Producto": 7, "Codigo": "TE", "Nombre": "Té comprado", "hasReceta": True},
+            {"PK_Producto": 8, "Codigo": "MIXED", "Nombre": "Pay con receta", "hasReceta": True},
+            {"PK_Producto": 9, "Codigo": "MIXED", "Nombre": "Accesorio con código compartido"},
+        ]
+        client = FakePointHttpClient({"products": products})
+        service = PointProductRecipeSyncService(http_client_factory=lambda: client)
+        with patch.object(client, "get_product_bom") as bom:
+            result = service.discover_new_product_codes(retry_codes=["DECO", "CAJA", "TE"])
+        self.assertEqual(result["new_codes"], ["PASTEL"])
+        self.assertEqual(result["blocked_codes"], ["MIXED"])
+        self.assertEqual(result["blocked_candidates"][0]["point_external_id"], "8")
+        self.assertCountEqual(result["excluded_retry_codes"], ["DECO", "CAJA", "TE"])
+        self.assertEqual(result["products_seen"], 9)
+        bom.assert_not_called()
+
+    def test_full_catalog_recipe_job_skips_commercial_rows_before_reading_composition(self):
+        from unittest.mock import patch
+        from reportes.models import ProductBusinessRule
+
+        ProductBusinessRule.objects.create(product_name="Caja de reventa", classification="REVENTA")
+        client = FakePointHttpClient({"products": [
+            {"PK_Producto": 1, "Codigo": "CAJA", "Nombre": "Caja de reventa", "hasReceta": True},
+            {"PK_Producto": 2, "Codigo": "CARGO", "Nombre": "Cargo", "Servicio": True, "hasReceta": True},
+            {"PK_Producto": 3, "Codigo": "ACCESORIO", "Nombre": "Accesorio sin receta"},
+        ]})
+        service = PointProductRecipeSyncService(http_client_factory=lambda: client)
+        with patch.object(client, "get_product_detail") as detail, patch.object(client, "get_product_bom") as bom:
+            result = service.sync(catalog_recipes_only=True)
+        self.assertEqual(result.summary["products_seen"], 3)
+        self.assertEqual(result.summary["products_selected"], 0)
+        detail.assert_not_called()
+        bom.assert_not_called()
+
     def test_discovery_coordinates_its_point_session_with_other_imports(self):
         from django.db import connection
         from unittest.mock import patch
