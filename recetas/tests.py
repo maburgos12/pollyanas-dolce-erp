@@ -664,6 +664,28 @@ class RecetasListCatalogFiltersTests(TestCase):
         self.assertContains(response, "NEW-REVIEW")
         self.assertContains(response, "Point devolvió el producto sin composición.")
 
+    def test_recetas_panel_replaces_a_failed_catalog_job_from_an_old_session(self):
+        failed = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_FAILED,
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"},
+            error_message="Error anterior de productos no devueltos",
+            triggered_by=self.user,
+        )
+        latest = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_RECIPES,
+            status=PointSyncJob.STATUS_PARTIAL,
+            parameters={"action": "SYNC_ONLY_NEW_PRODUCTS"},
+        )
+        session = self.client.session
+        session["recetas_last_point_sync_job_id"] = failed.id
+        session.save()
+
+        response = self.client.get(reverse("recetas:recetas_list"))
+
+        self.assertEqual(response.context["point_recipe_sync_panel"]["job_id"], latest.id)
+        self.assertNotContains(response, failed.error_message)
+
     def test_recetas_list_prioritizes_running_job_and_shows_live_stage(self):
         running_job = PointSyncJob.objects.create(
             job_type=PointSyncJob.JOB_TYPE_RECIPES,

@@ -398,7 +398,7 @@ def _format_point_recipe_discovery_blocked_message(discovery: dict[str, Any]) ->
 
 
 def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
-    from pos_bridge.services.catalog_recipe_execution import recover_abandoned_catalog_jobs
+    from pos_bridge.services.catalog_recipe_execution import ACTIONS, recover_abandoned_catalog_jobs
     recover_abandoned_catalog_jobs()
     job_qs = PointSyncJob.objects.filter(
         Q(parameters__mode__isnull=True) | ~Q(parameters__mode="recipe_gap_audit"),
@@ -415,6 +415,18 @@ def _point_recipe_sync_job_panel(request: HttpRequest) -> dict[str, Any] | None:
     )
     if job is None and preferred_job_id:
         job = job_qs.filter(id=preferred_job_id).first()
+        if (
+            job is not None
+            and job.status not in {PointSyncJob.STATUS_PENDING, PointSyncJob.STATUS_RUNNING}
+            and job.parameters.get("action") in ACTIONS
+        ):
+            newer_catalog_job = (
+                job_qs.filter(parameters__action__in=ACTIONS)
+                .filter(Q(created_at__gt=job.created_at) | Q(created_at=job.created_at, pk__gt=job.pk))
+                .order_by("-created_at", "-id")
+                .first()
+            )
+            job = newer_catalog_job or job
     if job is None:
         job = job_qs.order_by("-created_at", "-id").first()
     if job is None:
