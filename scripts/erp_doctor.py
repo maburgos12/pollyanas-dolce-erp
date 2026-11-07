@@ -416,7 +416,8 @@ def check_python_static(full: bool) -> list[CheckResult]:
 
 def check_templates(full: bool) -> list[CheckResult]:
     if not full:
-        templates = set(ROOT.glob("**/templates/**/*.html")) | set((ROOT / "templates").glob("**/*.html"))
+        # Match the full check's template roots without traversing storage/NAS.
+        templates = set(ROOT.glob("*/templates/**/*.html")) | set((ROOT / "templates").glob("**/*.html"))
         template_count = len(templates)
         return [
             CheckResult(
