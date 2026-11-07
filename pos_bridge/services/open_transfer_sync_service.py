@@ -18,6 +18,7 @@ from pos_bridge.models import (
     PointTransferLine,
 )
 from pos_bridge.services.movement_sync_service import PointMovementSyncService
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text
 
@@ -248,11 +249,14 @@ class OpenTransferSyncService:
             context=parameters,
         )
         try:
-            lines = self.movement_service.transfer_extractor.extract_open(
-                start_date=fecha,
-                end_date=fecha,
-                branch_filter=branch_filter,
-            )
+            with point_account_session_lock(wait=False) as adquirido:
+                if not adquirido:
+                    raise PosBridgeError("Point está atendiendo otra actualización. Reintenta en unos momentos.")
+                lines = self.movement_service.transfer_extractor.extract_open(
+                    start_date=fecha,
+                    end_date=fecha,
+                    branch_filter=branch_filter,
+                )
             existing_hashes = set(
                 PointTransferLine.objects.filter(source_hash__in=[line.source_hash for line in lines]).values_list(
                     "source_hash",

@@ -3617,21 +3617,79 @@
         ensureRutaAutoTracking(ruta.id, rutaEnSeguimiento && turnoOk && unidadOk && !state.previewReadOnly);
       }
 
-      async function renderRutaCarga(message = "") {
-        let rutaData = null;
-        try {
-          rutaData = await loadRutaActiva();
-        } catch (error) {
-          rutaData = null;
+      async function renderRutaCarga(message = "", rutaData = null, estadoPoint = "") {
+        if (!rutaData) {
+          try {
+            rutaData = await loadRutaActiva();
+          } catch (error) {
+            rutaData = null;
+          }
         }
         if (!rutaData?.ruta?.id) return showScreen("ruta_activa");
         const paradas = rutaData.paradas || [];
+        const puedeActualizar = !state.previewRepartidor && !state.cargaSucursal.paradaId
+          && rutaData.ruta.estatus === "PLANEADA"
+          && Number(rutaData.ruta.repartidor) === Number(state.perfil?.repartidor?.id)
+          && paradas.some((parada) => parada.punto?.sucursal && parada.punto.tipo !== "CEDIS");
         render(shell(`
           <button class="secondary-btn" onclick="showScreen('ruta_activa')">${lucideIcon("arrow-left")} Volver a Mi ruta</button>
           <h1 class="screen-title" style="margin-top:16px;">Carga de ruta</h1>
           ${message ? `<p class="${message.startsWith("✅") ? "success" : "error"}">${escapeHtml(message)}</p>` : ""}
+          ${puedeActualizar ? `
+            <button class="secondary-btn" style="min-height:44px" type="button" onclick="actualizarCargaDesdePoint(${Number(rutaData.ruta.id)}, this)">Actualizar carga desde Point</button>
+            <p class="muted" role="status" aria-live="polite">${escapeHtml(estadoPoint)}</p>
+          ` : ""}
           ${renderChecklistCarga(rutaData.checklist_carga, paradas)}
         `));
+      }
+
+      async function actualizarCargaDesdePoint(rutaId, button) {
+        if (button.disabled || state.previewRepartidor) return;
+        const aviso = button.nextElementSibling;
+        const path = `/rutas/${rutaId}/carga-checklist/actualizacion-point/`;
+        button.disabled = true;
+        button.textContent = "Actualizando carga…";
+        aviso.textContent = "Solicitando actualización a Point…";
+        try {
+          let response = await apiFetch(path, { method: "POST", skipOfflineQueue: true });
+          const limite = Date.now() + 120000;
+          while (response.status === 202 && button.isConnected) {
+            const { estado } = await response.json();
+            aviso.textContent = estado === "RUNNING" ? "Consultando transferencias en Point…" : "La actualización está en espera…";
+            if (Date.now() >= limite) {
+              aviso.textContent = "La consulta sigue en curso. Pulsa Actualizar para consultar el resultado.";
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+            if (!button.isConnected) return;
+            response = await apiFetch(path);
+          }
+          if (!button.isConnected) return;
+          const data = await response.json().catch(() => ({}));
+          const mensajes = {
+            ACTUALIZADA: "Carga actualizada. Revisa las cantidades por sucursal.",
+            PENDIENTE_ENVIO: "Point aún no marca toda la carga como Enviada. Pide a CEDIS que confirme el envío.",
+            SIN_CARGA: "Point no mostró transferencias para este tramo. Verifica el envío con CEDIS.",
+          };
+          if (!response.ok || !mensajes[data.estado]) {
+            aviso.textContent = apiErrorMessage(data, "No se pudo confirmar la actualización. Vuelve a intentarlo.");
+            return;
+          }
+          const rutaData = await loadRutaActiva();
+          if (!button.isConnected) return;
+          if (rutaData?.ruta?.id !== rutaId) {
+            aviso.textContent = "Vuelve a Mi ruta para consultar tu asignación actual.";
+            return;
+          }
+          return renderRutaCarga("", rutaData, mensajes[data.estado]);
+        } catch (error) {
+          aviso.textContent = error?.message === "Sesión expirada"
+            ? "Tu sesión expiró. Vuelve a iniciar sesión."
+            : "No se pudo consultar la actualización. Recupera la señal y vuelve a intentarlo.";
+        } finally {
+          button.disabled = false;
+          button.textContent = "Actualizar carga desde Point";
+        }
       }
 
       function renderRutaScreen(message = "") {
@@ -3649,12 +3707,15 @@
         const drafts = state.cargaSucursal.drafts;
         if (!drafts[linea.id]) {
           drafts[linea.id] = {
-            cantidad: String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0"),
             motivo: linea.motivo_diferencia || "",
             notas: linea.notas || "",
           };
         }
-        return drafts[linea.id];
+        const draft = drafts[linea.id];
+        if (!draft.cantidadEditada) {
+          draft.cantidad = String(linea.cantidad_cargada ?? linea.cantidad_enviada_esperada ?? "0");
+        }
+        return draft;
       }
 
       function seleccionarSucursalCarga(paradaId) {
@@ -3681,7 +3742,10 @@
 
       function actualizarCantidadSucursal(lineaId, value) {
         const linea = cargaSucursalLineas(state.cargaSucursal.paradaId).find((row) => Number(row.id) === Number(lineaId));
-        if (linea) cargaSucursalDraft(linea).cantidad = value;
+        if (!linea) return;
+        const draft = cargaSucursalDraft(linea);
+        draft.cantidad = value;
+        draft.cantidadEditada = true;
       }
 
       function diferenciasCargaSucursal() {
@@ -5727,7 +5791,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v95-evidencias-network-only-combustible-correccion-20261104", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v96-carga-point-repartidor", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

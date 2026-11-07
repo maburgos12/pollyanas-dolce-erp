@@ -4,6 +4,7 @@ from datetime import date, timedelta
 from celery import shared_task
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
 from django.db import OperationalError, connection, transaction
 from django.utils import timezone
@@ -12,6 +13,8 @@ from django.utils.html import strip_tags
 from core.access import can_view_module, group_name_variants
 from core.email_rendering import render_email_to_string
 from core.models import AuditLog
+from pos_bridge.models import PointSyncJob
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 
 from .models import (
     AuditoriaEntregaCursor,
@@ -29,6 +32,11 @@ from .models import (
 from .services_combustible_auditoria import auditar_carga_combustible
 from .services_auditoria_entregas import auditar_entregas_ruta
 from .services_carga_ruta import (
+    MODO_SYNC_CARGA_REPARTIDOR,
+    VIGENCIA_SYNC_CARGA_REPARTIDOR,
+    PointSyncUnavailableError,
+    estado_sync_carga_repartidor,
+    sincronizar_checklist_carga_desde_point,
     RecargaCedisPendienteEnviado,
     RecargaCedisPointError,
     RecargaCedisSinLineasPoint,
@@ -77,6 +85,41 @@ def _emails_de_usuarios(usuarios) -> list[str]:
 
 def _from_email() -> str:
     return getattr(settings, "DEFAULT_FROM_EMAIL", "") or getattr(settings, "EMAIL_HOST_USER", "")
+
+
+@shared_task(ignore_result=True)
+def actualizar_carga_point_repartidor(*, job_id):
+    solicitudes = PointSyncJob.objects.filter(pk=job_id, parameters__mode=MODO_SYNC_CARGA_REPARTIDOR)
+    ahora = timezone.now()
+    if not solicitudes.filter(
+        status=PointSyncJob.STATUS_PENDING,
+        started_at__gt=ahora - VIGENCIA_SYNC_CARGA_REPARTIDOR,
+    ).update(status=PointSyncJob.STATUS_RUNNING, updated_at=ahora):
+        return
+
+    job = solicitudes.select_related("triggered_by").get()
+    try:
+        ruta = RutaEntrega.objects.get(pk=job.parameters["ruta_id"])
+        with point_account_session_lock(wait=False) as adquirido:
+            if not adquirido:
+                raise ValidationError("Point está atendiendo otra actualización. Reintenta en unos momentos.")
+            sincronizar_checklist_carga_desde_point(ruta=ruta, user=job.triggered_by, desde_repartidor=True)
+        job.result_summary = {"estado": estado_sync_carga_repartidor(ruta, solicitud=job)}
+        job.status = PointSyncJob.STATUS_SUCCESS
+    except PointSyncUnavailableError:
+        job.error_message = "No se pudo conectar con Point. Vuelve a intentar la actualización."
+    except ValidationError as exc:
+        job.error_message = exc.message
+    except (PermissionDenied, RutaEntrega.DoesNotExist):
+        job.error_message = "La ruta ya no está disponible para actualizar la carga."
+    except Exception:
+        logger.exception("Falló la actualización Point de carga %s", job_id)
+        job.error_message = "No se pudo actualizar la carga. Vuelve a intentarlo."
+
+    if job.error_message:
+        job.status = PointSyncJob.STATUS_FAILED
+    job.finished_at = timezone.now()
+    job.save(update_fields=["status", "result_summary", "error_message", "finished_at", "updated_at"])
 
 
 @shared_task

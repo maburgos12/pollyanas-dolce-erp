@@ -66,5 +66,5 @@ class AndroidPwaContractTests(SimpleTestCase):
 
         self.assertIn("versionCode = 3", build_gradle)
         self.assertIn('versionName = "1.0.3"', build_gradle)
-        self.assertIn("route-control-v95-evidencias-network-only", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v95-evidencias-network-only", service_worker)
+        self.assertIn("route-control-v96-carga-point-repartidor", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v96-carga-point-repartidor", service_worker)
