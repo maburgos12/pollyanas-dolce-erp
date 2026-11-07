@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 from policy import Ledger, cause_key, validate_paths
@@ -368,11 +369,18 @@ def detect():
     data = json.loads(path.read_text()) if path.exists() else dict(http_failures=0)
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-        with opener.open('https://erp.pollyanasdolce.com/health/', timeout=10) as response:
+        request = urllib.request.Request('https://erp.pollyanasdolce.com/health/',
+                                         headers={'User-Agent': 'PollyanaERPObserver/1.0', 'Accept': 'application/json'})
+        with opener.open(request, timeout=10) as response:
             okay = response.status == 200 and json.loads(response.read(4097)) == {'status': 'ok'}
+    except urllib.error.HTTPError as error:
+        if error.code in {401, 403}:
+            write(path, dict(probe='access_denied', http_status=error.code, http_failures=0, checked_at=now()))
+            return observation()
+        okay = False
     except (OSError, ValueError):
         okay = False
-    data.update(http_failures=0 if okay else data['http_failures'] + 1, checked_at=now())
+    data = dict(http_failures=0 if okay else data['http_failures'] + 1, checked_at=now())
     write(path, data)
     if data['http_failures'] >= 2:
         return dict(kind='http_unavailable', task_id='http-health', checks=[dict(name='http_health', status='FAIL')])

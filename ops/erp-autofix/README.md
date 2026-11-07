@@ -13,6 +13,11 @@ ejecuta Doctor ni cambia Beat. Un resultado anterior al arranque del worker,
 vencido o insuficiente no se convierte en una reparación. `/health/` solo prueba
 respuesta web, no salud de BD ni cobertura completa del ERP.
 
+El sondeo se identifica como `PollyanaERPObserver/1.0` y pide JSON. Un 401/403
+registra `probe=access_denied`: evidencia insuficiente, sin declarar salud ni
+abrir por sí solo una reparación de código. Otros fallos requieren dos observaciones
+consecutivas; no se modifican autenticación, Cloudflare ni validación TLS.
+
 `worker.py` es un despachador confiable separado del modelo. Usa flock, ledger
 atómico y registros/worktrees Factory existentes. Una reparación simultánea;
 máximo tres intentos por causa, incluso cambia el SHA. Una llamada interrumpida

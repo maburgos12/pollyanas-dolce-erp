@@ -73,6 +73,57 @@ class WorkerTests(unittest.TestCase):
             response.status=200;response.read.return_value=b'{"status":"ok"}'
             self.assertIsNone(worker.detect())
 
+    def test_http_probe_sends_identity_headers_and_clears_stale_denial(self):
+        import worker
+        import json
+        with tempfile.TemporaryDirectory() as temporary, patch.object(worker, 'STATE', Path(temporary)), \
+                patch.object(worker, 'observation', return_value=None), \
+                patch.object(worker.urllib.request, 'build_opener') as opener:
+            sensor = Path(temporary) / 'sensor.json'
+            sensor.write_text(json.dumps({'http_failures': 0, 'probe': 'access_denied', 'http_status': 403}))
+            response = opener.return_value.open.return_value.__enter__.return_value
+            response.status = 200
+            response.read.return_value = b'{"status":"ok"}'
+            self.assertIsNone(worker.detect())
+            request = opener.return_value.open.call_args.args[0]
+            self.assertIsInstance(request, worker.urllib.request.Request)
+            self.assertEqual(request.get_header('User-agent'), 'PollyanaERPObserver/1.0')
+            self.assertEqual(request.get_header('Accept'), 'application/json')
+            state = json.loads(sensor.read_text())
+            self.assertEqual(state['http_failures'], 0)
+            self.assertNotIn('http_status', state)
+            self.assertNotIn('probe', state)
+
+    def test_repeated_access_denied_is_insufficient_and_preserves_observer_signal(self):
+        import worker
+        import json
+        from urllib.error import HTTPError
+        observation = {'kind': 'doctor_fail'}
+        for code in [401, 403]:
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as temporary, \
+                    patch.object(worker, 'STATE', Path(temporary)), \
+                    patch.object(worker, 'observation', return_value=observation), \
+                    patch.object(worker.urllib.request, 'build_opener') as opener:
+                sensor = Path(temporary) / 'sensor.json'
+                sensor.write_text(json.dumps({'http_failures': 2}))
+                opener.return_value.open.side_effect = HTTPError('https://erp.pollyanasdolce.com/health/', code, 'denied', {}, None)
+                for _ in range(3):
+                    self.assertIs(worker.detect(), observation)
+                    state = json.loads(sensor.read_text())
+                    self.assertEqual(state['probe'], 'access_denied')
+                    self.assertEqual(state['http_status'], code)
+                    self.assertEqual(state['http_failures'], 0)
+
+    def test_http_server_error_still_requires_two_failures(self):
+        import worker
+        from urllib.error import HTTPError
+        with tempfile.TemporaryDirectory() as temporary, patch.object(worker, 'STATE', Path(temporary)), \
+                patch.object(worker, 'observation', return_value=None), \
+                patch.object(worker.urllib.request, 'build_opener') as opener:
+            opener.return_value.open.side_effect = HTTPError('https://erp.pollyanasdolce.com/health/', 500, 'error', {}, None)
+            self.assertIsNone(worker.detect())
+            self.assertEqual(worker.detect()['kind'], 'http_unavailable')
+
     def test_test_commands_are_derived_without_shell(self):
         import worker
         self.assertEqual(worker.test_commands(['scripts/tests/test_erp_observer.py']),
