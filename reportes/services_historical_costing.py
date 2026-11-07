@@ -166,6 +166,10 @@ def _source_method(rows: list[CostoInsumo]) -> str:
     return InsumoCostoHistoricoMensual.METODO_PROMEDIO_MENSUAL
 
 
+class HistoricalCostPeriodProtectedError(ValueError):
+    """El período requiere conciliación documental, no reconstrucción genérica."""
+
+
 @dataclass
 class HistoricalCostSnapshotSummary:
     period_start: date
@@ -792,6 +796,12 @@ class MonthlyHistoricalCostingService:
     @transaction.atomic
     def build_period(self, *, period_start: date) -> HistoricalCostSnapshotSummary:
         period_start, period_end = _month_bounds(period_start)
+        if period_start.year == 2025:
+            raise HistoricalCostPeriodProtectedError(
+                "El recálculo general de 2025 está protegido: ese ejercicio usa "
+                "fuentes históricas documentadas. Use la conciliación auditada "
+                "para corregir sus costos."
+            )
         recetas_objetivo = list(
             Receta.objects.filter(
                 tipo=Receta.TIPO_PRODUCTO_FINAL,

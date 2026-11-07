@@ -1,5 +1,5 @@
 """Lectura de gastos mensuales reales; nunca consolida ni modifica sus fuentes."""
-from datetime import date
+from datetime import date, timedelta
 from calendar import monthrange
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 
@@ -177,6 +177,48 @@ def _importe_mensual(monto, inicio, fin, periodo):
     meses = (fin.year - inicio.year) * 12 + fin.month - inicio.month + 1
     base = (monto / meses).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
     return monto - base * (meses - 1) if periodo == fin else base
+
+
+def _ciclos_cfe_intermedios(periodo, reglas):
+    """Explica el mes intermedio; no genera consumo, devengo ni un importe cero."""
+    from .services_gastos_compromisos import validar_cfdi_soporte
+    anterior = (periodo - timedelta(days=1)).replace(day=1)
+    candidatos = []
+    for gasto in GastoOperativoMensual.objects.filter(
+            periodo=anterior, tipo_dato="REAL", es_estimado=False,
+            categoria_gasto__codigo="LUZ_SUC", cfdi_soporte__rfc_emisor="CFE370814QI0",
+            cfdi_soporte__rfc_receptor="GEF211230KR2",
+            servicio_desde__isnull=False, servicio_hasta__isnull=False
+            ).exclude(obligacion_gasto__estado="CANCELADO").select_related(
+                "cfdi_soporte", "centro_costo", "categoria_gasto"):
+        desde, hasta, cfdi = gasto.servicio_desde, gasto.servicio_hasta, gasto.cfdi_soporte
+        if (hasta.replace(day=1) != anterior
+                or (hasta.year - desde.year) * 12 + hasta.month - desde.month != 2
+                or not 45 <= (hasta - desde).days <= 75
+                or not cfdi.fecha_emision or cfdi.fecha_emision.date().replace(day=1) != anterior
+                or gasto.cobertura_mes_inicio not in (None, anterior)
+                or gasto.cobertura_mes_fin not in (None, anterior)):
+            continue
+        try:
+            validar_cfdi_soporte(gasto, cfdi)
+        except ValidationError:
+            continue
+        candidatos.append(gasto)
+    ciclos = {}
+    for regla in reglas:
+        coincidentes = [g for g in candidatos if _coincide(regla, g.centro_costo, g.categoria_gasto_id)]
+        if len(coincidentes) != 1:
+            continue
+        gasto = coincidentes[0]
+        ciclos[regla.pk] = dict(
+            regla_id=regla.pk, gasto_id=gasto.pk, uuid=gasto.cfdi_soporte.uuid,
+            sucursal_id=_sucursal(regla), centro=gasto.centro_costo.nombre,
+            area=regla.rubro.area.codigo, familia="electricidad", concepto=regla.rubro.concepto,
+            mes_factura=anterior, importe_facturado=gasto.monto, monto_mensual=None,
+            servicio_desde=gasto.servicio_desde, servicio_hasta=gasto.servicio_hasta,
+            detalle="Mes intermedio de facturación bimestral CFE. La factura se conserva en su mes; "
+                    "no se suma otra vez ni representa consumo cero o una estimación del mes.")
+    return ciclos
 
 
 def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_indirectos_produccion=False):
@@ -437,6 +479,9 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                     and r.centro_costo_id in (None, recurrente.centro_costo_id)
                     and _sucursal(r) == recurrente.centro_costo.sucursal_id)))
 
+    sin_fuente_cfe = [r for r in reglas if r.pk not in vistas_reglas and _vigente(r, periodo)
+        and r.tipo_fuente == "GASTO_OPERATIVO" and _familia(r.categoria_gasto, r.rubro) == "electricidad"]
+    ciclos_cfe = _ciclos_cfe_intermedios(periodo, sin_fuente_cfe) if sin_fuente_cfe else {}
     for regla in reglas:
         familia = _familia(regla.categoria_gasto, regla.rubro)
         if (not _vigente(regla, periodo) or not familia or regla.pk in vistas_reglas
@@ -444,6 +489,9 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                 or (regla.tipo_fuente == "GASTO_OPERATIVO" and (
                     regla.rubro_id, regla.categoria_gasto_id, regla.rubro.area.codigo,
                     None if regla.rubro.area.codigo == 'produccion' else _sucursal(regla)) in destinos_cubiertos)):
+            continue
+        if regla.pk in ciclos_cfe:
+            resultado.setdefault("ciclos_facturacion", []).append(ciclos_cfe[regla.pk])
             continue
         fila = _fila("REGLA_FUENTE", regla.pk, sucursal_id=_sucursal(regla), area=regla.rubro.area.codigo,
                      familia=familia, concepto=regla.rubro.concepto, inicio=periodo, fin=periodo, regla=regla)

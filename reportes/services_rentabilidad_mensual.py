@@ -42,6 +42,7 @@ def leer_costos_mensuales(periodo):
         "resultado": leer_resultado_mensual(periodo),
         "filas": gastos["filas"] + personal["filas"],
         "pendientes": gastos["pendientes"] + personal["pendientes"],
+        "ciclos_facturacion": gastos.get("ciclos_facturacion", []),
     }
 
 
@@ -57,7 +58,9 @@ def costos_de_sucursal(resultado, sucursal_id):
                   if f["sucursal_id"] == sucursal_id and f["area"] not in AREAS_EXCLUIDAS]
     pendientes_globales = [dict(f) for f in resultado["pendientes"]
                            if f["sucursal_id"] is None and f["area"] not in AREAS_EXCLUIDAS]
-    presentes = {f["familia"] for f in filas}
+    ciclos = [c for c in resultado.get("ciclos_facturacion", [])
+              if c["sucursal_id"] == sucursal_id and c["area"] not in AREAS_EXCLUIDAS]
+    presentes = {f["familia"] for f in filas} | {c["familia"] for c in ciclos}
     faltantes = REQUERIDAS - presentes
     ya_pendientes = {f["familia"] for f in pendientes}
     for familia in sorted(faltantes - ya_pendientes):
@@ -89,6 +92,7 @@ def costos_de_sucursal(resultado, sucursal_id):
     bloqueantes = [p for p in pendientes if p["familia"] not in SIN_FUENTE_ACTIVA]
     return {
         "filas": filas, "pendientes": pendientes, "pendientes_globales": pendientes_globales,
+        "ciclos_facturacion": ciclos,
         "totales": dict(totales), "campos": dict(campos), "total": sum(totales.values(), ZERO),
         "familias_cubiertas": sorted(cubiertas),
         "familias_faltantes": sorted(faltantes_exigibles),

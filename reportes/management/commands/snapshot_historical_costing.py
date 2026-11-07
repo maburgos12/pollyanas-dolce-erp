@@ -4,7 +4,10 @@ from datetime import date
 
 from django.core.management.base import BaseCommand, CommandError
 
-from reportes.services_historical_costing import MonthlyHistoricalCostingService
+from reportes.services_historical_costing import (
+    HistoricalCostPeriodProtectedError,
+    MonthlyHistoricalCostingService,
+)
 
 
 class Command(BaseCommand):
@@ -19,7 +22,10 @@ class Command(BaseCommand):
         except Exception as exc:
             raise CommandError("El periodo debe venir en formato YYYY-MM.") from exc
 
-        summary = MonthlyHistoricalCostingService().build_period(period_start=period)
+        try:
+            summary = MonthlyHistoricalCostingService().build_period(period_start=period)
+        except HistoricalCostPeriodProtectedError as exc:
+            raise CommandError(str(exc)) from exc
         self.stdout.write(
             self.style.SUCCESS(
                 f"snapshot_historical_costing period={summary.period_start:%Y-%m} "

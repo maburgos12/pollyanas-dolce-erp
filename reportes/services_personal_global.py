@@ -187,6 +187,7 @@ def resumen_personal_global(selected):
         costo_integral=total if personal_cerrado and expense_total is not None and not expenses['pendientes'] else None,
         fuentes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['filas']],
         pendientes_gastos=[{k: f.get(k, '') for k in fields} for f in expenses['pendientes']],
+        ciclos_facturacion=expenses.get('ciclos_facturacion', []),
         referencias_consumo=list({f['referencia_servicio']['gasto_id']: f['referencia_servicio']
             for f in expenses['filas'] if f.get('referencia_servicio')}.values()),
         gastos_parciales=len(incompletos),

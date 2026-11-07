@@ -7,8 +7,9 @@
     </div>
   </div>
   <div class="ia-box">
+  {% for c in gastos.ciclos_facturacion %}<p>CFE · {{ c.detalle }} Factura de {{ c.mes_factura|date:"m/Y" }}, gasto #{{ c.gasto_id }}, CFDI {{ c.uuid }}.</p>{% endfor %}
   {% if not gastos.completo %}
-  <p role="status"><strong>Categorías con importe: {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
+  <p role="status"><strong>Categorías acreditadas por importe o ciclo: {{ gastos.cobertura_pct }}% · punto de equilibrio parcial.</strong>
     Se calcula con las fuentes disponibles del mes; no representa todavía un costo completo confirmado.
     {% if gastos.familias_faltantes_display %}Falta cargar: {{ gastos.familias_faltantes_display|join:", " }}.{% endif %}</p>
   {% endif %}
