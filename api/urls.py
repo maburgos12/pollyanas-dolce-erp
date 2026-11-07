@@ -168,6 +168,7 @@ from .logistica_views import (
     LogisticaRutasView,
     LogisticaRutaActivaView,
     LogisticaRutaCargaChecklistSyncView,
+    LogisticaRutaCargaPointRepartidorView,
     LogisticaRutaCargaChecklistView,
     LogisticaRutaCargaSucursalGuardarView,
     LogisticaRutaCargaLineaValidarView,
@@ -459,6 +460,11 @@ urlpatterns = [
         "logistica/rutas/<int:ruta_id>/carga-checklist/sincronizar/",
         LogisticaRutaCargaChecklistSyncView.as_view(),
         name="api_logistica_ruta_carga_checklist_sync",
+    ),
+    path(
+        "logistica/rutas/<int:ruta_id>/carga-checklist/actualizacion-point/",
+        LogisticaRutaCargaPointRepartidorView.as_view(),
+        name="api_logistica_ruta_carga_point_repartidor",
     ),
     path(
         "logistica/rutas/<int:ruta_id>/carga-checklist/lineas/<int:linea_id>/validar/",

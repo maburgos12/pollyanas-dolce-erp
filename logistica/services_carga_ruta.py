@@ -43,7 +43,7 @@ from .models import (
     RutaCargaChecklistLinea,
     RutaEntrega,
 )
-from .services_rutas_control import repartidor_participa_en_ruta
+from .services_rutas_control import repartidor_participa_en_ruta, ruta_es_operativa_hoy
 
 POINT_PENDIENTE_ENVIO_NOTA = (
     "La carga aún no aparece enviada en Point. "
@@ -839,8 +839,25 @@ def _elegir_recepcion_point(linea: RutaCargaChecklistLinea, candidates: list[Poi
     return [max(exactas, key=lambda line: (line.received_at or line.updated_at, line.id))]
 
 
-def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True) -> ChecklistCargaResumen:
+MODO_SYNC_CARGA_REPARTIDOR = "logistica_carga_repartidor"
+VIGENCIA_SYNC_CARGA_REPARTIDOR = timedelta(minutes=5)
+
+
+def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> None:
+    if not user or not user.is_active or not ruta.repartidor_id or ruta.repartidor.user_id != user.pk:
+        raise PermissionDenied("Solo el repartidor titular puede actualizar esta carga.")
+    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA or not ruta_es_operativa_hoy(ruta):
+        raise ValidationError("Esta ruta ya no está disponible para actualizar la carga inicial.")
+    if not ruta.paradas.filter(punto__sucursal__isnull=False).exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
+        raise ValidationError("Esta ruta no tiene sucursales con carga de Point.")
+
+
+def sincronizar_checklist_carga_desde_point(
+    *, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True, desde_repartidor: bool = False,
+) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if desde_repartidor:
+        validar_ruta_sync_carga_repartidor(ruta, user)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
     if not _paradas_por_sucursal(ruta):
@@ -857,7 +874,9 @@ def sincronizar_checklist_carga_desde_point(*, ruta: RutaEntrega, user=None, eje
                     sync_job=sync_job,
                 )
 
-    return _actualizar_checklist_carga_desde_point(ruta=ruta, user=user, sync_job=sync_job)
+    return _actualizar_checklist_carga_desde_point(
+        ruta=ruta, user=user, sync_job=sync_job, desde_repartidor=desde_repartidor,
+    )
 
 
 def sincronizar_checklist_recarga_desde_point(*, ruta: RutaEntrega, user=None) -> ChecklistCargaResumen:
@@ -901,8 +920,11 @@ def _actualizar_checklist_carga_desde_point(
     user=None,
     sync_job=None,
     solo_abiertas: bool = True,
+    desde_repartidor: bool = False,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+    if desde_repartidor:
+        validar_ruta_sync_carga_repartidor(ruta, user)
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
 
@@ -971,10 +993,11 @@ def _actualizar_checklist_carga_desde_point(
                 RutaCargaChecklistLinea.ESTATUS_SUPERADA,
             ]
         ).exists():
-            checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
-            checklist.confirmado_por = user
-            checklist.confirmado_en = timezone.now()
-            checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
+            if not (desde_repartidor and checklist.estatus == RutaCargaChecklist.ESTATUS_CONFIRMADA and not hechos_point_cambiaron):
+                checklist.estatus = RutaCargaChecklist.ESTATUS_CONFIRMADA
+                checklist.confirmado_por = user
+                checklist.confirmado_en = timezone.now()
+                checklist.save(update_fields=["estatus", "confirmado_por", "confirmado_en", "actualizado_en"])
         else:
             checklist.estatus = RutaCargaChecklist.ESTATUS_CON_INCIDENCIA
             checklist.confirmado_por = None
@@ -1195,6 +1218,32 @@ def validar_producto_tramo_carga(
         )
         linea.refresh_from_db()
     return lineas
+
+
+def estado_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> str:
+    lineas = list(
+        lineas_tramo_operativo_actual(ruta)
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .select_related("point_transfer_line")
+    )
+    if any(_linea_pendiente_envio_point(linea) for linea in lineas):
+        return "PENDIENTE_ENVIO"
+
+    # Las solicitudes sin Enviado se conservan en el espejo Point, fuera del checklist.
+    ordenes = _ordenes_tramo_carga_actual(ruta)
+    sucursales = {
+        sucursal_id for sucursal_id, parada in _paradas_por_sucursal(ruta).items()
+        if ordenes is None or parada.orden in ordenes
+    }
+    solicitudes_point = PointTransferLine.objects.filter(
+        erp_destination_branch_id__in=sucursales,
+        is_open=True, is_cancelled=False, is_current_snapshot=True, sent_at__isnull=True,
+        sync_job__started_at__gte=solicitud.started_at,
+        sync_job__triggered_by_id=solicitud.triggered_by_id,
+    ).only("sent_at", "raw_payload")
+    if any(not point_transfer_enviada(linea) for linea in solicitudes_point):
+        return "PENDIENTE_ENVIO"
+    return "ACTUALIZADA" if lineas else "SIN_CARGA"
 
 
 def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:

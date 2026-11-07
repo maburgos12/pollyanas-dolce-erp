@@ -53,8 +53,10 @@ from logistica.models import (
 from logistica.services_google_routes import recalcular_ruta_programada
 from logistica.pwa_compat import is_exact_v59_replay_contract, v59_compat_active
 from logistica.services_combustible_auditoria import auditar_carga_combustible
-from logistica.tasks import auditar_ticket_combustible
+from logistica.tasks import actualizar_carga_point_repartidor, auditar_ticket_combustible
 from logistica.services_carga_ruta import (
+    MODO_SYNC_CARGA_REPARTIDOR,
+    VIGENCIA_SYNC_CARGA_REPARTIDOR,
     checklist_bloquea_salida,
     obtener_checklist_carga_detallado,
     registrar_recarga_cedis,
@@ -65,6 +67,7 @@ from logistica.services_carga_ruta import (
     sincronizar_recepcion_desde_point,
     validar_linea_carga,
     validar_producto_tramo_carga,
+    validar_ruta_sync_carga_repartidor,
 )
 from logistica.services_carga_sucursal import CargaSucursalError, ConflictoIdempotencia, guardar_carga_sucursal
 from logistica.services_tutorial_carga import debe_mostrar_tutorial_carga
@@ -95,6 +98,7 @@ from logistica.services_domicilio_assignment import (
     assign_domicilio,
     list_repartidores_disponibles,
 )
+from pos_bridge.models import PointSyncJob
 from rrhh.services_identidad import nombre_operativo_usuario
 
 from .logistica_serializers import (
@@ -1929,6 +1933,93 @@ class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class LogisticaRutaCargaPointRepartidorView(_LogisticaBaseView):
+    def _ruta(self, request, ruta_id, *, bloquear=False):
+        rutas = RutaEntrega.objects.all()
+        if bloquear:
+            rutas = rutas.select_for_update()
+        ruta = get_object_or_404(rutas, pk=ruta_id)
+        validar_ruta_sync_carga_repartidor(ruta, request.user)
+        return ruta
+
+    def _solicitudes(self, request, ruta_id):
+        return PointSyncJob.objects.filter(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+            triggered_by=request.user,
+            parameters__mode=MODO_SYNC_CARGA_REPARTIDOR,
+            parameters__ruta_id=ruta_id,
+        )
+
+    @staticmethod
+    def _respuesta(job):
+        if not job:
+            return Response({"estado": "SIN_SOLICITUD"})
+        if job.status == PointSyncJob.STATUS_SUCCESS:
+            return Response(job.result_summary)
+        if job.status == PointSyncJob.STATUS_FAILED:
+            return Response({"estado": "ERROR", "detail": job.error_message})
+        if job.started_at <= timezone.now() - VIGENCIA_SYNC_CARGA_REPARTIDOR:
+            return Response({"estado": "ERROR", "detail": "La actualización tardó demasiado. Vuelve a intentarlo."})
+        return Response({"estado": job.status}, status=status.HTTP_202_ACCEPTED)
+
+    def get(self, request, ruta_id):
+        try:
+            self._ruta(request, ruta_id)
+        except PermissionDenied as exc:
+            raise DRFPermissionDenied(str(exc)) from exc
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_409_CONFLICT)
+        return self._respuesta(self._solicitudes(request, ruta_id).first())
+
+    def post(self, request, ruta_id):
+        try:
+            with transaction.atomic():
+                self._ruta(request, ruta_id, bloquear=True)
+                solicitudes = self._solicitudes(request, ruta_id)
+                ultima = solicitudes.first()
+                ahora = timezone.now()
+                if ultima and (
+                    (ultima.finished_at and ultima.finished_at > ahora - timedelta(seconds=20))
+                    or (not ultima.finished_at and ultima.started_at > ahora - VIGENCIA_SYNC_CARGA_REPARTIDOR)
+                ):
+                    return self._respuesta(ultima)
+                solicitudes.filter(
+                    status=PointSyncJob.STATUS_PENDING,
+                    started_at__lte=ahora - VIGENCIA_SYNC_CARGA_REPARTIDOR,
+                ).update(
+                    status=PointSyncJob.STATUS_FAILED,
+                    finished_at=ahora,
+                    error_message="La actualización venció en espera. Vuelve a intentarlo.",
+                )
+                job = solicitudes.create(
+                    job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
+                    triggered_by=request.user,
+                    parameters={"mode": MODO_SYNC_CARGA_REPARTIDOR, "ruta_id": ruta_id},
+                )
+        except PermissionDenied as exc:
+            raise DRFPermissionDenied(str(exc)) from exc
+        except ValidationError as exc:
+            return Response({"detail": exc.message}, status=status.HTTP_409_CONFLICT)
+
+        try:
+            actualizar_carga_point_repartidor.apply_async(
+                kwargs={"job_id": job.pk},
+                expires=VIGENCIA_SYNC_CARGA_REPARTIDOR.total_seconds(),
+                retry=True,
+                retry_policy={"max_retries": 0},
+            )
+        except Exception:
+            logger.exception("No se pudo encolar la actualización Point de carga %s", job.pk)
+            # La publicación puede haber llegado al broker; sólo cerrar si nadie la tomó.
+            PointSyncJob.objects.filter(pk=job.pk, status=PointSyncJob.STATUS_PENDING).update(
+                status=PointSyncJob.STATUS_FAILED,
+                finished_at=timezone.now(),
+                error_message="No se pudo solicitar la actualización. Vuelve a intentarlo.",
+            )
+            job.refresh_from_db()
+        return self._respuesta(job)
 
 
 class LogisticaRutaRecepcionPointSyncView(_LogisticaBaseView):

@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-logistica-pwa-v95-evidencias-network-only-combustible-correccion-20261104";
+const CACHE_NAME = "pollyanas-logistica-pwa-v96-carga-point-repartidor";
 const SHELL_ASSETS = [
   "/logistica/app/",
   "/static/logistica/pwa/offline_queue_compat.js?v=route-control-v63-carga-tramos-consolidada",
