@@ -19,18 +19,16 @@ jobs:
       - id: solicitud
         name: Verificar PR y commit solicitado
         env:
-          ARCHIVOS: ${{ toJSON(github.event.head_commit.added) }}
+          SOLICITUD: ${{ github.event.head_commit.message }}
         run: |
           python3 - <<'PY'
           import json, os, re, urllib.request
           repo = 'maburgos12/pollyanas-dolce-erp'
           assert os.environ['GITHUB_REPOSITORY'] == repo
-          files = json.loads(os.environ['ARCHIVOS'])
-          assert len(files) == 1
-          path = files[0]
-          match = re.fullmatch(r'\.github/erp-aprobaciones/([1-9][0-9]*)-([a-f0-9]{40})\.json', path)
+          match = re.fullmatch(r'Aprobar ERP PR #([1-9][0-9]*) ([a-f0-9]{40})', os.environ['SOLICITUD'])
           assert match
           number, sha = match.groups()
+          path = f'.github/erp-aprobaciones/{number}-{sha}.json'
           def read(url):
               with urllib.request.urlopen(url, timeout=15) as reply:
                   return json.load(reply)
