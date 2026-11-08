@@ -997,6 +997,8 @@ class LogisticaReporteSerializer(serializers.ModelSerializer):
         ]
 
     def get_repartidor_nombre(self, obj):
+        if not obj.repartidor_id:
+            return ""
         return nombre_operativo_usuario(obj.repartidor.user)
 
     def get_asignado_a_nombre(self, obj):
