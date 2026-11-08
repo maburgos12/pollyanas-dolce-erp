@@ -1,0 +1,24 @@
+name: ERP · Prueba de aprobación en iPhone
+run-name: "Prueba sin despliegue · ${{ github.sha }}"
+
+on:
+  push:
+    branches:
+      - codex/erp-aprobacion-iphone-piloto
+    paths:
+      - .github/workflows/erp-aprobacion-iphone-piloto.yml
+
+permissions: {}
+
+jobs:
+  confirmacion:
+    name: Confirmar notificación de prueba
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    environment:
+      name: erp-iphone-piloto
+      url: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+    steps:
+      - name: Registrar resultado del piloto
+        run: |
+          printf '## Aprobación de prueba recibida\n\nCommit: `%s`\n' "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
