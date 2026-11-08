@@ -111,6 +111,23 @@ class LogisticaReportesApiTests(TestCase):
         self.assertEqual(str(self.repartidor), "VALDEZ FÉLIX REY IVÁN")
         self.assertEqual(response.data["repartidor_nombre"], "VALDEZ FÉLIX REY IVÁN")
 
+    def test_listado_de_reportes_abiertos_incluye_reporte_sin_repartidor(self):
+        reporte = ReporteUnidad.objects.create(
+            unidad=self.unidad,
+            tipo=ReporteUnidad.TIPO_MANTENIMIENTO,
+            descripcion="Reporte de mantenimiento sin repartidor",
+        )
+        self._auth(self._jwt_for("repartidor.api"))
+        response = self.client.get(
+            reverse("api_logistica_reportes_abiertos_unidad"),
+            {"unidad_id": self.unidad.id},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in response.data], [reporte.id])
+        self.assertIsNone(response.data[0]["repartidor"])
+        self.assertEqual(response.data[0]["repartidor_nombre"], "")
+
     def test_mantenimiento_con_perfil_repartidor_crea_reporte_sin_grupo_logistica(self):
         user = User.objects.create_user(username="mantenimiento.logistica", password="pass123")
         UserModuleAccess.objects.create(user=user, module="mantenimiento", access=ACCESS_MANAGE)
