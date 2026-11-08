@@ -1,0 +1,57 @@
+name: ERP · Aprobación móvil
+run-name: "${{ github.event.head_commit.message }}"
+
+on:
+  push:
+    branches: [codex/erp-aprobacion-movil]
+    paths: ['.github/erp-aprobaciones/*.json']
+
+permissions: {}
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      pr_url: ${{ steps.solicitud.outputs.pr_url }}
+      sha: ${{ steps.solicitud.outputs.sha }}
+    steps:
+      - id: solicitud
+        name: Verificar PR y commit solicitado
+        env:
+          ARCHIVOS: ${{ toJSON(github.event.head_commit.added) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          repo = 'maburgos12/pollyanas-dolce-erp'
+          assert os.environ['GITHUB_REPOSITORY'] == repo
+          files = json.loads(os.environ['ARCHIVOS'])
+          assert len(files) == 1
+          path = files[0]
+          match = re.fullmatch(r'\.github/erp-aprobaciones/([1-9][0-9]*)-([a-f0-9]{40})\.json', path)
+          assert match
+          number, sha = match.groups()
+          def read(url):
+              with urllib.request.urlopen(url, timeout=15) as reply:
+                  return json.load(reply)
+          request = read(f'https://raw.githubusercontent.com/{repo}/{os.environ["GITHUB_SHA"]}/{path}')
+          assert request == {'pr': int(number), 'sha': sha}
+          pull = read(f'https://api.github.com/repos/{repo}/pulls/{number}')
+          assert pull['state'] == 'open' and pull['draft'] and pull['base']['ref'] == 'main'
+          assert pull['head']['repo']['full_name'] == repo and pull['head']['sha'] == sha
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'pr_url=https://github.com/{repo}/pull/{number}\nsha={sha}\n')
+          PY
+  aprobacion:
+    name: Registrar autorización de publicación
+    needs: validar
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    environment:
+      name: erp-publicacion-movil
+      url: ${{ needs.validar.outputs.pr_url }}
+    steps:
+      - name: Registrar SHA aprobado
+        env:
+          CANDIDATO: ${{ needs.validar.outputs.sha }}
+        run: printf 'Autorización registrada para el commit `%s`. Publicación separada.\n' "$CANDIDATO" >> "$GITHUB_STEP_SUMMARY"
