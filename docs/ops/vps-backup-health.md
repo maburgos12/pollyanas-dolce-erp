@@ -44,7 +44,9 @@ de retirarlo. No borrar por edad. El límite total del servicio es ocho horas.
 Los respaldos originales se conservan ante cualquier verificación fallida.
 
 Esta tarea no limpia volúmenes, contenedores, respaldos manuales ni imágenes
-de rollback. La limpieza Docker existente queda fuera de este nuevo servicio.
+de rollback. Después de verificar los respaldos, si continúa en 75% o más,
+ejecuta el mantenimiento Docker conservador existente (dangling/caché sin uso
+de más de siete días), únicamente si conserva la huella de la versión revisada.
 Para reversión: `systemctl disable --now erp-backup-health.timer`; dejar terminar
 la ejecución activa o detener el servicio y revisar scratch NAS. El cron de
 respaldo y todos los datos operativos permanecen intactos. Pausar la antigua

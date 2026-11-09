@@ -14,6 +14,8 @@ STATE = Path('/var/lib/erp-backup-restore')
 NAS_PYTHON = '/share/CACHEDEV1_DATA/.qpkg/HybridBackup/CloudConnector3/python/bin/python3'
 NAS_RUNNER = '/share/homes/DolcePasteleria/.erp-backup-verifier/nas_restore_daily.py'
 ROTATOR = '/usr/local/sbin/erp-rotate-verified-backups'
+DOCKER_MAINTENANCE = Path('/usr/local/sbin/docker-disk-maintenance.sh')
+DOCKER_MAINTENANCE_SHA = '06e7e1dab800f2a7c92cf33a71c79f3535a1cfbfa03e12a1c57f4dfb1d229799'
 
 
 def run(args):
@@ -84,6 +86,12 @@ def maintain(rotator):
     # The rotator reacquires its lock and checks the current newest set and every proof.
     rotation = run([ROTATOR, '--apply'])
     rotator.local_set(rotator.BACKUPS, newest)
+    rotator.require(not any((rotator.BACKUPS / (point + '.manifest')).exists() for point in points[:-1]),
+                    'Rotation preserved older points; inspect NAS/rotator log')
+    if int(run(['df', '-P', '/']).splitlines()[-1].split()[4].rstrip('%')) >= 75:
+        rotator.secure_file(DOCKER_MAINTENANCE)
+        rotator.require(rotator.digest(DOCKER_MAINTENANCE) == DOCKER_MAINTENANCE_SHA, 'Docker maintenance changed; review required')
+        run([str(DOCKER_MAINTENANCE)])
     return dict(verified=verified, retained=newest, rotation=rotation)
 
 
@@ -108,6 +116,11 @@ def main():
                 report['freed_bytes_net'] = int(after[3]) - int(before[3])
                 report['used_percent'] = int(after[4].rstrip('%'))
                 report['level'] = 'URGENTE' if report['used_percent'] >= 85 else 'ALERTA' if report['used_percent'] >= 75 else 'OK'
+                running = lambda snapshot: {line.split()[1] for line in snapshot['containers'].splitlines() if line.split()[2] == 'running'}
+                report['unexpected_stopped'] = sorted(running(report['before']) - running(report['after']))
+                report['unexpected_removed_volumes'] = sorted(set(report['before']['volumes'].splitlines()) - set(report['after']['volumes'].splitlines()))
+                if report['unexpected_stopped'] or report['unexpected_removed_volumes']:
+                    report['success'] = False
             except Exception as error:
                 report['measurement_error'] = str(error)
                 report['success'] = False
