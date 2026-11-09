@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{% if editar %}Editar solicitud{% elif solicitud.estado == 'BORRADOR' %}Eliminar borrador{% else %}Retirar solicitud{% endif %}{% endblock %}
+{% block page_title %}Gestión de compras departamentales{% endblock %}
+{% block extra_css %}<link rel="stylesheet" href="{% static 'css/compras_departamentales.css' %}?v=20260803-1">{% endblock %}
+{% block content %}
+<main class="cd-shell cd-form-shell">
+  <a class="cd-back" href="{{ detalle }}">← Volver a {{ solicitud.folio }}</a>
+  <header class="cd-hero compact">
+    <div>
+      <h1>{% if editar %}Editar solicitud{% elif solicitud.estado == 'BORRADOR' %}Eliminar borrador{% else %}Retirar solicitud{% endif %} {{ solicitud.folio }}</h1>
+      {% if not editar %}
+      <p>{% if solicitud.estado == 'BORRADOR' %}El borrador se quitará del listado.{% else %}Compras dejará de atender esta solicitud. El folio y su historial seguirán disponibles.{% endif %}</p>
+      {% endif %}
+    </div>
+  </header>
+  <form method="post" enctype="multipart/form-data" class="cd-form">
+    {% csrf_token %}
+    <section class="cd-card">
+      {% if editar %}<h2>Datos generales</h2>{% endif %}
+      {{ form.as_div }}
+    </section>
+    {% if editar %}
+    <section class="cd-card">
+      <div class="cd-card-head">
+        <h2>Artículos solicitados</h2>
+        <button type="button" class="cd-button ghost" id="agregar-articulo">+ Agregar artículo</button>
+      </div>
+      {{ items.management_form }}
+      {{ items.non_form_errors }}
+      <div id="articulos-solicitud">
+        {% for articulo in items %}
+        <fieldset class="cd-item-form"><legend>Artículo {{ forloop.counter }}</legend>{{ articulo.as_div }}</fieldset>
+        {% endfor %}
+      </div>
+      <template id="nuevo-articulo">
+        <fieldset class="cd-item-form"><legend>Artículo nuevo</legend>{{ items.empty_form.as_div }}</fieldset>
+      </template>
+    </section>
+    {% endif %}
+    <div class="cd-actions">
+      <button type="submit" class="cd-button {% if editar %}primary{% else %}danger{% endif %}">
+        {% if editar %}Guardar cambios{% elif solicitud.estado == 'BORRADOR' %}Eliminar borrador{% else %}Retirar solicitud{% endif %}
+      </button>
+      <a class="cd-button ghost" href="{{ detalle }}">Volver sin cambios</a>
+    </div>
+  </form>
+</main>
+{% endblock %}
+{% block extra_js %}
+{% if editar %}
+<script>
+(() => {
+  const total = document.getElementById('id_items-TOTAL_FORMS');
+  const articulos = document.getElementById('articulos-solicitud');
+  const plantilla = document.getElementById('nuevo-articulo');
+  document.getElementById('agregar-articulo').addEventListener('click', () => {
+    const index = Number(total.value);
+    articulos.insertAdjacentHTML('beforeend', plantilla.innerHTML.replaceAll('__prefix__', index));
+    total.value = index + 1;
+    articulos.lastElementChild.querySelector('input[name$="-descripcion"]').focus();
+  });
+})();
+</script>
+{% endif %}
+{% endblock %}

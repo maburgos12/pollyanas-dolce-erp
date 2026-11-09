@@ -8,6 +8,13 @@
 <main class="cd-shell cd-detalle">
   <a class="cd-back" href="{% url 'compras:departamental_inicio' %}">← Volver</a>
   <header class="cd-hero compact" id="solicitud-envio"><div><span class="cd-eyebrow">{{ solicitud.get_tipo_display }} · {{ solicitud.area.nombre }}</span><h1>{{ solicitud.folio }}</h1><p>{{ solicitud.motivo|default:"Sin motivo general capturado" }}</p></div><span class="cd-status hero">{{ solicitud.get_estado_display }}</span></header>
+  {% if puede_modificar %}
+  <div class="cd-actions">
+    <a class="cd-button ghost" href="{% url 'compras:departamental_editar' solicitud.pk %}">Editar solicitud</a>
+    <a class="cd-button danger" href="{% url 'compras:departamental_eliminar' solicitud.pk %}">{% if solicitud.estado == 'BORRADOR' %}Eliminar borrador{% else %}Retirar solicitud{% endif %}</a>
+  </div>
+  {% endif %}
+  {% if retiro %}<p class="cd-notice"><strong>Solicitud retirada.</strong> {{ retiro.detalle }}</p>{% endif %}
   {% if puede_enviar %}
   <form method="post" action="{% url 'compras:departamental_enviar' solicitud.pk %}" data-async-action class="cd-inline-action">
     {% csrf_token %}
@@ -24,7 +31,7 @@
     <article><span>Comprometido vigente</span><strong>${{ total_comprometido|floatformat:2|intcomma }}</strong><small>Órdenes activas aún vigentes</small></article>
     <article><span>Pagado registrado</span><strong>${{ total_pagado|floatformat:2|intcomma }}</strong><small>Compras confirmadas; reembolsos por separado. Gasto contable pendiente de integración.</small></article>
   </section>
-  {% if es_compras and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
+  {% if es_compras and puede_asignar and not solicitud.comprador_asignado %}<form method="post" action="{% url 'compras:departamental_asignar' solicitud.pk %}" data-async-action class="cd-inline-action">{% csrf_token %}<button class="cd-button primary">Asignarme esta solicitud</button></form>{% endif %}
   <section class="cd-items-detail">
     {% for reporte in reportes_compra_ia %}
     <article class="cd-card">
@@ -143,7 +150,7 @@
       </div>
     </article>{% endfor %}
   </section>
-  {% if es_compras %}<form method="post" action="{% url 'compras:departamental_generar_ordenes' solicitud.pk %}" data-async-action class="cd-sticky-action">{% csrf_token %}<div><strong>Órdenes por proveedor</strong><span>Solo incluye artículos autorizados con cotización seleccionada.</span></div><button class="cd-button primary">Generar órdenes disponibles</button></form>{% endif %}
+  {% if es_compras and solicitud.estado != 'CANCELADA' %}<form method="post" action="{% url 'compras:departamental_generar_ordenes' solicitud.pk %}" data-async-action class="cd-sticky-action">{% csrf_token %}<div><strong>Órdenes por proveedor</strong><span>Solo incluye artículos autorizados con cotización seleccionada.</span></div><button class="cd-button primary">Generar órdenes disponibles</button></form>{% endif %}
   {% include "compras/departamentales/partials/image_viewer.html" %}
 </main>
 {% endblock %}
