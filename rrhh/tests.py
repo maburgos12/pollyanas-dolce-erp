@@ -581,6 +581,83 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertContains(response, "Ajuste manual")
         self.assertContains(response, "Carolina Cayetano")
 
+    def test_historial_vacaciones_consulta_movimientos_antiguos_con_fechas(self):
+        from datetime import date, datetime
+
+        admin = User.objects.create_user(username="admin.historial", is_superuser=True)
+        empleado = Empleado.objects.create(nombre="Persona Historial", activo=True)
+        solicitud = SolicitudVacaciones.objects.create(
+            empleado=empleado,
+            fecha_inicio=date(2026, 10, 23),
+            fecha_fin=date(2026, 10, 26),
+            dias_laborables=Decimal("3.00"),
+            estado=SolicitudVacaciones.ESTADO_APROBADA,
+            folio="VAC-2610-TEST",
+        )
+        periodo = PeriodoVacacional.objects.create(
+            empleado=empleado, aniversario=date(2026, 1, 1), fecha_limite=date(2026, 7, 1),
+            antiguedad_anios=1, dias_generados=Decimal("12.00"),
+        )
+        AplicacionGoceVacaciones.objects.create(
+            solicitud=solicitud, periodo=periodo, dias=Decimal("3.00"),
+            estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA,
+        )
+        registro = timezone.make_aware(datetime(2026, 10, 28, 8, 32))
+        SolicitudVacaciones.objects.filter(pk=solicitud.pk).update(creado_en=registro)
+        consumo = MovimientoVacaciones.objects.create(
+            empleado=empleado, solicitud=solicitud, tipo=MovimientoVacaciones.TIPO_CONSUMIDO,
+            dias=Decimal("3.00"), periodo_anio=2026,
+        )
+        MovimientoVacaciones.objects.filter(pk=consumo.pk).update(
+            creado_en=timezone.make_aware(datetime(2026, 10, 29, 9, 15)),
+        )
+        MovimientoVacaciones.objects.bulk_create([
+            MovimientoVacaciones(
+                empleado=empleado, tipo=MovimientoVacaciones.TIPO_AJUSTE,
+                dias=Decimal("0.00"), periodo_anio=2026, descripcion=f"Ajuste {i:02}",
+            )
+            for i in range(20)
+        ])
+        MovimientoVacaciones.objects.filter(
+            empleado=empleado, tipo=MovimientoVacaciones.TIPO_AJUSTE,
+        ).update(creado_en=timezone.make_aware(datetime(2026, 10, 30, 10)))
+        self.client.force_login(admin)
+        url = reverse("rrhh:rrhh_vacaciones_list")
+        resumen = self.client.get(url)
+        self.assertContains(resumen, f'historial={empleado.pk}')
+
+        primera = self.client.get(url, {"historial": empleado.pk})
+        self.assertContains(primera, "Página 1 de 2")
+        self.assertContains(primera, "Sin solicitud vinculada")
+        self.assertNotContains(primera, "VAC-2610-TEST")
+
+        with patch("rrhh.views.timezone.localdate", return_value=date(2026, 11, 9)):
+            segunda = self.client.get(url, {"historial": empleado.pk, "pagina": 2})
+        self.assertContains(segunda, "Página 2 de 2")
+        self.assertContains(segunda, "VAC-2610-TEST")
+        self.assertContains(segunda, "23/10/2026, 24/10/2026, 26/10/2026")
+        self.assertContains(segunda, "28/10/2026 08:32")
+        self.assertContains(segunda, "29/10/2026 09:15")
+        self.assertNotContains(segunda, "25/10/2026")
+
+        with patch("rrhh.views.timezone.localdate", return_value=date(2026, 10, 26)):
+            sin_goce = self.client.get(url, {"historial": empleado.pk, "pagina": 2})
+        self.assertContains(sin_goce, "Fechas de vacaciones")
+        self.assertNotContains(sin_goce, "Días de goce del folio")
+
+    def test_historial_vacaciones_conserva_el_alcance_por_empleado(self):
+        usuario = User.objects.create_user(username="jefe.historial")
+        jefe = Empleado.objects.create(nombre="Jefatura Historial", usuario_erp=usuario, activo=True)
+        equipo = Empleado.objects.create(nombre="Equipo Historial", jefe_directo=jefe, activo=True)
+        externo = Empleado.objects.create(nombre="Otra persona", activo=True)
+        self.client.force_login(usuario)
+        url = reverse("rrhh:rrhh_vacaciones_list")
+
+        self.assertContains(self.client.get(url, {"historial": equipo.pk}), "Sin movimientos registrados")
+        self.assertContains(self.client.get(url, {"historial": jefe.pk}), "Historial de vacaciones")
+        self.assertEqual(self.client.get(url, {"historial": externo.pk}).status_code, 404)
+        self.assertEqual(self.client.get(url, {"historial": "inválido"}).status_code, 404)
+
     @override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
     def test_vacaciones_list_muestra_desglose_fifo_en_saldos_y_solicitudes(self):
         from datetime import date

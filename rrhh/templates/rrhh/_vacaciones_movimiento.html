@@ -1,0 +1,16 @@
+<div class="vac-movement-line" id="vac-movimiento-{{ movimiento.pk }}">
+  <strong>{{ movimiento.get_tipo_display }} · {{ movimiento.dias }} días · Saldo {{ movimiento.periodo_anio }}</strong>
+  <span>Movimiento registrado el <time datetime="{{ movimiento.creado_en|date:'c' }}">{{ movimiento.creado_en|date:"d/m/Y H:i" }}</time></span>
+  {% with solicitud=movimiento.solicitud %}
+    {% if solicitud and solicitud.empleado_id == movimiento.empleado_id %}
+      <span>{{ solicitud.folio }} · Solicitud registrada el <time datetime="{{ solicitud.creado_en|date:'c' }}">{{ solicitud.creado_en|date:"d/m/Y H:i" }}</time></span>
+      <span>Fechas de vacaciones · {{ solicitud.fecha_inicio|date:"d/m/Y" }}{% if solicitud.fecha_inicio != solicitud.fecha_fin %} al {{ solicitud.fecha_fin|date:"d/m/Y" }}{% endif %}</span>
+      {% if movimiento.dias_goce %}
+        <span>Días de goce del folio · {% for dia in movimiento.dias_goce %}{{ dia|date:"d/m/Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+      {% endif %}
+    {% else %}
+      <span>Sin solicitud vinculada</span>
+    {% endif %}
+  {% endwith %}
+  {% if movimiento.descripcion %}<span>{{ movimiento.descripcion }}</span>{% endif %}
+</div>

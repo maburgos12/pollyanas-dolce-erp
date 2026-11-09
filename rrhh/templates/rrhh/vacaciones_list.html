@@ -15,6 +15,36 @@
 </section>
 
 <section class="vac-page">
+{% if historial_empleado %}
+  <section class="vac-panel" aria-labelledby="vac-historial-titulo">
+    <div class="vac-history-top">
+      <div>
+        <h2 id="vac-historial-titulo">Historial de vacaciones</h2>
+        <div class="vac-saldo-main">{{ historial_empleado.nombre }}</div>
+      </div>
+      <a class="btn btn-secondary" href="{% url 'rrhh:rrhh_vacaciones_list' %}{% if filtros_consulta %}?{{ filtros_consulta }}{% endif %}#saldo-empleado-{{ historial_empleado.pk }}">Volver a saldos</a>
+    </div>
+    <p class="vac-meta">Los días de goce reflejan el consumo registrado en el ERP. Las horas corresponden a Sinaloa.</p>
+    <div class="vac-movement-list">
+      {% for movimiento in historial_pagina %}
+        {% include "rrhh/_vacaciones_movimiento.html" with movimiento=movimiento only %}
+      {% empty %}
+        <div class="vac-meta">Sin movimientos registrados.</div>
+      {% endfor %}
+    </div>
+    {% if historial_pagina.has_other_pages %}
+      <nav class="vac-card-actions" aria-label="Páginas del historial">
+        {% if historial_pagina.has_previous %}
+          <a class="btn btn-secondary" rel="prev" href="?historial={{ historial_empleado.pk }}&amp;pagina={{ historial_pagina.previous_page_number }}{% if filtros_consulta %}&amp;{{ filtros_consulta }}{% endif %}">Anterior</a>
+        {% endif %}
+        <p class="vac-meta">Página {{ historial_pagina.number }} de {{ historial_pagina.paginator.num_pages }}</p>
+        {% if historial_pagina.has_next %}
+          <a class="btn btn-secondary" rel="next" href="?historial={{ historial_empleado.pk }}&amp;pagina={{ historial_pagina.next_page_number }}{% if filtros_consulta %}&amp;{{ filtros_consulta }}{% endif %}">Siguiente</a>
+        {% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% else %}
   <div class="vac-head">
     <div>
       <div class="vac-title">Vacaciones</div>
@@ -166,13 +196,12 @@
                     </div>
                   </div>
                 {% endif %}
+                <div>
+                  <a class="btn btn-secondary" href="?historial={{ row.empleado.pk }}{% if filtros_consulta %}&amp;{{ filtros_consulta }}{% endif %}" aria-label="Ver historial completo de {{ row.empleado.nombre }}">Ver historial completo</a>
+                </div>
                 <div class="vac-movement-list">
                   {% for movimiento in row.movimientos %}
-                    <div class="vac-movement-line">
-                      <strong>{{ movimiento.periodo_anio }} · {{ movimiento.get_tipo_display }} · {{ movimiento.dias }} días</strong>
-                      <span>{{ movimiento.descripcion|default:"Sin descripción"|truncatechars:90 }}</span>
-                      {% if movimiento.solicitud %}<span>{{ movimiento.solicitud.folio }}</span>{% endif %}
-                    </div>
+                    {% include "rrhh/_vacaciones_movimiento.html" with movimiento=movimiento only %}
                   {% empty %}
                     <div class="vac-meta">Sin movimientos registrados.</div>
                   {% endfor %}
@@ -272,10 +301,12 @@
       </div>
     </section>
   </section>
+{% endif %}
 </section>
 {% endblock %}
 
 {% block extra_js %}
+{% if not historial_empleado %}
 <script>
   (function () {
     const form = document.getElementById("vac-nueva-solicitud");
@@ -391,4 +422,5 @@
     actualizarPropuesta();
   })();
 </script>
+{% endif %}
 {% endblock %}
