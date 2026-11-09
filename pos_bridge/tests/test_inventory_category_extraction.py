@@ -45,6 +45,23 @@ class PointInventoryCategoryExtractionTests(SimpleTestCase):
         with self.assertRaisesMessage(ExtractionError, "PASTEL CHICO"):
             self.extractor._extract_product_rows_by_category(self.page)
 
+    def test_accepts_point_selector_aliases_confirmed_in_actual_cuts(self):
+        pairs = [
+            ("VASO PREPARADO MINI", "Vasos Mini"),
+            ("VASOS PREPARADOS GRANDE", "Vasos Grande"),
+            ("VELAS SPARKLERS", "Vela Sparklers"),
+        ]
+        for selected, row_category in pairs:
+            with self.subTest(selected=selected, row_category=row_category):
+                self.page.list_category_options.return_value = [{"value": "10", "label": selected}]
+                self.page.extract_inventory_table.return_value = {
+                    "headers": self.current["headers"],
+                    "rows": [["500", "00500", "Producto de prueba", row_category, "0"]],
+                }
+                rows, audit = self.extractor._extract_product_rows_by_category(self.page)
+                self.assertEqual([(row["category"], row["stock"]) for row in rows], [(row_category, 0)])
+                self.assertEqual(audit, [{"category": selected, "rows": 1}])
+
     def test_accepts_empty_category_without_conflicting_rows(self):
         self.page.extract_inventory_table.side_effect = [
             self.previous, {"headers": self.current["headers"], "rows": []},
