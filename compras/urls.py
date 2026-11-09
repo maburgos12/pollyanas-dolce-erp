@@ -2,7 +2,7 @@ from django.urls import path
 
 from . import views
 from . import views_destinos_documentales, views_procedencia_adquisicion
-from . import views_departamentales, views_edicion_compra, views_intentos_compra
+from . import views_departamentales, views_edicion_compra, views_gestion_solicitud, views_intentos_compra
 
 app_name = "compras"
 
@@ -25,6 +25,8 @@ urlpatterns = [
     path("departamentales/bandeja/", views_departamentales.departamental_bandeja, name="departamental_bandeja"),
     path("departamentales/direccion/", views_departamentales.departamental_direccion, name="departamental_direccion"),
     path("departamentales/<int:pk>/enviar/", views_departamentales.departamental_enviar, name="departamental_enviar"),
+    path("departamentales/<int:pk>/editar/", views_gestion_solicitud.departamental_editar, name="departamental_editar"),
+    path("departamentales/<int:pk>/eliminar/", views_gestion_solicitud.departamental_eliminar, name="departamental_eliminar"),
     path("departamentales/<int:pk>/", views_departamentales.departamental_detalle, name="departamental_detalle"),
     path("departamentales/<int:pk>/asignar/", views_departamentales.departamental_asignar, name="departamental_asignar"),
     path("departamentales/<int:pk>/generar-ordenes/", views_departamentales.departamental_generar_ordenes, name="departamental_generar_ordenes"),

@@ -12,11 +12,11 @@
       <h1>Solicitudes que sí llegan a compra</h1>
       <p>Concentra las necesidades del mes, agrega compras extraordinarias y sigue cada artículo hasta recibirlo conforme.</p>
     </div>
-    <a class="cd-button primary" href="{% url 'compras:departamental_nueva' %}">+ Nueva solicitud</a>
+    {% if puede_solicitar %}<a class="cd-button primary" href="{% url 'compras:departamental_nueva' %}">+ Nueva solicitud</a>{% endif %}
   </header>
   <section class="cd-notice"><strong>Ciclo mensual:</strong> prepara tu solicitud desde el día 20 y envíala del 20 al 25 para el mes siguiente. Las urgencias pueden capturarse como extraordinarias.</section>
   <section class="cd-card">
-    <div class="cd-card-head"><div><span class="cd-kicker">Seguimiento</span><h2>Solicitudes de mis áreas</h2></div><span class="cd-count">{{ solicitudes|length }} registros</span></div>
+    <div class="cd-card-head"><div><span class="cd-kicker">Seguimiento</span><h2>{% if request.user.is_superuser %}Todas las solicitudes{% else %}Solicitudes de mis áreas{% endif %}</h2></div><span class="cd-count">{{ solicitudes|length }} registros</span></div>
     <div class="cd-table-wrap table-responsive">
       <table class="cd-table">
         <thead><tr><th>Folio</th><th>Área / periodo</th><th>Tipo</th><th>Artículos</th><th>Estado</th><th>Comprador</th><th></th></tr></thead>

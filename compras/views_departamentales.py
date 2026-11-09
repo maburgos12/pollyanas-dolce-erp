@@ -33,6 +33,10 @@ from .models import (
 from .resumen_departamentales import construir_resumen_departamental, exportar_resumen_departamental
 from .access_departamentales import (puede_gestionar_compras_departamentales, _areas_usuario,
                                       _es_direccion, _puede_ver_solicitud, _puede_enviar_solicitud)
+from .services_solicitudes import (
+    ELIMINACION_BORRADOR, RETIRO_SOLICITUD, bloquear_items_solicitud, crear_solicitud,
+    puede_modificar_solicitud, solicitud_sin_atencion,
+)
 from .services_departamentales import (
     compromiso_actual_para_evaluar,
     confirmar_recepcion_departamental,
@@ -89,10 +93,15 @@ def departamental_inicio(request):
 @login_required
 def departamental_mis_solicitudes(request):
     areas = _areas_usuario(request.user)
-    if not areas.exists() and not puede_gestionar_compras_departamentales(request.user):
+    es_compras = puede_gestionar_compras_departamentales(request.user)
+    if not areas.exists() and not es_compras:
         raise PermissionDenied("No tienes un área asignada para solicitudes departamentales.")
+    alcance = Q() if request.user.is_superuser else Q(area__in=areas)
+    if es_compras and not request.user.is_superuser:
+        alcance |= Q(solicitante=request.user)
     solicitudes = (
-        SolicitudCompraDepartamental.objects.filter(area__in=areas)
+        SolicitudCompraDepartamental.objects.filter(alcance)
+        .exclude(eventos__tipo=ELIMINACION_BORRADOR)
         .select_related("area", "solicitante", "comprador_asignado")
         .prefetch_related("items")
     )
@@ -104,7 +113,7 @@ def departamental_mis_solicitudes(request):
             "areas": areas,
             "vista": "area",
             "puede_solicitar": areas.exists(),
-            "es_compras": puede_gestionar_compras_departamentales(request.user),
+            "es_compras": es_compras,
             "es_direccion": _es_direccion(request.user),
         },
     )
@@ -138,7 +147,6 @@ def departamental_nueva(request):
     if not any(value.strip() for value in descripciones):
         return _error_nueva(request, "Agrega al menos un artículo.", areas)
 
-    from .services_solicitudes import crear_solicitud
     items = []
     cantidades = request.POST.getlist("cantidad")
     unidades = request.POST.getlist("unidad")
@@ -380,6 +388,9 @@ def departamental_detalle(request, pk, *, cotizacion_error=None, proveedor_error
         {
             "solicitud": solicitud,
             "puede_enviar": solicitud.estado == SolicitudCompraDepartamental.ESTADO_BORRADOR and _puede_enviar_solicitud(request.user, solicitud),
+            "puede_modificar": puede_modificar_solicitud(request.user, solicitud) and solicitud_sin_atencion(solicitud),
+            "puede_asignar": solicitud.estado in (solicitud.ESTADO_ENVIADA, solicitud.ESTADO_EN_ATENCION, solicitud.ESTADO_PARCIAL),
+            "retiro": solicitud.eventos.filter(tipo=RETIRO_SOLICITUD).first() if solicitud.estado == solicitud.ESTADO_CANCELADA else None,
             "rubros": rubros,
             "proveedores": proveedores,
             "es_compras": es_compras,
@@ -457,10 +468,17 @@ def departamental_direccion(request):
 
 @login_required
 @require_POST
+@transaction.atomic
 def departamental_asignar(request, pk):
     if not puede_gestionar_compras_departamentales(request.user):
         raise PermissionDenied
-    solicitud = get_object_or_404(SolicitudCompraDepartamental, pk=pk)
+    bloqueados = bloquear_items_solicitud(pk)
+    solicitud = get_object_or_404(SolicitudCompraDepartamental.objects.select_for_update(), pk=pk)
+    destino = reverse("compras:departamental_detalle", args=[pk])
+    if solicitud.estado not in (solicitud.ESTADO_ENVIADA, solicitud.ESTADO_EN_ATENCION, solicitud.ESTADO_PARCIAL):
+        return _respuesta_accion(request, message="Esta solicitud no está disponible para asignación.", redirect_url=destino, status=409)
+    if list(solicitud.items.order_by("pk").values_list("pk", flat=True)) != bloqueados:
+        return _respuesta_accion(request, message="La solicitud cambió. Recarga antes de asignarla.", redirect_url=destino, status=409)
     solicitud.comprador_asignado = request.user
     solicitud.estado = SolicitudCompraDepartamental.ESTADO_EN_ATENCION
     solicitud.save(update_fields=["comprador_asignado", "estado", "actualizado_en"])
@@ -468,7 +486,7 @@ def departamental_asignar(request, pk):
         estado=ItemCompraDepartamental.ESTADO_POR_COTIZAR,
         siguiente_responsable=ItemCompraDepartamental.RESPONSABLE_COMPRAS,
     )
-    return _respuesta_accion(request, message="Solicitud asignada; los artículos quedaron por cotizar.", redirect_url=reverse("compras:departamental_detalle", args=[pk]))
+    return _respuesta_accion(request, message="Solicitud asignada; los artículos quedaron por cotizar.", redirect_url=destino)
 
 
 def _error_cotizacion(request, item, form, *, proveedor=False, status=400):
@@ -514,7 +532,7 @@ def departamental_cotizar(request, item_pk):
     if not form.is_valid():
         return _error_cotizacion(request, item, form)
     with transaction.atomic():
-        item = ItemCompraDepartamental.objects.select_for_update().get(pk=item.pk)
+        item = get_object_or_404(ItemCompraDepartamental.objects.select_for_update(), pk=item.pk)
         if item.estado in ('ORDENADO','COMPRADO','RECIBIDO_PARCIAL','PENDIENTE_CONFIRMACION','RECIBIDO_CONFORME','RECHAZADO','CANCELADO') or item.solicitud.estado in ('BORRADOR','CANCELADA','COMPLETADA') or tiene_compra_o_recepcion(item) or tiene_recepcion_historica(item) or item.intento_vigente is not None:
             form.add_error(None, 'Este artículo ya no admite nuevas cotizaciones.')
             return _error_cotizacion(request, item, form, status=409)
