@@ -92,6 +92,12 @@ def _aplicar_linea(*, linea, captura, actor):
             )
         return
     motivo = str(captura.get("motivo_diferencia") or "").strip()
+    notas = str(captura.get("notas") or "").strip()
+    if (
+        (linea.validado_en or linea.validado_por_id or linea.client_event_id)
+        and (cargada, motivo, notas) == (linea.cantidad_cargada, linea.motivo_diferencia, linea.notas)
+    ):
+        return
     if cargada != esperada and not motivo:
         raise CargaSucursalError(
             f"Selecciona el motivo de la diferencia para {linea.item_name}.",
@@ -100,7 +106,7 @@ def _aplicar_linea(*, linea, captura, actor):
     linea.cantidad_cargada = cargada
     linea.estatus = _estatus_cantidad(esperada=esperada, cargada=cargada)
     linea.motivo_diferencia = motivo
-    linea.notas = str(captura.get("notas") or "").strip()
+    linea.notas = notas
     linea.validado_por = actor
     linea.validado_en = timezone.now()
     linea.save(

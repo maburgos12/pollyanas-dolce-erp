@@ -1701,16 +1701,37 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         ruta = _ruta_operativa_dia_para_repartidor(repartidor)
         if not ruta:
             return Response(status=status.HTTP_204_NO_CONTENT)
+        recarga_cedis_parada_ids = set(
+            ruta.eventos.filter(
+                Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
+                | Q(
+                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
+                    metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
+                )
+            )
+            .exclude(parada_id__isnull=True)
+            .values_list("parada_id", flat=True)
+        )
+
+        recarga_carga_point_id = None
+        if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and not _is_pwa_preview_request(request):
+            try:
+                recarga_carga_point_id = validar_ruta_sync_carga_repartidor(ruta, request.user)
+            except (PermissionDenied, ValidationError):
+                pass
         checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
         tiene_paradas_sucursal = (
             ruta.paradas.filter(punto__sucursal__isnull=False)
             .exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS)
             .exists()
         )
-        if tiene_paradas_sucursal and not checklist.lineas.exists():
+        # En recarga, el checklist sólo se refresca mediante la acción limitada al tramo.
+        carga_tras_recarga = ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and bool(recarga_cedis_parada_ids)
+        hidratar_checklist = tiene_paradas_sucursal and not carga_tras_recarga
+        if hidratar_checklist and not checklist.lineas.exists():
             sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
             checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
-        elif tiene_paradas_sucursal:
+        elif hidratar_checklist:
             pendientes_point = checklist.lineas.filter(
                 estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
                 cantidad_solicitada__gt=0,
@@ -1724,17 +1745,6 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                 except ValidationError:
                     logger.warning("No se pudo refrescar checklist Point para ruta activa %s", ruta.folio, exc_info=True)
         ultima_ubicacion = ruta.ubicaciones.select_related("repartidor__user", "unidad").first()
-        recarga_cedis_parada_ids = set(
-            ruta.eventos.filter(
-                Q(tipo=EventoRuta.TIPO_RECARGA_CEDIS)
-                | Q(
-                    tipo=EventoRuta.TIPO_INCIDENCIA_MANUAL,
-                    metadata__tipo__in=["recarga_cedis", "recarga_cedis_pwa"],
-                )
-            )
-            .exclude(parada_id__isnull=True)
-            .values_list("parada_id", flat=True)
-        )
 
         try:
             contexto_actor = repartidor.user if _is_pwa_preview_request(request) else request.user
@@ -1748,6 +1758,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                 "ruta": LogisticaRutaSerializer(ruta).data,
                 "contexto_operativo": contexto_operativo,
                 "contexto_operativo_advertencia": contexto_advertencia,
+                "recarga_carga_point_id": recarga_carga_point_id,
                 "paradas": ParadaRutaSerializer(
                     ruta.paradas.select_related(
                         "ruta",
@@ -1768,7 +1779,7 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
                 "eventos": EventoRutaSerializer(ruta.eventos.select_related("parada__punto", "ubicacion", "creado_por")[:20], many=True).data,
                 "checklist_carga": RutaCargaChecklistSerializer(
                     checklist,
-                    context={"request": request},
+                    context={"request": request, "carga_tras_recarga": carga_tras_recarga},
                 ).data,
             },
             status=status.HTTP_200_OK,
@@ -1941,16 +1952,21 @@ class LogisticaRutaCargaPointRepartidorView(_LogisticaBaseView):
         if bloquear:
             rutas = rutas.select_for_update()
         ruta = get_object_or_404(rutas, pk=ruta_id)
-        validar_ruta_sync_carga_repartidor(ruta, request.user)
-        return ruta
+        recarga_id = validar_ruta_sync_carga_repartidor(ruta, request.user)
+        if request.query_params.get("recarga", "0") != str(recarga_id or 0):
+            raise ValidationError("El tramo cambió. Vuelve a abrir la carga de ruta.")
+        return recarga_id
 
-    def _solicitudes(self, request, ruta_id):
-        return PointSyncJob.objects.filter(
+    def _solicitudes(self, request, ruta_id, recarga_id):
+        solicitudes = PointSyncJob.objects.filter(
             job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
             triggered_by=request.user,
             parameters__mode=MODO_SYNC_CARGA_REPARTIDOR,
             parameters__ruta_id=ruta_id,
         )
+        if recarga_id is None:
+            return solicitudes.filter(parameters__recarga_cedis_id__isnull=True)
+        return solicitudes.filter(parameters__recarga_cedis_id=recarga_id)
 
     @staticmethod
     def _respuesta(job):
@@ -1966,18 +1982,18 @@ class LogisticaRutaCargaPointRepartidorView(_LogisticaBaseView):
 
     def get(self, request, ruta_id):
         try:
-            self._ruta(request, ruta_id)
+            recarga_id = self._ruta(request, ruta_id)
         except PermissionDenied as exc:
             raise DRFPermissionDenied(str(exc)) from exc
         except ValidationError as exc:
             return Response({"detail": exc.message}, status=status.HTTP_409_CONFLICT)
-        return self._respuesta(self._solicitudes(request, ruta_id).first())
+        return self._respuesta(self._solicitudes(request, ruta_id, recarga_id).first())
 
     def post(self, request, ruta_id):
         try:
             with transaction.atomic():
-                self._ruta(request, ruta_id, bloquear=True)
-                solicitudes = self._solicitudes(request, ruta_id)
+                recarga_id = self._ruta(request, ruta_id, bloquear=True)
+                solicitudes = self._solicitudes(request, ruta_id, recarga_id)
                 ultima = solicitudes.first()
                 ahora = timezone.now()
                 if ultima and (
@@ -1993,10 +2009,13 @@ class LogisticaRutaCargaPointRepartidorView(_LogisticaBaseView):
                     finished_at=ahora,
                     error_message="La actualización venció en espera. Vuelve a intentarlo.",
                 )
+                parametros = {"mode": MODO_SYNC_CARGA_REPARTIDOR, "ruta_id": ruta_id}
+                if recarga_id is not None:
+                    parametros["recarga_cedis_id"] = recarga_id
                 job = solicitudes.create(
                     job_type=PointSyncJob.JOB_TYPE_TRANSFERS,
                     triggered_by=request.user,
-                    parameters={"mode": MODO_SYNC_CARGA_REPARTIDOR, "ruta_id": ruta_id},
+                    parameters=parametros,
                 )
         except PermissionDenied as exc:
             raise DRFPermissionDenied(str(exc)) from exc

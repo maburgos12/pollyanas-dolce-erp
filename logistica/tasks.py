@@ -103,7 +103,10 @@ def actualizar_carga_point_repartidor(*, job_id):
         with point_account_session_lock(wait=False) as adquirido:
             if not adquirido:
                 raise ValidationError("Point está atendiendo otra actualización. Reintenta en unos momentos.")
-            sincronizar_checklist_carga_desde_point(ruta=ruta, user=job.triggered_by, desde_repartidor=True)
+            sincronizar_checklist_carga_desde_point(
+                ruta=ruta, user=job.triggered_by, desde_repartidor=True,
+                recarga_cedis_id=job.parameters.get("recarga_cedis_id"),
+            )
         job.result_summary = {"estado": estado_sync_carga_repartidor(ruta, solicitud=job)}
         job.status = PointSyncJob.STATUS_SUCCESS
     except PointSyncUnavailableError:

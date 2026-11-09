@@ -65,5 +65,5 @@ class LogisticaPwaTicketPhotoTemplateTests(SimpleTestCase):
         sw_path = Path(settings.BASE_DIR) / "logistica" / "static" / "logistica" / "pwa" / "sw.js"
         sw_source = sw_path.read_text(encoding="utf-8")
 
-        self.assertIn("pollyanas-logistica-pwa-v96-carga-point-repartidor", sw_source)
-        self.assertIn("route-control-v96-carga-point-repartidor", source)
+        self.assertIn("pollyanas-logistica-pwa-v97-carga-point-tramo-cedis", sw_source)
+        self.assertIn("route-control-v97-carga-point-tramo-cedis", source)

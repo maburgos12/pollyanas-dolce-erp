@@ -1684,9 +1684,9 @@ if (JSON.stringify(prepare(v60)) !== JSON.stringify(v60)) throw new Error("paylo
 
         self.assertEqual(
             set(REQUIRED_TEMPLATE_MARKERS),
-            {"route-control-v96-carga-point-repartidor"},
+            {"route-control-v97-carga-point-tramo-cedis"},
         )
-        self.assertIn("pollyanas-logistica-pwa-v96-carga-point-repartidor", REQUIRED_SERVICE_WORKER_MARKERS)
+        self.assertIn("pollyanas-logistica-pwa-v97-carga-point-tramo-cedis", REQUIRED_SERVICE_WORKER_MARKERS)
         self.assertNotIn("route-control-v57", REQUIRED_TEMPLATE_MARKERS)
 
 
@@ -5532,9 +5532,9 @@ class LogisticaControlRutasTests(TestCase):
         self.assertIn("pendiente${count === 1 ? \"\" : \"s\"} por sincronizar", pwa_html)
         self.assertIn("route-control-v57", pwa_html)
         self.assertIn("logistica:pwa_sw", pwa_html)
-        self.assertIn("?v=route-control-v96-carga-point-repartidor", pwa_html)
+        self.assertIn("?v=route-control-v97-carga-point-tramo-cedis", pwa_html)
         self.assertIn('scope: "/logistica/"', pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v96-carga-point-repartidor", sw_js)
+        self.assertIn("pollyanas-logistica-pwa-v97-carga-point-tramo-cedis", sw_js)
         self.assertIn("operationalModalHtml", pwa_html)
         self.assertIn("function operationalErrorTitle(error, fallback = \"No se puede continuar\")", pwa_html)
         self.assertIn("Falta obligatorio", pwa_html)
@@ -5697,7 +5697,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("no-cache", response["Cache-Control"])
         self.assertIn("no-store", response["Cache-Control"])
-        self.assertIn("pollyanas-logistica-pwa-v96-carga-point-repartidor", response.content.decode("utf-8"))
+        self.assertIn("pollyanas-logistica-pwa-v97-carga-point-tramo-cedis", response.content.decode("utf-8"))
 
     def test_pwa_mi_ruta_declara_prototipo_operativo(self):
         from pathlib import Path
@@ -8019,6 +8019,131 @@ class LogisticaControlRutasTests(TestCase):
         self.assertEqual(source_hashes, ["API-SUP"])
         self.assertEqual(len(response.json()["checklist_carga"]["lineas"]), 1)
 
+    def test_actualizacion_point_reproduce_recarga_parcial_solo_en_tramo_de_ivan(self):
+        from logistica.tasks import actualizar_carga_point_repartidor
+
+        ruta = self.ruta
+        self.client.force_login(self.user)
+        url = reverse("api_logistica_ruta_carga_point_repartidor", args=[ruta.pk])
+        ruta_url = reverse("api_logistica_ruta_activa")
+
+        def parada_sucursal(orden):
+            sucursal = Sucursal.objects.create(codigo=f"TR-{orden}", nombre=f"Tramo {orden}")
+            punto = PuntoLogistico.objects.create(
+                tipo=PuntoLogistico.TIPO_SUCURSAL, sucursal=sucursal, nombre=sucursal.nombre,
+                latitud="25.57", longitud="-108.47",
+            )
+            return ParadaRuta.objects.create(ruta=ruta, punto=punto, orden=orden)
+
+        def transferencia(parada, clave):
+            return self._crear_transferencia_point_abierta(
+                sucursal=parada.punto.sucursal, source_hash=clave,
+            )
+
+        cedis = PuntoLogistico.objects.create(
+            nombre="CEDIS recarga", tipo=PuntoLogistico.TIPO_CEDIS,
+            latitud="25.57", longitud="-108.47",
+        )
+        recarga = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=2, estado=ParadaRuta.ESTADO_VISITADA)
+        sinaloa, bamoa, guamuchil, cerrada = [parada_sucursal(n) for n in (3, 4, 5, 6)]
+        siguiente_cedis = ParadaRuta.objects.create(ruta=ruta, punto=cedis, orden=7)
+        futura = parada_sucursal(8)
+        iniciales = [transferencia(sinaloa, f"ivan-inicial-{n}") for n in range(5)]
+        ya_entregadas = [transferencia(p, f"ivan-entregada-{p.orden}") for p in (self.parada, cerrada)]
+        sincronizar_checklist_carga_desde_point(ruta=ruta, ejecutar_sync=False)
+        ParadaRuta.objects.filter(pk__in=[self.parada.pk, cerrada.pk]).update(
+            entrega_estado=ParadaRuta.ENTREGA_ENTREGADA, entrega_confirmada_por=self.user,
+        )
+        capturada = RutaCargaChecklistLinea.objects.get(checklist__ruta=ruta, point_transfer_line=iniciales[0])
+        RutaCargaChecklistLinea.objects.filter(pk=capturada.pk).update(
+            cantidad_cargada=4, estatus=RutaCargaChecklistLinea.ESTATUS_PARCIAL,
+            validado_por=self.user, validado_en=timezone.now(), notas="Captura de prueba",
+        )
+        protegidas = RutaCargaChecklistLinea.objects.filter(
+            checklist__ruta=ruta, point_transfer_line__in=[iniciales[0], *ya_entregadas],
+        )
+        antes = list(protegidas.order_by("pk").values())
+        entregas = ParadaRuta.objects.filter(pk__in=[self.parada.pk, cerrada.pk]).order_by("pk")
+        entregas_antes = list(entregas.values())
+
+        with patch.object(actualizar_carga_point_repartidor, "apply_async") as encolar:
+            self.assertEqual(self.client.post(url).status_code, 409)
+            encolar.assert_not_called()
+        EventoRuta.objects.create(ruta=ruta, parada=recarga, tipo=EventoRuta.TIPO_RECARGA_CEDIS, creado_por=self.user)
+        url_tramo = f"{url}?recarga={recarga.pk}"
+
+        PointTransferLine.objects.filter(pk__in=[iniciales[0].pk, ya_entregadas[0].pk]).update(sent_quantity=7)
+        variante = PointTransferLine.objects.get(pk=iniciales[0].pk)
+        variante.pk = None
+        variante.source_hash = "ivan-nueva-version-capturada"
+        variante.save()
+        fuera = [transferencia(p, f"ivan-fuera-{p.orden}") for p in (self.parada, cerrada, futura)]
+        for parada, cantidad in ((sinaloa, 22), (bamoa, 34), (guamuchil, 32)):
+            for n in range(cantidad):
+                transferencia(parada, f"ivan-tardia-{parada.orden}-{n}")
+
+        with patch.object(actualizar_carga_point_repartidor, "apply_async") as encolar:
+            self.assertEqual(self.client.post(url_tramo).status_code, 202)
+            self.assertEqual(self.client.post(url_tramo).status_code, 202)
+            encolar.assert_called_once()
+        self.assertEqual(self.client.get(ruta_url).json()["recarga_carga_point_id"], recarga.pk)
+        kwargs = encolar.call_args.kwargs["kwargs"]
+        sync_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_TRANSFERS, status=PointSyncJob.STATUS_SUCCESS)
+        with patch("logistica.services_carga_ruta.OpenTransferSyncService") as point:
+            point.return_value.sync_open_transfers.return_value = sync_job
+            actualizar_carga_point_repartidor.apply(kwargs=kwargs, throw=True)
+            self.assertEqual(point.return_value.sync_open_transfers.call_count, 2)
+
+        self.assertEqual(self.client.get(url_tramo).json()["estado"], "ACTUALIZADA")
+        datos_ruta = self.client.get(ruta_url).json()
+        carga = datos_ruta["checklist_carga"]["lineas"]
+        self.assertEqual([sum(l["parada"] == p.pk for l in carga) for p in (sinaloa, bamoa, guamuchil)], [27, 34, 32])
+        linea = next(l for l in carga if l["id"] == capturada.pk)
+        self.assertEqual(linea["cantidad_enviada_esperada"], "5")
+        self.assertEqual(linea["cantidad_enviada_point"], "7")
+        guardado = self.client.post(
+            reverse("api_logistica_ruta_carga_sucursal", args=[ruta.pk, sinaloa.pk]),
+            {
+                "contexto_token": datos_ruta["contexto_operativo"]["token"],
+                "version_checklist": datos_ruta["contexto_operativo"]["version_checklist"],
+                "client_event_id": "prueba-ivan-lineas-tardias",
+                "lineas": [
+                    {
+                        "linea_id": l["id"], "source_hash": l["source_hash"],
+                        "cantidad_cargada": l["cantidad_cargada"] or l["cantidad_enviada_esperada"],
+                        "motivo_diferencia": l["motivo_diferencia"], "notas": l["notas"],
+                    }
+                    for l in carga if l["parada"] == sinaloa.pk
+                ],
+            },
+            content_type="application/json",
+        )
+        self.assertEqual(guardado.status_code, 200, guardado.json())
+        self.assertEqual(list(protegidas.order_by("pk").values()), antes)
+        self.assertEqual(list(entregas.values()), entregas_antes)
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist__ruta=ruta, point_transfer_line__in=[variante, *fuera]).exists())
+        self.assertEqual(EventoRuta.objects.filter(ruta=ruta, tipo=EventoRuta.TIPO_RECARGA_CEDIS).count(), 1)
+
+        ruta.acompanante = self.acompanante
+        ruta.save(update_fields=["acompanante"])
+        self.client.force_login(self.user_acompanante)
+        self.assertEqual(self.client.post(url_tramo).status_code, 403)
+        self.assertIsNone(self.client.get(ruta_url).json()["recarga_carga_point_id"])
+
+        self.client.force_login(self.user)
+        PointSyncJob.objects.filter(pk=kwargs["job_id"]).update(finished_at=timezone.now() - timedelta(seconds=21))
+        with patch.object(actualizar_carga_point_repartidor, "apply_async") as encolar:
+            self.assertEqual(self.client.post(url_tramo).status_code, 202)
+        EventoRuta.objects.create(
+            ruta=ruta, parada=siguiente_cedis, tipo=EventoRuta.TIPO_RECARGA_CEDIS, creado_por=self.user,
+        )
+        with patch("logistica.services_carga_ruta.OpenTransferSyncService") as point:
+            actualizar_carga_point_repartidor.apply(kwargs=encolar.call_args.kwargs["kwargs"], throw=True)
+            point.assert_not_called()
+        self.assertFalse(RutaCargaChecklistLinea.objects.filter(checklist__ruta=ruta, parada=futura).exists())
+        self.assertEqual(self.client.get(url_tramo).status_code, 409)
+        self.assertEqual(self.client.get(f"{url}?recarga={siguiente_cedis.pk}").json()["estado"], "SIN_SOLICITUD")
+
     def test_repartidor_actualiza_carga_point_sin_liberar_ruta(self):
         ruta, _ = self._crear_ruta_planeada_para_carga()
         url = f"/api/logistica/rutas/{ruta.pk}/carga-checklist/actualizacion-point/"
@@ -9515,7 +9640,7 @@ class LogisticaControlRutasTests(TestCase):
         self.assertNotIn("function lineaPendientePoint", pwa_html)
         self.assertEqual(pwa_html.count("function renderChecklistCarga("), 1)
         self.assertIn("resumenCargaRuta(rutaData.checklist_carga, paradas)", pwa_html)
-        self.assertIn("route-control-v96-carga-point-repartidor", pwa_html)
+        self.assertIn("route-control-v97-carga-point-tramo-cedis", pwa_html)
 
     def test_checklist_no_entra_en_incidencia_solo_por_linea_superada(self):
         ruta, parada = self._crear_ruta_planeada_para_carga()
