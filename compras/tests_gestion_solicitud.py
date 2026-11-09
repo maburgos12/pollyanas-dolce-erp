@@ -6,8 +6,9 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import AuditLog
+from maestros.models import Proveedor
 from reportes.models import AreaPresupuesto, AreaPresupuestoResponsable
-from .models import ItemCompraDepartamental, SolicitudCompraDepartamental
+from .models import CotizacionCompraDepartamental, ItemCompraDepartamental, SolicitudCompraDepartamental
 
 
 class GestionSolicitudDepartamentalTests(TestCase):
@@ -92,12 +93,9 @@ class GestionSolicitudDepartamentalTests(TestCase):
         self.assertContains(self.client.get(self.url("editar")), "Estante")
 
     def test_cotizacion_existente_bloquea_aunque_el_estado_siga_enviada(self):
-        from maestros.models import Proveedor
-        from .models import CotizacionCompraDepartamental
-
         CotizacionCompraDepartamental.objects.create(
             item=self.item, proveedor=Proveedor.objects.create(nombre="Proveedor de prueba"),
-            costo_unitario=10,
+            cantidad_ofertada=1, costo_unitario=10,
         )
         self.client.force_login(self.autora)
         self.assertEqual(self.client.post(self.url("editar"), self.datos()).status_code, 409)
