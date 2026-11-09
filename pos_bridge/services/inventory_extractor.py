@@ -16,6 +16,14 @@ from pos_bridge.utils.exceptions import ExtractionError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, safe_slug, write_json_file
 
 
+# shortcut: Point exposes labels, so allow only aliases verified in its cuts until category IDs are available.
+PRODUCT_CATEGORY_ROW_ALIASES = {
+    "vaso preparado mini": "vasos mini",
+    "vasos preparados grande": "vasos grande",
+    "velas sparklers": "vela sparklers",
+}
+
+
 @dataclass
 class ExtractedBranchInventory:
     branch: dict
@@ -90,6 +98,7 @@ class PointInventoryExtractor:
         for option in category_options:
             inventory_page.select_category(option["value"], kind="products")
             expected_category = normalize_text(option["label"])
+            accepted_categories = {expected_category, PRODUCT_CATEGORY_ROW_ALIASES.get(expected_category, expected_category)}
             for attempt in range(4):
                 parsed = self.parser.parse_inventory_table(
                     inventory_page.extract_inventory_table(kind="products"), "", ""
@@ -98,7 +107,9 @@ class PointInventoryExtractor:
                     normalize_text(item["category"]) for item in parsed["items"] if item.get("category")
                 }
                 # After seeing stale rows, an intermediate empty table cannot confirm the refresh.
-                if observed_categories == {expected_category} or (not observed_categories and attempt == 0):
+                if observed_categories and observed_categories <= accepted_categories:
+                    break
+                if not observed_categories and attempt == 0:
                     break
                 if attempt < 3:
                     inventory_page.page.wait_for_timeout(750)
