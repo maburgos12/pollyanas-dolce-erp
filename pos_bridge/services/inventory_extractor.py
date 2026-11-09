@@ -13,7 +13,7 @@ from pos_bridge.services.normalizer_service import PointNormalizerService
 from pos_bridge.services.parser_service import PointInventoryParserService
 from pos_bridge.utils.dates import local_now, timestamp_token
 from pos_bridge.utils.exceptions import ExtractionError, PosBridgeError
-from pos_bridge.utils.helpers import safe_slug, write_json_file
+from pos_bridge.utils.helpers import normalize_text, safe_slug, write_json_file
 
 
 @dataclass
@@ -89,7 +89,24 @@ class PointInventoryExtractor:
 
         for option in category_options:
             inventory_page.select_category(option["value"], kind="products")
-            parsed = self.parser.parse_inventory_table(inventory_page.extract_inventory_table(kind="products"), "", "")
+            expected_category = normalize_text(option["label"])
+            for attempt in range(4):
+                parsed = self.parser.parse_inventory_table(
+                    inventory_page.extract_inventory_table(kind="products"), "", ""
+                )
+                observed_categories = {
+                    normalize_text(item["category"]) for item in parsed["items"] if item.get("category")
+                }
+                # After seeing stale rows, an intermediate empty table cannot confirm the refresh.
+                if observed_categories == {expected_category} or (not observed_categories and attempt == 0):
+                    break
+                if attempt < 3:
+                    inventory_page.page.wait_for_timeout(750)
+            else:
+                raise ExtractionError(
+                    f"Point no confirmó la tabla de la categoría {option['label']}.",
+                    context={"category": option["label"], "observed_categories": sorted(observed_categories)},
+                )
             category_rows = 0
             for item in parsed["items"]:
                 item["category"] = item.get("category") or option["label"]
