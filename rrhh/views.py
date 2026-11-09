@@ -13,9 +13,10 @@ from django.contrib import messages
 from django.contrib.auth.models import Group
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Avg, Count, Prefetch, Q, Sum
-from django.http import JsonResponse
+from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -30,6 +31,7 @@ from core.notificaciones import notificar_permiso_solicitado
 from core.models import Sucursal
 
 from .models import (
+    AplicacionGoceVacaciones,
     AsistenciaEmpleado,
     AsignacionJornadaEmpleado,
     AltaPendienteEmpleado,
@@ -123,6 +125,7 @@ from .services_vacaciones import (
     can_gestionar_vacaciones_jefe,
     can_resolver_vacaciones_jefe,
     crear_solicitud_vacaciones,
+    es_dia_laborable,
     goce_vacacional_fifo_activo,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
@@ -3313,6 +3316,64 @@ def permisos_list(request):
     )
 
 
+def _dias_goce_del_folio(movimiento, hoy):
+    solicitud = movimiento.solicitud
+    if (
+        movimiento.tipo != MovimientoVacaciones.TIPO_CONSUMIDO
+        or solicitud is None
+        or solicitud.empleado_id != movimiento.empleado_id
+        or solicitud.estado != SolicitudVacaciones.ESTADO_APROBADA
+        or solicitud.fecha_fin >= hoy
+    ):
+        return []
+
+    aplicaciones = list(solicitud.aplicaciones_goce.all())
+    if aplicaciones:
+        consumido = sum(
+            aplicacion.dias for aplicacion in aplicaciones
+            if aplicacion.estado == AplicacionGoceVacaciones.ESTADO_CONSUMIDA
+        )
+        # Un cargo anticipado puede seguir en la bitácora después de una regularización.
+        if (
+            consumido != solicitud.dias_laborables
+            or timezone.localtime(movimiento.creado_en).date() <= solicitud.fecha_fin
+        ):
+            return []
+
+    dias = []
+    for offset in range((solicitud.fecha_fin - solicitud.fecha_inicio).days + 1):
+        fecha = solicitud.fecha_inicio + timedelta(days=offset)
+        if es_dia_laborable(fecha):
+            dias.append(fecha)
+            if len(dias) > solicitud.dias_laborables:
+                return []
+    return dias if len(dias) == solicitud.dias_laborables else []
+
+
+def _vacaciones_historial(request, empleados_qs, filtros_consulta):
+    try:
+        empleado_id = int(request.GET["historial"])
+    except ValueError as exc:
+        raise Http404("Empleado no encontrado") from exc
+    empleado = get_object_or_404(empleados_qs, pk=empleado_id)
+    movimientos = (
+        MovimientoVacaciones.objects.filter(empleado=empleado)
+        .select_related("solicitud")
+        .prefetch_related("solicitud__aplicaciones_goce")
+        .order_by("-creado_en", "-id")
+    )
+    pagina = Paginator(movimientos, 20).get_page(request.GET.get("pagina"))
+    hoy = timezone.localdate()
+    for movimiento in pagina:
+        movimiento.dias_goce = _dias_goce_del_folio(movimiento, hoy)
+    return render(request, "rrhh/vacaciones_list.html", {
+        "module_tabs": _module_tabs("vacaciones", request.user),
+        "historial_empleado": empleado,
+        "historial_pagina": pagina,
+        "filtros_consulta": filtros_consulta,
+    })
+
+
 @login_required
 def vacaciones_list(request):
     empleado_actual = empleado_de_usuario(request.user)
@@ -3321,11 +3382,11 @@ def vacaciones_list(request):
     else:
         equipo_qs = Empleado.objects.filter(activo=True, jefe_directo__usuario_erp=request.user)
     tiene_equipo = equipo_qs.exists()
-    puede_ver_vacaciones = can_view_submodule(request.user, "rrhh", "vacaciones") or tiene_equipo or bool(empleado_actual)
-    if not puede_ver_vacaciones:
+    acceso_modulo = can_view_submodule(request.user, "rrhh", "vacaciones")
+    if not (acceso_modulo or tiene_equipo or empleado_actual):
         raise PermissionDenied("No tienes permisos para ver vacaciones")
 
-    if can_view_submodule(request.user, "rrhh", "vacaciones"):
+    if acceso_modulo:
         empleados_qs = Empleado.objects.filter(activo=True).order_by("nombre")
     elif tiene_equipo:
         empleado_ids = list(equipo_qs.values_list("id", flat=True))
@@ -3439,6 +3500,13 @@ def vacaciones_list(request):
         messages.success(request, success_message)
         return redirect(redirect_url)
 
+    filtros_historial = {
+        campo: (request.GET.get(campo) or "").strip() for campo in ("q", "estado", "sucursal")
+    }
+    filtros_consulta = urlencode({campo: valor for campo, valor in filtros_historial.items() if valor})
+    if request.method in {"GET", "HEAD"} and "historial" in request.GET:
+        return _vacaciones_historial(request, empleados_qs, filtros_consulta)
+
     solicitudes_qs = (
         SolicitudVacaciones.objects.select_related(
             "empleado",
@@ -3456,9 +3524,9 @@ def vacaciones_list(request):
         else:
             solicitudes_qs = solicitudes_qs.filter(vacaciones_jefe_q(request.user))
     empleados = list(empleados_qs[:250])
-    filtro_q = (request.GET.get("q") or "").strip()
-    filtro_estado = (request.GET.get("estado") or "").strip()
-    filtro_sucursal = (request.GET.get("sucursal") or "").strip()
+    filtro_q = filtros_historial["q"]
+    filtro_estado = filtros_historial["estado"]
+    filtro_sucursal = filtros_historial["sucursal"]
     revision_qs = empleados_qs
     if filtro_q:
         revision_qs = revision_qs.filter(
@@ -3485,7 +3553,7 @@ def vacaciones_list(request):
     movimientos_por_empleado = {empleado.id: [] for empleado in empleados_revision}
     movimientos_qs = (
         MovimientoVacaciones.objects.filter(empleado__in=empleados_revision)
-        .select_related("solicitud", "actor")
+        .select_related("solicitud")
         .order_by("empleado_id", "-creado_en", "-id")
     )
     for movimiento in movimientos_qs:
@@ -3597,7 +3665,8 @@ def vacaciones_list(request):
             "module_tabs": _module_tabs("vacaciones", request.user),
             "empleados": empleados,
             "empleados_historial": empleados_historial,
-            "filtros_historial": {"q": filtro_q, "estado": filtro_estado, "sucursal": filtro_sucursal},
+            "filtros_historial": filtros_historial,
+            "filtros_consulta": filtros_consulta,
             "periodo_actual": hoy.year,
             "periodo_maximo": hoy.year + 1,
             "sucursales_historial": sucursales_historial,
