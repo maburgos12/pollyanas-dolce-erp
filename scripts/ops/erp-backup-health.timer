@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily ERP disk and recovery verification at 08:00 Mazatlan
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 America/Mazatlan
+Persistent=true
+Unit=erp-backup-health.service
+
+[Install]
+WantedBy=timers.target
