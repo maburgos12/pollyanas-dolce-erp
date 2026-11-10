@@ -95,11 +95,17 @@ class PointInventoryExtractor:
         audit_rows: list[dict] = []
         seen_keys: set[str] = set()
 
-        for option in category_options:
+        reads_per_selection = 4
+        for index, option in enumerate(category_options):
             inventory_page.select_category(option["value"], kind="products")
             expected_category = normalize_text(option["label"])
             accepted_categories = {expected_category, PRODUCT_CATEGORY_ROW_ALIASES.get(expected_category, expected_category)}
-            for attempt in range(4):
+            for attempt in range(2 * reads_per_selection):
+                if attempt == reads_per_selection:
+                    # Move away once so Point sees a fresh transition to the target.
+                    if len(category_options) > 1:
+                        inventory_page.select_category(category_options[index - 1]["value"], kind="products")
+                    inventory_page.select_category(option["value"], kind="products")
                 parsed = self.parser.parse_inventory_table(
                     inventory_page.extract_inventory_table(kind="products"), "", ""
                 )
@@ -111,7 +117,7 @@ class PointInventoryExtractor:
                     break
                 if not observed_categories and attempt == 0:
                     break
-                if attempt < 3:
+                if (attempt + 1) % reads_per_selection:
                     inventory_page.page.wait_for_timeout(750)
             else:
                 raise ExtractionError(
