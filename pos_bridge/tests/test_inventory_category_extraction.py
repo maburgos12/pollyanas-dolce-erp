@@ -1,5 +1,5 @@
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 from django.test import SimpleTestCase
 
@@ -44,6 +44,18 @@ class PointInventoryCategoryExtractionTests(SimpleTestCase):
 
         with self.assertRaisesMessage(ExtractionError, "PASTEL CHICO"):
             self.extractor._extract_product_rows_by_category(self.page)
+
+    def test_reselects_filter_if_point_keeps_previous_category(self):
+        self.page.extract_inventory_table.side_effect = [self.previous] * 5 + [self.current]
+
+        rows, audit = self.extractor._extract_product_rows_by_category(self.page)
+
+        self.assertEqual([row["external_id"] for row in rows], ["734", "924"])
+        self.assertEqual([category["rows"] for category in audit], [1, 1])
+        self.assertEqual(self.page.select_category.call_args_list, [
+            call("21", kind="products"), call("22", kind="products"),
+            call("21", kind="products"), call("22", kind="products"),
+        ])
 
     def test_accepts_point_selector_aliases_confirmed_in_actual_cuts(self):
         pairs = [
