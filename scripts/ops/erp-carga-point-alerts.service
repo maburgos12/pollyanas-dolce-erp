@@ -1,0 +1,18 @@
+[Unit]
+Description=Avisar por Telegram de solicitudes vencidas de carga Point
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pastelerias-erp
+UMask=0077
+StateDirectory=erp-carga-point-alerts
+StateDirectoryMode=0700
+LoadCredential=telegram.json:/etc/erp-mac-ia-watchdog/telegram.json
+ExecStart=/usr/bin/python3 -EB /opt/pastelerias-erp/scripts/carga_point_alerts.py
+TimeoutStartSec=55
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only

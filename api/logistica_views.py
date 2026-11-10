@@ -55,6 +55,7 @@ from logistica.pwa_compat import is_exact_v59_replay_contract, v59_compat_active
 from logistica.services_combustible_auditoria import auditar_carga_combustible
 from logistica.tasks import actualizar_carga_point_repartidor, auditar_ticket_combustible
 from logistica.services_carga_ruta import (
+    ERROR_SYNC_CARGA_VENCIDA,
     MODO_SYNC_CARGA_REPARTIDOR,
     VIGENCIA_SYNC_CARGA_REPARTIDOR,
     checklist_bloquea_salida,
@@ -2007,7 +2008,7 @@ class LogisticaRutaCargaPointRepartidorView(_LogisticaBaseView):
                 ).update(
                     status=PointSyncJob.STATUS_FAILED,
                     finished_at=ahora,
-                    error_message="La actualización venció en espera. Vuelve a intentarlo.",
+                    error_message=ERROR_SYNC_CARGA_VENCIDA,
                 )
                 parametros = {"mode": MODO_SYNC_CARGA_REPARTIDOR, "ruta_id": ruta_id}
                 if recarga_id is not None:
