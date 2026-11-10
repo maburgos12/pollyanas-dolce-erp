@@ -1,0 +1,10 @@
+[Unit]
+Description=Check ERP backup alerts every five minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=erp-backup-alerts.service
+
+[Install]
+WantedBy=timers.target
