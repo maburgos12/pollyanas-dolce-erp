@@ -19,20 +19,20 @@ REPEAT_SECONDS = 6 * 3600
 
 def issues(percent, nas_ok, report, service_result, now):
     found = {}
-    if percent >= 85:
+    if percent is not None and percent >= 85:
         found['disk_urgent'] = f'URGENTE: disco raíz al {percent}% (umbral 85%).'
-    elif percent >= 75:
+    elif percent is not None and percent >= 75:
         found['disk_warning'] = f'ALERTA: disco raíz al {percent}% (umbral 75%).'
     if not nas_ok:
-        found['nas'] = 'No se pudo acceder por SSH al directorio de respaldos del NAS.'
+        found['nas'] = 'No se pudo comprobar el acceso a los respaldos del NAS.'
     if report is None:
         found['verification'] = 'No hay un informe de recuperación válido disponible.'
     elif report.get('success') is not True:
-        found['verification'] = 'La última verificación de recuperación terminó con error. Revisa health-latest.json.'
+        found['verification'] = 'La última verificación de recuperación no confirmó éxito. Revisa health-latest.json.'
     elif not isinstance(report.get('finished_epoch'), (int, float)) or not 0 <= now - report['finished_epoch'] <= 36 * 3600:
         found['verification'] = 'La verificación de recuperación está ausente, desactualizada o tiene una fecha inválida.'
     if service_result != 'success':
-        found['verification'] = 'El servicio de recuperación falló o excedió su tiempo límite. Revisa su journal.'
+        found['verification'] = 'El servicio de recuperación no confirmó éxito: fallo, tiempo límite o estado no disponible. Revisa su journal.'
     return found
 
 
@@ -47,7 +47,7 @@ def collect(now):
         if not 0 <= percent <= 100:
             raise ValueError('Invalid percentage')
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
-        percent = 0
+        percent = None
         failures['monitor'] = 'No se pudo medir el uso del disco. Revisa erp-backup-alerts.service.'
     try:
         output = read_command(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',

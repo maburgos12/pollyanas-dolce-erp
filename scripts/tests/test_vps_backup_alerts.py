@@ -54,8 +54,9 @@ class BackupAlertTests(unittest.TestCase):
     def test_probe_timeouts_and_missing_report_are_alerts(self):
         with patch.object(alerts, 'read_command', side_effect=subprocess.TimeoutExpired('probe', 5)), patch.object(alerts, 'REPORT') as report:
             report.read_text.side_effect = FileNotFoundError()
-            found, _ = alerts.collect(100)
+            found, percent = alerts.collect(100)
         self.assertEqual(set(found), {'nas', 'verification', 'monitor'})
+        self.assertIsNone(percent)
 
 
 if __name__ == '__main__':
