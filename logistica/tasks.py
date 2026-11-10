@@ -32,6 +32,7 @@ from .models import (
 from .services_combustible_auditoria import auditar_carga_combustible
 from .services_auditoria_entregas import auditar_entregas_ruta
 from .services_carga_ruta import (
+    ERROR_SYNC_CARGA_VENCIDA,
     MODO_SYNC_CARGA_REPARTIDOR,
     VIGENCIA_SYNC_CARGA_REPARTIDOR,
     PointSyncUnavailableError,
@@ -100,9 +101,11 @@ def actualizar_carga_point_repartidor(*, job_id):
     job = solicitudes.select_related("triggered_by").get()
     try:
         ruta = RutaEntrega.objects.get(pk=job.parameters["ruta_id"])
-        with point_account_session_lock(wait=False) as adquirido:
-            if not adquirido:
-                raise ValidationError("Point está atendiendo otra actualización. Reintenta en unos momentos.")
+        vence_en = job.started_at + VIGENCIA_SYNC_CARGA_REPARTIDOR
+        espera = max(0, (vence_en - timezone.now()).total_seconds())
+        with point_account_session_lock(wait=True, timeout_seconds=espera) as adquirido:
+            if not adquirido or timezone.now() >= vence_en:
+                raise ValidationError(ERROR_SYNC_CARGA_VENCIDA)
             sincronizar_checklist_carga_desde_point(
                 ruta=ruta, user=job.triggered_by, desde_repartidor=True,
                 recarga_cedis_id=job.parameters.get("recarga_cedis_id"),

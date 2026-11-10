@@ -880,6 +880,7 @@ def _elegir_recepcion_point(linea: RutaCargaChecklistLinea, candidates: list[Poi
 
 MODO_SYNC_CARGA_REPARTIDOR = "logistica_carga_repartidor"
 VIGENCIA_SYNC_CARGA_REPARTIDOR = timedelta(minutes=5)
+ERROR_SYNC_CARGA_VENCIDA = "La actualización venció en espera. Vuelve a intentarlo."
 
 
 def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> int | None:

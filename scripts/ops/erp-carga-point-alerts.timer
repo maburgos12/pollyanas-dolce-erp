@@ -1,0 +1,10 @@
+[Unit]
+Description=Comprobar cada minuto si venció una actualización de carga Point
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=5s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
