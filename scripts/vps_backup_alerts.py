@@ -90,6 +90,8 @@ def message(current, previous, percent, test=False):
     lines = [title, 'Servidor: VPS ERP']
     lines.extend(current[key] for key in sorted(current))
     cleared = set(previous) - set(current)
+    if {'disk_warning', 'disk_urgent'} & set(current):
+        cleared -= {'disk_warning', 'disk_urgent'}
     if cleared:
         labels = dict(nas='acceso al NAS', verification='verificación de recuperación',
                       disk_warning='disco desde 75%', disk_urgent='disco desde 85%', monitor='lectura de disco')
