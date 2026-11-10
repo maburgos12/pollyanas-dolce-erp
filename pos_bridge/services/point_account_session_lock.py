@@ -13,14 +13,14 @@ POINT_ACCOUNT_SESSION_LOCK_ID = 7_532_026_080_700_001
 
 
 @contextmanager
-def point_account_session_lock(*, wait: bool):
+def point_account_session_lock(*, wait: bool, timeout_seconds: float | None = None):
     if connection.vendor != "postgresql":
         raise RuntimeError("La coordinación de sesiones Point requiere PostgreSQL.")
 
     from pos_bridge.services.catalog_recipe_execution import remaining_seconds
-    bounded = wait and remaining_seconds() is not None
+    bounded = wait and (timeout_seconds is not None or remaining_seconds() is not None)
     query = "SELECT pg_advisory_lock(%s)" if wait and not bounded else "SELECT pg_try_advisory_lock(%s)"
-    lock_deadline = time.monotonic() + 60
+    lock_deadline = time.monotonic() + (60 if timeout_seconds is None else timeout_seconds)
     while True:
         with connection.cursor() as cursor:
             cursor.execute(query, [POINT_ACCOUNT_SESSION_LOCK_ID])
@@ -28,9 +28,12 @@ def point_account_session_lock(*, wait: bool):
         if acquired or not bounded:
             break
         remaining_seconds()
-        if time.monotonic() >= lock_deadline:
+        remaining = lock_deadline - time.monotonic()
+        if remaining <= 0:
+            if timeout_seconds is not None:
+                break
             raise TimeoutError("Point está ocupado con otra sincronización. Reintenta en un minuto.")
-        time.sleep(1)
+        time.sleep(min(remaining, 0.25 if timeout_seconds is not None else 1))
 
     try:
         yield acquired

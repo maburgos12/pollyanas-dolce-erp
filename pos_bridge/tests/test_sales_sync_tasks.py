@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from contextlib import contextmanager
 from datetime import date
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -38,6 +39,41 @@ class PointSalesSyncTaskRoutingTests(TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_ventas_oficiales_protegen_ambas_consultas_point_con_el_candado_de_cuenta(self):
+        service = OfficialSalesBackfillService()
+        branch = PointBranch.objects.create(external_id="point-lock", name="Matriz")
+        calls = []
+        acquired = False
+
+        @contextmanager
+        def point_lock(*, wait):
+            nonlocal acquired
+            self.assertTrue(wait)
+            acquired = True
+            try:
+                yield True
+            finally:
+                acquired = False
+
+        def fetch_reports(**_kwargs):
+            calls.append(("reportes", acquired))
+            return [], []
+
+        def fetch_indicators(**_kwargs):
+            calls.append(("indicadores", acquired))
+            raise ValueError("no hay indicador")
+
+        module = "pos_bridge.services.official_sales_backfill_service"
+        with (
+            patch(f"{module}.point_account_session_lock", side_effect=point_lock),
+            patch.object(service, "_sales_branches", return_value=[branch]),
+            patch.object(service, "_fetch_branch_day_reports_with_retry", side_effect=fetch_reports),
+            patch.object(service.indicator_service, "fetch_branch_day", side_effect=fetch_indicators),
+        ):
+            service.run(start_date=date(2026, 8, 1), end_date=date(2026, 8, 1))
+
+        self.assertEqual(calls, [("reportes", True), ("indicadores", True)])
 
     def test_real_official_partial_timeout_retries_without_building_even_when_exhausted(self):
         branch = PointBranch.objects.create(external_id="partial-retry", name="Matriz")

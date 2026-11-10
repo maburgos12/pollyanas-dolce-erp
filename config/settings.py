@@ -355,6 +355,7 @@ CELERY_TASK_ROUTES = {
     "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
     "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
+    "logistica.tasks.actualizar_carga_point_repartidor": {"queue": "logistica_point"},
     # Los avisos a personas no pueden formarse detrás de la automatización de
     # navegador de Point: el worker por omisión corre --pool=solo y una sola
     # sincronización de ventas lo ocupa más de diez minutos.

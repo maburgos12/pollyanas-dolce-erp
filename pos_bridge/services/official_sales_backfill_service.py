@@ -20,6 +20,7 @@ from pos_bridge.models import (
     PointSyncJob,
 )
 from reportes.analytics_service import mark_analytics_dirty_for_range
+from pos_bridge.services.point_account_session_lock import point_account_session_lock
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
@@ -396,13 +397,15 @@ class OfficialSalesBackfillService:
                         )
                         continue
                     try:
-                        parsed_reports, raw_paths = self._fetch_branch_day_reports_with_retry(
-                            branch=branch,
-                            sale_date=sale_date,
-                            credito_scopes=credito_scopes,
-                            sync_job=sync_job,
-                            session_cache=session_cache,
-                        )
+                        # Ceder la cuenta entre consultas para que carga pueda entrar durante el corte.
+                        with point_account_session_lock(wait=True):
+                            parsed_reports, raw_paths = self._fetch_branch_day_reports_with_retry(
+                                branch=branch,
+                                sale_date=sale_date,
+                                credito_scopes=credito_scopes,
+                                sync_job=sync_job,
+                                session_cache=session_cache,
+                            )
                         aggregated = self._aggregate_report_rows(parsed_reports)
                         deleted, imported = self._replace_branch_day_sales(
                             branch=branch,
@@ -413,7 +416,8 @@ class OfficialSalesBackfillService:
                         indicator_payload = None
                         indicator_created = False
                         try:
-                            indicator_payload = self.indicator_service.fetch_branch_day(branch=branch, indicator_date=sale_date)
+                            with point_account_session_lock(wait=True):
+                                indicator_payload = self.indicator_service.fetch_branch_day(branch=branch, indicator_date=sale_date)
                             _, indicator_created = self.indicator_service.persist_branch_day(
                                 indicator_payload=indicator_payload,
                                 sync_job=sync_job,
