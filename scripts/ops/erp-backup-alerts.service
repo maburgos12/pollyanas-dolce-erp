@@ -1,0 +1,18 @@
+[Unit]
+Description=ERP NAS, recovery and disk alerts via Telegram
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+StateDirectory=erp-backup-alerts
+StateDirectoryMode=0700
+LoadCredential=telegram.json:/etc/erp-mac-ia-watchdog/telegram.json
+ExecStart=/usr/bin/python3 -IB /opt/pastelerias-erp/scripts/vps_backup_alerts.py
+TimeoutStartSec=75
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
