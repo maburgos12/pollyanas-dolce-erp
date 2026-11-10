@@ -30,3 +30,7 @@ Reutilizar la consulta de transferencias abiertas y la construcción de la lista
 Procedimiento reproducible: `manage.py inventario_fuentes_datos --term carga --term transfer --term sync --limit 28` en PostgreSQL local. La revisión de tiempos en producción filtró `PointSyncJob` por `mode=open_transfers`, estado exitoso y los 14 días anteriores.
 
 La sincronización usa la cuenta Point compartida. Si está ocupada, la app informa que debe reintentar. La lista que se reconstruye corresponde a la ruta autorizada.
+
+## Recarga en ruta
+
+El caso RUT-202611-0009 del 9 de noviembre confirmó que la primera recarga proyectó cinco líneas de envío y que una sincronización posterior agregó 88 líneas en tres sucursales. La acción del titular identifica el tramo mediante la parada de recarga registrada en `EventoRuta`. Sólo reconstruye la lista de paradas abiertas de ese tramo. La sincronización de Point conserva su espejo compartido. Las líneas con captura o evidencia y las paradas cerradas permanecen protegidas, incluso si se genera una nueva versión del mismo detalle en Point.

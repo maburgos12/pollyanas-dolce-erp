@@ -9,7 +9,7 @@ import json
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Prefetch, Q
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -111,8 +111,11 @@ def _identidad_producto_carga(*, item_code: str, item_name: str, unit: str) -> t
     return (code, "" if code else name, normalized_unit)
 
 
-def _paradas_por_sucursal(ruta: RutaEntrega) -> dict[int, ParadaRuta]:
+def _paradas_por_sucursal(ruta: RutaEntrega, *, ordenes_abiertas: set[int] | None = None) -> dict[int, ParadaRuta]:
     paradas = ruta.paradas.select_related("punto", "punto__sucursal").order_by("orden", "id")
+    if ordenes_abiertas is not None:
+        paradas = paradas.filter(orden__in=ordenes_abiertas, entrega_estado=ParadaRuta.ENTREGA_PENDIENTE)
+        paradas = paradas.exclude(estado=ParadaRuta.ESTADO_OMITIDA)
     result = {}
     sucursales = list(Sucursal.objects.filter(activa=True).only("id", "nombre"))
     for parada in paradas:
@@ -174,12 +177,13 @@ def _ids_paradas_con_recarga_cedis(ruta: RutaEntrega) -> set[int]:
     )
 
 
-def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
+def _tramo_carga_actual(ruta: RutaEntrega) -> tuple[int | None, set[int] | None]:
     paradas = list(ruta.paradas.select_related("punto").order_by("orden", "id"))
     cedis = [parada for parada in paradas if parada.punto and parada.punto.tipo == PuntoLogistico.TIPO_CEDIS]
     if not cedis:
-        return None
+        return None, None
 
+    recarga_id = None
     cedis_con_recarga = _ids_paradas_con_recarga_cedis(ruta)
     inicio = cedis[0].orden if cedis[0].orden == 1 else None
     for cedis_parada in cedis:
@@ -187,11 +191,12 @@ def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
             continue
         if cedis_parada.id in cedis_con_recarga:
             inicio = cedis_parada.orden
+            recarga_id = cedis_parada.pk
             continue
         break
     fin = next((parada.orden for parada in cedis if inicio is None or parada.orden > inicio), None)
 
-    return {
+    return recarga_id, {
         parada.orden
         for parada in paradas
         if parada.punto
@@ -199,6 +204,10 @@ def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
         and (inicio is None or parada.orden > inicio)
         and (fin is None or parada.orden < fin)
     }
+
+
+def _ordenes_tramo_carga_actual(ruta: RutaEntrega) -> set[int] | None:
+    return _tramo_carga_actual(ruta)[1]
 
 
 def obtener_checklist_carga_detallado(
@@ -315,8 +324,11 @@ def _superar_lineas_point_canceladas(
     return superadas
 
 
-def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False) -> tuple[int, int, int]:
-    paradas_by_branch = _paradas_por_sucursal(ruta)
+def _sincronizar_lineas_point_para_ruta(
+    *, ruta: RutaEntrega, checklist: RutaCargaChecklist, solo_abiertas: bool = False,
+    paradas_tramo: dict[int, ParadaRuta] | None = None,
+) -> tuple[int, int, int]:
+    paradas_by_branch = _paradas_por_sucursal(ruta) if paradas_tramo is None else paradas_tramo
     if not paradas_by_branch:
         return 0, 0, 0
 
@@ -369,12 +381,32 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
         for point_id, checklist_id in propietario_por_point_id.items()
         if checklist_id != checklist.id
     }
-    checklist_lines = list(
-        checklist.lineas.select_for_update(of=("self",)).select_related(
-            "point_transfer_line",
-            "point_transfer_line__destination_branch",
-        )
+    lineas_qs = checklist.lineas.select_for_update(of=("self",)).select_related(
+        "point_transfer_line", "point_transfer_line__destination_branch",
     )
+    if paradas_tramo is not None:
+        lineas_qs = lineas_qs.annotate(con_evidencia=Exists(ParadaEntregaEvidencia.objects.filter(linea_carga_id=OuterRef("pk"))))
+    checklist_lines = list(lineas_qs)
+    protegidas_por_source = set()
+    protegidas_por_point_id = set()
+    detalles_protegidos = set()
+    if paradas_tramo is not None:
+        paradas_ids = {parada.pk for parada in paradas_tramo.values()}
+        editables = []
+        for linea in checklist_lines:
+            if (
+                linea.parada_id in paradas_ids
+                and not (linea.validado_en or linea.validado_por_id or linea.client_event_id)
+                and (linea.cantidad_cargada is None or linea.estatus == RutaCargaChecklistLinea.ESTATUS_ZERO_EXPECTED)
+                and not linea.con_evidencia
+            ):
+                editables.append(linea)
+                continue
+            protegidas_por_source.add(linea.source_hash)
+            protegidas_por_point_id.add(linea.point_transfer_line_id)
+            if linea.transfer_external_id and linea.detail_external_id:
+                detalles_protegidos.add((linea.transfer_external_id, linea.detail_external_id))
+        checklist_lines = editables
     lineas_superadas = resolver_duplicados_activos_point(checklist_lines)
     lineas_superadas += archivar_solicitudes_point(checklist_lines)
     for linea in checklist_lines:
@@ -423,6 +455,13 @@ def _sincronizar_lineas_point_para_ruta(*, ruta: RutaEntrega, checklist: RutaCar
     actualizadas = lineas_superadas
     omitidas = 0
     for line in candidates:
+        if (
+            line.source_hash in protegidas_por_source
+            or line.id in protegidas_por_point_id
+            or (line.transfer_external_id, line.detail_external_id) in detalles_protegidos
+        ):
+            omitidas += 1
+            continue
         if not linea_point_es_operativa(line):
             omitidas += 1
             continue
@@ -843,21 +882,28 @@ MODO_SYNC_CARGA_REPARTIDOR = "logistica_carga_repartidor"
 VIGENCIA_SYNC_CARGA_REPARTIDOR = timedelta(minutes=5)
 
 
-def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> None:
+def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> int | None:
     if not user or not user.is_active or not ruta.repartidor_id or ruta.repartidor.user_id != user.pk:
         raise PermissionDenied("Solo el repartidor titular puede actualizar esta carga.")
-    if ruta.estatus != RutaEntrega.ESTATUS_PLANEADA or not ruta_es_operativa_hoy(ruta):
-        raise ValidationError("Esta ruta ya no está disponible para actualizar la carga inicial.")
+    if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA} or not ruta_es_operativa_hoy(ruta):
+        raise ValidationError("Esta ruta ya no está disponible para actualizar la carga.")
+    if ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+        recarga_id, ordenes = _tramo_carga_actual(ruta)
+        if recarga_id is None or not _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes):
+            raise ValidationError("La ruta no tiene un tramo abierto después de una recarga CEDIS.")
+        return recarga_id
     if not ruta.paradas.filter(punto__sucursal__isnull=False).exclude(punto__tipo=PuntoLogistico.TIPO_CEDIS).exists():
         raise ValidationError("Esta ruta no tiene sucursales con carga de Point.")
+    return None
 
 
 def sincronizar_checklist_carga_desde_point(
     *, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True, desde_repartidor: bool = False,
+    recarga_cedis_id: int | None = None,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.get(pk=ruta.pk)
-    if desde_repartidor:
-        validar_ruta_sync_carga_repartidor(ruta, user)
+    if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
+        raise ValidationError("El tramo cambió. Abre Mi ruta y solicita una nueva actualización.")
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
     if not _paradas_por_sucursal(ruta):
@@ -876,6 +922,7 @@ def sincronizar_checklist_carga_desde_point(
 
     return _actualizar_checklist_carga_desde_point(
         ruta=ruta, user=user, sync_job=sync_job, desde_repartidor=desde_repartidor,
+        recarga_cedis_id=recarga_cedis_id,
     )
 
 
@@ -921,10 +968,11 @@ def _actualizar_checklist_carga_desde_point(
     sync_job=None,
     solo_abiertas: bool = True,
     desde_repartidor: bool = False,
+    recarga_cedis_id: int | None = None,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
-    if desde_repartidor:
-        validar_ruta_sync_carga_repartidor(ruta, user)
+    if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
+        raise ValidationError("El tramo cambió. Abre Mi ruta y solicita una nueva actualización.")
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
         raise ValidationError("La carga solo se puede sincronizar mientras la ruta está planeada o en ruta.")
 
@@ -933,6 +981,20 @@ def _actualizar_checklist_carga_desde_point(
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
     checklist = checklist or obtener_checklist_carga(ruta)
+    if recarga_cedis_id is not None:
+        paradas_tramo = _paradas_por_sucursal(ruta, ordenes_abiertas=_ordenes_tramo_carga_actual(ruta))
+        creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(
+            ruta=ruta, checklist=checklist, paradas_tramo=paradas_tramo,
+        )
+        # El snapshot global sigue siendo evidencia de la recarga CEDIS original.
+        if checklist.lineas.filter(
+            parada_id__in={parada.pk for parada in paradas_tramo.values()},
+            estatus=RutaCargaChecklistLinea.ESTATUS_PENDIENTE,
+        ).exists():
+            checklist.estatus = RutaCargaChecklist.ESTATUS_EN_REVISION
+            checklist.save(update_fields=["estatus", "actualizado_en"])
+        return ChecklistCargaResumen(checklist, creadas, actualizadas, omitidas)
+
     hechos_point_antes = dict(checklist.lineas.values_list("source_hash", "cantidad_enviada_esperada"))
     checklist.point_sync_job = sync_job or checklist.point_sync_job
     sync_fields = ["point_sync_job", "estatus", "actualizado_en"]
@@ -1221,20 +1283,22 @@ def validar_producto_tramo_carga(
 
 
 def estado_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> str:
-    lineas = list(
-        lineas_tramo_operativo_actual(ruta)
-        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        .select_related("point_transfer_line")
-    )
+    ordenes = _ordenes_tramo_carga_actual(ruta)
+    lineas_tramo = lineas_tramo_operativo_actual(ruta).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+    if solicitud.parameters.get("recarga_cedis_id"):
+        paradas = _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes)
+        lineas_tramo = lineas_tramo.filter(parada_id__in={parada.pk for parada in paradas.values()})
+        sucursales = set(paradas)
+    else:
+        sucursales = {
+            sucursal_id for sucursal_id, parada in _paradas_por_sucursal(ruta).items()
+            if ordenes is None or parada.orden in ordenes
+        }
+    lineas = list(lineas_tramo.select_related("point_transfer_line"))
     if any(_linea_pendiente_envio_point(linea) for linea in lineas):
         return "PENDIENTE_ENVIO"
 
     # Las solicitudes sin Enviado se conservan en el espejo Point, fuera del checklist.
-    ordenes = _ordenes_tramo_carga_actual(ruta)
-    sucursales = {
-        sucursal_id for sucursal_id, parada in _paradas_por_sucursal(ruta).items()
-        if ordenes is None or parada.orden in ordenes
-    }
     solicitudes_point = PointTransferLine.objects.filter(
         erp_destination_branch_id__in=sucursales,
         is_open=True, is_cancelled=False, is_current_snapshot=True, sent_at__isnull=True,

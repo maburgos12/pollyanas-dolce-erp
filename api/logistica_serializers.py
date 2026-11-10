@@ -518,6 +518,8 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         return _format_quantity(obj.cantidad_solicitada)
 
     def get_cantidad_enviada_esperada(self, obj):
+        if self.context.get("carga_tras_recarga"):
+            return _format_quantity(obj.cantidad_enviada_esperada)
         return self.get_cantidad_enviada_point(obj)
 
     def get_cantidad_enviada_point(self, obj):
@@ -527,6 +529,8 @@ class RutaCargaChecklistLineaSerializer(serializers.ModelSerializer):
         return _format_quantity(obj.cantidad_enviada_esperada)
 
     def get_point_enviada(self, obj):
+        if self.context.get("carga_tras_recarga") and obj.cantidad_cargada is not None and obj.estatus != obj.ESTATUS_ZERO_EXPECTED:
+            return True
         point_line = self._point_line(obj)
         if point_line is None:
             # Carga manual capturada en el ERP: no depende del Enviado de Point.
