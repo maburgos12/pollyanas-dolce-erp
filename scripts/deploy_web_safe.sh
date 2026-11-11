@@ -73,6 +73,25 @@ for row in rows:
 ' "$minimum_started"
 }
 
+# Gunicorn preload took 29s in production; bound both startup and each probe.
+wait_for_web() {
+  local deadline remaining probe_timeout
+  deadline=$(( $(date +%s) + 120 ))
+  while true; do
+    remaining=$(( deadline - $(date +%s) ))
+    (( remaining > 0 )) || break
+    probe_timeout=5
+    (( remaining >= probe_timeout )) || probe_timeout="$remaining"
+    if curl --connect-timeout 2 --max-time "$probe_timeout" -fsS http://127.0.0.1:8011/login/ >/dev/null; then
+      return 0
+    fi
+    (( $(date +%s) < deadline )) || break
+    sleep 1
+  done
+  echo "web did not become ready within 120 seconds" >&2
+  return 1
+}
+
 main() {
   local app_dir="${APP_DIR:-/opt/pastelerias-erp}"
   local compose_file="${COMPOSE_FILE:-$app_dir/docker-compose.yml}"
@@ -135,16 +154,9 @@ main() {
   fi
   verify_processes "$compose_file" "$minimum_started" || return 1
 
-  for _ in {1..20}; do
-    if curl -fsS http://127.0.0.1:8011/login/ >/dev/null; then
-      echo "web-ready revision=$new_head"
-      return 0
-    fi
-    sleep 1
-  done
+  wait_for_web || return 1
+  echo "web-ready revision=$new_head"
 
-  echo "web did not become ready after deploy reload" >&2
-  return 1
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
