@@ -325,7 +325,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def telegram(config, method, data):
     try:
-        if method not in {'sendMessage', 'answerCallbackQuery'}:
+        if method not in {'sendMessage', 'answerCallbackQuery', 'editMessageReplyMarkup'}:
             raise ValueError('invalid_method')
         request = Request('https://api.telegram.org/bot' + config['token'] + '/' + method,
                           data=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})

@@ -6,7 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 MODULES = Path(__file__).resolve().parents[2] / 'ops/erp-telegram-release'
 spec = importlib.util.spec_from_file_location('erp_telegram_release', MODULES / 'erp_telegram_release.py')
@@ -137,6 +137,30 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'approved')
         c.handle(self.query('r'), self.config, Path(self.temp.name), send)
         self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'rejected')
+
+    def test_request_through_real_transport_and_closed_allowlist(self):
+        from io import BytesIO
+        c.decide(self.query('r'), self.config, self.ledger)
+        calls = []
+        def opened(request, timeout):
+            method = request.full_url.rsplit('/', 1)[1]
+            payload = json.loads(request.data)
+            calls.append(method)
+            result = {'message_id': 57, 'chat': {'id': 17, 'type': 'private'}}
+            if method == 'editMessageReplyMarkup':
+                row = self.ledger.read(next(p.stem for p in self.ledger.directory.glob('*.json') if p.stem != self.row['nonce']))
+                self.assertEqual(row['message_id'], 57)
+                self.assertEqual(row['state'], 'pending')
+                result['reply_markup'] = payload['reply_markup']
+            return BytesIO(json.dumps({'ok': True, 'result': result}).encode())
+        opener = Mock(open=Mock(side_effect=opened))
+        with patch.object(r, 'build_opener', return_value=opener):
+            row = c.request(self.path, self.ledger, self.config, r.telegram)
+            self.assertEqual(row['state'], 'pending')
+            self.assertEqual(calls, ['sendMessage', 'editMessageReplyMarkup'])
+            with self.assertRaisesRegex(RuntimeError, '^telegram_transport_failed$'):
+                r.telegram(self.config, 'deleteMessage', {})
+        self.assertEqual(opener.open.call_count, 2)
 
     def test_default_release_validator_stays_closed(self):
         with self.assertRaises(ValueError): r.validate(self.row)
