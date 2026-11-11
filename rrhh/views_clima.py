@@ -2,6 +2,7 @@
 
 import base64
 import json
+import logging
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
@@ -27,6 +28,15 @@ from .models import CampanaClima, Empleado, ParticipanteClima, RespuestaClima
 
 
 QUESTIONNAIRE = json.loads((Path(__file__).parent / "data" / "clima_laboral_2026.json").read_text())
+logger = logging.getLogger(__name__)
+
+
+def _encolar_confirmacion(aviso_id):
+    from .tasks import enviar_confirmacion_clima
+    try:
+        enviar_confirmacion_clima.delay(aviso_id)
+    except Exception:
+        logger.exception("No se pudo encolar confirmación de clima; queda pendiente para el barrido diario")
 
 
 class CampanaClimaForm(forms.Form):
@@ -55,7 +65,7 @@ class RespuestasClimaForm(forms.Form):
                 )
             else:
                 self.fields[f"q_{indice}"] = forms.CharField(
-                    label=pregunta["text"], required=False, max_length=2000,
+                    label=pregunta["text"], max_length=2000,
                     widget=forms.Textarea(attrs={"rows": 4}),
                 )
 
@@ -210,7 +220,14 @@ def acceso_publico_clima(request, token):
             )
             locked.respondio = True
             locked.save(update_fields=["respondio"])
-        return HttpResponse("Tu respuesta quedó registrada. Gracias.", headers=headers)
+            from .services_clima_avisos import _habilitado
+            from .models import AvisoClima
+            if locked.envio_whatsapp_autorizado and _habilitado():
+                aviso, _ = AvisoClima.objects.get_or_create(
+                    participante=locked, tipo=AvisoClima.CONFIRMACION,
+                )
+                transaction.on_commit(lambda: _encolar_confirmacion(aviso.pk))
+        return HttpResponse("¡Gracias por tus respuestas! Tu encuesta completa quedó registrada correctamente.", headers=headers)
     response = render(request, "rrhh/clima_responder.html", {"campana": participante.campana, "form": form})
     for name, value in headers.items():
         response[name] = value

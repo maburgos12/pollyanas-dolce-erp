@@ -14,6 +14,13 @@ def procesar_avisos_clima_diario():
     return procesar_avisos_clima()
 
 
+@shared_task(name="rrhh.enviar_confirmacion_clima")
+def enviar_confirmacion_clima(aviso_id):
+    from .services_clima_avisos import enviar_confirmacion_clima as enviar
+
+    return enviar(aviso_id)
+
+
 @shared_task(bind=True, max_retries=3)
 def avisar_cumpleanos(self, fecha_envio=None):
     """Avisos de hoy; reintentos confirmados sólo durante el mismo día local."""

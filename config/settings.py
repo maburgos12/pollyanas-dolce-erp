@@ -352,6 +352,7 @@ CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEO
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_TASK_ROUTES = {
     "rrhh.procesar_avisos_clima": {"queue": "notificaciones"},
+    "rrhh.enviar_confirmacion_clima": {"queue": "notificaciones"},
     "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
     "rrhh.tasks.avisar_cumpleanos": {"queue": "notificaciones"},
     "pos_bridge.catalog_recipe_sync": {"queue": "recipes"},
