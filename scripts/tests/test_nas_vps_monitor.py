@@ -59,6 +59,8 @@ class ExternalMonitorTests(unittest.TestCase):
             opener.return_value.open.side_effect = OSError
             self.assertEqual(monitor.probe(), dict(public_tcp=False, erp_https=False))
             self.assertEqual(opener.return_value.open.call_args.kwargs['timeout'], 12)
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual(request.get_header('User-agent'), 'Pollyana-NAS-Monitor/1.0')
 
     def test_recipient_must_match(self):
         with patch.object(monitor.urllib.request, 'build_opener') as opener, patch.object(monitor.json, 'load', return_value={'ok': True, 'result': {'chat': {'id': 999}, 'message_id': 10}}):

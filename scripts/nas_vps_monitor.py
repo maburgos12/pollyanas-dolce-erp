@@ -23,7 +23,9 @@ def probe():
     try:
         # Ignore proxy environment variables: this observer must use NAS Internet.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open('https://erp.pollyanasdolce.com/', timeout=12) as response:
+        request = urllib.request.Request('https://erp.pollyanasdolce.com/',
+                                         headers={'User-Agent': 'Pollyana-NAS-Monitor/1.0'})
+        with opener.open(request, timeout=12) as response:
             checks['erp_https'] = response.status == 200
     except (OSError, ValueError):
         checks['erp_https'] = False
