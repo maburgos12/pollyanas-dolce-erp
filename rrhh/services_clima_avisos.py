@@ -12,7 +12,7 @@ from core import whatsapp
 from core.contactos import normalizar_telefono
 from core.notificaciones import PUBLIC_BASE_URL
 
-from .models import AvisoClima, ParticipanteClima
+from .models import AvisoClima, Empleado, ParticipanteClima
 
 
 PLANTILLAS = {
@@ -35,6 +35,7 @@ def procesar_avisos_clima():
         envio_whatsapp_autorizado=True,
         respondio=False,
         empleado__activo=True,
+        empleado__tipo_personal=Empleado.TIPO_POLLYANA,
         campana__recepcion_habilitada=True,
         campana__fecha_cierre__gte=timezone.localdate(),
     ).values_list("pk", flat=True)
@@ -71,6 +72,8 @@ def enviar_confirmacion_clima(aviso_id):
                  .filter(pk=aviso_id, tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE").first())
         if not aviso or not aviso.participante.respondio or not aviso.participante.envio_whatsapp_autorizado:
             return False
+        if not aviso.participante.empleado.activo or aviso.participante.empleado.tipo_personal != Empleado.TIPO_POLLYANA:
+            return False
         telefono = _telefono_unico(aviso.participante)
         if not telefono:
             return False
@@ -106,7 +109,8 @@ def _preparar_aviso(pk):
     if not participante or not _habilitado() or not participante.envio_whatsapp_autorizado:
         return False
     campana, empleado = participante.campana, participante.empleado
-    if (participante.respondio or not empleado.activo or not campana.recepcion_habilitada
+    if (participante.respondio or not empleado.activo or empleado.tipo_personal != Empleado.TIPO_POLLYANA
+            or not campana.recepcion_habilitada
             or campana.fecha_cierre < timezone.localdate()):
         return False
     telefono = _telefono_unico(participante)

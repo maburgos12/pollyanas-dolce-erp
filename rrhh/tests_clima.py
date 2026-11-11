@@ -310,6 +310,20 @@ class AvisosClimaTests(TestCase):
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
         enviar.assert_not_called()
 
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_baja_o_cambio_a_personal_externo_impide_envio(self, enviar):
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.persona.empleado.tipo_personal = Empleado.TIPO_EXTERNO
+            self.persona.empleado.save(update_fields=["tipo_personal"])
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+            self.persona.empleado.tipo_personal = Empleado.TIPO_POLLYANA
+            self.persona.empleado.activo = False
+            self.persona.empleado.save(update_fields=["tipo_personal", "activo"])
+            self.assertEqual(procesar_avisos_clima()["procesados"], 0)
+        enviar.assert_not_called()
+
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla", side_effect=TimeoutError)
     def test_excepcion_conserva_estado_incierto_y_no_renvia(self, enviar):
         self.campana.recepcion_habilitada = True
