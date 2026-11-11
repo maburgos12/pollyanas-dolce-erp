@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import re
+from time import monotonic
+from urllib.parse import parse_qs, urlsplit
 
 from pos_bridge.browser.client import PlaywrightBrowserClient
 from pos_bridge.browser.inventory_page import PointInventoryPage
@@ -97,33 +100,75 @@ class PointInventoryExtractor:
 
         reads_per_selection = 4
         for index, option in enumerate(category_options):
-            inventory_page.select_category(option["value"], kind="products")
-            expected_category = normalize_text(option["label"])
-            accepted_categories = {expected_category, PRODUCT_CATEGORY_ROW_ALIASES.get(expected_category, expected_category)}
-            for attempt in range(2 * reads_per_selection):
-                if attempt == reads_per_selection:
-                    # Move away once so Point sees a fresh transition to the target.
-                    if len(category_options) > 1:
-                        inventory_page.select_category(category_options[index - 1]["value"], kind="products")
-                    inventory_page.select_category(option["value"], kind="products")
-                parsed = self.parser.parse_inventory_table(
-                    inventory_page.extract_inventory_table(kind="products"), "", ""
-                )
-                observed_categories = {
-                    normalize_text(item["category"]) for item in parsed["items"] if item.get("category")
-                }
-                # After seeing stale rows, an intermediate empty table cannot confirm the refresh.
-                if observed_categories and observed_categories <= accepted_categories:
-                    break
-                if not observed_categories and attempt == 0:
-                    break
-                if (attempt + 1) % reads_per_selection:
-                    inventory_page.page.wait_for_timeout(750)
-            else:
-                raise ExtractionError(
-                    f"Point no confirmó la tabla de la categoría {option['label']}.",
-                    context={"category": option["label"], "observed_categories": sorted(observed_categories)},
-                )
+            browser_page = inventory_page.page
+            started = monotonic()
+            trace = {"requested_id": option["value"], "responses": [], "reads": []}
+
+            def elapsed_ms():
+                return round((monotonic() - started) * 1000)
+
+            def observe_response(response):
+                if response.request.resource_type not in ("xhr", "fetch"):
+                    return
+                url = urlsplit(response.url)
+                if url.netloc != urlsplit(browser_page.url).netloc:
+                    return
+                if not re.fullmatch(r"/(?:Stock|Catalogos)/[A-Za-z_]{1,64}", url.path, re.I):
+                    return
+                if len(trace["responses"]) >= 16:
+                    return
+                category = parse_qs(url.query).get("categoria", [""])[0]
+                trace["responses"].append({
+                    "elapsed_ms": elapsed_ms(),
+                    "route": url.path,
+                    "status": response.status,
+                    "category_id": category if re.fullmatch(r"[0-9]{1,12}", category) else None,
+                })
+
+            browser_page.on("response", observe_response)
+            try:
+                inventory_page.select_category(option["value"], kind="products")
+                expected_category = normalize_text(option["label"])
+                accepted_categories = {expected_category, PRODUCT_CATEGORY_ROW_ALIASES.get(expected_category, expected_category)}
+                for attempt in range(2 * reads_per_selection):
+                    if attempt == reads_per_selection:
+                        # Move away once so Point sees a fresh transition to the target.
+                        if len(category_options) > 1:
+                            inventory_page.select_category(category_options[index - 1]["value"], kind="products")
+                        inventory_page.select_category(option["value"], kind="products")
+                    parsed = self.parser.parse_inventory_table(
+                        inventory_page.extract_inventory_table(kind="products"), "", ""
+                    )
+                    observed_categories = {
+                        normalize_text(item["category"]) for item in parsed["items"] if item.get("category")
+                    }
+                    trace["reads"].append({
+                        "elapsed_ms": elapsed_ms(),
+                        "selection": attempt // reads_per_selection + 1,
+                        "observed_categories": sorted(observed_categories),
+                        "rows": len(parsed["items"]),
+                    })
+                    # After seeing stale rows, an intermediate empty table cannot confirm the refresh.
+                    if observed_categories and observed_categories <= accepted_categories:
+                        break
+                    if not observed_categories and attempt == 0 and parsed["items"]:
+                        break
+                    # shortcut: confirm empty twice until Point exposes a category-specific empty result.
+                    if attempt == 1 and not trace["reads"][0]["rows"] and not parsed["items"]:
+                        break
+                    if (attempt + 1) % reads_per_selection:
+                        inventory_page.page.wait_for_timeout(750)
+                else:
+                    raise ExtractionError(
+                        f"Point no confirmó la tabla de la categoría {option['label']}.",
+                        context={
+                            "category": option["label"],
+                            "observed_categories": sorted(observed_categories),
+                            "category_trace": trace,
+                        },
+                    )
+            finally:
+                browser_page.remove_listener("response", observe_response)
             category_rows = 0
             for item in parsed["items"]:
                 item["category"] = item.get("category") or option["label"]
@@ -134,7 +179,10 @@ class PointInventoryExtractor:
                 seen_keys.add(dedupe_key)
                 all_rows.append(normalized)
                 category_rows += 1
-            audit_rows.append({"category": option["label"], "rows": category_rows})
+            audit = {"category": option["label"], "rows": category_rows}
+            if not trace["reads"][0]["rows"]:
+                audit["category_trace"] = trace
+            audit_rows.append(audit)
         return all_rows, audit_rows
 
     def _extract_branch(self, inventory_page: PointInventoryPage, branch_option: dict) -> ExtractedBranchInventory:
@@ -148,7 +196,11 @@ class PointInventoryExtractor:
                 "metadata": {},
             }
         )
-        normalized_rows, category_audit = self._extract_product_rows_by_category(inventory_page)
+        try:
+            normalized_rows, category_audit = self._extract_product_rows_by_category(inventory_page)
+        except ExtractionError as error:
+            error.context.setdefault("branch_external_id", selected_branch["value"])
+            raise
         if not normalized_rows:
             raise ExtractionError(
                 f"Point devolvió cero productos para la sucursal {selected_branch['label']}; "
