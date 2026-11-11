@@ -1,4 +1,5 @@
 from datetime import timedelta
+import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -9,8 +10,8 @@ from django.utils import timezone
 
 from .models import AvisoClima, CampanaClima, Empleado, ParticipanteClima, RespuestaClima
 from .views_clima import QUESTIONNAIRE
-from .services_clima_avisos import procesar_avisos_clima
-from core.whatsapp import ResultadoWhatsApp
+from .services_clima_avisos import enviar_confirmacion_clima, procesar_avisos_clima
+from core.whatsapp import ResultadoWhatsApp, enviar_plantilla
 
 
 class PreparacionClimaTests(TestCase):
@@ -93,17 +94,49 @@ class PreparacionClimaTests(TestCase):
         campana.save(update_fields=["recepcion_habilitada"])
         self.assertContains(self.client.get(url), "Encuesta de clima laboral")
         preguntas = [q for s in QUESTIONNAIRE["sections"] for q in s["questions"]]
-        datos = {f"q_{i}": q["options"][0] for i, q in enumerate(preguntas) if q["type"] == "choice"}
+        datos = {f"q_{i}": q["options"][0] if q["type"] == "choice" else "No tengo comentarios"
+                 for i, q in enumerate(preguntas)}
         invalidos = dict(datos, q_0="opción inventada")
         self.assertEqual(self.client.post(url, invalidos).status_code, 200)
         self.assertEqual(RespuestaClima.objects.count(), 0)
-        self.assertContains(self.client.post(url, datos), "respuesta quedó registrada")
+        incompletos = dict(datos, q_23="   ")
+        self.assertContains(self.client.post(url, incompletos), "Faltan respuestas")
+        self.assertEqual(RespuestaClima.objects.count(), 0)
+        self.assertContains(self.client.post(url, datos), "encuesta completa quedó registrada")
         self.assertEqual(RespuestaClima.objects.count(), 1)
+        self.assertEqual(len(RespuestaClima.objects.get().respuestas), len(preguntas))
         self.assertTrue(ParticipanteClima.objects.get(pk=participante.pk).respondio)
         self.assertNotIn("empleado", [f.name for f in RespuestaClima._meta.fields])
         self.assertNotIn("participante", [f.name for f in RespuestaClima._meta.fields])
         self.assertContains(self.client.post(url, datos), "ya fue registrada")
         self.assertEqual(RespuestaClima.objects.count(), 1)
+
+    @patch("rrhh.tasks.enviar_confirmacion_clima.delay")
+    def test_confirmacion_solo_despues_de_guardar_respuesta_completa(self, encolar):
+        campana = CampanaClima.objects.create(
+            titulo="Prueba", fecha_cierre=timezone.localdate() + timedelta(days=14),
+            cuestionario=QUESTIONNAIRE, creada_por=self.admin, recepcion_habilitada=True,
+        )
+        self.active.telefono = "6671234567"
+        self.active.save(update_fields=["telefono"])
+        persona = ParticipanteClima.objects.create(
+            campana=campana, empleado=self.active, nombre=self.active.nombre,
+            envio_whatsapp_autorizado=True,
+        )
+        url = reverse("rrhh:clima_acceso_publico", args=[signing.Signer(salt="rrhh.clima").sign(str(persona.pk))])
+        preguntas = [q for s in QUESTIONNAIRE["sections"] for q in s["questions"]]
+        datos = {f"q_{i}": q["options"][0] if q["type"] == "choice" else "Sin comentarios"
+                 for i, q in enumerate(preguntas)}
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.client.post(url, {k: v for k, v in datos.items() if k != "q_25"})
+            self.assertFalse(AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION).exists())
+            encolar.assert_not_called()
+            with self.captureOnCommitCallbacks(execute=True):
+                self.client.post(url, datos)
+            self.assertEqual(AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION).count(), 1)
+            encolar.assert_called_once()
+            self.client.post(url, datos)
+            self.assertEqual(AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION).count(), 1)
 
     def test_resultados_ocultos_con_menos_de_cinco_respuestas(self):
         campana = CampanaClima.objects.create(
@@ -181,6 +214,49 @@ class AvisosClimaTests(TestCase):
             campana=self.campana, empleado=empleado, nombre=empleado.nombre,
             envio_whatsapp_autorizado=True,
         )
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_confirmacion_una_vez_y_sin_respuestas_ni_liga(self, enviar):
+        enviar.return_value = ResultadoWhatsApp("ENVIADO", referencia="wamid.confirmacion")
+        aviso = AvisoClima.objects.create(participante=self.persona, tipo=AvisoClima.CONFIRMACION)
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertFalse(enviar_confirmacion_clima(aviso.pk))
+            self.persona.respondio = True
+            self.persona.save(update_fields=["respondio"])
+            self.assertTrue(enviar_confirmacion_clima(aviso.pk))
+            self.assertFalse(enviar_confirmacion_clima(aviso.pk))
+        enviar.assert_called_once_with(
+            telefono="526671234567", plantilla="clima_laboral_confirmacion_v1", parametros=[],
+        )
+        self.assertEqual(AvisoClima.objects.get(pk=aviso.pk).estado, "ENVIADO")
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_confirmacion_respetando_flag_y_numero_compartido(self, enviar):
+        self.persona.respondio = True
+        self.persona.save(update_fields=["respondio"])
+        aviso = AvisoClima.objects.create(participante=self.persona, tipo=AvisoClima.CONFIRMACION)
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": ""}):
+            self.assertFalse(enviar_confirmacion_clima(aviso.pk))
+        empleado = Empleado.objects.create(nombre="Otro", telefono="6671234567")
+        ParticipanteClima.objects.create(campana=self.campana, empleado=empleado, nombre=empleado.nombre)
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertFalse(enviar_confirmacion_clima(aviso.pk))
+        enviar.assert_not_called()
+
+    @patch("core.whatsapp.urllib.request.urlopen")
+    def test_plantilla_sin_variables_omite_componentes_vacios(self, abrir):
+        respuesta = abrir.return_value.__enter__.return_value
+        respuesta.getcode.return_value = 200
+        respuesta.read.return_value = b'{"messages":[{"id":"wamid.test"}]}'
+        with patch.dict("os.environ", {
+            "WHATSAPP_ENABLED": "1", "META_WHATSAPP_TOKEN": "test",
+            "META_WHATSAPP_PHONE_NUMBER_ID": "123",
+        }):
+            self.assertEqual(enviar_plantilla(
+                telefono="526671234567", plantilla="clima_laboral_confirmacion_v1", parametros=[],
+            ).estado, "ENVIADO")
+        payload = json.loads(abrir.call_args.args[0].data)
+        self.assertNotIn("components", payload["template"])
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
     def test_cerrada_o_flag_apagado_nunca_envia(self, enviar):

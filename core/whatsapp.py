@@ -113,14 +113,13 @@ def enviar_plantilla(*, telefono: str, plantilla: str, parametros: list[str], ti
         "template": {
             "name": nombre_plantilla,
             "language": {"code": _idioma()},
-            "components": [
-                {
-                    "type": "body",
-                    "parameters": [{"type": "text", "text": str(valor)} for valor in parametros],
-                }
-            ],
         },
     }
+    if parametros:
+        payload["template"]["components"] = [{
+            "type": "body",
+            "parameters": [{"type": "text", "text": str(valor)} for valor in parametros],
+        }]
     url = f"https://graph.facebook.com/{GRAPH_VERSION}/{_env('META_WHATSAPP_PHONE_NUMBER_ID')}/messages"
     request = urllib.request.Request(
         url,

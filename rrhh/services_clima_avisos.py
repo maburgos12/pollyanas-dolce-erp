@@ -18,6 +18,7 @@ from .models import AvisoClima, ParticipanteClima
 PLANTILLAS = {
     AvisoClima.INVITACION: "clima_laboral_invitacion_v1",
     AvisoClima.RECORDATORIO: "clima_laboral_recordatorio_v1",
+    AvisoClima.CONFIRMACION: "clima_laboral_confirmacion_v1",
 }
 
 
@@ -55,7 +56,47 @@ def procesar_avisos_clima():
                 estado=resultado.estado, referencia_externa=resultado.referencia,
             )
             procesados += 1
+    for aviso_id in AvisoClima.objects.filter(tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE").values_list("pk", flat=True).iterator():
+        procesados += int(enviar_confirmacion_clima(aviso_id))
     return {"estado": "ejecutado", "procesados": procesados}
+
+
+def enviar_confirmacion_clima(aviso_id):
+    """Confirma una respuesta ya guardada, sin incluir respuestas ni liga individual."""
+    if not _habilitado():
+        return False
+    with transaction.atomic():
+        aviso = (AvisoClima.objects.select_for_update(skip_locked=True)
+                 .select_related("participante__campana", "participante__empleado")
+                 .filter(pk=aviso_id, tipo=AvisoClima.CONFIRMACION, estado="PENDIENTE").first())
+        if not aviso or not aviso.participante.respondio or not aviso.participante.envio_whatsapp_autorizado:
+            return False
+        telefono = _telefono_unico(aviso.participante)
+        if not telefono:
+            return False
+        aviso.estado = "INCIERTO"
+        aviso.intentado_en = timezone.now()
+        aviso.save(update_fields=["estado", "intentado_en"])
+    try:
+        resultado = whatsapp.enviar_plantilla(
+            telefono=telefono, plantilla=PLANTILLAS[AvisoClima.CONFIRMACION], parametros=[],
+        )
+    except Exception:
+        return True  # INCIERTO evita duplicar ante un timeout.
+    AvisoClima.objects.filter(pk=aviso_id, estado="INCIERTO").update(
+        estado=resultado.estado, referencia_externa=resultado.referencia,
+    )
+    return True
+
+
+def _telefono_unico(participante):
+    telefono = normalizar_telefono(participante.empleado.telefono)
+    if not telefono:
+        return None
+    for otro in participante.campana.participantes.select_related("empleado").exclude(pk=participante.pk):
+        if normalizar_telefono(otro.empleado.telefono) == telefono:
+            return None
+    return telefono
 
 
 @transaction.atomic
@@ -68,13 +109,9 @@ def _preparar_aviso(pk):
     if (participante.respondio or not empleado.activo or not campana.recepcion_habilitada
             or campana.fecha_cierre < timezone.localdate()):
         return False
-    telefono = normalizar_telefono(empleado.telefono)
+    telefono = _telefono_unico(participante)
     if not telefono:
         return False
-    # No dirigir una liga individual a un celular compartido en el padrón de la campaña.
-    for otro in campana.participantes.select_related("empleado").exclude(pk=pk):
-        if normalizar_telefono(otro.empleado.telefono) == telefono:
-            return False
     invitacion = AvisoClima.objects.filter(participante=participante, tipo=AvisoClima.INVITACION).first()
     if invitacion is None:
         tipo = AvisoClima.INVITACION
