@@ -66,11 +66,11 @@ def _select(document, selector: str):
 
 def _merge_style(existing_style: str | None, declarations: list[tuple[str, str]]) -> str:
     merged: dict[str, str] = {}
+    for property_name, value in declarations:
+        merged[property_name] = value
     if existing_style:
         for property_name, value in _parse_declarations(existing_style):
             merged[property_name] = value
-    for property_name, value in declarations:
-        merged[property_name] = value
     return "; ".join(f"{property_name}: {value}" for property_name, value in merged.items()) + ";"
 
 
