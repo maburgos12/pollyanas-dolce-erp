@@ -271,6 +271,47 @@ class ReleaseTests(unittest.TestCase):
         r.worker(self.api, self.ledger, self.config, good, discover, publisher)
         good.assert_called_once()
 
+    def test_notification_describes_each_outcome_without_false_success(self):
+        cases = [
+            ('published', 'approved', M, 'Publicado correctamente', 'Despliegue completado.'),
+            ('blocked', 'rejected', None, 'Rechazado', 'No se realizó ningún despliegue.'),
+            ('blocked', 'approved', None, 'Solicitud vencida', 'No se realizó ningún despliegue.'),
+            ('blocked', None, None, 'Solicitud vencida', 'No se realizó ningún despliegue.'),
+            ('uncertain', 'approved', None, 'Problema: publicación sin confirmar', 'Requiere revisión'),
+            ('uncertain', 'approved', M, 'Problema: publicación sin confirmar', 'Requiere revisión'),
+            ('uncertain', 'rejected', None, 'Problema: publicación sin confirmar', 'Requiere revisión'),
+            ('executing', 'approved', M, 'Problema: publicación sin confirmar', 'Requiere revisión'),
+        ]
+        for state, decision, release, title, detail in cases:
+            with self.subTest(state=state, decision=decision, release=release):
+                row = dict(self.row, state=state, decision=decision, release_sha=release,
+                           decision_at=int(time.time()) if decision else None)
+                self.ledger.write(row)
+                send = Mock(return_value={'message_id': 99, 'chat': {'id': 17, 'type': 'private'}})
+                r.notify_result(row['nonce'], self.ledger, self.config, send)
+                text = send.call_args.args[2]['text']
+                self.assertIn('ERP PR #1 · ' + title, text)
+                self.assertIn(H, text)
+                self.assertIn(detail, text)
+                self.assertNotIn('Un resultado incierto', text)
+                if state == 'published':
+                    self.assertIn('Commit publicado: ' + M, text)
+                    self.assertNotIn('Requiere revisión', text)
+                    self.assertNotIn('no confirm', text)
+                else:
+                    self.assertNotIn('Publicado correctamente', text)
+                    self.assertNotIn('Commit publicado:', text)
+                if state in {'uncertain', 'executing'}:
+                    self.assertIn('no se repetirá el despliegue automáticamente', text)
+                    self.assertNotIn('No se realizó ningún despliegue', text)
+                    if release:
+                        self.assertIn('Commit de integración: ' + M, text)
+                        self.assertIn('(no confirma el despliegue)', text)
+                expected = dict(row, notification_id=99)
+                self.assertEqual(self.ledger.read(row['nonce']), expected)
+                r.notify_result(row['nonce'], self.ledger, self.config, send)
+                send.assert_called_once()
+
     def test_notification_requires_correct_chat_and_worker_lock_is_nonblocking(self):
         self.approve()
         self.publish()

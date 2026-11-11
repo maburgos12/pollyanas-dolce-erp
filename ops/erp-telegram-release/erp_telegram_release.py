@@ -354,10 +354,20 @@ def notify_result(nonce, ledger, config, send):
         if row['state'] not in {'published', 'blocked', 'uncertain', 'executing'} or row['notification_id'] is not None:
             return
         # Only delivery is retried. A lost Telegram response can duplicate this informational message.
+        if row['state'] == 'published':
+            title = 'Publicado correctamente'
+            detail = f"Despliegue completado. Commit publicado: {row['release_sha']}"
+        elif row['state'] == 'blocked':
+            title = 'Rechazado' if row['decision'] == 'rejected' else 'Solicitud vencida'
+            detail = 'No se realizó ningún despliegue. Para continuar se necesita una nueva solicitud y aprobación.'
+        else:
+            title = 'Problema: publicación sin confirmar'
+            detail = ('No se pudo confirmar el resultado. Requiere revisión antes de continuar; '
+                      'no se repetirá el despliegue automáticamente.')
+            if row['release_sha']:
+                detail += f"\nCommit de integración: {row['release_sha']} (no confirma el despliegue)."
         result = send(config, 'sendMessage', {'chat_id': row['chat_id'], 'text':
-            f"ERP PR #{row['pr']} · {row['state']}\nCommit solicitado: {row['head_sha']}\n"
-            f"Publicación: {row['release_sha'] or 'no confirmada'}\n"
-            'Un resultado incierto requiere revisión; la publicación no se repetirá automáticamente.'})
+            f"ERP PR #{row['pr']} · {title}\nCommit solicitado: {row['head_sha']}\n{detail}"})
         verify_message(result, row['chat_id'])
         row['notification_id'] = result['message_id']
         ledger.write(row)
