@@ -59,3 +59,98 @@ do
 done
 
 echo "deploy-web-safe-tests-ok"
+
+# Real isolated Git history: main advances after the approved release.
+# Pinned deployment must stop at that release, not deploy the later commit.
+git init --bare --quiet "$tmp_dir/origin.git"
+git init --quiet -b main "$tmp_dir/author"
+git -C "$tmp_dir/author" config user.email test@example.invalid
+git -C "$tmp_dir/author" config user.name Test
+printf 'base\n' > "$tmp_dir/author/version"
+cp "$ROOT_DIR/.gitignore" "$tmp_dir/author/.gitignore"
+git -C "$tmp_dir/author" add version .gitignore
+git -C "$tmp_dir/author" commit --quiet -m base
+base=$(git -C "$tmp_dir/author" rev-parse HEAD)
+git -C "$tmp_dir/author" remote add origin "$tmp_dir/origin.git"
+git -C "$tmp_dir/author" push --quiet origin main
+git clone --quiet -b main "$tmp_dir/origin.git" "$tmp_dir/production"
+printf 'approved\n' > "$tmp_dir/author/version"
+git -C "$tmp_dir/author" commit --quiet -am approved
+approved=$(git -C "$tmp_dir/author" rev-parse HEAD)
+printf 'unapproved\n' > "$tmp_dir/author/version"
+git -C "$tmp_dir/author" commit --quiet -am unapproved
+git -C "$tmp_dir/author" push --quiet origin main
+(
+  cd "$tmp_dir/production"
+  mkdir -p storage/conteos_evidencias storage/private/conciliaciones
+  printf 'evidence\n' > storage/conteos_evidencias/example.txt
+  printf 'private\n' > storage/private/conciliaciones/example.txt
+  test -z "$(git status --porcelain)"
+  touch storage/private/unknown-file
+  if update_checkout "$approved" "$base"; then exit 1; fi
+  rm storage/private/unknown-file
+  printf 'modified\n' > version
+  if update_checkout "$approved" "$base"; then exit 1; fi
+  git restore version
+  if update_checkout invalid "$base"; then exit 1; fi
+  if update_checkout "$approved" ''; then exit 1; fi
+  touch foreign-file
+  if update_checkout "$approved" "$base"; then exit 1; fi
+  rm foreign-file
+  if update_checkout "$approved" "$approved"; then exit 1; fi
+  test "$(git rev-parse HEAD)" = "$base"
+  update_checkout "$approved" "$base"
+  test "$(git rev-parse HEAD)" = "$approved"
+  test "$(cat version)" = approved
+  test "$(cat storage/conteos_evidencias/example.txt)" = evidence
+  test "$(cat storage/private/conciliaciones/example.txt)" = private
+  # A repeated attempt using the old production base is rejected.
+  if update_checkout "$approved" "$base"; then exit 1; fi
+)
+echo "deploy-exact-revision-tests-ok"
+
+# Run main with Docker captured: rejection must happen before any application call.
+# macOS has no util-linux flock; mock its decision here, Ubuntu also tests a real lock.
+: > "$docker_calls"
+(
+  export APP_DIR="$tmp_dir/production" ERP_DEPLOY_LOCK="$tmp_dir/deploy.lock"
+  flock() { return 1; }
+  if main --expected-sha "$approved" --expected-base "$approved"; then exit 1; fi
+  flock() { return 0; }
+  if main --expected-sha invalid --expected-base "$approved"; then exit 1; fi
+  if main --expected-sha "$approved" --expected-base "$base"; then exit 1; fi
+  touch "$tmp_dir/production/foreign-file"
+  if main; then exit 1; fi
+  rm "$tmp_dir/production/foreign-file"
+  test ! -s "$docker_calls"
+)
+if command -v flock >/dev/null 2>&1; then
+  (
+    exec 8>"$tmp_dir/real.lock"
+    flock -n 8
+    if (export APP_DIR="$tmp_dir/production" ERP_DEPLOY_LOCK="$tmp_dir/real.lock";
+        main --expected-sha "$approved" --expected-base "$approved"); then exit 1; fi
+    test ! -s "$docker_calls"
+  )
+fi
+echo "deploy-preflight-before-docker-tests-ok"
+
+(
+  docker() {
+    if [[ "$1" == compose ]]; then
+      echo "container-${*: -1}"
+    elif [[ "$1" == inspect ]]; then
+      for _ in {1..8}; do echo "${process_running:-true} 2026-01-01T00:00:00Z"; done
+    else return 1
+    fi
+  }
+  verify_processes /tmp/compose.yml 1767225600
+  if verify_processes /tmp/compose.yml 1767225601 2>/dev/null; then
+    echo 'stale process accepted' >&2; exit 1
+  fi
+  process_running=false
+  if verify_processes /tmp/compose.yml 0 2>/dev/null; then
+    echo 'stopped process accepted' >&2; exit 1
+  fi
+)
+echo "deploy-process-verification-tests-ok"

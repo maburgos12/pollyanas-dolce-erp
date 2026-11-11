@@ -104,6 +104,7 @@ jobs:
           python -m unittest discover -s scripts/tests -p test_vps_backup_alerts.py
           python -m unittest discover -s scripts/tests -p test_nas_vps_monitor.py
           python -m unittest discover -s scripts/tests -p test_carga_point_alerts.py
+          python -m unittest discover -s scripts/tests -p test_telegram_release.py
           bash scripts/test_deploy_web_safe.sh
           python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
           python -m unittest discover -s scripts/tests -p test_task_factory.py

@@ -1,0 +1,10 @@
+[Unit]
+Description=Check authorized ERP releases and eligible candidates
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=erp-telegram-release.service
+
+[Install]
+WantedBy=timers.target

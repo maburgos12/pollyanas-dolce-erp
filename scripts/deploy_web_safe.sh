@@ -28,22 +28,78 @@ build_application_images() {
   done
 }
 
+# Called under the common deployment lock. Fetching main proves membership;
+# pulling the immutable SHA prevents a later main update from changing release.
+update_checkout() {
+  local expected_sha="${1:-}" expected_base="${2:-}"
+  [[ "$(git branch --show-current)" == main && -z "$(git status --porcelain)" ]] || {
+    echo "deployment checkout must be clean main" >&2; return 1;
+  }
+  if [[ -n "$expected_sha" || -n "$expected_base" ]]; then
+    [[ "$expected_sha" =~ ^[0-9a-f]{40}$ && "$expected_base" =~ ^[0-9a-f]{40}$ ]] || {
+      echo "invalid expected revision" >&2; return 1;
+    }
+    [[ "$(git rev-parse HEAD)" == "$expected_base" ]] || {
+      echo "production revision changed" >&2; return 1;
+    }
+    git fetch origin main || return 1
+    git merge-base --is-ancestor "$expected_base" "$expected_sha" || return 1
+    git merge-base --is-ancestor "$expected_sha" FETCH_HEAD || return 1
+    git pull --ff-only origin "$expected_sha" || return 1
+    [[ "$(git rev-parse HEAD)" == "$expected_sha" ]] || return 1
+  else
+    git pull --ff-only origin main
+  fi
+}
+
+verify_processes() {
+  local compose_file="$1" minimum_started="$2" service identifier
+  local -a identifiers=()
+  for service in web worker worker_notificaciones worker_sat worker_recetas worker_logistica_point recetas_watchdog beat; do
+    identifier="$(docker compose -f "$compose_file" ps -q "$service")" || return 1
+    [[ -n "$identifier" && "$identifier" != *$'\n'* ]] || return 1
+    identifiers+=("$identifier")
+  done
+  docker inspect --format '{{.State.Running}} {{.State.StartedAt}}' "${identifiers[@]}" |
+    python3 -c 'import datetime,sys
+rows=sys.stdin.read().splitlines()
+minimum=int(sys.argv[1])
+assert len(rows)==8, "missing application processes"
+for row in rows:
+ running,started=row.split()
+ assert running=="true", "application process stopped"
+ stamp=datetime.datetime.fromisoformat(started.replace("Z", "+00:00")).timestamp()
+ assert stamp>=minimum, "application process did not restart"
+' "$minimum_started"
+}
+
 main() {
   local app_dir="${APP_DIR:-/opt/pastelerias-erp}"
   local compose_file="${COMPOSE_FILE:-$app_dir/docker-compose.yml}"
-  local old_head new_head changed_files
+  local old_head new_head changed_files expected_sha="" expected_base=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --expected-sha) [[ $# -ge 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || return 2; expected_sha="$2"; shift 2 ;;
+      --expected-base) [[ $# -ge 2 && "$2" =~ ^[0-9a-f]{40}$ ]] || return 2; expected_base="$2"; shift 2 ;;
+      *) echo "unknown deployment argument" >&2; return 2 ;;
+    esac
+  done
+  # All invocations, including manual deployments, share this lock.
+  exec 9>"${ERP_DEPLOY_LOCK:-/run/lock/erp-deploy.lock}"
+  flock -n 9 || { echo "another deployment is running" >&2; return 1; }
   local -a compose=(docker compose -f "$compose_file")
 
-  cd "$app_dir"
+  cd "$app_dir" || return 1
   old_head="$(git rev-parse HEAD)"
-  git pull origin main
+  update_checkout "$expected_sha" "$expected_base" || return 1
   new_head="$(git rev-parse HEAD)"
   changed_files="$(git diff --name-only "$old_head" "$new_head")"
 
   # Una dependencia nueva se instala reconstruyendo la imagen, y eso tiene que
   # pasar ANTES de migrar y de `check`: el contenedor viejo no puede importar el
   # código nuevo, así que `check` abortaría el deploy a medias.
-  local imagen_reconstruida=0
+  local imagen_reconstruida=0 deployment_started
+  deployment_started="$(date +%s)"
   if requires_image_rebuild "$changed_files"; then
     imagen_reconstruida=1
     build_application_images "$compose_file"
@@ -73,9 +129,15 @@ main() {
     "${compose[@]}" exec -T web sh -lc 'kill -HUP 1'
   fi
 
+  local minimum_started=0
+  if [[ "$imagen_reconstruida" == 1 ]] || requires_process_restart "$changed_files" || requires_compose_recreate "$changed_files"; then
+    minimum_started="$deployment_started"
+  fi
+  verify_processes "$compose_file" "$minimum_started" || return 1
+
   for _ in {1..20}; do
     if curl -fsS http://127.0.0.1:8011/login/ >/dev/null; then
-      echo "web-ready"
+      echo "web-ready revision=$new_head"
       return 0
     fi
     sleep 1
