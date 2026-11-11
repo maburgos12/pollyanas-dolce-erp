@@ -154,3 +154,30 @@ echo "deploy-preflight-before-docker-tests-ok"
   fi
 )
 echo "deploy-process-verification-tests-ok"
+
+# Simulated time proves slow startup succeeds and failed probes stay bounded.
+(
+  clock=0 ready_at=29
+  date() { echo "$clock"; }
+  sleep() { clock=$((clock + $1)); }
+  curl() {
+    test "$1 $2 $3" = '--connect-timeout 2 --max-time' || exit 1
+    { test "$4" -gt 0 && test "$4" -le 5; } || exit 1
+    test "$4" -le "$((120 - clock))" || exit 1
+    (( clock >= ready_at ))
+  }
+  wait_for_web
+  test "$clock" = 29
+  clock=0 ready_at=999
+  if wait_for_web; then exit 1; fi
+  test "$clock" = 120
+  clock=0
+  curl() {
+    test "$4" -le "$((120 - clock))" || exit 1
+    clock=$((clock + $4))
+    return 1
+  }
+  if wait_for_web; then exit 1; fi
+  test "$clock" = 120
+)
+echo "deploy-readiness-deadline-tests-ok"
