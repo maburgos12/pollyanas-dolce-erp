@@ -122,3 +122,48 @@ head/base diferentes, CI ausente/fallido/no confiable, paginación, pérdida de
 respuesta, caída tras claim, árbol/padres incorrectos, permisos/esquema/symlinks,
 discovery/deduplicación y conservación de rutas p/t/g. Estas pruebas usan mocks
 para servicios externos: no sustituyen un ciclo real de Telegram/GitHub/VPS.
+
+## Autorización separada de limpieza
+
+El módulo `erp_telegram_cleanup.py` registra decisiones; **no ejecuta limpiezas**,
+no publica PR y no tiene worker. Su habilitación exige integrar, desplegar e
+instalar esta revisión por el mismo procedimiento aprobado. El instalador admite
+el hook anterior verificado y añade `c:` al consumidor único; conserva `d:` y p/t/g.
+
+La solicitud root recibe un JSON local revisado de propuesta `VPS-LIM-AAAAMMDD-NN`
+para una única imagen `erp-autofix-deps:<12 hex>` del VPS ERP. Valida esquema cerrado,
+ID completo, referencias cero declaradas, límites de tamaño y campos; no recibe
+comandos. Solo envía campos operativos seleccionados y condiciones fijas, nunca
+el texto arbitrario del JSON. El operador debe revisar todas las condiciones del
+JSON y explicar cualquier bloqueo de recuperación antes de solicitar aprobación.
+
+```sh
+CREDENTIALS_DIRECTORY=/etc/erp-mac-ia-watchdog \
+  python3 -B /usr/local/libexec/erp-point-decision/erp_telegram_cleanup.py request \
+  --proposal /RUTA/PROPUESTA.json
+python3 -B /usr/local/libexec/erp-point-decision/erp_telegram_cleanup.py status \
+  --proposal /RUTA/PROPUESTA.json --nonce NONCE
+```
+
+Ledger separado `/var/lib/erp-point-decision/cleanups` con permisos root0700/0600.
+HMAC liga namespace, nonce, ID de propuesta, SHA256 de **bytes exactos**, imagen,
+chat, mensaje y vencimiento de una hora. Se persiste el message_id antes de añadir
+botones. Respuesta inicial perdida deja `notifying`, sin reintento automático; una
+solicitud viva bloquea duplicados. Cualquier identidad, firma o mensaje distinto
+falla cerrado. Aprobación repetida no se acepta; rechazo es terminal, revocación
+pasa approved a rejected; una nueva solicitud exige nonce nuevo.
+
+`status` vuelve a calcular el hash del archivo y lee la decisión bajo lock. Sale0
+con `approved=true` solo si coincide y sigue vigente; sale1 si no está aprobada o
+venció. Un cambio de bytes invalida la consulta. Esta salida es una fotografía de
+la decisión, **no un claim atómico ni permiso para omitir recuperación**. Antes de
+cualquier retiro manual, el operador debe reconsultar justo antes de actuar,
+comprobar que nadie usa la imagen, preservar todos los respaldos y probar su copia
+NAS y restauración aislada al mismo ID. Si hay demora, cambio, rechazo o falta de
+prueba, detenerse. No hay ejecutor automático que cierre una carrera con una
+revocación simultánea; si se necesita, exige un diseño/autorización independientes.
+
+La confirmación del botón declara aprobación/rechazo registrado y que nada se ha
+borrado. La solicitud declara recuperación pendiente, conserva el respaldo más
+reciente y posteriores y excluye prune, volúmenes, datos y otros servicios.
+Pruebas: `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.

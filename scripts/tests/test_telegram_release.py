@@ -336,6 +336,7 @@ class ReleaseTests(unittest.TestCase):
         consumer = target / 'decidir_corte_point.py'
         consumer.write_bytes(original)
         (source / 'erp_telegram_release.py').write_text('pass\n')
+        (source / 'erp_telegram_cleanup.py').write_text('pass\n')
         for name in ('erp-telegram-release.service', 'erp-telegram-release.timer'):
             (source / name).write_text('[Unit]\nDescription=test\n')
         failed = False
@@ -356,8 +357,10 @@ class ReleaseTests(unittest.TestCase):
             if command[1] == 'show':
                 return subprocess.CompletedProcess(command, 0, stdout='inactive\n' if '--property=ActiveState' in command else 'loaded\n')
             return subprocess.CompletedProcess(command, 1 if command[1].startswith('is-') and not check else 0)
+        consumer.write_bytes(module.patched(original, cleanup=False))
         module.install(source, target, units, safe, root / 'state', preflight=lambda: None)
         patched = consumer.read_bytes()
+        self.assertEqual(patched.count(b'from erp_telegram_cleanup'), 1)
         module.install(source, target, units, safe, root / 'state', preflight=lambda: None)
         self.assertEqual(consumer.read_bytes(), patched)
         self.assertEqual(patched.count(b'from erp_telegram_release'), 1)
@@ -395,6 +398,7 @@ class ReleaseTests(unittest.TestCase):
         consumer = target / 'decidir_corte_point.py'
         consumer.write_bytes(original)
         (source / 'erp_telegram_release.py').write_text('pass\n')
+        (source / 'erp_telegram_cleanup.py').write_text('pass\n')
         for name in ('erp-telegram-release.service', 'erp-telegram-release.timer'):
             (source / name).write_text('[Unit]\nDescription=test\n')
         with self.assertRaisesRegex(RuntimeError, 'policy_unreadable'):
