@@ -1345,6 +1345,15 @@ class CapitalHumanoAPITests(TestCase):
         self.assertTrue(response.data["saldo_suficiente"])
         self.assertEqual(response.data["faltante"], Decimal("0"))
 
+    def test_vacaciones_saldo_rechaza_fechas_invertidas(self):
+        response = self.client.get(
+            reverse("rrhh:vacaciones-saldo"),
+            {"fecha_inicio": "2026-07-24", "fecha_fin": "2026-07-20"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("fecha_fin", response.data)
+
     def test_vacaciones_saldo_sin_periodos_conserva_totales_legacy(self):
         PoliticaVacaciones.objects.create(
             antiguedad_desde=0,
