@@ -2935,8 +2935,9 @@ class ParticipanteClima(models.Model):
 class AvisoClima(models.Model):
     INVITACION = "INVITACION"
     RECORDATORIO = "RECORDATORIO"
+    CONFIRMACION = "CONFIRMACION"
     participante = models.ForeignKey(ParticipanteClima, on_delete=models.CASCADE, related_name="avisos")
-    tipo = models.CharField(max_length=20, choices=[(INVITACION, "Invitación"), (RECORDATORIO, "Recordatorio")])
+    tipo = models.CharField(max_length=20, choices=[(INVITACION, "Invitación"), (RECORDATORIO, "Recordatorio"), (CONFIRMACION, "Confirmación")])
     estado = models.CharField(max_length=20, default="PENDIENTE")
     referencia_externa = models.CharField(max_length=180, blank=True)
     intentado_en = models.DateTimeField(null=True, blank=True)
