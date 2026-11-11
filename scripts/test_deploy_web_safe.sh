@@ -68,13 +68,20 @@ git -C "$tmp_dir/author" config user.email test@example.invalid
 git -C "$tmp_dir/author" config user.name Test
 printf 'base\n' > "$tmp_dir/author/version"
 cp "$ROOT_DIR/.gitignore" "$tmp_dir/author/.gitignore"
-git -C "$tmp_dir/author" add version .gitignore
+printf "#!/bin/sh\nexit 0\n" > "$tmp_dir/author/run.sh"
+chmod 755 "$tmp_dir/author/run.sh"
+git -C "$tmp_dir/author" add version .gitignore run.sh
 git -C "$tmp_dir/author" commit --quiet -m base
 base=$(git -C "$tmp_dir/author" rev-parse HEAD)
 git -C "$tmp_dir/author" remote add origin "$tmp_dir/origin.git"
 git -C "$tmp_dir/author" push --quiet origin main
 git clone --quiet -b main "$tmp_dir/origin.git" "$tmp_dir/production"
 printf 'approved\n' > "$tmp_dir/author/version"
+printf '# approved\n' >> "$tmp_dir/author/run.sh"
+printf 'fixture = True\n' > "$tmp_dir/author/new.py"
+printf '#!/bin/sh\nexit 0\n' > "$tmp_dir/author/new.sh"
+chmod 755 "$tmp_dir/author/new.sh"
+git -C "$tmp_dir/author" add new.py new.sh
 git -C "$tmp_dir/author" commit --quiet -am approved
 approved=$(git -C "$tmp_dir/author" rev-parse HEAD)
 printf 'unapproved\n' > "$tmp_dir/author/version"
@@ -99,7 +106,8 @@ git -C "$tmp_dir/author" push --quiet origin main
   rm foreign-file
   if update_checkout "$approved" "$approved"; then exit 1; fi
   test "$(git rev-parse HEAD)" = "$base"
-  update_checkout "$approved" "$base"
+  (umask 077; update_checkout "$approved" "$base"; test "$(umask)" = 0077)
+  python3 -c 'import os,stat; assert all(stat.S_IMODE(os.stat(p).st_mode)==m for p,m in [("version",0o644),("run.sh",0o755),("new.py",0o644),("new.sh",0o755)])'
   test "$(git rev-parse HEAD)" = "$approved"
   test "$(cat version)" = approved
   test "$(cat storage/conteos_evidencias/example.txt)" = evidence
@@ -108,6 +116,18 @@ git -C "$tmp_dir/author" push --quiet origin main
   if update_checkout "$approved" "$base"; then exit 1; fi
 )
 echo "deploy-exact-revision-tests-ok"
+# Manual pull has the same scoped umask and never changes the caller's privacy.
+git clone --quiet -b main "$tmp_dir/origin.git" "$tmp_dir/manual"
+(
+  cd "$tmp_dir/manual"
+  git reset --quiet --hard "$base"
+  umask 077
+  update_checkout
+  test "$(umask)" = 0077
+  python3 -c 'import os,stat; assert all(stat.S_IMODE(os.stat(p).st_mode)==m for p,m in [("version",0o644),("run.sh",0o755),("new.py",0o644),("new.sh",0o755)])'
+)
+echo "deploy-checkout-permissions-tests-ok"
+
 
 # Run main with Docker captured: rejection must happen before any application call.
 # macOS has no util-linux flock; mock its decision here, Ubuntu also tests a real lock.
