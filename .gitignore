@@ -106,3 +106,7 @@ storage/dg_reports/logs/*.log
 !static/**/*.png
 !static/**/*.jpg
 !static/**/*.gif
+
+# Evidencias operativas privadas; nunca forman parte del artefacto Git.
+/storage/conteos_evidencias/
+/storage/private/conciliaciones/

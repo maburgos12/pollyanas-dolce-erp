@@ -67,7 +67,8 @@ git init --quiet -b main "$tmp_dir/author"
 git -C "$tmp_dir/author" config user.email test@example.invalid
 git -C "$tmp_dir/author" config user.name Test
 printf 'base\n' > "$tmp_dir/author/version"
-git -C "$tmp_dir/author" add version
+cp "$ROOT_DIR/.gitignore" "$tmp_dir/author/.gitignore"
+git -C "$tmp_dir/author" add version .gitignore
 git -C "$tmp_dir/author" commit --quiet -m base
 base=$(git -C "$tmp_dir/author" rev-parse HEAD)
 git -C "$tmp_dir/author" remote add origin "$tmp_dir/origin.git"
@@ -81,6 +82,16 @@ git -C "$tmp_dir/author" commit --quiet -am unapproved
 git -C "$tmp_dir/author" push --quiet origin main
 (
   cd "$tmp_dir/production"
+  mkdir -p storage/conteos_evidencias storage/private/conciliaciones
+  printf 'evidence\n' > storage/conteos_evidencias/example.txt
+  printf 'private\n' > storage/private/conciliaciones/example.txt
+  test -z "$(git status --porcelain)"
+  touch storage/private/unknown-file
+  if update_checkout "$approved" "$base"; then exit 1; fi
+  rm storage/private/unknown-file
+  printf 'modified\n' > version
+  if update_checkout "$approved" "$base"; then exit 1; fi
+  git restore version
   if update_checkout invalid "$base"; then exit 1; fi
   if update_checkout "$approved" ''; then exit 1; fi
   touch foreign-file
@@ -91,6 +102,8 @@ git -C "$tmp_dir/author" push --quiet origin main
   update_checkout "$approved" "$base"
   test "$(git rev-parse HEAD)" = "$approved"
   test "$(cat version)" = approved
+  test "$(cat storage/conteos_evidencias/example.txt)" = evidence
+  test "$(cat storage/private/conciliaciones/example.txt)" = private
   # A repeated attempt using the old production base is rejected.
   if update_checkout "$approved" "$base"; then exit 1; fi
 )
