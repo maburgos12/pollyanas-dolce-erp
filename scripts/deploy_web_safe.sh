@@ -30,6 +30,7 @@ build_application_images() {
 
 # Called under the common deployment lock. Fetching main proves membership;
 # pulling the immutable SHA prevents a later main update from changing release.
+# Checkout files must remain readable by the app despite the publisher umask 0077.
 update_checkout() {
   local expected_sha="${1:-}" expected_base="${2:-}"
   [[ "$(git branch --show-current)" == main && -z "$(git status --porcelain)" ]] || {
@@ -45,10 +46,10 @@ update_checkout() {
     git fetch origin main || return 1
     git merge-base --is-ancestor "$expected_base" "$expected_sha" || return 1
     git merge-base --is-ancestor "$expected_sha" FETCH_HEAD || return 1
-    git pull --ff-only origin "$expected_sha" || return 1
+    (umask 022; git pull --ff-only origin "$expected_sha") || return 1
     [[ "$(git rev-parse HEAD)" == "$expected_sha" ]] || return 1
   else
-    git pull --ff-only origin main
+    (umask 022; git pull --ff-only origin main)
   fi
 }
 
