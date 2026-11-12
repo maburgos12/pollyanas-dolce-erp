@@ -1,3 +1,4 @@
+from datetime import datetime, time
 from decimal import Decimal
 import json
 
@@ -7,7 +8,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from core.models import Sucursal
+from core.models import Notificacion, Sucursal, UserProfile
 from logistica.models import (
     DiscrepanciaLogistica,
     ParadaRuta,
@@ -214,6 +215,32 @@ class GuardarCargaSucursalTests(PersistenciaCargaSucursalTests):
         linea.point_transfer_line = point_line
         linea.save(update_fields=["point_transfer_line", "actualizado_en"])
         return point_line
+
+    def test_avisa_a_guamuchil_solo_el_folio_vigente_guardado(self):
+        self.sucursal.codigo = "GUAMUCHIL"
+        self.sucursal.save(update_fields=["codigo"])
+        UserProfile.objects.create(user=self.jefe, sucursal=self.sucursal)
+        vigente = self.asociar_point(self.linea, enviada=True, sent="10")
+        anterior = self.asociar_point(self.linea_2, enviada=True, sent="5")
+        vigente.is_open = True
+        vigente.save(update_fields=["is_open"])
+        anterior.is_open = True
+        madrugada = datetime.combine(self.ruta.fecha_ruta, time(hour=1))
+        anterior.sent_at = timezone.make_aware(madrugada)
+        anterior.raw_payload["transfer"]["Fecha_envio"] = madrugada.isoformat()
+        anterior.save(update_fields=["is_open", "sent_at", "raw_payload"])
+        self.contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
+
+        self.guardar()
+        self.guardar()
+        self.contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
+        self.guardar(event_id="evt-guardar-nuevo")
+
+        aviso = Notificacion.objects.get(usuario=self.jefe)
+        self.assertIn(vigente.transfer_external_id, aviso.mensaje)
+        self.assertNotIn(anterior.transfer_external_id, aviso.mensaje)
+        self.assertIn(self.ruta.folio, aviso.mensaje)
+        self.assertEqual(Notificacion.objects.count(), 1)
 
     def test_guarda_todas_las_lineas_de_la_sucursal(self):
         respuesta = self.guardar()
