@@ -106,6 +106,7 @@ jobs:
           python -m unittest discover -s scripts/tests -p test_carga_point_alerts.py
           python -m unittest discover -s scripts/tests -p 'test_telegram*.py'
           bash scripts/test_deploy_web_safe.sh
+          bash scripts/test_promote_erp_web.sh
           python -m unittest discover -s scripts/tests -p test_ci_test_shards.py
           python -m unittest discover -s scripts/tests -p test_task_factory.py
           bash scripts/tests/test_task_workspace_lifecycle.sh
