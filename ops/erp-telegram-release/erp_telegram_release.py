@@ -56,7 +56,8 @@ def validate(row):
 
 
 class Ledger:
-    def __init__(self, directory=STATE):
+    def __init__(self, directory=STATE, validator=validate):
+        self.validate = validator
         self.directory = Path(directory)
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         info = self.directory.lstat()
@@ -80,13 +81,13 @@ class Ledger:
         info = path.lstat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
             raise ValueError('unsafe_ledger_file')
-        row = validate(json.loads(path.read_text()))
+        row = self.validate(json.loads(path.read_text()))
         if row['nonce'] != nonce:
             raise ValueError('nonce_mismatch')
         return row
 
     def write(self, row):
-        validate(row)
+        self.validate(row)
         path = self.path(row['nonce'])
         temporary = path.with_suffix('.pending')
         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
@@ -324,7 +325,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 def telegram(config, method, data):
     try:
-        if method not in {'sendMessage', 'answerCallbackQuery'}:
+        if method not in {'sendMessage', 'answerCallbackQuery', 'editMessageReplyMarkup'}:
             raise ValueError('invalid_method')
         request = Request('https://api.telegram.org/bot' + config['token'] + '/' + method,
                           data=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})

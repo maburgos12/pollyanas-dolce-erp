@@ -13,16 +13,20 @@ HOOK = """    if isinstance(query.get('data'), str) and query['data'].startswith
         from erp_telegram_release import handle as release_handle
         return release_handle(query, config, state, telegram)
 """
+CLEANUP_HOOK = """    if isinstance(query.get('data'), str) and query['data'].startswith('c:'):
+        from erp_telegram_cleanup import handle as cleanup_handle
+        return cleanup_handle(query, config, state, telegram)
+"""
 ANCHOR = 'def handle(query, config, state, telegram, now=None):\n'
 
 
-def patched(source):
+def patched(source, cleanup=True):
     if hashlib.sha256(source).hexdigest() != BASELINE:
         raise ValueError('Point consumer changed: review new baseline before installation')
     text = source.decode()
     if text.count(ANCHOR) != 1:
         raise ValueError('invalid_hook_anchor')
-    return text.replace(ANCHOR, ANCHOR + HOOK).encode()
+    return text.replace(ANCHOR, ANCHOR + HOOK + (CLEANUP_HOOK if cleanup else '')).encode()
 
 
 def replace_file(path, content, mode=0o644):
@@ -60,11 +64,13 @@ def _install(source, target, units, run, preflight):
     backup = target / ('decidir_corte_point.' + BASELINE + '.py')
     original = backup.read_bytes() if backup.exists() else current
     updated = patched(original)
-    if current not in (original, updated):
+    if current not in (original, patched(original, cleanup=False), updated):
         raise ValueError('Point consumer changed since baseline')
     compile(updated, str(consumer), 'exec')
     module = (source / 'erp_telegram_release.py').read_bytes()
     compile(module, 'erp_telegram_release.py', 'exec')
+    cleanup_module = (source / 'erp_telegram_cleanup.py').read_bytes()
+    compile(cleanup_module, 'erp_telegram_cleanup.py', 'exec')
     (preflight if preflight is not None else lambda: check_policy(source))()
     names = ('erp-telegram-release.service', 'erp-telegram-release.timer')
     run(['systemd-analyze', 'verify', *[str(source / name) for name in names]], check=True)
@@ -80,6 +86,7 @@ def _install(source, target, units, run, preflight):
     prior = {name: {kind: run(['systemctl', 'is-' + kind, '--quiet', name], check=False).returncode == 0
                     for kind in ('enabled', 'active')} for name in timers}
     changes = {target / 'erp_telegram_release.py': module,
+               target / 'erp_telegram_cleanup.py': cleanup_module,
                **{units / name: (source / name).read_bytes() for name in names}, consumer: updated}
     before = {path: path.read_bytes() if path.exists() else None for path in changes}
     if not backup.exists():
