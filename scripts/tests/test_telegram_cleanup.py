@@ -183,6 +183,94 @@ class CleanupTests(unittest.TestCase):
         c.handle(self.query('r'), self.config, Path(self.temp.name), send)
         self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'rejected')
 
+    def test_repeated_decisions_are_informational_and_do_not_renew(self):
+        send = Mock()
+        c.decide(self.query(), self.config, self.ledger)
+        before = self.ledger.path(self.row['nonce']).read_bytes()
+        for now in (self.row['expires']-1, self.row['expires']+1):
+            with patch.object(c.time, 'time', return_value=now):
+                c.handle(self.query(), self.config, Path(self.temp.name), send)
+            self.assertIn('aprobación ya quedó registrada', send.call_args.args[2]['text'])
+            self.assertFalse(send.call_args.args[2]['show_alert'])
+            self.assertEqual(self.ledger.path(self.row['nonce']).read_bytes(), before)
+        c.decide(self.query('r'), self.config, self.ledger)
+        c.handle(self.query(), self.config, Path(self.temp.name), send)
+        self.assertIn('rechazada', send.call_args.args[2]['text'])
+        self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'rejected')
+
+    def completion_evidence(self):
+        path = Path(self.temp.name) / 'verified-result.json'
+        path.write_text(json.dumps(dict(nonce=self.row['nonce'],
+            proposal_sha256=self.row['proposal_sha256'], scope_id=self.row['image_id'],
+            verified=True, result='Cleanup and preservation verified against execution evidence')))
+        return path
+
+    def test_completed_cleanup_is_terminal_and_never_reauthorizes(self):
+        c.decide(self.query(), self.config, self.ledger)
+        evidence = self.completion_evidence()
+        with patch.object(c.time, 'time', return_value=self.row['expires']+1):
+            c.complete(self.path, self.row['nonce'], evidence, self.ledger)
+        before = self.ledger.path(self.row['nonce']).read_bytes()
+        send = Mock()
+        for action in ('a', 'r'):
+            c.handle(self.query(action), self.config, Path(self.temp.name), send)
+            self.assertIn('limpieza ya terminó', send.call_args.args[2]['text'])
+            self.assertFalse(send.call_args.args[2]['show_alert'])
+        self.assertEqual(self.ledger.path(self.row['nonce']).read_bytes(), before)
+        self.assertFalse(c.status(self.path, self.row['nonce'], self.ledger)['approved'])
+        with self.assertRaisesRegex(ValueError, 'existing_request'):
+            c.request(self.path, self.ledger, self.config, self.send)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['evidence_sha256'],
+                         hashlib.sha256(evidence.read_bytes()).hexdigest())
+
+    def test_completion_requires_matching_evidence_and_approval(self):
+        evidence = self.completion_evidence()
+        with self.assertRaises(ValueError):
+            c.complete(self.path, self.row['nonce'], evidence, self.ledger)
+        c.decide(self.query(), self.config, self.ledger)
+        for key, value in [('nonce', 'f'*24), ('proposal_sha256', 'f'*64),
+                           ('scope_id', 'sha256:'+'f'*64), ('verified', False)]:
+            evidence = self.completion_evidence()
+            item = json.loads(evidence.read_text()); item[key] = value
+            evidence.write_text(json.dumps(item))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                c.complete(self.path, self.row['nonce'], evidence, self.ledger)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'approved')
+
+    def test_completion_cannot_override_rejection_or_changed_proposal(self):
+        c.decide(self.query(), self.config, self.ledger)
+        evidence = self.completion_evidence()
+        self.path.write_text(self.path.read_text()+' ')
+        with self.assertRaises(ValueError):
+            c.complete(self.path, self.row['nonce'], evidence, self.ledger)
+        self.path.write_text(self.path.read_text()[:-1])
+        c.decide(self.query('r'), self.config, self.ledger)
+        with self.assertRaises(ValueError):
+            c.complete(self.path, self.row['nonce'], evidence, self.ledger)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'rejected')
+
+    def test_completion_schema_rejects_missing_or_forged_metadata(self):
+        row = c.decide(self.query(), self.config, self.ledger)
+        row.update(state='completed', completed_at=row['decision_at'], evidence_sha256='b'*64)
+        c.validate(row)
+        for key, value in [('completed_at', True), ('completed_at', row['decision_at']-1),
+                           ('evidence_sha256', 'invalid'), ('state', 'approved')]:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                c.validate({**row, key: value})
+        row.pop('evidence_sha256')
+        with self.assertRaises(ValueError): c.validate(row)
+
+    def test_repeated_callback_still_authenticates_and_expired_pending_is_clear(self):
+        send = Mock()
+        with patch.object(c.time, 'time', return_value=self.row['expires']):
+            c.handle(self.query(), self.config, Path(self.temp.name), send)
+        self.assertIn('venció', send.call_args.args[2]['text'])
+        c.decide(self.query(), self.config, self.ledger)
+        query = self.query(); query['from']['id'] = 18
+        c.handle(query, self.config, Path(self.temp.name), send)
+        self.assertNotIn('ya quedó registrada', send.call_args.args[2]['text'])
+        self.assertTrue(send.call_args.args[2]['show_alert'])
+
     def test_request_through_real_transport_and_closed_allowlist(self):
         from io import BytesIO
         c.decide(self.query('r'), self.config, self.ledger)

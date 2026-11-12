@@ -150,7 +150,7 @@ HMAC liga namespace, nonce, ID de propuesta, SHA256 de **bytes exactos**, imagen
 chat, mensaje y vencimiento de una hora. Se persiste el message_id antes de añadir
 botones. Respuesta inicial perdida deja `notifying`, sin reintento automático; una
 solicitud viva bloquea duplicados. Cualquier identidad, firma o mensaje distinto
-falla cerrado. Aprobación repetida no se acepta; rechazo es terminal, revocación
+falla cerrado. Aprobación repetida informa la decisión guardada sin escribir ni renovar su vigencia; rechazo es terminal, revocación
 pasa approved a rejected; una nueva solicitud exige nonce nuevo.
 
 `status` vuelve a calcular el hash del archivo y lee la decisión bajo lock. Sale0
@@ -163,8 +163,10 @@ NAS y restauración aislada al mismo ID. Si hay demora, cambio, rechazo o falta 
 prueba, detenerse. No hay ejecutor automático que cierre una carrera con una
 revocación simultánea; si se necesita, exige un diseño/autorización independientes.
 
-La confirmación del botón declara aprobación/rechazo registrado y que nada se ha
-borrado. La solicitud declara recuperación pendiente, conserva el respaldo más
+La primera confirmación declara aprobación/rechazo registrado. Las pulsaciones
+repetidas autenticadas muestran aprobación registrada, rechazo o vencimiento sin
+parecer errores. Una solicitud `completed` informa limpieza terminada incluso
+después de vencer; nunca vuelve a autorizar ni permite revocar una ejecución pasada. La solicitud declara recuperación pendiente, conserva el respaldo más
 reciente y posteriores y excluye prune, volúmenes, datos y otros servicios.
 Pruebas: `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.
 
@@ -198,3 +200,30 @@ Las solicitudes de ambos formatos pasan por el mismo método `request`: solo
 termina con éxito si Telegram confirma los dos botones y el mensaje exacto.
 Nunca sustituir errores por mensajes manuales sin botones ni marcar `notifying`
 como aprobado. La aprobación de instalación del módulo es distinta de la limpieza.
+
+### Registrar limpieza terminada
+
+Después de ejecutar la limpieza autorizada y verificar candidatos retirados,
+recuperación y recursos preservados, el operador conserva un JSON de evidencia:
+`nonce`, `proposal_sha256`, `scope_id` (imagen o manifiesto), `verified: true` y
+`result` (resumen y referencias a las comprobaciones, hasta 4000 caracteres).
+Este es un registro explícito del operador: el módulo no ejecuta limpieza ni
+infiere verificación a partir de aprobar o de un archivo llamado “resultado”.
+
+```sh
+python3 -B /usr/local/libexec/erp-point-decision/erp_telegram_cleanup.py complete \
+  --proposal /RUTA/PROPUESTA.json --nonce NONCE --evidence /RUTA/RESULTADO-VERIFICADO.json
+```
+
+Solo root puede usar la CLI. El comando exige estado aprobado y coincidencia de
+propuesta, nonce y alcance. Conserva decisión y vencimiento, registra fecha de
+cierre y SHA-256 del archivo de evidencia bajo el mismo bloqueo; el operador debe
+conservar ese archivo. Se admite registrar un resultado histórico tras vencer la
+solicitud; eso no autoriza ejecutar nada vencido. Un rechazo impide el cierre.
+`completed` es terminal: `status` devuelve `approved=false`, bloquea una nueva
+solicitud con el mismo ID y cualquier pulsación autenticada indica que la limpieza
+ya terminó, sin escribir decisiones. Identidad/firma incorrecta sigue fallando
+cerrado antes de mostrar el estado. No se migran registros antiguos automáticamente.
+Tras el cierre, retirar los botones del mensaje y enviar el resumen operativo por
+el transporte existente. El registro de cierre permite responder a callbacks ya
+en vuelo sin presentar un error o repetir acciones.
