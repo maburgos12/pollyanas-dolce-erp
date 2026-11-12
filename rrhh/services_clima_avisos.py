@@ -128,7 +128,10 @@ def _preparar_aviso(pk):
     aviso = AvisoClima.objects.create(participante=participante, tipo=tipo, estado="INCIERTO", intentado_en=timezone.now())
     token = signing.Signer(salt="rrhh.clima").sign(str(participante.pk))
     liga = PUBLIC_BASE_URL + reverse("rrhh:clima_acceso_publico", args=[token])
+    partes = participante.nombre.split()
+    # shortcut: RRHH guarda dos apellidos antes del nombre en mayúsculas; usar un campo propio si cambia el padrón.
+    primer_nombre = partes[2].capitalize() if len(partes) >= 3 and participante.nombre.isupper() else "equipo"
     return (aviso.pk, telefono, PLANTILLAS[tipo], [
-        participante.nombre.split()[0] if participante.nombre.split() else "Colaborador",
+        primer_nombre,
         campana.fecha_cierre.strftime("%d/%m/%Y"), liga,
     ])

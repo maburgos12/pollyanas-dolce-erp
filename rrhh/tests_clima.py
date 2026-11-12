@@ -275,6 +275,7 @@ class AvisosClimaTests(TestCase):
         self.campana.save(update_fields=["recepcion_habilitada"])
         with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
             self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(enviar.call_args.kwargs["parametros"][0], "equipo")
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
             invitacion = AvisoClima.objects.get(tipo=AvisoClima.INVITACION)
             invitacion.intentado_en = timezone.now() - timedelta(days=4)
@@ -284,6 +285,17 @@ class AvisosClimaTests(TestCase):
         self.assertEqual(enviar.call_count, 2)
         self.assertEqual(enviar.call_args.kwargs["plantilla"], "clima_laboral_recordatorio_v1")
         self.assertEqual(AvisoClima.objects.count(), 2)
+
+    @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
+    def test_saludo_usa_primer_nombre_despues_de_dos_apellidos(self, enviar):
+        enviar.return_value = ResultadoWhatsApp("ENVIADO", referencia="wamid.test")
+        self.persona.nombre = "LUGO ESPINOZA PAULA ELIZABETH"
+        self.persona.save(update_fields=["nombre"])
+        self.campana.recepcion_habilitada = True
+        self.campana.save(update_fields=["recepcion_habilitada"])
+        with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
+            self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+        self.assertEqual(enviar.call_args.kwargs["parametros"][0], "Paula")
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
     def test_no_recuerda_si_respondio_y_no_reintenta_incierto(self, enviar):
