@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import UTC
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
+
+from core.models import Notificacion
+from core.notificaciones import crear_notificaciones
 
 from logistica.models import (
     DiscrepanciaLogistica,
+    ParadaRuta,
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaCargaSucursalEvento,
@@ -142,6 +149,61 @@ def _aplicar_linea(*, linea, captura, actor):
         )
 
 
+def _avisar_carga_guamuchil(evento, point_lineas):
+    ruta = evento.ruta
+    parada = evento.parada
+    sucursal = parada.punto.sucursal
+    if (
+        not sucursal or sucursal.codigo != "GUAMUCHIL" or not sucursal.activa
+        or ruta.fecha_ruta != timezone.localdate(evento.creado_en)
+        or ruta.estatus not in (RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA)
+        or parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE
+        or parada.estado == ParadaRuta.ESTADO_OMITIDA
+        or ruta.repartidor_id is None or ruta.repartidor.user_id != evento.creado_por_id
+    ):
+        return
+
+    folios = set()
+    for linea in point_lineas:
+        if (
+            linea.erp_destination_branch_id != sucursal.pk or not linea.transfer_external_id
+            or not linea.is_current_snapshot or not linea.is_open
+            or linea.is_received or linea.is_cancelled or not linea.sent_at
+        ):
+            continue
+        payload = linea.raw_payload
+        cabecera = payload.get("transfer") if isinstance(payload, dict) else None
+        envio_point = cabecera.get("Fecha_envio") if isinstance(cabecera, dict) else None
+        try:
+            envio = parse_datetime(envio_point) if isinstance(envio_point, str) else None
+        except ValueError:
+            envio = None
+        if envio and timezone.is_naive(envio):
+            # Point entrega Fecha_envio en UTC sin offset en esta consulta.
+            envio = envio.replace(tzinfo=UTC)
+        if timezone.localdate(envio or linea.sent_at) == ruta.fecha_ruta:
+            folios.add(linea.transfer_external_id)
+
+    usuarios = get_user_model().objects.filter(is_active=True, userprofile__sucursal=sucursal)
+    for folio in sorted(folios):
+        objeto_id = f"{ruta.pk}:{evento.parada_id}:{folio}"
+        notificados = Notificacion.objects.filter(
+            tipo=Notificacion.TIPO_SISTEMA, objeto_tipo="recepcion_point_guamuchil", objeto_id=objeto_id,
+        ).values_list("usuario_id", flat=True)
+        crear_notificaciones(
+            usuarios.exclude(pk__in=notificados),
+            titulo="Carga de Guamúchil guardada",
+            mensaje=(
+                f"El repartidor guardó la carga del folio Point {folio} de la ruta {ruta.folio} "
+                f"del {ruta.fecha_ruta:%d/%m/%Y}. Al recibir el producto, confirma en Point "
+                "la recepción de este folio si sigue como Enviado."
+            ),
+            actor=evento.creado_por,
+            objeto_tipo="recepcion_point_guamuchil",
+            objeto_id=objeto_id,
+        )
+
+
 @transaction.atomic
 def guardar_carga_sucursal(
     *,
@@ -233,7 +295,7 @@ def guardar_carga_sucursal(
         "lineas_guardadas": len(capturables),
         "version_checklist": contexto.version_checklist,
     }
-    RutaCargaSucursalEvento.objects.create(
+    evento = RutaCargaSucursalEvento.objects.create(
         ruta=ruta_bloqueada,
         parada_id=parada_id,
         client_event_id=client_event_id,
@@ -242,4 +304,5 @@ def guardar_carga_sucursal(
         respuesta=respuesta,
         creado_por=actor,
     )
+    _avisar_carga_guamuchil(evento, (point_lineas[pk] for pk in esperadas_por_id if pk in point_lineas))
     return respuesta
