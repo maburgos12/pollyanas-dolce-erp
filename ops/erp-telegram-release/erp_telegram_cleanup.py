@@ -20,10 +20,53 @@ FIELDS = {'proposal_id', 'proposal_sha256', 'image_id', 'nonce', 'expires', 'cha
           'message_id', 'state', 'decision_at'}
 
 
+# Closed scopes only. This validator never authorizes arbitrary paths or commands.
+FILE_PATH = re.compile(
+    r'(?:/var/cache/apt/(?:srcpkgcache|pkgcache)\.bin'
+    r'|/var/cache/apt/archives/[A-Za-z0-9_+.~%:-]+\.deb'
+    r'|/var/log/(?:[A-Za-z0-9_-]+/)?[A-Za-z0-9_.-]+\.(?:[0-9]+\.gz|1)'
+    r'|/var/log/journal/[0-9a-f]{32}/(?:system|user-[0-9]+)@[0-9a-f-]+\.journal)')
+
+
+def validate_manifest(item, proposal_id):
+    if set(item) != {'type', 'id', 'files', 'build_cache', 'recovery'}:
+        raise ValueError('invalid_manifest_schema')
+    files, cache = item['files'], item['build_cache']
+    if (not isinstance(files, list) or not 1 <= len(files) <= 256
+            or not isinstance(cache, list) or len(cache) > 128):
+        raise ValueError('invalid_manifest_count')
+    identities = set()
+    for entry in files:
+        if (not isinstance(entry, dict) or set(entry) != {'path', 'bytes', 'sha256'}
+                or not isinstance(entry['path'], str) or not FILE_PATH.fullmatch(entry['path'])
+                or '..' in entry['path'] or 'backup' in entry['path'].lower()
+                or not isinstance(entry['sha256'], str) or not DIGEST.fullmatch(entry['sha256'])
+                or type(entry['bytes']) is not int or not 0 <= entry['bytes'] < 10_000_000_000
+                or entry['path'] in identities):
+            raise ValueError('invalid_file_candidate')
+        identities.add(entry['path'])
+    for entry in cache:
+        if (not isinstance(entry, dict) or set(entry) != {'id', 'bytes'}
+                or not isinstance(entry['id'], str) or not re.fullmatch(r'[a-z0-9]{25}', entry['id'])
+                or type(entry['bytes']) is not int or not 0 <= entry['bytes'] < 10_000_000_000
+                or entry['id'] in identities):
+            raise ValueError('invalid_cache_candidate')
+        identities.add(entry['id'])
+    recovery = item['recovery']
+    if (not isinstance(recovery, dict) or set(recovery) != {'archive', 'sha256', 'files_verified'}
+            or recovery['archive'] != f'/share/ERP_BACKUPS/vps-cleanup/{proposal_id}/files-recovery.tar.gz'
+            or not isinstance(recovery['sha256'], str) or not DIGEST.fullmatch(recovery['sha256'])
+            or type(recovery['files_verified']) is not int or recovery['files_verified'] != len(files)):
+        raise ValueError('invalid_recovery_evidence')
+    content = json.dumps(dict(files=files, build_cache=cache), sort_keys=True, separators=(',', ':')).encode()
+    if item['id'] != 'sha256:' + hashlib.sha256(content).hexdigest():
+        raise ValueError('manifest_digest_mismatch')
+
+
 def read_proposal(path):
     with Path(path).open('rb') as stream:
-        raw = stream.read(16385)
-    if len(raw) > 16384:
+        raw = stream.read(131073)
+    if len(raw) > 131072:
         raise ValueError('proposal_too_large')
     proposal = json.loads(raw)
     fields = {'delete_candidates', 'execution', 'expected_recovery', 'expected_usage', 'host',
@@ -35,17 +78,21 @@ def read_proposal(path):
         raise ValueError('invalid_proposal')
     candidates = proposal['delete_candidates']
     if not isinstance(candidates, list) or len(candidates) != 1:
-        raise ValueError('one_image_only')
+        raise ValueError('one_scope_only')
     item = candidates[0]
-    if (not isinstance(item, dict) or set(item) != {'bytes_logical', 'container_references', 'id', 'tag', 'type', 'unique_size_docker_report'}
-            or item['type'] != 'docker_image' or not isinstance(item['id'], str) or not IMAGE.fullmatch(item['id'])
-            or not isinstance(item['tag'], str) or not re.fullmatch(r'erp-autofix-deps:[0-9a-f]{12}', item['tag'])
-            or item['tag'].split(':')[1] != item['id'][7:19]
-            or type(item['bytes_logical']) is not int or not 0 < item['bytes_logical'] < 100_000_000_000
-            or type(item['container_references']) is not int or item['container_references'] != 0):
-        raise ValueError('invalid_image_candidate')
+    if isinstance(item, dict) and item.get('type') == 'cache_log_manifest':
+        validate_manifest(item, proposal['id'])
+    else:
+        if (not isinstance(item, dict) or set(item) != {'bytes_logical', 'container_references', 'id', 'tag', 'type', 'unique_size_docker_report'}
+                or item['type'] != 'docker_image' or not isinstance(item['id'], str) or not IMAGE.fullmatch(item['id'])
+                or not isinstance(item['tag'], str) or not re.fullmatch(r'erp-autofix-deps:[0-9a-f]{12}', item['tag'])
+                or item['tag'].split(':')[1] != item['id'][7:19]
+                or type(item['bytes_logical']) is not int or not 0 < item['bytes_logical'] < 100_000_000_000
+                or type(item['container_references']) is not int or item['container_references'] != 0):
+            raise ValueError('invalid_image_candidate')
     texts = [proposal[k] for k in ('execution', 'expected_recovery', 'expected_usage', 'risk')]
-    texts.append(item['unique_size_docker_report'])
+    if item['type'] == 'docker_image':
+        texts.append(item['unique_size_docker_report'])
     for key in ('preconditions', 'preserve'):
         if not isinstance(proposal[key], list) or not 1 <= len(proposal[key]) <= 20:
             raise ValueError('invalid_conditions')
@@ -96,17 +143,37 @@ def request(path, ledger, config, send=telegram):
                 raise ValueError('existing_request_requires_resolution')
         ledger.write(row)
         # Only fixed, bounded operational fields are sent; arbitrary proposal prose stays local.
-        text = (f"Autorizar limpieza VPS · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
-                f"Única imagen: {item['tag']}\n{item['id']}\n"
-                f"Tamaño lógico máximo: {item['bytes_logical'] / 1e9:.2f} GB; ahorro real por medir.\n"
-                'No garantiza bajar del umbral de disco. Se conserva el respaldo completo más reciente '
-                'y cualquier respaldo posterior, todos los demás respaldos, bases, volúmenes, contenedores, '
-                'medios, logs, cachés y monitores.\n'
-                'Antes de retirar: comprobar ausencia de uso, copiar esta imagen al NAS y demostrar '
-                'recuperación aislada al mismo ID. Si falla, no se borra. Sin prune ni borrado forzado.\n'
-                'Recuperación pendiente de verificar; una tarea futura podría necesitar restaurar la imagen. '
-                'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
-                'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+        if item['type'] == 'docker_image':
+            text = (f"Autorizar limpieza VPS · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
+                    f"Única imagen: {item['tag']}\n{item['id']}\n"
+                    f"Tamaño lógico máximo: {item['bytes_logical'] / 1e9:.2f} GB; ahorro real por medir.\n"
+                    'No garantiza bajar del umbral de disco. Se conserva el respaldo completo más reciente '
+                    'y cualquier respaldo posterior, todos los demás respaldos, bases, volúmenes, contenedores, '
+                    'medios, logs, cachés y monitores.\n'
+                    'Antes de retirar: comprobar ausencia de uso, copiar esta imagen al NAS y demostrar '
+                    'recuperación aislada al mismo ID. Si falla, no se borra. Sin prune ni borrado forzado.\n'
+                    'Recuperación pendiente de verificar; una tarea futura podría necesitar restaurar la imagen. '
+                    'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
+                    'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+        else:
+            file_bytes = sum(entry['bytes'] for entry in item['files'])
+            cache_bytes = sum(entry['bytes'] for entry in item['build_cache'])
+            text = (f"Autorizar limpieza VPS · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
+                    f"Manifiesto: {item['id']}\n"
+                    f"{len(item['files'])} archivos de APT/logs rotados: {file_bytes / 1e9:.2f} GB lógicos.\n"
+                    f"{len(item['build_cache'])} registros de caché BuildKit: {cache_bytes / 1e9:.2f} GB estimados.\n"
+                    f"Archivo NAS: {item['recovery']['archive']}\n"
+                    f"SHA-256 archivo: {item['recovery']['sha256']}\n"
+                    'Evidencia declarada: copia NAS y recuperación aislada de todos los archivos verificadas. '
+                    'Codex debe revalidarla; la caché BuildKit es regenerable, no se afirma restaurada.\n'
+                    'Antes de retirar: comprobar hashes, rutas/IDs exactos, archivos sin uso y caché no compartida '
+                    'ni en uso; sin construcciones concurrentes. Si cambia algo, se excluye.\n'
+                    'Conservar TODOS los respaldos, imágenes, bases, volúmenes, contenedores, medios, logs activos, '
+                    'servicios y monitores. Sin prune global, reinicios ni borrado forzado. '
+                    'El histórico retirado se consulta desde NAS; las próximas construcciones pueden tardar más. '
+                    'Ahorro real por medir; no garantiza bajar del umbral.\n'
+                    'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
+                    'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
         result = send(config, 'sendMessage', {'chat_id': row['chat_id'], 'text': text})
         verify_message(result, row['chat_id'])
         row.update(message_id=result['message_id'], state='pending')
