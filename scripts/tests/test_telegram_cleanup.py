@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -38,6 +39,50 @@ class CleanupTests(unittest.TestCase):
     def query(self, action='a'):
         return dict(id='callback', data=c.signed(self.config, self.row, action),
                     **{'from': {'id': 17}}, message={'message_id': 42, 'chat': {'id': 17, 'type': 'private'}})
+
+    def manifest(self):
+        files = [dict(path='/var/log/syslog.1', bytes=10, sha256='b'*64)]
+        cache = [dict(id='a'*25, bytes=20)]
+        content = dict(files=files, build_cache=cache)
+        digest = hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        return dict(type='cache_log_manifest', id='sha256:'+digest, **content,
+                    recovery=dict(archive='/share/ERP_BACKUPS/vps-cleanup/VPS-LIM-20261111-01/files-recovery.tar.gz',
+                                  sha256='c'*64, files_verified=1))
+
+    def test_manifest_buttons_and_exact_binding(self):
+        c.decide(self.query('r'), self.config, self.ledger)
+        self.proposal['delete_candidates'] = [self.manifest()]
+        self.path.write_text(json.dumps(self.proposal))
+        self.send.reset_mock()
+        self.row = c.request(self.path, self.ledger, self.config, self.send)
+        text = self.send.call_args_list[0].args[2]['text']
+        self.assertIn('archivos', text)
+        self.assertNotIn('Única imagen', text)
+        self.assertIn('recuperación', text)
+        self.assertIn('reply_markup', self.send.call_args_list[1].args[2])
+        c.decide(self.query(), self.config, self.ledger)
+        self.assertTrue(c.status(self.path, self.row['nonce'], self.ledger)['approved'])
+        self.proposal['risk'] = 'changed'
+        self.path.write_text(json.dumps(self.proposal))
+        with self.assertRaisesRegex(ValueError, 'proposal_changed'):
+            c.status(self.path, self.row['nonce'], self.ledger)
+
+    def test_manifest_rejects_active_sensitive_paths_and_unverified_recovery(self):
+        for path in ['/var/log/syslog', '/opt/backups/a.gz', '/var/log/../lib/a.1',
+                     '/var/log/backup.gz', '/var/log/journal/a/system.journal']:
+            candidate = self.manifest(); candidate['files'][0]['path'] = path
+            content = {key: candidate[key] for key in ('files', 'build_cache')}
+            candidate['id'] = 'sha256:' + hashlib.sha256(json.dumps(content, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+            self.proposal['delete_candidates'] = [candidate]
+            self.path.write_text(json.dumps(self.proposal))
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                c.read_proposal(self.path)
+        for key, value in [('files_verified', 0), ('sha256', 'invalid'), ('archive', '/tmp/archive')]:
+            candidate = self.manifest(); candidate['recovery'][key] = value
+            self.proposal['delete_candidates'] = [candidate]
+            self.path.write_text(json.dumps(self.proposal))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                c.read_proposal(self.path)
 
     def test_request_persists_before_exposing_buttons(self):
         self.assertEqual(self.send.call_args_list[0].args[1], 'sendMessage')
@@ -103,7 +148,7 @@ class CleanupTests(unittest.TestCase):
         for proposal in variants:
             self.path.write_text(json.dumps(proposal))
             with self.assertRaises(ValueError): c.read_proposal(self.path)
-        self.path.write_text(' '*16385)
+        self.path.write_text(' '*131073)
         with self.assertRaisesRegex(ValueError, 'too_large'): c.read_proposal(self.path)
 
     def test_ambiguous_send_does_not_expose_buttons_or_retry(self):

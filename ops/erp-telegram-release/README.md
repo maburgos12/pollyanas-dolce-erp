@@ -167,3 +167,34 @@ La confirmación del botón declara aprobación/rechazo registrado y que nada se
 borrado. La solicitud declara recuperación pendiente, conserva el respaldo más
 reciente y posteriores y excluye prune, volúmenes, datos y otros servicios.
 Pruebas: `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.
+
+### Manifiesto de cachés y registros rotados
+
+Además del formato histórico de una imagen, `request` acepta un único candidato
+`cache_log_manifest`. No admite comandos, borrados automáticos ni rutas arbitrarias.
+Su `id` es `sha256:` más el hash de JSON canónico (sort_keys=True, separadores
+`,` y `:`) de `{files, build_cache}`. Cada archivo contiene `path`, `bytes` y
+`sha256`; cada registro de construcción contiene `id` y `bytes`. Se limita a
+256 archivos y 128 registros, dentro de una propuesta de 128 KiB.
+
+Rutas permitidas: índices binarios APT, descargas `.deb`, logs rotados `.1` o
+`.N.gz` en `/var/log` (hasta un subdirectorio) y journals archivados con `@`.
+Se rechazan rutas con traversal, respaldos, duplicados y logs activos. Esto no
+prueba ausencia de descriptores abiertos ni symlinks: el operador debe verificar
+ambas condiciones, hashes y uso justo antes de actuar, sin ampliar el inventario.
+
+`recovery` exige `archive` en
+`/share/ERP_BACKUPS/vps-cleanup/ID_PROPUESTA/files-recovery.tar.gz`, su `sha256`
+y `files_verified` igual al número de archivos. Es una declaración del operador,
+no una comprobación remota del bot: primero completar copia, hash recibido en NAS,
+lectura de regreso y extracción aislada con todos los hashes. La caché BuildKit
+se declara regenerable, nunca restaurada por esa prueba; comprobar que no se usa
+ni comparte y que no hay construcciones concurrentes antes de cualquier retiro.
+
+Se conserva la forma del ledger y HMAC anteriores: el campo histórico `image_id`
+contiene el digest de alcance para manifiestos. No se reinterpreta como imagen
+ni se ejecuta; el hash de propuesta liga también la evidencia de recuperación.
+Las solicitudes de ambos formatos pasan por el mismo método `request`: solo
+termina con éxito si Telegram confirma los dos botones y el mensaje exacto.
+Nunca sustituir errores por mensajes manuales sin botones ni marcar `notifying`
+como aprobado. La aprobación de instalación del módulo es distinta de la limpieza.
