@@ -112,6 +112,41 @@ oficial y ejecutar el helper obligatorio. La entrega final debe aclarar recursos
 pendientes hasta confirmar su retiro. No confundir cierre Git con recursos retirados.
 No eliminar registros/logs de la fábrica al limpiar el worktree.
 
+### Cierre administrativo por sucesora verificada
+
+Una entrega corregida por otra tarea puede cerrarse sin volver a desplegar una
+revisión antigua. Requiere autorización explícita y revisión humana de la cobertura;
+no convierte los pasos originales fallidos o ausentes en pasos aprobados.
+
+```bash
+python3 scripts/task_factory.py --repo "$PWD" --task TAREA_ORIGINAL supersede \
+  --successor TAREA_SUCESORA --authorization 'Referencia a aprobación de Mauricio' \
+  --evidence /ruta/privada/cobertura-y-recursos.json
+```
+
+El JSON debe contener `acceptance` idéntica a la aceptación original, `coverage`
+con la explicación revisada y referencias a las pruebas de la sucesora, y
+`resources` con `owner`, `review_date` (YYYY-MM-DD) e `inventory` (lista no vacía
+de recursos conservados/retirados y evidencia de respaldo). La herramienta copia
+el documento al expediente privado y registra su hash; la calidad y suficiencia
+de su contenido siguen siendo responsabilidad del operador, no una inferencia
+automática a partir de que un PR esté integrado.
+
+La original debe conservar integración y controles previos válidos para su HEAD
+limpio. La sucesora debe estar cerrada como `merged`, tener todas sus etapas y logs
+íntegros, usar el mismo tipo de entrega y un PR distinto. Se revalidan ambos PR,
+CI y commits; la publicación original debe ser ancestro de la sucesora y esta de
+`origin/main`. No se admiten cadenas de sucesoras, tareas en ejecución ni reemplazar
+una decisión ya registrada. Se permite registrar esta decisión en tareas activas,
+entregadas o bloqueadas; no habilita ejecutar etapas normales en tareas entregadas.
+
+`status` muestra la decisión separada en `supersession`, conserva `completed` de
+la revisión original y señala `close`. `check-close` vuelve a comprobar los hashes,
+la cobertura y la integración. El cierre Git continúa por `task_workspace_close.sh`
+y conserva sus controles de ramas. Cualquier cambio de HEAD o evidencia bloquea
+el cierre; no se deben editar registros para saltarlo. Esta acción no despliega,
+borra Docker ni concede autorización para limpiar recursos.
+
 ## Comprobación y medición
 
 ```bash
