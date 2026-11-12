@@ -275,6 +275,7 @@ class AvisosClimaTests(TestCase):
         self.campana.save(update_fields=["recepcion_habilitada"])
         with patch.dict("os.environ", {"CLIMA_META_ENVIOS_HABILITADOS": "1"}):
             self.assertEqual(procesar_avisos_clima()["procesados"], 1)
+            self.assertEqual(enviar.call_args.kwargs["plantilla"], "clima_laboral_invitacion_v2")
             self.assertEqual(enviar.call_args.kwargs["parametros"][0], "equipo")
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
             invitacion = AvisoClima.objects.get(tipo=AvisoClima.INVITACION)
@@ -283,7 +284,7 @@ class AvisosClimaTests(TestCase):
             self.assertEqual(procesar_avisos_clima()["procesados"], 1)
             self.assertEqual(procesar_avisos_clima()["procesados"], 0)
         self.assertEqual(enviar.call_count, 2)
-        self.assertEqual(enviar.call_args.kwargs["plantilla"], "clima_laboral_recordatorio_v1")
+        self.assertEqual(enviar.call_args.kwargs["plantilla"], "clima_laboral_recordatorio_v2")
         self.assertEqual(AvisoClima.objects.count(), 2)
 
     @patch("rrhh.services_clima_avisos.whatsapp.enviar_plantilla")
