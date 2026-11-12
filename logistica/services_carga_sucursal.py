@@ -15,6 +15,7 @@ from core.notificaciones import crear_notificaciones
 
 from logistica.models import (
     DiscrepanciaLogistica,
+    ParadaRuta,
     RutaCargaChecklist,
     RutaCargaChecklistLinea,
     RutaCargaSucursalEvento,
@@ -150,10 +151,14 @@ def _aplicar_linea(*, linea, captura, actor):
 
 def _avisar_carga_guamuchil(evento, point_lineas):
     ruta = evento.ruta
-    sucursal = evento.parada.punto.sucursal
+    parada = evento.parada
+    sucursal = parada.punto.sucursal
     if (
         not sucursal or sucursal.codigo != "GUAMUCHIL" or not sucursal.activa
         or ruta.fecha_ruta != timezone.localdate(evento.creado_en)
+        or ruta.estatus not in (RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA)
+        or parada.entrega_estado != ParadaRuta.ENTREGA_PENDIENTE
+        or parada.estado == ParadaRuta.ESTADO_OMITIDA
         or ruta.repartidor_id is None or ruta.repartidor.user_id != evento.creado_por_id
     ):
         return

@@ -242,6 +242,20 @@ class GuardarCargaSucursalTests(PersistenciaCargaSucursalTests):
         self.assertIn(self.ruta.folio, aviso.mensaje)
         self.assertEqual(Notificacion.objects.count(), 1)
 
+    def test_guardado_diferido_de_parada_entregada_no_avisa_recepcion(self):
+        self.sucursal.codigo = "GUAMUCHIL"
+        self.sucursal.save(update_fields=["codigo"])
+        UserProfile.objects.create(user=self.jefe, sucursal=self.sucursal)
+        transferencia = self.asociar_point(self.linea, enviada=True, sent="10")
+        transferencia.is_open = True
+        transferencia.save(update_fields=["is_open"])
+        self.contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
+        ParadaRuta.objects.filter(pk=self.parada.pk).update(entrega_estado=ParadaRuta.ENTREGA_ENTREGADA)
+
+        self.guardar()
+
+        self.assertFalse(Notificacion.objects.exists())
+
     def test_guarda_todas_las_lineas_de_la_sucursal(self):
         respuesta = self.guardar()
 
