@@ -16,8 +16,8 @@ from .models import AvisoClima, Empleado, ParticipanteClima
 
 
 PLANTILLAS = {
-    AvisoClima.INVITACION: "clima_laboral_invitacion_v1",
-    AvisoClima.RECORDATORIO: "clima_laboral_recordatorio_v1",
+    AvisoClima.INVITACION: "clima_laboral_invitacion_v2",
+    AvisoClima.RECORDATORIO: "clima_laboral_recordatorio_v2",
     AvisoClima.CONFIRMACION: "clima_laboral_confirmacion_v1",
 }
 
