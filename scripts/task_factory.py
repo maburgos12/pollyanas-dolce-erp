@@ -44,7 +44,7 @@ class Factory:
         self.lock_path = self.registry / "locks" / f"factory-{task}.lock"
 
     @contextmanager
-    def lock(self, production=False):
+    def lock(self, production=False, handoff=False):
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         environment_lock = self.registry / "locks/factory-production.lock"
         environment_owned = False
@@ -56,7 +56,8 @@ class Factory:
             (self.lock_path / "pid").write_text(str(os.getpid()))
             if (self.registry / "locks/global.lock").exists():
                 raise ValueError("lifecycle operation in progress")
-            if not self.record_path.exists() or self.record_path.parent.name != "active":
+            allowed = ("active", "delivered", "blocked") if handoff else ("active",)
+            if not self.record_path.exists() or self.record_path.parent.name not in allowed:
                 raise ValueError("only active tasks can advance; resume lifecycle ownership first")
             if production:
                 try:
@@ -139,11 +140,16 @@ class Factory:
         valid = self.valid_events(sha)
         dirty = False if terminal else bool(self.git("status", "--porcelain"))
         next_step = next((s for s in self.stages() if s not in valid), "close")
+        if data.get("supersession") and not terminal and not dirty:
+            self.validate_supersession(data["supersession"], sha, refresh=False)
+            next_step = "close"
         return data | dict(lifecycle=self.record_path.parent.name, sha=sha, dirty=dirty,
                            next_step=None if terminal else ("local" if dirty else next_step),
                            executing=self.lock_path.exists(), completed=list(valid))
 
     def require(self, stage, sha):
+        if self.read().get("supersession"):
+            raise ValueError("task superseded; original execution history is sealed")
         stages = self.stages()
         if stage not in stages:
             raise ValueError("stage does not apply to this delivery")
@@ -267,10 +273,82 @@ class Factory:
             self.append(dict(stage="integration", sha=sha, result="passed", finished_at=now(),
                              release_sha=release, pr=observed["url"]))
 
+    def validate_supersession(self, entry, sha, refresh=True):
+        if entry["sha"] != sha or not entry["authorization"].strip():
+            raise ValueError("supersession revision or authorization differs")
+        if entry["successor"] == self.task:
+            raise ValueError("a task cannot supersede itself")
+        evidence = Path(entry["evidence"])
+        if not evidence.is_file() or hashlib.sha256(evidence.read_bytes()).hexdigest() != entry["evidence_sha256"]:
+            raise ValueError("supersession evidence changed")
+        proof = json.loads(evidence.read_text())
+        if proof.get("acceptance") != self.read()["acceptance"] or not proof.get("coverage", "").strip():
+            raise ValueError("explicit coverage of original acceptance required")
+        resources = proof.get("resources", {})
+        if not resources.get("owner", "").strip() or not isinstance(resources.get("inventory"), list) or not resources["inventory"]:
+            raise ValueError("resource inventory and owner required")
+        datetime.strptime(resources.get("review_date", ""), "%Y-%m-%d")
+        successor = Factory(self.repo, entry["successor"])
+        if successor.lock_path.exists() or successor.record_path.parent.name != "closed" or successor.record.get("status") != "merged":
+            raise ValueError("successor must be closed and unlocked")
+        if hashlib.sha256(successor.path.read_bytes()).hexdigest() != entry["successor_sha256"]:
+            raise ValueError("successor evidence changed")
+        data = successor.read()
+        if data.get("supersession") or data["delivery"] != self.read()["delivery"]:
+            raise ValueError("successor chains and delivery downgrades are not allowed")
+        original = self.valid_events(sha)
+        valid = successor.valid_events(entry["successor_head"])
+        if "integration" not in original or any(s not in valid for s in successor.stages()):
+            raise ValueError("original integration and complete successor evidence required")
+        release = original["integration"]["release_sha"]
+        next_release = valid["integration"]["release_sha"]
+        if original["ci"]["pr"] == valid["ci"]["pr"]:
+            raise ValueError("successor must have a distinct integrated PR")
+        if refresh:
+            self.fetch_main()
+            for factory, events, head in ((self, original, sha), (successor, valid, entry["successor_head"])):
+                observed = factory.github_pr(events["ci"]["pr"])
+                factory.validate_ci(observed, head)
+                if observed["url"] != events["ci"]["pr"] or observed["state"] != "MERGED" or not observed["mergeCommit"] or observed["mergeCommit"]["oid"] != events["integration"]["release_sha"]:
+                    raise ValueError("supersession merge evidence changed")
+        command(["git", "merge-base", "--is-ancestor", release, next_release], self.repo)
+        command(["git", "merge-base", "--is-ancestor", next_release, "origin/main"], self.repo)
+
+    def supersede(self, successor_task, authorization, evidence):
+        with self.lock(handoff=True):
+            data = self.read()
+            if data.get("supersession"):
+                raise ValueError("supersession cannot be overwritten")
+            successor = Factory(self.repo, successor_task)
+            events = successor.read()["events"]
+            if not events:
+                raise ValueError("successor has no evidence")
+            entry = dict(sha=self.head(clean=True), successor=successor_task,
+                         successor_head=events[-1]["sha"], authorization=authorization,
+                         successor_sha256=hashlib.sha256(successor.path.read_bytes()).hexdigest(),
+                         evidence=str(evidence.resolve()),
+                         evidence_sha256=hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                         recorded_at=now())
+            self.validate_supersession(entry, entry["sha"])
+            # Separate administrative decision: never rewrite a failed stage as passed.
+            logs = self.path.parent / self.task
+            logs.mkdir(exist_ok=True)
+            saved = logs / f"supersession-{uuid.uuid4().hex}.json"
+            with saved.open("xb") as stream:
+                os.chmod(saved, 0o600)
+                stream.write(evidence.read_bytes())
+            entry["evidence"] = str(saved)
+            self.validate_supersession(entry, entry["sha"], refresh=False)
+            data["supersession"] = entry
+            self.save(data)
+
     def check_close(self, refresh=True):
         if self.lock_path.exists():
             raise ValueError("task execution is still locked")
         sha = self.head(clean=True)
+        if self.read().get("supersession"):
+            self.validate_supersession(self.read()["supersession"], sha, refresh)
+            return
         valid = self.require("cleanup", sha)
         if "cleanup" not in self.valid_events(sha):
             raise ValueError("cleanup evidence required")
@@ -303,6 +381,10 @@ def main():
     ci.add_argument("--pr", required=True)
     sub.add_parser("integration")
     sub.add_parser("check-close")
+    supersede = sub.add_parser("supersede", help="Administrative closure by a verified, closed successor")
+    supersede.add_argument("--successor", required=True)
+    supersede.add_argument("--authorization", required=True)
+    supersede.add_argument("--evidence", type=Path, required=True)
     args = parser.parse_args()
     try:
         factory = Factory(args.repo, args.task)
@@ -317,6 +399,8 @@ def main():
             factory.check_ci(args.pr)
         elif args.action == "integration":
             factory.integration()
+        elif args.action == "supersede":
+            factory.supersede(args.successor, args.authorization, args.evidence)
         elif args.action == "check-close":
             factory.check_close()
             return 0

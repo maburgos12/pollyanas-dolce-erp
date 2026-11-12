@@ -243,6 +243,185 @@ class FactoryTests(unittest.TestCase):
         self.assertEqual(state["lifecycle"], "closed")
         self.assertIsNone(state["next_step"])
 
+    def prepare_successor(self):
+        self.through_integration()
+        self.assertFalse(self.run_stage("verify", "raise SystemExit(9)"))
+        record = json.loads(self.record.read_text()) | {"task_id": "successor"}
+        successor_record = self.registry / "active/successor.json"
+        successor_record.write_text(json.dumps(record))
+        successor = self.module.Factory(self.repo, "successor")
+        successor.initialize("Includes original acceptance", "Approved successor", "tooling")
+        data = successor.read()
+        data["events"] = self.factory.read()["events"][:-1]
+        for event in data["events"]:
+            if "pr" in event:
+                event["pr"] = "https://github.com/test/repo/pull/2"
+        successor.save(data)
+        for stage in ("verify", "cleanup"):
+            self.assertTrue(successor.run(stage, [sys.executable, "-c", "print('observed')"],
+                                         5, "Successor acceptance and resource handoff"))
+        closed = self.registry / "closed"
+        closed.mkdir()
+        record["status"] = "merged"
+        successor_record.write_text(json.dumps(record))
+        successor_record.rename(closed / successor_record.name)
+        self.successor = self.module.Factory(self.repo, "successor")
+        self.proof = self.root / "coverage.json"
+        self.proof.write_text(json.dumps({"acceptance": "Keep source behavior",
+            "coverage": "Verified original behavior in successor log; reviewed by operator",
+            "resources": {"owner": "test", "review_date": "2026-11-13",
+                          "inventory": ["original volume preserved, backup verified"]}}))
+
+    def record_supersession(self, **changes):
+        args = dict(successor_task="successor", authorization="Explicit user approval",
+                    evidence=self.proof) | changes
+        with patch.object(self.module.Factory, "github_pr", side_effect=lambda pr: self.pr(
+                state="MERGED", mergeCommit={"oid": self.sha}, url=pr)), \
+                patch.object(self.module.Factory, "fetch_main"):
+            self.factory.supersede(**args)
+
+    def test_supersession_preserves_failure_and_seals_original_execution(self):
+        self.prepare_successor()
+        before = self.factory.read()["events"]
+        self.record_supersession()
+        self.assertEqual(before, self.factory.read()["events"])
+        self.assertEqual(self.factory.read()["events"][-1]["result"], "failed")
+        self.assertEqual(self.factory.status()["next_step"], "close")
+        self.assertNotIn("verify", self.factory.status()["completed"])
+        self.factory.check_close(refresh=False)
+        with self.assertRaisesRegex(ValueError, "sealed"):
+            self.run_stage("verify")
+        with self.assertRaisesRegex(ValueError, "overwritten"):
+            self.record_supersession()
+
+    def test_supersession_requires_authorization_and_acceptance_coverage(self):
+        self.prepare_successor()
+        with self.assertRaises(ValueError):
+            self.record_supersession(authorization=" ")
+        for change in ({"acceptance": "different"}, {"coverage": ""}, {"resources": {}}):
+            original = self.proof.read_text()
+            self.proof.write_text(json.dumps(json.loads(original) | change))
+            with self.assertRaises(ValueError):
+                self.record_supersession()
+            self.proof.write_text(original)
+        with self.assertRaises(ValueError):
+            self.record_supersession(successor_task="example")
+
+    def test_supersession_rejects_unclosed_locked_or_chained_successor(self):
+        self.prepare_successor()
+        closed = self.successor.record_path
+        active = self.registry / "active/successor.json"
+        closed.rename(active)
+        with self.assertRaisesRegex(ValueError, "closed"):
+            self.record_supersession()
+        active.rename(closed)
+        self.successor.lock_path.mkdir()
+        with self.assertRaisesRegex(ValueError, "unlocked"):
+            self.record_supersession()
+        self.successor.lock_path.rmdir()
+        data = self.successor.read()
+        self.successor.save(data | {"supersession": {"successor": "example"}})
+        with self.assertRaisesRegex(ValueError, "chains"):
+            self.record_supersession()
+
+    def test_supersession_rejects_incomplete_or_changed_successor_evidence(self):
+        self.prepare_successor()
+        data = self.successor.read()
+        log = Path(data["events"][-1]["log"])
+        original = log.read_bytes()
+        log.write_text("tampered")
+        with self.assertRaisesRegex(ValueError, "complete"):
+            self.record_supersession()
+        log.write_bytes(original)
+        self.record_supersession()
+        log.write_text("tampered after registration")
+        with self.assertRaises(ValueError):
+            self.factory.check_close(refresh=False)
+        log.write_bytes(original)
+        self.successor.save(data | {"acceptance": "changed"})
+        with self.assertRaisesRegex(ValueError, "successor evidence changed"):
+            self.factory.check_close(refresh=False)
+
+    def test_supersession_revalidates_coverage_revision_and_main_ancestry(self):
+        self.prepare_successor()
+        self.record_supersession()
+        entry = self.factory.read()["supersession"]
+        saved = Path(entry["evidence"])
+        original = saved.read_bytes()
+        saved.write_text("tampered")
+        with self.assertRaisesRegex(ValueError, "evidence changed"):
+            self.factory.check_close(refresh=False)
+        saved.write_bytes(original)
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.factory.check_close(refresh=False)
+        self.git("update-ref", "refs/remotes/origin/main", self.sha)
+        (self.repo / "source.txt").write_text("changed")
+        with self.assertRaises(ValueError):
+            self.factory.check_close(refresh=False)
+
+    def test_supersession_cannot_hide_stale_original_integration_or_changed_pr(self):
+        self.prepare_successor()
+        original = self.factory.read()
+        changed = self.factory.read()
+        changed["events"][0]["result"] = "failed"
+        self.factory.save(changed)
+        with self.assertRaisesRegex(ValueError, "original integration"):
+            self.record_supersession()
+        self.factory.save(original)
+        self.record_supersession()
+        with patch.object(self.module.Factory, "fetch_main"), \
+                patch.object(self.module.Factory, "github_pr", return_value=self.pr(state="OPEN")), \
+                self.assertRaisesRegex(ValueError, "merge evidence changed"):
+            self.factory.check_close()
+
+    def test_supersession_rejects_delivery_downgrade_and_revision_change(self):
+        self.prepare_successor()
+        data = self.factory.read()
+        self.factory.save(data | {"delivery": "production"})
+        with self.assertRaisesRegex(ValueError, "downgrades"):
+            self.record_supersession()
+        self.factory.save(data)
+        self.record_supersession()
+        (self.repo / "source.txt").write_text("new revision")
+        self.git("add", ".")
+        self.git("commit", "-m", "new revision")
+        with self.assertRaisesRegex(ValueError, "revision"):
+            self.factory.check_close(refresh=False)
+
+    def test_supersession_passes_official_close_without_rewriting_stage_history(self):
+        self.prepare_successor()
+        self.record_supersession()
+        origin = self.root / "origin.git"
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        self.git("config", f"url.{origin}.insteadOf", "https://github.com/test/repo.git")
+        self.git("remote", "add", "origin", "https://github.com/test/repo.git")
+        self.git("push", "origin", "main")
+        self.git("checkout", "main")
+        wt = self.root / "worktree"
+        self.git("worktree", "add", str(wt), "codex/example")
+        record = json.loads(self.record.read_text()) | {"worktree": str(wt)}
+        self.record.write_text(json.dumps(record))
+        # GitHub identity/API are simulated; Git transport uses the disposable bare repo.
+        bin_dir = self.root / "bin"
+        bin_dir.mkdir()
+        gh = bin_dir / "gh"
+        gh.write_text(f"#!{sys.executable}\nimport json,sys\np={self.pr(state='MERGED', mergeCommit={'oid': self.sha})!r}\np['url']=sys.argv[3]\nprint(json.dumps(p))\n")
+        gh.chmod(0o700)
+        import os
+        import shutil
+        git = bin_dir / "git"
+        git.write_text(f"#!{sys.executable}\nimport os,sys\nif sys.argv[1:]==['remote','get-url','origin']:\n print('https://github.com/test/repo.git')\nelse:\n os.execv({shutil.which('git')!r}, ['git', *sys.argv[1:]])\n")
+        git.chmod(0o700)
+        result = subprocess.run(["bash", str(SCRIPT.with_name("task_workspace_close.sh")),
+            "--repo", str(self.repo), "--task", "example", "--state", "merged"],
+            env=os.environ | {"PATH": str(bin_dir) + os.pathsep + os.environ["PATH"]},
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(wt.exists())
+        self.assertTrue((self.registry / "closed/example.json").exists())
+        self.assertEqual(self.factory.read()["events"][-1]["result"], "failed")
+
 
 if __name__ == "__main__":
     unittest.main()
