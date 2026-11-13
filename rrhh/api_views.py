@@ -400,6 +400,8 @@ class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSe
                 fecha_fin = date.fromisoformat(fecha_fin_raw)
             except ValueError:
                 raise ValidationError("Captura fechas válidas en formato AAAA-MM-DD.")
+            if fecha_fin < fecha_inicio:
+                raise ValidationError({"fecha_fin": "La fecha final no puede ser anterior a la fecha inicial."})
             dias_laborables = contar_dias_laborables(fecha_inicio, fecha_fin)
             if dias_laborables <= 0:
                 raise ValidationError("El periodo no contiene días laborables.")
