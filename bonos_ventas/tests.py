@@ -263,7 +263,7 @@ class BonosVentasTests(TestCase):
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
         # Versión vigente del SW (bump 71e46ad1, estandarización UI).
-        self.assertIn("pollyanas-bonos-ventas-pwa-v20-fechas-completas", sw_content)
+        self.assertIn("pollyanas-bonos-ventas-pwa-v21-permisos-rango", sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-ventas/dashboard/")', sw_content)
 
     def test_api_ventas_acepta_post_con_sesion_y_csrf(self):
@@ -604,9 +604,10 @@ class BonosVentasTests(TestCase):
             json.dumps(
                 {
                     "empleado": empleado.id,
-                    "tipo": PermisoSalida.TIPO_PERMISO_HORA,
-                    "fecha_inicio": "2026-05-20T13:00:00",
-                    "fecha_fin": "2026-05-20T15:00:00",
+                    "tipo": PermisoSalida.TIPO_PERMISO_DIA,
+                    "modalidad_dias": "rango",
+                    "fecha_inicio": "2026-05-20T00:00:00",
+                    "fecha_fin": "2026-05-26T00:00:00",
                     "goce_sueldo": "false",
                     "motivo": "Cita medica",
                 }
@@ -617,6 +618,8 @@ class BonosVentasTests(TestCase):
         self.assertEqual(creado.status_code, 201)
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_VENTAS)
+        self.assertEqual(PermisoSalida.objects.filter(empleado=empleado).count(), 1)
+        self.assertEqual(permiso.fecha_fin.isoformat(), "2026-05-27T06:59:59.999999+00:00")
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
         self.assertFalse(permiso.goce_sueldo)
         self.assertTrue(creado.json()["puede_preautorizar"])
@@ -628,6 +631,16 @@ class BonosVentasTests(TestCase):
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PREAUTORIZADO)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_APROBADO)
         self.assertEqual(permiso.autorizado_jefe_por, user)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            cancelado = self.client.post(
+                f"/api/bonos-ventas/permisos/{permiso.id}/eliminar/",
+                {"motivo_cambio": "Ya no se necesita el rango"},
+            )
+        self.assertEqual(cancelado.status_code, 200)
+        permiso.refresh_from_db()
+        self.assertEqual(permiso.estado, PermisoSalida.ESTADO_CANCELADO)
+        self.assertEqual(permiso.cambios.get().motivo, "Ya no se necesita el rango")
 
     def test_horas_extra_ventas_crea_y_autoriza_en_rrhh(self):
         Empleado.objects.all().delete()

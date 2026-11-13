@@ -135,18 +135,7 @@ function EmployeeSearchList({items,selected,onSelect,placeholder,emptyText,metaT
     )
   );
 }
-function permisoDate(p){
-  const ini=new Date(p.fecha_inicio);
-  return ini.toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
-}
-function permisoTime(p){
-  if(p.tipo==='permiso_dia')return 'Todo el dia';
-  const ini=new Date(p.fecha_inicio);
-  const fin=p.fecha_fin?new Date(p.fecha_fin):null;
-  const horaIni=ini.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-  const horaFin=fin?fin.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
-  return `${horaIni} - ${horaFin}`;
-}
+{% include "rrhh/bonos_permiso_fechas.js" %}
 function PrintField({label,value}){
   return h('div',{className:'print-field'},h('div',{className:'print-label'},label),h('div',{className:'print-value'},value||'—'));
 }
@@ -559,7 +548,9 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
   const [selected,setSelected]=React.useState(null);
   const [tipo,setTipo]=React.useState('permiso_hora');
   const [goce,setGoce]=React.useState(true);
-  const [fecha,setFecha]=React.useState(new Date().toISOString().slice(0,10));
+  const [fecha,setFecha]=React.useState(fechaPermiso(new Date()));
+  const [modalidad,setModalidad]=React.useState('dia');
+  const [fechaFin,setFechaFin]=React.useState('');
   const [desde,setDesde]=React.useState('12:30');
   const [hasta,setHasta]=React.useState('14:30');
   const [motivo,setMotivo]=React.useState('');
@@ -616,6 +607,8 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
     if(submitting)return;
     if(!selected){showStatus('Selecciona un empleado.','err');return;}
     if(!motivo.trim()){showStatus('Captura el motivo del permiso.','err');return;}
+    const errorFechas=validarRangoPermiso({tipo,fecha,modalidad,fechaFin});
+    if(errorFechas){showStatus(errorFechas,'err');return;}
     if(tipo==='permiso_hora'&&(!desde||!hasta)){showStatus('Captura hora desde y hasta para permiso parcial.','err');return;}
     const areaPermiso=selected.area&&selected.area!==AREA_TODAS?selected.area:area;
     setSubmitting(true);
@@ -625,8 +618,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
       anio,
       area:areaPermiso,
       tipo,
-      fecha_inicio:tipo==='permiso_dia'?`${fecha}T00:00:00`:`${fecha}T${desde}:00`,
-      fecha_fin:tipo==='permiso_dia'?null:`${fecha}T${hasta}:00`,
+      ...fechasPermiso({tipo,fecha,desde,hasta,modalidad,fechaFin}),
       goce_sueldo:goce,
       motivo,
     })}).then(p=>{showStatus(`Permiso ${p.folio} creado`,'ok');setMotivo('');setLastPermiso(p);setPreviewPermiso(p);setAlcancePermisos('actual');cargarPermisos('actual');}).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
@@ -641,12 +633,11 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
       .catch(err=>showStatus(err.message,'err'));
   }
   function abrirEdicion(p){
-    const ini=new Date(p.fecha_inicio);
-    const fin=p.fecha_fin?new Date(p.fecha_fin):null;
-    const fechaStr=ini.toISOString().slice(0,10);
-    const desdeStr=ini.toTimeString().slice(0,5);
-    const hastaStr=fin?fin.toTimeString().slice(0,5):'';
-    setEditPermiso({id:p.id,area:p.area,tipo:p.tipo,fecha:fechaStr,desde:desdeStr,hasta:hastaStr,motivo:p.motivo,goce:p.goce_sueldo,motivoCambio:'',error:''});
+    const fecha=fechaPermiso(p.fecha_inicio);
+    const fechaFin=p.fecha_fin?fechaPermiso(p.fecha_fin):'';
+    setEditPermiso({id:p.id,area:p.area,tipo:p.tipo,fecha,fechaFin,modalidad:fechaFin>fecha?'rango':'dia',
+      desde:horaPermiso(p.fecha_inicio),hasta:p.fecha_fin?horaPermiso(p.fecha_fin):'',
+      motivo:p.motivo,goce:p.goce_sueldo,motivoCambio:'',error:''});
   }
   function setEditError(msg){
     setEditPermiso(prev=>prev?({...prev,error:msg}):prev);
@@ -656,6 +647,8 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
     if(!editPermiso)return;
     if(!editPermiso.motivo.trim()){setEditError('El motivo es obligatorio.');return;}
     if(!editPermiso.motivoCambio.trim()){setEditError('Escribe el motivo de correccion para poder guardar.');return;}
+    const errorFechas=validarRangoPermiso(editPermiso);
+    if(errorFechas){setEditError(errorFechas);return;}
     if(editPermiso.tipo==='permiso_hora'&&(!editPermiso.desde||!editPermiso.hasta)){setEditError('Captura hora desde y hasta.');return;}
     const payload={
       mes,
@@ -664,8 +657,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
       tipo:editPermiso.tipo,
       motivo:editPermiso.motivo,
       goce_sueldo:editPermiso.goce,
-      fecha_inicio:editPermiso.tipo==='permiso_dia'?`${editPermiso.fecha}T00:00:00`:`${editPermiso.fecha}T${editPermiso.desde}:00`,
-      fecha_fin:editPermiso.tipo==='permiso_dia'?null:`${editPermiso.fecha}T${editPermiso.hasta}:00`,
+      ...fechasPermiso(editPermiso),
       motivo_cambio:editPermiso.motivoCambio,
     };
     const qs=new URLSearchParams({mes,anio});
@@ -688,12 +680,7 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
     return AREA_LABELS[p.area]||p.area||'Produccion';
   }
   function fmtFecha(p){
-    const ini=new Date(p.fecha_inicio);
-    const fin=p.fecha_fin?new Date(p.fecha_fin):null;
-    const fechaTxt=ini.toLocaleDateString('es-MX',{day:'2-digit',month:'2-digit',year:'numeric'});
-    const horaIni=ini.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
-    const horaFin=fin?fin.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}):'';
-    return `${fechaTxt} · ${p.tipo==='permiso_dia'?'Todo el dia':`${horaIni} - ${horaFin}`}`;
+    return `${permisoDate(p)} · ${permisoTime(p)}`;
   }
   return h('div',null,
     !operadorSolicitudes&&h(AreaChips,{area,setArea,includeAll:true}),
@@ -723,13 +710,19 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
               [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${tipo===v?'on':''}`,onClick:()=>setTipo(v)},lbl))
             )),
             h('div',{className:'grid-2'},
-              h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
+              tipo==='permiso_dia'
+                ?h(DiasPermiso,{fecha,fechaFin,modalidad,actualizar:datos=>{
+                  if('fecha' in datos)setFecha(datos.fecha);
+                  if('fechaFin' in datos)setFechaFin(datos.fechaFin);
+                  if('modalidad' in datos)setModalidad(datos.modalidad);
+                }})
+                :h('label',{className:'field'},'Fecha',h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Area'),h('input',{className:'form-control',value:selected?(AREA_LABELS[selected.area]||selected.area||''):'' ,readOnly:true}))
             ),
             tipo==='permiso_hora'?h('div',{className:'grid-2'},
               h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:desde,onChange:e=>setDesde(e.target.value)})),
               h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:hasta,onChange:e=>setHasta(e.target.value)}))
-            ):h('div',{className:'preview-note'},'Dia completo: no necesitas capturar horario de entrada y salida.'),
+            ):null,
             h('div',{className:'field'},h('label',null,'Goce de sueldo'),h('div',{className:'segmented'},
               [[true,'Con goce'],[false,'Sin goce']].map(([v,lbl])=>h('button',{key:lbl,type:'button',className:`segment ${goce===v?'on':''}`,onClick:()=>setGoce(v)},lbl))
             )),
@@ -768,7 +761,9 @@ function PermisosTab({bonos,area,setArea,mes,anio,showStatus,operadorSolicitudes
                   [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,tipo:v}))},lbl))
                 )),
                 h('div',{className:'grid-2'},
-                  h('div',{className:'field'},h('label',null,'Fecha'),h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>setEditPermiso(prev=>({...prev,fecha:e.target.value}))})),
+                  editPermiso.tipo==='permiso_dia'
+                    ?h(DiasPermiso,{...editPermiso,actualizar:datos=>setEditPermiso(prev=>({...prev,...datos}))})
+                    :h('label',{className:'field'},'Fecha',h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>setEditPermiso(prev=>({...prev,fecha:e.target.value}))})),
                   editPermiso.tipo==='permiso_hora'&&h('div',{className:'contents-grid'},
                     h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:editPermiso.desde,onChange:e=>setEditPermiso(prev=>({...prev,desde:e.target.value}))})),
                     h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:editPermiso.hasta,onChange:e=>setEditPermiso(prev=>({...prev,hasta:e.target.value}))}))

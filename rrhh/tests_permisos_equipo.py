@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
@@ -10,6 +10,8 @@ from rest_framework.test import APIClient
 from core.models import Notificacion
 from core.navigation import build_nav_groups
 from .models import Empleado, PermisoSalida
+from .services_asistencia_reglas import _permiso_aprobado_en_rango
+from .services_reporte_asistencia import build_reporte_departamento
 
 
 class PermisosEquipoTests(TestCase):
@@ -67,6 +69,69 @@ class PermisosEquipoTests(TestCase):
         self.assertEqual(permiso.creado_por, self.user)
         self.assertEqual(permiso.estado, PermisoSalida.ESTADO_SOLICITADO)
         self.assertFalse(permiso.goce_sueldo)
+
+    def test_rango_con_un_folio_cubre_ultimo_dia_en_asistencia_y_reporte(self):
+        inicio = date(2026, 10, 29)
+        fin = date(2026, 11, 3)
+        dia_siguiente = fin + timedelta(days=1)
+        self.equipo.fecha_ingreso = inicio
+        self.equipo.save(update_fields=["fecha_ingreso"])
+        datos = {
+            **self.payload(self.equipo), "tipo": "permiso_dia", "modalidad_dias": "rango",
+            "fecha_inicio": f"{inicio}T00:00:00", "fecha_fin": f"{fin}T00:00:00",
+        }
+        response = self.api.post("/rrhh/api/mi-equipo/permisos/", datos, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        permiso = PermisoSalida.objects.get(folio=response.data["folio"])
+        self.assertEqual(PermisoSalida.objects.count(), 4)
+        for mes in (10, 11):
+            bandeja = self.api.get(f"/rrhh/api/mi-equipo/permisos/?mes={mes}&anio=2026")
+            self.assertIn(permiso.folio, [item["folio"] for item in bandeja.data["permisos"]])
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(self.url, {"action": "preautorizar_jefe", "permiso_id": permiso.pk})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(_permiso_aprobado_en_rango(self.equipo, fin), permiso)
+        self.assertIsNone(_permiso_aprobado_en_rango(self.equipo, dia_siguiente))
+        reporte = build_reporte_departamento(inicio, dia_siguiente, empleado_id=self.equipo.pk)["reportes"][0]
+        self.assertEqual([p["dias"] for p in reporte["permisos"]], [6])
+        self.assertEqual(reporte["filas"][-2]["permiso_folios"], [permiso.folio])
+        self.assertEqual(reporte["filas"][-1]["permiso_folios"], [])
+
+        url = f"/rrhh/api/mi-equipo/permisos/{permiso.pk}"
+        with self.captureOnCommitCallbacks(execute=True):
+            editado = self.api.post(f"{url}/editar/", {
+                **datos, "modalidad_dias": "dia", "fecha_inicio": f"{fin}T00:00:00",
+                "fecha_fin": None, "motivo_cambio": "Reducir a un día",
+            }, format="json")
+        self.assertEqual(editado.status_code, 200, editado.data)
+        self.assertEqual(editado.data["folio"], permiso.folio)
+        self.assertIsNone(_permiso_aprobado_en_rango(self.equipo, inicio))
+        self.assertEqual(_permiso_aprobado_en_rango(self.equipo, fin), permiso)
+        self.assertEqual(permiso.cambios.get().motivo, "Reducir a un día")
+
+    def test_captura_erp_y_api_personal_aceptan_fechas_de_calendario(self):
+        datos = {
+            **self.payload(self.equipo), "tipo": "permiso_dia", "modalidad_dias": "rango",
+            "fecha_inicio": "2026-11-15", "fecha_fin": "2026-11-20",
+        }
+        response = self.client.post(self.url, datos)
+        self.assertEqual(response.status_code, 302)
+        permiso = PermisoSalida.objects.latest("id")
+        self.assertEqual(timezone.localtime(permiso.fecha_fin).isoformat(), "2026-11-20T23:59:59.999999-07:00")
+        response = self.api.post("/rrhh/api/permisos/", {**datos, "empleado": self.jefa.pk}, format="json")
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["fecha_fin"], "2026-11-20T23:59:59.999999-07:00")
+
+    def test_rango_sin_fin_y_rango_invertido_se_rechazan(self):
+        datos = {
+            **self.payload(self.equipo), "tipo": "permiso_dia", "modalidad_dias": "rango",
+            "fecha_inicio": "2026-11-15T00:00:00",
+        }
+        for fin in (None, "2026-11-14T00:00:00"):
+            response = self.api.post("/rrhh/api/mi-equipo/permisos/", {**datos, "fecha_fin": fin}, format="json")
+            self.assertEqual(response.status_code, 400, response.data)
+            self.assertIn("fecha_fin", response.data)
+        self.assertEqual(PermisoSalida.objects.count(), 3)
 
     def test_autoriza_y_rechaza_equipo_con_actor_y_fecha(self):
         for action, estado in [("preautorizar_jefe", PermisoSalida.ESTADO_APROBADO), ("rechazar_jefe", PermisoSalida.ESTADO_RECHAZADO)]:
