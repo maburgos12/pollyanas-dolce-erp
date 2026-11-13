@@ -2891,7 +2891,9 @@ def ruta_detail(request, pk: int):
 
         if action == "sync_carga_point":
             try:
-                resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
+                resumen = sincronizar_checklist_carga_desde_point(
+                    ruta=ruta, user=request.user, solo_tramo_vigente=True,
+                )
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
             except OperationalError:
