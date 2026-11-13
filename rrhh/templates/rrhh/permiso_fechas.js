@@ -10,14 +10,14 @@ function iniciarFechasPermiso(form, nombreTipo) {
     const completo = form.elements[nombreTipo].value === 'permiso_dia';
     const rango = completo && modalidad.value === 'rango';
     modalidad.disabled = !completo;
-    modalidad.parentElement.hidden = !completo;
+    modalidad.closest('[data-permiso-modalidad]').hidden = !completo;
     for (const campo of [inicio, fin]) {
       const valor = campo.value;
       campo.type = completo ? 'date' : 'datetime-local';
       campo.value = completo ? valor.slice(0, 10) : valor.length === 10 ? valor + 'T00:00' : valor;
     }
     fin.disabled = completo && !rango;
-    fin.closest('label').hidden = fin.disabled;
+    fin.closest('[data-permiso-final]').hidden = fin.disabled;
     fin.required = rango;
     fin.min = rango ? inicio.value : '';
     if (fin.disabled) fin.value = '';
