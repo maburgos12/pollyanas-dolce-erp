@@ -1,0 +1,15 @@
+<div data-permiso-fechas>
+  <label data-permiso-modalidad hidden>Duración
+    <select name="modalidad_dias" disabled>
+      <option value="dia">Un día</option>
+      <option value="rango" {% if captura.modalidad_dias == "rango" %}selected{% endif %}>Rango de días</option>
+    </select>
+  </label>
+  <label><span data-permiso-inicio>Desde</span>
+    <input type="{% if captura.modalidad_dias %}date{% else %}datetime-local{% endif %}" name="fecha_inicio" value="{{ captura.fecha_inicio }}" required>
+  </label>
+  <label data-permiso-final><span data-permiso-fin>Hasta (opcional)</span>
+    <input type="{% if captura.modalidad_dias %}date{% else %}datetime-local{% endif %}" name="fecha_fin" value="{{ captura.fecha_fin }}">
+  </label>
+  <output data-permiso-dias></output>
+</div>

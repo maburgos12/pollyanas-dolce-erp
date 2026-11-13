@@ -59,8 +59,7 @@
           {% for value, label in tipos_permiso %}<option value="{{ value }}" {% if captura.tipo == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
         </select>
       </label>
-      <label>Desde <input type="datetime-local" name="fecha_inicio" value="{{ captura.fecha_inicio }}" required></label>
-      <label>Hasta (opcional) <input type="datetime-local" name="fecha_fin" value="{{ captura.fecha_fin }}"></label>
+      {% include "rrhh/permiso_fechas.html" %}
       <label class="permisos-captura-motivo">Motivo <textarea name="motivo" rows="3" required>{{ captura.motivo }}</textarea></label>
       <label>Goce de sueldo
         <select name="goce_sueldo"><option value="true" {% if captura.goce_sueldo != "false" %}selected{% endif %}>Con goce de sueldo</option><option value="false" {% if captura.goce_sueldo == "false" %}selected{% endif %}>Sin goce de sueldo</option></select>
@@ -105,7 +104,7 @@
               <span>{{ permiso.folio }} · {{ permiso.get_tipo_display }}</span>
               {% if permiso.motivo %}<p>{{ permiso.motivo|truncatechars:120 }}</p>{% endif %}
             </div>
-            <div>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</div>
+            <div>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin %} a {% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</div>
             <div>
               {% if permiso.autorizado_jefe_por %}Jefe: {{ permiso.autorizado_jefe_por }}{% endif %}
               {% if permiso.requiere_direccion %}{% if permiso.autorizado_jefe_por %}<br>{% endif %}Dirección: {{ permiso.get_estado_direccion_display }}{% endif %}
@@ -185,7 +184,7 @@
             <td>{{ permiso.folio }}</td>
             <td>{{ permiso.empleado.nombre }}</td>
             <td>{{ permiso.get_tipo_display }}</td>
-            <td>{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% if permiso.fecha_fin %}<br>{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}</td>
+            <td>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin %}<br>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</td>
             <td>{{ permiso.get_origen_solicitud_display }}</td>
             <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
             <td>
@@ -214,6 +213,9 @@
 
 {% block extra_js %}
 <script>
+  {% include "rrhh/permiso_fechas.js" %}
+  const capturaPermiso = document.querySelector(".permisos-captura");
+  if (capturaPermiso) iniciarFechasPermiso(capturaPermiso, "tipo");
   (function () {
     const buttons = Array.from(document.querySelectorAll("[data-permisos-filter]"));
     const panels = Array.from(document.querySelectorAll("[data-permisos-panel]"));

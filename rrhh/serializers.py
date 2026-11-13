@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime, time
+
+from django.utils import timezone
 from rest_framework import serializers
 
 from core.access import can_view_rrhh
@@ -69,7 +72,31 @@ class HoraExtraSerializer(serializers.ModelSerializer):
         return obj.jefe_directo.get_full_name() or obj.jefe_directo.username
 
 
-class PermisoSalidaSerializer(serializers.ModelSerializer):
+def validar_fechas_permiso(tipo, inicio, fin, modalidad=None):
+    if fin and fin < inicio:
+        raise serializers.ValidationError({"fecha_fin": "La fecha final no puede ser anterior al inicio."})
+    if not modalidad:
+        return inicio, fin
+    if tipo != PermisoSalida.TIPO_PERMISO_DIA:
+        raise serializers.ValidationError({"modalidad_dias": "Selecciona día completo para usar esta modalidad."})
+    zona = timezone.get_default_timezone()
+    primer_dia = timezone.localtime(inicio, zona).date()
+    inicio = datetime.combine(primer_dia, time.min, zona)
+    if modalidad == "dia":
+        return inicio, None
+    if not fin:
+        raise serializers.ValidationError({"fecha_fin": "Selecciona el último día del rango."})
+    ultimo_dia = timezone.localtime(fin, zona).date()
+    return inicio, datetime.combine(ultimo_dia, time.max, zona)
+
+
+class FechasPermisoSerializer(serializers.Serializer):
+    fecha_inicio = serializers.DateTimeField()
+    fecha_fin = serializers.DateTimeField(required=False, allow_null=True)
+    modalidad_dias = serializers.ChoiceField(choices=("dia", "rango"), required=False, write_only=True)
+
+
+class PermisoSalidaSerializer(FechasPermisoSerializer, serializers.ModelSerializer):
     empleado_nombre = serializers.CharField(source="empleado.nombre", read_only=True)
 
     class Meta:
@@ -79,6 +106,7 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
             "empleado",
             "empleado_nombre",
             "tipo",
+            "modalidad_dias",
             "fecha_inicio",
             "fecha_fin",
             "motivo",
@@ -118,9 +146,10 @@ class PermisoSalidaSerializer(serializers.ModelSerializer):
         return empleado
 
     def validate(self, attrs):
-        inicio, fin = attrs.get("fecha_inicio"), attrs.get("fecha_fin")
-        if inicio and fin and fin < inicio:
-            raise serializers.ValidationError({"fecha_fin": "La fecha final no puede ser anterior al inicio."})
+        modalidad = attrs.pop("modalidad_dias", None)
+        attrs["fecha_inicio"], attrs["fecha_fin"] = validar_fechas_permiso(
+            attrs["tipo"], attrs["fecha_inicio"], attrs.get("fecha_fin"), modalidad,
+        )
         return attrs
 
 

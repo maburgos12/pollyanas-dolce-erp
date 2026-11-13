@@ -568,7 +568,7 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(sw.status_code, 200)
         self.assertIn("application/javascript", sw["Content-Type"])
         sw_content = sw.content.decode()
-        self.assertIn("pollyanas-bonos-produccion-pwa-v30-fechas-completas", sw_content)
+        self.assertIn("pollyanas-bonos-produccion-pwa-v31-permisos-rango", sw_content)
         self.assertIn('cache: "no-store"', sw_content)
         self.assertIn('url.pathname.startsWith("/bonos-produccion/dashboard/")', sw_content)
 
@@ -896,8 +896,9 @@ class BonosProduccionTests(TestCase):
                 {
                     "empleado": empleado.id,
                     "tipo": PermisoSalida.TIPO_PERMISO_DIA,
-                    "fecha_inicio": "2026-05-21T08:00:00",
-                    "fecha_fin": "2026-05-21T16:00:00",
+                    "modalidad_dias": "rango",
+                    "fecha_inicio": "2026-05-21T00:00:00",
+                    "fecha_fin": "2026-05-26T00:00:00",
                     "goce_sueldo": True,
                     "motivo": "Tramite familiar",
                 }
@@ -908,6 +909,8 @@ class BonosProduccionTests(TestCase):
         self.assertEqual(creado.status_code, 201)
         permiso = PermisoSalida.objects.get(pk=creado.json()["id"])
         self.assertEqual(permiso.origen_solicitud, PermisoSalida.ORIGEN_BONOS_PRODUCCION)
+        self.assertEqual(PermisoSalida.objects.filter(empleado=empleado).count(), 1)
+        self.assertEqual(permiso.fecha_fin.isoformat(), "2026-05-27T06:59:59.999999+00:00")
         self.assertEqual(permiso.estado_jefe, PermisoSalida.ESTADO_JEFE_PENDIENTE)
         self.assertTrue(creado.json()["puede_preautorizar"])
 

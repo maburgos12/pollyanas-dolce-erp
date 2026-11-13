@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from datetime import date
+
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -11,6 +12,7 @@ from rest_framework.response import Response
 from core.access import has_any_role, ROLE_DG, ROLE_ADMIN
 from core.notificaciones import notificar_permiso_solicitado
 from rrhh.models import Empleado, PermisoSalida, PermisoSalidaCambio
+from rrhh.serializers import FechasPermisoSerializer, validar_fechas_permiso
 from rrhh.services_permisos import (
     can_resolver_permiso_jefe,
     reevaluar_asistencia_permiso,
@@ -91,13 +93,13 @@ TIPO_LABELS = {
 }
 
 
-def _parse_dt(value):
-    if not value:
-        return None
-    dt = parse_datetime(str(value))
-    if dt and timezone.is_naive(dt):
-        return timezone.make_aware(dt, timezone.get_current_timezone())
-    return dt
+def _fechas_permiso(data, tipo):
+    serializer = FechasPermisoSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    fechas = serializer.validated_data
+    return validar_fechas_permiso(
+        tipo, fechas["fecha_inicio"], fechas.get("fecha_fin"), fechas.get("modalidad_dias"),
+    )
 
 
 def _parse_bool(value, default=True):
@@ -172,9 +174,19 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         )
         mes = self.request.query_params.get("mes")
         anio = self.request.query_params.get("anio")
-        if mes:
+        if mes and anio:
+            try:
+                inicio = date(int(anio), int(mes), 1)
+                siguiente = date(inicio.year + (inicio.month == 12), inicio.month % 12 + 1, 1)
+            except ValueError:
+                return qs.none()
+            qs = qs.filter(fecha_inicio__date__lt=siguiente).filter(
+                Q(fecha_inicio__date__gte=inicio)
+                | Q(tipo=PermisoSalida.TIPO_PERMISO_DIA, fecha_fin__date__gte=inicio)
+            )
+        elif mes:
             qs = qs.filter(fecha_inicio__month=mes)
-        if anio:
+        elif anio:
             qs = qs.filter(fecha_inicio__year=anio)
         return self.filter_permisos(qs)
 
@@ -197,14 +209,11 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if not self.can_solicitar_empleado(empleado):
             return Response({"empleado": "No puedes solicitar permisos para este empleado."}, status=status.HTTP_403_FORBIDDEN)
 
-        fecha_inicio = _parse_dt(request.data.get("fecha_inicio"))
-        if not fecha_inicio:
-            return Response({"fecha_inicio": "Fecha/hora de inicio invalida."}, status=status.HTTP_400_BAD_REQUEST)
-
-        fecha_fin = _parse_dt(request.data.get("fecha_fin"))
         tipo = request.data.get("tipo") or PermisoSalida.TIPO_PERMISO_HORA
         if tipo not in dict(PermisoSalida.TIPO_CHOICES):
             return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        fecha_inicio, fecha_fin = _fechas_permiso(request.data, tipo)
 
         motivo = (request.data.get("motivo") or "").strip()
         if not motivo:
@@ -240,9 +249,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if tipo and tipo not in dict(PermisoSalida.TIPO_CHOICES):
             return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        fecha_inicio = _parse_dt(request.data.get("fecha_inicio"))
-        if not fecha_inicio:
-            return Response({"fecha_inicio": "Fecha/hora de inicio invalida."}, status=status.HTTP_400_BAD_REQUEST)
+        fecha_inicio, fecha_fin = _fechas_permiso(request.data, tipo or permiso.tipo)
 
         motivo = (request.data.get("motivo") or "").strip()
         if not motivo:
@@ -255,7 +262,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if tipo:
             permiso.tipo = tipo
         permiso.fecha_inicio = fecha_inicio
-        permiso.fecha_fin = _parse_dt(request.data.get("fecha_fin"))
+        permiso.fecha_fin = fecha_fin
         permiso.motivo = motivo
         goce = request.data.get("goce_sueldo")
         if goce is not None:

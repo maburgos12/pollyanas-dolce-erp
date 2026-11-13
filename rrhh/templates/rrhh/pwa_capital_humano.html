@@ -27,6 +27,7 @@
     </footer>
 
     <script>
+      {% include "rrhh/permiso_fechas.js" %}
       const API = "/rrhh/api";
       const AUTH_API = "/api/logistica";
       const initialSection = "{{ initial_section|default:'inicio'|escapejs }}";
@@ -219,11 +220,12 @@
         const goce = document.querySelector('input[name="goce_sueldo"]:checked')?.value === "true";
         const payload = {
           tipo: tipo,
-          fecha_inicio: document.getElementById("p_desde").value,
-          fecha_fin: document.getElementById("p_hasta").value || null,
+          fecha_inicio: event.currentTarget.elements.fecha_inicio.value,
+          fecha_fin: event.currentTarget.elements.fecha_fin.value || null,
           motivo: document.getElementById("p_motivo").value,
           goce_sueldo: goce
         };
+        if (tipo === "permiso_dia") payload.modalidad_dias = event.currentTarget.elements.modalidad_dias.value;
         const res = await apiFetch(`${API}/permisos/`, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
@@ -480,11 +482,21 @@
         `);
       }
 
+      function fechaHistorialPermiso(p) {
+        const formato = new Intl.DateTimeFormat("es-MX", {
+          timeZone: "America/Mazatlan", dateStyle: "short",
+          ...(p.tipo === "permiso_dia" ? {} : {timeStyle: "short"})
+        });
+        const inicio = formato.format(new Date(p.fecha_inicio));
+        const fin = p.fecha_fin && formato.format(new Date(p.fecha_fin));
+        return fin && fin !== inicio ? `${inicio} a ${fin}` : inicio;
+      }
+
       function renderPermisos() {
         const items = state.permisos.map(p => `
           <article class="card">
             <div class="row"><strong>${esc(p.folio)}</strong><span class="badge">${esc(p.estado)}</span></div>
-            <div class="muted">${esc(p.tipo)} · ${new Date(p.fecha_inicio).toLocaleString("es-MX")}</div>
+            <div class="muted">${p.tipo === "permiso_dia" ? "Día completo" : "Tiempo parcial"} · ${fechaHistorialPermiso(p)}</div>
             <div class="muted">${p.goce_sueldo ? "Con goce de sueldo" : "Sin goce de sueldo"}</div>
             <div>${esc(p.motivo)}</div>
           </article>
@@ -523,16 +535,7 @@
                   </label>
                 </div>
               </div>
-              <div class="field-row-double">
-                <div>
-                  <label for="p_desde">DESDE</label>
-                  <input type="datetime-local" id="p_desde" name="fecha_inicio" required>
-                </div>
-                <div>
-                  <label for="p_hasta">HASTA</label>
-                  <input type="datetime-local" id="p_hasta" name="fecha_fin">
-                </div>
-              </div>
+              {% include "rrhh/permiso_fechas.html" %}
               <div class="field-row">
                 <label>AUTORIZADO</label>
                 <div class="radio-group">
@@ -557,6 +560,7 @@
           </section>
           <div class="list">${items}</div>
         `);
+        iniciarFechasPermiso(document.getElementById("form_permiso"), "tipo_permiso");
       }
 
       function renderHoras() {
