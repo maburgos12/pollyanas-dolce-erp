@@ -12,6 +12,7 @@
   let employees = [];
   let busy = false;
   const esPermiso = () => recurso === 'permisos';
+  const actualizarFechas = iniciarFechasPermiso(form, "tipo");
   const endpoint = () => `/rrhh/api/mi-equipo/${recurso}/`;
   const announce = (message, error = false) => {
     status.textContent = message;
@@ -65,9 +66,15 @@
       for (const name of ['empleado', 'tipo', 'motivo', 'goce_sueldo', 'fecha', 'horas', 'notas']) {
         if (item[name] !== undefined) form.elements[name].value = String(item[name]);
       }
-      form.elements.fecha_inicio.value = inputDate(item.fecha_inicio);
-      form.elements.fecha_fin.value = inputDate(item.fecha_fin);
+      form.elements.fecha_inicio.type = form.elements.fecha_fin.type = 'datetime-local';
+      const inicio = inputDate(item.fecha_inicio);
+      const fin = inputDate(item.fecha_fin);
+      form.elements.modalidad_dias.value = item.fechas_laborables?.length
+        ? 'laborables' : item.tipo === 'permiso_dia' && fin.slice(0,10) > inicio.slice(0,10) ? 'rango' : 'dia';
+      form.elements.fecha_inicio.value = inicio;
+      form.elements.fecha_fin.value = fin;
     }
+    if (esPermiso()) actualizarFechas();
     document.getElementById('equipo-form-title').focus();
   }
   async function resolve(item, action) {
@@ -122,10 +129,17 @@
     if (esPermiso()) {
       // El servidor interpreta las fechas sin offset en America/Mazatlan.
       data.fecha_fin = data.fecha_fin || null;
+      combinarHorasRepetidas(form, data);
     }
     lock(true);
     try {
-      await api(editing ? `${endpoint()}${editing.id}/editar/` : endpoint(), data);
+      const url = editing ? `${endpoint()}${editing.id}/editar/` : endpoint();
+      if (data.modalidad_dias === 'laborables') {
+        const resumen = await api(url, {...data, vista_previa:true});
+        if (!confirmarPermisoRepetido(resumen)) return;
+        data.confirmacion = resumen.confirmacion;
+      }
+      await api(url, data);
       closeEditor();
       await load('Solicitud guardada.');
     } catch (error) { announce(error.message, true); }

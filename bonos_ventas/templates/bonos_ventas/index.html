@@ -618,6 +618,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   const [selected,setSelected]=React.useState(null);
   const [tipo,setTipo]=React.useState('permiso_hora');
   const [goce,setGoce]=React.useState(true);
+  const [submitting,setSubmitting]=React.useState(false);
   const [fecha,setFecha]=React.useState(fechaPermiso(new Date()));
   const [modalidad,setModalidad]=React.useState('dia');
   const [fechaFin,setFechaFin]=React.useState('');
@@ -657,18 +658,20 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
     return 'pending';
   }
   function submitPermiso(){
+    if(submitting)return;
     if(!selected){ showStatus('Selecciona una empleada.','err'); return; }
     if(!motivo.trim()){ showStatus('Captura el motivo del permiso.','err'); return; }
     const errorFechas=validarRangoPermiso({tipo,fecha,modalidad,fechaFin});
     if(errorFechas){showStatus(errorFechas,'err');return;}
     if(tipo==='permiso_hora'&&(!desde||!hasta)){ showStatus('Captura hora desde y hasta para permiso parcial.','err'); return; }
-    api('/api/bonos-ventas/permisos/',{method:'POST',body:JSON.stringify({
+    setSubmitting(true);
+    guardarPermisoBonos('/api/bonos-ventas/permisos/',{
       empleado:selected.id,
       tipo,
       ...fechasPermiso({tipo,fecha,desde,hasta,modalidad,fechaFin}),
       goce_sueldo:goce,
       motivo,
-    })}).then(p=>{ showStatus(`Permiso ${p.folio} creado`,'ok'); setMotivo(''); setLastPermiso(p); setPreviewPermiso(p); cargarPermisos(); }).catch(err=>showStatus(err.message,'err'));
+    }).then(p=>{if(!p)return; showStatus(`Permiso ${p.folio} creado`,'ok'); setMotivo(''); setLastPermiso(p); setPreviewPermiso(p); cargarPermisos(); }).catch(err=>showStatus(err.message,'err')).finally(()=>setSubmitting(false));
   }
   function imprimirPermiso(p){
     setPreviewPermiso(p);
@@ -682,7 +685,7 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
   function abrirEdicion(p){
     const fecha=fechaPermiso(p.fecha_inicio);
     const fechaFin=p.fecha_fin?fechaPermiso(p.fecha_fin):'';
-    setEditPermiso({id:p.id,tipo:p.tipo,fecha,fechaFin,modalidad:fechaFin>fecha?'rango':'dia',
+    setEditPermiso({id:p.id,tipo:p.tipo,fecha,fechaFin,modalidad:p.fechas_laborables?.length?'laborables':fechaFin>fecha?'rango':'dia',
       desde:horaPermiso(p.fecha_inicio),hasta:p.fecha_fin?horaPermiso(p.fecha_fin):'',
       motivo:p.motivo,goce:p.goce_sueldo,motivoCambio:'',error:''});
   }
@@ -707,8 +710,8 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
     };
     const qs=new URLSearchParams({mes,anio});
     if(filtroSuc)qs.set('sucursal',filtroSuc);
-    api(`/api/bonos-ventas/permisos/${editPermiso.id}/editar/?${qs.toString()}`,{method:'POST',body:JSON.stringify(payload)})
-      .then(()=>{showStatus('Permiso actualizado','ok');setEditPermiso(null);cargarPermisos();})
+    guardarPermisoBonos(`/api/bonos-ventas/permisos/${editPermiso.id}/editar/?${qs.toString()}`,payload)
+      .then(p=>{if(!p)return;showStatus('Permiso actualizado','ok');setEditPermiso(null);cargarPermisos();})
       .catch(err=>setEditError(err.message));
   }
   function eliminarPermiso(p){
@@ -758,16 +761,14 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
           h('div',{className:'div'}),
           h('div',{className:'form-grid'},
             h('div',{className:'field'},h('label',null,'Tipo de permiso'),h('div',{className:'segmented'},
-              [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${tipo===v?'on':''}`,onClick:()=>setTipo(v)},lbl))
+              [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${tipo===v?'on':''}`,onClick:()=>{setTipo(v);setModalidad('dia');setFechaFin('');}},lbl))
             )),
             h('div',{className:'grid-2'},
-              tipo==='permiso_dia'
-                ?h(DiasPermiso,{fecha,fechaFin,modalidad,actualizar:datos=>{
+                h(DiasPermiso,{tipo,fecha,fechaFin,modalidad,actualizar:datos=>{
                   if('fecha' in datos)setFecha(datos.fecha);
                   if('fechaFin' in datos)setFechaFin(datos.fechaFin);
                   if('modalidad' in datos)setModalidad(datos.modalidad);
-                }})
-                :h('label',{className:'field'},'Fecha',h('input',{className:'form-control',type:'date',value:fecha,onChange:e=>setFecha(e.target.value)})),
+                }}),
               h('div',{className:'field'},h('label',null,'Sucursal'),h('input',{className:'form-control',value:selected?.sucursal_nombre||'',readOnly:true}))
             ),
             tipo==='permiso_hora'?h('div',{className:'grid-2'},
@@ -804,12 +805,10 @@ function PermisosTab({bonos,sucursales,filtroSuc,setFiltroSuc,mes,anio,showStatu
               ),
               editPermiso&&editPermiso.id===p.id&&h('div',{className:'form-grid edit-panel'},
                 h('div',{className:'field'},h('label',null,'Tipo'),h('div',{className:'segmented'},
-                  [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,tipo:v}))},lbl))
+                  [['permiso_hora','Tiempo parcial'],['permiso_dia','Dia completo']].map(([v,lbl])=>h('button',{key:v,type:'button',className:`segment ${editPermiso.tipo===v?'on':''}`,onClick:()=>setEditPermiso(prev=>({...prev,tipo:v,modalidad:'dia',fechaFin:''}))},lbl))
                 )),
                 h('div',{className:'grid-2'},
-                  editPermiso.tipo==='permiso_dia'
-                    ?h(DiasPermiso,{...editPermiso,actualizar:datos=>setEditPermiso(prev=>({...prev,...datos}))})
-                    :h('label',{className:'field'},'Fecha',h('input',{className:'form-control',type:'date',value:editPermiso.fecha,onChange:e=>setEditPermiso(prev=>({...prev,fecha:e.target.value}))})),
+                  h(DiasPermiso,{...editPermiso,actualizar:datos=>setEditPermiso(prev=>({...prev,...datos}))}),
                   editPermiso.tipo==='permiso_hora'&&h('div',{className:'contents-grid'},
                     h('div',{className:'field'},h('label',null,'Desde'),h('input',{className:'form-control',type:'time',value:editPermiso.desde,onChange:e=>setEditPermiso(prev=>({...prev,desde:e.target.value}))})),
                     h('div',{className:'field'},h('label',null,'Hasta'),h('input',{className:'form-control',type:'time',value:editPermiso.hasta,onChange:e=>setEditPermiso(prev=>({...prev,hasta:e.target.value}))}))

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, time
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
+from django.utils.crypto import constant_time_compare
 from rest_framework import serializers
 
 from core.access import can_view_rrhh
@@ -10,6 +12,7 @@ from core.access import can_view_rrhh
 from .models import AsistenciaEmpleado, Empleado, HoraExtra, PermisoSalida, Prestamo, SolicitudVacaciones
 from .services_prestamos import can_autorizar_prestamo_direccion, can_autorizar_prestamo_jefe
 from .services_permisos import permisos_empleados_usuario
+from .services_permisos_repetidos import calcular_permiso_repetido
 
 
 class AsistenciaSerializer(serializers.ModelSerializer):
@@ -75,7 +78,15 @@ class HoraExtraSerializer(serializers.ModelSerializer):
 def validar_fechas_permiso(tipo, inicio, fin, modalidad=None):
     if fin and fin < inicio:
         raise serializers.ValidationError({"fecha_fin": "La fecha final no puede ser anterior al inicio."})
+    if modalidad == "laborables":
+        if tipo != PermisoSalida.TIPO_PERMISO_HORA:
+            raise serializers.ValidationError({"modalidad_dias": "Selecciona tiempo parcial."})
+        return inicio, fin
     if not modalidad:
+        return inicio, fin
+    if modalidad == "dia" and tipo == PermisoSalida.TIPO_PERMISO_HORA:
+        if fin and timezone.localdate(fin) != timezone.localdate(inicio):
+            raise serializers.ValidationError({"fecha_fin": "Para repetir el horario, selecciona días laborables."})
         return inicio, fin
     if tipo != PermisoSalida.TIPO_PERMISO_DIA:
         raise serializers.ValidationError({"modalidad_dias": "Selecciona día completo para usar esta modalidad."})
@@ -93,7 +104,26 @@ def validar_fechas_permiso(tipo, inicio, fin, modalidad=None):
 class FechasPermisoSerializer(serializers.Serializer):
     fecha_inicio = serializers.DateTimeField()
     fecha_fin = serializers.DateTimeField(required=False, allow_null=True)
-    modalidad_dias = serializers.ChoiceField(choices=("dia", "rango"), required=False, write_only=True)
+    modalidad_dias = serializers.ChoiceField(choices=("dia", "rango", "laborables"), required=False, write_only=True)
+
+    vista_previa = serializers.BooleanField(required=False, write_only=True)
+    confirmacion = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    @staticmethod
+    def procesar_repeticion(empleado, fechas, modalidad, confirmacion, vista_previa):
+        if modalidad != "laborables":
+            if vista_previa:
+                raise serializers.ValidationError({"modalidad_dias": "Selecciona repetir en días laborables."})
+            return []
+        try:
+            resumen = calcular_permiso_repetido(empleado, fechas["fecha_inicio"], fechas.get("fecha_fin"))
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"fecha_fin": exc.messages}) from exc
+        if vista_previa:
+            return resumen
+        if not constant_time_compare(confirmacion or "", resumen["confirmacion"]):
+            raise serializers.ValidationError({"confirmacion": "Revisa y confirma las fechas laborables actualizadas."})
+        return resumen["fechas_laborables"]
 
 
 class PermisoSalidaSerializer(FechasPermisoSerializer, serializers.ModelSerializer):
@@ -107,6 +137,9 @@ class PermisoSalidaSerializer(FechasPermisoSerializer, serializers.ModelSerializ
             "empleado_nombre",
             "tipo",
             "modalidad_dias",
+            "vista_previa",
+            "confirmacion",
+            "fechas_laborables",
             "fecha_inicio",
             "fecha_fin",
             "motivo",
@@ -125,6 +158,7 @@ class PermisoSalidaSerializer(FechasPermisoSerializer, serializers.ModelSerializ
             "creado_en",
         ]
         read_only_fields = [
+            "fechas_laborables",
             "folio",
             "estado",
             "estado_jefe",
@@ -146,11 +180,23 @@ class PermisoSalidaSerializer(FechasPermisoSerializer, serializers.ModelSerializ
         return empleado
 
     def validate(self, attrs):
-        modalidad = attrs.pop("modalidad_dias", None)
+        modalidad = attrs.get("modalidad_dias")
         attrs["fecha_inicio"], attrs["fecha_fin"] = validar_fechas_permiso(
             attrs["tipo"], attrs["fecha_inicio"], attrs.get("fecha_fin"), modalidad,
         )
         return attrs
+
+
+    def repeticion(self, empleado):
+        datos = self.validated_data
+        return self.procesar_repeticion(
+            empleado, datos, datos.get("modalidad_dias"), datos.get("confirmacion"), datos.get("vista_previa"),
+        )
+
+    def create(self, validated_data):
+        for campo in ("modalidad_dias", "confirmacion", "vista_previa"):
+            validated_data.pop(campo, None)
+        return super().create(validated_data)
 
 
 class SolicitudVacacionesSerializer(serializers.ModelSerializer):

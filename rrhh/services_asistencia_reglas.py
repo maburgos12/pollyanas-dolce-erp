@@ -21,6 +21,7 @@ from .models import (
     Turno,
 )
 from .services import TIEMPO_COMIDA_MINUTOS, generar_horas_extra_automatico, minutos_jornada_programada
+from .services_permisos_repetidos import ventana_permiso_repetido
 from .services_vacaciones import es_descanso_oficial, es_dia_laborable
 from .services_extra_conciliacion import conciliar_extra_diario, diagnosticar_horas_extra, modalidad_marcaje_efectiva
 from .services_turnos import ESTADO_DESCANSO, ESTADO_LABORABLE, horario_programado_para_fecha
@@ -88,12 +89,49 @@ def _permiso_aprobado_en_rango(
             empleado=empleado,
             estado=PermisoSalida.ESTADO_APROBADO,
             fecha_inicio__lte=fin,
+            fechas_laborables=[],
         )
         .filter(Q(fecha_fin__isnull=True, fecha_inicio__gte=dia_inicio, fecha_inicio__lte=dia_fin) | Q(fecha_fin__gte=inicio))
         .order_by("fecha_inicio")
         .first()
     )
 
+
+
+def _cobertura_repetida(empleado, fecha, inicio, fin, limite):
+    if not inicio or not fin or fin <= inicio or limite <= 0:
+        return None, 0
+    permisos = PermisoSalida.objects.filter(
+        empleado=empleado, estado=PermisoSalida.ESTADO_APROBADO,
+        fechas_laborables__contains=[fecha.isoformat()],
+    ).order_by("pk")
+    intervalos = []
+    referencia = None
+    for permiso in permisos:
+        desde, hasta = ventana_permiso_repetido(permiso, fecha)
+        desde, hasta = max(inicio, desde), min(fin, hasta)
+        if desde < hasta:
+            referencia = referencia or permiso
+            intervalos.append((desde, hasta))
+    total = timedelta()
+    cursor = inicio
+    for desde, hasta in sorted(intervalos):
+        if hasta > cursor:
+            total += hasta - max(cursor, desde)
+            cursor = hasta
+    return referencia, min(limite, int(total.total_seconds() // 60))
+
+
+def _datos_cobertura(cubiertos, pendientes):
+    if not cubiertos:
+        return {}
+    return {"minutos_cubiertos_permiso": cubiertos, "minutos_pendientes_permiso": pendientes}
+
+
+def _detalle_cobertura(detalle, cubiertos, pendientes):
+    if not cubiertos:
+        return detalle
+    return f"{cubiertos} min cubiertos por permiso; {pendientes} min pendientes."
 
 def _vacaciones_vigentes_en_fecha(empleado: Empleado, fecha: date) -> SolicitudVacaciones | None:
     """Solicitud de vacaciones que cubre la fecha con reserva viva o goce aprobado.
@@ -257,20 +295,26 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
 
     if minutos_tarde <= int(asistencia.turno.tolerancia_minutos or 0):
         permiso = _permiso_aprobado_en_rango(empleado, fecha, inicio=hora_programada, fin=entrada_local)
+        repetido, cubiertos = (None, 0) if permiso else _cobertura_repetida(
+            empleado, fecha, hora_programada, entrada_local, minutos_tarde,
+        )
+        pendientes = minutos_tarde - cubiertos
+        conciliado = bool(permiso) or pendientes == 0
+        permiso = permiso or repetido
         tipo = IncidenciaAsistencia.TIPO_USO_TOLERANCIA
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(
             empleado=empleado,
             fecha=fecha,
             tipo=tipo,
-            estado=IncidenciaAsistencia.ESTADO_CONCILIADO if permiso else IncidenciaAsistencia.ESTADO_PENDIENTE,
+            estado=IncidenciaAsistencia.ESTADO_CONCILIADO if conciliado else IncidenciaAsistencia.ESTADO_PENDIENTE,
             severidad=IncidenciaAsistencia.SEVERIDAD_INFO,
             asistencia=asistencia,
             permiso=permiso,
-            minutos=minutos_tarde,
+            minutos=pendientes if not conciliado else minutos_tarde,
             goce_sueldo=getattr(permiso, "goce_sueldo", None),
-            detalle="Entrada dentro de tolerancia." if not permiso else "Entrada dentro de tolerancia conciliada con permiso.",
-            metadata={"minutos_tarde": minutos_tarde},
+            detalle=_detalle_cobertura("Entrada dentro de tolerancia.", cubiertos, pendientes) if repetido else ("Entrada dentro de tolerancia conciliada con permiso." if permiso else "Entrada dentro de tolerancia."),
+            metadata={"minutos_tarde": minutos_tarde, **_datos_cobertura(cubiertos, pendientes)},
         )
         creados += int(creada)
         actualizados += int(actualizada)
@@ -309,7 +353,11 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
         return creados, actualizados
 
     permiso = _permiso_aprobado_en_rango(empleado, fecha, inicio=hora_programada, fin=entrada_local)
-    if not permiso:
+    repetido, cubiertos = (None, 0) if permiso else _cobertura_repetida(
+        empleado, fecha, hora_programada, entrada_local, minutos_tarde,
+    )
+    pendientes = minutos_tarde - cubiertos
+    if not permiso and pendientes:
         tipo = IncidenciaAsistencia.TIPO_FALTA
         touched.add(tipo)
         _, creada, actualizada = _upsert_incidencia(
@@ -319,14 +367,16 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
             estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
             severidad=IncidenciaAsistencia.SEVERIDAD_ALTA,
             asistencia=asistencia,
-            minutos=minutos_tarde,
-            detalle="Entrada posterior a tolerancia sin permiso; se considera falta.",
-            metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos},
+            permiso=repetido,
+            minutos=pendientes,
+            detalle=_detalle_cobertura("Entrada posterior a tolerancia sin permiso; se considera falta.", cubiertos, pendientes),
+            metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos, **_datos_cobertura(cubiertos, pendientes)},
         )
         creados += int(creada)
         actualizados += int(actualizada)
         return creados, actualizados
 
+    permiso = permiso or repetido
     tipo = IncidenciaAsistencia.TIPO_RETARDO
     touched.add(tipo)
     _, creada, actualizada = _upsert_incidencia(
@@ -340,7 +390,7 @@ def _evaluar_entrada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
         minutos=minutos_tarde,
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
         detalle="Entrada posterior a tolerancia conciliada con permiso de ingreso tarde.",
-        metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos},
+        metadata={"minutos_tarde": minutos_tarde, "tolerancia_minutos": asistencia.turno.tolerancia_minutos, **_datos_cobertura(cubiertos, pendientes)},
     )
     creados += int(creada)
     actualizados += int(actualizada)
@@ -395,20 +445,34 @@ def _evaluar_jornada(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple
 
     inicio_ausencia = timezone.localtime(asistencia.salida) if asistencia.salida else timezone.localtime(asistencia.entrada)
     permiso = _permiso_aprobado_en_rango(asistencia.empleado, asistencia.fecha, inicio=inicio_ausencia, fin=fin_turno)
+    salida = timezone.localtime(asistencia.salida) if asistencia.salida else None
+    llegada = timezone.localtime(asistencia.entrada)
+    repetido, cubiertos = (None, 0) if permiso else _cobertura_repetida(
+        asistencia.empleado, asistencia.fecha, inicio_turno, min(llegada, fin_turno), faltante,
+    )
+    if not permiso and salida:
+        permiso_salida, cubiertos_salida = _cobertura_repetida(
+            asistencia.empleado, asistencia.fecha, max(salida, llegada, inicio_turno), fin_turno, faltante - cubiertos,
+        )
+        repetido = repetido or permiso_salida
+        cubiertos += cubiertos_salida
+    pendientes = faltante - cubiertos
+    conciliado = bool(permiso) or pendientes == 0
+    permiso = permiso or repetido
     tipo = IncidenciaAsistencia.TIPO_JORNADA_INCOMPLETA
     touched.add(tipo)
     _, creada, actualizada = _upsert_incidencia(
         empleado=asistencia.empleado,
         fecha=asistencia.fecha,
         tipo=tipo,
-        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if permiso else IncidenciaAsistencia.ESTADO_PENDIENTE,
+        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if conciliado else IncidenciaAsistencia.ESTADO_PENDIENTE,
         severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
         asistencia=asistencia,
         permiso=permiso,
-        minutos=faltante,
+        minutos=faltante if conciliado else pendientes,
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
-        detalle="Jornada incompleta conciliada con permiso." if permiso else "Jornada incompleta sin permiso asociado.",
-        metadata={"minutos_jornada": minutos_jornada, "minutos_trabajados": minutos_trabajados},
+        detalle=_detalle_cobertura("Jornada incompleta conciliada con permiso." if conciliado else "Jornada incompleta sin permiso asociado.", cubiertos, pendientes),
+        metadata={"minutos_jornada": minutos_jornada, "minutos_trabajados": minutos_trabajados, **_datos_cobertura(cubiertos, pendientes)},
     )
     creados += int(creada)
     actualizados += int(actualizada)
@@ -432,20 +496,27 @@ def _evaluar_comida(asistencia: AsistenciaEmpleado, touched: set[str]) -> tuple[
         inicio=asistencia.salida_comida,
         fin=asistencia.regreso_comida,
     )
+    repetido, cubiertos = (None, 0) if permiso else _cobertura_repetida(
+        asistencia.empleado, asistencia.fecha,
+        asistencia.salida_comida + timedelta(minutes=TIEMPO_COMIDA_MINUTOS), asistencia.regreso_comida, exceso,
+    )
+    pendientes = exceso - cubiertos
+    conciliado = bool(permiso) or pendientes == 0
+    permiso = permiso or repetido
     tipo = IncidenciaAsistencia.TIPO_COMIDA_EXCEDIDA
     touched.add(tipo)
     _, creada, actualizada = _upsert_incidencia(
         empleado=asistencia.empleado,
         fecha=asistencia.fecha,
         tipo=tipo,
-        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if permiso else IncidenciaAsistencia.ESTADO_PENDIENTE,
+        estado=IncidenciaAsistencia.ESTADO_CONCILIADO if conciliado else IncidenciaAsistencia.ESTADO_PENDIENTE,
         severidad=IncidenciaAsistencia.SEVERIDAD_MEDIA,
         asistencia=asistencia,
         permiso=permiso,
-        minutos=exceso,
+        minutos=exceso if conciliado else pendientes,
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
-        detalle="Comida excedida conciliada con permiso." if permiso else "Comida excedida sin permiso asociado.",
-        metadata={"minutos_comida": minutos_comida, "exceso": exceso},
+        detalle=_detalle_cobertura("Comida excedida conciliada con permiso." if conciliado else "Comida excedida sin permiso asociado.", cubiertos, pendientes),
+        metadata={"minutos_comida": minutos_comida, "exceso": exceso, **_datos_cobertura(cubiertos, pendientes)},
     )
     creados += int(creada)
     actualizados += int(actualizada)
@@ -522,6 +593,21 @@ def _evaluar_falta_sin_registro(empleado: Empleado, fecha: date, touched: set[st
     elif permiso:
         detalle = "Falta de registro conciliada con permiso aprobado."
 
+    repetido, cubiertos, pendientes = None, 0, 0
+    if not permiso and not vacaciones:
+        turno = horario_programado_para_fecha(empleado, fecha).turno
+        if turno:
+            inicio = _aware_datetime(fecha, turno.hora_entrada)
+            fin = _aware_datetime(fecha, turno.hora_salida)
+            if fin <= inicio:
+                fin += timedelta(days=1)
+            total = _minutos_entre(inicio, fin)
+            repetido, cubiertos = _cobertura_repetida(empleado, fecha, inicio, fin, total)
+            if cubiertos:
+                pendientes = total - cubiertos
+                estado = IncidenciaAsistencia.ESTADO_PENDIENTE if pendientes else IncidenciaAsistencia.ESTADO_CONCILIADO
+                detalle = _detalle_cobertura(detalle, cubiertos, pendientes)
+
     tipo = IncidenciaAsistencia.TIPO_FALTA
     touched.add(tipo)
     _, creada, actualizada = _upsert_incidencia(
@@ -530,12 +616,14 @@ def _evaluar_falta_sin_registro(empleado: Empleado, fecha: date, touched: set[st
         tipo=tipo,
         estado=estado,
         severidad=IncidenciaAsistencia.SEVERIDAD_ALTA if estado == IncidenciaAsistencia.ESTADO_PENDIENTE else IncidenciaAsistencia.SEVERIDAD_INFO,
-        permiso=permiso,
+        permiso=permiso or repetido,
+        minutos=pendientes,
         solicitud_vacaciones=vacaciones,
         goce_sueldo=getattr(permiso, "goce_sueldo", None),
         detalle=detalle,
         metadata={
             "conciliacion": "vacaciones" if vacaciones else ("permiso" if permiso else "sin_conciliacion"),
+            **_datos_cobertura(cubiertos, pendientes),
         },
     )
     return int(creada), int(actualizada)

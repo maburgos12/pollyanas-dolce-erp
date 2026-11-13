@@ -375,6 +375,11 @@ class PermisoAdmin(admin.ModelAdmin):
         "autorizado_por",
     )
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj and obj.fechas_laborables:
+            return (*self.readonly_fields, "empleado", "tipo", "fecha_inicio", "fecha_fin", "fechas_laborables")
+        return self.readonly_fields
+
 
 @admin.register(PermisoSalidaCambio)
 class PermisoSalidaCambioAdmin(admin.ModelAdmin):

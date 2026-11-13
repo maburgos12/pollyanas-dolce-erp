@@ -27,5 +27,5 @@
 </table></div>
 {% if reporte.permisos %}
 <details class="rrhh-permit-details"><summary>Permisos autorizados y folios ({{ reporte.permisos|length }})</summary>
-  <ul>{% for permiso in reporte.permisos %}<li><strong>{{ permiso.folio }}</strong> · {{ permiso.tipo }} · {{ permiso.fecha_inicio|date:"d/m/Y H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"d/m/Y H:i" }}{% endif %} · {% if permiso.goce_sueldo %}con goce{% else %}sin goce{% endif %} · {% if permiso.dias %}{{ permiso.dias }} día(s){% else %}{{ permiso.minutos|default_if_none:"N/D" }} min{% endif %}{% for nota in permiso.observaciones %} · {{ nota }}{% endfor %}</li>{% endfor %}</ul>
+  <ul>{% for permiso in reporte.permisos %}<li><strong>{{ permiso.folio }}</strong> · {{ permiso.tipo }} · {% if permiso.fechas_laborables %}{{ permiso.fecha_inicio|date:"H:i" }}–{{ permiso.fecha_fin|date:"H:i" }} por día · {{ permiso.fechas_laborables|join:", " }}{% else %}{{ permiso.fecha_inicio|date:"d/m/Y H:i" }}{% if permiso.fecha_fin %} a {{ permiso.fecha_fin|date:"d/m/Y H:i" }}{% endif %}{% endif %} · {% if permiso.goce_sueldo %}con goce{% else %}sin goce{% endif %} · {% if permiso.dias %}{{ permiso.dias }} día(s){% else %}{{ permiso.minutos|default_if_none:"N/D" }} min{% endif %}{% for nota in permiso.observaciones %} · {{ nota }}{% endfor %}</li>{% endfor %}</ul>
 </details>{% endif %}

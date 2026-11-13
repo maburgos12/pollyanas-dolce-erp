@@ -235,14 +235,21 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
             qs = qs.filter(estado=estado)
         return self._apply_mis_and_limit(qs)
 
-    def perform_create(self, serializer):
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         empleado = serializer.validated_data.get("empleado") or empleado_de_usuario(self.request.user)
         if not empleado:
             raise ValidationError({"empleado": "No se pudo vincular tu usuario con un empleado activo."})
         if not permisos_empleados_usuario(self.request.user).filter(pk=empleado.pk).exists():
             raise PermissionDenied("No puedes solicitar permisos para otro empleado.")
-        permiso = serializer.save(empleado=empleado, creado_por=self.request.user)
-        notificar_permiso_solicitado(permiso, actor=self.request.user)
+        fechas = serializer.repeticion(empleado)
+        if serializer.validated_data.get("vista_previa"):
+            return Response(fechas)
+        permiso = serializer.save(empleado=empleado, creado_por=request.user, fechas_laborables=fechas)
+        notificar_permiso_solicitado(permiso, actor=request.user)
+        return Response(serializer.data, status=201)
 
     @action(detail=True, methods=["post"], url_path="autorizar-jefe")
     def autorizar_jefe(self, request, pk=None):
