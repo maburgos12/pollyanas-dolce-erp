@@ -20,8 +20,7 @@
       <label>Colaborador<select name="empleado" required></select></label>
       <fieldset id="equipo-permiso"><legend>Detalle del permiso</legend>
         <label>Tipo<select name="tipo">{% for value,label in tipos_permiso %}<option value="{{ value }}">{{ label }}</option>{% endfor %}</select></label>
-        <label>Desde<input type="datetime-local" name="fecha_inicio" required></label>
-        <label>Hasta (opcional)<input type="datetime-local" name="fecha_fin"></label>
+        {% include "rrhh/permiso_fechas.html" %}
         <label>Goce de sueldo<select name="goce_sueldo"><option value="true">Con goce de sueldo</option><option value="false">Sin goce de sueldo</option></select></label>
         <label class="equipo-wide">Motivo<textarea name="motivo" rows="3" required></textarea></label>
       </fieldset>
@@ -38,4 +37,4 @@
   <div id="equipo-registros" aria-labelledby="equipo-list-title" aria-busy="true"></div>
 </section>
 {% endblock %}
-{% block extra_js %}<script src="{% static 'js/mi-equipo.js' %}" defer></script>{% endblock %}
+{% block extra_js %}<script>{% include "rrhh/permiso_fechas.js" %}{% include "rrhh/confirmar_permiso_repetido.js" %}</script><script src="{% static 'js/mi-equipo.js' %}?v=permisos-laborables" defer></script>{% endblock %}

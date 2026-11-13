@@ -17,6 +17,7 @@ from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Avg, Count, Prefetch, Q, Sum
 from django.http import Http404, JsonResponse
+from rest_framework.exceptions import ValidationError as APIValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
 from django.urls import reverse
@@ -3203,12 +3204,22 @@ def permisos_list(request):
         if action == "crear":
             serializer = PermisoSalidaSerializer(data=request.POST, context={"request": request})
             if serializer.is_valid() and serializer.validated_data.get("empleado"):
-                with transaction.atomic():
-                    permiso = serializer.save(creado_por=request.user)
-                    notificar_permiso_solicitado(permiso, actor=request.user)
-                messages.success(request, f"Solicitud {permiso.folio} registrada; pendiente de autorización.")
-                return redirect("rrhh:rrhh_permisos_list")
-            errores_captura = serializer.errors or {"empleado": ["Selecciona un empleado."]}
+                try:
+                    with transaction.atomic():
+                        fechas = serializer.repeticion(serializer.validated_data["empleado"])
+                        if serializer.validated_data.get("vista_previa"):
+                            return JsonResponse(fechas)
+                        permiso = serializer.save(creado_por=request.user, fechas_laborables=fechas)
+                        notificar_permiso_solicitado(permiso, actor=request.user)
+                except APIValidationError as exc:
+                    errores_captura = exc.detail
+                else:
+                    messages.success(request, f"Solicitud {permiso.folio} registrada; pendiente de autorización.")
+                    return redirect("rrhh:rrhh_permisos_list")
+            else:
+                errores_captura = serializer.errors or {"empleado": ["Selecciona un empleado."]}
+            if request.POST.get("vista_previa") == "true":
+                return JsonResponse(errores_captura, status=400)
         elif action in {"preautorizar_jefe", "rechazar_jefe"}:
             permiso = get_object_or_404(permisos_qs, pk=request.POST.get("permiso_id"))
             resolver_permiso_jefe(permiso, request.user, aprobar=action == "preautorizar_jefe")

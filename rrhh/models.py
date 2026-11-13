@@ -1642,6 +1642,7 @@ class PermisoSalida(models.Model):
     tipo = models.CharField(max_length=20, choices=TIPO_CHOICES)
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField(null=True, blank=True)
+    fechas_laborables = models.JSONField(default=list, blank=True, editable=False)
     motivo = models.TextField()
     estado = models.CharField(max_length=12, choices=ESTADO_CHOICES, default=ESTADO_SOLICITADO)
     estado_jefe = models.CharField(max_length=16, choices=ESTADO_JEFE_CHOICES, default=ESTADO_JEFE_PENDIENTE)

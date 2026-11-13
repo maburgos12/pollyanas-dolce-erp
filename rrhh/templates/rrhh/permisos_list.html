@@ -104,7 +104,7 @@
               <span>{{ permiso.folio }} · {{ permiso.get_tipo_display }}</span>
               {% if permiso.motivo %}<p>{{ permiso.motivo|truncatechars:120 }}</p>{% endif %}
             </div>
-            <div>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin %} a {% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</div>
+            <div>{% if permiso.fechas_laborables %}{{ permiso.fecha_inicio|date:"H:i" }}–{{ permiso.fecha_fin|date:"H:i" }} · {{ permiso.fechas_laborables|length }} día(s) laborable(s)<br>{{ permiso.fechas_laborables|join:", " }}{% elif permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin and not permiso.fechas_laborables %} a {% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</div>
             <div>
               {% if permiso.autorizado_jefe_por %}Jefe: {{ permiso.autorizado_jefe_por }}{% endif %}
               {% if permiso.requiere_direccion %}{% if permiso.autorizado_jefe_por %}<br>{% endif %}Dirección: {{ permiso.get_estado_direccion_display }}{% endif %}
@@ -184,7 +184,7 @@
             <td>{{ permiso.folio }}</td>
             <td>{{ permiso.empleado.nombre }}</td>
             <td>{{ permiso.get_tipo_display }}</td>
-            <td>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin %}<br>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</td>
+            <td>{% if permiso.fechas_laborables %}{{ permiso.fecha_inicio|date:"H:i" }}–{{ permiso.fecha_fin|date:"H:i" }} · {{ permiso.fechas_laborables|length }} día(s) laborable(s)<br>{{ permiso.fechas_laborables|join:", " }}{% elif permiso.tipo == "permiso_dia" %}{{ permiso.fecha_inicio|date:"d/m/Y" }}{% else %}{{ permiso.fecha_inicio|date:"Y-m-d H:i" }}{% endif %}{% if permiso.fecha_fin and not permiso.fechas_laborables %}<br>{% if permiso.tipo == "permiso_dia" %}{{ permiso.fecha_fin|date:"d/m/Y" }}{% else %}{{ permiso.fecha_fin|date:"Y-m-d H:i" }}{% endif %}{% endif %}</td>
             <td>{{ permiso.get_origen_solicitud_display }}</td>
             <td>{% if permiso.goce_sueldo %}Con goce{% else %}Sin goce{% endif %}</td>
             <td>
@@ -214,8 +214,47 @@
 {% block extra_js %}
 <script>
   {% include "rrhh/permiso_fechas.js" %}
+  {% include "rrhh/confirmar_permiso_repetido.js" %}
   const capturaPermiso = document.querySelector(".permisos-captura");
-  if (capturaPermiso) iniciarFechasPermiso(capturaPermiso, "tipo");
+  if (capturaPermiso) {
+    iniciarFechasPermiso(capturaPermiso, "tipo");
+    let consultando = false;
+    capturaPermiso.addEventListener("submit", async event => {
+      if (capturaPermiso.elements.modalidad_dias.value !== "laborables") return;
+      event.preventDefault();
+      if (consultando) return;
+      consultando = true;
+      try {
+        const datos = new FormData(capturaPermiso);
+        const fechas = combinarHorasRepetidas(capturaPermiso, Object.fromEntries(datos));
+        datos.set("fecha_inicio", fechas.fecha_inicio);
+        datos.set("fecha_fin", fechas.fecha_fin);
+        datos.set("vista_previa", "true");
+        const res = await fetch(location.href, {method:"POST", body:datos});
+        const resumen = await res.json();
+        if (!res.ok) throw new Error(Object.values(resumen).flat().join(" "));
+        if (!confirmarPermisoRepetido(resumen)) return;
+        const enviar = document.createElement("form");
+        enviar.method = "post";
+        enviar.action = location.href;
+        datos.delete("vista_previa");
+        datos.set("confirmacion", resumen.confirmacion);
+        for (const [name, value] of datos) {
+          const campo = document.createElement("input");
+          campo.type = "hidden";
+          campo.name = name;
+          campo.value = value;
+          enviar.append(campo);
+        }
+        document.body.append(enviar);
+        enviar.submit();
+      } catch (error) {
+        capturaPermiso.querySelector("[data-permiso-dias]").textContent = error.message;
+      } finally {
+        consultando = false;
+      }
+    });
+  }
   (function () {
     const buttons = Array.from(document.querySelectorAll("[data-permisos-filter]"));
     const panels = Array.from(document.querySelectorAll("[data-permisos-panel]"));

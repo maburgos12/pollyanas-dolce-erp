@@ -3,17 +3,23 @@
     <label>Duración
       <select name="modalidad_dias" disabled>
         <option value="dia">Un día</option>
+        <option value="laborables" {% if captura.modalidad_dias == "laborables" %}selected{% endif %}>Repetir en días laborables</option>
         <option value="rango" {% if captura.modalidad_dias == "rango" %}selected{% endif %}>Rango de días</option>
       </select>
     </label>
   </div>
   <label><span data-permiso-inicio>Desde</span>
-    <input type="{% if captura.modalidad_dias %}date{% else %}datetime-local{% endif %}" name="fecha_inicio" value="{{ captura.fecha_inicio }}" required>
+    <input type="{% if captura.tipo == "permiso_dia" %}date{% else %}datetime-local{% endif %}" name="fecha_inicio" value="{{ captura.fecha_inicio }}" required>
   </label>
   <div data-permiso-final>
     <label><span data-permiso-fin>Hasta (opcional)</span>
-      <input type="{% if captura.modalidad_dias %}date{% else %}datetime-local{% endif %}" name="fecha_fin" value="{{ captura.fecha_fin }}">
+      <input type="{% if captura.tipo == "permiso_dia" %}date{% else %}datetime-local{% endif %}" name="fecha_fin" value="{{ captura.fecha_fin }}">
     </label>
   </div>
+  <div data-hora-repetida hidden>
+    <label>Hora desde <input name="hora_desde" type="time" disabled></label>
+    <label>Hora hasta <input name="hora_hasta" type="time" disabled></label>
+  </div>
+  <input name="confirmacion" type="hidden">
   <output data-permiso-dias></output>
 </div>

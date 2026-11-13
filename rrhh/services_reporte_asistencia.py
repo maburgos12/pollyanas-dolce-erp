@@ -11,6 +11,9 @@ from .models import AsistenciaEmpleado, Empleado, EmpleadoBaja, HoraExtra, Incid
 from .services_extra_conciliacion import conciliar_extra_diario, formato_minutos
 
 EXTRA_KEYS = ('detectado', 'autorizado', 'pendiente', 'rechazado', 'solicitado')
+from .services_permisos_repetidos import ventana_permiso_repetido
+
+
 PERMISSION_KEYS = ('minutos_cg', 'minutos_sg', 'dias_cg', 'dias_sg', 'conflictos', 'duracion_desconocida')
 SUMMARY_KEYS = ('faltas', 'faltas_conciliadas', 'falta_retardos', 'retardos', 'comida_excedida', 'jornada_incompleta', 'hora_extra', 'avisos_baja', 'avisos_baja_30d', 'permisos', 'permisos_aplicables', 'vacaciones', 'suspensiones', 'faltas_30d') + PERMISSION_KEYS
 
@@ -147,7 +150,14 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
             minutes, days_count = (None if invalid or permiso.fecha_fin is None else 0), 0
             matched_days = []
             for day in dates:
-                if permiso.tipo=='permiso_dia':
+                if permiso.fechas_laborables:
+                    ventana = ventana_permiso_repetido(permiso, day)
+                    matches = ventana is not None
+                    if matches:
+                        lo, hi = ventana
+                        intervals[day][permiso.goce_sueldo].append(ventana)
+                        minutes += (hi - lo).total_seconds() / 60
+                elif permiso.tipo=='permiso_dia':
                     matches = first<=day<=final if not invalid else day==first
                     if matches and not invalid:
                         full_days[day].add(permiso.goce_sueldo)
@@ -173,7 +183,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
             elif minutes is None:
                 summary['duracion_desconocida']+=int(applicable_permission)
                 observations.append('Permiso por horas con duración N/D')
-            permiso_report.append({'id':permiso.id,'folio':permiso.folio,'tipo':permiso.get_tipo_display(),'tipo_codigo':permiso.tipo,'estado':permiso.get_estado_display(),'goce_sueldo':permiso.goce_sueldo,'fecha_inicio':permiso.fecha_inicio,'fecha_fin':permiso.fecha_fin,'minutos':int(minutes) if minutes is not None else None,'dias':days_count,'observaciones':observations,'motivo':permiso.motivo,'aplicable_laboral':applicable_permission})
+            permiso_report.append({'id':permiso.id,'folio':permiso.folio,'tipo':permiso.get_tipo_display(),'tipo_codigo':permiso.tipo,'estado':permiso.get_estado_display(),'goce_sueldo':permiso.goce_sueldo,'fecha_inicio':permiso.fecha_inicio,'fecha_fin':permiso.fecha_fin,'minutos':int(minutes) if minutes is not None else None,'dias':days_count,'fechas_laborables': [day.isoformat() for day in matched_days] if permiso.fechas_laborables else [],'observaciones':observations,'motivo':permiso.motivo,'aplicable_laboral':applicable_permission})
         summary['permisos']=len(permiso_report)
         summary['permisos_aplicables']=sum(p['aplicable_laboral'] for p in permiso_report)
         conflict_days = set()
@@ -225,6 +235,10 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
                     permission_parts.append(f'{formato_minutos(minutes)} {suffix}')
                 if any(p.goce_sueldo == goce and p.tipo != 'permiso_dia' and (p.fecha_fin is None or p.fecha_fin < p.fecha_inicio) for p in permiso_days[day]):
                     permission_parts.append(f'N/D {suffix}')
+            for permiso in permiso_days[day]:
+                if permiso.fechas_laborables:
+                    desde, hasta = ventana_permiso_repetido(permiso, day)
+                    permission_parts.append(f'{permiso.folio} · {desde:%H:%M}–{hasta:%H:%M}')
             rows.append({'fecha':day,'asistencia':a,'vacaciones':vacation_days[day],'incidencias':by_day[day],'extra':extra,'tarde_minutos':late,'retardos_registrados':0 if pre or post else sum(i['tipo_codigo'] in ('retardo','retardo_tolerancia') and i['estado_codigo']=='pendiente' for i in by_day[day]),'permiso_texto':'; '.join(permission_parts),'permiso_folios':[p.folio for p in permiso_days[day]],'estado_laboral':'pre_ingreso' if pre else ('post_baja' if post else 'activo' if employee.activo else 'inactivo'),'estado_laboral_label':label,'aplicable_laboral':not (pre or post),'observaciones':observations})
         reports.append({'empleado':employee,'datos':{'id':eid,'nombre':employee.nombre,'codigo':employee.codigo,'puesto':employee.puesto,'sucursal':employee.sucursal_display,'departamento':employee.get_departamento_display(),'departamento_codigo':employee.departamento,'area':employee.area},'resumen':summary,'extra_resumen':_extra_summary(rows),'filas':rows,'permisos':permiso_report,'permisos_resumen':{key:summary[key] for key in PERMISSION_KEYS},'faltas_30d':summary['faltas_30d'],'avisos_30d':avisos,'observaciones_resumen':['Evidencia fuera del periodo laboral no incluida en KPIs de tiempo, extra o incidencias; permisos cuenta folios, permisos_aplicables cuenta los que intersectan el periodo laboral.'] if any(not row['aplicable_laboral'] and (row['asistencia'] or row['incidencias'] or row['extra']['registros'] or row['permiso_folios'] or row['vacaciones']) for row in rows) else []})
     global_summary={key:sum(r['resumen'][key] for r in reports) for key in SUMMARY_KEYS}

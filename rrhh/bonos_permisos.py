@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from datetime import date
 
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -93,13 +94,16 @@ TIPO_LABELS = {
 }
 
 
-def _fechas_permiso(data, tipo):
+def _fechas_permiso(data, tipo, empleado):
     serializer = FechasPermisoSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     fechas = serializer.validated_data
-    return validar_fechas_permiso(
-        tipo, fechas["fecha_inicio"], fechas.get("fecha_fin"), fechas.get("modalidad_dias"),
+    modalidad = fechas.get("modalidad_dias")
+    inicio, fin = validar_fechas_permiso(tipo, fechas["fecha_inicio"], fechas.get("fecha_fin"), modalidad)
+    resumen = serializer.procesar_repeticion(
+        empleado, fechas, modalidad, fechas.get("confirmacion"), fechas.get("vista_previa"),
     )
+    return inicio, fin, resumen
 
 
 def _parse_bool(value, default=True):
@@ -134,6 +138,7 @@ def _permiso_payload(permiso: PermisoSalida, user=None) -> dict:
         "tipo_label": TIPO_LABELS.get(permiso.tipo, permiso.tipo),
         "fecha_inicio": permiso.fecha_inicio.isoformat(),
         "fecha_fin": permiso.fecha_fin.isoformat() if permiso.fecha_fin else None,
+        "fechas_laborables": permiso.fechas_laborables,
         "motivo": permiso.motivo,
         "estado": permiso.estado,
         "estado_jefe": permiso.estado_jefe,
@@ -182,7 +187,8 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
                 return qs.none()
             qs = qs.filter(fecha_inicio__date__lt=siguiente).filter(
                 Q(fecha_inicio__date__gte=inicio)
-                | Q(tipo=PermisoSalida.TIPO_PERMISO_DIA, fecha_fin__date__gte=inicio)
+                | (Q(fecha_fin__date__gte=inicio)
+                   & (Q(tipo=PermisoSalida.TIPO_PERMISO_DIA) | ~Q(fechas_laborables=[])))
             )
         elif mes:
             qs = qs.filter(fecha_inicio__month=mes)
@@ -200,6 +206,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             }
         )
 
+    @transaction.atomic
     def create(self, request):
         empleado_id = request.data.get("empleado")
         try:
@@ -213,7 +220,9 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if tipo not in dict(PermisoSalida.TIPO_CHOICES):
             return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        fecha_inicio, fecha_fin = _fechas_permiso(request.data, tipo)
+        fecha_inicio, fecha_fin, fechas = _fechas_permiso(request.data, tipo, empleado)
+        if isinstance(fechas, dict):
+            return Response(fechas)
 
         motivo = (request.data.get("motivo") or "").strip()
         if not motivo:
@@ -225,6 +234,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             tipo=tipo,
             fecha_inicio=fecha_inicio,
             fecha_fin=fecha_fin,
+            fechas_laborables=fechas,
             motivo=motivo,
             goce_sueldo=_parse_bool(request.data.get("goce_sueldo"), default=True),
             origen_solicitud=self.origen_solicitud,
@@ -232,12 +242,16 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         notificar_permiso_solicitado(permiso, actor=request.user)
         return Response(_permiso_payload(permiso, request.user), status=status.HTTP_201_CREATED)
 
-    def get_object(self):
-        return get_object_or_404(self._permisos(), pk=self.kwargs["pk"])
+    def get_object(self, *, bloquear=False):
+        qs = self._permisos()
+        if bloquear:
+            qs = PermisoSalida.objects.select_for_update().filter(pk__in=qs.order_by().values("pk"))
+        return get_object_or_404(qs, pk=self.kwargs["pk"])
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def editar(self, request, pk=None):
-        permiso = self.get_object()
+        permiso = self.get_object(bloquear=True)
         if not can_editar_permiso(request.user, permiso):
             return Response({"detail": "No tienes permiso para editar este registro."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -249,13 +263,17 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         if tipo and tipo not in dict(PermisoSalida.TIPO_CHOICES):
             return Response({"tipo": "Tipo de permiso invalido."}, status=status.HTTP_400_BAD_REQUEST)
 
-        fecha_inicio, fecha_fin = _fechas_permiso(request.data, tipo or permiso.tipo)
+        fecha_inicio, fecha_fin, fechas = _fechas_permiso(request.data, tipo or permiso.tipo, permiso.empleado)
+        if isinstance(fechas, dict):
+            return Response(fechas)
+        if permiso.fechas_laborables and not request.data.get("modalidad_dias"):
+            raise serializers.ValidationError({"modalidad_dias": "Selecciona la duración para corregir este permiso."})
 
         motivo = (request.data.get("motivo") or "").strip()
         if not motivo:
             return Response({"motivo": "El motivo es obligatorio."}, status=status.HTTP_400_BAD_REQUEST)
 
-        campos_auditados = ["tipo", "fecha_inicio", "fecha_fin", "motivo", "goce_sueldo"]
+        campos_auditados = ["tipo", "fecha_inicio", "fecha_fin", "fechas_laborables", "motivo", "goce_sueldo"]
         antes = {campo: _valor_permiso(permiso, campo) for campo in campos_auditados}
         fechas_previas = [f for f in (permiso.fecha_inicio, permiso.fecha_fin) if f]
 
@@ -263,6 +281,7 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
             permiso.tipo = tipo
         permiso.fecha_inicio = fecha_inicio
         permiso.fecha_fin = fecha_fin
+        permiso.fechas_laborables = fechas
         permiso.motivo = motivo
         goce = request.data.get("goce_sueldo")
         if goce is not None:
@@ -294,8 +313,9 @@ class BasePermisosEquipoViewSet(viewsets.ViewSet):
         return Response(_permiso_payload(permiso, request.user))
 
     @action(detail=True, methods=["post"])
+    @transaction.atomic
     def eliminar(self, request, pk=None):
-        permiso = self.get_object()
+        permiso = self.get_object(bloquear=True)
         if not can_eliminar_permiso(request.user, permiso):
             return Response({"detail": "No tienes permiso para eliminar este registro."}, status=status.HTTP_403_FORBIDDEN)
         motivo_cambio = _motivo_cambio(request)

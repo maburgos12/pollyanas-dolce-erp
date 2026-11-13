@@ -28,6 +28,7 @@
 
     <script>
       {% include "rrhh/permiso_fechas.js" %}
+      {% include "rrhh/confirmar_permiso_repetido.js" %}
       const API = "/rrhh/api";
       const AUTH_API = "/api/logistica";
       const initialSection = "{{ initial_section|default:'inicio'|escapejs }}";
@@ -225,12 +226,31 @@
           motivo: document.getElementById("p_motivo").value,
           goce_sueldo: goce
         };
-        if (tipo === "permiso_dia") payload.modalidad_dias = event.currentTarget.elements.modalidad_dias.value;
-        const res = await apiFetch(`${API}/permisos/`, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(payload)
+        const form = event.currentTarget;
+        if (form.dataset.enviando) return;
+        form.dataset.enviando = "true";
+        const modalidad = form.elements.modalidad_dias.value;
+        payload.modalidad_dias = modalidad;
+        combinarHorasRepetidas(form, payload);
+        const enviar = datos => apiFetch(`${API}/permisos/`, {
+          method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(datos)
         });
+        let res;
+        try {
+          if (modalidad === "laborables") {
+            const preview = await enviar({...payload, vista_previa: true});
+            const resumen = await preview.json();
+            if (!preview.ok) throw new Error(Object.values(resumen).flat().join(" "));
+            if (!confirmarPermisoRepetido(resumen)) return;
+            payload.confirmacion = resumen.confirmacion;
+          }
+          res = await enviar(payload);
+        } catch (error) {
+          form.querySelector("[data-permiso-dias]").textContent = error.message;
+          return;
+        } finally {
+          delete form.dataset.enviando;
+        }
         const data = await res.json();
         if (res.ok) {
           await cargarHistorialReciente();
@@ -487,6 +507,10 @@
           timeZone: "America/Mazatlan", dateStyle: "short",
           ...(p.tipo === "permiso_dia" ? {} : {timeStyle: "short"})
         });
+        if (p.fechas_laborables?.length) {
+          const hora = new Intl.DateTimeFormat("es-MX", {timeZone:"America/Mazatlan", hour:"2-digit", minute:"2-digit"});
+          return `${hora.format(new Date(p.fecha_inicio))}–${hora.format(new Date(p.fecha_fin))} · ${p.fechas_laborables.join(", ")}`;
+        }
         const inicio = formato.format(new Date(p.fecha_inicio));
         const fin = p.fecha_fin && formato.format(new Date(p.fecha_fin));
         return fin && fin !== inicio ? `${inicio} a ${fin}` : inicio;

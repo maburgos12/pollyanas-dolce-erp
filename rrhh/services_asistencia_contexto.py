@@ -354,6 +354,7 @@ def cargar_contexto_asistencia(
         empleado_id__in=empleado_ids,
         estado=PermisoSalida.ESTADO_APROBADO,
         fecha_inicio__lte=fin_dt,
+        fechas_laborables=[],
     ).filter(Q(fecha_fin__isnull=True, fecha_inicio__gte=inicio_dt) | Q(fecha_fin__gte=inicio_dt)))
 
     bajas = {}

@@ -199,10 +199,13 @@ def exportar_pdf_reporte(data, *, titulo='Reporte de asistencia'):
                     interval.append(timezone.localtime(value).strftime('%d/%m/%Y %H:%M') if value else 'N/D')
                 duration = (f'{permit.get("dias", 0)} días' if permit.get('dias')
                             else formato_minutos(permit.get('minutos')))
+                horario = f'{interval[0]} a {interval[1]}'
+                if permit.get('fechas_laborables'):
+                    horario = f'{interval[0][-5:]}–{interval[1][-5:]} por día: ' + ', '.join(permit['fechas_laborables'])
                 story.append(p(f'Folio {permit.get("folio") or permit.get("id", "N/D")}: '
                                f'{permit.get("tipo", "")} | {permit.get("estado", "")} | '
                                f'{"CG" if permit.get("goce_sueldo") else "SG"} | '
-                               f'{interval[0]} a {interval[1]} | Duración en periodo: {duration} | '
+                               f'{horario} | Duración en periodo: {duration} | '
                                f'Motivo: {permit.get("motivo", "")}'))
                 for observation in permit.get('observaciones', []):
                     story.append(p(observation))
