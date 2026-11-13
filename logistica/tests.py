@@ -8082,19 +8082,49 @@ class LogisticaControlRutasTests(TestCase):
             for n in range(cantidad):
                 transferencia(parada, f"ivan-tardia-{parada.orden}-{n}")
 
+        def carga_del_tramo():
+            return list(RutaCargaChecklistLinea.objects.filter(
+                checklist__ruta=ruta, parada__in=[sinaloa, bamoa, guamuchil],
+            ).order_by("source_hash").values_list(
+                "parada_id", "transfer_external_id", "detail_external_id",
+                "cantidad_enviada_esperada", "cantidad_cargada", "estatus",
+            ))
+
+        sync_job = PointSyncJob.objects.create(
+            job_type=PointSyncJob.JOB_TYPE_TRANSFERS, status=PointSyncJob.STATUS_SUCCESS,
+        )
+        with transaction.atomic():
+            jefatura = User.objects.create_superuser(username="jefatura.paridad")
+            self.client.force_login(jefatura)
+            with patch("logistica.services_carga_ruta.OpenTransferSyncService") as point:
+                point.return_value.sync_open_transfers.return_value = sync_job
+                response = self.client.post(
+                    reverse("logistica:ruta_detail", args=[ruta.pk]), {"action": "sync_carga_point"},
+                )
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(point.return_value.sync_open_transfers.call_count, 2)
+            carga_erp = carga_del_tramo()
+            self.assertEqual(list(protegidas.order_by("pk").values()), antes)
+            self.assertEqual(list(entregas.values()), entregas_antes)
+            self.assertFalse(RutaCargaChecklistLinea.objects.filter(
+                checklist__ruta=ruta, point_transfer_line__in=[variante, *fuera],
+            ).exists())
+            transaction.set_rollback(True)
+
+        self.client.force_login(self.user)
         with patch.object(actualizar_carga_point_repartidor, "apply_async") as encolar:
             self.assertEqual(self.client.post(url_tramo).status_code, 202)
             self.assertEqual(self.client.post(url_tramo).status_code, 202)
             encolar.assert_called_once()
         self.assertEqual(self.client.get(ruta_url).json()["recarga_carga_point_id"], recarga.pk)
         kwargs = encolar.call_args.kwargs["kwargs"]
-        sync_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_TRANSFERS, status=PointSyncJob.STATUS_SUCCESS)
         with patch("logistica.services_carga_ruta.OpenTransferSyncService") as point:
             point.return_value.sync_open_transfers.return_value = sync_job
             actualizar_carga_point_repartidor.apply(kwargs=kwargs, throw=True)
             self.assertEqual(point.return_value.sync_open_transfers.call_count, 2)
 
         self.assertEqual(self.client.get(url_tramo).json()["estado"], "ACTUALIZADA")
+        self.assertEqual(carga_del_tramo(), carga_erp)
         datos_ruta = self.client.get(ruta_url).json()
         carga = datos_ruta["checklist_carga"]["lineas"]
         self.assertEqual([sum(l["parada"] == p.pk for l in carga) for p in (sinaloa, bamoa, guamuchil)], [27, 34, 32])

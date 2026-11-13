@@ -900,7 +900,7 @@ def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> int | None:
 
 def sincronizar_checklist_carga_desde_point(
     *, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True, desde_repartidor: bool = False,
-    recarga_cedis_id: int | None = None,
+    recarga_cedis_id: int | None = None, solo_tramo_vigente: bool = False,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.get(pk=ruta.pk)
     if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
@@ -923,7 +923,7 @@ def sincronizar_checklist_carga_desde_point(
 
     return _actualizar_checklist_carga_desde_point(
         ruta=ruta, user=user, sync_job=sync_job, desde_repartidor=desde_repartidor,
-        recarga_cedis_id=recarga_cedis_id,
+        recarga_cedis_id=recarga_cedis_id, solo_tramo_vigente=solo_tramo_vigente,
     )
 
 
@@ -970,6 +970,7 @@ def _actualizar_checklist_carga_desde_point(
     solo_abiertas: bool = True,
     desde_repartidor: bool = False,
     recarga_cedis_id: int | None = None,
+    solo_tramo_vigente: bool = False,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
     if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
@@ -982,6 +983,8 @@ def _actualizar_checklist_carga_desde_point(
         raise ValidationError("La ruta no tiene paradas ligadas a sucursales para relacionar transferencias Point.")
     checklist = RutaCargaChecklist.objects.select_for_update().filter(ruta=ruta).first()
     checklist = checklist or obtener_checklist_carga(ruta)
+    if solo_tramo_vigente and ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA:
+        recarga_cedis_id, _ = _tramo_carga_actual(ruta)
     if recarga_cedis_id is not None:
         paradas_tramo = _paradas_por_sucursal(ruta, ordenes_abiertas=_ordenes_tramo_carga_actual(ruta))
         creadas, actualizadas, omitidas = _sincronizar_lineas_point_para_ruta(
