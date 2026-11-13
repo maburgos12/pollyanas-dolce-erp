@@ -1,0 +1,27 @@
+[Unit]
+Description=ERP technical repairs to draft PR only; human SHA approval required
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Environment=HOME=/var/lib/erp-autofix GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_OPTIONAL_LOCKS=0 GIT_TERMINAL_PROMPT=0
+ExecStart=/usr/bin/python3 -B /opt/erp-autofix/current/ops/erp-autofix/worker.py once
+TimeoutStartSec=7200
+TimeoutStopSec=30
+StateDirectory=erp-autofix
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/erp-factory /var/lib/erp-autofix /var/lib/erp-codex/jobs
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+MemoryMax=384M
+CPUQuota=20%
+TasksMax=128
