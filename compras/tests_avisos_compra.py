@@ -186,7 +186,7 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
             UserProfile.objects.create(user=self.solicitante, telefono="6871234567")
             enviar_avisos_pendientes(compra)
         self.assertEqual(compra.avisos.get(canal="CORREO").estado, "ENVIADO")
-        self.assertEqual(compra.avisos.get(canal="WHATSAPP").estado, "FALLIDO")
+        self.assertEqual(compra.avisos.get(canal="WHATSAPP").estado, "INCIERTO")
         self.assertEqual(len(mail.outbox), 1)
         self.assertTrue(CompraRealizadaDepartamental.objects.filter(pk=compra.pk).exists())
 
@@ -234,16 +234,36 @@ class AvisosCompraTests(BaseAvisosMixin, TestCase):
         programar_avisos(compra)
         self.assertEqual(compra.avisos.count(), 2)
 
-    def test_resultado_incierto_de_whatsapp_no_se_marca_enviado(self):
+    def test_whatsapp_al_solicitante_incluye_folio_y_enlace(self):
         UserProfile.objects.create(user=self.solicitante, telefono="6871234567")
         with patch("compras.services_avisos_compra._despachar"):
             compra = self.registrar_compra()
         with patch("core.whatsapp.enviar_plantilla",
-                   return_value=ResultadoWhatsApp("INCIERTO", detalle="Sin respuesta del canal")):
+                   return_value=ResultadoWhatsApp("ENVIADO", referencia="wamid.1")) as enviar:
             enviar_avisos_pendientes(compra)
-        aviso = compra.avisos.get(canal="WHATSAPP")
+            enviar_avisos_pendientes(compra)
+        enviar.assert_called_once_with(
+            telefono="526871234567", plantilla="",
+            parametros=["Carolina Prueba", self.item.descripcion,
+                        f"{self.solicitud.folio} ({url_solicitud(compra)})",
+                        compra.fecha_compra.strftime("%d/%m/%Y")],
+        )
+
+    def test_whatsapp_incierto_no_se_reenvia_ni_muestra_reintento(self):
+        UserProfile.objects.create(user=self.solicitante, telefono="6871234567")
+        with patch("compras.services_avisos_compra._despachar"):
+            compra = self.registrar_compra()
+        with patch("core.whatsapp.enviar_plantilla",
+                   return_value=ResultadoWhatsApp("INCIERTO", detalle="Sin respuesta del canal")) as enviar:
+            enviar_avisos_pendientes(compra)
+            enviar_avisos_pendientes(compra)
+            aviso = compra.avisos.get(canal="WHATSAPP")
+            enviar_aviso(aviso, actor=self.compras_user)
+        enviar.assert_called_once()
+        aviso.refresh_from_db()
         self.assertEqual(aviso.estado, "INCIERTO")
         self.assertEqual(aviso.referencia_externa, "")
+        self.assertFalse(aviso.puede_reintentarse)
 
     def test_correo_sin_respuesta_queda_incierto_y_con_respuesta_de_error_queda_fallido(self):
         with patch("compras.services_avisos_compra._despachar"):
@@ -482,6 +502,25 @@ class TransaccionRevertidaTests(BaseAvisosMixin, TransactionTestCase):
             compra = self.registrar_compra()
         encolar.assert_called_once_with(compra.pk)
         self.assertEqual(AvisoCompraDepartamental.objects.count(), 2)
+
+    def test_interrupcion_del_worker_no_duplica_whatsapp(self):
+        UserProfile.objects.create(user=self.solicitante, telefono="6871234567")
+        with patch("compras.services_avisos_compra._despachar"):
+            compra = self.registrar_compra()
+        aviso = compra.avisos.get(canal="WHATSAPP")
+
+        def interrumpir(**kwargs):
+            self.assertFalse(transaction.get_connection().in_atomic_block)
+            self.assertEqual(compra.avisos.get(canal="WHATSAPP").estado, "INCIERTO")
+            raise SystemExit
+
+        with patch("core.whatsapp.enviar_plantilla", side_effect=interrumpir) as enviar:
+            with self.assertRaises(SystemExit):
+                enviar_aviso(aviso)
+            enviar_aviso(aviso)
+        enviar.assert_called_once()
+        aviso.refresh_from_db()
+        self.assertEqual(aviso.intentos, 1)
 
 
 class RuteoDeColaTests(TestCase):

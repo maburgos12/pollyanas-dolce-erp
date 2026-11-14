@@ -4,7 +4,7 @@ Patrón outbox: los renglones de aviso se crean dentro de la misma transacción
 que la compra —así una transacción revertida no deja aviso ni envío— y el envío
 se despacha en ``transaction.on_commit``. El renglón es la cola persistente: si
 Celery, Resend o Meta fallan, el aviso queda con su estado y motivo y puede
-reintentarse desde la pantalla sin duplicar nada.
+reintentarse desde la pantalla cuando el proveedor no lo haya aceptado.
 """
 from __future__ import annotations
 
@@ -118,7 +118,10 @@ def _enviar_whatsapp(aviso, contexto) -> None:
     resultado = whatsapp.enviar_plantilla(
         telefono=telefono,
         plantilla="",
-        parametros=[contexto["nombre"], contexto["articulo"], contexto["folio"], contexto["fecha"]],
+        parametros=[
+            contexto["nombre"], contexto["articulo"],
+            f'{contexto["folio"]} ({contexto["url"]})', contexto["fecha"],
+        ],
     )
     _marcar(aviso, resultado.estado, detalle=resultado.detalle, destino=telefono,
             referencia=resultado.referencia)
@@ -134,25 +137,33 @@ def _marcar(aviso, estado: str, *, detalle: str = "", destino: str = "", referen
         aviso.enviado_en = timezone.now()
 
 
-@transaction.atomic
 def enviar_aviso(aviso, *, actor=None) -> AvisoCompraDepartamental:
-    """Ejecuta un canal y guarda su resultado real. No lanza al llamador.
+    """Ejecuta un canal y guarda el resultado del proveedor."""
+    with transaction.atomic():
+        bloqueado = (AvisoCompraDepartamental.objects.select_for_update(skip_locked=True)
+                     .filter(pk=aviso.pk).first())
+        if bloqueado is None:
+            return aviso
+        aviso = bloqueado
+        if not aviso.puede_reintentarse:
+            return aviso
+        contexto = contexto_mensaje(aviso.compra)
+        aviso.intentos += 1
+        aviso.ultimo_intento_en = timezone.now()
+        if actor is not None:
+            aviso.ultimo_intento_por = actor
+        if aviso.canal == AvisoCompraDepartamental.CANAL_CORREO:
+            return _ejecutar_aviso(aviso, contexto)
+        # Si el proceso se interrumpe durante la llamada, Meta pudo haberla aceptado.
+        aviso.estado = AvisoCompraDepartamental.ESTADO_INCIERTO
+        aviso.detalle = "El intento de WhatsApp aún no tiene confirmación del proveedor."
+        aviso.save(update_fields=[
+            "estado", "detalle", "intentos", "ultimo_intento_en", "ultimo_intento_por", "actualizado_en",
+        ])
+    return _ejecutar_aviso(aviso, contexto)
 
-    El renglón se toma con ``skip_locked``: si otro proceso ya está enviando
-    este mismo aviso, esta llamada no hace nada en lugar de mandar un duplicado.
-    """
-    bloqueado = (AvisoCompraDepartamental.objects.select_for_update(skip_locked=True)
-                 .filter(pk=aviso.pk).first())
-    if bloqueado is None:
-        return aviso
-    aviso = bloqueado
-    if aviso.estado == AvisoCompraDepartamental.ESTADO_ENVIADO:
-        return aviso
-    contexto = contexto_mensaje(aviso.compra)
-    aviso.intentos += 1
-    aviso.ultimo_intento_en = timezone.now()
-    if actor is not None:
-        aviso.ultimo_intento_por = actor
+
+def _ejecutar_aviso(aviso, contexto) -> AvisoCompraDepartamental:
     try:
         if aviso.canal == AvisoCompraDepartamental.CANAL_CORREO:
             _enviar_correo(aviso, contexto)
@@ -160,8 +171,10 @@ def enviar_aviso(aviso, *, actor=None) -> AvisoCompraDepartamental:
             _enviar_whatsapp(aviso, contexto)
     except Exception as exc:  # una falla de canal nunca revienta la pantalla
         logger.exception("[compras] Aviso %s falló de forma inesperada", aviso.pk)
-        _marcar(aviso, AvisoCompraDepartamental.ESTADO_FALLIDO, detalle=f"{exc}"[:400],
-                destino=aviso.destino)
+        estado = (AvisoCompraDepartamental.ESTADO_INCIERTO
+                  if aviso.canal == AvisoCompraDepartamental.CANAL_WHATSAPP
+                  else AvisoCompraDepartamental.ESTADO_FALLIDO)
+        _marcar(aviso, estado, detalle=f"{exc}"[:400], destino=aviso.destino)
     aviso.save(update_fields=[
         "estado", "detalle", "destino", "referencia_externa", "intentos",
         "enviado_en", "ultimo_intento_en", "ultimo_intento_por", "actualizado_en",
@@ -174,7 +187,7 @@ def reconciliar_incierto(aviso) -> AvisoCompraDepartamental:
 
     Solo el correo puede consultarse: si Resend devolvió identificador, se
     confirma contra su API. WhatsApp no ofrece consulta por idempotencia, así
-    que un incierto sin identificador exige decisión de una persona.
+    que un resultado incierto de WhatsApp queda bloqueado para reenvío.
     """
     if aviso.estado != AvisoCompraDepartamental.ESTADO_INCIERTO:
         return aviso
