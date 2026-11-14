@@ -1081,7 +1081,9 @@ class AvisoCompraDepartamental(models.Model):
 
     @property
     def puede_reintentarse(self) -> bool:
-        """Un envío aceptado nunca se reenvía; el incierto exige reconciliar primero."""
+        """Un resultado incierto de WhatsApp se conserva sin reenvío."""
+        if self.canal == self.CANAL_WHATSAPP and self.estado == self.ESTADO_INCIERTO:
+            return False
         return self.estado in {self.ESTADO_PENDIENTE, self.ESTADO_FALLIDO, self.ESTADO_SIN_CONTACTO,
                                self.ESTADO_SIN_CANAL, self.ESTADO_INCIERTO}
 
