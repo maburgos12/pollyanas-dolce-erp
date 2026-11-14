@@ -322,6 +322,7 @@
                   <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
                   <input type="hidden" name="revision" value="{{ solicitud.actualizado_en.isoformat }}">
                   <label>Motivo <input type="text" name="motivo_cambio" maxlength="500" required></label>
+                  <label><span><input type="checkbox" name="sin_pago_confirmado" value="1" required> Verifiqué que estas vacaciones no se han pagado.</span></label>
                   <button class="btn btn-secondary" type="submit">Confirmar cancelación</button>
                 </form>
               </details>

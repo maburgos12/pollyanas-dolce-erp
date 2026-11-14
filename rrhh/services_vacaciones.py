@@ -532,7 +532,7 @@ def _validar_reserva_para_cambio(solicitud):
 
 
 @transaction.atomic
-def modificar_solicitud_vacaciones(solicitud, user, *, motivo, revision, fechas=None):
+def modificar_solicitud_vacaciones(solicitud, user, *, motivo, revision, fechas=None, sin_pago_confirmado=False):
     if not can_manage_rrhh(user):
         raise PermissionDenied("Solo Capital Humano puede modificar vacaciones.")
     if not motivo or len(motivo) > 500:
@@ -550,6 +550,8 @@ def modificar_solicitud_vacaciones(solicitud, user, *, motivo, revision, fechas=
     if fechas is None:
         if solicitud.estado not in ESTADOS_VACACIONES_PENDIENTES or solicitud.fecha_inicio <= hoy:
             raise ValidationError("Solo se pueden cancelar solicitudes pendientes cuyo goce aún no inicia.")
+        if not sin_pago_confirmado:
+            raise ValidationError("Confirma que verificaste que las vacaciones no se han pagado.")
         reservas = _validar_reserva_para_cambio(solicitud)
         descripcion = f"Liberación por cancelación {solicitud.folio}"
         if reservas:
@@ -597,6 +599,7 @@ def modificar_solicitud_vacaciones(solicitud, user, *, motivo, revision, fechas=
         model=solicitud._meta.label, object_id=str(solicitud.pk),
         payload={
             "folio": solicitud.folio, "motivo": motivo, "antes": antes,
+            **({"sin_pago_confirmado": True} if fechas is None else {}),
             "despues": {"estado": solicitud.estado, "fecha_inicio": str(solicitud.fecha_inicio),
                         "fecha_fin": str(solicitud.fecha_fin)},
         },

@@ -1948,7 +1948,7 @@ class CorreccionVacacionesTests(TestCase):
     def post(self, action, **datos):
         return self.client.post(self.url, {
             "action": action, "solicitud_id": self.solicitud.pk, "motivo_cambio": "Captura incorrecta",
-            "revision": self.solicitud.actualizado_en.isoformat(), **datos,
+            "revision": self.solicitud.actualizado_en.isoformat(), "sin_pago_confirmado": "1", **datos,
         }, HTTP_X_REQUESTED_WITH="XMLHttpRequest", HTTP_ACCEPT="application/json")
 
     def test_corrige_aprobada_sin_tocar_saldo(self):
@@ -1973,6 +1973,7 @@ class CorreccionVacacionesTests(TestCase):
 
     def test_cancelacion_terminal_y_reserva_liberada_una_vez(self):
         self.assertContains(self.client.get(self.url), "Cancelar solicitud")
+        self.assertEqual(self.post("cancelar_solicitud", sin_pago_confirmado="").status_code, 400)
         self.post("cancelar_solicitud")
         self.solicitud.refresh_from_db()
         self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_CANCELADA)

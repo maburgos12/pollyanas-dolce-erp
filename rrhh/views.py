@@ -3454,6 +3454,7 @@ def vacaciones_list(request):
                     solicitud, request.user,
                     motivo=(request.POST.get("motivo_cambio") or "").strip(),
                     revision=request.POST.get("revision"), fechas=fechas,
+                    sin_pago_confirmado=request.POST.get("sin_pago_confirmado") == "1",
                 )
                 if fechas is None:
                     success_message = f"Solicitud {solicitud.folio} cancelada y reserva liberada."
