@@ -1919,3 +1919,117 @@ class PrepararPeriodosVacacionalesTests(TestCase):
             ),
             originales,
         )
+
+
+@override_settings(VACACIONES_GOCE_FIFO_ACTIVO=True)
+class CorreccionVacacionesTests(TestCase):
+    def setUp(self):
+        from django.urls import reverse
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones
+
+        self.actor = User.objects.create_user(username="rrhh.correccion")
+        self.actor.groups.add(Group.objects.get_or_create(name="RRHH")[0])
+        self.empleado = Empleado.objects.create(nombre="Persona de prueba", fecha_ingreso=date(2023, 1, 1))
+        PeriodoVacacional.objects.create(
+            empleado=self.empleado, aniversario=date(2026, 1, 1), fecha_limite=date(2026, 7, 1),
+            antiguedad_anios=3, dias_generados=18,
+        )
+        self.reloj = patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 11, 14))
+        self.reloj.start()
+        self.addCleanup(self.reloj.stop)
+        self.solicitud = crear_solicitud_vacaciones(
+            empleado=self.empleado, fecha_inicio=date(2026, 11, 19), fecha_fin=date(2026, 11, 21),
+            motivo="Descanso", actor=self.actor,
+        )
+        self.client.force_login(self.actor)
+        self.url = reverse("rrhh:rrhh_vacaciones_list")
+        self.api = reverse("rrhh:vacaciones-detail", args=[self.solicitud.pk])
+
+    def post(self, action, **datos):
+        return self.client.post(self.url, {
+            "action": action, "solicitud_id": self.solicitud.pk, "motivo_cambio": "Captura incorrecta",
+            "revision": self.solicitud.actualizado_en.isoformat(), **datos,
+        }, HTTP_X_REQUESTED_WITH="XMLHttpRequest", HTTP_ACCEPT="application/json")
+
+    def test_corrige_aprobada_sin_tocar_saldo(self):
+        from core.models import AuditLog
+        from rrhh.services_vacaciones import aprobar_solicitud_vacaciones_rrhh
+
+        self.solicitud = aprobar_solicitud_vacaciones_rrhh(self.solicitud, self.actor)
+        antes = list(self.solicitud.aplicaciones_goce.values())
+        movimientos = list(self.solicitud.movimientos.values())
+        pantalla = self.client.get(self.url)
+        self.assertContains(pantalla, "Corregir fechas")
+        self.assertContains(pantalla, f'value="{self.solicitud.actualizado_en.isoformat()}"')
+        self.assertNotContains(pantalla, "Cancelar solicitud")
+        self.post("corregir_fechas", fecha_inicio="2026-11-23", fecha_fin="2026-11-25")
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.fecha_inicio, date(2026, 11, 23))
+        self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_APROBADA)
+        self.assertEqual(self.solicitud.aprobado_rrhh_por, self.actor)
+        self.assertEqual(list(self.solicitud.aplicaciones_goce.values()), antes)
+        self.assertEqual(list(self.solicitud.movimientos.values()), movimientos)
+        self.assertTrue(AuditLog.objects.filter(user=self.actor, action="UPDATE", model="rrhh.SolicitudVacaciones").exists())
+
+    def test_cancelacion_terminal_y_reserva_liberada_una_vez(self):
+        self.assertContains(self.client.get(self.url), "Cancelar solicitud")
+        self.post("cancelar_solicitud")
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_CANCELADA)
+        self.assertEqual(self.solicitud.aplicaciones_goce.get().estado, AplicacionGoceVacaciones.ESTADO_LIBERADA)
+        self.post("cancelar_solicitud")
+        self.post("aprobar_rrhh")
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_CANCELADA)
+        self.assertEqual(self.solicitud.movimientos.filter(tipo=MovimientoVacaciones.TIPO_LIBERADO).count(), 1)
+        self.assertNotContains(self.client.get(self.url), f'id="vac-solicitud-{self.solicitud.pk}"')
+        historial = self.client.get(self.url + "?solicitudes=canceladas")
+        self.assertContains(historial, self.solicitud.folio)
+        self.assertContains(historial, "Motivo de cancelación: Captura incorrecta")
+        from rrhh.services_vacaciones import crear_solicitud_vacaciones
+
+        nueva = crear_solicitud_vacaciones(
+            empleado=self.empleado, fecha_inicio=self.solicitud.fecha_inicio,
+            fecha_fin=self.solicitud.fecha_fin, motivo="Reprogramación", actor=self.actor,
+        )
+        self.assertNotEqual(nueva.folio, self.solicitud.folio)
+
+    def test_api_impide_escrituras_genericas(self):
+        self.assertEqual(self.client.patch(self.api, {"fecha_inicio": "2026-11-18"}, content_type="application/json").status_code, 405)
+        self.assertEqual(self.client.delete(self.api).status_code, 405)
+
+    def test_rechaza_cambio_de_dias_y_cancelacion_iniciada(self):
+        self.post("corregir_fechas", fecha_inicio="2026-11-19", fecha_fin="2026-11-20")
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.fecha_fin, date(2026, 11, 21))
+        self.reloj.stop()
+        with patch("rrhh.services_vacaciones.timezone.localdate", return_value=date(2026, 11, 19)):
+            self.post("cancelar_solicitud")
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_SOLICITADA)
+
+    def test_control_de_acceso_y_revision(self):
+        otro = User.objects.create_user(username="solo.empleado")
+        self.empleado.usuario_erp = otro
+        self.empleado.save(update_fields=["usuario_erp"])
+        self.client.force_login(otro)
+        self.assertNotContains(self.client.get(self.url), "Corregir fechas")
+        self.assertEqual(self.post("cancelar_solicitud").status_code, 403)
+        self.client.force_login(self.actor)
+        self.assertEqual(self.post("cancelar_solicitud", revision="anterior").status_code, 400)
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.estado, SolicitudVacaciones.ESTADO_SOLICITADA)
+
+    def test_bloquea_corte_exportado(self):
+        from rrhh.models import PrenominaCorte
+
+        dia = date(2026, 11, 19)
+        corte = PrenominaCorte.objects.create(
+            fecha_inicio=dia, fecha_fin=dia, fecha_corte=dia, estado=PrenominaCorte.ESTADO_EXPORTADO,
+        )
+        corte.resumenes.create(empleado=self.empleado)
+        respuesta = self.post("corregir_fechas", fecha_inicio="2026-11-23", fecha_fin="2026-11-25")
+        self.assertEqual(respuesta.status_code, 400)
+        self.assertIn("corte de prenómina", respuesta.json()["toast"]["message"])
+        self.solicitud.refresh_from_db()
+        self.assertEqual(self.solicitud.fecha_inicio, dia)

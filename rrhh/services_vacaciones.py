@@ -18,6 +18,7 @@ from .models import (
     IncapacidadEmpleado,
     MovimientoVacaciones,
     PoliticaVacaciones,
+    PrenominaCorte,
     SolicitudVacaciones,
 )
 from .services_permisos import permiso_requiere_autorizacion_direccion, usuario_direccion_general_para_autorizacion
@@ -213,6 +214,39 @@ def _reevaluar_asistencia_solicitud(solicitud: SolicitudVacaciones) -> None:
     transaction.on_commit(_correr)
 
 
+ESTADOS_VACACIONES_PENDIENTES = (
+    SolicitudVacaciones.ESTADO_SOLICITADA,
+    SolicitudVacaciones.ESTADO_PREAUTORIZADA,
+)
+ESTADOS_VACACIONES_VIGENTES = (*ESTADOS_VACACIONES_PENDIENTES, SolicitudVacaciones.ESTADO_APROBADA)
+
+
+def _validar_rango_vacaciones(empleado, fecha_inicio, fecha_fin, *, excluir_id=None):
+    traslape = SolicitudVacaciones.objects.filter(
+        empleado=empleado,
+        estado__in=ESTADOS_VACACIONES_VIGENTES,
+        fecha_inicio__lte=fecha_fin,
+        fecha_fin__gte=fecha_inicio,
+    ).exclude(pk=excluir_id).exists()
+    if traslape:
+        raise ValidationError("Ya existe una solicitud de vacaciones en ese periodo.")
+    incapacidad = (
+        IncapacidadEmpleado.objects.filter(
+            empleado=empleado,
+            estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
+            fecha_inicio__lte=fecha_fin,
+            fecha_fin__gte=fecha_inicio,
+        )
+        .order_by("fecha_inicio", "id")
+        .first()
+    )
+    if incapacidad:
+        folio = f" {incapacidad.folio}" if incapacidad.folio else ""
+        raise ValidationError(
+            f"El periodo cruza incapacidad{folio} del {incapacidad.fecha_inicio:%Y-%m-%d} al {incapacidad.fecha_fin:%Y-%m-%d}."
+        )
+
+
 def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_fin: date, motivo: str, actor=None) -> SolicitudVacaciones:
     if not empleado or not empleado.activo:
         raise ValidationError("Selecciona un empleado activo.")
@@ -220,6 +254,9 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
     if dias <= 0:
         raise ValidationError("El periodo no contiene días laborables.")
     with transaction.atomic():
+        empleado = Empleado.objects.select_for_update(no_key=True).get(pk=empleado.pk)
+        if not empleado.activo:
+            raise ValidationError("Selecciona un empleado activo.")
         # El respaldo de generación solo es necesario si faltan días: un
         # aniversario por conciliar no debe bloquear bolsas anteriores válidas.
         if goce_vacacional_fifo_activo() and not proponer_goce_fifo(empleado, dias)["suficiente"]:
@@ -228,33 +265,7 @@ def crear_solicitud_vacaciones(*, empleado: Empleado, fecha_inicio: date, fecha_
             asegurar_periodo_actual(
                 empleado.pk, al=fecha_inicio, actor=actor, referencia="solicitud",
             )
-        traslape = SolicitudVacaciones.objects.filter(
-            empleado=empleado,
-            estado__in=[
-                SolicitudVacaciones.ESTADO_SOLICITADA,
-                SolicitudVacaciones.ESTADO_PREAUTORIZADA,
-                SolicitudVacaciones.ESTADO_APROBADA,
-            ],
-            fecha_inicio__lte=fecha_fin,
-            fecha_fin__gte=fecha_inicio,
-        ).exists()
-        if traslape:
-            raise ValidationError("Ya existe una solicitud de vacaciones en ese periodo.")
-        incapacidad = (
-            IncapacidadEmpleado.objects.filter(
-                empleado=empleado,
-                estado__in=[IncapacidadEmpleado.ESTADO_ACTIVA, IncapacidadEmpleado.ESTADO_CERRADA],
-                fecha_inicio__lte=fecha_fin,
-                fecha_fin__gte=fecha_inicio,
-            )
-            .order_by("fecha_inicio", "id")
-            .first()
-        )
-        if incapacidad:
-            folio = f" {incapacidad.folio}" if incapacidad.folio else ""
-            raise ValidationError(
-                f"El periodo cruza incapacidad{folio} del {incapacidad.fecha_inicio:%Y-%m-%d} al {incapacidad.fecha_fin:%Y-%m-%d}."
-            )
+        _validar_rango_vacaciones(empleado, fecha_inicio, fecha_fin)
         if not goce_vacacional_fifo_activo():
             saldo = saldo_vacaciones_empleado(
                 empleado,
@@ -499,4 +510,95 @@ def rechazar_solicitud_vacaciones(solicitud: SolicitudVacaciones, user) -> Solic
         solicitud.fecha_aprobacion_rrhh = timezone.now()
         solicitud.save(update_fields=["estado", "aprobado_rrhh_por", "fecha_aprobacion_rrhh", "actualizado_en"])
         _reevaluar_asistencia_solicitud(solicitud)
+    return solicitud
+
+
+def _validar_reserva_para_cambio(solicitud):
+    if _solicitud_usa_goce_fifo(solicitud):
+        reservas = validar_reservas_goce(solicitud)
+        if solicitud.aplicaciones_goce.filter(estado=AplicacionGoceVacaciones.ESTADO_CONSUMIDA).exists():
+            raise ValidationError("La solicitud tiene días consumidos.")
+        return reservas
+
+    movimientos = solicitud.movimientos.filter(
+        tipo__in=[MovimientoVacaciones.TIPO_RESERVADO, MovimientoVacaciones.TIPO_LIBERADO,
+                  MovimientoVacaciones.TIPO_CONSUMIDO],
+    )
+    if list(movimientos.values_list("tipo", "dias", "periodo_anio")) != [
+        (MovimientoVacaciones.TIPO_RESERVADO, solicitud.dias_laborables, solicitud.fecha_inicio.year),
+    ]:
+        raise ValidationError("La solicitud no tiene una reserva vigente que coincida con sus días.")
+    return []
+
+
+@transaction.atomic
+def modificar_solicitud_vacaciones(solicitud, user, *, motivo, revision, fechas=None):
+    if not can_manage_rrhh(user):
+        raise PermissionDenied("Solo Capital Humano puede modificar vacaciones.")
+    if not motivo or len(motivo) > 500:
+        raise ValidationError("Captura un motivo de hasta 500 caracteres.")
+    if fechas is not None:
+        # La creación y la corrección validan traslapes bajo el mismo bloqueo.
+        Empleado.objects.select_for_update(no_key=True).get(pk=solicitud.empleado_id)
+    solicitud = SolicitudVacaciones.objects.select_for_update().get(pk=solicitud.pk)
+    if revision != solicitud.actualizado_en.isoformat():
+        raise ValidationError("La solicitud cambió. Recarga la página y revisa sus datos.")
+
+    hoy = timezone.localdate()
+    antes = {"estado": solicitud.estado, "fecha_inicio": str(solicitud.fecha_inicio),
+             "fecha_fin": str(solicitud.fecha_fin)}
+    if fechas is None:
+        if solicitud.estado not in ESTADOS_VACACIONES_PENDIENTES or solicitud.fecha_inicio <= hoy:
+            raise ValidationError("Solo se pueden cancelar solicitudes pendientes cuyo goce aún no inicia.")
+        reservas = _validar_reserva_para_cambio(solicitud)
+        descripcion = f"Liberación por cancelación {solicitud.folio}"
+        if reservas:
+            liberar_reservas_goce(solicitud, actor=user, descripcion=descripcion)
+        else:
+            _registrar_movimiento_legacy(
+                solicitud, tipo=MovimientoVacaciones.TIPO_LIBERADO, actor=user, descripcion=descripcion,
+            )
+        solicitud.estado = SolicitudVacaciones.ESTADO_CANCELADA
+        solicitud.save(update_fields=["estado", "actualizado_en"])
+    else:
+        if solicitud.estado not in ESTADOS_VACACIONES_VIGENTES or solicitud.fecha_fin < hoy:
+            raise ValidationError("Solo se pueden corregir solicitudes vigentes con goce futuro o en curso.")
+        inicio, fin = fechas
+        if fin < hoy or contar_dias_laborables(inicio, fin) != solicitud.dias_laborables:
+            raise ValidationError("El periodo debe conservar los días laborables y terminar hoy o después.")
+        if fechas == (solicitud.fecha_inicio, solicitud.fecha_fin):
+            raise ValidationError("Indica fechas distintas a las registradas.")
+        reservas = _validar_reserva_para_cambio(solicitud)
+        if not reservas and inicio.year != solicitud.fecha_inicio.year:
+            raise ValidationError("La reserva original pertenece a otro año.")
+        _validar_rango_vacaciones(solicitud.empleado, inicio, fin, excluir_id=solicitud.pk)
+
+        def dias_del_rango(desde, hasta):
+            return {desde + timedelta(days=i) for i in range((hasta - desde).days + 1)}
+
+        afectados = dias_del_rango(inicio, fin) ^ dias_del_rango(solicitud.fecha_inicio, solicitud.fecha_fin)
+        cortes = PrenominaCorte.objects.filter(
+            resumenes__empleado_id=solicitud.empleado_id,
+            estado__in=[PrenominaCorte.ESTADO_EXPORTADO, PrenominaCorte.ESTADO_CERRADO],
+            fecha_inicio__lte=max(afectados), fecha_fin__gte=min(afectados),
+        ).values_list("fecha_inicio", "fecha_fin")
+        if any(desde <= dia <= hasta for desde, hasta in cortes for dia in afectados):
+            raise ValidationError("El cambio afecta un corte de prenómina exportado o cerrado.")
+        solicitud.fecha_inicio, solicitud.fecha_fin = inicio, fin
+        solicitud.save(update_fields=["fecha_inicio", "fecha_fin", "actualizado_en"])
+        from .services_asistencia_reglas import evaluar_dia_empleado
+
+        for dia in sorted(afectados):
+            if dia <= hoy:
+                evaluar_dia_empleado(solicitud.empleado, dia)
+
+    AuditLog.objects.create(
+        user=user, action="CANCEL" if fechas is None else "UPDATE",
+        model=solicitud._meta.label, object_id=str(solicitud.pk),
+        payload={
+            "folio": solicitud.folio, "motivo": motivo, "antes": antes,
+            "despues": {"estado": solicitud.estado, "fecha_inicio": str(solicitud.fecha_inicio),
+                        "fecha_fin": str(solicitud.fecha_fin)},
+        },
+    )
     return solicitud

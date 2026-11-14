@@ -295,6 +295,7 @@ class PermisoSalidaViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
 
 class SolicitudVacacionesViewSet(_CapitalHumanoAccessMixin, viewsets.ModelViewSet):
     serializer_class = SolicitudVacacionesSerializer
+    http_method_names = ["get", "post", "head", "options"]
 
     def get_queryset(self):
         qs = SolicitudVacaciones.objects.select_related(

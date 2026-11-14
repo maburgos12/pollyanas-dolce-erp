@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 
 from .models import (
     AjusteAsistencia,
@@ -429,27 +430,34 @@ class SolicitudVacacionesAdmin(admin.ModelAdmin):
     readonly_fields = ("folio", "creado_en", "actualizado_en")
     autocomplete_fields = ("empleado", "jefe_directo", "preautorizado_por", "aprobado_rrhh_por", "creado_por")
 
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
 
 @admin.register(MovimientoVacaciones)
 class MovimientoVacacionesAdmin(admin.ModelAdmin):
     list_display = ("empleado", "tipo", "dias", "periodo_anio", "solicitud", "actor", "creado_en")
     list_filter = ("tipo", "periodo_anio", "creado_en")
     search_fields = ("empleado__nombre", "empleado__codigo", "solicitud__folio", "descripcion")
-    readonly_fields = ("creado_en",)
-    autocomplete_fields = ("empleado", "solicitud", "actor")
+    readonly_fields = ("creado_en", "solicitud")
+    autocomplete_fields = ("empleado", "actor")
 
-    def delete_model(self, request, obj):
-        self._delete_with_solicitudes(MovimientoVacaciones.objects.filter(pk=obj.pk))
+    def has_change_permission(self, request, obj=None):
+        return (obj is None or obj.solicitud_id is None) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return (obj is None or obj.solicitud_id is None) and super().has_delete_permission(request, obj)
 
     def delete_queryset(self, request, queryset):
-        self._delete_with_solicitudes(queryset)
-
-    def _delete_with_solicitudes(self, queryset):
-        solicitud_ids = list(queryset.exclude(solicitud__isnull=True).values_list("solicitud_id", flat=True).distinct())
-        queryset.filter(solicitud__isnull=True).delete()
-        if solicitud_ids:
-            MovimientoVacaciones.objects.filter(solicitud_id__in=solicitud_ids).delete()
-            SolicitudVacaciones.objects.filter(id__in=solicitud_ids).delete()
+        if queryset.filter(solicitud__isnull=False).exists():
+            raise PermissionDenied("Gestiona la solicitud vinculada desde el módulo de vacaciones.")
+        super().delete_queryset(request, queryset)
 
 
 @admin.register(SuspensionEmpleado)

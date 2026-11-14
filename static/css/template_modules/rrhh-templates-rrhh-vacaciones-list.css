@@ -171,6 +171,10 @@
   .vac-badge { background: #f7edf2; border-radius: 999px; color: var(--vino); display: inline-flex; font-size: 12px; font-weight: 900; padding: 5px 9px; }
   .vac-badge.gold { background: rgba(201, 168, 76, .18); color: #6f5415; }
   .vac-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+  .vac-change-action { grid-column: 1 / -1; }
+  .vac-change-action summary { color: var(--vino); cursor: pointer; font-weight: 700; }
+  .vac-change-action form { align-items: end; margin-top: 8px; }
+  .vac-change-action label { display: grid; gap: 4px; }
   .vac-reglamento {
     background: #fff;
     border: 1px solid var(--rosa);
