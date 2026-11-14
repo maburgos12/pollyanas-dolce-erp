@@ -25,6 +25,7 @@ from django.utils import timezone
 
 from django.contrib.auth import get_user_model
 
+from core.models import AuditLog
 from core.access import can_manage_rrhh, can_view_rrhh, can_view_submodule
 from core.branch_catalog import resolver_sucursal_por_texto
 from core.audit import log_event
@@ -122,12 +123,15 @@ from .services_permisos import (
 from .serializers import PermisoSalidaSerializer
 from .api_views import empleado_de_usuario
 from .services_vacaciones import (
+    ESTADOS_VACACIONES_PENDIENTES,
+    ESTADOS_VACACIONES_VIGENTES,
     aprobar_solicitud_vacaciones_rrhh,
     can_gestionar_vacaciones_jefe,
     can_resolver_vacaciones_jefe,
     crear_solicitud_vacaciones,
     es_dia_laborable,
     goce_vacacional_fifo_activo,
+    modificar_solicitud_vacaciones,
     preautorizar_solicitud_vacaciones_jefe,
     rechazar_solicitud_vacaciones,
     saldo_vacaciones_empleado,
@@ -3434,6 +3438,29 @@ def vacaciones_list(request):
                 )
                 success_message = f"Solicitud {solicitud.folio} registrada y saldo reservado."
                 fragment = f"vac-solicitud-{solicitud.id}"
+            elif action in {"corregir_fechas", "cancelar_solicitud"}:
+                if not can_manage_rrhh(request.user):
+                    raise PermissionDenied("Solo Capital Humano puede modificar vacaciones.")
+                solicitud = get_object_or_404(SolicitudVacaciones, pk=request.POST.get("solicitud_id"))
+                fragment = f"vac-solicitud-{solicitud.id}"
+                fechas = None
+                if action == "corregir_fechas":
+                    inicio = _parse_date(request.POST.get("fecha_inicio"))
+                    fin = _parse_date(request.POST.get("fecha_fin"))
+                    if not inicio or not fin:
+                        raise ValidationError("Captura fecha inicial y fecha final.")
+                    fechas = (inicio, fin)
+                solicitud = modificar_solicitud_vacaciones(
+                    solicitud, request.user,
+                    motivo=(request.POST.get("motivo_cambio") or "").strip(),
+                    revision=request.POST.get("revision"), fechas=fechas,
+                    sin_pago_confirmado=request.POST.get("sin_pago_confirmado") == "1",
+                )
+                if fechas is None:
+                    success_message = f"Solicitud {solicitud.folio} cancelada y reserva liberada."
+                    fragment = "solicitudes-vacaciones"
+                else:
+                    success_message = f"Fechas de {solicitud.folio} corregidas. Saldo conservado."
             elif action == "ajustar_saldo":
                 if not can_manage_rrhh(request.user):
                     raise PermissionDenied("Solo Capital Humano puede conciliar saldos de vacaciones.")
@@ -3642,8 +3669,20 @@ def vacaciones_list(request):
         rows = list(qs[:120])
         for solicitud in rows:
             solicitud.puede_preautorizar_jefe = can_resolver_vacaciones_jefe(request.user, solicitud)
+            aplicaciones = list(solicitud.aplicaciones_goce.all())
+            solicitud.puede_corregir_fechas = (
+                solicitud.estado in ESTADOS_VACACIONES_VIGENTES
+                and solicitud.fecha_fin >= hoy
+                and (solicitud.estado in ESTADOS_VACACIONES_PENDIENTES or any(
+                    aplicacion.estado == AplicacionGoceVacaciones.ESTADO_RESERVADA
+                    for aplicacion in aplicaciones
+                ))
+            )
+            solicitud.puede_cancelar = (
+                solicitud.estado in ESTADOS_VACACIONES_PENDIENTES and solicitud.fecha_inicio > hoy
+            )
             solicitud.distribucion_goce = (
-                list(solicitud.aplicaciones_goce.all()) if fifo_activo else []
+                aplicaciones if fifo_activo else []
             )
         return rows
 
@@ -3661,8 +3700,18 @@ def vacaciones_list(request):
         ("aprobada", "Aprobadas", _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_APROBADA))),
         ("rechazada", "Rechazadas", _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_RECHAZADA))),
     ]
+    ver_canceladas = request.GET.get("solicitudes") == "canceladas"
+    if ver_canceladas:
+        canceladas = _con_permisos_accion(solicitudes_qs.filter(estado=SolicitudVacaciones.ESTADO_CANCELADA))
+        motivos_cancelacion = dict(AuditLog.objects.filter(
+            model="rrhh.SolicitudVacaciones", action="CANCEL",
+            object_id__in=[str(solicitud.pk) for solicitud in canceladas],
+        ).values_list("object_id", "payload")) if can_manage_rrhh(request.user) else {}
+        for solicitud in canceladas:
+            solicitud.motivo_cancelacion = motivos_cancelacion.get(str(solicitud.pk), {}).get("motivo")
+        columnas = [("cancelada", "Canceladas", canceladas)]
     stats = {
-        "total": solicitudes_qs.count(),
+        "total": solicitudes_qs.exclude(estado=SolicitudVacaciones.ESTADO_CANCELADA).count(),
         "pendientes": solicitudes_qs.filter(
             estado__in=[SolicitudVacaciones.ESTADO_SOLICITADA, SolicitudVacaciones.ESTADO_PREAUTORIZADA]
         ).count(),
@@ -3681,7 +3730,8 @@ def vacaciones_list(request):
             "periodo_actual": hoy.year,
             "periodo_maximo": hoy.year + 1,
             "sucursales_historial": sucursales_historial,
-            "hay_solicitudes": stats["total"] > 0,
+            "hay_solicitudes": any(items for _, _, items in columnas),
+            "ver_canceladas": ver_canceladas,
             "columnas": columnas,
             "stats": stats,
             "vacaciones_goce_fifo_activo": fifo_activo,

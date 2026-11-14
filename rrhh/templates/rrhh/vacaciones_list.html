@@ -239,7 +239,12 @@
       </div>
     </div>
 
-    <section class="vac-status-panel">
+    <section class="vac-status-panel" id="solicitudes-vacaciones">
+      {% if ver_canceladas %}
+        <a href="?#solicitudes-vacaciones">Ver solicitudes operativas</a>
+      {% else %}
+        <a href="?solicitudes=canceladas#solicitudes-vacaciones">Ver solicitudes canceladas</a>
+      {% endif %}
       <div class="vac-status-strip">
       {% for key, label, items in columnas %}
         <a class="vac-status-tab {% if forloop.first %}active{% endif %}" href="#estado-{{ key }}">
@@ -258,6 +263,7 @@
               <strong>{{ solicitud.empleado.nombre }}</strong>
               <span>{{ solicitud.folio }}</span>
               {% if solicitud.motivo %}<p>{{ solicitud.motivo|truncatechars:140 }}</p>{% endif %}
+              {% if solicitud.motivo_cancelacion %}<p>Motivo de cancelación: {{ solicitud.motivo_cancelacion }}</p>{% endif %}
             </div>
             <div>{{ solicitud.fecha_inicio|date:"Y-m-d" }} a {{ solicitud.fecha_fin|date:"Y-m-d" }}</div>
             <div>
@@ -290,6 +296,36 @@
                 <button class="btn btn-primary" type="submit" name="action" value="aprobar_rrhh" data-pending-label="Aprobando…">Aprobar RRHH</button>
                 <button class="btn btn-secondary" type="submit" name="action" value="rechazar_rrhh" data-pending-label="Rechazando…">Rechazar</button>
               </form>
+            {% endif %}
+            {% if can_manage_rrhh and solicitud.puede_corregir_fechas %}
+              <details class="vac-change-action">
+                <summary>Corregir fechas</summary>
+                <form class="vac-card-actions" method="post" data-async-action>
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="corregir_fechas">
+                  <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                  <input type="hidden" name="revision" value="{{ solicitud.actualizado_en.isoformat }}">
+                  <label>Inicio <input type="date" name="fecha_inicio" value="{{ solicitud.fecha_inicio|date:'Y-m-d' }}" required></label>
+                  <label>Fin <input type="date" name="fecha_fin" value="{{ solicitud.fecha_fin|date:'Y-m-d' }}" required></label>
+                  <label>Motivo <input type="text" name="motivo_cambio" maxlength="500" required></label>
+                  <button class="btn btn-primary" type="submit">Guardar fechas</button>
+                </form>
+              </details>
+            {% endif %}
+            {% if can_manage_rrhh and solicitud.puede_cancelar %}
+              <details class="vac-change-action">
+                <summary>Cancelar solicitud</summary>
+                <form class="vac-card-actions" method="post" data-async-action
+                      data-confirm-message="Se liberará la reserva de {{ solicitud.folio }}. Para reprogramar, registra una nueva solicitud.">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="cancelar_solicitud">
+                  <input type="hidden" name="solicitud_id" value="{{ solicitud.id }}">
+                  <input type="hidden" name="revision" value="{{ solicitud.actualizado_en.isoformat }}">
+                  <label>Motivo <input type="text" name="motivo_cambio" maxlength="500" required></label>
+                  <label><span><input type="checkbox" name="sin_pago_confirmado" value="1" required> Verifiqué que estas vacaciones no se han pagado.</span></label>
+                  <button class="btn btn-secondary" type="submit">Confirmar cancelación</button>
+                </form>
+              </details>
             {% endif %}
           </article>
         {% endfor %}

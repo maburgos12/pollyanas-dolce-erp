@@ -1,5 +1,5 @@
 from django.contrib.auth.models import Group, User
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase, TransactionTestCase, override_settings
@@ -797,7 +797,7 @@ class CapitalHumanoServiceTests(TestCase):
         self.assertEqual(movimiento.actor, rrhh_user)
         self.assertIn("[conciliacion-manual] Corrección por pago timbrado", movimiento.descripcion)
 
-    def test_admin_borra_solicitud_al_borrar_movimiento_vacaciones_ligado(self):
+    def test_admin_protege_solicitud_y_movimientos_vinculados(self):
         from datetime import date
 
         from django.contrib import admin
@@ -832,10 +832,11 @@ class CapitalHumanoServiceTests(TestCase):
         )
 
         model_admin = admin.site._registry[MovimientoVacaciones]
-        model_admin.delete_queryset(None, MovimientoVacaciones.objects.filter(pk=reservado.pk))
+        with self.assertRaises(PermissionDenied):
+            model_admin.delete_queryset(None, MovimientoVacaciones.objects.filter(pk=reservado.pk))
 
-        self.assertFalse(SolicitudVacaciones.objects.filter(pk=solicitud.pk).exists())
-        self.assertFalse(MovimientoVacaciones.objects.filter(solicitud_id=solicitud.pk).exists())
+        self.assertTrue(SolicitudVacaciones.objects.filter(pk=solicitud.pk).exists())
+        self.assertEqual(MovimientoVacaciones.objects.filter(solicitud_id=solicitud.pk).count(), 2)
         self.assertTrue(MovimientoVacaciones.objects.filter(pk=ajuste.pk).exists())
 
     def test_permiso_de_jefatura_lo_resuelve_direccion_no_rrhh(self):
