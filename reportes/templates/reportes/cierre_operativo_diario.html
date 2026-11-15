@@ -22,13 +22,15 @@
     <div class="bi-hero-main">
       <div class="bi-kicker">Dirección general</div>
       <h1 class="bi-hero-title">Cierre operativo diario</h1>
-      <p class="bi-copy">Conciliación diaria de ventas, producción, mermas e inventario con foco en lo que realmente entró desde Point y en lo que ya quedó visible en el ERP.</p>
+      <p class="bi-copy">Consulta qué quedó registrado para el día auditado en ventas, producción, mermas e inventario, y qué falta revisar.</p>
       <div class="closure-pill-row pd-u-88b9d5c614">
         <span class="closure-pill {% if closure.overall_status.tone == 'success' %}success{% elif closure.overall_status.tone == 'danger' %}danger{% else %}warning{% endif %}">
           {{ closure.overall_status.label }}
         </span>
         <span class="closure-pill">Fecha auditada {{ target_date_iso }}</span>
-        <span class="closure-pill">Fecha operativa esperada {{ default_target_date_iso }}</span>
+        {% if target_date_iso != default_target_date_iso %}
+          <span class="closure-pill">Fecha operativa esperada {{ default_target_date_iso }}</span>
+        {% endif %}
       </div>
       <p class="closure-copy pd-u-d8a81eac84">{{ closure.overall_status.detail }}</p>
     </div>
@@ -39,7 +41,7 @@
           <input id="fecha" name="fecha" type="date" value="{{ target_date_iso }}">
         </div>
         <div class="bi-control">
-          <label for="fecha_option">Atajos</label>
+          <label for="fecha_option">Fechas recientes</label>
           <select id="fecha_option" onchange="if (this.value) { document.getElementById('fecha').value = this.value; }">
             <option value="">Elegir fecha reciente</option>
             {% for option in date_options %}
@@ -53,12 +55,12 @@
       </form>
       <div class="bi-hero-status-grid">
         <article class="bi-status-card">
-          <span class="bi-status-label">Ventas visibles</span>
-          <strong>{{ closure.sales.visible_cut_snapshot_label|default:"Sin corte" }}</strong>
+          <span class="bi-status-label">Último corte de ventas confirmado</span>
+          <strong>{% if latest_sales_cut_date %}<time datetime="{{ latest_sales_cut_date|date:'Y-m-d' }}">{{ latest_sales_cut_date|date:"Y-m-d" }}</time>{% else %}Sin corte confirmado{% endif %}</strong>
         </article>
         <article class="bi-status-card">
-          <span class="bi-status-label">Plan producción</span>
-          <strong>{{ production_snapshot.plan_hoy_estado }}</strong>
+          <span class="bi-status-label">Plan del día auditado</span>
+          <strong>{% if closure.production.plan_count %}{{ closure.production.plan_count }} {{ closure.production.plan_count|pluralize:"plan,planes" }}{% else %}Sin plan registrado{% endif %}</strong>
         </article>
         <article class="bi-status-card">
           <span class="bi-status-label">Movimientos inventario</span>
@@ -66,7 +68,7 @@
         </article>
         <article class="bi-status-card">
           <span class="bi-status-label">Alertas del cierre</span>
-          <strong>{{ closure.alerts|length|intcomma }}</strong>
+          <strong><a href="#alertas-cierre">{{ closure.alerts|length|intcomma }} · Ver alertas</a></strong>
         </article>
       </div>
     </div>
@@ -133,7 +135,7 @@
       </div>
     </article>
 
-    <article class="closure-card">
+    <article class="closure-card" id="alertas-cierre">
       <div class="closure-card-head">
         <div>
           <h2 class="closure-card-title">Alertas del cierre</h2>

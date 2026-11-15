@@ -707,6 +707,22 @@ class DailyOperationalClosureViewTests(TestCase):
         )
         self.existencia.refresh_from_db()
 
+    def test_cierre_operativo_distinguishes_selected_day_from_latest_confirmed_sales_cut(self):
+        confirmed_day = self.target_date + timedelta(days=1)
+        with patch("reportes.closed_sales.latest_closed_sales_date", return_value=confirmed_day), patch(
+            "reportes.views._bi_daily_sales_snapshot",
+            return_value={"date": confirmed_day, "date_label": confirmed_day.isoformat()},
+        ) as commercial_snapshot:
+            response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+
+        self.assertEqual(response.status_code, 200)
+        commercial_snapshot.assert_not_called()
+        self.assertContains(response, f"Fecha auditada {self.target_date.isoformat()}")
+        self.assertContains(response, "Último corte de ventas confirmado")
+        self.assertContains(response, f'<time datetime="{confirmed_day.isoformat()}">{confirmed_day.isoformat()}</time>', html=True)
+        self.assertContains(response, "Plan del día auditado")
+        self.assertEqual(response.context["target_date"], self.target_date)
+
     def test_cierre_operativo_view_renders_reconciled_domains(self):
         response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
 
