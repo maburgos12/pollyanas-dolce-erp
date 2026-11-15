@@ -56,6 +56,8 @@ from reportes.views import (
     _bi_branch_weekday_comparisons,
     _bi_product_weekday_comparisons,
     _bi_production_summary,
+    _bi_supply_watchlist,
+    _bi_waste_summary,
     _faltantes_rows,
     _bi_inventory_snapshot,
     _sales_previous_dates,
@@ -186,6 +188,22 @@ class ReportesBITests(TestCase):
         self.assertContains(response, "?sales_year=2025&amp;sales_month=10&amp;detalle=1#detalle-operativo")
         self.assertNotContains(response, "Tablero ejecutivo del negocio")
 
+    def test_bi_detail_uses_visible_panels_without_old_summaries(self):
+        with patch("reportes.views._bi_production_summary", wraps=_bi_production_summary) as production, patch(
+            "reportes.views._bi_waste_summary", wraps=_bi_waste_summary
+        ) as waste, patch("reportes.views.compute_bi_snapshot", wraps=compute_bi_snapshot) as snapshot:
+            response = self.client.get(reverse("reportes:bi"), {"detalle": "1", "period_days": 60, "months": 9})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Tablero ejecutivo del negocio")
+        self.assertEqual(response.context["period_days"], 60)
+        self.assertEqual(response.context["months_window"], 9)
+        self.assertIn("production_sales_panel", response.context)
+        self.assertIn("inventory_ledger_panel", response.context)
+        production.assert_not_called()
+        waste.assert_not_called()
+        snapshot.assert_not_called()
+
     def test_bi_view_renders(self):
         sucursal = self._create_sucursal("BI-01", "Sucursal BI 01")
         receta = Receta.objects.create(nombre="Pastel BI Histórico", hash_contenido="hash-bi-historico-001")
@@ -273,21 +291,8 @@ class ReportesBITests(TestCase):
         self.assertNotContains(resp, "Centro de mando ERP")
         self.assertNotContains(resp, "Madurez ERP de reportes")
         self.assertNotContains(resp, "Criterios de cierre ERP")
-        self.assertIn("maturity_summary", resp.context)
-        self.assertIn("daily_decision_rows", resp.context)
         self.assertIn("branch_weekday_rows", resp.context)
         self.assertIn("product_weekday_rows", resp.context)
-        self.assertIn("handoff_map", resp.context)
-        self.assertIn("release_gate_rows", resp.context)
-        self.assertIn("release_gate_completion", resp.context)
-        self.assertIn("dependency_status", resp.context["enterprise_chain"][0])
-        self.assertIn("owner", resp.context["document_stage_rows"][0])
-        self.assertIn("completion", resp.context["document_stage_rows"][0])
-        self.assertIn("erp_governance_rows", resp.context)
-        self.assertIn("critical_path_rows", resp.context)
-        self.assertIn("executive_radar_rows", resp.context)
-        self.assertIn("erp_command_center", resp.context)
-        self.assertIn("ventas_historicas_summary", resp.context)
         self.assertIn("forecast_panel", resp.context)
         self.assertIn("yoy_panel", resp.context)
         self.assertIn("profitability_panel", resp.context)
@@ -296,7 +301,6 @@ class ReportesBITests(TestCase):
         self.assertIn("production_sales_panel", resp.context)
         self.assertIn("central_flow_panel", resp.context)
         self.assertIn("inventory_ledger_panel", resp.context)
-        self.assertEqual(resp.context["ventas_historicas_summary"]["total_rows"], 2)
 
     @patch("reportes.executive_panels._operational_projection_for_week", return_value=None)
     @patch("reportes.executive_panels._indicator_daily_ticket_map")
@@ -1866,7 +1870,7 @@ class ReportesBITests(TestCase):
         self.assertNotContains(resp, "Mesa de gobierno ERP")
         self.assertNotContains(resp, "Ruta crítica ERP")
 
-    def test_bi_shows_plan_supply_watchlist(self):
+    def test_bi_supply_watchlist_uses_cedis_stock_and_display_units(self):
         sucursal = self._create_sucursal("BI-SUP-01", "Sucursal BI Supply")
         unidad = UnidadMedida.objects.create(
             codigo="g",
@@ -1929,20 +1933,17 @@ class ReportesBITests(TestCase):
             fuente="BI_SUPPLY_TEST",
         )
 
-        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
+        watchlist = _bi_supply_watchlist()
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertIn("supply_watchlist", resp.context)
-        self.assertTrue(resp.context["supply_watchlist"])
-        self.assertEqual(resp.context["supply_watchlist"]["plan_nombre"], "Plan BI Supply")
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["insumo_nombre"], "Chocolate BI Supply")
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual"], Decimal("4000"))
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage"], Decimal("4000"))
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["stock_actual_display"], Decimal("4"))
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["shortage_display"], Decimal("4"))
-        self.assertEqual(resp.context["supply_watchlist"]["rows"][0]["display_unit"], "kg")
-        self.assertContains(resp, "kg")
-        self.assertNotContains(resp, "4,000.00")
+        self.assertEqual(watchlist["plan_nombre"], "Plan BI Supply")
+        row = watchlist["rows"][0]
+        self.assertEqual(row["insumo_nombre"], "Chocolate BI Supply")
+        self.assertEqual(row["stock_actual"], Decimal("4000"))
+        self.assertEqual(row["shortage"], Decimal("4000"))
+        self.assertEqual(row["stock_actual_display"], Decimal("4"))
+        self.assertEqual(row["shortage_display"], Decimal("4"))
+        self.assertEqual(row["display_unit"], "kg")
+
 
     def test_bi_production_summary_uses_bulk_recipe_cost_map(self):
         target_date = timezone.localdate()

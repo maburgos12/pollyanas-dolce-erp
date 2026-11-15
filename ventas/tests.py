@@ -634,7 +634,7 @@ class VentasProjectionEngineTests(TestCase):
         branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
         calls = []
 
-        def fake_forecast(*, target_date, lookback_weeks, top_n):
+        def fake_forecast(*, target_date, lookback_weeks, top_n, include_validation):
             calls.append((target_date, lookback_weeks, top_n))
             qty = Decimal("18") if target_date.weekday() == 5 else Decimal("9")
             return {
@@ -702,7 +702,7 @@ class VentasProjectionEngineTests(TestCase):
                 source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE,
             )
 
-        def fake_forecast(*, target_date, lookback_weeks, top_n):
+        def fake_forecast(*, target_date, lookback_weeks, top_n, include_validation):
             return {
                 "rows": [
                     {
@@ -734,7 +734,7 @@ class VentasProjectionEngineTests(TestCase):
     def test_projection_applies_special_event_uplift_without_copying_old_units(self):
         branch = Sucursal.objects.create(codigo="GSV", nombre="Guasave")
 
-        def fake_forecast(*, target_date, lookback_weeks, top_n):
+        def fake_forecast(*, target_date, lookback_weeks, top_n, include_validation):
             return {
                 "rows": [
                     {

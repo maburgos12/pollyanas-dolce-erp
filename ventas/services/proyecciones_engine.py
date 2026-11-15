@@ -351,6 +351,8 @@ def calcular_proyeccion_operativa(
     fecha_fin: date,
     sucursal_ids: set[int] | list[int] | None = None,
     point_product_ids: set[int] | list[int] | None = None,
+    *,
+    include_validation: bool = True,
 ) -> dict:
     selected_days = list(_date_range(fecha_inicio, fecha_fin))
     if not selected_days:
@@ -398,6 +400,7 @@ def calcular_proyeccion_operativa(
             target_date=target_day,
             lookback_weeks=THREE_WEEK_LOOKBACK,
             top_n=None,
+            include_validation=include_validation,
         )
         validations.append(forecast.get("validation") or {})
         for row in forecast.get("rows") or []:

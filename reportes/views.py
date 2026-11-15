@@ -6299,12 +6299,16 @@ def bi(request: HttpRequest) -> HttpResponse:
         budget_month = None
     action_filter = (request.GET.get("action") or "").strip()
     bi_runtime_cache: dict[str, object] = {}
-    snapshot = _bi_cached_value(
-        runtime_cache=bi_runtime_cache,
-        section="snapshot",
-        builder=lambda: compute_bi_snapshot(period_days=period_days, months_window=months_window),
-        parts=(period_days, months_window),
-    )
+    export_format = (request.GET.get("export") or "").lower()
+    if not branch_id and export_format in ("csv", "xlsx"):
+        snapshot = _bi_cached_value(
+            runtime_cache=bi_runtime_cache,
+            section="snapshot",
+            builder=lambda: compute_bi_snapshot(period_days=period_days, months_window=months_window),
+            parts=(period_days, months_window),
+        )
+        return _export_bi_csv(snapshot) if export_format == "csv" else _export_bi_xlsx(snapshot)
+
     executive_panels = _bi_cached_value(
         runtime_cache=bi_runtime_cache,
         section="executive-panels-confidence-v1",
@@ -6326,7 +6330,6 @@ def bi(request: HttpRequest) -> HttpResponse:
     from reportes.sales_confidence import build_sales_confidence
     cutoff = executive_panels.get("latest_cutoff_date") or timezone.localdate()
     executive_panels["sales_confidence"] = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
-    export_format = (request.GET.get("export") or "").lower()
     if branch_id and export_format == "csv":
         return _export_branch_bi_csv(executive_panels["branch_pricing_panel"], executive_panels["branch_contribution_panel"])
     if branch_id and export_format == "xlsx":
@@ -6339,15 +6342,9 @@ def bi(request: HttpRequest) -> HttpResponse:
         return _export_branches_bi_xlsx(executive_panels["branch_contribution_panel"])
     if export_format == "branches_pdf":
         return _export_branches_bi_pdf(executive_panels["branch_contribution_panel"])
-    if export_format == "csv":
-        return _export_bi_csv(snapshot)
-    if export_format == "xlsx":
-        return _export_bi_xlsx(snapshot)
 
     context = {
-        "snapshot": snapshot,
         "bi_detail_loaded": True,
-        "executive_panels": executive_panels,
         "sales_confidence": executive_panels["sales_confidence"],
         "forecast_panel": executive_panels["forecast_panel"],
         "yoy_panel": executive_panels["yoy_panel"],
@@ -6376,189 +6373,14 @@ def bi(request: HttpRequest) -> HttpResponse:
             builder=_bi_product_weekday_comparisons,
             parts=(timezone.localdate().isoformat(),),
         ),
-        "purchase_snapshot": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="purchase-snapshot",
-            builder=_bi_purchase_snapshot,
-            parts=(timezone.localdate().isoformat(),),
-        ),
-        "inventory_snapshot": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="inventory-snapshot",
-            builder=_bi_inventory_snapshot,
-            parts=(timezone.localdate().isoformat(),),
-        ),
-        "production_snapshot": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="production-snapshot",
-            builder=_bi_production_snapshot,
-            parts=(timezone.localdate().isoformat(),),
-        ),
-        "production_summary": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="production-summary",
-            builder=lambda: _bi_production_summary(snapshot["range"]["from"], snapshot["range"]["to"]),
-            parts=(snapshot["range"]["from"].isoformat(), snapshot["range"]["to"].isoformat()),
-        ),
-        "waste_summary": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="waste-summary",
-            builder=lambda: _bi_waste_summary(snapshot["range"]["from"], snapshot["range"]["to"]),
-            parts=(snapshot["range"]["from"].isoformat(), snapshot["range"]["to"].isoformat()),
-        ),
-        "forecast_summary": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="forecast-summary",
-            builder=lambda: _bi_forecast_summary(snapshot["range"]["to"].strftime("%Y-%m")),
-            parts=(snapshot["range"]["to"].strftime("%Y-%m"),),
-        ),
-        "supply_watchlist": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="supply-watchlist",
-            builder=_bi_supply_watchlist,
-            parts=(timezone.localdate().isoformat(),),
-        ),
-        "ventas_historicas_summary": _bi_cached_value(
-            runtime_cache=bi_runtime_cache,
-            section="ventas-historicas-summary",
-            builder=_ventas_historicas_bi_summary,
-            parts=(timezone.localdate().isoformat(),),
-        ),
-        "bi_force_refresh_reference_date": timezone.localdate().isoformat(),
-        "bi_force_refresh_lookback_days": 7,
         "current_year": executive_panels["yoy_panel"]["current_year"],
         "prev_year": executive_panels["yoy_panel"]["prev_year"],
         "prev2_year": executive_panels["yoy_panel"]["prev2_year"],
-        "period_days": snapshot["range"]["days"],
-        "months_window": snapshot["range"]["months_window"],
+        "period_days": max(7, min(period_days or 90, 365)),
+        "months_window": max(3, min(months_window or 6, 24)),
         "selected_branch_id": branch_id,
-        "selected_budget_month": budget_month,
         "selected_action": action_filter,
-        "enterprise_chain": _reportes_enterprise_chain(
-            focus="bi",
-            open_count=len(snapshot.get("series_mensual", [])),
-            blocked_count=0,
-        ),
-        "document_stage_rows": _reportes_document_stage_rows(
-            focus="bi",
-            open_count=len(snapshot.get("series_mensual", [])),
-            blocked_count=0,
-            total_count=len(snapshot.get("series_mensual", [])),
-        ),
-        "erp_governance_rows": _reportes_governance_rows(
-            _reportes_document_stage_rows(
-                focus="bi",
-                open_count=len(snapshot.get("series_mensual", [])),
-                blocked_count=0,
-                total_count=len(snapshot.get("series_mensual", [])),
-            )
-        ),
-        "operational_health_cards": _reportes_operational_health_cards(
-            focus="bi",
-            open_count=len(snapshot.get("series_mensual", [])),
-            blocked_count=0,
-            total_count=len(snapshot.get("series_mensual", [])),
-        ),
-        "maturity_summary": _reportes_maturity_summary(
-            chain=_reportes_enterprise_chain(
-                focus="bi",
-                open_count=len(snapshot.get("series_mensual", [])),
-                blocked_count=0,
-            ),
-            default_url=reverse("reportes:bi"),
-        ),
-        "handoff_map": _reportes_handoff_map(
-            focus="bi",
-            blocked_count=0,
-            open_count=len(snapshot.get("series_mensual", [])),
-            total_count=len(snapshot.get("series_mensual", [])),
-            default_url=reverse("reportes:bi"),
-        ),
-        "release_gate_rows": _reportes_release_gate_rows(
-            focus="bi",
-            open_count=len(snapshot.get("series_mensual", [])),
-            blocked_count=0,
-            total_count=len(snapshot.get("series_mensual", [])),
-        ),
     }
-    context["sales_branch_bar_rows"] = _bi_bar_rows(
-        list(context["daily_sales_snapshot"].get("top_branches") or []),
-        label_key="label",
-        secondary_key="secondary",
-        value_key="amount",
-    )
-    context["sales_product_bar_rows"] = _bi_bar_rows(
-        list(context["daily_sales_snapshot"].get("top_products") or []),
-        label_key="label",
-        value_key="amount",
-    )
-    context["monthly_sales_rows"] = _bi_monthly_sales_rows(snapshot)
-    context["monthly_margin_rows"] = _bi_monthly_margin_rows(snapshot)
-    context["supplier_bar_rows"] = _bi_bar_rows(
-        list(snapshot.get("top_proveedores") or []),
-        label_key="proveedor__nombre",
-        value_key="total",
-    )
-    context["consumption_bar_rows"] = _bi_bar_rows(
-        list(snapshot.get("top_insumos_consumo") or []),
-        label_key="insumo__nombre",
-        value_key="total",
-    )
-    context["production_product_bar_rows"] = _bi_bar_rows(
-        list(context["production_summary"].get("top_products") or []),
-        label_key="label",
-        value_key="value",
-    )
-    context["waste_branch_bar_rows"] = _bi_bar_rows(
-        list(context["waste_summary"].get("branch_rows") or []),
-        label_key="label",
-        secondary_key="secondary",
-        value_key="value",
-    )
-    context["waste_cedis_bar_rows"] = _bi_bar_rows(
-        list(context["waste_summary"].get("cedis_rows") or []),
-        label_key="label",
-        secondary_key="secondary",
-        value_key="value",
-    )
-    context["forecast_gap_bar_rows"] = _bi_bar_rows(
-        list(context["forecast_summary"].get("top_rows") or []),
-        label_key="label",
-        secondary_key="secondary",
-        value_key="value",
-    )
-    context["branch_weekday_bar_rows"] = _bi_comparison_bar_rows(
-        list(context["branch_weekday_rows"] or []),
-        label_key="branch_code",
-        secondary_key="branch_name",
-    )
-    context["product_weekday_bar_rows"] = _bi_comparison_bar_rows(
-        list(context["product_weekday_rows"] or []),
-        label_key="recipe_name",
-    )
-    context["daily_decision_rows"] = _bi_daily_decisions(
-        daily_sales_snapshot=context["daily_sales_snapshot"],
-        branch_weekday_rows=context["branch_weekday_rows"],
-        product_weekday_rows=context["product_weekday_rows"],
-        purchase_snapshot=context["purchase_snapshot"],
-        inventory_snapshot=context["inventory_snapshot"],
-        production_snapshot=context["production_snapshot"],
-        waste_summary=context["waste_summary"],
-        forecast_summary=context["forecast_summary"],
-        supply_watchlist=context["supply_watchlist"],
-    )
-    context["release_gate_completion"] = _reportes_release_gate_completion(context["release_gate_rows"])
-    context["critical_path_rows"] = _reportes_critical_path_rows(context["enterprise_chain"])
-    context["executive_radar_rows"] = _reportes_executive_radar_rows(
-        context["erp_governance_rows"],
-        default_owner="Dirección General",
-        fallback_url=reverse("reportes:bi"),
-    )
-    context["erp_command_center"] = _reportes_command_center(
-        governance_rows=context["erp_governance_rows"],
-        maturity_summary=context["maturity_summary"],
-        default_owner="Dirección General",
-    )
     context["commercial_analytics"] = commercial_panel_from_request(request)
     return render(request, "reportes/bi.html", context)
 
