@@ -16,8 +16,8 @@
       <p class="dg-subtitle">Venta, merma y excepciones del corte actual.</p>
       <div class="dg-headline-row">
         <span class="dg-date-pill">Corte {{ point_exec_summary.closure_date|date:"Y-m-d" }}</span>
-        <span class="dg-chip {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          Ticket promedio {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+        <span class="dg-chip {% if point_ticket_summary.total_tickets %}is-success{% else %}is-warning{% endif %}">
+          Ticket promedio {% if point_ticket_summary.total_tickets %}${{ point_ticket_summary.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
         </span>
         <span class="dg-chip {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
           Merma {{ point_waste_summary.total_qty|floatformat:2|intcomma }}
@@ -59,15 +59,15 @@
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Tickets último corte</div>
-        <div class="dg-metric-value is-neutral">{{ point_exec_summary.latest_tickets|intcomma }}</div>
-        <div class="dg-metric-foot">Sucursales con tickets: {{ point_exec_summary.ticket_branch_count }}/{{ point_exec_summary.active_branch_count }}</div>
+        <div class="dg-metric-value is-neutral">{{ point_ticket_summary.total_tickets|intcomma }}</div>
+        <div class="dg-metric-foot">{% if point_ticket_summary %}Sucursales con tickets: {{ point_ticket_summary.with_tickets_count }}/{{ point_ticket_summary.branch_count }}{% else %}Indicadores Point no disponibles{% endif %}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Ticket promedio</div>
-        <div class="dg-metric-value {% if point_exec_summary.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-          {% if point_exec_summary.ticket_data_available %}${{ point_exec_summary.latest_avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
+        <div class="dg-metric-value {% if point_ticket_summary.total_tickets %}is-success{% else %}is-warning{% endif %}">
+          {% if point_ticket_summary.total_tickets %}${{ point_ticket_summary.avg_ticket|floatformat:2|intcomma }}{% else %}N/D{% endif %}
         </div>
-        <div class="dg-metric-foot">{% if point_exec_summary.ticket_data_available %}promedio real del corte{% else %}sin tickets válidos{% endif %}</div>
+        <div class="dg-metric-foot">{% if point_ticket_summary.total_tickets %}promedio real del corte{% else %}sin tickets válidos{% endif %}</div>
       </article>
       <article class="dg-kpi-card">
         <div class="dg-metric-label">Venta acumulada del mes</div>
@@ -138,7 +138,7 @@
         {% endfor %}
       </div>
       <div class="dg-summary-inline pd-u-d8a81eac84">
-        <span><strong>{{ point_exec_summary.top_branches|length }}</strong> sucursales visibles</span>
+        <span><strong>{{ point_exec_summary.top_branches|slice:":3"|length }}</strong> sucursales en el ranking</span>
         <span>monto relativo contra el corte total</span>
       </div>
       {% else %}
@@ -150,11 +150,11 @@
       <div class="dg-panel-header">
         <div>
           <h2 class="dg-panel-title">Mermas del día</h2>
-          <p class="dg-panel-subtitle">Pérdida visible en el corte actual.</p>
+          <p class="dg-panel-subtitle">Movimientos registrados en Point para el corte.</p>
         </div>
         <div class="dg-panel-actions">
           <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">{{ point_waste_summary.source_label }}</span>
-          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Abrir control</a>
+          <a class="btn btn-secondary" href="?fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}&amp;merma_detalle=1">Ver movimientos</a>
         </div>
       </div>
       {% if point_waste_summary.top_branches %}
@@ -169,8 +169,8 @@
             </div>
             {% if row.branch_id %}
             <div class="dg-inline-actions">
-              <a class="dg-inline-link" href="{% url 'control:discrepancias' %}?from={{ point_waste_summary.closure_date|date:'Y-m-d' }}&to={{ point_waste_summary.closure_date|date:'Y-m-d' }}&sucursal_id={{ row.branch_id }}">
-                Revisar merma en control
+              <a class="dg-inline-link" href="?fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}&amp;merma_detalle=1&amp;sucursal_id={{ row.branch_id }}">
+                Ver movimientos de {{ row.branch_name }}
               </a>
             </div>
             {% endif %}
@@ -181,7 +181,7 @@
       </div>
       <div class="dg-summary-inline pd-u-d8a81eac84">
         <span><strong>{{ point_waste_summary.total_qty|floatformat:2|intcomma }}</strong> pzas en el corte</span>
-        <span><strong>${{ point_waste_summary.total_cost|floatformat:2|intcomma }}</strong> costo visible</span>
+        <span><strong>${{ point_waste_summary.total_cost|floatformat:2|intcomma }}</strong> costo con estimaciones</span>
       </div>
       {% else %}
       <div class="dg-note">Sin mermas visibles en el último corte.</div>
@@ -277,26 +277,33 @@
   </section>
 
   <section class="dg-grid-2 dg-grid-2--compact">
-    <article class="dg-panel dg-chart-card">
+    <article class="dg-panel">
       <div class="dg-panel-header">
         <div>
           <h2 class="dg-panel-title">Ticket promedio por sucursal</h2>
-          <p class="dg-panel-subtitle">Ranking para identificar dónde se monetiza mejor el tráfico del día.</p>
+          <p class="dg-panel-subtitle">Importe de los tickets Point dividido entre el número de tickets del corte.</p>
         </div>
-        <div class="dg-panel-actions">
-          <span class="dg-pill {% if point_chart_bundle.ticket_data_available %}is-success{% else %}is-warning{% endif %}">
-            {% if point_chart_bundle.ticket_data_available %}Cobertura {{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}Sin tickets válidos{% endif %}
-          </span>
-          <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
+      </div>
+      {% if point_ticket_summary.rows %}
+        <p class="pd-chart-source">{{ point_ticket_summary.with_tickets_count }} de {{ point_ticket_summary.branch_count }} sucursales con tickets</p>
+        <div class="table-responsive">
+          <table class="table">
+            <thead><tr><th scope="col">Sucursal</th><th scope="col">Tickets</th><th scope="col">Promedio (MXN)</th></tr></thead>
+            <tbody>
+            {% for row in point_ticket_summary.rows %}
+              <tr>
+                <th scope="row">{{ row.name }}</th>
+                <td>{{ row.tickets|default_if_none:"—"|intcomma }}</td>
+                <td>{% if row.avg_ticket is not None %}${{ row.avg_ticket|floatformat:2|intcomma }}{% elif row.tickets is None %}Sin tickets registrados{% else %}Cero tickets{% endif %}</td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
         </div>
-      </div>
-      <canvas id="dg-chart-ticket-ranking" class="dg-chart-surface is-short"></canvas>
-      <div class="pd-chart-source">
-        <strong>Fuente:</strong> tickets Point · {% if point_chart_bundle.ticket_data_available %}{{ point_chart_bundle.ticket_branch_count }} sucursales{% else %}sin tickets válidos{% endif %}
-      </div>
-      <div class="dg-chart-legend">
-        <span><i class="dg-chart-dot is-ticket"></i>Ticket promedio</span>
-      </div>
+      {% else %}
+        <p class="dg-note">No hay cobertura de tickets para este corte.</p>
+      {% endif %}
     </article>
 
     <article class="dg-panel dg-chart-card">
@@ -309,7 +316,7 @@
           <span class="dg-pill {% if point_waste_summary.total_qty > 0 %}is-warning{% else %}is-success{% endif %}">
             {{ point_waste_summary.total_rows|intcomma }} registros
           </span>
-          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Detalle de merma</a>
+          <a class="btn btn-secondary" href="?fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}&amp;merma_detalle=1">Ver detalle de merma</a>
         </div>
       </div>
       {% if point_waste_summary.total_rows %}
@@ -612,15 +619,6 @@
         sales: bundle.category_balance.sales,
       },
       [palette.blue, palette.amber],
-      true
-    );
-    drawGroupedBars(
-      document.getElementById("dg-chart-ticket-ranking"),
-      bundle.ticket_ranking.labels,
-      {
-        avgTicket: bundle.ticket_ranking.values,
-      },
-      [palette.green],
       true
     );
     drawDonut(

@@ -19,6 +19,8 @@
         {{ report.totals.alertas }} alertas requieren acción inmediata
       {% elif report.totals.observar > 0 %}
         Sin alertas críticas; {{ report.totals.observar }} insumos quedan en observación
+      {% elif report.totals.sin_unidad_compatible %}
+        Corte pendiente de revisar unidades
       {% else %}
         Corte controlado sin discrepancias relevantes
       {% endif %}
@@ -127,10 +129,19 @@
 <section class="card">
   <div class="card-header">Discrepancias del corte · {{ report.semaforo_global }}</div>
   <div class="muted pd-u-3ef1fa1aa1">
-    Producción {{ report.totals.produccion|floatformat:2|intcomma }} ·
-    ventas POS {{ report.totals.ventas_pos|floatformat:2|intcomma }} ·
-    mermas POS {{ report.totals.mermas_pos|floatformat:2|intcomma }}
+    Cada renglón usa la unidad base de su insumo. El inventario es el saldo actual de los almacenes.
+    {% if sucursal_id %}El filtro de sucursal se aplica a ventas y mermas. Plan e inventario conservan el alcance general.{% endif %}
   </div>
+  {% if report.insumos_sin_unidad_compatible %}
+  <details class="pd-u-3ef1fa1aa1">
+    <summary>Ver {{ report.totals.sin_unidad_compatible }} insumos sin unidad compatible</summary>
+    <ul>
+      {% for insumo in report.insumos_sin_unidad_compatible %}
+        <li>{{ insumo.nombre }}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
   <div class="table-responsive">
     <table class="table table-striped">
       <thead>

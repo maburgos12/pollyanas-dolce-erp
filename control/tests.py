@@ -80,6 +80,50 @@ class ControlViewsTests(TestCase):
         self.assertIn("focus_summary", resp.context)
         self.assertEqual(resp.context["enterprise_focus"], "")
 
+    def test_discrepancias_convierte_gramos_a_kg_para_venta_plan_y_merma(self):
+        from recetas.models import PlanProduccion, PlanProduccionItem
+
+        gram = UnidadMedida.objects.create(codigo="g", nombre="Gramo", tipo=UnidadMedida.TIPO_MASA)
+        kg = UnidadMedida.objects.get(codigo="kg")
+        insumo = Insumo.objects.get(nombre="Insumo control view")
+        LineaReceta.objects.create(
+            receta=self.receta, insumo=insumo, insumo_texto=insumo.nombre, cantidad=Decimal("310"), unidad=gram,
+        )
+        fecha = timezone.localdate()
+        plan = PlanProduccion.objects.create(nombre="Plan del corte", fecha_produccion=fecha)
+        PlanProduccionItem.objects.create(plan=plan, receta=self.receta, cantidad=4)
+        VentaPOS.objects.create(fecha=fecha, sucursal=self.sucursal, receta=self.receta, cantidad=2)
+        MermaPOS.objects.create(fecha=fecha, sucursal=self.sucursal, receta=self.receta, cantidad=1)
+
+        report = build_discrepancias_report(date_from=fecha, date_to=fecha)
+        row = next(row for row in report["rows"] if row["insumo_id"] == insumo.pk)
+        self.assertEqual(row["unidad"], kg.codigo)
+        self.assertAlmostEqual(row["produccion"], 1.24)
+        self.assertAlmostEqual(row["ventas_pos"], 0.62)
+        self.assertAlmostEqual(row["mermas_pos"], 0.31)
+        self.assertAlmostEqual(row["inventario_teorico"], 0.31)
+
+    def test_discrepancias_separa_insumos_con_unidad_incompatible_o_ausente(self):
+        volume = UnidadMedida.objects.create(codigo="ml", nombre="Mililitro", tipo=UnidadMedida.TIPO_VOLUMEN)
+        mass = UnidadMedida.objects.get(codigo="kg")
+        names = ("Insumo sin unidad de receta", "Insumo con unidad incompatible")
+        for name, unit in zip(names, (None, volume)):
+            insumo = Insumo.objects.create(nombre=name, unidad_base=mass)
+            LineaReceta.objects.create(
+                receta=self.receta, insumo=insumo, insumo_texto=name, cantidad=Decimal("50"), unidad=unit,
+            )
+        fecha = timezone.localdate()
+        MermaPOS.objects.create(fecha=fecha, sucursal=self.sucursal, receta=self.receta, cantidad=1)
+
+        self.client.force_login(self.user_lectura)
+        response = self.client.get(reverse("control:discrepancias"), {"from": fecha, "to": fecha})
+        report = response.context["report"]
+        self.assertEqual(report["totals"]["sin_unidad_compatible"], 2)
+        self.assertGreaterEqual(report["totals"]["observar"], 2)
+        for name in names:
+            self.assertContains(response, name)
+            self.assertNotIn(name, [row["insumo"] for row in report["rows"]])
+
     def test_discrepancias_can_focus_enterprise_subset(self):
         self.client.force_login(self.user_lectura)
         unidad = UnidadMedida.objects.create(

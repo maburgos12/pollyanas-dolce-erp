@@ -18,7 +18,7 @@ from django.db import OperationalError, ProgrammingError, connection, transactio
 from django.db.models.deletion import ProtectedError
 from django.db.models import Count, Q, OuterRef, Subquery, Case, When, Value, IntegerField, Sum, DecimalField, Max
 from django.core.paginator import Paginator
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -35,7 +35,7 @@ from compras.models import OrdenCompra, RecepcionCompra, SolicitudCompra
 from control.models import MermaPOS
 from core.access import can_manage_compras, can_view_recetas, is_branch_capture_only
 from core.audit import log_event
-from core.branch_catalog import resolver_sucursal_por_texto
+from core.branch_catalog import canonical_point_network_branch_qs, resolver_sucursal_por_texto
 from core.models import Sucursal, sucursales_operativas
 from inventario.models import UBICACION_CEDIS, ExistenciaInsumo, MovimientoInventario
 from inventario.services_existencias import aplicar_delta
@@ -19308,6 +19308,7 @@ def _build_dg_operacion_dashboard_payload(
         else f"Pendientes {resumen_cierre['pendientes']} · Tardías {resumen_cierre['tardias']} · Borrador {resumen_cierre['borrador']}."
     )
     point_exec_summary = _build_point_exec_summary(fecha_operacion)
+    point_ticket_summary = point_exec_summary.pop("ticket_summary", None)
     point_waste_summary = _build_point_waste_summary(fecha_operacion)
     point_central_flow_summary = _build_point_central_flow_summary(fecha_operacion)
     point_closure_summary = _build_point_closure_summary(fecha_operacion)
@@ -19330,6 +19331,7 @@ def _build_dg_operacion_dashboard_payload(
         "reabasto_detail": reabasto_detail,
         "demand_history_summary": demand_history_summary,
         "point_exec_summary": point_exec_summary,
+        "point_ticket_summary": point_ticket_summary,
         "point_waste_summary": point_waste_summary,
         "point_central_flow_summary": point_central_flow_summary,
         "point_closure_summary": point_closure_summary,
@@ -19381,28 +19383,43 @@ def _point_waste_effective_total_cost(
     return total_cost
 
 
+def _build_point_ticket_summary(fecha_operacion: date) -> dict[str, Any]:
+    branches = list(canonical_point_network_branch_qs(fecha_operacion).values("id", "codigo", "nombre"))
+    indicators = {
+        row["branch__erp_branch_id"]: row
+        for row in PointDailyBranchIndicator.objects.filter(
+            indicator_date=fecha_operacion,
+            branch__erp_branch_id__in=[branch["id"] for branch in branches],
+        ).values("branch__erp_branch_id").annotate(amount=Sum("total_amount"), tickets=Sum("total_tickets"))
+    }
+    rows = []
+    for branch in branches:
+        row = indicators.get(branch["id"])
+        tickets = row["tickets"] if row else None
+        amount = row["amount"] if row else None
+        rows.append({
+            "id": branch["id"], "code": branch["codigo"], "name": branch["nombre"],
+            "tickets": tickets, "amount": amount, "avg_ticket": amount / tickets if tickets else None,
+        })
+    rows.sort(key=lambda row: (row["avg_ticket"] is None, -(row["avg_ticket"] or 0), row["code"]))
+    with_tickets = [row for row in rows if row["tickets"]]
+    total_tickets = sum(row["tickets"] for row in with_tickets)
+    total_amount = sum((row["amount"] for row in with_tickets), Decimal("0"))
+    return {
+        "rows": rows,
+        "branch_count": len(branches),
+        "with_tickets_count": len(with_tickets),
+        "total_tickets": total_tickets,
+        "avg_ticket": total_amount / total_tickets if total_tickets else None,
+    }
+
+
 def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
     cierre_fecha = fecha_operacion
     try:
         sales_qs = _point_operational_sales_rows_for_date(cierre_fecha).filter(
             branch__erp_branch_id__isnull=False,
             branch__erp_branch__activa=True,
-        )
-        indicator_qs = PointDailyBranchIndicator.objects.filter(
-            indicator_date=cierre_fecha,
-            branch__erp_branch_id__isnull=False,
-            branch__erp_branch__activa=True,
-        )
-        month_sales_qs = PointDailySale.objects.filter(
-            sale_date__year=cierre_fecha.year,
-            sale_date__month=cierre_fecha.month,
-            branch__erp_branch_id__isnull=False,
-            branch__erp_branch__activa=True,
-        ).filter(
-            _point_operational_sales_filters(
-                start_date=date(cierre_fecha.year, cierre_fecha.month, 1),
-                end_date=cierre_fecha,
-            )
         )
         month_indicator_qs = PointDailyBranchIndicator.objects.filter(
             indicator_date__year=cierre_fecha.year,
@@ -19413,13 +19430,7 @@ def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
 
         latest_sales_amount = Decimal(str(sales_qs.aggregate(total=Sum("total_amount")).get("total") or 0))
         latest_units = Decimal(str(sales_qs.aggregate(total=Sum("quantity")).get("total") or 0))
-        latest_tickets = int(indicator_qs.aggregate(total=Sum("total_tickets")).get("total") or 0)
-        latest_indicator_amount = Decimal(str(indicator_qs.aggregate(total=Sum("total_amount")).get("total") or 0))
-        latest_avg_ticket = (
-            (latest_indicator_amount or latest_sales_amount) / Decimal(str(latest_tickets))
-            if latest_tickets > 0
-            else Decimal("0")
-        )
+        ticket_summary = _build_point_ticket_summary(cierre_fecha)
 
         month_sales_amount, month_units = _partial_month_amount_quantity(
             start_date=date(cierre_fecha.year, cierre_fecha.month, 1),
@@ -19433,32 +19444,35 @@ def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
             else Decimal("0")
         )
 
-        active_branch_count = sucursales_operativas().count()
-        ticket_branch_count = indicator_qs.values("branch__erp_branch_id").distinct().count()
-        top_branches = list(
-            indicator_qs.values("branch__erp_branch_id", "branch__erp_branch__codigo", "branch__erp_branch__nombre")
-            .annotate(total_amount=Sum("total_amount"), total_tickets=Sum("total_tickets"))
-            .order_by("-total_amount", "branch__erp_branch__codigo")[:5]
-        )
-        for row in top_branches:
-            total_tickets = int(row.get("total_tickets") or 0)
-            total_amount = Decimal(str(row.get("total_amount") or 0))
-            row["avg_ticket"] = (total_amount / Decimal(str(total_tickets))) if total_tickets > 0 else Decimal("0")
-
+        top_branches = [
+            {
+                "branch__erp_branch_id": row["id"],
+                "branch__erp_branch__codigo": row["code"],
+                "branch__erp_branch__nombre": row["name"],
+                "total_amount": row["amount"],
+                "total_tickets": row["tickets"],
+                "avg_ticket": row["avg_ticket"],
+            }
+            for row in sorted(
+                (row for row in ticket_summary["rows"] if row["tickets"]),
+                key=lambda row: (-row["amount"], row["code"]),
+            )[:5]
+        ]
         return {
             "available": True,
             "closure_date": cierre_fecha,
             "latest_sales_amount": latest_sales_amount,
             "latest_units": latest_units,
-            "latest_tickets": latest_tickets,
-            "latest_avg_ticket": latest_avg_ticket,
+            "latest_tickets": ticket_summary["total_tickets"],
+            "latest_avg_ticket": ticket_summary["avg_ticket"] or Decimal("0"),
             "month_sales_amount": month_sales_amount,
             "month_units": month_units,
             "month_tickets": month_tickets,
             "month_avg_ticket": month_avg_ticket,
-            "ticket_data_available": latest_tickets > 0,
-            "ticket_branch_count": ticket_branch_count,
-            "active_branch_count": active_branch_count,
+            "ticket_data_available": ticket_summary["total_tickets"] > 0,
+            "ticket_branch_count": ticket_summary["with_tickets_count"],
+            "active_branch_count": ticket_summary["branch_count"],
+            "ticket_summary": ticket_summary,
             "top_branches": top_branches,
             "source_label": "Point directo",
         }
@@ -19482,21 +19496,19 @@ def _build_point_exec_summary(fecha_operacion: date) -> dict[str, Any]:
         }
 
 
+def _point_waste_rows_for_day(fecha_operacion: date):
+    window_start = timezone.make_aware(datetime.combine(fecha_operacion, datetime.min.time()))
+    window_end = timezone.make_aware(datetime.combine(fecha_operacion + timedelta(days=1), datetime.min.time()))
+    return PointWasteLine.objects.filter(
+        movement_at__gte=window_start,
+        movement_at__lt=window_end,
+    ).select_related("branch", "erp_branch", "insumo").order_by("movement_at", "branch__name", "item_name")
+
+
 def _build_point_waste_summary(fecha_operacion: date) -> dict[str, Any]:
     cierre_fecha = fecha_operacion
     try:
-        window_start = timezone.make_aware(datetime.combine(cierre_fecha, datetime.min.time()), timezone.get_current_timezone())
-        window_end = window_start + timedelta(days=2)
-        waste_rows = [
-            row
-            for row in PointWasteLine.objects.filter(
-                movement_at__gte=window_start,
-                movement_at__lt=window_end,
-            )
-            .select_related("branch", "erp_branch")
-            .order_by("movement_at", "branch__name", "item_name")
-            if _point_operational_date_from_timestamp(row.movement_at) == cierre_fecha
-        ]
+        waste_rows = list(_point_waste_rows_for_day(cierre_fecha))
         recipe_cost_map = get_total_cost_map(
             {int(row.receta_id) for row in waste_rows if row.receta_id}
         )
@@ -20227,20 +20239,8 @@ def _build_point_chart_bundle(
                 row["branch_label"],
             ),
         )[:8]
-        avg_ticket_rows = [row for row in branch_rows if int(row.get("sold_tickets") or 0) > 0]
-        avg_ticket_rows.sort(key=lambda row: (-Decimal(str(row["avg_ticket"])), row["branch_label"]))
-        avg_ticket_rows = avg_ticket_rows[:8]
-        ticket_branch_coverage_pct = (
-            Decimal(str(len(avg_ticket_rows))) / Decimal(str(len(branch_rows))) * Decimal("100")
-            if branch_rows
-            else Decimal("0")
-        )
-
         return {
             "available": True,
-            "ticket_data_available": bool(avg_ticket_rows),
-            "ticket_branch_coverage_pct": float(ticket_branch_coverage_pct),
-            "ticket_branch_count": len(avg_ticket_rows),
             "weekly_sales_amount": {
                 "labels": weekly_labels,
                 "values": [float(weekly_sales_amount[week_start]) for week_start in week_starts],
@@ -20255,10 +20255,6 @@ def _build_point_chart_bundle(
             "waste_share": {
                 "labels": [row["branch_code"] for row in waste_share_rows],
                 "values": [float(Decimal(str(row.get("total_qty") or 0))) for row in waste_share_rows],
-            },
-            "ticket_ranking": {
-                "labels": [row["branch_label"].split(" · ")[0] for row in avg_ticket_rows],
-                "values": [float(Decimal(str(row["avg_ticket"]))) for row in avg_ticket_rows],
             },
             "branch_balance": {
                 "labels": [row["branch_label"].split(" · ")[0] for row in branch_balance_rows],
@@ -20286,13 +20282,9 @@ def _build_point_chart_bundle(
     except (OperationalError, ProgrammingError):
         return {
             "available": False,
-            "ticket_data_available": False,
-            "ticket_branch_coverage_pct": 0.0,
-            "ticket_branch_count": 0,
             "weekly_sales_amount": {"labels": [], "values": []},
             "weekly_ops_units": {"labels": [], "sales": [], "waste": [], "production": [], "transfers": []},
             "waste_share": {"labels": [], "values": []},
-            "ticket_ranking": {"labels": [], "values": []},
             "branch_balance": {"labels": [], "sales": [], "inflow": [], "waste": []},
             "variance_map": {"labels": [], "values": []},
             "category_balance": {
@@ -20942,11 +20934,49 @@ def _export_dg_operacion_dashboard_xlsx(payload: Dict[str, Any]) -> HttpResponse
     return response
 
 
+def _dg_operacion_waste_detail(request: HttpRequest, fecha_operacion: date | None) -> HttpResponse:
+    if not fecha_operacion or fecha_operacion == date.max:
+        raise Http404("Fecha de merma inválida.")
+    waste_rows = _point_waste_rows_for_day(fecha_operacion)
+    branch = None
+    raw_branch_id = request.GET.get("sucursal_id")
+    if raw_branch_id is not None:
+        try:
+            branch_id = int(raw_branch_id)
+        except ValueError as exc:
+            raise Http404("Sucursal inválida.") from exc
+        branch = get_object_or_404(Sucursal, pk=branch_id)
+        waste_rows = waste_rows.filter(erp_branch_id=branch.pk)
+    waste_rows = list(waste_rows)
+    cost_map = get_total_cost_map({row.receta_id for row in waste_rows if row.receta_id})
+    rows = []
+    for row in waste_rows:
+        code, name = _point_waste_branch_label(row)
+        estimate = None
+        if row.total_cost <= 0:
+            inferred = _point_waste_effective_total_cost(row, recipe_cost_map=cost_map)
+            estimate = inferred if inferred > 0 else None
+        rows.append({
+            "item": row.item_name,
+            "movement_at": row.movement_at,
+            "branch": name or code,
+            "quantity": row.quantity,
+            "unit": row.unit,
+            "cost_point": row.total_cost if row.total_cost > 0 else None,
+            "cost_estimate": estimate,
+        })
+    return render(request, "recetas/dg_operacion_waste_detail.html", {
+        "fecha_operacion": fecha_operacion, "sucursal": branch, "rows": rows,
+    })
+
+
 @login_required
 @permission_required("recetas.view_planproduccion", raise_exception=True)
 def dg_operacion_dashboard(request: HttpRequest) -> HttpResponse:
-    dg_filters = _plan_status_dashboard_filters(request)
     fecha_operacion = _parse_date_safe(request.GET.get("fecha_operacion"))
+    if request.GET.get("merma_detalle") == "1":
+        return _dg_operacion_waste_detail(request, fecha_operacion)
+    dg_filters = _plan_status_dashboard_filters(request)
     has_plan_filters = bool(dg_filters["start_date"] or dg_filters["end_date"] or dg_filters["group_by"] != "day")
     if not has_plan_filters:
         from reportes.services_dg_operacion_snapshot import (
@@ -20986,6 +21016,9 @@ def dg_operacion_dashboard(request: HttpRequest) -> HttpResponse:
             fecha_operacion=fecha_operacion,
         )
         payload["dg_snapshot_source"] = "live"
+
+    if "point_ticket_summary" not in payload:
+        payload["point_ticket_summary"] = _build_point_ticket_summary(payload["fecha_operacion"])
 
     return render(
         request,
