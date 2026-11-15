@@ -172,6 +172,19 @@ class ReportesBITests(TestCase):
         self.assertEqual(snapshot["bajo_reorden"], 0)
         self.assertEqual(snapshot["unavailable"], 1)
 
+    def test_bi_home_loads_commercial_panel_without_operational_builders(self):
+        with patch("reportes.views.compute_bi_snapshot", wraps=compute_bi_snapshot) as snapshot, patch(
+            "reportes.views.build_executive_bi_panels", wraps=executive_panels_module.build_executive_bi_panels
+        ) as operational_panels:
+            response = self.client.get(reverse("reportes:bi"), {"sales_year": "2025", "sales_month": "10"})
+
+        self.assertEqual(response.status_code, 200)
+        snapshot.assert_not_called()
+        operational_panels.assert_not_called()
+        self.assertContains(response, "Venta total con IVA")
+        self.assertContains(response, "?sales_year=2025&amp;sales_month=10&amp;detalle=1#detalle-operativo")
+        self.assertNotContains(response, "Tablero ejecutivo del negocio")
+
     def test_bi_view_renders(self):
         sucursal = self._create_sucursal("BI-01", "Sucursal BI 01")
         receta = Receta.objects.create(nombre="Pastel BI Histórico", hash_contenido="hash-bi-historico-001")
@@ -230,7 +243,7 @@ class ReportesBITests(TestCase):
         closed_job = PointSyncJob.objects.create(job_type=PointSyncJob.JOB_TYPE_SALES,
             status=PointSyncJob.STATUS_SUCCESS, started_at=timezone.now(), finished_at=timezone.now())
         PointDailyBranchIndicator.objects.filter(branch=point_branch).update(sync_job=closed_job)
-        resp = self.client.get(reverse("reportes:bi"))
+        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "BI Ejecutivo")
         self.assertContains(resp, "Tablero ejecutivo del negocio")
@@ -921,7 +934,7 @@ class ReportesBITests(TestCase):
             metadata={},
         )
 
-        resp = self.client.get(reverse("reportes:bi"))
+        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Meta de venta, costo, gasto y resultado")
@@ -1050,7 +1063,7 @@ class ReportesBITests(TestCase):
             source_endpoint="/Report/PrintReportes?idreporte=3",
         )
 
-        resp = self.client.get(reverse("reportes:bi"))
+        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
 
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "Rendimiento por sucursal")
@@ -1238,7 +1251,7 @@ class ReportesBITests(TestCase):
         self.assertEqual(resp_pdf["Content-Type"], "application/pdf")
         self.assertIn("bi_sucursales_2026.pdf", resp_pdf["Content-Disposition"])
 
-        resp = self.client.get(reverse("reportes:bi"))
+        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
         self.assertContains(resp, "Venta $10,000.00")
         self.assertContains(resp, "semáforo")
         self.assertContains(resp, "Vs prom. YTD venta")
@@ -1915,7 +1928,7 @@ class ReportesBITests(TestCase):
             fuente="BI_SUPPLY_TEST",
         )
 
-        resp = self.client.get(reverse("reportes:bi"))
+        resp = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
 
         self.assertEqual(resp.status_code, 200)
         self.assertIn("supply_watchlist", resp.context)

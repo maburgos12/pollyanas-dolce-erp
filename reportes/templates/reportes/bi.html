@@ -25,8 +25,12 @@
     <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
   </nav>
 
+  {% if not bi_detail_loaded %}
+    <p><a class="btn btn-secondary" href="?{{ bi_detail_query }}#detalle-operativo">Abrir operación, pronósticos y detalle de costos</a></p>
+  {% endif %}
   {% include "reportes/partials/commercial_analytics.html" %}
-  {% if commercial_analytics %}<details class="ca-legacy"><summary>Operación, pronósticos y detalle de costos</summary>{% endif %}
+  {% if bi_detail_loaded %}
+  <details class="ca-legacy" id="detalle-operativo" open><summary>Operación, pronósticos y detalle de costos</summary>
   {% include "reportes/partials/sales_confidence.html" %}
 
   <section class="bi-hero">
@@ -1592,20 +1596,22 @@
       </div>
     </article>
   </section>
-{% if commercial_analytics %}</details>{% endif %}
+  </details>
+  {% endif %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+{{ commercial_analytics|json_script:"commercial-analytics-data" }}
+<script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>
+{% if bi_detail_loaded %}
 {{ forecast_panel.weekly_rows|json_script:"forecast-weekly-data" }}
 {{ yoy_panel.rows|json_script:"yoy-monthly-data" }}
 {{ profitability_panel.rows|json_script:"profitability-data" }}
 {{ production_sales_panel.weekly_rows|json_script:"production-weekly-data" }}
 {{ production_sales_panel.category_rows|json_script:"production-category-data" }}
 {{ central_flow_panel.rows|json_script:"central-flow-data" }}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-{{ commercial_analytics|json_script:"commercial-analytics-data" }}
-<script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>
 <script>
   (() => {
     const parse = (id) => {
@@ -2014,4 +2020,5 @@
     }
   })();
 </script>
+{% endif %}
 {% endblock %}

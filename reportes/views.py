@@ -1383,11 +1383,6 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
 
     closure = build_daily_operational_closure(target_date=target_date)
     latest_sales_cut_date = closed_sales.latest_closed_sales_date()
-    waste_summary = _bi_waste_summary(target_date, target_date)
-    inventory_snapshot = _bi_inventory_snapshot()
-
-    closure["waste"]["visible_summary"] = waste_summary
-    closure["inventory"]["visible_snapshot"] = inventory_snapshot
 
     date_options: list[dict[str, str]] = []
     seen_dates: set[date] = set()
@@ -1418,8 +1413,6 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
         "date_options": date_options,
         "module_tabs": _reportes_module_tabs("cierre_operativo"),
         "latest_sales_cut_date": latest_sales_cut_date,
-        "waste_summary": waste_summary,
-        "inventory_snapshot": inventory_snapshot,
     }
     return render(request, "reportes/cierre_operativo_diario.html", context)
 
@@ -6277,6 +6270,17 @@ def bi(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")
 
+    from reportes.commercial_analytics import commercial_panel_from_request
+
+    operational_filters = ("period_days", "months", "branch_id", "budget_month", "action", "export")
+    if request.GET.get("detalle") != "1" and not any(request.GET.get(key) for key in operational_filters):
+        detail_params = request.GET.copy()
+        detail_params["detalle"] = "1"
+        return render(request, "reportes/bi.html", {
+            "commercial_analytics": commercial_panel_from_request(request),
+            "bi_detail_query": detail_params.urlencode(),
+        })
+
     try:
         period_days = int(request.GET.get("period_days") or "90")
     except (TypeError, ValueError):
@@ -6342,6 +6346,7 @@ def bi(request: HttpRequest) -> HttpResponse:
 
     context = {
         "snapshot": snapshot,
+        "bi_detail_loaded": True,
         "executive_panels": executive_panels,
         "sales_confidence": executive_panels["sales_confidence"],
         "forecast_panel": executive_panels["forecast_panel"],
@@ -6554,7 +6559,6 @@ def bi(request: HttpRequest) -> HttpResponse:
         maturity_summary=context["maturity_summary"],
         default_owner="Dirección General",
     )
-    from reportes.commercial_analytics import commercial_panel_from_request
     context["commercial_analytics"] = commercial_panel_from_request(request)
     return render(request, "reportes/bi.html", context)
 
