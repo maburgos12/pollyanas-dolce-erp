@@ -232,6 +232,21 @@ class DecisionSupportServicesTests(TestCase):
         self.assertTrue(any(row["action"] in {"PRODUCIR_MAS", "PROMOCIONAR", "REACTIVAR"} for row in opportunity_context["rows"]))
         self.assertTrue(any(row["priority"] in {"ALTA", "MEDIA", "BAJA"} for row in decision_context["rows"]))
 
+    def test_forecast_without_backtest_preserves_projected_rows_and_amounts(self):
+        parameters = {
+            "target_date": self.target_date + timedelta(days=7),
+            "reference_date": self.target_date,
+            "lookback_weeks": 3,
+            "top_n": None,
+        }
+        complete = build_daily_forecast_context(**parameters)
+        forecast_only = build_daily_forecast_context(**parameters, include_validation=False)
+
+        self.assertTrue(complete["rows"])
+        self.assertEqual(forecast_only["rows"], complete["rows"])
+        self.assertEqual(forecast_only["summary"], complete["summary"])
+        self.assertEqual(forecast_only["validation"], {})
+
     def test_future_forecast_uses_latest_real_history_not_future_holes(self):
         current_context = build_daily_forecast_context(
             target_date=self.target_date,

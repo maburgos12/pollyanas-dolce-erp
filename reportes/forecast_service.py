@@ -363,6 +363,7 @@ def build_daily_forecast_context(
     lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
     top_n: int | None = DEFAULT_TOP_ROWS,
     validation_days: int = DEFAULT_VALIDATION_DAYS,
+    include_validation: bool = True,
 ) -> dict[str, object]:
     reference_date = reference_date or timezone.localdate()
     target_date = target_date or reference_date
@@ -446,17 +447,20 @@ def build_daily_forecast_context(
             calibration_profile=calibration_profiles.get(calibration_key),
         )
         rows.append(row)
-        backtest_candidates.append((key, labels_by_key[key], series))
+        if include_validation:
+            backtest_candidates.append((key, labels_by_key[key], series))
     rows.sort(key=lambda row: (_to_decimal(row.get("forecast_amount")), _to_decimal(row.get("forecast_qty"))), reverse=True)
     total_units = sum((_to_decimal(row.get("forecast_qty")) for row in rows), ZERO)
     total_amount = sum((_to_decimal(row.get("forecast_amount")) for row in rows), ZERO)
-    validation = _build_backtest_summary(
-        candidates=backtest_candidates[: min(len(backtest_candidates), 25)],
-        reference_date=reference_date,
-        lookback_weeks=lookback_weeks,
-        validation_days=validation_days,
-        calibration_profiles=calibration_profiles,
-    )
+    validation = {}
+    if include_validation:
+        validation = _build_backtest_summary(
+            candidates=backtest_candidates[: min(len(backtest_candidates), 25)],
+            reference_date=reference_date,
+            lookback_weeks=lookback_weeks,
+            validation_days=validation_days,
+            calibration_profiles=calibration_profiles,
+        )
     return {
         "target_date": target_date.isoformat(),
         "target_label": target_date.strftime("%d %b %Y"),

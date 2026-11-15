@@ -31,8 +31,7 @@ from pos_bridge.services.sales_matching_service import PointSalesMatchingService
 from recetas.models import RecetaCostoSemanal
 from reportes.models import FactVentaDiaria, SnapshotFlujoCentralMensual, SnapshotLedgerInventarioMensual
 from reportes.dashboard_production_dataset import get_dashboard_production_dataset
-from reportes.dashboard_sales_dataset import get_dashboard_sales_dataset
-from reportes.closed_sales import CLOSED_SALES_VERSION, closed_month_comparison
+from reportes.closed_sales import CLOSED_SALES_VERSION, closed_month_comparison, latest_closed_sales_date
 from ventas.services.sales_canonical_source import canonical_point_sales_range_total
 
 
@@ -838,7 +837,7 @@ class ForecastWeek:
 def _operational_projection_for_week(*, start_date: date, end_date: date) -> dict[str, object] | None:
     from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 
-    projection = calcular_proyeccion_operativa(start_date, end_date)
+    projection = calcular_proyeccion_operativa(start_date, end_date, include_validation=False)
     summary = projection.get("resumen") or {}
     amount = _to_decimal(summary.get("total_ingreso"))
     quantity = _to_decimal(summary.get("total_piezas"))
@@ -2783,7 +2782,7 @@ def build_executive_bi_panels(
 ) -> dict[str, object]:
     from reportes.sales_confidence import build_sales_confidence
     trusted_sales_latest = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
-    closed_cutoff = get_dashboard_sales_dataset(months=months).get("latest_date")
+    closed_cutoff = latest_closed_sales_date()
     common_flow_date = _common_flow_cutoff_date() or trusted_sales_latest
     return {
         "latest_cutoff_date": trusted_sales_latest,
