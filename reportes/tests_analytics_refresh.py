@@ -715,11 +715,15 @@ class DailyOperationalClosureViewTests(TestCase):
         with patch("reportes.closed_sales.latest_closed_sales_date", return_value=confirmed_day), patch(
             "reportes.views._bi_daily_sales_snapshot",
             return_value={"date": confirmed_day, "date_label": confirmed_day.isoformat()},
-        ) as commercial_snapshot:
+        ) as commercial_snapshot, patch("reportes.views._bi_waste_summary") as bi_waste, patch(
+            "reportes.views._bi_inventory_snapshot"
+        ) as bi_inventory:
             response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
 
         self.assertEqual(response.status_code, 200)
         commercial_snapshot.assert_not_called()
+        bi_waste.assert_not_called()
+        bi_inventory.assert_not_called()
         self.assertContains(response, f"Fecha auditada {self.target_date.isoformat()}")
         self.assertContains(response, "Último corte de ventas confirmado")
         self.assertContains(response, f'<time datetime="{confirmed_day.isoformat()}">{confirmed_day.isoformat()}</time>', html=True)
