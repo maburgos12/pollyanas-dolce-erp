@@ -104,6 +104,7 @@ from ventas.services.sales_canonical_source import (
 from ventas.services.sales_read_service import get_daily_sales_bulk, get_sales_range
 from recetas.utils.derived_product_presentations import get_total_cost_map
 
+from . import closed_sales
 from .bi_utils import compute_bi_snapshot
 from .auto_production_service import (
     approve_production_order,
@@ -1381,14 +1382,10 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
             invalid_date = True
 
     closure = build_daily_operational_closure(target_date=target_date)
-    daily_sales_snapshot = _bi_daily_sales_snapshot()
-    production_snapshot = _bi_production_snapshot()
+    latest_sales_cut_date = closed_sales.latest_closed_sales_date()
     waste_summary = _bi_waste_summary(target_date, target_date)
     inventory_snapshot = _bi_inventory_snapshot()
 
-    closure["sales"]["visible_cut_snapshot_date"] = daily_sales_snapshot.get("date")
-    closure["sales"]["visible_cut_snapshot_label"] = daily_sales_snapshot.get("date_label") or ""
-    closure["production"]["plan_snapshot"] = production_snapshot
     closure["waste"]["visible_summary"] = waste_summary
     closure["inventory"]["visible_snapshot"] = inventory_snapshot
 
@@ -1397,7 +1394,7 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
     candidate_dates = [
         target_date,
         default_target_date,
-        daily_sales_snapshot.get("date"),
+        latest_sales_cut_date,
         closure["sales"].get("raw_max_date"),
         closure["production"].get("raw_max_date"),
         closure["waste"].get("raw_max_date"),
@@ -1420,8 +1417,7 @@ def cierre_operativo(request: HttpRequest) -> HttpResponse:
         "default_target_date_iso": default_target_date.isoformat(),
         "date_options": date_options,
         "module_tabs": _reportes_module_tabs("cierre_operativo"),
-        "daily_sales_snapshot": daily_sales_snapshot,
-        "production_snapshot": production_snapshot,
+        "latest_sales_cut_date": latest_sales_cut_date,
         "waste_summary": waste_summary,
         "inventory_snapshot": inventory_snapshot,
     }
