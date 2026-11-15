@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load humanize %}
+{% block title %}Detalle de merma Point{% endblock %}
+{% block content %}
+<div class="module-shell">
+  <section class="card" aria-labelledby="merma-titulo">
+    <h1 id="merma-titulo">Detalle de merma Point</h1>
+    <p>Corte {{ fecha_operacion|date:"d/m/Y" }} · {% if sucursal %}{{ sucursal.nombre }}{% else %}Todas las ubicaciones{% endif %}</p>
+    <div>
+      <a class="btn btn-secondary" href="?fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}">Volver a Operación DG</a>
+      {% if sucursal %}
+      <a class="btn btn-secondary" href="?fecha_operacion={{ fecha_operacion|date:'Y-m-d' }}&amp;merma_detalle=1">Ver todas las ubicaciones</a>
+      {% endif %}
+    </div>
+    {% if rows %}
+      <p class="muted">El costo estimado se muestra cuando el movimiento no tiene un costo total registrado en Point.</p>
+      <div class="table-responsive">
+        <table class="table table-striped">
+          <thead>
+            <tr>
+              <th scope="col">Hora</th>
+              <th scope="col">Producto o insumo</th>
+              <th scope="col">Sucursal / frente</th>
+              <th scope="col">Cantidad</th>
+              <th scope="col">Unidad</th>
+              <th scope="col">Costo Point (MXN)</th>
+              <th scope="col">Costo estimado (MXN)</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>{{ row.movement_at|date:"H:i" }}</td>
+              <th scope="row">{{ row.item }}</th>
+              <td>{{ row.branch }}</td>
+              <td>{{ row.quantity|floatformat:"-3"|intcomma }}</td>
+              <td>{{ row.unit|default:"Sin unidad" }}</td>
+              <td>{% if row.cost_point is not None %}${{ row.cost_point|floatformat:2|intcomma }}{% else %}Sin costo registrado{% endif %}</td>
+              <td>{% if row.cost_estimate is not None %}${{ row.cost_estimate|floatformat:2|intcomma }}{% else %}—{% endif %}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p>Point no tiene movimientos registrados para esta fecha y ubicación.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
