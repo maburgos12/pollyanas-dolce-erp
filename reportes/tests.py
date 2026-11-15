@@ -182,6 +182,7 @@ class ReportesBITests(TestCase):
         snapshot.assert_not_called()
         operational_panels.assert_not_called()
         self.assertContains(response, "Venta total con IVA")
+        self.assertContains(response, 'id="commercial-analytics-data"')
         self.assertContains(response, "?sales_year=2025&amp;sales_month=10&amp;detalle=1#detalle-operativo")
         self.assertNotContains(response, "Tablero ejecutivo del negocio")
 

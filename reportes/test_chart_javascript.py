@@ -17,7 +17,11 @@ class ReportChartJavaScriptTests(SimpleTestCase):
         request.user = AnonymousUser()
         for template in ("reportes/ventas.html", "reportes/bi.html"):
             with self.subTest(template=template):
-                html = render_to_string(template, {"current_year": 2026, "request": request})
+                html = render_to_string(template, {
+                    "current_year": 2026,
+                    "request": request,
+                    "bi_detail_loaded": template == "reportes/bi.html",
+                })
                 scripts = re.findall(r"<script>(.*?)</script>", html, flags=re.DOTALL)
                 self.assertTrue(scripts)
                 self.assertTrue(any("new Chart(" in script for script in scripts))
