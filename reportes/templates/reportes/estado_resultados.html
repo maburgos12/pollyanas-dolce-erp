@@ -16,6 +16,13 @@
   .er-row-total td:first-child { color: var(--vino); }
   .er-neg { color: var(--rojo); }
   .er-metric-btns .btn.active { background: var(--vino); border-color: var(--vino); color: #fff; }
+  .er-kpi-grid .kpi-card { container-type: inline-size; }
+  .kpi-grid.er-kpi-grid .kpi-number {
+    font-size: 1.5rem;
+    font-size: clamp(1.25rem, 11.5cqi, 2.5rem);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
 </style>
 {% endblock %}
 
@@ -53,7 +60,7 @@
   </form>
 </section>
 
-<section class="kpi-grid">
+<section class="kpi-grid er-kpi-grid">
   <div class="kpi-card">
     <div class="kpi-number">{% if kpis.ingresos_real is not None %}${{ kpis.ingresos_real|floatformat:0|intcomma }}{% else %}—{% endif %}</div>
     <div class="kpi-label">Ingresos reales acumulados</div>
