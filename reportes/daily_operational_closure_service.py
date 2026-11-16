@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.db.models import Sum
+from django.utils import timezone
 
 from control.models import MermaPOS
 from core.models import AuditLog, sucursales_operativas
@@ -310,7 +311,7 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
     ajustes_netos = _to_decimal(
         movement_qs.filter(tipo=MovimientoInventario.TIPO_AJUSTE).aggregate(total=Sum("cantidad")).get("total")
     )
-    visible_date = visible_updated_max.date() if visible_updated_max else None
+    visible_date = timezone.localdate(visible_updated_max) if visible_updated_max else None
     same_moment_comparison = bool(visible_date and visible_date == target_date)
     comparison_scope = (
         "Mismo día operativo"
@@ -563,85 +564,63 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
 def _build_alerts(*, target_date: date, sales: dict[str, object], production: dict[str, object], waste: dict[str, object], inventory: dict[str, object]) -> list[dict[str, str]]:
     alerts: list[dict[str, str]] = []
 
+    def add(label: str, tone: str, detail: str, review_area: str) -> None:
+        alerts.append({"label": label, "tone": tone, "detail": detail, "review_area": review_area})
+
     if sales["raw_rows"] > 0 and sales["fact_rows"] == 0:
-        alerts.append(
-            _status_row(
-                label="Ventas sin publicar",
-                tone="danger",
-                detail=f"Point ya tiene {sales['raw_rows']} renglones de venta para {target_date.isoformat()}, pero FactVentaDiaria sigue vacío.",
-            )
+        add(
+            "Ventas sin publicar", "danger",
+            f"Point tiene {sales['raw_rows']} renglones de venta del {target_date.isoformat()} pendientes de publicación en el ERP.",
+            "Integraciones Point",
         )
     if production["raw_rows"] > 0 and production["fact_rows"] == 0:
-        alerts.append(
-            _status_row(
-                label="Producción sin publicar",
-                tone="danger",
-                detail=f"Point ya tiene {production['raw_rows']} renglones de producción para {target_date.isoformat()}, pero FactProduccionDiaria no refleja esa jornada.",
-            )
+        add(
+            "Producción sin publicar", "danger",
+            f"Point tiene {production['raw_rows']} renglones de producción del {target_date.isoformat()} pendientes de publicación en el ERP.",
+            "Integraciones Point",
         )
     if waste["raw_rows"] > 0 and waste["visible_units"] <= 0:
-        alerts.append(
-            _status_row(
-                label="Merma sin reflejo visible",
-                tone="danger",
-                detail=f"Point ya trae {waste['raw_rows']} renglones de merma para {target_date.isoformat()}, pero la capa visible del ERP no muestra unidades de merma publicadas.",
-            )
+        add(
+            "Merma pendiente de publicación", "danger",
+            f"Point tiene {waste['raw_rows']} renglones de merma del {target_date.isoformat()} pendientes de reflejarse en el ERP.",
+            "Control de mermas e Integraciones Point",
         )
     if inventory.get("inventory_unavailable_count"):
-        alerts.append(
-            _status_row(
-                label="Point ALMACÉN no disponible",
-                tone="warning",
-                detail="El cierre no fabricó una diferencia usando saldos internos; falta un ciclo canónico vigente.",
-            )
+        add(
+            "Point ALMACÉN no disponible", "warning",
+            "Hace falta una captura vigente y completa de Point ALMACÉN para comparar las existencias.",
+            "Inventarios",
         )
     elif inventory["delta_stock"] != ZERO:
-        alerts.append(
-            _status_row(
-                label="Desviación de stock",
-                tone="warning",
-                detail=(
-                    f"El stock visible difiere en {inventory['delta_stock']} contra el stock esperado "
-                    f"de los insumos con movimiento en {target_date.isoformat()}."
-                ),
-            )
+        add(
+            "Desviación de stock", "warning",
+            "El stock visible presenta diferencias frente al esperado. Revisa las cantidades por insumo en el detalle.",
+            "Inventarios",
         )
     if not inventory["same_moment_comparison"]:
-        alerts.append(
-            _status_row(
-                label="Inventario cruza tiempos",
-                tone="warning",
-                detail=(
-                    "El cierre auditado compara stock esperado del día contra la captura viva de Point ALMACÉN; úsalo como conciliación entre momentos, no como saldo histórico puro."
-                ),
-            )
+        add(
+            "Fecha de la lectura de inventario", "warning",
+            "El stock esperado corresponde al día auditado. El stock visible usa la última captura disponible de Point ALMACÉN.",
+            "Inventarios",
         )
     if inventory["untraceable_count"] > 0:
-        alerts.append(
-            _status_row(
-                label="Stock visible sin traza suficiente",
-                tone="warning",
-                detail=(
-                    f"{inventory['untraceable_count']} insumos con movimiento del día todavía no tienen origen directo suficientemente trazado para el stock visible."
-                ),
-            )
+        add(
+            "Stock visible sin traza suficiente", "warning",
+            f"Falta comprobar el origen del stock visible de {inventory['untraceable_count']} insumos con movimiento ese día.",
+            "Inventarios",
         )
     if production["plan_count"] == 0:
-        alerts.append(
-            _status_row(
-                label="Sin plan de producción",
-                tone="warning",
-                detail=(
-                    "La producción Point puede estar publicada, pero la tarjeta visible de planeación sigue sin plan para esta fecha."
-                ),
-            )
+        add(
+            "Sin plan de producción", "warning",
+            "Revisa si correspondía registrar un plan de producción para la fecha auditada.",
+            "Planeación de Producción",
         )
     if not alerts:
         alerts.append(
             _status_row(
-                label="Sin alertas críticas",
+                label="Sin alertas detectadas",
                 tone="success",
-                detail="Los dominios auditados muestran publicación y conciliación suficiente para una lectura diaria inicial.",
+                detail="La revisión automática del día no generó alertas.",
             )
         )
     return alerts
@@ -650,20 +629,20 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
 def _overall_status(*, alerts: list[dict[str, str]]) -> dict[str, str]:
     if any(alert["tone"] == "danger" for alert in alerts):
         return _status_row(
-            label="Inconsistente",
+            label="Publicación pendiente",
             tone="danger",
-            detail="Existen dominios con dato capturado en Point que todavía no se refleja correctamente en el ERP visible.",
+            detail="Hay información del día auditado en Point que aún no se refleja en el ERP.",
         )
     if any(alert["tone"] == "warning" for alert in alerts):
         return _status_row(
-            label="Con rezago",
+            label="Requiere revisión",
             tone="warning",
-            detail="La jornada puede leerse, pero todavía presenta desviaciones o fuentes visibles no reconciliadas del todo.",
+            detail="El día auditado tiene observaciones de inventario o planeación que requieren revisión.",
         )
     return _status_row(
-        label="Completo",
+        label="Sin alertas detectadas",
         tone="success",
-        detail="La jornada auditada ya refleja ventas, producción, mermas y stock comparativo sin alertas críticas abiertas.",
+        detail="La revisión automática del día no generó alertas.",
     )
 
 
