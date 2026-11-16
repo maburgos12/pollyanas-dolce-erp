@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% load humanize %}
+{% load humanize l10n %}
 {% block title %}Control · Discrepancias{% endblock %}
 {% block page_title %}Control · Discrepancias{% endblock %}
 
@@ -11,6 +11,18 @@
   {% endfor %}
 </div>
 
+{% if sucursal_id %}
+<section class="card enterprise-focus-alert">
+  <div class="enterprise-focus-alert-copy">
+    <h1 class="enterprise-focus-alert-title">Consulta de Control · {{ sucursal_label }}</h1>
+    <p class="enterprise-focus-alert-detail">{{ date_from|date:"d/m/Y" }} a {{ date_to|date:"d/m/Y" }} · Ventas y mermas de la sucursal en la unidad de cada insumo.</p>
+    <p class="enterprise-focus-alert-detail">El plan general y el saldo actual de almacenes ERP se muestran como referencia. Esta vista no compara existencias de la sucursal para el corte seleccionado.</p>
+  </div>
+  <div class="enterprise-focus-alert-actions">
+    <a class="btn btn-secondary" href="?from={{ date_from|date:'Y-m-d' }}&amp;to={{ date_to|date:'Y-m-d' }}&amp;threshold_pct={{ threshold_pct|unlocalize }}">Ver comparación general</a>
+  </div>
+</section>
+{% else %}
 <section class="card enterprise-focus-alert {% if report.totals.alertas > 0 %}enterprise-focus-alert-warning{% else %}enterprise-focus-alert-success{% endif %}">
   <div class="enterprise-focus-alert-copy">
     <div class="enterprise-focus-alert-title">Resumen del corte</div>
@@ -29,21 +41,19 @@
       Semáforo {{ report.semaforo_global }} ·
       {{ date_from|date:"Y-m-d" }} a {{ date_to|date:"Y-m-d" }} ·
       umbral {{ threshold_pct }}%
-      {% if sucursal_id %}
-        · sucursal filtrada
-      {% else %}
-        · todas las sucursales activas
-      {% endif %}
+      · alcance general
     </div>
   </div>
   <div class="enterprise-focus-alert-actions">
     {% if report.totals.alertas > 0 %}
-      <a class="btn btn-primary" href="?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}{% if sucursal_id %}&sucursal_id={{ sucursal_id }}{% endif %}&threshold_pct={{ threshold_pct }}&enterprise_focus=ALERTAS">Ver alertas</a>
+      <a class="btn btn-primary" href="?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}&threshold_pct={{ threshold_pct }}&enterprise_focus=ALERTAS">Ver alertas</a>
     {% elif enterprise_focus %}
-      <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}{% if sucursal_id %}&sucursal_id={{ sucursal_id }}{% endif %}&threshold_pct={{ threshold_pct }}">Quitar foco</a>
+      <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}&threshold_pct={{ threshold_pct }}">Quitar foco</a>
     {% endif %}
   </div>
 </section>
+
+{% endif %}
 
 <section class="card">
   <div class="card-header">Filtro de corte</div>
@@ -73,10 +83,14 @@
           {% endfor %}
         </select>
       </div>
+      {% if sucursal_id %}
+      <input type="hidden" name="threshold_pct" value="{{ threshold_pct|unlocalize }}">
+      {% else %}
       <div>
         <label>Umbral alerta (%)</label>
-        <input type="number" step="0.1" min="0" name="threshold_pct" value="{{ threshold_pct }}">
+        <input type="number" step="0.1" min="0" name="threshold_pct" value="{{ threshold_pct|unlocalize }}">
       </div>
+      {% endif %}
       <div>
         <button type="submit" class="btn btn-primary">Aplicar</button>
       </div>
@@ -84,6 +98,7 @@
   </form>
 </section>
 
+{% if not sucursal_id %}
 <div class="kpi-grid">
   <article class="kpi-card">
     <div class="kpi-number">{{ report.totals.insumos }}</div>
@@ -126,12 +141,18 @@
   {% endif %}
 </section>
 
+{% endif %}
+
 <section class="card">
+  {% if sucursal_id %}
+  <div class="card-header">Cantidades por insumo</div>
+  <p class="muted pd-u-3ef1fa1aa1">La tabla muestra hasta 300 insumos de referencia del cálculo de Control. Las columnas de la sucursal muestran las cantidades registradas para esos insumos.</p>
+  {% else %}
   <div class="card-header">Discrepancias del corte · {{ report.semaforo_global }}</div>
   <div class="muted pd-u-3ef1fa1aa1">
-    Cada renglón usa la unidad base de su insumo. El inventario es el saldo actual de los almacenes.
-    {% if sucursal_id %}El filtro de sucursal se aplica a ventas y mermas. Plan e inventario conservan el alcance general.{% endif %}
+    Cada renglón usa la unidad base de su insumo. El saldo real corresponde a los almacenes ERP al momento de la consulta.
   </div>
+  {% endif %}
   {% if report.insumos_sin_unidad_compatible %}
   <details class="pd-u-3ef1fa1aa1">
     <summary>Ver {{ report.totals.sin_unidad_compatible }} insumos sin unidad compatible</summary>
@@ -146,16 +167,18 @@
     <table class="table table-striped">
       <thead>
         <tr>
-          <th>Insumo</th>
-          <th>Unidad</th>
-          <th>Producción</th>
-          <th>Ventas POS</th>
-          <th>Mermas POS</th>
-          <th>Teórico</th>
-          <th>Real</th>
-          <th>Discrepancia</th>
-          <th>% variación</th>
-          <th>Estatus</th>
+          <th scope="col">Insumo</th>
+          <th scope="col">Unidad</th>
+          <th scope="col">{% if sucursal_id %}Plan general{% else %}Producción{% endif %}</th>
+          <th scope="col">{% if sucursal_id %}Ventas de la sucursal{% else %}Ventas POS{% endif %}</th>
+          <th scope="col">{% if sucursal_id %}Mermas de la sucursal{% else %}Mermas POS{% endif %}</th>
+          {% if not sucursal_id %}<th scope="col">Teórico</th>{% endif %}
+          <th scope="col">Saldo actual de almacenes ERP</th>
+          {% if not sucursal_id %}
+          <th scope="col">Discrepancia</th>
+          <th scope="col">% variación</th>
+          <th scope="col">Estatus</th>
+          {% endif %}
         </tr>
       </thead>
       <tbody>
@@ -166,8 +189,9 @@
           <td>{{ row.produccion|floatformat:2|intcomma }}</td>
           <td>{{ row.ventas_pos|floatformat:2|intcomma }}</td>
           <td>{{ row.mermas_pos|floatformat:2|intcomma }}</td>
-          <td>{{ row.inventario_teorico|floatformat:2|intcomma }}</td>
+          {% if not sucursal_id %}<td>{{ row.inventario_teorico|floatformat:2|intcomma }}</td>{% endif %}
           <td>{{ row.inventario_real|floatformat:2|intcomma }}</td>
+          {% if not sucursal_id %}
           <td>{{ row.discrepancia|floatformat:2|intcomma }}</td>
           <td>{{ row.variacion_pct|floatformat:1 }}%</td>
           <td>
@@ -179,10 +203,11 @@
               <span class="badge badge-success">OK</span>
             {% endif %}
           </td>
+          {% endif %}
         </tr>
         {% empty %}
         <tr>
-          <td colspan="10" class="text-muted">Sin datos para el rango seleccionado.</td>
+          <td colspan="{{ sucursal_id|yesno:'6,10' }}" class="text-muted">Sin datos para el rango seleccionado.</td>
         </tr>
         {% endfor %}
       </tbody>

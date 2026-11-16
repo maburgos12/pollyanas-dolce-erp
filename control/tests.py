@@ -80,6 +80,57 @@ class ControlViewsTests(TestCase):
         self.assertIn("focus_summary", resp.context)
         self.assertEqual(resp.context["enterprise_focus"], "")
 
+    def test_sucursal_muestra_movimientos_y_saldos_globales_sin_alertas_locales(self):
+        insumo = Insumo.objects.get(nombre="Insumo control view")
+        LineaReceta.objects.create(
+            receta=self.receta, insumo=insumo, insumo_texto=insumo.nombre,
+            cantidad=Decimal("1"), unidad=insumo.unidad_base,
+        )
+        fecha = timezone.localdate()
+        VentaPOS.objects.create(fecha=fecha, sucursal=self.sucursal, receta=self.receta, cantidad=2)
+        MermaPOS.objects.create(fecha=fecha, sucursal=self.sucursal, receta=self.receta, cantidad=1)
+        other = Sucursal.objects.create(codigo="OTRA", nombre="Otra sucursal")
+        VentaPOS.objects.create(fecha=fecha, sucursal=other, receta=self.receta, cantidad=9)
+
+        self.client.force_login(self.user_lectura)
+        response = self.client.get(reverse("control:discrepancias"), {
+            "from": fecha, "to": fecha, "sucursal_id": self.sucursal.pk,
+            "threshold_pct": "10.5", "enterprise_focus": "ALERTAS",
+        })
+
+        self.assertContains(response, "Consulta de Control · Matriz")
+        self.assertContains(response, "La tabla muestra hasta 300 insumos de referencia")
+        self.assertContains(response, "Plan general")
+        self.assertContains(response, "Saldo actual de almacenes ERP")
+        self.assertContains(response, "Ver comparación general")
+        self.assertContains(
+            response, f'?from={fecha}&amp;to={fecha}&amp;threshold_pct=10.5',
+        )
+        self.assertNotContains(response, "alertas requieren acción inmediata")
+        self.assertNotContains(response, "% variación")
+        self.assertNotContains(response, "Semáforo")
+        self.assertNotContains(response, "Foco operativo")
+        self.assertEqual(response.context["enterprise_focus"], "")
+        row = next(row for row in response.context["report"]["rows"] if row["insumo_id"] == insumo.pk)
+        self.assertEqual((row["ventas_pos"], row["mermas_pos"], row["inventario_real"]), (2, 1, 5))
+        # El cálculo queda intacto para sus otros consumidores.
+        self.assertEqual(row["semaforo"], "ROJO")
+
+    def test_sucursal_invalida_no_cambia_el_alcance_a_general(self):
+        self.client.force_login(self.user_lectura)
+        for branch in ("999999999", "inválida"):
+            response = self.client.get(reverse("control:discrepancias"), {"sucursal_id": branch})
+            self.assertEqual(response.status_code, 404)
+
+    def test_sucursal_historica_sigue_seleccionada_al_cambiar_fechas(self):
+        self.sucursal.activa = False
+        self.sucursal.save(update_fields=["activa"])
+        self.client.force_login(self.user_lectura)
+
+        response = self.client.get(reverse("control:discrepancias"), {"sucursal_id": self.sucursal.pk})
+        self.assertContains(response, "Consulta de Control · Matriz")
+        self.assertContains(response, f'<option value="{self.sucursal.pk}" selected>MTRZ - Matriz</option>', html=True)
+
     def test_discrepancias_convierte_gramos_a_kg_para_venta_plan_y_merma(self):
         from recetas.models import PlanProduccion, PlanProduccionItem
 
