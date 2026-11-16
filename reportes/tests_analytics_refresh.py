@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -15,6 +15,7 @@ from django.utils import timezone
 from core.access import ROLE_DG
 from core.models import AuditLog, Sucursal
 from control.models import MermaPOS
+from inventario.canonical_point_inventory import InventoryFreshness
 from inventario.models import ExistenciaInsumo, MovimientoInventario
 from inventario.stock_trace import TRACE_RECONSTRUCTED_MOVEMENT
 from maestros.models import Insumo, UnidadMedida
@@ -30,7 +31,7 @@ from reportes.models import (
 )
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from reportes.views import _sales_refresh_status
-from reportes.daily_operational_closure_service import _inventory_discrepancies
+from reportes.daily_operational_closure_service import _inventory_discrepancies, _inventory_domain
 from recetas.models import PlanProduccion, Receta
 from ventas.models import VentaAutoritativaPoint
 
@@ -752,8 +753,29 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Cierre esperado del día vs stock vivo actual")
         self.assertContains(response, "Origen stock visible")
         self.assertContains(response, "Insumos sin traza")
+        self.assertContains(response, "Requiere revisión")
+        self.assertContains(response, "Área sugerida · Inventarios")
+        self.assertContains(response, "Área sugerida · Planeación de Producción")
+        self.assertContains(response, "Ver comparación por insumo")
+        self.assertNotContains(response, "Con rezago")
+        self.assertNotContains(response, "Diferencia stock")
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
+
+    def test_inventory_comparison_uses_local_capture_date(self):
+        reading = SimpleNamespace(
+            freshness=InventoryFreshness.FRESH,
+            quantity_base=Decimal("12"),
+            captured_at=datetime(2026, 4, 8, 2, tzinfo=UTC),
+        )
+        with timezone.override("America/Mazatlan"), patch(
+            "reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many",
+            return_value={self.insumo.pk: reading},
+        ):
+            inventory = _inventory_domain(self.target_date)
+
+        self.assertEqual(inventory["visible_max_date"], self.target_date)
+        self.assertTrue(inventory["same_moment_comparison"])
 
     def test_inventory_discrepancies_no_suma_stock_interno_sin_point(self):
         ExistenciaInsumo.objects.create(
