@@ -40,6 +40,34 @@ Ninguna ruta, comando o argumento de ejecución se toma del diagnóstico generad
 con el release comprobado. No certifica automáticamente la aceptación funcional
 particular de cada reparación; esa evidencia sigue perteneciendo a la fábrica.
 
+## Confirmación persistente de la decisión
+
+Después de persistir la aprobación o el rechazo, el mismo consumidor envía un
+mensaje privado con PR, SHA y decisión. La aprobación indica publicación pendiente
+de verificaciones: no confirma un despliegue. `receipt_id` identifica ese recibo y
+es independiente de `notification_id`, reservado al resultado final. El esquema
+acepta registros históricos sin `receipt_id`; cualquier otro campo desconocido
+continúa rechazado. Una revocación borra el identificador anterior para emitir su
+propio recibo de rechazo.
+
+Después del primer recibo, no revertir al módulo anterior sin adaptar y verificar
+su compatibilidad con `receipt_id`: su esquema cerrado rechaza ese campo. Conservar
+las decisiones y el ledger; no borrar campos ni registros para forzar el rollback.
+
+Una pulsación autenticada repetida informa el estado actual sin registrar otra
+autorización. Después del vencimiento permite consultar decisiones existentes,
+pero no aprobar ni revocar. Actores, chats, mensajes o firmas inválidos no reciben
+el estado. Si Telegram o la persistencia del recibo fallan, se conserva la decisión
+y el aviso breve indica que el recibo no se confirmó. Una nueva pulsación válida
+reintenta el recibo mientras la decisión siga en `approved` o `rejected`; después
+del claim solo consulta el estado y conserva el aviso final del worker.
+
+El envío conserva el lock del ledger hasta su confirmación o error (timeout del
+transporte existente), antes de permitir el claim del publicador. No escribe
+snapshots desde callbacks durante una publicación. No se garantiza entrega
+exactamente una vez: una respuesta perdida o fallo de persistencia después del
+envío puede duplicar el recibo informativo, nunca la autorización ni el despliegue.
+
 ## Requisitos pendientes de habilitación
 
 Este código no está operativo por estar escrito o probado localmente. Antes de

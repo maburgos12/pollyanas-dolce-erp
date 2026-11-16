@@ -93,7 +93,150 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'expired'):
             r.decide(self.query(), self.config, self.ledger, self.row['expires'])
         self.approve()
-        with self.assertRaisesRegex(ValueError, 'already_decided'): self.approve()
+        previous = self.ledger.read(self.row['nonce'])
+        self.assertEqual(self.approve(), previous)
+        self.assertEqual(self.ledger.read(self.row['nonce']), previous)
+
+    def handle(self, query, send):
+        with patch.object(r, 'Ledger', return_value=self.ledger):
+            r.handle(query, self.config, self.temp.name, send)
+
+    def test_persistent_receipt_after_durable_decision_and_no_repeat(self):
+        def transport(config, method, data):
+            row = self.ledger.read(self.row['nonce'])
+            self.assertEqual(row['state'], 'approved')
+            self.assertEqual(row['decision'], 'approved')
+            if method == 'sendMessage':
+                self.assertIn('PR #1', data['text'])
+                self.assertIn(H, data['text'])
+                self.assertIn('todavía no confirma despliegue', data['text'])
+                return {'message_id': 98, 'chat': {'id': 17, 'type': 'private'}}
+        send = Mock(side_effect=transport)
+        self.handle(self.query(), send)
+        row = self.ledger.read(self.row['nonce'])
+        self.assertEqual(row['receipt_id'], 98)
+        self.assertIsNone(row['notification_id'])
+        self.handle(self.query(), send)
+        self.assertEqual([c.args[1] for c in send.call_args_list],
+                         ['sendMessage', 'answerCallbackQuery', 'answerCallbackQuery'])
+        self.assertEqual(self.ledger.read(self.row['nonce']), row)
+
+    def test_receipt_survives_publishing_and_final_notice_is_separate(self):
+        send = Mock(return_value={'message_id': 98, 'chat': {'id': 17, 'type': 'private'}})
+        self.handle(self.query(), send)
+        self.publish()
+        send.return_value = {'message_id': 99, 'chat': {'id': 17, 'type': 'private'}}
+        r.notify_result(self.row['nonce'], self.ledger, self.config, send)
+        row = self.ledger.read(self.row['nonce'])
+        self.assertEqual(row['state'], 'published')
+        self.assertEqual(row['receipt_id'], 98)
+        self.assertEqual(row['notification_id'], 99)
+        self.handle(self.query(), send)
+        self.publish()
+        self.deploy.assert_called_once_with(M, B)
+        self.assertEqual(sum(c.args[1] == 'sendMessage' for c in send.call_args_list), 2)
+
+    def test_failed_receipt_keeps_approval_and_authenticated_retry_only(self):
+        for failure in (OSError('lost'), {'message_id': 98, 'chat': {'id': 18, 'type': 'private'}}):
+            self.setUp()
+            def transport(config, method, data):
+                if method == 'sendMessage':
+                    if isinstance(failure, Exception): raise failure
+                    return failure
+            bad = Mock(side_effect=transport)
+            self.handle(self.query(), bad)
+            row = self.ledger.read(self.row['nonce'])
+            self.assertEqual(row['state'], 'approved')
+            self.assertIsNone(row['receipt_id'])
+            self.assertIn('Aprobación registrada', bad.call_args.args[2]['text'])
+            self.assertIn('Aviso persistente sin confirmar', bad.call_args.args[2]['text'])
+            good = Mock(return_value={'message_id': 99, 'chat': {'id': 17, 'type': 'private'}})
+            self.handle(self.query(), good)
+            confirmed = self.ledger.read(self.row['nonce'])
+            self.assertEqual(confirmed['receipt_id'], 99)
+            self.assertEqual(confirmed['decision_at'], row['decision_at'])
+
+    def test_receipt_persistence_failure_reports_unconfirmed_receipt(self):
+        write = self.ledger.write
+        def fail_receipt(row):
+            if row.get('receipt_id') is not None:
+                raise OSError('disk failure')
+            write(row)
+        send = Mock(return_value={'message_id': 98, 'chat': {'id': 17, 'type': 'private'}})
+        with patch.object(self.ledger, 'write', side_effect=fail_receipt):
+            self.handle(self.query(), send)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'approved')
+        self.assertIsNone(self.ledger.read(self.row['nonce'])['receipt_id'])
+        self.assertIn('Aviso persistente sin confirmar', send.call_args.args[2]['text'])
+
+    def test_rejected_execution_is_not_described_as_deployment(self):
+        row = dict(self.row, state='executing', decision='rejected', decision_at=1)
+        self.ledger.write(row)
+        send = Mock()
+        self.handle(self.query(), send)
+        self.assertIn('Rechazo registrado. Cierre en curso', send.call_args.args[2]['text'])
+        self.assertNotIn('Publicación en curso', send.call_args.args[2]['text'])
+        self.assertEqual(self.ledger.read(row['nonce']), row)
+
+    def test_callback_transport_failure_does_not_undo_decision(self):
+        send = Mock(side_effect=[{'message_id': 98, 'chat': {'id': 17, 'type': 'private'}}, OSError('lost')])
+        self.handle(self.query(), send)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['receipt_id'], 98)
+        self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'approved')
+
+    def test_revocation_has_own_receipt_and_repeated_rejection_is_read_only(self):
+        send = Mock(return_value={'message_id': 98, 'chat': {'id': 17, 'type': 'private'}})
+        self.handle(self.query(), send)
+        send.return_value = {'message_id': 99, 'chat': {'id': 17, 'type': 'private'}}
+        self.handle(self.query('r'), send)
+        row = self.ledger.read(self.row['nonce'])
+        self.assertEqual(row['state'], 'rejected')
+        self.assertEqual(row['receipt_id'], 99)
+        self.assertIn('Rechazo registrado', send.call_args.args[2]['text'])
+        self.handle(self.query('r'), send)
+        self.assertEqual(self.ledger.read(self.row['nonce']), row)
+        self.assertEqual(sum(c.args[1] == 'sendMessage' for c in send.call_args_list), 2)
+
+    def test_authenticated_duplicate_reports_current_state_even_after_expiry(self):
+        for state, expected in [('approved', 'vencida'), ('executing', 'en curso'),
+                                ('published', 'Publicado correctamente'), ('blocked', 'vencida'),
+                                ('uncertain', 'sin confirmar')]:
+            with self.subTest(state=state):
+                row = dict(self.row, state=state, decision='approved', decision_at=1,
+                           receipt_id=98, expires=2, release_sha=M if state == 'published' else None)
+                self.ledger.write(row)
+                query = self.query('r')
+                query['data'] = r.signed(self.config, row, 'r')
+                send = Mock()
+                self.handle(query, send)
+                send.assert_called_once()
+                self.assertEqual(send.call_args.args[1], 'answerCallbackQuery')
+                self.assertIn(expected, send.call_args.args[2]['text'])
+                self.assertEqual(self.ledger.read(row['nonce']), row)
+
+    def test_invalid_actor_cannot_read_state_or_trigger_receipt(self):
+        self.approve()
+        for key in ('actor', 'signature', 'message', 'chat'):
+            q = self.query()
+            if key == 'actor': q['from']['id'] = 18
+            if key == 'signature': q['data'] = q['data'][:-1] + 'z'
+            if key == 'message': q['message']['message_id'] = 43
+            if key == 'chat': q['message']['chat']['id'] = 18
+            send = Mock()
+            self.handle(q, send)
+            send.assert_called_once()
+            self.assertEqual(send.call_args.args[1], 'answerCallbackQuery')
+            text = send.call_args.args[2]['text']
+            self.assertNotIn('PR #1', text)
+            self.assertNotIn('Aprobación registrada', text)
+
+    def test_legacy_schema_and_receipt_id_validation(self):
+        self.assertEqual(self.ledger.read(self.row['nonce']), self.row)
+        for value in (False, 0, -1, '98'):
+            with self.assertRaises(ValueError):
+                self.ledger.write(dict(self.row, receipt_id=value))
+        self.ledger.write(dict(self.row, receipt_id=None))
+        self.assertIsNone(self.ledger.read(self.row['nonce'])['receipt_id'])
 
     def test_revocation_before_claim_and_rejection_never_deploy(self):
         self.approve()
@@ -125,7 +268,8 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(r.publish(self.row['nonce'], lost, self.ledger, self.deploy, lambda: B)['state'], 'uncertain')
         self.publish()
         self.deploy.assert_not_called()
-        with self.assertRaises(ValueError): r.decide(self.query('r'), self.config, self.ledger)
+        previous = self.ledger.read(self.row['nonce'])
+        self.assertEqual(r.decide(self.query('r'), self.config, self.ledger), previous)
 
     def test_crash_during_effect_is_durable_executing(self):
         self.approve()
