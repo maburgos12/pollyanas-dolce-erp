@@ -237,7 +237,11 @@ def read_audit_report(month, *, branch=""):
         if selected is None:
             raise SuspiciousOperation("Sucursal de auditoría inválida")
     run = ProductInventoryAuditRun.objects.filter(month=month).first()
-    aliases, _ = canonical_point_branch_identity()
+    aliases, point_branches = canonical_point_branch_identity()
+    audit_branch_id = next(
+        (point_id for point_id in aliases.values() if selected and point_branches[point_id].erp_branch_id == selected.pk),
+        None,
+    )
     qs = ProductInventoryAuditCase.objects.sold_products().filter(month=month).exclude(
         Q(branch__name__iexact="Devoluciones") | Q(branch__erp_branch__codigo__iexact="DEVOLUCIONES")
     ).select_related("branch__erp_branch", "product")
@@ -309,6 +313,7 @@ def read_audit_report(month, *, branch=""):
     stale = bool(run and (not run.last_successful_rebuild_at or (run.rebuilt_at and run.rebuilt_at > run.last_successful_rebuild_at)))
     return {
         "rows": rows, "run": run, "branches": branches, "selected_branch": str(selected.id) if selected else "",
+        "selected_audit_branch_id": audit_branch_id,
         "selected_branch_label": selected.nombre if selected else "Sucursales de venta y CEDIS",
         "audit_status": audit_status(c.movement_status for c in cases), "stale": stale,
         "partial": partial,
