@@ -52,3 +52,61 @@ marcados PRUEBA mediante las mismas credenciales de systemd; simulan condiciones
 no rompen NAS/SQL ni cambian umbrales o estado real de deduplicación. Probar cada
 causa y conservar los message_id aceptados antes de cerrar la instalación.
 Para revertir: desactivar solo este timer; no alterar el timer de recuperación.
+
+## Solicitudes de limpieza con botones (preparador separado)
+
+Autorizado por Mauricio el 16/11/2026: `erp-cleanup-prepare.timer` comprueba cada
+cinco minutos si el porcentaje entero de `df` es **mayor que75**. El monitor
+original conserva sus avisos a75/85%, sin cambios de horario. El preparador vive
+en el VPS; no necesita una Mac encendida ni consume llamadas de IA.
+
+El preparador acepta únicamente archivos de caché APT y registros rotados de la
+lista cerrada de `erp_telegram_cleanup.FILE_PATH`. Excluye symlinks, enlaces duros,
+archivos abiertos/mapeados y cambios durante la comprobación. Acota cada lote a
+256 archivos y1GB; Docker, respaldos, bases, medios y registros activos quedan
+fuera del alcance automático. No usa `prune` ni borra candidatos.
+
+Antes de mostrar botones debe copiar al NAS, comprobar el hash allí, leer el
+archivo de regreso y recuperar cada miembro en un directorio temporal aislado,
+verificando tamaño y hash contra la fuente. Comprueba espacio disponible antes
+de preparar y conserva una reserva de5GiB en el VPS. Solo se retira el temporal
+creado por esa comprobación; el archivo NAS y los originales se conservan.
+Si falla una condición, informa un bloqueo y no presenta una autorización falsa.
+
+El manifiesto y la evidencia quedan en estado privado. La solicitud pasa por
+`erp_telegram_cleanup.request`: comprueba destinatario, mensaje y ambos botones
+**Aprobar limpieza / Rechazar / revocar**. La pulsación solo registra la decisión.
+No hay ejecutor automático de limpieza ni despliegue. El operador debe verificar
+la aprobación vigente y las condiciones exactas antes de un retiro autorizado.
+Una solicitud vencida no se renueva a ciegas; el mismo alcance no se vuelve a
+solicitar automáticamente. Una entrega ambigua requiere conciliación humana.
+
+### Instalación del preparador
+
+Solo después de aprobar el SHA exacto, integrar y desplegar por el flujo oficial.
+Desde el checkout de producción limpio, verificar primero que el módulo de
+limpieza instalado corresponde al contrato de manifiestos y que existen sus
+carpetas privadas. No reinstalar el receptor Telegram ni el publicador para
+habilitar este preparador.
+
+```sh
+cd /opt/pastelerias-erp
+systemd-analyze verify scripts/ops/erp-cleanup-prepare.service scripts/ops/erp-cleanup-prepare.timer
+install -m 0644 scripts/ops/erp-cleanup-prepare.service /etc/systemd/system/erp-cleanup-prepare.service
+install -m 0644 scripts/ops/erp-cleanup-prepare.timer /etc/systemd/system/erp-cleanup-prepare.timer
+systemctl daemon-reload
+systemctl start erp-cleanup-prepare.service
+journalctl -u erp-cleanup-prepare.service --no-pager -n 30
+systemctl enable --now erp-cleanup-prepare.timer
+```
+
+La unidad hace el sistema de archivos de producción de solo lectura; solo permite
+escribir su estado, manifiestos, ledger y temporales privados. No cambia timers
+existentes. Verificar resultado real y message_id antes de declarar instalación
+completa; los tests locales no demuestran entrega real. Para desactivar, parar y
+deshabilitar exclusivamente `erp-cleanup-prepare.timer`; conservar evidencia y
+las alertas originales. Nunca interpretar su aprobación como permiso genérico
+para borrar otros archivos.
+
+Pruebas: `python3 -m unittest discover -s scripts/tests -p test_cleanup_prepare.py`
+y `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.

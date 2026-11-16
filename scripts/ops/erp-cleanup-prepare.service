@@ -1,0 +1,27 @@
+[Unit]
+Description=Prepare recoverable ERP cleanup proposals without deleting candidates
+Wants=network-online.target
+After=network-online.target erp-backup-alerts.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+StateDirectory=erp-cleanup-prepare
+StateDirectoryMode=0700
+LoadCredential=telegram.json:/etc/erp-mac-ia-watchdog/telegram.json
+ExecStart=/usr/bin/python3 -B /opt/pastelerias-erp/ops/erp-telegram-release/erp_cleanup_prepare.py --once
+TimeoutStartSec=1800
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/erp-point-decision/cleanups /var/lib/erp-point-decision/cleanup-proposals
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+MemoryMax=512M
+TasksMax=64
+Nice=15
+IOSchedulingClass=idle
