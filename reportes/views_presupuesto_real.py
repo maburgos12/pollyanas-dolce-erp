@@ -216,7 +216,7 @@ def _build_context(request: HttpRequest, area_codes: list[str] | None = None) ->
                 "orden": area.orden,
                 "meses": {m: {"presupuesto": ZERO, "real": ZERO, "con_real": False} for _, m in MONTH_COLUMNS},
                 "anual_presupuesto": ZERO,
-                "anual_real": ZERO,
+                "anual_real": None,
             },
         )
         mes = linea.periodo.month
@@ -226,7 +226,7 @@ def _build_context(request: HttpRequest, area_codes: list[str] | None = None) ->
         if linea.monto_real is not None:
             celda["real"] += linea.monto_real
             celda["con_real"] = True
-            fila["anual_real"] += linea.monto_real
+            fila["anual_real"] = (fila["anual_real"] or ZERO) + linea.monto_real
 
         # ---- detalle del mes seleccionado ---------------------------------
         if linea.periodo == periodo and (not selected_area or area.codigo == selected_area):
@@ -271,9 +271,9 @@ def _build_context(request: HttpRequest, area_codes: list[str] | None = None) ->
     # mezcla cuadra al peso pero no significa nada para el negocio (hallazgo
     # de dirección: mayo mostraba $8.9M "presupuestados" = venta + gasto).
     kpis = {
-        "ppto_ingresos": ZERO, "real_ingresos": ZERO,
-        "ppto_egresos": ZERO, "real_egresos": ZERO,
-        "ppto_capex": ZERO, "real_capex": ZERO,
+        "ppto_ingresos": ZERO, "real_ingresos": None,
+        "ppto_egresos": ZERO, "real_egresos": None,
+        "ppto_capex": ZERO, "real_capex": None,
         "capturado": 0, "pendiente": 0, "retenidos": 0,
     }
     for row in detalle:
@@ -291,7 +291,7 @@ def _build_context(request: HttpRequest, area_codes: list[str] | None = None) ->
             ppto_key, real_key = "ppto_egresos", "real_egresos"
         kpis[ppto_key] += row["presupuesto"]
         if row["real"] is not None:
-            kpis[real_key] += row["real"]
+            kpis[real_key] = (kpis[real_key] or ZERO) + row["real"]
             kpis["capturado"] += 1
             if row["sin_datos_fuente"]:
                 # Valor retenido de una consolidación previa (fuente sin datos
@@ -299,9 +299,9 @@ def _build_context(request: HttpRequest, area_codes: list[str] | None = None) ->
                 kpis["retenidos"] += 1
         else:
             kpis["pendiente"] += 1
-    kpis["dif_real"] = kpis["real_ingresos"] - kpis["real_egresos"]
+    kpis["dif_real"] = (kpis["real_ingresos"] or ZERO) - (kpis["real_egresos"] or ZERO)
     kpis["dif_ppto"] = kpis["ppto_ingresos"] - kpis["ppto_egresos"]
-    kpis["varianza_egresos"] = kpis["real_egresos"] - kpis["ppto_egresos"]
+    kpis["varianza_egresos"] = (kpis["real_egresos"] or ZERO) - kpis["ppto_egresos"]
 
     # ---- ventas por unidades (regla de dirección: unidades × precio actual) --
     ventas_unidades = None

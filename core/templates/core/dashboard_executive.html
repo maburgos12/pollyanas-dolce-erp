@@ -6,7 +6,6 @@
 {% block body_class %}page-dashboard-executive{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/commercial_analytics.css' %}?v=20261004-v2">
 <link rel="stylesheet" href="/static/css/sales_confidence.css?v=20261004-v1">
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
 <link rel="stylesheet" href="/static/css/template_modules/core-templates-core-dashboard-executive.css?v=20260703-hero-mobile-center-v2">
@@ -14,13 +13,11 @@
 
 {% block content %}
 <div class="home-exec-shell">
-  {% include "reportes/partials/commercial_analytics.html" %}
-  {% if commercial_analytics %}<details class="ca-legacy"><summary>Operación, pronósticos y detalle de costos</summary>{% endif %}
   <section class="home-exec-hero">
     <div>
       <div class="home-exec-kicker">Dirección general</div>
       <h1>Tablero ejecutivo</h1>
-      <p class="home-exec-copy">Venta, forecast, margen y cierre mensual en una sola lectura.</p>
+      <p class="home-exec-copy">Consulta el corte de ventas y los pendientes que requieren atención.</p>
     </div>
     <div class="home-exec-hero-side">
       <div class="home-exec-pills">
@@ -29,7 +26,8 @@
         <span class="home-exec-pill">{{ forecast_panel.target_week_label }}</span>
       </div>
       <div class="home-exec-actions">
-        <a class="btn btn-primary" href="{% url 'reportes:bi' %}">BI</a>
+        <a class="btn btn-primary" href="{% url 'reportes:cierre_operativo' %}">Cierre diario</a>
+        <a class="btn btn-secondary" href="{% url 'reportes:bi' %}{% if commercial_bi_query %}?{{ commercial_bi_query }}{% endif %}">Análisis comercial en BI</a>
         <a class="btn btn-primary" href="{% url 'reportes:ventas' %}">Ventas</a>
         <a class="btn btn-secondary" href="{% url 'recetas:costeo_dashboard' %}">Costeo</a>
         <a class="btn btn-secondary" href="{% url 'recetas:dg_operacion_dashboard' %}">DG</a>
@@ -527,7 +525,6 @@
       </div>
     </article>
   </section>
-{% if commercial_analytics %}</details>{% endif %}
 </div>
 {% endblock %}
 
@@ -536,8 +533,6 @@
 {{ yoy_panel.rows|json_script:"home-yoy-data" }}
 <script src="{% static 'js/dashboard_cut_refresh.js' %}?v=20261011-mobile-cut-v2" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-{{ commercial_analytics|json_script:"commercial-analytics-data" }}
-<script src="{% static 'js/commercial_analytics.js' %}?v=20261004-v3"></script>
 <script>
   (() => {
     const parse = (id) => {

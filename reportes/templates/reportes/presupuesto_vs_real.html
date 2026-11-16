@@ -82,11 +82,13 @@
 <section class="kpi-grid">
   {% if resumen_limitado %}
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-number">{% if kpis.real_egresos is not None %}${{ kpis.real_egresos|floatformat:0|intcomma }}{% else %}Sin datos{% endif %}</div>
     <div class="kpi-label">Gasto real de mis áreas (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
+    {% if kpis.real_egresos is not None %}
     <div class="kpi-number {% if kpis.varianza_egresos > 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.varianza_egresos|floatformat:0|intcomma }}</div>
+    {% else %}<div class="kpi-number">Sin datos</div>{% endif %}
     <div class="kpi-label">Variación contra presupuesto</div>
   </div>
   <div class="kpi-card">
@@ -95,19 +97,21 @@
   </div>
   {% else %}
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real_ingresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-number">{% if kpis.real_ingresos is not None %}${{ kpis.real_ingresos|floatformat:0|intcomma }}{% else %}Sin datos{% endif %}</div>
     <div class="kpi-label">Ingresos reales · {{ selected_month_name|capfirst }} (ppto ${{ kpis.ppto_ingresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real_egresos|floatformat:0|intcomma }}</div>
+    <div class="kpi-number">{% if kpis.real_egresos is not None %}${{ kpis.real_egresos|floatformat:0|intcomma }}{% else %}Sin datos{% endif %}</div>
     <div class="kpi-label">Egresos operativos reales (ppto ${{ kpis.ppto_egresos|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
+    {% if kpis.real_ingresos is not None and kpis.real_egresos is not None %}
     <div class="kpi-number {% if kpis.dif_real < 0 %}is-danger{% else %}is-success{% endif %}">${{ kpis.dif_real|floatformat:0|intcomma }}</div>
+    {% else %}<div class="kpi-number">Sin datos</div>{% endif %}
     <div class="kpi-label">Diferencia operativa ingresos − egresos (ppto ${{ kpis.dif_ppto|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
-    <div class="kpi-number">${{ kpis.real_capex|floatformat:0|intcomma }}</div>
+    <div class="kpi-number">{% if kpis.real_capex is not None %}${{ kpis.real_capex|floatformat:0|intcomma }}{% else %}Sin datos{% endif %}</div>
     <div class="kpi-label">Inversión CAPEX (ppto ${{ kpis.ppto_capex|floatformat:0|intcomma }})</div>
   </div>
   <div class="kpi-card">
@@ -147,7 +151,7 @@
         <tr>
           <td><a href="?year={{ selected_year }}&month={{ selected_month }}&version={{ selected_version }}&area={{ fila.codigo }}">{{ fila.area }}</a></td>
           <td>${{ fila.anual_presupuesto|floatformat:2|intcomma }}</td>
-          <td>${{ fila.anual_real|floatformat:2|intcomma }}</td>
+          <td>{% if fila.anual_real is not None %}${{ fila.anual_real|floatformat:2|intcomma }}{% else %}<span class="muted">Sin datos</span>{% endif %}</td>
           <td>${{ fila.mes_presupuesto|floatformat:2|intcomma }}</td>
           <td>{% if fila.mes_real is not None %}${{ fila.mes_real|floatformat:2|intcomma }}{% else %}<span class="muted">Sin datos</span>{% endif %}</td>
           <td>{% if fila.mes_varianza is not None %}${{ fila.mes_varianza|floatformat:2|intcomma }}{% else %}-{% endif %}</td>
