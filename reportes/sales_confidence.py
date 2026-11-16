@@ -61,49 +61,56 @@ def _source_priority():
     )
 
 
-def selected_sales_facts(*, start_date, end_date):
+def selected_sales_facts(*, start_date, end_date, branch_id=None):
     """Same branch/day precedence as analytics_service; retain closed branches."""
     candidates = FactVentaDiaria.objects.filter(fecha__range=(start_date, end_date)).order_by().annotate(
         priority=_source_priority(), identity=Coalesce("sucursal_id", Value(-1)),
     )
+    branch_filter = "AND sucursal_id = %s" if branch_id is not None else ""
+    export_filter = "AND branch_id = %s" if branch_id is not None else ""
+    derived_filter = "AND d.branch_id = %s" if branch_id is not None else ""
+    branch_params = (branch_id,) if branch_id is not None else ()
+    if branch_id is not None:
+        candidates = candidates.filter(sucursal_id=branch_id)
+
     # Compute the same branch/day winner once instead of comparing every pair of sales rows.
-    selected_ids = RawSQL("""
+    selected_ids = RawSQL(f"""
         WITH preferred_days AS MATERIALIZED (
             SELECT fecha, COALESCE(sucursal_id, -1) branch_identity,
                    MIN(CASE WHEN source_kind = %s THEN 0 WHEN source_kind = %s THEN 1 ELSE 2 END) priority
             FROM reportes_factventadiaria
-            WHERE fecha BETWEEN %s AND %s
+            WHERE fecha BETWEEN %s AND %s {branch_filter}
             GROUP BY fecha, COALESCE(sucursal_id, -1)
         )
         SELECT f.id FROM reportes_factventadiaria f
         JOIN preferred_days p ON p.fecha = f.fecha
             AND p.branch_identity = COALESCE(f.sucursal_id, -1)
             AND p.priority = CASE WHEN f.source_kind = %s THEN 0 WHEN f.source_kind = %s THEN 1 ELSE 2 END
-        WHERE f.fecha BETWEEN %s AND %s
-    """, (FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date,
-           FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date))
+        WHERE f.fecha BETWEEN %s AND %s {branch_filter}
+    """, (FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date, *branch_params,
+           FactVentaDiaria.SOURCE_AUTHORITATIVE, FactVentaDiaria.SOURCE_V2, start_date, end_date, *branch_params))
     facts = candidates.annotate(has_preferred=Value(False)).filter(pk__in=selected_ids)
     # A derived import of the SAME export is not a second sale. This is lineage
     # selection, not a SKU/name equivalence or an edit to historical records.
     mirror_ids = RawSQL(
-        """
+        f"""
         WITH original_exports AS MATERIALIZED (
             SELECT DISTINCT branch_id, sale_date, source_file
             FROM ventas_autoritativas_point
             WHERE source_sheet = 'category_report' AND source_file <> ''
-              AND sale_date BETWEEN %s AND %s
+              AND sale_date BETWEEN %s AND %s {export_filter}
         ), mirrored_keys AS MATERIALIZED (
             SELECT d.branch_id, d.sale_date, d.product_code
             FROM ventas_autoritativas_point d
             JOIN original_exports o ON o.branch_id = d.branch_id
                 AND o.sale_date = d.sale_date AND o.source_file = d.source_file
-            WHERE d.source_sheet = 'PointSalesDailyProductFact'
+            WHERE d.source_sheet = 'PointSalesDailyProductFact' {derived_filter}
         )
         SELECT f.id FROM reportes_factventadiaria f
         JOIN mirrored_keys k ON k.branch_id = f.sucursal_id
             AND k.sale_date = f.fecha AND k.product_code = f.producto_clave
         WHERE f.source_kind = 'AUTHORITATIVE'
-        """, (start_date, end_date),
+        """, (start_date, end_date, *branch_params, *branch_params),
     )
     return facts.exclude(pk__in=mirror_ids)
 

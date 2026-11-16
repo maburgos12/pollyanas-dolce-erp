@@ -84,10 +84,11 @@ def _product_groups(facts):
 def _build_panel(year, month, branch_id):
     today = timezone.localdate()
     previous_year = year-1
-    annual = selected_sales_facts(start_date=date(previous_year, 1, 1), end_date=min(date(year, 12, 31), today))
+    annual_range = {"start_date": date(previous_year, 1, 1), "end_date": min(date(year, 12, 31), today)}
+    annual = selected_sales_facts(**annual_range)
     branch_options = list(annual.exclude(sucursal_id=None).values('sucursal_id', 'sucursal__nombre').distinct().order_by('sucursal__nombre'))
     if branch_id:
-        annual = annual.filter(sucursal_id=branch_id)
+        annual = selected_sales_facts(**annual_range, branch_id=branch_id)
     monthly_totals = list(annual.annotate(period=TruncMonth('fecha')).values('period').annotate(amount=Sum('venta_total'), latest=Max('fecha')))
     monthly_map = {r['period']: r['amount'] for r in monthly_totals}
     latest_current = max((r['latest'] for r in monthly_totals if r['period'].year == year), default=None)
@@ -110,11 +111,8 @@ def _build_panel(year, month, branch_id):
     # Match elapsed calendar dates for a current partial period; full historical years remain full.
     prev_end = date(previous_year, end.month, min(end.day, monthrange(previous_year, end.month)[1])) if end >= start else date(previous_year, end_month, monthrange(previous_year, end_month)[1])
     # Source precedence and mirror lineage are day-local; do not rescan both years for each monthly grouping.
-    current = selected_sales_facts(start_date=start, end_date=min(end, today))
-    previous = selected_sales_facts(start_date=prev_start, end_date=prev_end)
-    if branch_id:
-        current = current.filter(sucursal_id=branch_id)
-        previous = previous.filter(sucursal_id=branch_id)
+    current = selected_sales_facts(start_date=start, end_date=min(end, today), branch_id=branch_id or None)
+    previous = selected_sales_facts(start_date=prev_start, end_date=prev_end, branch_id=branch_id or None)
     def summary(q):
         return q.aggregate(amount=Sum('venta_total'), rows=Count('id'), updated=Max('actualizado_en'))
     now, before = summary(current), summary(previous)

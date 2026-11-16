@@ -280,6 +280,13 @@ class SalesConfidenceTests(TestCase):
         self.assertTrue(all(value is False for value in actual.values_list("has_preferred",flat=True)))
         self.assertTrue(actual.filter(sucursal=None).exists())
         self.assertTrue(actual.filter(source_kind="OTHER").exists())
+        for branch in (self.branch, other):
+            with self.subTest(branch=branch.pk):
+                scoped = selected_sales_facts(start_date=date(2025, 9, 1), end_date=date(2025, 9, 30), branch_id=branch.pk)
+                self.assertSetEqual(
+                    set(scoped.values_list("pk", flat=True)),
+                    set(actual.filter(sucursal=branch).values_list("pk", flat=True)),
+                )
 
     def test_source_priority_is_for_the_day_not_an_alternate_product(self):
         original = self.fact(key="official", source="AUTHORITATIVE")
