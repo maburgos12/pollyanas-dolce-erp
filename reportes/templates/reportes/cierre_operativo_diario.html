@@ -33,6 +33,9 @@
         {% endif %}
       </div>
       <p class="closure-copy pd-u-d8a81eac84">{{ closure.overall_status.detail }}</p>
+      {% if closure.overall_status.tone != "success" %}
+        <a href="#alertas-cierre">Ver observaciones del cierre ({{ closure.alerts|length }})</a>
+      {% endif %}
     </div>
     <div class="bi-hero-side">
       <form class="bi-filterbar" method="get">
@@ -94,10 +97,13 @@
       <div class="closure-muted">Costo Point estimado ${{ closure.waste.raw_cost|floatformat:2|intcomma }}</div>
     </article>
     <article class="closure-card">
-      <div class="closure-kpi-value {% if closure.inventory.delta_stock == 0 %}success{% elif closure.inventory.delta_stock > 0 %}warning{% else %}danger{% endif %}">{{ closure.inventory.delta_stock|floatformat:3|intcomma }}</div>
-      <div class="bi-kpi-label">Diferencia stock</div>
-      <div class="closure-copy">Esperado al cierre {{ closure.inventory.expected_stock|floatformat:3|intcomma }} · visible actual {{ closure.inventory.visible_stock|floatformat:3|intcomma }}</div>
-      <div class="closure-muted">Sólo considera insumos con movimiento el día auditado. Comparación: {{ closure.inventory.comparison_scope }}.</div>
+      <div class="closure-kpi-value">{{ closure.inventory.movement_insumo_count|intcomma }}</div>
+      <div class="bi-kpi-label">Insumos con movimiento</div>
+      <div class="closure-copy">Última lectura Point ALMACÉN · {{ closure.inventory.visible_updated_max|date:"Y-m-d H:i"|default:"Sin lectura para este corte" }}</div>
+      {% if closure.inventory.inventory_unavailable_count %}
+        <div class="closure-muted">Hay insumos sin una lectura vigente para comparar.</div>
+      {% endif %}
+      <a class="closure-muted" href="#desviaciones-stock">Ver comparación por insumo</a>
     </article>
   </section>
 
@@ -139,7 +145,7 @@
       <div class="closure-card-head">
         <div>
           <h2 class="closure-card-title">Alertas del cierre</h2>
-          <p class="closure-copy">Hallazgos operativos que impiden considerar el día completamente confiable.</p>
+          <p class="closure-copy">Observaciones del día auditado {{ target_date_iso }} y área sugerida para revisarlas.</p>
         </div>
       </div>
       <div class="closure-note-list">
@@ -147,6 +153,7 @@
         <div class="closure-note-item {% if alert.tone == 'success' %}closure-alert-success{% elif alert.tone == 'danger' %}closure-alert-danger{% else %}closure-alert-warning{% endif %}">
           <strong>{{ alert.label }}</strong>
           <div class="closure-copy">{{ alert.detail }}</div>
+          {% if alert.review_area %}<div class="closure-muted">Área sugerida · {{ alert.review_area }}</div>{% endif %}
         </div>
         {% endfor %}
       </div>
@@ -194,8 +201,6 @@
             {% else %}
             <tr><th>Movimientos del día</th><td class="is-right">{{ domain.movement_rows|intcomma }}</td></tr>
             <tr><th>Insumos con movimiento</th><td class="is-right">{{ domain.movement_insumo_count|intcomma }}</td></tr>
-            <tr><th>Stock esperado al cierre</th><td class="is-right">{{ domain.expected_stock|floatformat:3|intcomma }}</td></tr>
-            <tr><th>Stock visible actual</th><td class="is-right">{{ domain.visible_stock|floatformat:3|intcomma }}</td></tr>
             <tr><th>Última actualización stock visible</th><td class="is-right">{{ domain.visible_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Último sync almacén OK</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sync OK" }}</td></tr>
             <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
@@ -203,9 +208,6 @@
             <tr><th>Comparación temporal</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
             <tr><th>Origen stock visible</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
             <tr><th>Insumos sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
-            <tr><th>Entradas del día</th><td class="is-right">{{ domain.entradas_dia|floatformat:3|intcomma }}</td></tr>
-            <tr><th>Salidas/consumo del día</th><td class="is-right">{{ domain.salidas_dia|floatformat:3|intcomma }}</td></tr>
-            <tr><th>Ajustes netos del día</th><td class="is-right">{{ domain.ajustes_netos|floatformat:3|intcomma }}</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -255,7 +257,7 @@
   </section>
 
   <section class="closure-grid-2">
-    <article class="closure-card">
+    <article class="closure-card" id="desviaciones-stock">
       <div class="closure-card-head">
         <div>
           <h2 class="closure-card-title">Desviaciones de stock vivo vs cierre auditado</h2>
@@ -269,8 +271,8 @@
               <th>Insumo</th>
               <th>Unidad</th>
               <th>Origen visible</th>
-              <th class="is-right">Esperado</th>
-              <th class="is-right">Visible</th>
+              <th class="is-right">Stock esperado al cierre</th>
+              <th class="is-right">Stock visible actual</th>
               <th class="is-right">Diferencia</th>
             </tr>
           </thead>
@@ -305,9 +307,6 @@
         <tbody>
           <tr><th>Fecha auditada</th><td class="is-right">{{ target_date_iso }}</td></tr>
           <tr><th>Último movimiento capturado</th><td class="is-right">{{ closure.inventory.movement_latest_at|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
-          <tr><th>Entradas del día</th><td class="is-right">{{ closure.inventory.entradas_dia|floatformat:3|intcomma }}</td></tr>
-          <tr><th>Salidas/consumo del día</th><td class="is-right">{{ closure.inventory.salidas_dia|floatformat:3|intcomma }}</td></tr>
-          <tr><th>Ajustes netos del día</th><td class="is-right">{{ closure.inventory.ajustes_netos|floatformat:3|intcomma }}</td></tr>
           <tr><th>Lectura correcta</th><td class="is-right">Cierre esperado del día vs stock vivo actual</td></tr>
         </tbody>
       </table>
