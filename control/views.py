@@ -3,7 +3,8 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import redirect, render
+from django.http import Http404
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
@@ -548,7 +549,15 @@ def discrepancias(request):
     if threshold_pct < 0:
         threshold_pct = Decimal("0")
 
-    sucursal_id = int(sucursal_id_raw) if sucursal_id_raw.isdigit() else None
+    try:
+        sucursal_id = int(sucursal_id_raw) if sucursal_id_raw else None
+    except ValueError as exc:
+        raise Http404("Sucursal inválida.") from exc
+    sucursales = list(Sucursal.objects.filter(activa=True).order_by("codigo"))
+    sucursal = next((s for s in sucursales if s.pk == sucursal_id), None)
+    if sucursal_id is not None and sucursal is None:
+        sucursal = get_object_or_404(Sucursal.objects.only("codigo", "nombre"), pk=sucursal_id)
+        sucursales.append(sucursal)
     report = build_discrepancias_report(
         date_from=date_from,
         date_to=date_to,
@@ -556,10 +565,7 @@ def discrepancias(request):
         threshold_pct=threshold_pct,
     )
 
-    ventas_hoy = VentaPOS.objects.filter(fecha=timezone.localdate()).count()
-    mermas_hoy = MermaPOS.objects.filter(fecha=timezone.localdate()).count()
-    capturas_recientes = VentaPOS.objects.count() + MermaPOS.objects.count()
-    enterprise_focus = (request.GET.get("enterprise_focus") or "").strip().upper()
+    enterprise_focus = "" if sucursal_id else (request.GET.get("enterprise_focus") or "").strip().upper()
     if enterprise_focus == "ALERTAS":
         report["rows"] = [row for row in report["rows"] if row["semaforo"] == "ROJO"]
     elif enterprise_focus == "OBSERVACION":
@@ -572,19 +578,22 @@ def discrepancias(request):
         report["rows"] = [
             row for row in report["rows"] if row["ventas_pos"] or row["mermas_pos"] or row["produccion"]
         ]
-    focus_cards = _control_focus_cards(
-        selected_focus=enterprise_focus,
-        alertas=report["totals"]["alertas"],
-        observar=report["totals"]["observar"],
-        ok=report["totals"]["ok"],
-        ventas_hoy=ventas_hoy,
-        mermas_hoy=mermas_hoy,
-        capturas_recientes=capturas_recientes,
-    )
-    focus_summary = _control_focus_summary(
-        selected_focus=enterprise_focus,
-        count=len(report["rows"]),
-    )
+    focus_cards, focus_summary = [], None
+    if not sucursal_id:
+        today = timezone.localdate()
+        focus_cards = _control_focus_cards(
+            selected_focus=enterprise_focus,
+            alertas=report["totals"]["alertas"],
+            observar=report["totals"]["observar"],
+            ok=report["totals"]["ok"],
+            ventas_hoy=VentaPOS.objects.filter(fecha=today).count(),
+            mermas_hoy=MermaPOS.objects.filter(fecha=today).count(),
+            capturas_recientes=VentaPOS.objects.count() + MermaPOS.objects.count(),
+        )
+        focus_summary = _control_focus_summary(
+            selected_focus=enterprise_focus,
+            count=len(report["rows"]),
+        )
 
     context = {
         "module_tabs": _module_tabs("discrepancias"),
@@ -593,7 +602,8 @@ def discrepancias(request):
         "date_to": date_to,
         "threshold_pct": threshold_pct,
         "sucursal_id": sucursal_id,
-        "sucursales": list(Sucursal.objects.filter(activa=True).order_by("codigo")),
+        "sucursales": sucursales,
+        "sucursal_label": sucursal.nombre if sucursal else "",
         "report": report,
         "enterprise_focus": enterprise_focus,
         "focus_cards": focus_cards,
