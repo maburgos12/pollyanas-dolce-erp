@@ -68,6 +68,15 @@ class ClosedSalesTests(TestCase):
         self.assertIsNone(snapshot['total_tickets'])
         self.assertIn(self.branches[1].erp_branch.nombre, snapshot['detail'])
         self.assertFalse(PointDailyBranchIndicator.objects.filter(branch=self.branches[1], indicator_date=day).exists())
+        with patch('reportes.dashboard_sales_dataset.point_sales_month_total') as monthly:
+            daily = get_dashboard_sales_dataset(today=self.today, daily_only=True)
+        monthly.assert_not_called()
+        self.assertEqual(daily['monthly_sales_rows'], [])
+        self.assertEqual(daily['latest_date'], day)
+        self.assertEqual(
+            {field: value for field, value in daily['daily_sales_snapshot'].items() if not field.startswith('month_')},
+            {field: value for field, value in snapshot.items() if not field.startswith('month_')},
+        )
 
     def test_incomplete_indicator_amount_cannot_replace_official_sales(self):
         from reportes.models import FactVentaDiaria
