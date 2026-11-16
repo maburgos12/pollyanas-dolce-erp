@@ -982,6 +982,35 @@ class PresupuestoVsRealViewTests(TestCase):
         self.assertIn("Concepto tablero", cuerpo)
         self.assertIn("Varianza %", cuerpo)
 
+    def test_resumen_distingue_real_ausente_cero_y_retenido(self):
+        self.client.force_login(self.superuser)
+        url = "/reportes/presupuesto-vs-real/?year=2026&month=3&area=tablero"
+        for monto, metadata, retenidos in (
+            (None, {}, 0),
+            (Decimal("0"), {}, 0),
+            (Decimal("0"), {"sin_datos_fuente": True}, 1),
+            (Decimal("80"), {"sin_datos_fuente": True}, 1),
+        ):
+            with self.subTest(monto=monto, retenidos=retenidos):
+                LineaPresupuestoMensual.objects.filter(pk=self.linea.pk).update(
+                    monto_real=monto, metadata=metadata
+                )
+                response = self.client.get(url)
+                fila = next(row for row in response.context["matriz"] if row["codigo"] == "tablero")
+                kpis = response.context["kpis"]
+                self.assertEqual(fila["anual_real"], monto)
+                self.assertEqual(fila["mes_real"], monto)
+                self.assertEqual(kpis["real_egresos"], monto)
+                self.assertIsNone(kpis["real_ingresos"])
+                self.assertIsNone(kpis["real_capex"])
+                self.assertEqual(kpis["retenidos"], retenidos)
+                self.assertContains(response, '<div class="kpi-number">Sin datos</div>', html=True)
+                if monto == 0:
+                    self.assertContains(response, '<div class="kpi-number">$0</div>', html=True)
+                if retenidos:
+                    self.assertContains(response, "muestran el último valor consolidado")
+                    self.assertContains(response, '<span class="badge bg-warning">Fuente sin datos</span>', html=True)
+
     def test_export_xlsx_responde_archivo(self):
         """El export XLSX responde un adjunto de Excel."""
         self.client.force_login(self.superuser)
