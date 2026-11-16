@@ -206,8 +206,8 @@
             <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
             <tr><th>Última reconstrucción fact</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Comparación temporal</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
-            <tr><th>Origen stock visible</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
-            <tr><th>Insumos sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
+            <tr><th>Trazabilidad de existencias ERP</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
+            <tr><th>Registros ERP sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
             {% endif %}
           </tbody>
         </table>
