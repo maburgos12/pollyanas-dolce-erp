@@ -116,6 +116,10 @@ class CommercialAnalyticsTests(TestCase):
             self.fact(2026,3,key=code,amount=100)
         panel=_build_panel(2026,3,None)
         self.assertEqual(panel['current'],D(200))
+        filtered = _build_panel(2026, 3, self.closed.pk)
+        self.assertEqual(filtered['current'], panel['current'])
+        self.assertEqual(filtered['monthly'], panel['monthly'])
+        self.assertEqual(filtered['products'], panel['products'])
         self.assertEqual(VentaAutoritativaPoint.objects.count(),3)
         self.assertEqual(FactVentaDiaria.objects.count(),3)
 
@@ -169,6 +173,6 @@ class CommercialAnalyticsTests(TestCase):
         with patch('reportes.commercial_analytics.selected_sales_facts', wraps=selected_sales_facts) as selected:
             panel = _build_panel(2026,9,self.closed.id)
         periods = [call.kwargs for call in selected.call_args_list]
-        self.assertIn({'start_date':date(2026,9,1),'end_date':date(2026,9,10)},periods)
-        self.assertIn({'start_date':date(2025,9,1),'end_date':date(2025,9,10)},periods)
+        self.assertIn({'start_date':date(2026,9,1),'end_date':date(2026,9,10),'branch_id':self.closed.pk},periods)
+        self.assertIn({'start_date':date(2025,9,1),'end_date':date(2025,9,10),'branch_id':self.closed.pk},periods)
         self.assertEqual(panel['delta'],D(50))
