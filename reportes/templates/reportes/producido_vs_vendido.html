@@ -28,17 +28,44 @@
         <p class="executive-section-copy">{{ selected_period_label }} · {{ audit_metadata.branch_label }}</p>
       </div>
       <div class="production-export-actions">
-        <a class="btn btn-primary" href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}&branch={{ selected_branch }}">Auditar por sucursal</a>
+        {% if not selected_branch or selected_audit_branch_id %}
+        <a class="btn btn-primary" href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}{% if selected_audit_branch_id %}&amp;branch={{ selected_audit_branch_id }}{% endif %}">Auditar por sucursal</a>
+        {% endif %}
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=csv">CSV</a>
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=xlsx">Excel XLSX</a>
         <a class="btn btn-secondary" href="{% url 'reportes:producido_vs_vendido' %}?periodo={{ selected_period }}&branch={{ selected_branch }}{% if selected_categoria %}&categoria={{ selected_categoria|urlencode }}{% endif %}&export=pdf">PDF</a>
       </div>
     </div>
     <div id="audit-summary" class="production-source-summary is-{{ operational_summary.tone }}" role="status" data-version="{{ audit_version }}">
-      <strong>{{ operational_summary.title }}</strong>
-      <span>{% if audit_updated_at %}Actualizado {{ audit_updated_at|date:"d/m/Y H:i" }}{% else %}Sin revisión publicada{% endif %}</span>
-      {% if audit_metadata.partial %}<span>Solo productos con datos identificados. Los pendientes no se cuentan como cero; septiembre no está cerrado.</span>{% endif %}
-      <span>Inicio Point comprobado: {{ grand_total.point_coverage.inventario_inicial.known }} de {{ grand_total.point_coverage.inventario_inicial.total }} producto-sucursal. Final Point comprobado: {{ grand_total.point_coverage.inventario_final_point_total.known }} de {{ grand_total.point_coverage.inventario_final_point_total.total }}.</span>
+      {% if not audit_updated_at and not groups %}
+        {% if is_current_period %}
+          <strong>Mes en curso</strong>
+          <span>Sin revisión publicada. Para comprobar el saldo final se necesita el cierre Point del {{ closing_reference|date:"d/m/Y" }}.</span>
+        {% elif is_future_period %}
+          <strong>Mes futuro · sin revisión publicada</strong>
+        {% else %}
+          <strong>Mes terminado · sin revisión publicada</strong>
+          <span>La auditoría todavía no ha publicado resultados para este período.</span>
+        {% endif %}
+        {% if previous_publication %}
+          <a href="?periodo={{ previous_publication|date:'Y-m' }}{% if selected_branch %}&amp;branch={{ selected_branch }}{% endif %}">Ver la última revisión mensual publicada ({{ previous_publication|date:"F Y" }})</a>
+        {% endif %}
+      {% else %}
+        <strong>{{ operational_summary.title }}</strong>
+        <span>{% if audit_updated_at %}Revisión publicada el {{ audit_updated_at|date:"d/m/Y H:i" }}{% else %}Sin revisión publicada{% endif %}</span>
+        {% if audit_metadata.partial %}<span>Los datos publicados son parciales. Los faltantes no se cuentan como cero.</span>{% endif %}
+        {% if not groups and audit_updated_at %}<span>No hay productos publicados para estos filtros.</span>{% endif %}
+      {% endif %}
+      {% if grand_total.point_coverage.inventario_inicial.total %}
+        <span>Inicio Point comprobado: {{ grand_total.point_coverage.inventario_inicial.known }} de {{ grand_total.point_coverage.inventario_inicial.total }} producto-sucursal. Final Point comprobado: {{ grand_total.point_coverage.inventario_final_point_total.known }} de {{ grand_total.point_coverage.inventario_final_point_total.total }}.</span>
+      {% endif %}
+      {% if audit_metadata.counts.incomplete %}
+        <span>{{ audit_metadata.counts.incomplete|intcomma }} por falta de información en este alcance de sucursal, considerando todas las categorías.</span>
+        {% if not selected_branch or selected_audit_branch_id %}
+          <a href="{% url 'reportes:inventory_audit' %}?month={{ selected_period }}{% if selected_audit_branch_id %}&amp;branch={{ selected_audit_branch_id }}{% endif %}&amp;status=SOURCE_INCOMPLETE">Revisar faltantes en Auditoría</a>
+        {% endif %}
+      {% endif %}
+      {% if selected_branch and not selected_audit_branch_id %}<span>Esta sucursal no está vinculada a Point para abrir su auditoría.</span>{% endif %}
     </div>
     <details class="production-source-diagnostics">
       <summary>Referencias del corte</summary>
@@ -92,7 +119,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.vendido is None %} muted{% endif %}">{% if kpi_totals.vendido is None %}Sin dato{% else %}{{ kpi_totals.vendido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Vendido</div>
-          {% if audit_metadata.partial or kpi_coverage.vendido.known < kpi_coverage.vendido.total %}<small>Parcial: {{ kpi_coverage.vendido.known }} de {{ kpi_coverage.vendido.total }} productos</small>{% endif %}
+          {% if kpi_coverage.vendido.total %}{% if audit_metadata.partial or kpi_coverage.vendido.known < kpi_coverage.vendido.total %}<small>Parcial: {{ kpi_coverage.vendido.known }} de {{ kpi_coverage.vendido.total }} productos</small>{% endif %}{% endif %}
         </div>
       </div>
     </article>
@@ -104,7 +131,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.producido is None %} muted{% else %} is-success{% endif %}">{% if kpi_totals.producido is None %}Sin dato{% else %}{{ kpi_totals.producido|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Producido</div>
-          {% if audit_metadata.partial or kpi_coverage.producido.known < kpi_coverage.producido.total %}<small>Parcial: {{ kpi_coverage.producido.known }} de {{ kpi_coverage.producido.total }} productos</small>{% endif %}
+          {% if kpi_coverage.producido.total %}{% if audit_metadata.partial or kpi_coverage.producido.known < kpi_coverage.producido.total %}<small>Parcial: {{ kpi_coverage.producido.known }} de {{ kpi_coverage.producido.total }} productos</small>{% endif %}{% endif %}
         </div>
       </div>
     </article>
@@ -116,7 +143,7 @@
         <div class="kpi-body">
           <div class="kpi-number{% if kpi_totals.dif is None %} muted{% else %} {% if kpi_totals.dif < 0 %}is-danger{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.dif is None %}Sin dato{% else %}{{ kpi_totals.dif|floatformat:0|intcomma }}{% endif %}</div>
           <div class="kpi-label">Dif. operativa</div>
-          {% if audit_metadata.partial or kpi_coverage.dif.known < kpi_coverage.dif.total %}<small>Parcial: {{ kpi_coverage.dif.known }} de {{ kpi_coverage.dif.total }} productos</small>{% endif %}
+          {% if kpi_coverage.dif.total %}{% if audit_metadata.partial or kpi_coverage.dif.known < kpi_coverage.dif.total %}<small>Parcial: {{ kpi_coverage.dif.known }} de {{ kpi_coverage.dif.total }} productos</small>{% endif %}{% endif %}
         </div>
       </div>
     </article>
@@ -128,7 +155,7 @@
         <div class="kpi-body">
           <div class="kpi-number kpi-number-currency production-kpi-number-currency{% if kpi_totals.costo_merma is None %} muted{% else %} {% if grand_total.pct_merma > 15 %}is-danger{% elif grand_total.pct_merma >= 5 %}is-warning{% else %}is-success{% endif %}{% endif %}">{% if kpi_totals.costo_merma is None %}Sin dato{% else %}${{ kpi_totals.costo_merma|floatformat:2|intcomma }}{% endif %}</div>
           <div class="kpi-label">Costo merma</div>
-          {% if audit_metadata.partial or kpi_coverage.costo_merma.known < kpi_coverage.costo_merma.total %}<small>Parcial: {{ kpi_coverage.costo_merma.known }} de {{ kpi_coverage.costo_merma.total }} productos</small>{% endif %}
+          {% if kpi_coverage.costo_merma.total %}{% if audit_metadata.partial or kpi_coverage.costo_merma.known < kpi_coverage.costo_merma.total %}<small>Parcial: {{ kpi_coverage.costo_merma.known }} de {{ kpi_coverage.costo_merma.total }} productos</small>{% endif %}{% endif %}
         </div>
       </div>
     </article>

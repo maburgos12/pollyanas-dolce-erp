@@ -12,6 +12,7 @@ from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
+from django.db.models import Q
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
@@ -494,7 +495,8 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
         period = _parse_period(request.GET.get("periodo") or request.GET.get("period"))
         categoria = (request.GET.get("categoria") or request.GET.get("familia") or "").strip()
 
-        month = date.fromisoformat(period.value + "-01")
+        month = period.month_start
+        current = timezone.localdate().replace(day=1)
         report = read_audit_report(month, branch=request.GET.get("branch", ""))
         categories = sorted({r["categoria"] for r in report["rows"]}, key=_category_sort_key)
         rows = sorted((r for r in report["rows"] if not categoria or r["categoria"] == categoria),
@@ -526,6 +528,16 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
                                "title": "Actualización parcial" if report["partial"] else "Pendiente de actualización" if report["stale"] else report["audit_status"],
                                "message": report["selected_branch_label"]}
         periodos = self._available_periods(selected=period.value)
+        previous_publication = None
+        if not updated and not rows:
+            previous_publication = (
+                ProductInventoryAuditRun.objects.filter(month__lt=min(month, current))
+                .filter(
+                    Q(partial_published=True, rebuilt_at__isnull=False)
+                    | Q(partial_published=False, last_successful_rebuild_at__isnull=False)
+                )
+                .order_by("-month").values_list("month", flat=True).first()
+            )
 
         return {
             "module_tabs": self._module_tabs("producido_vs_vendido"),
@@ -544,13 +556,17 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "fuentes": fuentes,
             "banners": [],
             "operational_summary": operational_summary,
-            "is_open_period": month >= timezone.localdate().replace(day=1),
+            "is_open_period": month >= current,
+            "is_current_period": month == current,
+            "is_future_period": month > current,
+            "previous_publication": previous_publication,
+            "selected_audit_branch_id": report["selected_audit_branch_id"],
             "audit_metadata": metadata,
             "audit_version": audit_report_version(month, report["selected_branch"]),
             "audit_updated_at": updated,
             "branches": report["branches"], "selected_branch": report["selected_branch"],
             "opening_reference": report["opening_reference"],
-            "closing_reference": date(month.year, month.month, monthrange(month.year, month.month)[1]),
+            "closing_reference": period.month_end,
         }
 
 

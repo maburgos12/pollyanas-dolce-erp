@@ -71,7 +71,10 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         for key in ("inventario_inicial", "inventario_final_teorico", "diferencia_inventario"):
             self.assertIsNone(row[key])
         self.assertEqual(row["inventario_final_point_total"], 22)
-        self.assertIn("Falta información", self.render(context))
+        html = self.render(context)
+        self.assertIn("Falta información", html)
+        self.assertIn("1 por falta de información", html)
+        self.assertIn("month=2026-08&amp;status=SOURCE_INCOMPLETE", html)
         for export in ("_export_csv", "_export_xlsx", "_export_pdf"):
             self.assertEqual(getattr(self.view, export)(context).status_code, 200)
 
@@ -111,15 +114,24 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertNotIn("41.4", self.view._export_csv(self.context()).content.decode())
 
     def test_filter_aliases_and_erp_branch_are_preserved(self):
-        branch = Sucursal.objects.create(codigo="PVVAUD", nombre="Sucursal auditada")
+        branch = Sucursal.objects.create(pk=10000, codigo="PVVAUD", nombre="Sucursal auditada")
         self.branch.erp_branch = branch
         self.branch.save()
         self.make_case()
         context = self.context(branch=str(branch.pk), familia="Pastel Chico")
         self.assertEqual(len(context["json_rows"]), 1)
         self.assertEqual(context["selected_branch"], str(branch.pk))
-        self.assertIn("branch=" + str(branch.pk), self.render(context))
-        self.assertEqual(self.context(categoria="Rebanada")["json_rows"], [])
+        html = self.render(context)
+        self.assertIn("branch=" + str(branch.pk), html)
+        self.assertIn(f"month=2026-08&amp;branch={self.branch.pk}", html)
+        self.assertNotIn(f"month=2026-08&amp;branch={branch.pk}", html)
+        self.audit_run.last_successful_rebuild_at = timezone.now()
+        self.audit_run.save()
+        filtered = self.context(branch=str(branch.pk), categoria="Rebanada")
+        self.assertEqual(filtered["json_rows"], [])
+        html = self.render(filtered)
+        self.assertIn("No hay productos publicados para estos filtros", html)
+        self.assertNotIn("0 de 0", html)
 
     def test_invalid_branch_is_rejected(self):
         for branch in ("999999", "not-a-number"):
@@ -163,6 +175,43 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(context["audit_metadata"]["status"], "Aún no auditado")
         self.assertEqual(context["json_rows"], [])
 
+    def test_month_in_progress_links_previous_published_run_without_point_requests(self):
+        stamp = timezone.now()
+        branch = Sucursal.objects.create(codigo="PV-CL", nombre="Sucursal de consulta")
+        current = date(2026, 11, 15)
+        ProductInventoryAuditRun.objects.create(
+            month=date(2026, 9, 1), rebuilt_at=stamp, partial_published=True,
+            status=ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+        )
+        ProductInventoryAuditRun.objects.create(
+            month=date(2026, 10, 1), rebuilt_at=stamp, status=ProductInventoryAuditRun.Status.SOURCE_INCOMPLETE,
+        )
+        with (
+            patch("reportes.views_produccion.timezone.localdate", return_value=current),
+            patch("requests.sessions.Session.request", side_effect=AssertionError("Point no se debe consultar")),
+        ):
+            context = self.context(periodo="2026-11", branch=branch.pk)
+            html = self.render(context)
+        self.assertIn("Mes en curso", html)
+        self.assertIn("Sin revisión publicada", html)
+        self.assertIn("30/11/2026", html)
+        self.assertNotIn("0 de 0", html)
+        self.assertIn(f"periodo=2026-09&amp;branch={branch.pk}", html)
+        self.assertIn("Esta sucursal no está vinculada a Point", html)
+        self.assertIsNone(context["kpi_totals"]["vendido"])
+
+    def test_elapsed_month_without_publication_is_distinct_from_open_month(self):
+        with patch("reportes.views_produccion.timezone.localdate", return_value=date(2026, 11, 15)):
+            for selected_period in ("2026-01", "2026-09", "2026-10"):
+                with self.subTest(selected_period=selected_period):
+                    html = self.render(self.context(periodo=selected_period))
+                    self.assertIn("Mes terminado · sin revisión publicada", html)
+                    self.assertNotIn("Mes en curso", html)
+                    self.assertNotIn("0 de 0", html)
+            future_html = self.render(self.context(periodo="2026-12"))
+            self.assertIn("Mes futuro · sin revisión publicada", future_html)
+            self.assertNotIn("Mes en curso", future_html)
+
     def test_stale_rebuild_keeps_date_of_last_valid_result(self):
         self.make_case()
         stamp = timezone.now()
@@ -187,8 +236,12 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertEqual(context["audit_updated_at"], self.audit_run.rebuilt_at)
         html = self.render(context)
         self.assertIn("Actualización parcial", html)
-        self.assertIn("septiembre no está cerrado", html)
+        self.assertIn("Los datos publicados son parciales", html)
+        self.assertNotIn("septiembre no está cerrado", html)
         self.assertIn("Parcial: 1 de 1 productos", html)
+        filtered_html = self.render(self.context(categoria="Rebanada"))
+        self.assertIn("No hay productos publicados para estos filtros", filtered_html)
+        self.assertNotIn("0 de 0", filtered_html)
 
     def test_kpis_show_known_products_as_partial_not_zero_for_missing_product(self):
         self.make_case(production=5, sales=4, waste=0)
