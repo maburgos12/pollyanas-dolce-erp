@@ -28,7 +28,7 @@ FIELDS = {'repo', 'pr', 'head_sha', 'base_sha', 'production_sha', 'nonce', 'expi
 
 
 def validate(row):
-    if not isinstance(row, dict) or set(row) != FIELDS or row['repo'] != REPO:
+    if not isinstance(row, dict) or set(row) not in (FIELDS, FIELDS | {'receipt_id'}) or row['repo'] != REPO:
         raise ValueError('invalid_ledger')
     for key in ('head_sha', 'base_sha', 'production_sha'):
         if not isinstance(row[key], str) or not SHA.fullmatch(row[key]):
@@ -49,8 +49,8 @@ def validate(row):
     for key in ('pr', 'expires', 'chat_id'):
         if type(row[key]) is not int or row[key] <= 0:
             raise ValueError('invalid_number')
-    for key in ('message_id', 'decision_at', 'notification_id'):
-        if row[key] is not None and (type(row[key]) is not int or row[key] <= 0):
+    for key in ('message_id', 'decision_at', 'notification_id', 'receipt_id'):
+        if row.get(key) is not None and (type(row[key]) is not int or row[key] <= 0):
             raise ValueError('invalid_number')
     return row
 
@@ -110,7 +110,7 @@ def signed(config, row, action):
     return body + ':' + tag
 
 
-def decide(query, config, ledger, now=None):
+def decide(query, config, ledger, now=None, send=None):
     now = int(time.time()) if now is None else now
     match = CALLBACK.fullmatch(query.get('data', ''))
     if not match:
@@ -125,25 +125,59 @@ def decide(query, config, ledger, now=None):
                 or message.get('message_id') != row['message_id'] or row['message_id'] is None
                 or not hmac.compare_digest(query['data'], signed(config, row, action))):
             raise ValueError('unauthorized_callback')
-        if now >= row['expires']:
+        can_decide = row['state'] == 'pending' or (row['state'] == 'approved' and action == 'r')
+        if can_decide and now < row['expires']:
+            decision = 'approved' if action == 'a' else 'rejected'
+            row.update(state=decision, decision=decision, decision_at=now, receipt_id=None)
+            ledger.write(row)
+        elif row['state'] in {'pending', 'notifying'}:
             raise ValueError('expired')
-        if row['state'] != 'pending' and not (row['state'] == 'approved' and action == 'r'):
-            raise ValueError('already_decided')
-        decision = 'approved' if action == 'a' else 'rejected'
-        row.update(state=decision, decision=decision, decision_at=now)
-        ledger.write(row)
+        # Keep the receipt before the publisher's claim: it must not overwrite a newer state.
+        if send is not None and row['state'] in {'approved', 'rejected'} and row.get('receipt_id') is None:
+            try:
+                result = send(config, 'sendMessage', {'chat_id': row['chat_id'], 'text':
+                    f"ERP PR #{row['pr']} · {decision_status(row, now)}\nCommit solicitado: {row['head_sha']}"})
+                verify_message(result, row['chat_id'])
+                confirmed = dict(row, receipt_id=result['message_id'])
+                ledger.write(confirmed)
+                row = confirmed
+            except Exception:
+                # A lost response can duplicate this receipt on another click, never the decision.
+                print('Decision recorded; Telegram receipt not confirmed.', flush=True)
         return row
+
+
+def decision_status(row, now=None):
+    now = int(time.time()) if now is None else now
+    if row['state'] == 'approved':
+        if now >= row['expires']:
+            return 'Aprobación registrada, pero vencida. No autoriza una publicación nueva.'
+        return 'Aprobación registrada. Publicación pendiente de verificaciones; todavía no confirma despliegue.'
+    if row['state'] == 'executing' and row['decision'] == 'rejected':
+        return 'Rechazo registrado. Cierre en curso; no se realizará ningún despliegue.'
+    if row['state'] == 'rejected' or (row['state'] == 'blocked' and row['decision'] == 'rejected'):
+        return 'Rechazo registrado. Esta solicitud no se publicará.'
+    return {
+        'executing': 'Publicación en curso; resultado aún sin confirmar. No se registró otra autorización.',
+        'published': 'Publicado correctamente. No se registró otra autorización.',
+        'blocked': 'Solicitud vencida. No se realizó ningún despliegue.',
+        'uncertain': 'Publicación sin confirmar. Requiere revisión; no se repetirá automáticamente.',
+    }[row['state']]
 
 
 def handle(query, config, state, telegram):
     """Called only by the existing Point consumer, before its original parser."""
     try:
-        row = decide(query, config, Ledger(Path(state) / 'releases'))
-        text = ('Aprobación registrada; se verificará y publicará únicamente ese commit.'
-                if row['state'] == 'approved' else 'Rechazo registrado. Esta solicitud no se publicará.')
+        row = decide(query, config, Ledger(Path(state) / 'releases'), send=telegram)
+        text = f"PR #{row['pr']}: {decision_status(row)}"
+        if row['state'] in {'approved', 'rejected'} and row.get('receipt_id') is None:
+            text += ' Aviso persistente sin confirmar.'
     except (OSError, ValueError, KeyError, TypeError):
-        text = 'Solicitud inválida, vencida o ya procesada. No se autorizó una publicación nueva.'
-    telegram(config, 'answerCallbackQuery', {'callback_query_id': query['id'], 'text': text})
+        text = 'Solicitud inválida o vencida. No se autorizó una publicación nueva.'
+    try:
+        telegram(config, 'answerCallbackQuery', {'callback_query_id': query['id'], 'text': text})
+    except Exception:
+        print('Telegram callback acknowledgement not confirmed.', flush=True)
 
 
 class GitHub:
