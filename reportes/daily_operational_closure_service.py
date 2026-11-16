@@ -605,8 +605,8 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
         )
     if inventory["untraceable_count"] > 0:
         add(
-            "Stock visible sin traza suficiente", "warning",
-            f"Falta comprobar el origen del stock visible de {inventory['untraceable_count']} insumos con movimiento ese día.",
+            "Registros de existencias ERP sin traza suficiente", "warning",
+            f"Revisa los registros de existencias ERP pendientes de trazar ({inventory['untraceable_count']}).",
             "Inventarios",
         )
     if production["plan_count"] == 0:
