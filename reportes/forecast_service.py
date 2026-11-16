@@ -31,6 +31,10 @@ DEFAULT_VALIDATION_DAYS = 14
 
 
 def _to_decimal(value, default: str = "0") -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if value is None:
+        return Decimal(default)
     try:
         return Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
@@ -116,47 +120,21 @@ def _same_weekday_history(
             _to_decimal((series.get(target_day - timedelta(days=7 * week)) or {}).get("qty"))
             for week in range(1, lookback_weeks + 1)
         ]
-    values = []
-    cursor = history_anchor - timedelta(days=1)
-    while len(values) < lookback_weeks and cursor >= history_anchor - timedelta(days=lookback_weeks * 14):
-        if cursor.weekday() == target_day.weekday():
-            values.append(_to_decimal((series.get(cursor) or {}).get("qty")))
-        cursor -= timedelta(days=1)
-    return values
+    last_day = history_anchor - timedelta(days=1)
+    offset = (last_day.weekday() - target_day.weekday()) % 7
+    return [
+        _to_decimal((series.get(last_day - timedelta(days=offset + 7 * week)) or {}).get("qty"))
+        for week in range(lookback_weeks)
+    ]
 
 
-def _weighted_moving_average(
-    series: dict[date, dict[str, Decimal]],
-    target_day: date,
-    recent_weight: Decimal = DEFAULT_RECENT_WEIGHT,
-    mid_weight: Decimal = DEFAULT_MID_WEIGHT,
-    older_weight: Decimal = DEFAULT_OLDER_WEIGHT,
-) -> Decimal:
-    recent_14 = _robust_mean(_history_window(series, target_day, 1, 14))
-    previous_14 = _robust_mean(_history_window(series, target_day, 15, 28))
-    older_28 = _robust_mean(_history_window(series, target_day, 29, 56))
-    return (recent_14 * recent_weight) + (previous_14 * mid_weight) + (older_28 * older_weight)
-
-
-def _weekday_factor(
-    series: dict[date, dict[str, Decimal]],
-    target_day: date,
-    lookback_weeks: int,
-    history_anchor: date | None = None,
-) -> Decimal:
-    history_anchor = history_anchor or target_day
-    weekday_values = _same_weekday_history(series, target_day, lookback_weeks, history_anchor)
-    trailing_values = _history_window(series, history_anchor, 1, max(lookback_weeks * 7, 7))
-    weekday_avg = _robust_mean(weekday_values)
-    trailing_avg = _robust_mean(trailing_values)
+def _weekday_factor(weekday_avg: Decimal, trailing_avg: Decimal) -> Decimal:
     if weekday_avg <= ZERO or trailing_avg <= ZERO:
         return ONE
     return _clamp(weekday_avg / trailing_avg, Decimal("0.70"), Decimal("1.35"))
 
 
-def _trend_factor(series: dict[date, dict[str, Decimal]], target_day: date) -> tuple[Decimal, Decimal]:
-    recent_14 = _robust_mean(_history_window(series, target_day, 1, 14))
-    previous_14 = _robust_mean(_history_window(series, target_day, 15, 28))
+def _trend_factor(recent_14: Decimal, previous_14: Decimal) -> tuple[Decimal, Decimal]:
     if recent_14 <= ZERO or previous_14 <= ZERO:
         return ONE, ZERO
     ratio = _clamp(recent_14 / previous_14, Decimal("0.75"), Decimal("1.30"))
@@ -219,7 +197,10 @@ def _build_forecast_row(
     calibration_profile: dict[str, Decimal] | None,
 ) -> dict[str, object]:
     history_anchor = history_anchor or target_day
-    recent_avg_28 = _robust_mean(_history_window(series, history_anchor, 1, 28))
+    weekday_window = max(lookback_weeks * 7, 7)
+    history = _history_window(series, history_anchor, 1, max(56, weekday_window))
+    recent_28 = history[:28]
+    recent_avg_28 = _robust_mean(recent_28)
     weekly_pattern = weekly_pattern_for_day(target_day)
     rotation_band = rotation_band_for_avg(recent_avg_28)
     calibration_profile = calibration_profile or {}
@@ -231,16 +212,14 @@ def _build_forecast_row(
     segment_wape_pct = _to_decimal(calibration_profile.get("wape_after_pct") or calibration_profile.get("wape_before_pct"))
     execution_gap_pct = _to_decimal(calibration_profile.get("execution_gap_pct"))
 
-    weighted_avg = _weighted_moving_average(
-        series,
-        history_anchor,
-        recent_weight=recent_weight,
-        mid_weight=mid_weight,
-        older_weight=older_weight,
-    )
-    weekday_factor = _weekday_factor(series, target_day, lookback_weeks, history_anchor)
-    trend_factor, trend_pct = _trend_factor(series, history_anchor)
-    stddev_28 = _stddev(_history_window(series, history_anchor, 1, 28))
+    recent_14 = _robust_mean(history[:14])
+    previous_14 = _robust_mean(history[14:28])
+    older_28 = _robust_mean(history[28:56])
+    weighted_avg = (recent_14 * recent_weight) + (previous_14 * mid_weight) + (older_28 * older_weight)
+    same_weekday_avg = _robust_mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
+    weekday_factor = _weekday_factor(same_weekday_avg, _robust_mean(history[:weekday_window]))
+    trend_factor, trend_pct = _trend_factor(recent_14, previous_14)
+    stddev_28 = _stddev(recent_28)
     base_forecast = weighted_avg * weekday_factor * trend_factor * bias_adjustment
     forecast_qty = _quantize_units(max(base_forecast, ZERO))
     dynamic_error_factor = min((segment_wape_pct / HUNDRED) * Decimal("0.35"), Decimal("0.25"))
@@ -254,8 +233,7 @@ def _build_forecast_row(
     forecast_max = _quantize_units(forecast_qty + buffer_units)
     avg_price = _recent_avg_price(series, history_anchor)
     forecast_amount = _quantize_money(forecast_qty * avg_price)
-    recent_avg_7 = _robust_mean(_history_window(series, history_anchor, 1, 7))
-    same_weekday_avg = _robust_mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
+    recent_avg_7 = _robust_mean(history[:7])
     contribution = contribution or {}
     why = (
         f"Promedio ponderado {weighted_avg.quantize(Decimal('0.01'))} pzs con pesos "

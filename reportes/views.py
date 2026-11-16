@@ -1037,8 +1037,8 @@ def _ventas_historicas_bi_summary() -> dict[str, object]:
     }
 
 
-def _bi_daily_sales_snapshot() -> dict[str, object]:
-    dataset = get_dashboard_sales_dataset()
+def _bi_daily_sales_snapshot(*, daily_only: bool = False) -> dict[str, object]:
+    dataset = get_dashboard_sales_dataset(daily_only=True) if daily_only else get_dashboard_sales_dataset()
     snapshot = dict(dataset.get("daily_sales_snapshot") or {})
     latest_date = snapshot.get("date")
     if not latest_date:
@@ -6358,7 +6358,7 @@ def bi(request: HttpRequest) -> HttpResponse:
         "daily_sales_snapshot": _bi_cached_value(
             runtime_cache=bi_runtime_cache,
             section="daily-sales-snapshot",
-            builder=_bi_daily_sales_snapshot,
+            builder=lambda: _bi_daily_sales_snapshot(daily_only=True),
             parts=(timezone.localdate().isoformat(),),
         ),
         "branch_weekday_rows": _bi_cached_value(

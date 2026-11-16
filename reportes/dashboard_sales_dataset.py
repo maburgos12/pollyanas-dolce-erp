@@ -149,7 +149,7 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: 
             COALESCE(SUM(cantidad), 0) AS total_units,
             COALESCE(SUM(venta_total), 0) AS total_amount
         FROM reportes_factventadiaria
-        WHERE fecha BETWEEN date_trunc('month', (SELECT latest_date FROM latest))::date
+        WHERE %(months)s > 0 AND fecha BETWEEN date_trunc('month', (SELECT latest_date FROM latest))::date
             AND (SELECT latest_date FROM latest)
     ),
     indicator_branch AS (
@@ -172,7 +172,7 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: 
     month_indicator AS (
         SELECT COALESCE(SUM(total_tickets), 0) AS total_tickets
         FROM pos_bridge_daily_branch_indicators
-        WHERE indicator_date BETWEEN date_trunc('month', (SELECT latest_date FROM latest))::date
+        WHERE %(months)s > 0 AND indicator_date BETWEEN date_trunc('month', (SELECT latest_date FROM latest))::date
             AND (SELECT latest_date FROM latest)
     ),
     day_cut AS (
@@ -540,9 +540,9 @@ def _build_dashboard_sales_dataset(*, today: date, months: int) -> dict[str, obj
     }
 
 
-def get_dashboard_sales_dataset(*, today: date | None = None, months: int = 6) -> dict[str, object]:
+def get_dashboard_sales_dataset(*, today: date | None = None, months: int = 6, daily_only: bool = False) -> dict[str, object]:
     today = today or timezone.localdate()
-    months = max(int(months or 6), 1)
+    months = 0 if daily_only else max(int(months or 6), 1)
     if bool(getattr(settings, "RUNNING_TESTS", False)):
         return _build_dashboard_sales_dataset(today=today, months=months)
     return get_or_set_versioned_cache(

@@ -86,6 +86,21 @@ class ClosedSalesTests(TestCase):
         self.assertEqual(snapshot['total_amount'], Decimal('250'))
         self.assertIsNone(snapshot['total_tickets'])
 
+    def test_bi_daily_dataset_preserves_cut_without_reading_monthly_totals(self):
+        day = date(2026, 9, 6)
+        self.close_day(day)
+        full = get_dashboard_sales_dataset(today=self.today)
+        with patch('reportes.dashboard_sales_dataset.point_sales_month_total') as monthly:
+            daily = get_dashboard_sales_dataset(today=self.today, daily_only=True)
+        monthly.assert_not_called()
+        self.assertEqual(daily['monthly_sales_rows'], [])
+        self.assertEqual(daily['latest_date'], day)
+        self.assertEqual(daily['present_branch_ids'], full['present_branch_ids'])
+        self.assertEqual(
+            {field: value for field, value in daily['daily_sales_snapshot'].items() if not field.startswith('month_')},
+            {field: value for field, value in full['daily_sales_snapshot'].items() if not field.startswith('month_')},
+        )
+
     def test_official_evidence_alone_can_close_a_reported_day(self):
         day = date(2026, 9, 6)
         for branch in self.branches:
