@@ -225,6 +225,51 @@ class DerivedProductPresentationCostingTests(TestCase):
         self.assertEqual(resolve_preparation.call_count, 1)
         self.assertLessEqual(len(queries), 12)
 
+    def test_cost_map_reuses_live_inputs_in_distinct_preparations(self):
+        raw = Insumo.objects.create(codigo="COST-MAP-RAW", nombre="Harina para preparaciones", unidad_base=self.unit)
+        source = CostoInsumo.objects.create(
+            insumo=raw, costo_unitario=Decimal("40"), source_hash="cost-map-raw", raw={"unit": "pza"},
+        )
+        products = []
+        for number in range(2):
+            preparation = Receta.objects.create(
+                nombre=f"Preparación cost map {number}", tipo=Receta.TIPO_PREPARACION,
+                hash_contenido=f"cost-map-preparation-{number}", rendimiento_cantidad=Decimal("4"),
+                rendimiento_unidad=self.unit,
+            )
+            LineaReceta.objects.create(
+                receta=preparation, posicion=1, insumo=raw, insumo_texto=raw.nombre, cantidad=Decimal("1"),
+                unidad=self.unit, match_status=LineaReceta.STATUS_AUTO,
+            )
+            internal = Insumo.objects.create(
+                codigo=f"COST-MAP-PREP-{number}", nombre=preparation.nombre,
+                tipo_item=Insumo.TIPO_INTERNO, unidad_base=self.unit,
+            )
+            product = Receta.objects.create(
+                nombre=f"Producto cost map {number}", tipo=Receta.TIPO_PRODUCTO_FINAL,
+                hash_contenido=f"cost-map-product-{number}",
+            )
+            LineaReceta.objects.create(
+                receta=product, posicion=1, insumo=internal, insumo_texto=internal.nombre,
+                cantidad=Decimal(number + 1), unidad=self.unit, match_status=LineaReceta.STATUS_AUTO,
+            )
+            products.append(product.pk)
+
+        with CaptureQueriesContext(connection) as queries:
+            first = get_total_cost_map(products)
+        self.assertEqual(first, {products[0]: Decimal("10"), products[1]: Decimal("20")})
+        cost_table = CostoInsumo._meta.db_table
+        raw_lookup = f'WHERE "{cost_table}"."insumo_id" IN ({raw.pk})'
+        cost_queries = [query for query in queries if raw_lookup in query["sql"]]
+        self.assertEqual(len(cost_queries), 1, f"{len(queries)} total queries")
+
+        CostoInsumo.objects.filter(pk=source.pk).update(costo_unitario=Decimal("80"))
+        self.assertEqual(get_total_cost_map(products), {products[0]: Decimal("20"), products[1]: Decimal("40")})
+        source.delete()
+        with CaptureQueriesContext(connection) as missing_queries:
+            self.assertEqual(get_total_cost_map(products), dict.fromkeys(products, Decimal("0")))
+        self.assertEqual(sum(raw_lookup in query["sql"] for query in missing_queries), 1)
+
     def test_total_cost_falls_back_to_live_cost_when_snapshot_is_missing(self):
         raw = Insumo.objects.create(
             codigo="MP-FRESA",
