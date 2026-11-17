@@ -111,6 +111,19 @@ class ApprovalHoursTests(unittest.TestCase):
         self.assertEqual(result['state'], 'deferred')
         self.send.assert_not_called()
 
+    def test_rejection_during_preflight_is_not_renewed(self):
+        row = dict(self.f.row, expires=epoch('2026-11-16T08:00:00'))
+        self.f.ledger.write(row)
+        original = r.eligible
+        def reject(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.f.ledger.write(dict(row, state='rejected', decision='rejected', decision_at=1))
+            return result
+        with patch('time.time', return_value=epoch('2026-11-17T07:00:00')), patch.object(r, 'eligible', side_effect=reject):
+            with self.assertRaisesRegex(ValueError, 'existing_request'):
+                self.request()
+        self.send.assert_not_called()
+
     def test_two_legacy_prs_are_both_revalidated(self):
         for number, nonce in [(1, 'a'*24), (2, 'b'*24)]:
             row = dict(self.f.row, pr=number, nonce=nonce, expires=epoch('2026-11-16T08:00:00'))
@@ -175,6 +188,18 @@ class CleanupHoursTests(unittest.TestCase):
         with patch.object(c, 'revalidate_proposal', wraps=CleanupHoursTests.original_revalidator):
             with self.assertRaisesRegex(ValueError, 'operator_review'):
                 c.revalidate_proposal(self.f.proposal, self.f.ledger.directory)
+
+    def test_same_content_different_proposals_cannot_race(self):
+        second = self.f.path.with_name('second.json')
+        second.write_text(json.dumps(dict(self.f.proposal, id='VPS-LIM-20261111-02')))
+        def run(path):
+            try: return c.request(path, self.f.ledger, self.f.config, self.f.send)['state']
+            except ValueError: return 'blocked'
+        with patch('time.time', return_value=epoch('2026-11-17T07:00:00')):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                results = list(pool.map(run, [self.f.path, second]))
+        self.assertCountEqual(results, ['pending', 'blocked'])
+        self.assertEqual(self.f.send.call_count, 2)
 
     def test_actual_archive_readback_and_corruption(self):
         prep = prepare_fixture.p

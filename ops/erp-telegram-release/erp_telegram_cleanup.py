@@ -243,8 +243,9 @@ def _request(path, ledger, config, send=telegram):
     with ledger.lock():
         for file in ledger.directory.glob('*.json'):
             old = ledger.read(file.stem)
-            if (old['proposal_id'] == row['proposal_id'] and old['state'] != 'rejected'
-                    and (old['state'] == 'notifying' or int(time.time()) < old['expires'])):
+            if ((old['proposal_id'] == row['proposal_id'] or old['image_id'] == row['image_id'])
+                    and (old.get('decision_at') is not None or old['state'] in {'notifying', 'approved', 'rejected'}
+                         or (old['state'] == 'pending' and int(time.time()) < old['expires']))):
                 raise ValueError('existing_request_requires_resolution')
         ledger.write(row)
         # Only fixed, bounded operational fields are sent; arbitrary proposal prose stays local.

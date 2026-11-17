@@ -392,6 +392,8 @@ def _request_release(number, api, ledger, config, telegram, production=productio
         # One live request per PR: a new request must not leave older buttons usable.
         for path in ledger.directory.glob('*.json'):
             previous = ledger.read(path.stem)
+            if previous['pr'] == number and previous['head_sha'] == head and previous.get('decision_at') is not None:
+                raise ValueError('existing_request_requires_resolution')
             if previous['pr'] == number and previous['state'] == 'pending' and int(time.time()) >= previous['expires']:
                 previous['state'] = 'blocked'
                 ledger.write(previous)
