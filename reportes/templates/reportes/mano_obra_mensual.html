@@ -23,7 +23,7 @@
   <a href="#fuentes" data-open-tab="fuentes">Ver fuentes y conciliación</a>
  </section>
  {% endif %}
- {% if cierre %}<p class="mo-status">Revisión {{ cierre.revision }} aprobada el {{ cierre.aprobado_en|date:"d/m/Y H:i" }}. {% if cierre.fingerprint != mo.fingerprint %}<strong>Las fuentes actuales cambiaron; Finanzas conserva el cierre aprobado.</strong>{% else %}La simulación coincide con el cierre aprobado.{% endif %} <a href="{% url 'reportes:financiero' %}?budget_period={{ mo.periodo }}#mano-obra-aprobada">Ver análisis en Finanzas</a></p>{% endif %}
+ {% if cierre %}<p class="mo-status">Revisión {{ cierre.revision }} aprobada el {{ cierre.aprobado_en|date:"d/m/Y H:i" }}. {% if cierre.fingerprint != mo.fingerprint %}<strong>Las fuentes o el método de cálculo cambiaron. Finanzas conserva el cierre aprobado.</strong>{% else %}La simulación coincide con el cierre aprobado.{% endif %} <a href="{% url 'reportes:financiero' %}?budget_period={{ mo.periodo }}#mano-obra-aprobada">Ver análisis en Finanzas</a></p>{% endif %}
  <p><strong>Servicios de Producción: {% if mo.servicios.fondo is not None %}${{ mo.servicios.fondo|floatformat:2|intcomma }}{% else %}Pendientes de completar{% endif %}</strong> · Agua, luz y gas. Importes registrados; pueden incluir impuestos. <a href="#fuentes" data-open-tab="fuentes">Ver origen y reparto</a>.</p>
  <nav class="mo-tabs" aria-label="Secciones de mano de obra"><a class="active" href="#productos" data-open-tab="productos">Por producto</a><a href="#etapas" data-open-tab="etapas">Costeo en tres etapas</a><a href="#personal" data-open-tab="personal">Personal incluido</a><a href="#fuentes" data-open-tab="fuentes">Fuentes y conciliación</a></nav>
  <section id="productos" class="mo-panel"><div class="mo-table-tools"><h2>Costos por producto</h2><label>Buscar producto<input id="mo-search" type="search" placeholder="Nombre o código Point"></label></div>
@@ -35,6 +35,29 @@
  {% include "reportes/costeo_etapas.html" with etapas=mo.etapas %}
  <section id="personal" class="mo-panel"><h2>Personal incluido</h2><p>Personas con nómina histórica de Producción. Se conserva a quienes trabajaron en el mes aunque ahora estén inactivos.</p><div class="mo-scroll table-responsive"><table><thead><tr><th>Persona</th><th>Puesto registrado</th><th>Componente</th><th>Percepciones</th></tr></thead><tbody>{% for p in mo.personas %}<tr><td>{{ p.nombre }}</td><td>{{ p.puesto|default:"Por clasificar" }}</td><td>{{ p.componente }}</td><td>${{ p.monto|floatformat:2|intcomma }}</td></tr>{% empty %}<tr><td colspan="4">Sin nómina de Producción disponible.</td></tr>{% endfor %}</tbody></table></div></section>
  <section id="fuentes" class="mo-panel"><h2>Fuentes y conciliación</h2>
+ {% for producto in mo.productos %}
+  {% if producto.semanas_mp %}
+  <details>
+   <summary>Costo semanal de materia prima · {{ producto.nombre }}</summary>
+   <ul>
+    {% for semana in producto.semanas_mp %}
+    <li>{{ semana.fecha }} · {{ semana.cantidad|floatformat:0|intcomma }} piezas · ${{ semana.costo_mp_unitario|floatformat:6 }} por pieza · snapshot #{{ semana.semana_id }}, versión de costo #{{ semana.version_id }}</li>
+    {% endfor %}
+   </ul>
+  </details>
+  {% endif %}
+ {% endfor %}
+ {% if mo.insumos_cero %}
+ <details>
+  <summary>Insumos identificados con producción en cero ({{ mo.insumos_cero|length }})</summary>
+  <ul>
+   {% for insumo in mo.insumos_cero %}
+   <li>{{ insumo.item_name }} ({{ insumo.item_code }}) · {{ insumo.production_date }} · {{ insumo.requested_quantity|floatformat:-3 }} {{ insumo.unit }} solicitados y 0 {{ insumo.unit }} producidos · producción Point {{ insumo.production_external_id }}, detalle {{ insumo.detail_external_id }}</li>
+   {% endfor %}
+  </ul>
+  <p>Point registró cero producido. Estas líneas quedan fuera del reparto de producto terminado.</p>
+ </details>
+ {% endif %}
  <h3>Servicios de Producción</h3><p>Importes reales ya asignados a Producción. <a href="{% url 'reportes:presupuesto_vs_real' %}?area=produccion&amp;month={{ mo.periodo|slice:'5:7' }}&amp;year={{ mo.periodo|slice:':4' }}&amp;version=ORIGINAL">Consultar Presupuesto vs. real</a>.</p>
  <table><thead><tr><th>Servicio</th><th>Importe a distribuir</th></tr></thead><tbody>{% for s in mo.servicios.fondos %}<tr><td>{{ s.nombre }}</td><td>{% if s.monto is not None %}${{ s.monto|floatformat:2|intcomma }}{% else %}Pendiente{% endif %}</td></tr>{% endfor %}<tr><th>Servicios asignados a productos</th><td>${{ mo.servicios.asignado|floatformat:2|intcomma }}</td></tr><tr><th>Servicios pendientes de reparto</th><td>{% if mo.servicios.pendiente is not None %}${{ mo.servicios.pendiente|floatformat:2|intcomma }}{% else %}Sin fondo completo{% endif %}</td></tr></tbody></table><div class="mo-scroll table-responsive"><table><tbody><tr><th>Fuente laboral</th><td>Nómina cerrada o pagada · departamento histórico Producción</td></tr><tr><th>Fuente de elaboración</th><td>Point · {{ mo.lineas_produccion }} líneas; {{ mo.preparaciones }} preparaciones separadas y {{ mo.sin_vinculo }} sin vínculo</td></tr><tr><th>Base de materia prima</th><td>${{ mo.base|floatformat:2|intcomma }}</td></tr><tr><th>Asignado</th><td>${{ mo.asignado|floatformat:2|intcomma }}</td></tr><tr><th>Pendiente de clasificar nómina</th><td>${{ mo.pendiente_nomina|floatformat:2|intcomma }}</td></tr><tr><th>Pendiente de reparto</th><td>${{ mo.pendiente_reparto|floatformat:2|intcomma }}</td></tr><tr><th>Diferencia por redondeo</th><td>{% if mo.redondeo is not None %}${{ mo.redondeo|floatformat:2|intcomma }}{% else %}No disponible{% endif %}</td></tr></tbody></table></div>
  <p>No se duplican líneas que enlazan receta e insumo. Las preparaciones no reciben un segundo reparto.</p>{% for nota in mo.notas %}<p>{{ nota }}</p>{% endfor %}
