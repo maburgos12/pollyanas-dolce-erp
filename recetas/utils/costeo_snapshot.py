@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal, ROUND_HALF_UP
+from functools import wraps
 import re
 
 from django.db.models import Q
@@ -53,6 +55,31 @@ _ACTIVE_PREPARATION_RECIPE_IDS: ContextVar[tuple[int, ...]] = ContextVar(
     "_ACTIVE_PREPARATION_RECIPE_IDS",
     default=(),
 )
+_COST_SOURCE_LOOKUPS: ContextVar[dict | None] = ContextVar("_COST_SOURCE_LOOKUPS", default=None)
+
+
+@contextmanager
+def reuse_cost_source_lookups():
+    """Reuse source reads during one cost map without memoizing recursive BOM results."""
+    token = _COST_SOURCE_LOOKUPS.set({})
+    try:
+        yield
+    finally:
+        _COST_SOURCE_LOOKUPS.reset(token)
+
+
+def _reuse_insumo_lookup(lookup):
+    @wraps(lookup)
+    def resolve(insumo):
+        lookups = _COST_SOURCE_LOOKUPS.get()
+        if lookups is None or insumo is None or insumo.pk is None:
+            return lookup(insumo)
+        key = (lookup, insumo.pk)
+        if key not in lookups:
+            lookups[key] = lookup(insumo)
+        return lookups[key]
+
+    return resolve
 
 
 def _q6(value: Decimal | int | float | str | None) -> Decimal:
@@ -96,6 +123,7 @@ def _unit_from_point_raw(raw: dict | None, fallback_unit: UnidadMedida | None) -
     return unit
 
 
+@_reuse_insumo_lookup
 def _latest_canonical_cost_with_unit(insumo: Insumo) -> tuple[Decimal | None, UnidadMedida | None]:
     member_ids = canonical_member_ids(insumo)
     if not member_ids:
@@ -153,6 +181,7 @@ def preparation_recipe_matches_insumo(receta: Receta | None, insumo: Insumo | No
     return bool(recipe_name and recipe_name in insumo_names)
 
 
+@_reuse_insumo_lookup
 def resolve_preparation_recipe_for_insumo(insumo: Insumo | None) -> Receta | None:
     if not insumo:
         return None

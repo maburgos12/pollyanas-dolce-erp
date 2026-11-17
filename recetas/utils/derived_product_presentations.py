@@ -11,6 +11,7 @@ from recetas.utils.costeo_snapshot import (
     preparation_recipe_matches_insumo,
     resolve_insumo_unit_cost,
     resolve_preparation_recipe_unit_cost,
+    reuse_cost_source_lookups,
 )
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -81,7 +82,10 @@ def get_active_derived_relation(receta: Receta) -> RecetaPresentacionDerivada | 
 
 def get_direct_components_cost(receta: Receta) -> Decimal:
     total = ZERO
-    for linea in receta.lineas.exclude(match_status=LineaReceta.STATUS_REJECTED).all():
+    lineas = receta.lineas.exclude(match_status=LineaReceta.STATUS_REJECTED).select_related(
+        "insumo", "unidad", "insumo__unidad_base",
+    )
+    for linea in lineas:
         total += _resolve_line_total_cost(linea)
     return total
 
@@ -130,6 +134,7 @@ def build_upstream_snapshot(receta: Receta) -> dict[str, object] | None:
     }
 
 
+@reuse_cost_source_lookups()
 def get_total_cost_map(recipe_ids: list[int] | set[int] | tuple[int, ...]) -> dict[int, Decimal]:
     requested_ids = {int(recipe_id) for recipe_id in recipe_ids if int(recipe_id or 0) > 0}
     if not requested_ids:
