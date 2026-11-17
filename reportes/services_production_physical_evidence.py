@@ -1,5 +1,6 @@
 """Read-only physical evidence displayed separately from Point balances."""
-from collections import defaultdict
+from collections import Counter, defaultdict
+from decimal import Decimal, InvalidOperation
 
 from django.utils.dateparse import parse_datetime
 
@@ -11,20 +12,58 @@ from inventario.models_conteos import (
 from reportes.models import ProductInventoryAuditCase
 
 
+def _physical_comparison(case):
+    readings = [item for item in case.get("physical_evidence", []) if item["quantity"] is not None]
+    if not readings:
+        return {"label": "Sin conteo", "summary": "sin conteo"}
+    if len({item["conteo"].pk for item in readings}) > 1:
+        return {"label": "Revisar conteos", "summary": "por revisar"}
+    reading = max(readings, key=lambda item: item["round"] or 0)
+    try:
+        quantity = Decimal(str(reading["quantity"]))
+        if not quantity.is_finite() or quantity < 0:
+            raise InvalidOperation
+    except InvalidOperation:
+        return {"label": "Revisar conteo", "summary": "por revisar"}
+    closing = case["closing"]
+    if closing is None:
+        return {"label": "Sin saldo final Point", "summary": "sin saldo final Point"}
+    delta = quantity - closing
+    provisional = "hora de corte común por confirmar"
+    if reading["conteo"].estado == "RECONTEO":
+        provisional = "reconteo pendiente"
+    elif not reading.get("counted_at"):
+        provisional = "hora de conteo sin registrar"
+    return {
+        "label": "Con diferencia" if delta else "Coincide",
+        "summary": "con diferencia" if delta else "coinciden",
+        "quantity": quantity,
+        "closing": closing,
+        "delta": delta,
+        "unit": reading["unit"],
+        "provisional": provisional,
+    }
+
+
 def add_physical_evidence(user, cutoff, groups):
-    cases = {case["id"]: case for group in groups for row in group["rows"] for case in row["cases"]}
+    rows = [row for group in groups for row in group["rows"]]
+    cases = {case["id"]: case for row in rows for case in row["cases"]}
     if not cases:
         return
     visible = conteos_visibles(user).filter(fecha=cutoff, estado__in=["ENVIADO", "RECONTEO", "ACEPTADO"])
     # Capture-only users must not see prior rounds in a blind recount.
+    eligible = Sucursal.objects.filter(sucursales_operativas_q(cutoff))
     if not puede_coordinar(user):
+        if not getattr(user, "is_authenticated", False) or not user.is_active:
+            return
         reviewed = AccesoConteoSucursal.objects.filter(user_id=user.pk, activo=True, revisar=True)
-        visible = visible.filter(sucursal_id__in=reviewed.values("sucursal_id"))
-    visible = visible.filter(sucursal_id__in=Sucursal.objects.filter(sucursales_operativas_q(cutoff)).values("pk"))
+        eligible = eligible.filter(pk__in=reviewed.values("sucursal_id"))
+    eligible_ids = set(eligible.values_list("pk", flat=True))
+    visible = visible.filter(sucursal_id__in=eligible_ids)
     pairs = {
         (branch, product): cases[pk]
         for pk, branch, product in ProductInventoryAuditCase.objects.filter(pk__in=cases)
-        .values_list("pk", "branch__erp_branch_id", "product_id") if branch is not None
+        .values_list("pk", "branch__erp_branch_id", "product_id") if branch in eligible_ids
     }
     if not pairs:
         return
@@ -36,8 +75,6 @@ def add_physical_evidence(user, cutoff, groups):
         ).select_related("conteo").order_by("conteo_id", "id")
         if (line.conteo.sucursal_id, line.producto_id) in pairs
     }
-    if not lines:
-        return
     submissions = defaultdict(list)
     imports = {}
     for event in EventoConteoSucursal.objects.filter(
@@ -75,3 +112,10 @@ def add_physical_evidence(user, cutoff, groups):
                 stamp = item.get("contado_en")
                 evidence.append(dict(conteo=conteo, unit=line.unidad, quantity=item.get("cantidad"),
                                      round=round_number, counted_at=parse_datetime(stamp) if stamp else None))
+
+    for case in pairs.values():
+        case["physical_comparison"] = _physical_comparison(case)
+    for row in rows:
+        comparisons = [case["physical_comparison"] for case in row["cases"] if "physical_comparison" in case]
+        row["physical_summary"] = dict(Counter(result["summary"] for result in comparisons))
+        row["provisional_count"] = sum(bool(result.get("provisional")) for result in comparisons)
