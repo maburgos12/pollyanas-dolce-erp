@@ -1537,8 +1537,8 @@
           <strong>{{ branch_weekday_rows|length }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Tickets del corte</span>
-          <strong>{{ daily_sales_snapshot.total_tickets|default_if_none:"N/D"|intcomma }}</strong>
+          <span>Corte comercial cerrado</span>
+          <strong>{{ closed_weekday_comparison.0|date:"Y-m-d"|default:"N/D" }}</strong>
         </div>
       </div>
       <div class="bi-list bi-list-dense">
@@ -1553,7 +1553,7 @@
           </div>
         </article>
         {% empty %}
-        <article class="bi-list-item"><strong>Sin alertas de sucursal</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>
+        <article class="bi-list-item"><strong>Sin alertas de sucursal</strong><div class="bi-subtle">{% if closed_weekday_comparison %}No hay datos comparables para ambos cortes.{% else %}No hay un par de cortes comerciales cerrados verificable.{% endif %}</div></article>
         {% endfor %}
       </div>
     </article>
@@ -1574,8 +1574,8 @@
           <strong>{{ product_weekday_rows|length }}</strong>
         </div>
         <div class="bi-summary-chip">
-          <span>Piezas del corte</span>
-          <strong>{{ daily_sales_snapshot.total_units|floatformat:0|intcomma }}</strong>
+          <span>Corte comercial cerrado</span>
+          <strong>{{ closed_weekday_comparison.0|date:"Y-m-d"|default:"N/D" }}</strong>
         </div>
       </div>
       <div class="bi-list bi-list-dense">
@@ -1591,7 +1591,7 @@
           </div>
         </article>
         {% empty %}
-        <article class="bi-list-item"><strong>Sin alertas de producto</strong><div class="bi-subtle">No hay suficiente referencia comparable reciente.</div></article>
+        <article class="bi-list-item"><strong>Sin alertas de producto</strong><div class="bi-subtle">{% if closed_weekday_comparison %}No hay datos comparables para ambos cortes.{% else %}No hay un par de cortes comerciales cerrados verificable.{% endif %}</div></article>
         {% endfor %}
       </div>
     </article>

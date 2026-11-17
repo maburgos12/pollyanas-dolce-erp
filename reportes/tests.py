@@ -204,6 +204,59 @@ class ReportesBITests(TestCase):
         waste.assert_not_called()
         snapshot.assert_not_called()
 
+    def test_bi_alerts_compare_closed_days_and_link_to_that_cut(self):
+        fecha_abierta = date(2026, 11, 17)
+        now = timezone.make_aware(datetime(2026, 11, 17, 12))
+        actual, comparable = date(2026, 11, 16), date(2026, 11, 9)
+        sucursal = self._create_sucursal("GUAMUCHIL", "Sucursal BI Guamúchil")
+        branch = PointBranch.objects.create(external_id="BI-CR", name=sucursal.nombre, erp_branch=sucursal)
+        receta = Receta.objects.create(nombre="Pastel BI comparado", hash_contenido="bi-cierre-semanal")
+        producto = PointProduct.objects.create(external_id="BI-PROD", sku="BI-COMP", name=receta.nombre)
+        nueva_sucursal = self._create_sucursal("BI-NUEVA", "Sucursal recién abierta BI")
+        nueva_sucursal.fecha_apertura = actual
+        nueva_sucursal.save(update_fields=["fecha_apertura"])
+        nueva_branch = PointBranch.objects.create(
+            external_id="BI-OPEN", name=nueva_sucursal.nombre, erp_branch=nueva_sucursal,
+        )
+        with patch("django.utils.timezone.now", return_value=now):
+            job = PointSyncJob.objects.create(
+                job_type=PointSyncJob.JOB_TYPE_SALES, status=PointSyncJob.STATUS_SUCCESS,
+                started_at=now, finished_at=now,
+            )
+            for dia, amount in ((actual, 1200), (comparable, 1000), (fecha_abierta, 25), (date(2026, 11, 10), 1300)):
+                PointDailySale.objects.create(
+                    branch=branch, product=producto, receta=receta, sale_date=dia, quantity=5,
+                    total_amount=amount, source_endpoint="/Report/PrintReportes?idreporte=3",
+                )
+                PointDailyBranchIndicator.objects.create(
+                    branch=branch, indicator_date=dia, total_amount=amount, total_tickets=5,
+                    sync_job=job if dia in (actual, comparable) else None,
+                )
+            PointDailySale.objects.create(
+                branch=nueva_branch, product=producto, receta=receta, sale_date=actual, quantity=4,
+                total_amount=800, source_endpoint="/Report/PrintReportes?idreporte=3",
+            )
+            PointDailyBranchIndicator.objects.create(
+                branch=nueva_branch, indicator_date=actual, total_amount=800, total_tickets=3, sync_job=job,
+            )
+            response = self.client.get(reverse("reportes:bi"), {"detalle": "1", "sales_year": "2025", "sales_month": "10"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["closed_weekday_comparison"], (actual, comparable, (sucursal.id,)))
+            commercial = response.context["commercial_analytics"]
+            self.assertEqual((commercial["year"], commercial["month"]), (2025, 10))
+            branch_rows = response.context["branch_weekday_rows"]
+            self.assertEqual([row["amount"] for row in branch_rows], [Decimal("1200")])
+            self.assertEqual([row["amount"] for row in response.context["product_weekday_rows"]], [Decimal("1200")])
+            self.assertContains(response, "+20.0% vs 2026-11-09")
+            self.assertContains(response, f"from=2026-11-16&amp;to=2026-11-16&amp;sucursal_id={sucursal.id}")
+            self.assertContains(response, "Corte comercial cerrado")
+
+            PointDailyBranchIndicator.objects.filter(indicator_date=comparable).update(sync_job=None)
+            response = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
+            self.assertEqual(response.context["branch_weekday_rows"], [])
+            self.assertEqual(response.context["product_weekday_rows"], [])
+            self.assertContains(response, "No hay un par de cortes comerciales cerrados verificable.")
+
     def test_bi_view_renders(self):
         sucursal = self._create_sucursal("BI-01", "Sucursal BI 01")
         receta = Receta.objects.create(nombre="Pastel BI Histórico", hash_contenido="hash-bi-historico-001")
