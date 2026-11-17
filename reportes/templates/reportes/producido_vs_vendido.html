@@ -206,6 +206,7 @@
             <th class="text-end" title="Saldo calculado por el contrato canónico de Point" scope="col">Saldo calc.</th>
             <th class="text-end" title="Saldo final registrado en Point" scope="col">Fin. Point</th>
             <th class="text-end" title="Final Point menos saldo calculado" scope="col">Dif. Point</th>
+            <th scope="col">Físico vs Point</th>
             <th class="text-center" scope="col">Movimientos</th>
           </tr>
         </thead>
@@ -255,16 +256,12 @@
             <td class="text-end">{% if group.total.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle en el producto pendiente">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ group.total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=group.total.inventario_final_point_total coverage=group.total.point_coverage.inventario_final_point_total unit="producto-sucursal" %}</td>
             <td class="text-end">{% if group.total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if group.total.diferencia_inventario > 0 %}text-warning{% elif group.total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ group.total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td></td>
             <td class="production-state-cell"><span class="production-state-label is-subtotal">Subtotal</span></td>
           </tr>
           {% for row in group.rows %}
           <tr>
             <td class="cell-wrap">{{ row.receta }}
-              {% if row.physical_summary %}
-              <small class="d-block">Físico vs Point:
-                {% for status, total in row.physical_summary.items %}{{ total }} {{ status }}{% if not forloop.last %} · {% endif %}{% endfor %}
-              </small>
-              {% endif %}
               <details id="trace-product-{{ row.product_id }}"><summary>Ver detalle</summary>
                 {% for case in row.cases %}
                 <p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Saldo calculado: {% if case.calculated is None %}pendiente{% else %}{{ case.calculated|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · Diferencia: {% if case.difference is None %}pendiente{% else %}{{ case.difference|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>
@@ -276,6 +273,7 @@
                   Final Point: {{ comparison.closing|floatformat:"-6u" }} {{ comparison.unit }} ·
                   Físico − Point: {{ comparison.delta|floatformat:"-6u" }} {{ comparison.unit }}
                   {% endif %}
+                  {% if comparison.provisional %}<br><small>Provisional: {{ comparison.provisional }}</small>{% endif %}
                 </p>
                 {% endif %}
                 {% endwith %}
@@ -337,6 +335,14 @@
             <td class="text-end">{% if row.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle para ver qué falta y en qué sucursal">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ row.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=row.inventario_final_point_total coverage=row.point_coverage.inventario_final_point_total unit="sucursales" %}</td>
             <td class="text-end">{% if row.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if row.diferencia_inventario > 0 %}text-warning{% elif row.diferencia_inventario < 0 %}text-danger{% elif row.estado_inventario == 'Conciliado' %}text-success{% else %}muted{% endif %}">{{ row.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td class="cell-wrap">
+              {% if row.physical_summary %}
+                {% for status, total in row.physical_summary.items %}{{ total }} {{ status }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+                {% if row.provisional_count %}<br><small>{{ row.provisional_count }} cotejo{{ row.provisional_count|pluralize }} provisional{{ row.provisional_count|pluralize:",es" }}</small>{% endif %}
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
             <td class="production-state-cell">
               {% if row.estado_inventario %}
               <span class="production-state-label {% if row.estado_inventario == 'Conciliado' %}is-success{% elif row.estado_inventario == 'Pendiente de conciliar' %}is-warning{% else %}is-neutral{% endif %}">{{ row.estado_inventario }}</span>
@@ -384,6 +390,7 @@
             <td class="text-end">{% if grand_total.inventario_final_teorico is None %}<span class="muted" title="Abre Ver detalle en el producto pendiente">{% if is_open_period %}En curso{% else %}Pendiente{% endif %}</span>{% else %}{{ grand_total.inventario_final_teorico|floatformat:"-1"|intcomma }}{% endif %}</td>
             <td class="text-end">{% include "reportes/includes/point_balance_cell.html" with value=grand_total.inventario_final_point_total coverage=grand_total.point_coverage.inventario_final_point_total unit="producto-sucursal" %}</td>
             <td class="text-end">{% if grand_total.diferencia_inventario is None %}<span class="muted">{% if is_open_period %}Al cierre{% else %}Pendiente{% endif %}</span>{% else %}<span class="{% if grand_total.diferencia_inventario > 0 %}text-warning{% elif grand_total.diferencia_inventario < 0 %}text-danger{% else %}text-success{% endif %}">{{ grand_total.diferencia_inventario|floatformat:"-1"|intcomma }}</span>{% endif %}</td>
+            <td></td>
             <td class="production-state-cell"><span class="production-state-label is-total">Total</span></td>
           </tr>
         </tbody>

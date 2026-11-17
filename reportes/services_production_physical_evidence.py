@@ -29,6 +29,11 @@ def _physical_comparison(case):
     if closing is None:
         return {"label": "Sin saldo final Point", "summary": "sin saldo final Point"}
     delta = quantity - closing
+    provisional = ""
+    if reading["conteo"].estado == "RECONTEO":
+        provisional = "reconteo pendiente"
+    elif not reading.get("counted_at"):
+        provisional = "hora de conteo sin registrar"
     return {
         "label": "Con diferencia" if delta else "Coincide",
         "summary": "con diferencia" if delta else "coinciden",
@@ -36,6 +41,7 @@ def _physical_comparison(case):
         "closing": closing,
         "delta": delta,
         "unit": reading["unit"],
+        "provisional": provisional,
     }
 
 
@@ -110,7 +116,6 @@ def add_physical_evidence(user, cutoff, groups):
     for case in pairs.values():
         case["physical_comparison"] = _physical_comparison(case)
     for row in rows:
-        row["physical_summary"] = dict(Counter(
-            case["physical_comparison"]["summary"]
-            for case in row["cases"] if "physical_comparison" in case
-        ))
+        comparisons = [case["physical_comparison"] for case in row["cases"] if "physical_comparison" in case]
+        row["physical_summary"] = dict(Counter(result["summary"] for result in comparisons))
+        row["provisional_count"] = sum(bool(result.get("provisional")) for result in comparisons)

@@ -89,12 +89,14 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
                 self.assertContains(response, "1 con diferencia")
                 self.assertContains(response, "Físico vs Point: Con diferencia")
                 self.assertContains(response, "Físico − Point: -9 PZA")
+                self.assertContains(response, "Provisional: reconteo pendiente")
+                self.assertContains(response, "1 cotejo provisional")
                 self.assertContains(response, "Ronda enviada 1")
                 self.assertContains(response, "Reconteo")
                 self.assertContains(response, "Hora no registrada")
             else:
                 self.assertNotContains(response, "Ronda enviada")
-                self.assertNotContains(response, "Físico vs Point")
+                self.assertNotContains(response, "Físico vs Point:")
 
     def test_physical_match_missing_count_and_unverified_closing_are_distinct(self):
         branch = Sucursal.objects.create(codigo="PVS-CRUCE", nombre="Sucursal de cruce")
@@ -117,7 +119,10 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertContains(self.view.get(request).render(), "Físico vs Point: Sin conteo")
         EventoConteoSucursal.objects.create(conteo=count, actor=actor, action="enviar",
             payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0"}]})
-        self.assertContains(self.view.get(request).render(), "Físico vs Point: Coincide")
+        response = self.view.get(request).render()
+        self.assertContains(response, "Físico vs Point: Coincide")
+        self.assertContains(response, "Provisional: hora de conteo sin registrar")
+        self.assertContains(response, '<th scope="col">Físico vs Point</th><th class="text-center" scope="col">Movimientos</th>', html=True)
 
         case.movement_status = "SOURCE_INCOMPLETE"
         case.source_trace = {}
@@ -387,7 +392,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("requestSubmit()", html)
         self.assertIn("window.setInterval(refreshAudit, 60000)", html)
         self.assertIn("document.hidden || busy || submitting", html)
-        self.assertEqual(html.count('scope="col"'), 15)
+        self.assertEqual(html.count('scope="col"'), 16)
         css = Path("static/css/styles.css").read_text()
         self.assertIn("max-height: calc(100dvh - 112px)", css)
         self.assertIn(".production-table-wrap .table thead th.text-end", css)
