@@ -206,7 +206,7 @@
             <th class="text-end" title="Saldo calculado por el contrato canónico de Point" scope="col">Saldo calc.</th>
             <th class="text-end" title="Saldo final registrado en Point" scope="col">Fin. Point</th>
             <th class="text-end" title="Final Point menos saldo calculado" scope="col">Dif. Point</th>
-            <th class="text-center" title="Estado" scope="col">Est.</th>
+            <th class="text-center" scope="col">Movimientos</th>
           </tr>
         </thead>
         <tbody>
@@ -260,9 +260,26 @@
           {% for row in group.rows %}
           <tr>
             <td class="cell-wrap">{{ row.receta }}
+              {% if row.physical_summary %}
+              <small class="d-block">Físico vs Point:
+                {% for status, total in row.physical_summary.items %}{{ total }} {{ status }}{% if not forloop.last %} · {% endif %}{% endfor %}
+              </small>
+              {% endif %}
               <details id="trace-product-{{ row.product_id }}"><summary>Ver detalle</summary>
-                {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Saldo calculado: {% if case.calculated is None %}pendiente{% else %}{{ case.calculated|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · Diferencia: {% if case.difference is None %}pendiente{% else %}{{ case.difference|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>{% endfor %}
-                {% for case in row.cases %}{% for count in case.physical_evidence %}
+                {% for case in row.cases %}
+                <p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Saldo calculado: {% if case.calculated is None %}pendiente{% else %}{{ case.calculated|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · Diferencia: {% if case.difference is None %}pendiente{% else %}{{ case.difference|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>
+                {% with comparison=case.physical_comparison %}
+                {% if comparison %}
+                <p><strong>Físico vs Point: {{ comparison.label }}</strong>
+                  {% if comparison.delta is not None and comparison.quantity is not None %}<br>
+                  Conteo: {{ comparison.quantity|floatformat:"-6u" }} {{ comparison.unit }} ·
+                  Final Point: {{ comparison.closing|floatformat:"-6u" }} {{ comparison.unit }} ·
+                  Físico − Point: {{ comparison.delta|floatformat:"-6u" }} {{ comparison.unit }}
+                  {% endif %}
+                </p>
+                {% endif %}
+                {% endwith %}
+                {% for count in case.physical_evidence %}
                 <p><strong>{{ case.branch }} · {% if count.historical %}Excel histórico importado{% else %}Conteo físico ERP{% endif %} #{{ count.conteo.pk }}</strong><br>
                   {{ count.conteo.fecha|date:"d/m/Y" }} · {{ count.conteo.get_estado_display }}
                   {% if count.round %}· Ronda {% if not count.historical %}enviada {% endif %}{{ count.round }}{% endif %}
