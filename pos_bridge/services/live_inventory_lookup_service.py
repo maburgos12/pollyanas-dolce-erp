@@ -4,6 +4,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from hashlib import sha256
 from typing import Any
 
 from django.core.cache import cache
@@ -26,6 +27,10 @@ class PointLiveInventoryLookupError(Exception):
 
 class PointLiveInventoryBusyError(PointLiveInventoryLookupError):
     """La cuenta compartida está ocupada; no se inició ninguna sesión Point."""
+
+
+class PointLiveInventoryProductMismatchError(PointLiveInventoryLookupError):
+    pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,25 +155,14 @@ class PointLiveInventoryLookupService:
         return result
 
     def _find_product(self, *, client: PointHttpSessionClient, codes: list[str]) -> dict[str, Any]:
-        target_codes = {normalizar_codigo_point(code) for code in codes if code}
-        fallback_rows: list[dict[str, Any]] = []
+        target_codes = {code.casefold() for code in codes}
         for code in codes:
             rows = client.get_stock_products(text=code, timeout=self.timeout_seconds)
-            fallback_rows.extend(rows)
             for row in rows:
-                row_codes = {
-                    normalizar_codigo_point(str(value))
-                    for value in (
-                        _first_present(row, ("Codigo", "codigo", "SKU", "sku")),
-                        _first_present(row, ("Codigo_Barra", "codigo_barra", "CodigoBarra")),
-                    )
-                    if value not in (None, "")
-                }
-                if row_codes & target_codes:
+                sku = _first_present(row, ("Codigo", "codigo", "SKU", "sku"))
+                if sku is not None and str(sku).strip().casefold() in target_codes:
                     return row
-        if len(fallback_rows) == 1:
-            return fallback_rows[0]
-        raise PointLiveInventoryLookupError("Point no devolvió un producto exacto para el código solicitado.")
+        raise PointLiveInventoryProductMismatchError("Point no devolvió un SKU exacto para el producto solicitado.")
 
     def _is_insumo(self, product: dict[str, Any]) -> bool:
         value = product.get("isInsumo")
@@ -269,9 +263,9 @@ class PointLiveInventoryLookupService:
         raise PointLiveInventoryLookupError("Point no devolvió una existencia única para la sucursal solicitada.")
 
     def _cache_key(self, *, codes: list[str], sucursal: Sucursal, point_branch: PointBranch | None) -> str:
-        code_key = ",".join(normalizar_codigo_point(code) for code in codes)
+        code_key = sha256(repr(tuple(code.casefold() for code in codes)).encode()).hexdigest()
         branch_key = str(point_branch.external_id if point_branch else sucursal.codigo).strip().lower()
-        return f"pos_bridge:pickup_live_point:v3:{code_key}:{branch_key}"
+        return f"pos_bridge:pickup_live_point:v4:{code_key}:{branch_key}"
 
     def _result_to_cache(self, result: PointLiveInventoryResult) -> dict[str, Any]:
         return {

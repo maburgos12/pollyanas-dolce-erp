@@ -154,7 +154,7 @@ class PointLiveInventoryLookupServiceTests(TestCase):
             point_branch=self.point_branch,
         )
 
-        self.assertIn("pickup_live_point:v3:", key)
+        self.assertIn("pickup_live_point:v4:", key)
 
     def test_exact_point_id_wins_over_earlier_historical_erp_name(self):
         self.client.get_stock_products.return_value = [
@@ -171,7 +171,7 @@ class PointLiveInventoryLookupServiceTests(TestCase):
                          ("2", "Bamoa", Decimal("3")))
 
     def test_live_provenance_does_not_fill_missing_source_fields_from_request_or_alias(self):
-        self.client.get_stock_products.return_value = [{"PK": 101, "isInsumo": False}]
+        self.client.get_stock_products.return_value = [{"PK": 101, "Codigo": "REQUESTED-ALIAS", "isInsumo": False}]
         for alias, row, expected_id, expected_name in (
             ("Bamoa", {"Sucursal": "Bamoa", "Cantidad": 3}, "", "Bamoa"),
             ("2", {"PK_Sucursal": 2, "Cantidad": 3}, "2", ""),
@@ -183,7 +183,7 @@ class PointLiveInventoryLookupServiceTests(TestCase):
                 result = self._service().get_stock(
                     product_codes=["REQUESTED-ALIAS"], sucursal=self.sucursal, point_branch=self.point_branch,
                 )
-                self.assertEqual((result.product_code, result.product_name), ("", ""))
+                self.assertEqual((result.product_code, result.product_name), ("REQUESTED-ALIAS", ""))
                 self.assertEqual((result.point_branch_id, result.point_branch_name), (expected_id, expected_name))
                 availability = PickupAvailability(
                     receta=Receta(codigo_point="REQUESTED-ALIAS", nombre="ERP product"),
@@ -194,7 +194,7 @@ class PointLiveInventoryLookupServiceTests(TestCase):
                 ).to_dict()
                 self.assertEqual(availability["stock_qty"], "3")
                 self.assertEqual(availability["point_product_id"], "101")
-                self.assertIsNone(availability["point_product_code"])
+                self.assertEqual(availability["point_product_code"], "REQUESTED-ALIAS")
                 self.assertIsNone(availability["point_product_name"])
                 self.assertEqual(availability["point_branch_id"], expected_id or None)
                 self.assertEqual(availability["point_branch_name"], expected_name or None)

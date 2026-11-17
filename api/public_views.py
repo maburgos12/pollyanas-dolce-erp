@@ -410,7 +410,7 @@ class PublicPickupAvailabilityView(APIView):
             raw_cache_key = (
                 f"{product_code.lower()}|{branch_code.lower()}|{str(quantity).strip().lower()}"
             )
-            cache_key = f"public_pickup_availability:{hashlib.sha1(raw_cache_key.encode('utf-8')).hexdigest()}"
+            cache_key = f"public_pickup_availability:v2:{hashlib.sha1(raw_cache_key.encode('utf-8')).hexdigest()}"
             cached_payload = cache.get(cache_key)
             if cached_payload is not None:
                 _log_access(client, request, status.HTTP_200_OK)
