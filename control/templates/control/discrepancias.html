@@ -19,7 +19,7 @@
     <p class="enterprise-focus-alert-detail">El plan general y el saldo actual de almacenes ERP se muestran como referencia. Esta vista no compara existencias de la sucursal para el corte seleccionado.</p>
   </div>
   <div class="enterprise-focus-alert-actions">
-    <a class="btn btn-secondary" href="?from={{ date_from|date:'Y-m-d' }}&amp;to={{ date_to|date:'Y-m-d' }}&amp;threshold_pct={{ threshold_pct|unlocalize }}">Ver comparación general</a>
+    <a class="btn btn-secondary" href="{{ report_url }}">Ver comparación general</a>
   </div>
 </section>
 {% else %}
@@ -46,9 +46,9 @@
   </div>
   <div class="enterprise-focus-alert-actions">
     {% if report.totals.alertas > 0 %}
-      <a class="btn btn-primary" href="?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}&threshold_pct={{ threshold_pct }}&enterprise_focus=ALERTAS">Ver alertas</a>
+      <a class="btn btn-primary" href="{{ report_url }}&amp;enterprise_focus=ALERTAS">Ver alertas</a>
     {% elif enterprise_focus %}
-      <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}?from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}&threshold_pct={{ threshold_pct }}">Quitar foco</a>
+      <a class="btn btn-secondary" href="{{ report_url }}">Quitar foco</a>
     {% endif %}
   </div>
 </section>

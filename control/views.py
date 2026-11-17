@@ -1,4 +1,5 @@
 from decimal import Decimal
+from urllib.parse import urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -436,6 +437,7 @@ def _control_release_gate_rows(
 
 def _control_focus_cards(
     *,
+    report_url: str,
     selected_focus: str,
     alertas: int,
     observar: int,
@@ -481,20 +483,19 @@ def _control_focus_cards(
             "detail": "Insumos sin diferencia relevante en este corte.",
         },
     ]
-    base_url = reverse("control:discrepancias")
     cards: list[dict[str, object]] = []
     for item in focus_definitions:
         cards.append(
             {
                 **item,
                 "active": selected_focus == item["key"],
-                "url": f"{base_url}?enterprise_focus={item['key']}",
+                "url": f"{report_url}&enterprise_focus={item['key']}",
             }
         )
     return cards
 
 
-def _control_focus_summary(*, selected_focus: str, count: int) -> dict | None:
+def _control_focus_summary(*, report_url: str, selected_focus: str, count: int) -> dict | None:
     focus_copy = {
         "HOY": {
             "title": "Corte del día",
@@ -521,7 +522,7 @@ def _control_focus_summary(*, selected_focus: str, count: int) -> dict | None:
         return None
     summary = focus_copy[selected_focus].copy()
     summary["count"] = count
-    summary["clear_url"] = reverse("control:discrepancias")
+    summary["clear_url"] = report_url
     return summary
 
 
@@ -578,10 +579,13 @@ def discrepancias(request):
         report["rows"] = [
             row for row in report["rows"] if row["ventas_pos"] or row["mermas_pos"] or row["produccion"]
         ]
+    report_query = urlencode({"from": date_from, "to": date_to, "threshold_pct": threshold_pct})
+    report_url = f"{reverse('control:discrepancias')}?{report_query}"
     focus_cards, focus_summary = [], None
     if not sucursal_id:
         today = timezone.localdate()
         focus_cards = _control_focus_cards(
+            report_url=report_url,
             selected_focus=enterprise_focus,
             alertas=report["totals"]["alertas"],
             observar=report["totals"]["observar"],
@@ -591,6 +595,7 @@ def discrepancias(request):
             capturas_recientes=VentaPOS.objects.count() + MermaPOS.objects.count(),
         )
         focus_summary = _control_focus_summary(
+            report_url=report_url,
             selected_focus=enterprise_focus,
             count=len(report["rows"]),
         )
@@ -606,6 +611,7 @@ def discrepancias(request):
         "sucursal_label": sucursal.nombre if sucursal else "",
         "report": report,
         "enterprise_focus": enterprise_focus,
+        "report_url": report_url,
         "focus_cards": focus_cards,
         "focus_summary": focus_summary,
     }
