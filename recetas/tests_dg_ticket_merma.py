@@ -1,5 +1,6 @@
 from datetime import date, datetime
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -11,7 +12,7 @@ from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointDailyBranchIndicator, PointWasteLine
 from recetas.views.plan import _build_dg_operacion_dashboard_payload
 from reportes.models import DgOperacionSnapshot
-from reportes.services_dg_operacion_snapshot import serialize_dg_operacion_payload
+from reportes.services_dg_operacion_snapshot import refresh_dg_operacion_snapshot, serialize_dg_operacion_payload
 
 
 class DgTicketMermaTests(TestCase):
@@ -64,6 +65,56 @@ class DgTicketMermaTests(TestCase):
         self.assertNotIn("CEDIS", [row["code"] for row in rows])
         self.assertNotIn("CRUCERO", [row["code"] for row in rows])
         self.assertEqual(DgOperacionSnapshot.objects.get(fecha_operacion=self.cut).payload, saved_payload)
+
+
+    def test_corte_publicado_relee_solo_tickets_posteriores_del_mismo_dia(self):
+        branch = self.branch("SINALOA_LEYVA", fecha_apertura=date(2026, 10, 3))
+        self.branch("EL_TUNEL")
+        self.branch("PLAZA_NIO")
+        indicator = PointDailyBranchIndicator.objects.create(
+            branch=branch, indicator_date=self.cut, total_amount=Decimal("7004.00"), total_tickets=26,
+        )
+        payload = _build_dg_operacion_dashboard_payload(fecha_operacion=self.cut)
+        saved_payload = serialize_dg_operacion_payload(payload)
+        snapshot = DgOperacionSnapshot.objects.create(fecha_operacion=self.cut, payload=saved_payload)
+        other_cut = date(2026, 11, 14)
+        PointDailyBranchIndicator.objects.create(
+            branch=branch, indicator_date=other_cut, total_amount=Decimal("7846.00"), total_tickets=38,
+        )
+
+        with patch("recetas.views.plan._build_point_ticket_summary") as live_reader:
+            response = self.client.get(self.url, {"fecha_operacion": self.cut})
+        live_reader.assert_not_called()
+        self.assertContains(response, "269.38")
+        self.assertNotContains(response, "Point actualizado después de guardar el corte")
+
+        PointDailyBranchIndicator.objects.update_or_create(
+            branch=branch,
+            indicator_date=self.cut,
+            defaults={"total_amount": Decimal("15307.00"), "total_tickets": 57},
+        )
+        indicator.refresh_from_db()
+        self.assertGreater(indicator.updated_at, snapshot.generated_at)
+
+        for filters in ({"fecha_operacion": self.cut}, {}):
+            with self.subTest(filters=filters):
+                response = self.client.get(self.url, filters)
+                self.assertContains(response, "268.54")
+                self.assertContains(response, "Corte del 13/11/2026")
+                self.assertContains(response, "Point actualizado después de guardar el corte")
+                self.assertContains(response, "Sin tickets registrados", count=2)
+                self.assertEqual(response.context["point_ticket_summary"]["total_tickets"], 57)
+                self.assertEqual(response.context["point_exec_summary"], payload["point_exec_summary"])
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.payload, saved_payload)
+
+        regenerated = refresh_dg_operacion_snapshot(fecha_operacion=self.cut)
+        self.assertGreater(regenerated.generated_at, snapshot.generated_at)
+        with patch("recetas.views.plan._build_point_ticket_summary") as live_reader:
+            response = self.client.get(self.url, {"fecha_operacion": self.cut})
+        live_reader.assert_not_called()
+        self.assertContains(response, "268.54")
+        self.assertNotContains(response, "Point actualizado después de guardar el corte")
 
     def test_detalle_merma_respeta_fecha_y_sucursal_con_la_misma_autorizacion(self):
         source = self.branch("GUAMUCHIL")
