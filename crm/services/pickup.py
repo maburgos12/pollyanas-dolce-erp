@@ -18,7 +18,12 @@ from core.models import Sucursal
 from crm.models import Cliente, PedidoCliente, PickupReservation, SeguimientoPedido
 from crm.services.sucursal_resolution import SucursalResolutionError, resolve_sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct
-from pos_bridge.services.live_inventory_lookup_service import PointLiveInventoryLookupError, PointLiveInventoryLookupService, PointLiveInventoryResult
+from pos_bridge.services.live_inventory_lookup_service import (
+    PointLiveInventoryLookupError,
+    PointLiveInventoryLookupService,
+    PointLiveInventoryProductMismatchError,
+    PointLiveInventoryResult,
+)
 from recetas.models import Receta, RecetaCodigoPointAlias, normalizar_codigo_point
 from recetas.utils.normalizacion import normalizar_nombre
 
@@ -305,6 +310,7 @@ class PickupAvailabilityService:
         stock_source = "ERP_POS_BRIDGE"
         stock_captured_at = None
         live_result = None
+        product_unconfirmed = False
         try:
             live_result = self.live_lookup_service.get_stock(
                 product_codes=self._candidate_codes(receta),
@@ -312,6 +318,7 @@ class PickupAvailabilityService:
                 point_branch=point_branch,
             )
         except PointLiveInventoryLookupError as exc:
+            product_unconfirmed = isinstance(exc, PointLiveInventoryProductMismatchError)
             logger.warning(
                 "Point live pickup lookup failed branch=%s product=%s error=%s",
                 sucursal.codigo,
@@ -332,7 +339,11 @@ class PickupAvailabilityService:
         else:
             is_fresh = snapshot is not None and snapshot_age_seconds is not None and snapshot_age_seconds <= freshness_seconds
 
-        if available_to_promise <= ZERO:
+        if product_unconfirmed:
+            available_to_promise = ZERO
+            is_fresh = False
+            status = self.STATUS_UNKNOWN
+        elif available_to_promise <= ZERO:
             status = self.STATUS_OUT_OF_STOCK
         elif not is_fresh:
             status = self.STATUS_UNKNOWN
