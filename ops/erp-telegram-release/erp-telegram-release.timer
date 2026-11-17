@@ -2,6 +2,9 @@
 Description=Check authorized ERP releases and eligible candidates
 
 [Timer]
+OnCalendar=*-*-* 07:00:00 America/Mazatlan
+AccuracySec=1s
+Persistent=true
 OnBootSec=2min
 OnUnitActiveSec=1min
 Unit=erp-telegram-release.service

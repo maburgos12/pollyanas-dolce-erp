@@ -14,6 +14,9 @@ H, B, M, T = 'a'*40, 'b'*40, 'c'*40, 'd'*40
 
 class ReleaseTests(unittest.TestCase):
     def setUp(self):
+        clock = patch("time.time", return_value=1794938400)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.ledger = r.Ledger(self.temp.name)
@@ -593,9 +596,8 @@ class ReleaseTests(unittest.TestCase):
         result = self.publish()
         self.assertEqual(result['state'], 'blocked')
         self.assertTrue(any('expired no execution' in (c[2] or {}).get('body', '') for c in self.calls))
-        fresh = r.request_release(1, self.api, self.ledger, self.config, send, lambda: B)
-        self.assertEqual(fresh['state'], 'pending')
-        self.assertNotEqual(fresh['nonce'], self.row['nonce'])
+        with self.assertRaisesRegex(ValueError, 'existing_request'):
+            r.request_release(1, self.api, self.ledger, self.config, send, lambda: B)
         self.assertEqual(self.ledger.read(self.row['nonce'])['decision'], 'approved')
         self.deploy.assert_not_called()
 
