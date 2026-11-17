@@ -7,7 +7,14 @@
 
 {% block extra_css %}
 <style>
-  /* Solo estilos sin equivalente global (badges de fuente y celdas de semáforo) */
+  .pvr-kpi-grid .kpi-card { container-type: inline-size; }
+  .kpi-grid.pvr-kpi-grid .kpi-number {
+    font-size: 1.5rem;
+    font-size: clamp(1.25rem, 11.5cqi, 2.5rem);
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+  }
+  /* Badges de fuente y celdas de semáforo */
   .pvr-fuente { display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; border-radius:var(--radius-sm); padding:2px 8px; }
   .pvr-fuente.is-auto { background:var(--rosa); color:var(--vino); }
   .pvr-fuente.is-manual { background:var(--gris-suave); color:var(--texto); border:1px solid var(--dorado); }
@@ -79,7 +86,7 @@
   </form>
 </section>
 
-<section class="kpi-grid">
+<section class="kpi-grid pvr-kpi-grid">
   {% if resumen_limitado %}
   <div class="kpi-card">
     <div class="kpi-number">{% if kpis.real_egresos is not None %}${{ kpis.real_egresos|floatformat:0|intcomma }}{% else %}Sin datos{% endif %}</div>
@@ -225,7 +232,7 @@
   <div class="card-header">Ventas · unidades proyectadas × precio actual — {{ selected_month_name|capfirst }} {{ selected_year }}</div>
   <p class="muted">La proyección de ventas se compara en unidades propuestas del mes contra las unidades reales de Point; el importe proyectado usa el precio vigente (ASP de los últimos 30 días o precio de lista), no los pesos del Excel.</p>
   {% if ventas_unidades.con_proyeccion %}
-  <div class="kpi-grid">
+  <div class="kpi-grid pvr-kpi-grid">
     <div class="kpi-card">
       <div class="kpi-number">{{ ventas_unidades.totales.unidades_proyectadas|floatformat:0|intcomma }}</div>
       <div class="kpi-label">Unidades proyectadas</div>

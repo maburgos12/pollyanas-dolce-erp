@@ -53,6 +53,12 @@ class DgTicketMermaTests(TestCase):
         self.assertContains(response, "190.34")
         self.assertContains(response, "Sin tickets registrados")
         self.assertContains(response, "Cero tickets")
+        control_url = reverse("control:discrepancias")
+        day = self.cut.isoformat()
+        self.assertContains(
+            response,
+            f'href="{control_url}?from={day}&amp;to={day}">Abrir control</a>',
+        )
         rows = response.context["point_ticket_summary"]["rows"]
         self.assertEqual(len(rows), 10)
         self.assertNotIn("CEDIS", [row["code"] for row in rows])
