@@ -215,11 +215,24 @@ class Broker:
                     continue
                 for old_entry in previous['delete_candidates'][0]['files']:
                     decisions.setdefault(old_entry['id'],[]).append(row)
+            reserved = set()
+            queued = Ledger(ledger.directory/'scheduled', validator=cleanup.validate_intent)
+            for pending in queued.directory.glob('*.json'):
+                intent = queued.read(pending.stem)
+                if intent['kind'] != 'cleanup':
+                    continue
+                frozen = ledger.directory/'scheduled-proposals'/(intent['binding']['digest']+'.json')
+                previous, digest = cleanup.read_proposal(frozen)
+                if digest != intent['binding']['digest']:
+                    raise ValueError('scheduled_proposal_changed')
+                old_item = previous['delete_candidates'][0]
+                if old_item['type'] == 'point_archive_manifest':
+                    reserved.update(entry['id'] for entry in old_item['files'])
             for file in sorted(catalog):
                 entry=self.store.catalog_entry(entry_id=file.stem)
                 prior=decisions.get(entry['id'],[])
                 # The shared daily scheduler renews exact undecided lots; never invent another scope.
-                if prior:
+                if prior or entry['id'] in reserved:
                     continue
                 if len(entries)>=MAX_PILOT_FILES or total+entry['bytes']>MAX_PILOT_BYTES:
                     break
@@ -252,7 +265,7 @@ class Broker:
                 raise ValueError('concurrent_request')
             row=cleanup.request(path,ledger,config,send)
             status.update(proposal=proposal_id,nonce=row['nonce']);prep.atomic_json(state_path,status)
-            return 'requested'
+            return 'deferred' if row['state']=='deferred' else 'requested'
         except Exception as exc:
             status.update(next_at=int(time.time())+21600,error=type(exc).__name__,failures=status.get('failures',0)+1)
             prep.atomic_json(state_path,status)

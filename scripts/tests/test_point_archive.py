@@ -118,6 +118,32 @@ class PointBrokerTests(unittest.TestCase):
         self.assertEqual(f.nas.get_calls, 0)
         self.assertTrue(f.source.exists())
 
+    def test_crossing_twenty_keeps_exact_lot_if_broker_runs_first(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        f = self.fixture
+        start = datetime(2026, 11, 17, 19, 59, 59, tzinfo=ZoneInfo('America/Mazatlan')).timestamp()
+        clock = [start]
+        put = f.nas.put
+        def slow_put(*args):
+            result = put(*args)
+            clock[0] = start + 1
+            return result
+        with patch('time.time', side_effect=lambda: clock[0]), patch.object(f.nas, 'put', side_effect=slow_put):
+            self.assertEqual(f.prepare(), 'deferred')
+            f.send.assert_not_called()
+            self.assertFalse(list(f.ledger.directory.glob('*.json')))
+            proposal = next(f.broker.state.glob('*.proposal'))
+            original = proposal.read_bytes()
+            clock[0] = start + 1 + 11*3600
+            self.assertEqual(f.prepare(), 'no_eligible_point_sources')
+            self.assertEqual(len(list(f.broker.state.glob('*.proposal'))), 1)
+            with patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: f.broker)):
+                cleanup.process_scheduled(f.ledger, f.config, f.send)
+            self.assertEqual(f.send.call_count, 2)
+            self.assertEqual(f.row()['proposal_sha256'], hashlib.sha256(original).hexdigest())
+            self.assertTrue(f.source.exists())
+
     def test_pending_point_lot_revalidated_once_next_morning(self):
         from datetime import datetime
         from zoneinfo import ZoneInfo
