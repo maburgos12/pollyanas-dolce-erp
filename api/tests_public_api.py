@@ -585,6 +585,41 @@ class PublicApiTests(APITestCase):
         PICKUP_LOW_STOCK_THRESHOLD="2",
         PICKUP_RESERVATION_TTL_MINUTES=15,
     )
+    def test_pickup_availability_does_not_offer_stock_when_point_returns_another_sku(self):
+        PointInventorySnapshot.objects.all().update(captured_at=timezone.now(), stock=Decimal("5"))
+        client_path = "pos_bridge.services.live_inventory_lookup_service.PointHttpSessionClient"
+        with patch.dict(os.environ, {"PICKUP_LIVE_POINT_LOOKUP_ENABLED": "1"}), patch(client_path) as factory:
+            point = factory.return_value.__enter__.return_value
+            point.get_product_stock.return_value = [{"PK_Sucursal": 1, "Cantidad": 9}]
+            for row in (
+                {"PK": 99, "Codigo": "OTRO-SKU"},
+                {"PK": 99, "Codigo": "OTRO-SKU", "Codigo_Barra": "01PSV"},
+                {"PK": 99, "Codigo": "01-PSV"},
+                {"PK": 99},
+            ):
+                with self.subTest(row=row):
+                    cache.clear()
+                    point.get_stock_products.return_value = [row]
+                    response = self.client.get(
+                        reverse("api_public_pickup_availability"),
+                        {"product_code": "01PSV", "branch_code": "MATRIZ", "quantity": "1"},
+                        **self._auth_headers(),
+                    )
+                    self.assertEqual(response.status_code, status.HTTP_200_OK)
+                    self.assertEqual(response.data["status"], "UNKNOWN")
+                    self.assertFalse(response.data["available"])
+                    self.assertFalse(response.data["is_fresh"])
+                    self.assertEqual(Decimal(response.data["available_to_promise"]), Decimal("0"))
+                    self.assertIsNone(response.data["point_product_id"])
+            point.get_product_stock.assert_not_called()
+
+    @override_settings(
+        PICKUP_AVAILABILITY_FRESHNESS_MINUTES=20,
+        POINT_BRIDGE_SYNC_INTERVAL_HOURS=24,
+        PICKUP_STOCK_BUFFER_DEFAULT="1",
+        PICKUP_LOW_STOCK_THRESHOLD="2",
+        PICKUP_RESERVATION_TTL_MINUTES=15,
+    )
     def test_pickup_availability_does_not_expand_freshness_to_daily_sync_window(self):
         PointInventorySnapshot.objects.all().update(captured_at=timezone.now() - timedelta(hours=6))
         url = reverse("api_public_pickup_availability")
