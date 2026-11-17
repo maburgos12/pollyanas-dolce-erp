@@ -79,6 +79,7 @@ class ReporteDiarioTests(TestCase):
         self.assertIn("$12,345.67", cuerpo)
         self.assertIn("$154.32", cuerpo)
         self.assertIn("Crucero: Por validar", cuerpo)
+        self.assertIn("=== REABASTO A CEDIS — PENDIENTES/ALERTA ===", cuerpo)
 
     @patch("reportes.services_reporte_diario.send_mail")
     def test_snapshot_con_error_no_envia(self, mock_send_mail):
