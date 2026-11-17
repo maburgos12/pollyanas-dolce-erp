@@ -1,4 +1,5 @@
-from datetime import date
+from copy import deepcopy
+from datetime import date, datetime, time
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
@@ -8,11 +9,12 @@ from django.core.exceptions import ValidationError
 from django.db import DatabaseError, transaction
 from django.test import TestCase, Client, SimpleTestCase
 from django.urls import reverse
+from django.utils import timezone
 from openpyxl import load_workbook
 
-from maestros.models import UnidadMedida
+from maestros.models import Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointProductionLine, PointDailySale, PointProduct
-from recetas.models import Receta, RecetaCodigoPointAlias
+from recetas.models import Receta, RecetaCodigoPointAlias, RecetaCostoSemanal, RecetaCostoVersion
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, AreaPresupuesto, RubroPresupuesto, LineaPresupuestoMensual
 from reportes.services_mano_obra_mensual import calcular, leer_fuentes, aprobar, analisis_aprobado
 from rrhh.models import Empleado, NominaLinea, NominaPeriodo
@@ -37,6 +39,97 @@ class ManoObraMensualTests(TestCase):
             LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=date(2026, 9, 1),
                 monto_real=0, fuente_real='AUTO:GASTO_OPERATIVO')
 
+    def test_usa_semanas_por_fecha_y_conserva_huella(self):
+        self.costo.delete()
+        Receta.objects.filter(pk=self.receta.pk).update(excluir_cierre=True)
+        self.linea.production_date = date(2026, 9, 1)
+        self.linea.save(update_fields=['production_date'])
+        PointProductionLine.objects.create(
+            branch=self.branch, receta=self.receta, production_external_id='MO-2',
+            detail_external_id='MO-D2', source_hash='mo-2',
+            production_date=date(2026, 9, 30), item_name=self.receta.nombre,
+            item_code=self.receta.codigo_point, unit='PZA', produced_quantity=20,
+        )
+        for version, inicio, fin, costo in (
+            (1, date(2026, 8, 31), date(2026, 9, 6), 3),
+            (2, date(2026, 9, 28), date(2026, 10, 4), 6),
+        ):
+            RecetaCostoVersion.objects.create(
+                receta=self.receta, version_num=version, hash_snapshot=f'mo-{version}',
+                costo_mp=costo, costo_total=costo, rendimiento_cantidad=None if version == 1 else 1,
+                rendimiento_unidad='' if version == 1 else 'PZA',
+                creado_en=timezone.make_aware(
+                    datetime.combine(date(2026, 9, 1) if version == 1 else inicio, time(19)),
+                    timezone.get_default_timezone(),
+                ),
+            )
+            RecetaCostoSemanal.objects.create(
+                receta=self.receta, scope_type='RECIPE', identity_key=f'RECIPE:{self.receta.id}',
+                label=self.receta.nombre, week_start=inicio, week_end=fin,
+                version_receta=version, costo_mp=costo, costo_total=costo,
+                metadata={'cost_source': 'VERSION_COSTEO'},
+            )
+        data = calcular('2026-09')
+        self.assertEqual(data['pendientes'], [])
+        self.assertEqual(data['productos'][0]['base'], Decimal('150'))
+        self.assertEqual(data['productos'][0]['mp'], Decimal('5'))
+        self.assertEqual(data['redondeo'], 0)
+        self.assertEqual(len(data['productos'][0]['semanas_mp']), 2)
+        self.receta.refresh_from_db()
+        self.assertTrue(self.receta.excluir_cierre)
+        browser = Client()
+        browser.force_login(self.user)
+        self.assertContains(browser.get(reverse('reportes:mano_obra_mensual'), {'periodo': '2026-09'}),
+                            'Costo semanal de materia prima')
+        fuentes = leer_fuentes('2026-09')
+        for cambio in ('faltante', 'ambiguo', 'futuro', 'kg', 'lote'):
+            with self.subTest(cambio=cambio):
+                alternas = deepcopy(fuentes)
+                if cambio == 'faltante':
+                    alternas['costos_semanales'].pop()
+                elif cambio == 'ambiguo':
+                    alternas['costos_semanales'].append(alternas['costos_semanales'][0].copy())
+                elif cambio == 'futuro':
+                    alternas['costos_semanales'][0]['version']['fecha'] = '2026-09-02'
+                elif cambio == 'kg':
+                    alternas['costos_semanales'][0]['version']['unidad'] = 'KG'
+                else:
+                    alternas['costos_semanales'][0]['version']['lote'] = 2
+                self.assertIsNone(calcular('2026-09', alternas)['productos'][0]['mp'])
+        self.assertFalse(RecetaCostoHistoricoMensual.objects.filter(receta=self.receta).exists())
+
+        # Una fila mensual incompleta se conserva como alerta, aun con semanas utilizables.
+        self.costo.pk = None
+        self.costo.coverage_pct = 80
+        self.costo.save()
+        self.assertIsNone(calcular('2026-09')['productos'][0]['mp'])
+        self.costo.delete()
+        RecetaCostoVersion.objects.filter(receta=self.receta, version_num=2).update(costo_mp=7)
+        data_cambio = calcular('2026-09')
+        self.assertIsNone(data_cambio['productos'][0]['mp'])
+        self.assertNotEqual(data_cambio['fingerprint'], data['fingerprint'])
+
+    def test_insumo_identificado_exige_cero_explicito_de_point(self):
+        insumo = Insumo.objects.create(codigo='MO-INS', nombre='Betún prueba', unidad_base=self.unidad)
+        linea = PointProductionLine.objects.create(
+            branch=self.branch, production_external_id='MO-INS', detail_external_id='MO-D3',
+            source_hash='mo-ins', production_date=date(2026, 9, 15), item_name=insumo.nombre,
+            item_code=insumo.codigo, unit='KG', insumo=insumo, is_insumo=True,
+            requested_quantity=6, produced_quantity=0,
+            raw_payload={'detail': {'IsInsumo': True, 'Cantidad_producida': 0, 'Cantidad_solicitada': 6}},
+        )
+        data = calcular('2026-09')
+        self.assertEqual(data['pendientes'], [])
+        self.assertEqual(data['insumos_cero'][0]['id'], linea.pk)
+        self.assertEqual(data['insumos_cero'][0]['requested_quantity'], 6)
+        self.assertEqual(len(data['productos']), 1)
+        linea.raw_payload = {'detail': {'IsInsumo': True}}
+        linea.save(update_fields=['raw_payload'])
+        nuevo = calcular('2026-09')
+        self.assertTrue(nuevo['pendientes'])
+        self.assertFalse(nuevo['insumos_cero'])
+        self.assertNotEqual(nuevo['fingerprint'], data['fingerprint'])
+
     def test_servicios_conservan_centavos_y_reparten_por_mp(self):
         fuentes = leer_fuentes('2026-09')
         for s in fuentes['servicios']:
@@ -48,6 +141,9 @@ class ManoObraMensualTests(TestCase):
             'receta__nombre': 'Otro producto'})
         fuentes['costos'].append({**fuentes['costos'][0], 'receta_id': 999})
         data = calcular('2026-09', fuentes)
+        self.assertEqual(data['asignado'], Decimal('100.01'))
+        self.assertEqual(data['redondeo'], 0)
+        self.assertEqual(sorted(p['asignado'] for p in data['productos']), [Decimal('50.00'), Decimal('50.01')])
         self.assertEqual(data['servicios']['fondo'], Decimal('3.03'))
         self.assertEqual(data['servicios']['asignado'], Decimal('3.03'))
         self.assertEqual(data['servicios']['pendiente'], 0)
@@ -265,7 +361,7 @@ class ManoObraMensualTests(TestCase):
         result = self.client.get(reverse('reportes:mano_obra_mensual'), {'periodo': '2026-09'})
         self.assertContains(result, 'Fondo clasificado pendiente de reparto: <strong>$100.01</strong>')
         self.assertContains(result, 'Nómina pendiente de clasificar: <strong>$20.02</strong>')
-        self.assertContains(result, 'Las fuentes actuales cambiaron; Finanzas conserva el cierre aprobado.')
+        self.assertContains(result, 'Las fuentes o el método de cálculo cambiaron. Finanzas conserva el cierre aprobado.')
         self.assertNotContains(result, 'Sin cierre aprobado para este periodo.')
         self.assertEqual(result.context['cierre'].pk, cierre.pk)
         self.assertEqual(CierreManoObraMensual.objects.count(), 1)

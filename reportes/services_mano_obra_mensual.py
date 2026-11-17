@@ -5,19 +5,21 @@ import json
 import unicodedata
 from collections import defaultdict
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN
 
 from django.core.exceptions import ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection, transaction
-from django.db.models import F
+from django.db.models import F, OuterRef, Q, Subquery
+from django.db.models.functions import JSONObject, TruncDate
 from django.utils import timezone
 
 from core.access import ROLE_ADMIN, ROLE_DG, can_view_reportes, has_any_role
 from core.models import AuditLog
 from pos_bridge.models import PointProductionLine
-from recetas.models import RecetaCodigoPointAlias
+from recetas.models import RecetaCodigoPointAlias, RecetaCostoSemanal, RecetaCostoVersion
 from reportes.models import CierreManoObraMensual, RecetaCostoHistoricoMensual, LineaPresupuestoMensual
+from reportes.services_costeo_logistica import repartir_centavos
 from rrhh.models import NominaLinea, NominaPeriodo
 from ventas.services.sales_read_service import get_point_sales_recipe_totals
 
@@ -65,6 +67,24 @@ def leer_fuentes(periodo):
     """Un SELECT para que nómina, cantidades y costos compartan snapshot MVCC."""
     inicio, fin = limites(periodo)
     periodos = NominaPeriodo.objects.filter(fecha_fin__range=(inicio, fin))
+    produccion = PointProductionLine.objects.filter(production_date__range=(inicio, fin))
+    aliases = RecetaCodigoPointAlias.objects.filter(
+        activo=True, codigo_point__in=produccion.filter(receta__isnull=True).values('item_code'),
+    )
+    costos = RecetaCostoHistoricoMensual.objects.filter(periodo=inicio)
+    version_coincidente = RecetaCostoVersion.objects.filter(
+        receta_id=OuterRef('receta_id'), version_num=OuterRef('version_receta'),
+        costo_mp=OuterRef('costo_mp'), costo_total=OuterRef('costo_total'),
+        costo_mo=0, costo_indirecto=0,
+    ).order_by().annotate(evidencia=JSONObject(
+        id='id', fecha=TruncDate('creado_en', tzinfo=timezone.get_default_timezone()),
+        cantidad='rendimiento_cantidad',
+        unidad='rendimiento_unidad', lote='lote_referencia', hash='hash_snapshot',
+    )).values('evidencia')
+    semanales = RecetaCostoSemanal.objects.filter(
+        Q(receta_id__in=produccion.values('receta_id')) | Q(receta_id__in=aliases.values('receta_id')),
+        scope_type=RecetaCostoSemanal.SCOPE_RECIPE, week_start__lte=fin, week_end__gte=inicio,
+    ).exclude(receta_id__in=costos.values('receta_id')).annotate(version=Subquery(version_coincidente))
     queries = {
         # El real consolidado ya contiene el reparto entre Matriz y Producción.
         'servicios': LineaPresupuestoMensual.objects.filter(
@@ -78,20 +98,24 @@ def leer_fuentes(periodo):
             'snapshot_origen', 'puesto_operativo_snapshot',
             'empleado__nombre', 'empleado__puesto', 'empleado__puesto_operativo'),
         'sin_departamento': NominaLinea.objects.filter(periodo_id__in=periodos.values('id'), departamento_snapshot='').values('id'),
-        'produccion': PointProductionLine.objects.filter(production_date__range=(inicio, fin)).values(
+        'produccion': produccion.values(
             'id', 'branch_id', 'production_external_id', 'detail_external_id', 'production_date',
             'receta_id', 'insumo_id', 'item_code', 'item_name', 'unit', 'produced_quantity', 'is_insumo',
             'receta__nombre', 'receta__tipo', 'receta__codigo_point', 'receta__rendimiento_cantidad',
-            'receta__rendimiento_unidad__codigo'),
-        'aliases_receta': RecetaCodigoPointAlias.objects.filter(activo=True, codigo_point__in=PointProductionLine.objects.filter(production_date__range=(inicio, fin), receta__isnull=True).values('item_code')).values(
+            'receta__rendimiento_unidad__codigo', 'requested_quantity',
+            'raw_payload__detail__IsInsumo', 'raw_payload__detail__Cantidad_producida'),
+        'aliases_receta': aliases.values(
             'id', 'codigo_point', 'receta_id', 'receta__nombre', 'receta__tipo', 'receta__codigo_point',
             'receta__rendimiento_cantidad', 'receta__rendimiento_unidad__codigo'),
-        'costos': RecetaCostoHistoricoMensual.objects.filter(periodo=inicio).values(
+        'costos': costos.values(
             'id', 'receta_id', 'costo_total', 'costo_por_unidad_rendimiento', 'coverage_pct', 'metadata'),
+        'costos_semanales': semanales.values(
+            'id', 'receta_id', 'identity_key', 'week_start', 'week_end', 'version_receta',
+            'costo_mp', 'costo_mo', 'costo_indirecto', 'costo_total', 'metadata', 'version'),
     }
     parts, params, aliases = [], [], {}
     for name, qs in queries.items():
-        aliases[name] = {f'f{i}': field for i, field in enumerate(qs.query.values_select)}
+        aliases[name] = {f'f{i}': field for i, field in enumerate((*qs.query.values_select, *qs.query.annotation_select))}
         sql, values = qs.order_by('id').values(**{alias: F(field) for alias, field in aliases[name].items()}).query.sql_with_params()
         parts.append("%s, (SELECT COALESCE(jsonb_agg(to_jsonb(r)), '[]'::jsonb) FROM (" + sql + ') r)')
         params.extend([name, *values])
@@ -143,6 +167,51 @@ def repartir_servicios(rows, fuentes, pendientes):
             'pendiente': fondo - asignado if fondo is not None else None, 'completo': completo}
 
 
+def costo_semanal_por_produccion(receta_id, cantidades, snapshots):
+    """Valida una única semana por fecha y devuelve su base de MP trazable."""
+    evidencia = []
+    for fecha, cantidad in sorted(cantidades.items()):
+        candidatos = [s for s in snapshots if str(s['week_start']) <= fecha <= str(s['week_end'])]
+        if len(candidatos) != 1:
+            return []
+        snapshot = candidatos[0]
+        version = snapshot['version']
+        costo = Decimal(str(snapshot['costo_mp']))
+        metadata = snapshot['metadata']
+        if (
+            snapshot['identity_key'] != f'RECIPE:{receta_id}'
+            or not isinstance(metadata, dict) or metadata.get('cost_source') != 'VERSION_COSTEO'
+            or not version or str(version['fecha']) > fecha
+            or costo <= 0 or costo != Decimal(str(snapshot['costo_total']))
+            or snapshot['costo_mo'] != 0 or snapshot['costo_indirecto'] != 0
+        ):
+            return []
+        rendimiento = version['cantidad']
+        unidad = (version['unidad'] or '').upper()
+        if rendimiento is not None:
+            rendimiento = Decimal(str(rendimiento))
+            if rendimiento <= 0 or (unidad not in {'PZA', 'U'} and (unidad or rendimiento != 1)):
+                return []
+            costo /= rendimiento
+        elif Decimal(str(version['lote'])) != 1 or (unidad and unidad not in {'PZA', 'U'}):
+            return []
+        evidencia.append({
+            'fecha': fecha, 'cantidad': cantidad, 'costo_mp_unitario': costo,
+            'semana_id': snapshot['id'], 'version_id': version['id'],
+        })
+    return evidencia
+
+
+def insumo_sin_produccion(linea):
+    cero_point = linea.get('raw_payload__detail__Cantidad_producida')
+    return (
+        linea['receta_id'] is None and linea['insumo_id'] is not None
+        and linea['is_insumo'] and linea.get('raw_payload__detail__IsInsumo') is True
+        and linea['produced_quantity'] == 0
+        and type(cero_point) in (int, Decimal) and cero_point == 0
+    )
+
+
 def calcular(periodo, fuentes=None):
     inicio, fin = limites(periodo)
     fuentes = leer_fuentes(periodo) if fuentes is None else fuentes
@@ -190,6 +259,11 @@ def calcular(periodo, fuentes=None):
     if not personas:
         pendientes.append('No hay personal de Producción en la nómina del mes.')
     costos = {c['receta_id']: c for c in fuentes['costos']}
+    semanales = defaultdict(list)
+    for snapshot in fuentes.get('costos_semanales', []):
+        semanales[snapshot['receta_id']].append(snapshot)
+    cantidades_por_fecha = defaultdict(lambda: defaultdict(Decimal))
+    insumos_cero = []
     productos, claves = {}, set()
     internas, sin_vinculo = 0, 0
     aliases = {a['codigo_point']: a for a in fuentes['aliases_receta']}
@@ -200,6 +274,9 @@ def calcular(periodo, fuentes=None):
             pendientes.append('Hay claves de producción duplicadas.')
             continue
         claves.add(clave)
+        if insumo_sin_produccion(p):
+            insumos_cero.append(p)
+            continue
         if not p['receta_id'] and p['item_code'] in aliases:
             alias = aliases[p['item_code']]
             p = {**p, **{k: v for k, v in alias.items() if k == 'receta_id' or k.startswith('receta__')}}
@@ -215,6 +292,8 @@ def calcular(periodo, fuentes=None):
             'rendimiento': p['receta__rendimiento_cantidad']})
         cantidad = Decimal(str(p['produced_quantity']))
         r['cantidad'] += cantidad
+        if cantidad > 0:
+            cantidades_por_fecha[r['id']][str(p['production_date'])] += cantidad
         if cantidad < 0 or p['is_insumo'] or p['unit'].upper() not in {'PZA', 'U'} or p['item_code'] != r['codigo']:
             r['errores'].append('Revisar identidad, unidad o cantidad en Point.')
         rendimiento = p['receta__rendimiento_cantidad']
@@ -228,7 +307,7 @@ def calcular(periodo, fuentes=None):
     rows = []
     for r in sorted(productos.values(), key=lambda x: x['nombre']):
         c = costos.get(r['id'])
-        r['mp'] = None
+        r.update(mp=None, base=None, semanas_mp=[])
         if c and Decimal(str(c['coverage_pct'])) == 100:
             value = c['costo_por_unidad_rendimiento']
             if not value:
@@ -237,23 +316,36 @@ def calcular(periodo, fuentes=None):
             r['mp'] = Decimal(str(value))
             if r['mp'] <= 0:
                 r['errores'].append('Costo mensual no positivo.')
+        elif c is None and not r['errores'] and r['cantidad'] > 0:
+            r['semanas_mp'] = costo_semanal_por_produccion(r['id'], cantidades_por_fecha[r['id']], semanales[r['id']])
+            if r['semanas_mp']:
+                r['base'] = sum(s['cantidad'] * s['costo_mp_unitario'] for s in r['semanas_mp'])
+                r['mp'] = r['base'] / r['cantidad']
+            else:
+                r['errores'].append('Costo mensual ausente y costo semanal sin respaldo para toda la producción.')
         else:
             r['errores'].append('Costo mensual ausente o incompleto.')
         r['errores'] = sorted(set(r['errores']))
-        r['base'] = r['cantidad'] * r['mp'] if r['mp'] is not None else None
+        if r['base'] is None and r['mp'] is not None:
+            r['base'] = r['cantidad'] * r['mp']
         if r['errores']:
             pendientes.append(f"{r['nombre']}: {' '.join(r['errores'])}")
         rows.append(r)
     base = sum((r['base'] or Decimal('0') for r in rows), Decimal('0'))
     # Un costo ausente no debe cargar su cuota a los productos que sí tienen costo.
     repartible = bool(personas) and fondo > 0 and pendiente_nomina == 0 and bool(rows) and base > 0 and all(r['mp'] is not None and r['mp'] > 0 and r['cantidad'] >= 0 for r in rows)
+    if any(not v.is_finite() or v < 0 or v != v.quantize(CENTAVO) for v in fondos.values()):
+        pendientes.append('Los fondos por componente deben ser no negativos y expresarse en centavos.')
+        repartible = False
     if not repartible:
         pendientes.append('No se puede repartir hasta completar la base de todos los productos.')
+    bases = {r['id']: r['base'] for r in rows if r['cantidad'] > 0}
+    cuotas = {k: repartir_centavos(monto, bases) for k, monto in fondos.items()} if repartible else {}
     asignado = Decimal('0')
     for r in rows:
         r.update(mo=None, fabricacion=None, con_despacho=None, asignado=None, componentes=[])
         if repartible and r['cantidad'] > 0:
-            importes = {k: (fondos[k] * r['base'] / base).quantize(CENTAVO, rounding=ROUND_HALF_UP) for k in fondos}
+            importes = {k: por_producto[r['id']] for k, por_producto in cuotas.items()}
             r['asignado'] = sum(importes.values(), Decimal('0'))
             r['mo'] = r['asignado'] / r['cantidad']
             r['fabricacion'] = r['mp'] + (importes['elaboracion'] + importes['supervision']) / r['cantidad']
@@ -266,17 +358,18 @@ def calcular(periodo, fuentes=None):
     notas.append('Puestos actuales contrastados con nómina histórica; confirmar cobertura y clasificación al aprobar.')
     notas.append('Reparto por materia prima. No mide tiempos, cargas patronales completas, inventario intermedio ni costo de ventas.')
     notas.append('El costo mensual puede usar estructura actual de receta; verificar su vigencia en el mes.')
+    notas.append('La mano de obra se reparte en centavos por componente, por mayores restos.')
     servicios = repartir_servicios(rows, fuentes, pendientes)
     notas.append('Servicios: agua potable, energía eléctrica y gas del real consolidado de Producción (versión Original). Ya incluyen el reparto entre centros; no se vuelve a aplicar 65%. No se suma agua purificada ni se duplican facturas, pagos o gastos.')
     notas.append('Servicios por participación en materia prima, con centavos distribuidos por mayores restos. Se conservan los importes registrados, incluidos impuestos cuando formen parte del gasto; no es costo neto fiscal ni medición de consumo por producto. No incluye renta ni otros indirectos.')
-    fingerprint = hashlib.sha256(json.dumps({'version': 3, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps({'version': 4, 'periodo': periodo, 'fuentes': fuentes}, cls=DjangoJSONEncoder, sort_keys=True).encode()).hexdigest()
     return {'periodo': periodo, 'fingerprint': fingerprint, 'fondo': fondo, 'fondos': [{'nombre': COMPONENTES[k], 'monto': v} for k, v in fondos.items()],
         'personas': list(personas.values()), 'productos': rows, 'unidades': sum((r['cantidad'] for r in rows), Decimal('0')),
         'base': base, 'asignado': asignado, 'pendiente_nomina': pendiente_nomina,
         'redondeo': sum(fondos.values()) - asignado if repartible else None,
         'pendiente_reparto': Decimal('0') if repartible else sum(fondos.values()),
         'pendientes': sorted(set(pendientes)), 'notas': notas, 'lineas_produccion': len(fuentes['produccion']),
-        'preparaciones': internas, 'sin_vinculo': sin_vinculo, 'fuentes': fuentes, 'servicios': servicios}
+        'preparaciones': internas, 'sin_vinculo': sin_vinculo, 'insumos_cero': insumos_cero, 'fuentes': fuentes, 'servicios': servicios}
 
 
 @transaction.atomic
