@@ -82,7 +82,8 @@ class ArchiveReaderTests(SimpleTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             fixture = PointLifecycleFixture(root, workbook.getvalue(), parse=semantic_digest)
-            with patch.dict(os.environ, {'POINT_BRIDGE_STORAGE_ROOT': str(root)}):
+            with patch.dict(os.environ, {'POINT_BRIDGE_STORAGE_ROOT': str(root)}), \
+                 patch('time.time', return_value=1794938400):
                 before = PointSalesCategoryReportService().parse_report(report_path=str(fixture.source))
                 self.assertEqual(fixture.prepare(), 'requested')
                 self.assertTrue(fixture.source.exists())
