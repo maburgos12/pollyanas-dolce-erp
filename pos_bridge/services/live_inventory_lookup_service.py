@@ -18,7 +18,6 @@ from pos_bridge.services.point_account_session_lock import point_account_session
 from pos_bridge.services.point_http_client import PointHttpSessionClient
 from pos_bridge.utils.exceptions import AuthenticationError, ConfigurationError, ExtractionError
 from pos_bridge.utils.helpers import normalize_text
-from recetas.models import normalizar_codigo_point
 
 
 class PointLiveInventoryLookupError(Exception):
@@ -116,11 +115,12 @@ class PointLiveInventoryLookupService:
                     product_id = _first_present(product, ("PK", "PK_Producto", "id", "Id"))
                     if product_id is None:
                         raise PointLiveInventoryLookupError("Point no devolvió PK para el producto de stock.")
+                    product_code = str(_first_present(product, ("Codigo", "codigo", "SKU", "sku"))).strip()
                     if self._is_insumo(product):
                         branch_row = self._find_official_insumo_stock(
                             client=client,
-                            product=product,
-                            codes=codes,
+                            product_code=product_code,
+                            product_id=product_id,
                             point_branch=point_branch,
                         )
                     else:
@@ -135,7 +135,7 @@ class PointLiveInventoryLookupService:
 
         captured_at = timezone.now()
         result = PointLiveInventoryResult(
-            product_code=str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or ""),
+            product_code=product_code,
             product_name=str(_first_present(product, ("Nombre", "nombre", "Name", "name")) or ""),
             point_product_id=str(product_id),
             point_branch_id=str(
@@ -174,8 +174,8 @@ class PointLiveInventoryLookupService:
         self,
         *,
         client: PointHttpSessionClient,
-        product: dict[str, Any],
-        codes: list[str],
+        product_code: str,
+        product_id: int | str,
         point_branch: PointBranch | None,
     ) -> dict[str, Any]:
         if point_branch is None or not str(point_branch.external_id or "").strip():
@@ -183,20 +183,7 @@ class PointLiveInventoryLookupService:
                 "La sucursal no tiene un identificador Point para consultar existencia de insumos."
             )
 
-        product_code = str(_first_present(product, ("Codigo", "codigo", "SKU", "sku")) or codes[0]).strip()
-        normalized_codes = {
-            normalizar_codigo_point(code)
-            for code in (*codes, product_code)
-            if code
-        }
-        insumo = next(
-            (
-                row
-                for row in Insumo.objects.filter(activo=True).exclude(codigo_point="").only("codigo_point", "categoria")
-                if normalizar_codigo_point(row.codigo_point) in normalized_codes
-            ),
-            None,
-        )
+        insumo = Insumo.objects.filter(activo=True, codigo_point__iexact=product_code).only("categoria").first()
         if insumo is None or not (insumo.categoria or "").strip():
             raise PointLiveInventoryLookupError(
                 f"El insumo {product_code} no tiene categoría Point configurada en el catálogo ERP."
@@ -224,9 +211,14 @@ class PointLiveInventoryLookupService:
         )
         for row in rows:
             row_code = _first_present(row, ("Codigo", "codigo", "SKU", "sku"))
-            if row_code not in (None, "") and normalizar_codigo_point(str(row_code)) in normalized_codes:
+            row_id = _first_present(row, ("PK_articulo", "PK_Articulo", "pk_articulo"))
+            if (
+                row_code is not None
+                and str(row_code).strip().casefold() == product_code.casefold()
+                and (row_id is None or str(row_id).strip() == str(product_id).strip())
+            ):
                 return row
-        raise PointLiveInventoryLookupError(
+        raise PointLiveInventoryProductMismatchError(
             f"Point no devolvió existencia oficial del insumo {product_code} para {point_branch.name}."
         )
 

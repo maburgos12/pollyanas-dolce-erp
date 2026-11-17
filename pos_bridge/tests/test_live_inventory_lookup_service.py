@@ -79,6 +79,8 @@ class PointLiveInventoryLookupServiceTests(TestCase):
             {"PK_Categoria_insumo": 12, "Categoria": "FRUTAS"}
         ]
         self.client.get_branch_insumos.return_value = [
+            {"PK_articulo": 18, "Codigo": "0-17", "Cantidad": 99, "Unidad": "KG"},
+            {"PK_articulo": 19, "Codigo": "017", "Cantidad": 88, "Unidad": "KG"},
             {
                 "PK_articulo": 17,
                 "Codigo": "017",
