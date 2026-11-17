@@ -18,7 +18,7 @@ import time
 if Path('/usr/local/libexec/erp-point-decision/erp_telegram_cleanup.py').is_file():
     sys.path.insert(0, '/usr/local/libexec/erp-point-decision')
 import erp_telegram_cleanup as cleanup
-from erp_telegram_release import Ledger, telegram
+from erp_telegram_release import Ledger, telegram, approval_window
 
 STATE = Path('/var/lib/erp-cleanup-prepare')
 MANUAL_PROPOSALS = Path('/var/lib/erp-point-decision/cleanup-proposals')
@@ -316,6 +316,8 @@ def reserved_files(state):
 
 
 def prepare(state, ledger, config, nas=None, send=telegram, now=None):
+    if not approval_window()[0]:
+        return 'outside_approval_hours'
     now = int(time.time()) if now is None else now
     owner = Ledger(state)
     with owner.lock(worker=True):

@@ -226,3 +226,36 @@ Las solicitudes de ambos formatos pasan por el mismo método `request`: solo
 termina con éxito si Telegram confirma los dos botones y el mensaje exacto.
 Nunca sustituir errores por mensajes manuales sin botones ni marcar `notifying`
 como aprobado. La aprobación de instalación del módulo es distinta de la limpieza.
+
+## Horario permanente de autorizaciones
+
+Las solicitudes de instalación y limpieza se envían de **07:00 inclusive a
+20:00 exclusive, America/Mazatlan**, todos los días. Fuera del horario se guarda
+una intención privada: no hay botones, nonce de autorización ni una aprobación.
+El timer existente agrega una activación diaria a las 07:00; conserva su ciclo
+por minuto. Si el VPS estuvo apagado, el siguiente ciclo revalida dentro del
+horario. Los avisos de salud, recibos y resultados no se silencian.
+
+A las 07:00 se revisan las solicitudes pendientes vencidas y las intenciones
+no enviadas. Cada PR/SHA o propuesta exacta tiene como máximo un intento diario.
+Una decisión, ejecución o envío ambiguo no se renueva automáticamente. Antes de
+reenviar se comprueban revisión, CI, base y producción para instalaciones; para
+archivos APT/log se comprueban fuentes cerradas, hashes, capacidad, recepción NAS
+y extracción real de la copia. Un fallo deja la solicitud sin enviar. Las
+propuestas antiguas de imágenes o BuildKit requieren revisión del operador:
+no existe en ese formato un contrato suficiente de recuperación automática.
+
+La vigencia continúa siendo una hora desde la emisión. La propuesta y revisión
+no se sustituyen automáticamente. Un rechazo no vuelve a pedir aprobación al
+día siguiente y una respuesta perdida de Telegram exige resolución manual.
+Este programador no elimina archivos ni amplía permisos del ejecutor.
+
+Después del despliegue aprobado, actualizar los módulos del consumidor desde el
+checkout oficial limpio con `python3 ops/erp-telegram-release/install.py
+--release-nonce NONCE_PUBLICADO`. Esta ruta exige la decisión publicada del SHA
+actual, conserva los bytes del consumidor Point/Mac-IA y respalda los módulos
+previos por hash. Actualiza el timer de publicación sin alterar los demás timers.
+No usar la instalación inicial del hook para actualizar un consumidor que ya
+incluya otros hooks. Verificar hashes instalados, timer y servicio activo antes
+de declarar el horario habilitado. Conservar intenciones y decisiones al revertir;
+una versión antigua no comprende el nuevo estado `deferred` de limpieza.

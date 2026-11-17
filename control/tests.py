@@ -205,11 +205,24 @@ class ControlViewsTests(TestCase):
             monto_total=Decimal("10"),
             fuente="CAPTURA_MOVIL",
         )
-        resp = self.client.get(reverse("control:discrepancias"), {"enterprise_focus": "ALERTAS"})
-        self.assertEqual(resp.status_code, 200)
+        path = reverse("control:discrepancias")
+        filters = {"from": "2026-11-14", "to": "2026-11-15", "threshold_pct": "17.5"}
+        expected_url = f"{path}?from=2026-11-14&to=2026-11-15&threshold_pct=17.5"
+        report = self.client.get(path, filters)
+        self.assertContains(report, "Enfocar", count=5)
+        for card in report.context["focus_cards"]:
+            self.assertEqual(card["url"], f"{expected_url}&enterprise_focus={card['key']}")
+        alerts = next(card for card in report.context["focus_cards"] if card["key"] == "ALERTAS")
+        resp = self.client.get(alerts["url"])
         self.assertContains(resp, "Quitar foco")
         self.assertEqual(resp.context["enterprise_focus"], "ALERTAS")
         self.assertEqual(resp.context["focus_summary"]["title"], "Alertas abiertas")
+        self.assertEqual(resp.context["focus_summary"]["clear_url"], expected_url)
+        unfiltered = self.client.get(resp.context["focus_summary"]["clear_url"])
+        self.assertEqual(unfiltered.context["enterprise_focus"], "")
+        self.assertEqual(unfiltered.context["date_from"].isoformat(), filters["from"])
+        self.assertEqual(unfiltered.context["date_to"].isoformat(), filters["to"])
+        self.assertEqual(unfiltered.context["threshold_pct"], Decimal("17.5"))
 
     def test_captura_movil_forbidden_for_lectura(self):
         self.client.force_login(self.user_lectura)

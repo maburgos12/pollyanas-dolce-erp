@@ -55,6 +55,12 @@ class FakeNAS:
 
 class PrepareTests(unittest.TestCase):
     def setUp(self):
+        recovery = patch.object(p.cleanup, "revalidate_proposal")
+        recovery.start()
+        self.addCleanup(recovery.stop)
+        clock = patch("time.time", return_value=1794938400)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)

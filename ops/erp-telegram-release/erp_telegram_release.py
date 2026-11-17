@@ -12,7 +12,10 @@ import re
 import secrets
 import stat
 import subprocess
+import sys
 import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHandler
 
 REPO = 'maburgos12/pollyanas-dolce-erp'
@@ -262,13 +265,126 @@ def production_sha():
     return subprocess.check_output(['/usr/bin/git', '-C', str(APP), 'rev-parse', 'HEAD'], text=True).strip()
 
 
+def approval_time():
+    return int(time.time())
+
+
+def operational_module(name):
+    if name not in {'erp_telegram_cleanup', 'erp_cleanup_prepare', 'erp_point_archive'}:
+        raise ValueError('unknown_operational_module')
+    source = Path(__file__).with_name(name + '.py')
+    if not source.is_file():
+        source = APP / 'ops/erp-telegram-release' / (name + '.py')
+    if str(source.parent) not in sys.path:
+        sys.path.insert(0, str(source.parent))
+    spec = importlib.util.spec_from_file_location(name, source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def approval_window(now=None):
+    local = datetime.fromtimestamp(approval_time() if now is None else now, ZoneInfo('America/Mazatlan'))
+    return 7 <= local.hour < 20, local.date().isoformat()
+
+
+def validate_intent(row):
+    if (set(row) != {'nonce', 'kind', 'binding', 'phase', 'last_day', 'error'}
+            or not NONCE.fullmatch(row['nonce']) or row['kind'] not in {'release', 'cleanup'}
+            or row['phase'] not in {'waiting', 'sending', 'closed', 'uncertain'}
+            or not isinstance(row['binding'], dict)
+            or not isinstance(row['last_day'], str) or not isinstance(row['error'], str)):
+        raise ValueError('invalid_approval_intent')
+    binding = row['binding']
+    if row['kind'] == 'release':
+        if (set(binding) != {'pr', 'head'} or type(binding['pr']) is not int or binding['pr'] <= 0
+                or not isinstance(binding['head'], str) or not SHA.fullmatch(binding['head'])):
+            raise ValueError('invalid_release_intent')
+    elif (set(binding) != {'digest', 'proposal_id'} or not isinstance(binding['digest'], str)
+          or not re.fullmatch('[0-9a-f]{64}', binding['digest'])
+          or not isinstance(binding['proposal_id'], str)
+          or not re.fullmatch(r'VPS-LIM-[0-9]{8}-[0-9]{2}', binding['proposal_id'])):
+        raise ValueError('invalid_cleanup_intent')
+    if row['nonce'] != hashlib.sha256(json.dumps([row['kind'], binding], sort_keys=True).encode()).hexdigest()[:24]:
+        raise ValueError('intent_identity_changed')
+    return row
+
+
+def schedule_request(kind, binding, ledger, matching, issue, revalidate):
+    """A durable intent is not an authorization; only issue() creates signed buttons."""
+    queue = Ledger(ledger.directory / 'scheduled', validator=validate_intent)
+    key = hashlib.sha256(json.dumps([kind, binding], sort_keys=True).encode()).hexdigest()[:24]
+    with queue.lock():
+        item = queue.read(key) if queue.path(key).exists() else dict(
+            nonce=key, kind=kind, binding=binding, phase='waiting', last_day='', error='')
+        if item['binding'] != binding:
+            raise ValueError('approval_intent_collision')
+        with ledger.lock():
+            previous = [ledger.read(p.stem) for p in ledger.directory.glob('*.json')]
+        previous = [row for row in previous if matching(row)]
+        if any(row.get('decision_at') is not None or row['state'] in {'approved', 'rejected', 'executing', 'published', 'uncertain'} for row in previous):
+            item['phase'] = 'closed'
+        elif any(row['state'] == 'notifying' for row in previous):
+            item['phase'] = 'uncertain'
+        elif item['phase'] == 'sending':
+            # A crash after claiming delivery cannot prove that Telegram received nothing.
+            item['phase'] = 'uncertain'
+        queue.write(item)
+        deferred = {'state': 'deferred', 'nonce': None, 'message_id': None,
+                    'head_sha': binding.get('head'), 'expires': None, 'intent_id': key}
+        if item['phase'] != 'waiting':
+            raise ValueError('existing_request_requires_resolution')
+        now = approval_time()
+        allowed, day = approval_window(now)
+        live = [row for row in previous if row['state'] == 'pending' and now < row['expires']]
+        if live:
+            raise ValueError('existing_request_requires_resolution')
+        if any(row['state'] == 'pending' and approval_window(row['expires'] - 3600)[1] == day for row in previous):
+            return deferred
+        if not allowed or item['last_day'] == day:
+            return deferred
+        # Persist the day's attempt before expensive recovery checks; failures do not busy-loop.
+        item.update(last_day=day, error='')
+        queue.write(item)
+        try:
+            revalidate()
+        except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError) as exc:
+            item['error'] = type(exc).__name__
+            queue.write(item)
+            raise
+        if not approval_window()[0]:
+            return deferred
+        # issue() persists the request before Telegram. A failed preflight is not an ambiguous send.
+        result = issue()
+        item['phase'] = 'waiting'
+        queue.write(item)
+        return result
+
+
 def request_release(number, api, ledger, config, telegram, production=production_sha, expected_head=None):
+    if type(number) is not int or number <= 0:
+        raise ValueError('invalid_pr')
+    head = expected_head or api('GET', PREFIX + f'/pulls/{number}')['head']['sha']
+    if not isinstance(head, str) or not SHA.fullmatch(head):
+        raise ValueError('invalid_sha')
+    def check():
+        pr = eligible(api, number, head)
+        if production() != pr['base']['sha']:
+            raise ValueError('production_not_at_base')
+    return schedule_request('release', {'pr': number, 'head': head}, ledger,
+        lambda row: row['pr'] == number and row['head_sha'] == head,
+        lambda: _request_release(number, api, ledger, config, telegram, production, head), check)
+
+
+def _request_release(number, api, ledger, config, telegram, production=production_sha, expected_head=None):
     if type(number) is not int or number <= 0:
         raise ValueError('invalid_pr')
     pr = eligible(api, number, expected_head)
     base, head = pr['base']['sha'], pr['head']['sha']
     if production() != base:
         raise ValueError('production_not_at_base')
+    if not approval_window()[0]:
+        raise ValueError('outside_approval_hours')
     row = dict(repo=REPO, pr=number, head_sha=head, base_sha=base, production_sha=base,
                nonce=secrets.token_hex(12), expires=int(time.time()) + 3600, message_id=None,
                chat_id=config['chat_id'], state='notifying', decision=None, decision_at=None, release_sha=None, notification_id=None)
@@ -276,15 +392,23 @@ def request_release(number, api, ledger, config, telegram, production=production
         # One live request per PR: a new request must not leave older buttons usable.
         for path in ledger.directory.glob('*.json'):
             previous = ledger.read(path.stem)
-            if previous['state'] == 'pending' and int(time.time()) >= previous['expires']:
+            if previous['pr'] == number and previous['head_sha'] == head and previous.get('decision_at') is not None:
+                raise ValueError('existing_request_requires_resolution')
+            if previous['pr'] == number and previous['state'] == 'pending' and int(time.time()) >= previous['expires']:
                 previous['state'] = 'blocked'
                 ledger.write(previous)
             if previous['pr'] == number and previous['state'] in {'notifying', 'pending', 'approved', 'executing', 'uncertain'}:
                 raise ValueError('existing_request_requires_resolution')
         ledger.write(row)
+        deadline = datetime.fromtimestamp(row['expires'], ZoneInfo('America/Mazatlan')).strftime('%d/%m %H:%M')
         text = (f'Aprobar y desplegar ERP · PR #{number}\nhttps://github.com/{REPO}/pull/{number}\n'
                 f'Commit: {head}\nBase y producción: {base}\nVence en 1 hora. '
+                f'Vencimiento: {deadline}, hora de Mazatlán. '
                 'Solo este commit; cualquier cambio exige nueva solicitud. Rechazar revoca hasta iniciar publicación.')
+        if not approval_window()[0]:
+            row['state'] = 'blocked'
+            ledger.write(row)
+            raise ValueError('outside_approval_hours')
         result = telegram(config, 'sendMessage', {'chat_id': config['chat_id'], 'text': text,
             'reply_markup': {'inline_keyboard': [[{'text': label, 'callback_data': signed(config, row, action)}
                 for action, label in [('a', 'Aprobar y desplegar'), ('r', 'Rechazar / revocar')]]]}})
@@ -447,9 +571,36 @@ def worker(api, ledger, config, send, discover=discover_requests, publisher=publ
             except (ValueError, RuntimeError, OSError, KeyError):
                 print('Release notification pending; publication will not be repeated.', flush=True)
         try:
+            process_scheduled(api, ledger, config, send)
             discover(api, ledger, config, send)
         except (ValueError, RuntimeError, OSError, KeyError, TypeError, AttributeError):
             print('Candidate discovery unavailable; recorded decisions remain processable.', flush=True)
+
+
+def process_scheduled(api, ledger, config, send, production=production_sha):
+    if not approval_window()[0]:
+        return
+    queue = Ledger(ledger.directory / 'scheduled', validator=validate_intent)
+    # Bring pre-upgrade undecided requests into the same durable daily gate.
+    for path in sorted(ledger.directory.glob('*.json')):
+        row = ledger.read(path.stem)
+        if row['state'] == 'pending' and row['decision'] is None and row['expires'] <= approval_time():
+            try:
+                request_release(row['pr'], api, ledger, config, send, production, expected_head=row['head_sha'])
+            except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError):
+                pass
+    for path in sorted(queue.directory.glob('*.json')):
+        item = queue.read(path.stem)
+        if item['kind'] != 'release' or item['phase'] != 'waiting':
+            continue
+        try:
+            request_release(item['binding']['pr'], api, ledger, config, send, production,
+                            expected_head=item['binding']['head'])
+        except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError):
+            print('Scheduled approval requires revalidation; no publication authorized.', flush=True)
+    # Cleanup has its own ledger and recovery validator; no deletion occurs here.
+    cleanup = operational_module('erp_telegram_cleanup')
+    cleanup.process_scheduled(Ledger(ledger.directory.parent / 'cleanups', validator=cleanup.validate), config, send)
 
 
 def main():
