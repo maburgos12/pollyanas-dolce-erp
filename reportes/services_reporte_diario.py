@@ -52,13 +52,13 @@ def _seccion_ventas(payload: dict) -> str:
 def _seccion_cierre(payload: dict) -> str:
     seccion = payload.get("resumen_cierre")
     if not seccion:
-        return "Estado de cierre por sucursal: no disponible."
+        return "Reabasto a CEDIS: no disponible."
     pendientes = [
         fila for fila in (seccion.get("detalle") or []) if fila.get("semaforo") in {"rojo", "amarillo"}
     ]
     if not pendientes:
-        return "=== CIERRE POR SUCURSAL ===\nTodas las sucursales cerraron sin alertas."
-    lineas = ["=== CIERRE POR SUCURSAL — PENDIENTES/ALERTA ==="]
+        return "=== REABASTO A CEDIS ===\nSin alertas de reabasto."
+    lineas = ["=== REABASTO A CEDIS — PENDIENTES/ALERTA ==="]
     for fila in pendientes:
         sucursal = (fila.get("sucursal") or {}).get("nombre", "N/D")
         lineas.append(f"- {sucursal}: {fila.get('estado_label', fila.get('estado', 'N/D'))}")
