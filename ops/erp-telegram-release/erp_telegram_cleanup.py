@@ -103,12 +103,15 @@ def read_proposal(path):
 
 
 def validate(row):
-    if not isinstance(row, dict) or set(row) != FIELDS:
+    if not isinstance(row, dict):
+        raise ValueError('invalid_cleanup_ledger')
+    fields = FIELDS | ({'completed_at', 'evidence_sha256'} if row.get('state') == 'completed' else set())
+    if set(row) != fields:
         raise ValueError('invalid_cleanup_ledger')
     for key, pattern in [('proposal_id', PROPOSAL_ID), ('proposal_sha256', DIGEST), ('image_id', IMAGE), ('nonce', NONCE)]:
         if not isinstance(row[key], str) or not pattern.fullmatch(row[key]):
             raise ValueError('invalid_cleanup_binding')
-    if row['state'] not in {'notifying', 'pending', 'approved', 'rejected'}:
+    if row['state'] not in {'notifying', 'pending', 'approved', 'rejected', 'completed'}:
         raise ValueError('invalid_cleanup_state')
     for key in ('expires', 'chat_id'):
         if type(row[key]) is not int or row[key] <= 0:
@@ -117,8 +120,12 @@ def validate(row):
         if row[key] is not None and (type(row[key]) is not int or row[key] <= 0):
             raise ValueError('invalid_number')
     if ((row['state'] != 'notifying' and row['message_id'] is None)
-            or ((row['state'] in {'approved', 'rejected'}) != (row['decision_at'] is not None))):
+            or ((row['state'] in {'approved', 'rejected', 'completed'}) != (row['decision_at'] is not None))):
         raise ValueError('inconsistent_cleanup_decision')
+    if row['state'] == 'completed':
+        if (type(row['completed_at']) is not int or row['completed_at'] < row['decision_at']
+                or not isinstance(row['evidence_sha256'], str) or not DIGEST.fullmatch(row['evidence_sha256'])):
+            raise ValueError('invalid_completion_evidence')
     return row
 
 
@@ -139,7 +146,7 @@ def request(path, ledger, config, send=telegram):
         for file in ledger.directory.glob('*.json'):
             old = ledger.read(file.stem)
             if (old['proposal_id'] == row['proposal_id'] and old['state'] != 'rejected'
-                    and (old['state'] == 'notifying' or int(time.time()) < old['expires'])):
+                    and (old['state'] in {'notifying', 'completed'} or int(time.time()) < old['expires'])):
                 raise ValueError('existing_request_requires_resolution')
         ledger.write(row)
         # Only fixed, bounded operational fields are sent; arbitrary proposal prose stays local.
@@ -194,6 +201,13 @@ def request(path, ledger, config, send=telegram):
     return row
 
 
+class RecordedDecision(ValueError):
+    """Authenticated status, not a new decision or authorization."""
+    def __init__(self, reason, row):
+        super().__init__(reason)
+        self.row = row
+
+
 def decide(query, config, ledger, now=None):
     now = int(time.time()) if now is None else now
     match = CALLBACK.fullmatch(query.get('data', ''))
@@ -209,8 +223,10 @@ def decide(query, config, ledger, now=None):
                 or message.get('message_id') != row['message_id'] or row['message_id'] is None
                 or not hmac.compare_digest(query['data'], signed(config, row, action))):
             raise ValueError('unauthorized_cleanup_callback')
+        if row['state'] in {'completed', 'rejected'} or (row['state'] == 'approved' and action == 'a'):
+            raise RecordedDecision('already_decided', row)
         if now >= row['expires']:
-            raise ValueError('expired')
+            raise RecordedDecision('expired', row)
         if row['state'] != 'pending' and not (row['state'] == 'approved' and action == 'r'):
             raise ValueError('already_decided')
         row.update(state='approved' if action == 'a' else 'rejected', decision_at=now)
@@ -229,21 +245,59 @@ def status(path, nonce, ledger, now=None):
         return {**row, 'approved': valid, 'automatic_deletion': False}
 
 
+def complete(path, nonce, evidence, ledger):
+    """Record the operator's verified result; never execute or authorize deletion."""
+    proposal, digest = read_proposal(path)
+    with Path(evidence).open('rb') as stream:
+        raw = stream.read(65537)
+    if len(raw) > 65536:
+        raise ValueError('completion_evidence_too_large')
+    proof = json.loads(raw)
+    if (not isinstance(proof, dict) or set(proof) != {'nonce', 'proposal_sha256', 'scope_id', 'verified', 'result'}
+            or proof['nonce'] != nonce or proof['proposal_sha256'] != digest
+            or proof['scope_id'] != proposal['delete_candidates'][0]['id'] or proof['verified'] is not True
+            or not isinstance(proof['result'], str) or not 1 <= len(proof['result']) <= 4000):
+        raise ValueError('invalid_completion_evidence')
+    with ledger.lock():
+        row = ledger.read(nonce)
+        if (row['state'] != 'approved' or row['proposal_sha256'] != digest
+                or row['proposal_id'] != proposal['id'] or row['image_id'] != proof['scope_id']):
+            raise ValueError('completion_not_approved_or_changed')
+        row.update(state='completed', completed_at=int(time.time()), evidence_sha256=hashlib.sha256(raw).hexdigest())
+        ledger.write(row)
+    return row
+
+
 def handle(query, config, state, send):
+    alert = False
     try:
         row = decide(query, config, Ledger(Path(state) / 'cleanups', validator=validate))
         text = ('Autorización registrada. Nada borrado; Codex debe verificar recuperación y vigencia.'
                 if row['state'] == 'approved' else 'Limpieza rechazada / revocada. Nada borrado por esta solicitud.')
+    except RecordedDecision as outcome:
+        row = outcome.row
+        if row['state'] == 'completed':
+            text = 'Esta limpieza ya terminó y quedó verificada. No se repetirá ninguna acción.'
+        elif row['state'] == 'rejected':
+            text = 'Esta solicitud ya quedó rechazada / revocada. Para autorizarla se necesita una solicitud nueva.'
+        elif row['state'] == 'approved':
+            text = 'Tu aprobación ya quedó registrada. No necesitas volver a pulsar; esto no repite la limpieza.'
+            if int(time.time()) >= row['expires']:
+                text += ' Su vigencia ya terminó.'
+        else:
+            text = 'Esta solicitud venció sin aprobación. Se necesita una solicitud nueva; no se autorizó ninguna limpieza.'
     except (OSError, ValueError, KeyError, TypeError):
-        text = 'Solicitud inválida, vencida o ya decidida. No se autorizó una limpieza nueva.'
-    send(config, 'answerCallbackQuery', {'callback_query_id': query['id'], 'text': text, 'show_alert': True})
+        alert = True
+        text = 'No se pudo validar esta solicitud. No se registró ningún cambio; requiere revisión.'
+    send(config, 'answerCallbackQuery', {'callback_query_id': query['id'], 'text': text, 'show_alert': alert})
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['request', 'status'])
+    parser.add_argument('command', choices=['request', 'status', 'complete'])
     parser.add_argument('--proposal', required=True)
     parser.add_argument('--nonce')
+    parser.add_argument('--evidence', help='Operator-reviewed completion evidence; does not execute cleanup')
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('root required')
@@ -251,6 +305,10 @@ def main():
     if args.command == 'request':
         config = json.loads((Path(os.environ['CREDENTIALS_DIRECTORY']) / 'telegram.json').read_text())
         row = request(args.proposal, ledger, config)
+    elif args.command == 'complete':
+        if not args.nonce or not args.evidence:
+            parser.error('complete requires --nonce and --evidence')
+        row = complete(args.proposal, args.nonce, args.evidence, ledger)
     else:
         row = status(args.proposal, args.nonce, ledger)
     print(json.dumps(row, sort_keys=True))
