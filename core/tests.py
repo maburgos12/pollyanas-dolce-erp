@@ -326,14 +326,17 @@ class HallmarkGuardrailsStaticTests(SimpleTestCase):
             "Saldo calc.",
             "Fin. Point",
             "Dif. Point",
-            "Est.",
+            "Físico vs Point",
+            "Movimientos",
         ]
         for header in required_headers:
             with self.subTest(header=header):
                 self.assertIn(header, template)
-        for misleading_label in ("Físico", "Sobrante físico", "Faltante no explicado", "Inv Δ"):
+        for misleading_label in (">Físico</th>", "Físico conciliado", "Sobrante físico", "Faltante no explicado", "Inv Δ"):
             with self.subTest(misleading_label=misleading_label):
                 self.assertNotIn(misleading_label, template)
+        self.assertIn("Físico − Point:", template)
+        self.assertIn("Provisional: {{ comparison.provisional }}", template)
         self.assertNotIn("production-secondary-table", template)
 
 
