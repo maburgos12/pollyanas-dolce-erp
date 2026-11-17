@@ -3,9 +3,11 @@ from datetime import date
 from decimal import Decimal
 from io import BytesIO
 from pathlib import Path
+from uuid import uuid4
 from unittest.mock import patch
 
 from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model
 from django.core.exceptions import SuspiciousOperation
 from django.db import connection
 from django.template.loader import render_to_string
@@ -15,6 +17,9 @@ from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Sucursal
+from inventario.models_conteos import (
+    ConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal, LineaConteoSucursal,
+)
 from pos_bridge.models import PointBranch, PointProduct
 from recetas.models import Receta
 from reportes.models import ProductInventoryAuditCase, ProductInventoryAuditRun
@@ -52,6 +57,74 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
             ("inventario_final_teorico", 11), ("inventario_final_point_total", 12), ("diferencia_inventario", 1)):
             self.assertEqual(row[field], value, field)
         self.assertEqual(row["estado_inventario"], "Pendiente de conciliar")
+
+    def test_physical_submission_zero_and_empty_recount_preserve_point_and_permissions(self):
+        branch = Sucursal.objects.create(codigo="PVS-CONTEO", nombre="Sucursal de conteo")
+        self.branch.erp_branch = branch
+        self.branch.save(update_fields=["erp_branch"])
+        self.make_case(point_closing=9)
+        users = get_user_model().objects
+        admin = users.create_superuser(username="conteo-admin")
+        reader = users.create_user(username="conteo-reader")
+        count = ConteoSucursal.objects.create(
+            sucursal=branch, responsable=admin, creado_por=admin,
+            fecha=date(2026, 8, 31), titulo="Cierre", estado="RECONTEO",
+            ronda=2, request_id=uuid4(), payload_hash="a" * 64,
+        )
+        line = LineaConteoSucursal.objects.create(
+            conteo=count, producto=self.product, codigo=self.product.sku,
+            nombre=self.product.name, unidad="PZA", fuente_unidad="Point",
+        )
+        EventoConteoSucursal.objects.create(conteo=count, actor=admin, action="enviar",
+            payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0",
+                                   "contado_en": None}]})
+        for actor, visible in ((admin, True), (reader, False)):
+            request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
+            request.user = actor
+            self.view.setup(request)
+            response = self.view.get(request).render()
+            self.assertContains(response, "Final Point: 9")
+            if visible:
+                self.assertContains(response, "0 PZA")
+                self.assertContains(response, "Ronda enviada 1")
+                self.assertContains(response, "Reconteo")
+                self.assertContains(response, "Hora no registrada")
+            else:
+                self.assertNotContains(response, "Ronda enviada")
+
+    def test_physical_detail_keeps_legacy_submission_and_import_provenance_separate(self):
+        branch = Sucursal.objects.create(codigo="PVS-HIST", nombre="Sucursal histórica")
+        self.branch.erp_branch = branch
+        self.branch.save(update_fields=["erp_branch"])
+        self.make_case(point_closing=9)
+        actor = get_user_model().objects.create_superuser(username="hist-admin")
+        for day, action in ((30, "enviar"), (31, "enviar"), (31, "importacion_historica")):
+            count = ConteoSucursal.objects.create(
+                sucursal=branch, responsable=actor, creado_por=actor,
+                fecha=date(2026, 8, day), titulo="Cierre", estado="ENVIADO",
+                request_id=uuid4(), payload_hash="a" * 64,
+            )
+            line = LineaConteoSucursal.objects.create(
+                conteo=count, producto=self.product, codigo=self.product.sku,
+                nombre=self.product.name, unidad="PZA", fuente_unidad="Point",
+            )
+            if action == "enviar":
+                payload = {"lecturas": {str(line.pk): {"cantidad": "6" if day == 30 else None,
+                                                       "contado_en": None}}}
+            else:
+                LecturaConteoSucursal.objects.create(linea=line, ronda=1, cantidad=3, actor=actor)
+                payload = {"procedencia": {"archivo": "Original.xlsx", "celdas": [{
+                    "domain": "producto", "catalogo_id": self.product.pk, "hoja": "Matriz", "celda": "K4",
+                }]}}
+            EventoConteoSucursal.objects.create(conteo=count, actor=actor, action=action, payload=payload)
+        request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
+        request.user = actor
+        self.view.setup(request)
+        response = self.view.get(request).render()
+        for text in ("Sin lectura", "Ronda enviada 1", "Excel histórico importado", "3 PZA", "Matriz!K4",
+                     "Final Point: 9"):
+            self.assertContains(response, text)
+        self.assertNotContains(response, "6 PZA")
 
     def test_balanced_stock_keeps_pending_transfer_visible(self):
         self.make_case(difference=0, movement_status="NEEDS_EXPLANATION",

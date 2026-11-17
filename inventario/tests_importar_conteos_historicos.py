@@ -111,14 +111,14 @@ class ImportarConteosHistoricosTests(TestCase):
             ],
         }
 
-    def run_import(self, *, aplicar=False, payload=None):
+    def run_import(self, *, aplicar=False, payload=None, flags=()):
         path = Path(self.tempdir.name) / "payload.json"
         path.write_text(json.dumps(payload or self.payload), encoding="utf-8")
         output = StringIO()
         args = ["importar_conteos_sucursal_historicos", str(path)]
         if aplicar:
             args.append("--aplicar")
-        call_command(*args, stdout=output)
+        call_command(*args, *flags, stdout=output)
         return output.getvalue()
 
     def assert_no_evidence(self):
@@ -126,6 +126,21 @@ class ImportarConteosHistoricosTests(TestCase):
         self.assertEqual(LineaConteoSucursal.objects.count(), 0)
         self.assertEqual(LecturaConteoSucursal.objects.count(), 0)
         self.assertEqual(EventoConteoSucursal.objects.count(), 0)
+
+    def test_explicit_seven_branch_batch_stays_read_only_in_preview_and_idempotent(self):
+        for index in range(5, 8):
+            branch = Sucursal.objects.create(codigo=f"H{index}", nombre=f"Histórica {index}")
+            self.payload["sucursales"].append({
+                "codigo": branch.codigo, "conteos": self.payload["sucursales"][0]["conteos"],
+            })
+        flags = ("--siete-sucursales",)
+        with self.assertRaisesMessage(CommandError, "cuatro"):
+            self.run_import()
+        self.assertIn("7 por crear", self.run_import(flags=flags))
+        self.assert_no_evidence()
+        self.assertIn("7 creados", self.run_import(aplicar=True, flags=flags))
+        self.assertIn("7 ya importados", self.run_import(aplicar=True, flags=flags))
+        self.assertEqual(ConteoSucursal.objects.filter(estado="ENVIADO").count(), 7)
 
     def test_dry_run_validates_without_writes(self):
         output = self.run_import()

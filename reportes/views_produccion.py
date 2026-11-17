@@ -25,6 +25,7 @@ from recetas.models import ProductoMonthClosure, Receta
 from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import ProductInventoryAuditRun
 from reportes.services_inventory_audit_report import read_audit_report, audit_report_version
+from reportes.services_production_physical_evidence import add_physical_evidence
 
 
 ZERO = Decimal("0")
@@ -342,6 +343,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             return self._export_xlsx(context)
         if export_format == "pdf":
             return self._export_pdf(context)
+        add_physical_evidence(request.user, context["closing_reference"], context["groups"])
         return self.render_to_response(context)
 
     def _export_csv(self, context: dict[str, Any]) -> HttpResponse:

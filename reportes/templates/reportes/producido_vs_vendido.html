@@ -262,6 +262,16 @@
             <td class="cell-wrap">{{ row.receta }}
               <details id="trace-product-{{ row.product_id }}"><summary>Ver detalle</summary>
                 {% for case in row.cases %}<p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Saldo calculado: {% if case.calculated is None %}pendiente{% else %}{{ case.calculated|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · Diferencia: {% if case.difference is None %}pendiente{% else %}{{ case.difference|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>{% endfor %}
+                {% for case in row.cases %}{% for count in case.physical_evidence %}
+                <p><strong>{{ case.branch }} · {% if count.historical %}Excel histórico importado{% else %}Conteo físico ERP{% endif %} #{{ count.conteo.pk }}</strong><br>
+                  {{ count.conteo.fecha|date:"d/m/Y" }} · {{ count.conteo.get_estado_display }}
+                  {% if count.round %}· Ronda {% if not count.historical %}enviada {% endif %}{{ count.round }}{% endif %}
+                  · {% if count.quantity is None %}Sin lectura{% else %}{{ count.quantity|floatformat:"-6u" }} {{ count.unit }}{% endif %}
+                  · {% if count.counted_at %}Contado {{ count.counted_at|date:"d/m/Y H:i:s" }}{% else %}Hora no registrada{% endif %}
+                  {% if count.conteo.estado == "RECONTEO" %}· Ronda {{ count.conteo.ronda }} pendiente de envío{% endif %}
+                  {% if count.file %}<br>{{ count.file }}{% if count.sheet and count.cell %} · {{ count.sheet }}!{{ count.cell }}{% endif %}{% endif %}
+                </p>
+                {% endfor %}{% endfor %}
                 <p>Transferencias: +{{ row.transferencia_entrada|floatformat:"-3" }} / −{{ row.transferencia_salida|floatformat:"-3" }}. Ajustes identificados: {{ row.ajuste_identificado|floatformat:"-3" }}.</p>
               </details>
             </td>
