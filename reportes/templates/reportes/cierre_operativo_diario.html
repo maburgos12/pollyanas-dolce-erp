@@ -101,9 +101,9 @@
       <div class="bi-kpi-label">Insumos con movimiento</div>
       <div class="closure-copy">Última lectura Point ALMACÉN · {{ closure.inventory.visible_updated_max|date:"Y-m-d H:i"|default:"Sin lectura para este corte" }}</div>
       {% if closure.inventory.inventory_unavailable_count %}
-        <div class="closure-muted">Hay insumos sin una lectura vigente para comparar.</div>
+        <div class="closure-muted">Hay insumos sin una lectura vigente de Point ALMACÉN.</div>
       {% endif %}
-      <a class="closure-muted" href="#desviaciones-stock">Ver comparación por insumo</a>
+      <a class="closure-muted" href="#referencias-stock">Ver existencias por insumo</a>
     </article>
   </section>
 
@@ -205,7 +205,7 @@
             <tr><th>Último sync almacén OK</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sync OK" }}</td></tr>
             <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
             <tr><th>Última reconstrucción fact</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
-            <tr><th>Comparación temporal</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
+            <tr><th>Fecha de las referencias</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
             <tr><th>Trazabilidad de existencias ERP</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
             <tr><th>Registros ERP sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
             {% endif %}
@@ -257,11 +257,11 @@
   </section>
 
   <section class="closure-grid-2">
-    <article class="closure-card" id="desviaciones-stock">
+    <article class="closure-card" id="referencias-stock">
       <div class="closure-card-head">
         <div>
-          <h2 class="closure-card-title">Desviaciones de stock vivo vs cierre auditado</h2>
-          <p class="closure-copy">Comparativo entre el stock esperado al cierre del día auditado y el inventario visible actual. Cada renglón se expresa en la unidad base del insumo.</p>
+          <h2 class="closure-card-title">Referencias de inventario por insumo</h2>
+          <p class="closure-copy">El saldo global ERP y el stock vivo de Point ALMACÉN cubren ubicaciones distintas. Cada renglón se expresa en la unidad base del insumo.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -270,25 +270,23 @@
             <tr>
               <th>Insumo</th>
               <th>Unidad</th>
-              <th>Origen visible</th>
-              <th class="is-right">Stock esperado al cierre</th>
-              <th class="is-right">Stock visible actual</th>
-              <th class="is-right">Diferencia</th>
+              <th>Traza de existencias ERP</th>
+              <th class="is-right">Saldo global ERP al cierre</th>
+              <th class="is-right">Stock vivo Point ALMACÉN</th>
             </tr>
           </thead>
           <tbody>
-            {% for row in closure.inventory_differences %}
+            {% for row in closure.inventory_references %}
             <tr>
               <td>{{ row.insumo_name }}</td>
               <td title="{{ row.unit_name }}">{{ row.unit_code }}</td>
               <td title="{{ row.trace_effective_at|default:'Sin fecha efectiva' }}">{{ row.trace_label }}</td>
               <td class="is-right">{{ row.expected_stock|floatformat:3|intcomma }}</td>
-              <td class="is-right">{{ row.visible_stock|floatformat:3|intcomma }}</td>
-              <td class="is-right">{{ row.difference|floatformat:3|intcomma }}</td>
+              <td class="is-right">{% if row.inventory_ready %}{{ row.visible_stock|floatformat:3|intcomma }}{% else %}Sin lectura vigente{% endif %}</td>
             </tr>
             {% empty %}
             <tr>
-              <td colspan="6">No hay desviaciones abiertas para los insumos con movimiento del día.</td>
+              <td colspan="5">Sin registros ERP de insumos con movimiento en el día auditado.</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -307,10 +305,10 @@
         <tbody>
           <tr><th>Fecha auditada</th><td class="is-right">{{ target_date_iso }}</td></tr>
           <tr><th>Último movimiento capturado</th><td class="is-right">{{ closure.inventory.movement_latest_at|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
-          <tr><th>Lectura correcta</th><td class="is-right">Cierre esperado del día vs stock vivo actual</td></tr>
+          <tr><th>Lectura correcta</th><td class="is-right">Movimientos del día y saldos de referencia</td></tr>
         </tbody>
       </table>
-      <p class="closure-copy pd-u-9374e84210">Si la fecha del stock visible es posterior a la fecha auditada, la diferencia no significa “consumo del día”; significa desviación entre el cierre esperado de ese día y la existencia viva actual.</p>
+      <p class="closure-copy pd-u-9374e84210">Consulta la fecha de Point ALMACÉN para saber cuándo se capturó ese saldo. El último movimiento indica actividad registrada del día auditado.</p>
     </article>
   </section>
 

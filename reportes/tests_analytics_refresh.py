@@ -31,7 +31,7 @@ from reportes.models import (
 )
 from reportes.sales_dashboard_freshness import ensure_sales_dashboard_freshness
 from reportes.views import _sales_refresh_status
-from reportes.daily_operational_closure_service import _inventory_discrepancies, _inventory_domain
+from reportes.daily_operational_closure_service import _inventory_references, _inventory_domain
 from recetas.models import PlanProduccion, Receta
 from ventas.models import VentaAutoritativaPoint
 
@@ -741,23 +741,23 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Ventas del día")
         self.assertContains(response, "Producción Point del día")
         self.assertContains(response, "Merma visible del día")
-        self.assertContains(response, "Desviaciones de stock")
+        self.assertContains(response, "Referencias de inventario por insumo")
         self.assertContains(response, "PlanProduccion")
         self.assertContains(response, "PointDailySale")
         self.assertContains(response, "MATRIZ")
         self.assertContains(response, "kg")
         self.assertContains(response, "Cada renglón se expresa en la unidad base del insumo.")
-        self.assertContains(response, "Stock esperado al cierre")
-        self.assertContains(response, "Stock visible actual")
+        self.assertContains(response, "Saldo global ERP al cierre")
+        self.assertContains(response, "Stock vivo Point ALMACÉN")
         self.assertContains(response, "Movimiento del día e interpretación")
-        self.assertContains(response, "Cierre esperado del día vs stock vivo actual")
+        self.assertContains(response, "Movimientos del día y saldos de referencia")
         self.assertContains(response, "Trazabilidad de existencias ERP")
         self.assertContains(response, "Registros ERP sin traza")
         self.assertNotContains(response, "Insumos sin traza")
         self.assertContains(response, "Requiere revisión")
         self.assertContains(response, "Área sugerida · Inventarios")
         self.assertContains(response, "Área sugerida · Planeación de Producción")
-        self.assertContains(response, "Ver comparación por insumo")
+        self.assertContains(response, "Ver existencias por insumo")
         self.assertNotContains(response, "Con rezago")
         self.assertNotContains(response, "Diferencia stock")
         self.assertContains(response, "Movimiento reconstruido")
@@ -776,20 +776,69 @@ class DailyOperationalClosureViewTests(TestCase):
             inventory = _inventory_domain(self.target_date)
 
         self.assertEqual(inventory["visible_max_date"], self.target_date)
-        self.assertTrue(inventory["same_moment_comparison"])
+        self.assertTrue(inventory["same_operational_date"])
 
-    def test_inventory_discrepancies_no_suma_stock_interno_sin_point(self):
+    def test_failed_cycle_timestamp_is_not_an_inventory_capture(self):
+        reading = SimpleNamespace(
+            freshness=InventoryFreshness.ERROR,
+            quantity_base=None,
+            captured_at=datetime(2026, 4, 8, 15, tzinfo=UTC),
+        )
+        with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many",
+                   return_value={self.insumo.pk: reading}):
+            response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+        closure = response.context["closure"]
+        self.assertIsNone(closure["inventory"]["visible_updated_max"])
+        alerts = {alert["label"] for alert in closure["alerts"]}
+        self.assertIn("Point ALMACÉN no disponible", alerts)
+        self.assertNotIn("Fecha de la lectura de inventario", alerts)
+
+    def test_inventory_references_keep_amounts_without_cross_scope_or_unit_delta(self):
+        FactInventarioDiario.objects.filter(insumo=self.insumo).update(
+            stock_final=Decimal("12"), metadata={"scope": "GLOBAL_ERP"},
+        )
+        unit = UnidadMedida.objects.create(codigo="pza", nombre="Pieza", tipo=UnidadMedida.TIPO_PIEZA)
+        other = Insumo.objects.create(nombre="Empaque", unidad_base=unit)
+        FactInventarioDiario.objects.create(
+            fecha=self.target_date, insumo=other, stock_final=Decimal("15"), metadata={"scope": "GLOBAL_ERP"},
+        )
+        FactInventarioDiario.objects.create(
+            fecha=self.target_date, sucursal=self.branch, insumo=other, stock_final=Decimal("99"),
+        )
+        for day_offset, expect_date_alert in ((0, False), (1, True)):
+            with self.subTest(day_offset=day_offset):
+                capture = datetime(2026, 4, 7 + day_offset, 15, tzinfo=UTC)
+                readings = {
+                    self.insumo.pk: SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("20"), captured_at=capture),
+                    other.pk: SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("2"), captured_at=capture),
+                }
+                with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many", return_value=readings):
+                    response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+                closure = response.context["closure"]
+                alerts = {alert["label"] for alert in closure["alerts"]}
+                self.assertNotIn("Desviación de stock", alerts)
+                self.assertEqual("Fecha de la lectura de inventario" in alerts, expect_date_alert)
+                self.assertEqual(closure["inventory"]["publication"]["label"], "Referencias de distinto alcance")
+                rows = {row["insumo_name"]: row for row in closure["inventory_references"]}
+                self.assertEqual(len(closure["inventory_references"]), 2)
+                self.assertEqual((rows["Harina"]["expected_stock"], rows["Harina"]["visible_stock"]), (12, 20))
+                self.assertEqual((rows["Empaque"]["expected_stock"], rows["Empaque"]["visible_stock"]), (15, 2))
+                self.assertTrue(all("difference" not in row for row in rows.values()))
+                self.assertContains(response, "Saldo global ERP")
+                self.assertContains(response, "Stock vivo Point ALMACÉN")
+
+    def test_inventory_references_no_suma_stock_interno_sin_point(self):
         ExistenciaInsumo.objects.create(
             insumo=self.insumo,
             almacen="ARMADO",
             stock_actual=Decimal("3"),
         )
 
-        rows = _inventory_discrepancies(self.target_date)
+        rows = _inventory_references(self.target_date)
         fact = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo)
 
         self.assertIsNone(rows[0]["visible_stock"])
-        self.assertIsNone(rows[0]["difference"])
+        self.assertNotIn("difference", rows[0])
         self.assertFalse(rows[0]["inventory_ready"])
 
     def test_cierre_operativo_uses_branch_indicator_tickets_when_sales_facts_have_zero(self):
