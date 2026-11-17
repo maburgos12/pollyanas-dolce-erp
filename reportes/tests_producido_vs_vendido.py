@@ -86,11 +86,59 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
             self.assertContains(response, "Final Point: 9")
             if visible:
                 self.assertContains(response, "0 PZA")
+                self.assertContains(response, "1 con diferencia")
+                self.assertContains(response, "Físico vs Point: Con diferencia")
+                self.assertContains(response, "Físico − Point: -9 PZA")
+                self.assertContains(response, "Provisional: reconteo pendiente")
+                self.assertContains(response, "1 cotejo provisional")
                 self.assertContains(response, "Ronda enviada 1")
                 self.assertContains(response, "Reconteo")
                 self.assertContains(response, "Hora no registrada")
             else:
                 self.assertNotContains(response, "Ronda enviada")
+                self.assertNotContains(response, "Físico vs Point:")
+
+    def test_physical_match_missing_count_and_unverified_closing_are_distinct(self):
+        branch = Sucursal.objects.create(codigo="PVS-CRUCE", nombre="Sucursal de cruce")
+        self.branch.erp_branch = branch
+        self.branch.save(update_fields=["erp_branch"])
+        actor = get_user_model().objects.create_superuser(username="cruce-admin")
+        count = ConteoSucursal.objects.create(
+            sucursal=branch, responsable=actor, creado_por=actor,
+            fecha=date(2026, 8, 31), titulo="Cierre", estado="ENVIADO",
+            request_id=uuid4(), payload_hash="a" * 64,
+        )
+        line = LineaConteoSucursal.objects.create(
+            conteo=count, producto=self.product, codigo=self.product.sku,
+            nombre=self.product.name, unidad="PZA", fuente_unidad="Point",
+        )
+        case = self.make_case(point_closing=0)
+        request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
+        request.user = actor
+        self.view.setup(request)
+        self.assertContains(self.view.get(request).render(), "Físico vs Point: Sin conteo")
+        EventoConteoSucursal.objects.create(conteo=count, actor=actor, action="enviar",
+            payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0"}]})
+        response = self.view.get(request).render()
+        self.assertContains(response, "Físico vs Point: Coincide")
+        self.assertContains(response, "Provisional: hora de conteo sin registrar")
+        self.assertContains(response, '<th scope="col">Físico vs Point</th><th class="text-center" scope="col">Movimientos</th>', html=True)
+
+        count.ronda = 2
+        count.save(update_fields=["ronda"])
+        EventoConteoSucursal.objects.create(conteo=count, actor=actor, action="enviar",
+            payload={"snapshot": [{"linea_id": line.pk, "ronda": 2, "cantidad": "1",
+                                   "contado_en": "2026-08-31T19:00:00-07:00"}]})
+        response = self.view.get(request).render()
+        self.assertContains(response, "Físico − Point: 1 PZA")
+        self.assertContains(response, "Provisional: hora de corte común por confirmar")
+
+        case.movement_status = "SOURCE_INCOMPLETE"
+        case.source_trace = {}
+        case.save(update_fields=["movement_status", "source_trace"])
+        response = self.view.get(request).render()
+        self.assertContains(response, "Físico vs Point: Sin saldo final Point")
+        self.assertContains(response, "Falta comprobar saldo inicial y saldo final")
 
     def test_physical_detail_keeps_legacy_submission_and_import_provenance_separate(self):
         branch = Sucursal.objects.create(codigo="PVS-HIST", nombre="Sucursal histórica")
@@ -124,7 +172,9 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         for text in ("Sin lectura", "Ronda enviada 1", "Excel histórico importado", "3 PZA", "Matriz!K4",
                      "Final Point: 9"):
             self.assertContains(response, text)
-        self.assertNotContains(response, "6 PZA")
+        case = response.context_data["groups"][0]["rows"][0]["cases"][0]
+        self.assertNotIn("6", [reading["quantity"] for reading in case["physical_evidence"]])
+        self.assertContains(response, "Físico − Point: -6 PZA")
 
     def test_balanced_stock_keeps_pending_transfer_visible(self):
         self.make_case(difference=0, movement_status="NEEDS_EXPLANATION",
@@ -351,7 +401,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("requestSubmit()", html)
         self.assertIn("window.setInterval(refreshAudit, 60000)", html)
         self.assertIn("document.hidden || busy || submitting", html)
-        self.assertEqual(html.count('scope="col"'), 15)
+        self.assertEqual(html.count('scope="col"'), 16)
         css = Path("static/css/styles.css").read_text()
         self.assertIn("max-height: calc(100dvh - 112px)", css)
         self.assertIn(".production-table-wrap .table thead th.text-end", css)
