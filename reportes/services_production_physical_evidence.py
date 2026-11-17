@@ -29,7 +29,7 @@ def _physical_comparison(case):
     if closing is None:
         return {"label": "Sin saldo final Point", "summary": "sin saldo final Point"}
     delta = quantity - closing
-    provisional = ""
+    provisional = "hora de corte común por confirmar"
     if reading["conteo"].estado == "RECONTEO":
         provisional = "reconteo pendiente"
     elif not reading.get("counted_at"):

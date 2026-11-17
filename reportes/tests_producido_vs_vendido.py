@@ -124,6 +124,15 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertContains(response, "Provisional: hora de conteo sin registrar")
         self.assertContains(response, '<th scope="col">Físico vs Point</th><th class="text-center" scope="col">Movimientos</th>', html=True)
 
+        count.ronda = 2
+        count.save(update_fields=["ronda"])
+        EventoConteoSucursal.objects.create(conteo=count, actor=actor, action="enviar",
+            payload={"snapshot": [{"linea_id": line.pk, "ronda": 2, "cantidad": "1",
+                                   "contado_en": "2026-08-31T19:00:00-07:00"}]})
+        response = self.view.get(request).render()
+        self.assertContains(response, "Físico − Point: 1 PZA")
+        self.assertContains(response, "Provisional: hora de corte común por confirmar")
+
         case.movement_status = "SOURCE_INCOMPLETE"
         case.source_trace = {}
         case.save(update_fields=["movement_status", "source_trace"])
