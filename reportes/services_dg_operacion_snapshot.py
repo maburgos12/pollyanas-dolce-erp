@@ -69,30 +69,36 @@ def hydrate_dg_operacion_payload(payload: dict[str, Any]) -> dict[str, Any]:
     return hydrated if isinstance(hydrated, dict) else {}
 
 
+def _hydrate_snapshot_payload(snapshot: DgOperacionSnapshot) -> dict[str, Any]:
+    payload = hydrate_dg_operacion_payload(snapshot.payload)
+    payload["dg_snapshot_generated_at"] = snapshot.generated_at
+    return payload
+
+
 def get_dg_operacion_snapshot_payload(fecha_operacion: date) -> dict[str, Any] | None:
     snapshot = (
         DgOperacionSnapshot.objects.filter(
             fecha_operacion=fecha_operacion,
             status=DgOperacionSnapshot.STATUS_READY,
         )
-        .only("payload")
+        .only("payload", "generated_at")
         .first()
     )
     if snapshot is None:
         return None
-    return hydrate_dg_operacion_payload(snapshot.payload)
+    return _hydrate_snapshot_payload(snapshot)
 
 
 def get_latest_dg_operacion_snapshot_payload() -> tuple[date, dict[str, Any]] | None:
     snapshot = (
         DgOperacionSnapshot.objects.filter(status=DgOperacionSnapshot.STATUS_READY)
-        .only("fecha_operacion", "payload")
+        .only("fecha_operacion", "payload", "generated_at")
         .order_by("-fecha_operacion")
         .first()
     )
     if snapshot is None:
         return None
-    return snapshot.fecha_operacion, hydrate_dg_operacion_payload(snapshot.payload)
+    return snapshot.fecha_operacion, _hydrate_snapshot_payload(snapshot)
 
 
 def refresh_dg_operacion_snapshot(

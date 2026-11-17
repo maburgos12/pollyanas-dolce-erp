@@ -21017,8 +21017,21 @@ def dg_operacion_dashboard(request: HttpRequest) -> HttpResponse:
         )
         payload["dg_snapshot_source"] = "live"
 
-    if "point_ticket_summary" not in payload:
-        payload["point_ticket_summary"] = _build_point_ticket_summary(payload["fecha_operacion"])
+    snapshot_generated_at = payload.pop("dg_snapshot_generated_at", None)
+    ticket_date = payload["fecha_operacion"]
+    # Point can update a prior day's indicators after the rest of the dashboard was captured.
+    ticket_summary_updated = (
+        snapshot_generated_at is not None
+        and payload.get("point_ticket_summary") is not None
+        and PointDailyBranchIndicator.objects.filter(
+            indicator_date=ticket_date,
+            updated_at__gt=snapshot_generated_at,
+            branch__erp_branch__in=canonical_point_network_branch_qs(ticket_date),
+        ).exists()
+    )
+    if payload.get("point_ticket_summary") is None or ticket_summary_updated:
+        payload["point_ticket_summary"] = _build_point_ticket_summary(ticket_date)
+    payload["point_ticket_summary_updated"] = ticket_summary_updated
 
     return render(
         request,
