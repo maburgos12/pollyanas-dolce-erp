@@ -268,7 +268,7 @@ def _waste_domain(target_date: date) -> dict[str, object]:
 
 
 def _inventory_domain(target_date: date) -> dict[str, object]:
-    fact_qs = FactInventarioDiario.objects.filter(fecha=target_date)
+    fact_qs = FactInventarioDiario.objects.filter(fecha=target_date, sucursal__isnull=True)
     moved_insumo_ids = list(fact_qs.values_list("insumo_id", flat=True))
     visible_qs = ExistenciaInsumo.objects.filter(insumo_id__in=moved_insumo_ids)
     inventory_items = list(Insumo.objects.filter(id__in=moved_insumo_ids))
@@ -276,48 +276,35 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
         inventory_items,
         location="ALMACEN",
     )
-    usable_readings = [
-        reading
+    unavailable_count = sum(
+        reading.freshness is not InventoryFreshness.FRESH
         for reading in inventory_readings.values()
-        if reading.freshness is InventoryFreshness.FRESH
-    ]
-    unavailable_count = len(inventory_readings) - len(usable_readings)
+    )
     movement_qs = MovimientoInventario.objects.filter(fecha__date=target_date)
 
-    expected_stock = _to_decimal(fact_qs.aggregate(total=Sum("stock_final")).get("total"))
-    visible_stock = sum((_to_decimal(reading.quantity_base) for reading in usable_readings), ZERO)
-    entradas = _to_decimal(fact_qs.aggregate(total=Sum("entradas")).get("total"))
-    salidas = _to_decimal(fact_qs.aggregate(total=Sum("salidas")).get("total"))
-    delta_stock = None if unavailable_count else visible_stock - expected_stock
-    fact_max = FactInventarioDiario.objects.order_by("-fecha").values_list("fecha", flat=True).first()
+    fact_max = FactInventarioDiario.objects.filter(sucursal__isnull=True).order_by("-fecha").values_list("fecha", flat=True).first()
     movement_max = (
         MovimientoInventario.objects.order_by("-fecha").values_list("fecha", flat=True).first()
     )
     movement_latest_at = movement_qs.order_by("-fecha").values_list("fecha", flat=True).first()
-    captured_values = [reading.captured_at for reading in inventory_readings.values() if reading.captured_at]
+    captured_values = [
+        reading.captured_at
+        for reading in inventory_readings.values()
+        if reading.captured_at and reading.freshness in (InventoryFreshness.FRESH, InventoryFreshness.STALE)
+    ]
     visible_updated_max = max(captured_values, default=None)
     visible_updated_min = min(captured_values, default=None)
     fact_updated_max = fact_qs.order_by("-actualizado_en").values_list("actualizado_en", flat=True).first()
     latest_sync_run = AlmacenSyncRun.objects.filter(status=AlmacenSyncRun.STATUS_OK).order_by("-started_at", "-id").first()
     latest_sync_any = AlmacenSyncRun.objects.order_by("-started_at", "-id").first()
-    entradas_dia = _to_decimal(
-        movement_qs.filter(tipo=MovimientoInventario.TIPO_ENTRADA).aggregate(total=Sum("cantidad")).get("total")
-    )
-    salidas_dia = _to_decimal(
-        movement_qs.filter(tipo__in=[MovimientoInventario.TIPO_SALIDA, MovimientoInventario.TIPO_CONSUMO])
-        .aggregate(total=Sum("cantidad"))
-        .get("total")
-    )
-    ajustes_netos = _to_decimal(
-        movement_qs.filter(tipo=MovimientoInventario.TIPO_AJUSTE).aggregate(total=Sum("cantidad")).get("total")
-    )
     visible_date = timezone.localdate(visible_updated_max) if visible_updated_max else None
-    same_moment_comparison = bool(visible_date and visible_date == target_date)
-    comparison_scope = (
-        "Mismo día operativo"
-        if same_moment_comparison
-        else "Cruza cierre del día auditado contra stock vivo actual"
-    )
+    same_operational_date = visible_date == target_date
+    if visible_date is None:
+        comparison_scope = "Sin fecha de lectura Point"
+    elif same_operational_date:
+        comparison_scope = "Mismo día operativo"
+    else:
+        comparison_scope = "Día auditado y captura Point de fechas distintas"
     trace_counts: dict[str, int] = {}
     traceable_count = 0
     untraceable_count = 0
@@ -337,27 +324,16 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
         publication = _status_row(
             label="Point no disponible",
             tone="warning",
-            detail="No se comparó el cierre contra saldos internos porque el ciclo canónico de ALMACÉN no está completo y vigente.",
+            detail="El último ciclo canónico de ALMACÉN no tiene lecturas vigentes para todos los insumos.",
         )
-    elif fact_qs.exists():
-        if not same_moment_comparison:
-            publication = _status_row(
-                label="Cruza tiempos",
-                tone="warning",
-                detail="El cierre esperado sí corresponde al día auditado, pero el stock visible viene del inventario vivo actualizado después; no son saldos del mismo instante histórico.",
-            )
-        elif delta_stock == ZERO:
-            publication = _status_row(
-                label="Alineado",
-                tone="success",
-                detail="El stock visible coincide con el stock esperado para los insumos con movimiento del día.",
-            )
-        else:
-            publication = _status_row(
-                label="Desviación",
-                tone="warning",
-                detail="El stock visible difiere del esperado en los insumos que tuvieron movimiento durante el día.",
-            )
+    elif moved_insumo_ids:
+        # The facts producer materializes GLOBAL_ERP from movements, while the
+        # Point reader covers one warehouse. Matching dates do not align scopes.
+        publication = _status_row(
+            label="Referencias de distinto alcance",
+            tone="warning",
+            detail="El saldo de cierre es global en ERP. La captura de Point abarca ALMACÉN.",
+        )
     else:
         publication = _status_row(
             label="Sin fact diario",
@@ -375,20 +351,12 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
         "visible_max_date": visible_date,
         "movement_rows": movement_qs.count(),
         "movement_insumo_count": fact_qs.values("insumo_id").distinct().count(),
-        "expected_stock": expected_stock,
-        "visible_stock": visible_stock,
-        "delta_stock": delta_stock,
         "inventory_unavailable_count": unavailable_count,
-        "entradas": entradas,
-        "salidas": salidas,
-        "entradas_dia": entradas_dia,
-        "salidas_dia": salidas_dia,
-        "ajustes_netos": ajustes_netos,
         "movement_latest_at": movement_latest_at,
         "visible_updated_max": visible_updated_max,
         "visible_updated_min": visible_updated_min,
         "fact_updated_max": fact_updated_max,
-        "same_moment_comparison": same_moment_comparison,
+        "same_operational_date": same_operational_date,
         "comparison_scope": comparison_scope,
         "traceable_count": traceable_count,
         "untraceable_count": untraceable_count,
@@ -500,10 +468,10 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
     return rows
 
 
-def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[str, object]]:
+def _inventory_references(target_date: date) -> list[dict[str, object]]:
     fact_rows = list(
-        FactInventarioDiario.objects.filter(fecha=target_date)
-        .select_related("insumo")
+        FactInventarioDiario.objects.filter(fecha=target_date, sucursal__isnull=True)
+        .select_related("insumo__unidad_base")
         .order_by("insumo__nombre")
     )
     insumo_ids = [fact.insumo_id for fact in fact_rows]
@@ -518,47 +486,22 @@ def _inventory_discrepancies(target_date: date, limit: int = 12) -> list[dict[st
         visible_map.setdefault(int(row.insumo_id), row)
     rows: list[dict[str, object]] = []
     for fact in fact_rows:
-        visible = visible_map.get(int(fact.insumo_id))
-        reading = inventory_readings[int(fact.insumo_id)]
-        if reading.freshness is not InventoryFreshness.FRESH:
-            rows.append(
-                {
-                    "insumo_name": fact.insumo.nombre,
-                    "unit_code": getattr(getattr(fact.insumo, "unidad_base", None), "codigo", "") or "s/u",
-                    "unit_name": getattr(getattr(fact.insumo, "unidad_base", None), "nombre", "") or "Sin unidad base",
-                    "trace_label": "Point no disponible",
-                    "trace_effective_at": str(reading.captured_at or ""),
-                    "expected_stock": _to_decimal(fact.stock_final),
-                    "visible_stock": None,
-                    "difference": None,
-                    "movement_scope": _to_decimal(fact.entradas) + _to_decimal(fact.salidas),
-                    "inventory_ready": False,
-                }
-            )
-            continue
-        visible_stock = _to_decimal(reading.quantity_base)
-        diff = visible_stock - _to_decimal(fact.stock_final)
-        if diff == ZERO:
-            continue
-        rows.append(
-            {
-                "insumo_name": fact.insumo.nombre,
-                "unit_code": getattr(getattr(fact.insumo, "unidad_base", None), "codigo", "") or "s/u",
-                "unit_name": getattr(getattr(fact.insumo, "unidad_base", None), "nombre", "") or "Sin unidad base",
-                "trace_label": str((getattr(visible, "trazabilidad_stock", {}) or {}).get("label") or "Sin traza suficiente"),
-                "trace_effective_at": str((getattr(visible, "trazabilidad_stock", {}) or {}).get("effective_at") or ""),
-                "expected_stock": _to_decimal(fact.stock_final),
-                "visible_stock": visible_stock,
-                "difference": diff,
-                "movement_scope": _to_decimal(fact.entradas) + _to_decimal(fact.salidas),
-                "inventory_ready": True,
-            }
-        )
-    rows.sort(
-        key=lambda row: (not bool(row.get("inventory_ready")), abs(_to_decimal(row["difference"]))),
-        reverse=True,
-    )
-    return rows[:limit]
+        existence = visible_map.get(fact.insumo_id)
+        trace = getattr(existence, "trazabilidad_stock", {}) or {}
+        reading = inventory_readings[fact.insumo_id]
+        ready = reading.freshness is InventoryFreshness.FRESH
+        rows.append({
+            "insumo_name": fact.insumo.nombre,
+            "unit_code": getattr(fact.insumo.unidad_base, "codigo", "") or "s/u",
+            "unit_name": getattr(fact.insumo.unidad_base, "nombre", "") or "Sin unidad base",
+            "trace_label": str(trace.get("label") or "Sin traza suficiente"),
+            "trace_effective_at": str(trace.get("effective_at") or ""),
+            "expected_stock": _to_decimal(fact.stock_final),
+            "visible_stock": _to_decimal(reading.quantity_base) if ready else None,
+            "inventory_ready": ready,
+        })
+    rows.sort(key=lambda row: row["inventory_ready"])
+    return rows
 
 
 def _build_alerts(*, target_date: date, sales: dict[str, object], production: dict[str, object], waste: dict[str, object], inventory: dict[str, object]) -> list[dict[str, str]]:
@@ -588,19 +531,13 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
     if inventory.get("inventory_unavailable_count"):
         add(
             "Point ALMACÉN no disponible", "warning",
-            "Hace falta una captura vigente y completa de Point ALMACÉN para comparar las existencias.",
+            "Hace falta una captura vigente y completa de Point ALMACÉN para mostrar las existencias.",
             "Inventarios",
         )
-    elif inventory["delta_stock"] != ZERO:
-        add(
-            "Desviación de stock", "warning",
-            "El stock visible presenta diferencias frente al esperado. Revisa las cantidades por insumo en el detalle.",
-            "Inventarios",
-        )
-    if not inventory["same_moment_comparison"]:
+    if inventory["visible_updated_max"] and not inventory["same_operational_date"]:
         add(
             "Fecha de la lectura de inventario", "warning",
-            "El stock esperado corresponde al día auditado. El stock visible usa la última captura disponible de Point ALMACÉN.",
+            "El saldo global ERP corresponde al día auditado. El stock de Point ALMACÉN se capturó en otra fecha.",
             "Inventarios",
         )
     if inventory["untraceable_count"] > 0:
@@ -660,7 +597,7 @@ def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
     )
     overall = _overall_status(alerts=alerts)
     branch_rows = _branch_rows(target_date)
-    inventory_differences = _inventory_discrepancies(target_date)
+    inventory_references = _inventory_references(target_date)
 
     domains = [sales, production, waste, inventory]
     publication_rows = [
@@ -685,7 +622,7 @@ def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
         "alerts": alerts,
         "publication_rows": publication_rows,
         "branch_rows": branch_rows,
-        "inventory_differences": inventory_differences,
+        "inventory_references": inventory_references,
         "source_notes": [
             {
                 "label": "Ventas",
@@ -701,7 +638,7 @@ def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
             },
             {
                 "label": "Inventario",
-                "detail": "El comparativo diario usa FactInventarioDiario como cierre esperado y Point ALMACÉN como stock vivo actual. Las cantidades se muestran en la unidad base configurada en cada insumo.",
+                "detail": "FactInventarioDiario resume movimientos globales del ERP. Point ALMACÉN aporta una lectura viva de una ubicación. Ambas referencias conservan la unidad base de cada insumo.",
             },
         ],
     }
