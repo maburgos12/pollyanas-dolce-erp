@@ -80,8 +80,12 @@ class ControlViewsTests(TestCase):
         self.assertIn("focus_summary", resp.context)
         self.assertEqual(resp.context["enterprise_focus"], "")
 
-    def test_sucursal_muestra_movimientos_y_saldos_globales_sin_alertas_locales(self):
+    def test_sucursal_muestra_movimientos_y_remite_saldos_a_comparacion_general(self):
         insumo = Insumo.objects.get(nombre="Insumo control view")
+        ml = UnidadMedida.objects.create(codigo="ml", nombre="Mililitro", tipo=UnidadMedida.TIPO_VOLUMEN)
+        for nombre, saldo in (("MEDIA CREMA", "-17505893.539"), ("AGUA", "16288307.037")):
+            referencia = Insumo.objects.create(nombre=nombre, unidad_base=ml, activo=True)
+            ExistenciaInsumo.objects.create(insumo=referencia, stock_actual=Decimal(saldo))
         LineaReceta.objects.create(
             receta=self.receta, insumo=insumo, insumo_texto=insumo.nombre,
             cantidad=Decimal("1"), unidad=insumo.unidad_base,
@@ -100,8 +104,14 @@ class ControlViewsTests(TestCase):
 
         self.assertContains(response, "Consulta de Control · Matriz")
         self.assertContains(response, "La tabla muestra hasta 300 insumos de referencia")
-        self.assertContains(response, "Plan general")
-        self.assertContains(response, "Saldo actual de almacenes ERP")
+        self.assertContains(response, "Ventas de la sucursal")
+        self.assertContains(response, "Mermas de la sucursal")
+        self.assertContains(response, "MEDIA CREMA")
+        self.assertContains(response, "AGUA")
+        self.assertNotContains(response, '<th scope="col">Plan general</th>', html=True)
+        self.assertNotContains(response, "Saldo actual de almacenes ERP")
+        self.assertNotContains(response, "17,505,893.54")
+        self.assertNotContains(response, "16,288,307.04")
         self.assertContains(response, "Ver comparación general")
         self.assertContains(
             response, f'?from={fecha}&amp;to={fecha}&amp;threshold_pct=10.5',
@@ -115,6 +125,13 @@ class ControlViewsTests(TestCase):
         self.assertEqual((row["ventas_pos"], row["mermas_pos"], row["inventario_real"]), (2, 1, 5))
         # El cálculo queda intacto para sus otros consumidores.
         self.assertEqual(row["semaforo"], "ROJO")
+
+        general = self.client.get(response.context["report_url"])
+        self.assertContains(general, "Saldo actual de almacenes ERP")
+        self.assertContains(general, "<td>ml</td>", html=True, count=2)
+        self.assertContains(general, "-17,505,893.54")
+        self.assertContains(general, "16,288,307.04")
+        self.assertContains(general, "Discrepancia")
 
     def test_sucursal_invalida_no_cambia_el_alcance_a_general(self):
         self.client.force_login(self.user_lectura)

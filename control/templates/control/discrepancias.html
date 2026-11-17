@@ -16,7 +16,7 @@
   <div class="enterprise-focus-alert-copy">
     <h1 class="enterprise-focus-alert-title">Consulta de Control · {{ sucursal_label }}</h1>
     <p class="enterprise-focus-alert-detail">{{ date_from|date:"d/m/Y" }} a {{ date_to|date:"d/m/Y" }} · Ventas y mermas de la sucursal en la unidad de cada insumo.</p>
-    <p class="enterprise-focus-alert-detail">El plan general y el saldo actual de almacenes ERP se muestran como referencia. Esta vista no compara existencias de la sucursal para el corte seleccionado.</p>
+    <p class="enterprise-focus-alert-detail">Consulta el plan general y los saldos de almacenes ERP en la comparación general.</p>
   </div>
   <div class="enterprise-focus-alert-actions">
     <a class="btn btn-secondary" href="{{ report_url }}">Ver comparación general</a>
@@ -169,12 +169,12 @@
         <tr>
           <th scope="col">Insumo</th>
           <th scope="col">Unidad</th>
-          <th scope="col">{% if sucursal_id %}Plan general{% else %}Producción{% endif %}</th>
+          {% if not sucursal_id %}<th scope="col">Producción</th>{% endif %}
           <th scope="col">{% if sucursal_id %}Ventas de la sucursal{% else %}Ventas POS{% endif %}</th>
           <th scope="col">{% if sucursal_id %}Mermas de la sucursal{% else %}Mermas POS{% endif %}</th>
-          {% if not sucursal_id %}<th scope="col">Teórico</th>{% endif %}
-          <th scope="col">Saldo actual de almacenes ERP</th>
           {% if not sucursal_id %}
+          <th scope="col">Teórico</th>
+          <th scope="col">Saldo actual de almacenes ERP</th>
           <th scope="col">Discrepancia</th>
           <th scope="col">% variación</th>
           <th scope="col">Estatus</th>
@@ -186,12 +186,12 @@
         <tr>
           <td>{{ row.insumo }}</td>
           <td>{{ row.unidad|default:'-' }}</td>
-          <td>{{ row.produccion|floatformat:2|intcomma }}</td>
+          {% if not sucursal_id %}<td>{{ row.produccion|floatformat:2|intcomma }}</td>{% endif %}
           <td>{{ row.ventas_pos|floatformat:2|intcomma }}</td>
           <td>{{ row.mermas_pos|floatformat:2|intcomma }}</td>
-          {% if not sucursal_id %}<td>{{ row.inventario_teorico|floatformat:2|intcomma }}</td>{% endif %}
-          <td>{{ row.inventario_real|floatformat:2|intcomma }}</td>
           {% if not sucursal_id %}
+          <td>{{ row.inventario_teorico|floatformat:2|intcomma }}</td>
+          <td>{{ row.inventario_real|floatformat:2|intcomma }}</td>
           <td>{{ row.discrepancia|floatformat:2|intcomma }}</td>
           <td>{{ row.variacion_pct|floatformat:1 }}%</td>
           <td>
@@ -207,7 +207,7 @@
         </tr>
         {% empty %}
         <tr>
-          <td colspan="{{ sucursal_id|yesno:'6,10' }}" class="text-muted">Sin datos para el rango seleccionado.</td>
+          <td colspan="{{ sucursal_id|yesno:'4,10' }}" class="text-muted">Sin datos para el rango seleccionado.</td>
         </tr>
         {% endfor %}
       </tbody>
