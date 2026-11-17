@@ -21,6 +21,9 @@ spec.loader.exec_module(c)
 
 class CleanupTests(unittest.TestCase):
     def setUp(self):
+        clock = patch("time.time", return_value=1794938400)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = Path(self.temp.name)
@@ -34,6 +37,9 @@ class CleanupTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.proposal))
         self.config = {'token': 'local-test', 'chat_id': 17}
         self.send = Mock(side_effect=lambda config, method, payload: {'message_id': 42, 'chat': {'id': 17, 'type': 'private'}, **({'reply_markup': payload['reply_markup']} if method == 'editMessageReplyMarkup' else {})})
+        recovery = patch.object(c, "revalidate_proposal")
+        recovery.start()
+        self.addCleanup(recovery.stop)
         self.row = c.request(self.path, self.ledger, self.config, self.send)
 
     def query(self, action='a'):
@@ -50,7 +56,7 @@ class CleanupTests(unittest.TestCase):
                                   sha256='c'*64, files_verified=1))
 
     def test_manifest_buttons_and_exact_binding(self):
-        c.decide(self.query('r'), self.config, self.ledger)
+        self.ledger = r.Ledger(Path(self.temp.name) / 'separate-scope', validator=c.validate)
         self.proposal['delete_candidates'] = [self.manifest()]
         self.path.write_text(json.dumps(self.proposal))
         self.send.reset_mock()
@@ -115,8 +121,8 @@ class CleanupTests(unittest.TestCase):
         c.decide(self.query('r'), self.config, self.ledger)
         with self.assertRaisesRegex(ValueError, 'already_decided'):
             c.decide(self.query(), self.config, self.ledger)
-        new = c.request(self.path, self.ledger, self.config, self.send)
-        self.assertNotEqual(new['nonce'], self.row['nonce'])
+        with self.assertRaisesRegex(ValueError, 'existing_request'):
+            c.request(self.path, self.ledger, self.config, self.send)
 
     def test_auth_expiry_and_namespace(self):
         queries = []
@@ -152,7 +158,7 @@ class CleanupTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'too_large'): c.read_proposal(self.path)
 
     def test_ambiguous_send_does_not_expose_buttons_or_retry(self):
-        c.decide(self.query('r'), self.config, self.ledger)
+        self.ledger = r.Ledger(Path(self.temp.name) / 'separate-scope', validator=c.validate)
         send = Mock(side_effect=RuntimeError('lost response'))
         with self.assertRaises(RuntimeError): c.request(self.path, self.ledger, self.config, send)
         self.assertEqual(send.call_count, 1)
@@ -185,7 +191,7 @@ class CleanupTests(unittest.TestCase):
 
     def test_request_through_real_transport_and_closed_allowlist(self):
         from io import BytesIO
-        c.decide(self.query('r'), self.config, self.ledger)
+        self.ledger = r.Ledger(Path(self.temp.name) / 'separate-scope', validator=c.validate)
         calls = []
         def opened(request, timeout):
             method = request.full_url.rsplit('/', 1)[1]

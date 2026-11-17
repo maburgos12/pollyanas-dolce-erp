@@ -8,8 +8,12 @@ from pathlib import Path
 import re
 import secrets
 import time
+import tempfile
+import shutil
+import subprocess
 
-from erp_telegram_release import Ledger, NONCE, telegram, verify_message
+from erp_telegram_release import (Ledger, NONCE, telegram, verify_message, schedule_request,
+                                  approval_window, validate_intent, operational_module)
 
 STATE = Path('/var/lib/erp-point-decision/cleanups')
 DIGEST = re.compile(r'[0-9a-f]{64}')
@@ -108,7 +112,7 @@ def validate(row):
     for key, pattern in [('proposal_id', PROPOSAL_ID), ('proposal_sha256', DIGEST), ('image_id', IMAGE), ('nonce', NONCE)]:
         if not isinstance(row[key], str) or not pattern.fullmatch(row[key]):
             raise ValueError('invalid_cleanup_binding')
-    if row['state'] not in {'notifying', 'pending', 'approved', 'rejected'}:
+    if row['state'] not in {'notifying', 'deferred', 'pending', 'approved', 'rejected'}:
         raise ValueError('invalid_cleanup_state')
     for key in ('expires', 'chat_id'):
         if type(row[key]) is not int or row[key] <= 0:
@@ -116,7 +120,7 @@ def validate(row):
     for key in ('message_id', 'decision_at'):
         if row[key] is not None and (type(row[key]) is not int or row[key] <= 0):
             raise ValueError('invalid_number')
-    if ((row['state'] != 'notifying' and row['message_id'] is None)
+    if ((row['state'] not in {'notifying', 'deferred'} and row['message_id'] is None)
             or ((row['state'] in {'approved', 'rejected'}) != (row['decision_at'] is not None))):
         raise ValueError('inconsistent_cleanup_decision')
     return row
@@ -130,6 +134,107 @@ def signed(config, row, action):
 
 
 def request(path, ledger, config, send=telegram):
+    proposal, digest = read_proposal(path)
+    directory = ledger.directory / 'scheduled-proposals'
+    directory.mkdir(mode=0o700, exist_ok=True)
+    frozen = directory / (digest + '.json')
+    with Path(path).open('rb') as stream:
+        raw = stream.read(131073)
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError('proposal_changed')
+    with ledger.lock():
+        if not frozen.exists():
+            fd = os.open(frozen, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            descriptor = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        if read_proposal(frozen)[1] != digest:
+            raise ValueError('frozen_proposal_changed')
+    def check():
+        current, current_digest = read_proposal(frozen)
+        if current_digest != digest:
+            raise ValueError('proposal_changed')
+        revalidate_proposal(current, ledger.directory)
+    return schedule_request('cleanup', {'digest': digest, 'proposal_id': proposal['id']}, ledger,
+        lambda row: row['proposal_id'] == proposal['id'] or row['image_id'] == proposal['delete_candidates'][0]['id'],
+        lambda: _request(frozen, ledger, config, send), check)
+
+
+def revalidate_proposal(proposal, state):
+    item = proposal['delete_candidates'][0]
+    if item['type'] == 'point_archive_manifest':
+        operational_module('erp_point_archive').Broker().verify_batch(item['files'])
+        return
+    # Legacy image/cache proposals lack a restorable identity contract: require operator review.
+    if item['type'] != 'cache_log_manifest' or item['build_cache']:
+        raise ValueError('recovery_requires_operator_review')
+    prep = operational_module('erp_cleanup_prepare')
+    entries = [prep.snapshot(Path(entry['path'])) for entry in item['files']]
+    if [{key: entry[key] for key in ('path', 'bytes', 'sha256')} for entry in entries] != item['files']:
+        raise ValueError('cleanup_scope_changed')
+    prep.unchanged(entries)
+    nas = prep.NAS()
+    archive_path = nas.path(proposal['id'])
+    if nas.digest(proposal['id']) != item['recovery']['sha256']:
+        raise ValueError('nas_recovery_changed')
+    size = int(nas.command(f'stat -c %s {archive_path}'))
+    total = sum(entry['bytes'] for entry in entries)
+    if not 0 < size <= prep.ARCHIVE_LIMIT or shutil.disk_usage(state).free < prep.RESERVE + total + size:
+        raise ValueError('recovery_capacity')
+    with tempfile.TemporaryDirectory(prefix='approval-recovery-', dir=state) as scratch:
+        root = Path(scratch)
+        archive = root / 'readback.tar.gz'
+        nas.download(proposal['id'], archive, size)
+        with archive.open('rb') as stream:
+            digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        if digest != item['recovery']['sha256']:
+            raise ValueError('nas_readback_changed')
+        prep.verify_archive(archive, entries, root)
+    prep.unchanged(entries)
+
+
+def process_scheduled(ledger, config, send=telegram):
+    if not approval_window()[0]:
+        return
+    queue = Ledger(ledger.directory / 'scheduled', validator=validate_intent)
+    for path in sorted(ledger.directory.glob('*.json')):
+        row = ledger.read(path.stem)
+        if row['state'] != 'pending' or row['decision_at'] is not None or row['expires'] > int(time.time()):
+            continue
+        candidates = [ledger.directory / 'proposals' / (row['nonce'] + '.json'),
+                      ledger.directory.parent / 'cleanup-proposals' / (row['proposal_id'] + '.json'),
+                      Path('/var/lib/erp-cleanup-prepare') / (row['proposal_id'] + '.proposal')]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            try:
+                if read_proposal(candidate)[1] == row['proposal_sha256']:
+                    request(candidate, ledger, config, send)
+                    break
+            except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError):
+                break
+    for path in sorted(queue.directory.glob('*.json')):
+        item = queue.read(path.stem)
+        if item['kind'] != 'cleanup' or item['phase'] != 'waiting':
+            continue
+        digest = item['binding'].get('digest', '')
+        if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
+            raise ValueError('invalid_cleanup_intent')
+        try:
+            request(ledger.directory / 'scheduled-proposals' / (digest + '.json'), ledger, config, send)
+        except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError):
+            print('Scheduled cleanup recovery could not be confirmed; no authorization sent.', flush=True)
+
+
+def _request(path, ledger, config, send=telegram):
+    if not approval_window()[0]:
+        raise ValueError('outside_approval_hours')
     proposal, digest = read_proposal(path)
     item = proposal['delete_candidates'][0]
     row = dict(proposal_id=proposal['id'], proposal_sha256=digest, image_id=item['id'],
@@ -174,6 +279,10 @@ def request(path, ledger, config, send=telegram):
                     'Ahorro real por medir; no garantiza bajar del umbral.\n'
                     'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
                     'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+        if not approval_window()[0]:
+            row['state'] = 'deferred'
+            ledger.write(row)
+            raise ValueError('outside_approval_hours')
         result = send(config, 'sendMessage', {'chat_id': row['chat_id'], 'text': text})
         verify_message(result, row['chat_id'])
         row.update(message_id=result['message_id'], state='pending')
@@ -181,6 +290,10 @@ def request(path, ledger, config, send=telegram):
         # Persist identity before exposing buttons; ambiguous sends remain blocked, never auto-retried.
         markup = {'inline_keyboard': [[{'text': label, 'callback_data': signed(config, row, action)}
             for action, label in [('a', 'Aprobar limpieza'), ('r', 'Rechazar / revocar')]]]}
+        if not approval_window()[0]:
+            row['state'] = 'deferred'
+            ledger.write(row)
+            raise ValueError('outside_approval_hours')
         try:
             result = send(config, 'editMessageReplyMarkup', {'chat_id': row['chat_id'],
                           'message_id': row['message_id'], 'reply_markup': markup})

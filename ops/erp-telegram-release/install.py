@@ -1,4 +1,5 @@
 """Install from the reviewed, clean production Git revision; preserve other consumers."""
+import argparse
 import fcntl
 import hashlib
 import importlib.util
@@ -120,7 +121,69 @@ def _install(source, target, units, run, preflight):
     print('Installed release hook; Point baseline backup verified. No resource cleanup performed.')
 
 
+def refresh(source, nonce, target=TARGET, units=Path('/etc/systemd/system'), run=subprocess.run,
+            state=Path('/var/lib/erp-point-decision/releases'), deploy_lock=Path('/run/lock/erp-deploy.lock')):
+    """Update reviewed modules without reconstructing the shared Point/Mac-IA consumer."""
+    from erp_telegram_release import Ledger
+    ledger = Ledger(state)
+    with ledger.lock(worker=True), deploy_lock.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        app = source.parents[1]
+        if run(['git', '-C', str(app), 'status', '--porcelain'], check=True, capture_output=True, text=True).stdout.strip():
+            raise ValueError('dirty_production_checkout')
+        head = run(['git', '-C', str(app), 'rev-parse', 'HEAD'], check=True, capture_output=True, text=True).stdout.strip()
+        row = ledger.read(nonce)
+        if row['state'] != 'published' or row['decision'] != 'approved' or row['release_sha'] != head:
+            raise ValueError('exact_published_approval_required')
+        consumer = target / 'decidir_corte_point.py'
+        original = consumer.read_bytes()
+        if b'from erp_telegram_release import handle' not in original or b'from erp_telegram_cleanup import handle' not in original:
+            raise ValueError('existing_hooks_required')
+        changes = {target / name: (source / name).read_bytes()
+                   for name in ('erp_telegram_release.py', 'erp_telegram_cleanup.py')}
+        for path, content in changes.items():
+            compile(content, str(path), 'exec')
+        timer = 'erp-telegram-release.timer'
+        changes[units / timer] = (source / timer).read_bytes()
+        check_policy(source)
+        run(['systemd-analyze', 'verify', str(source / timer)], check=True)
+        before = {path: path.read_bytes() for path in changes}
+        backup = target / 'module-backups'
+        backup.mkdir(mode=0o700, exist_ok=True)
+        for path, content in before.items():
+            saved = backup / (path.name + '.' + hashlib.sha256(content).hexdigest())
+            if not saved.exists():
+                replace_file(saved, content, 0o600)
+            if saved.read_bytes() != content:
+                raise ValueError('backup_mismatch')
+        active = run(['systemctl', 'is-active', '--quiet', timer], check=False).returncode == 0
+        run(['systemctl', 'stop', timer], check=True)
+        try:
+            for path, content in changes.items():
+                replace_file(path, content)
+            if consumer.read_bytes() != original:
+                raise ValueError('consumer_changed')
+            run(['systemctl', 'daemon-reload'], check=True)
+            run(['systemctl', 'restart', 'erp-point-decision.service'], check=True)
+            run(['systemctl', 'is-active', '--quiet', 'erp-point-decision.service'], check=True)
+        except Exception:
+            for path, content in before.items():
+                replace_file(path, content)
+            run(['systemctl', 'daemon-reload'], check=True)
+            run(['systemctl', 'restart', 'erp-point-decision.service'], check=True)
+            raise
+        finally:
+            if active:
+                run(['systemctl', 'start', timer], check=True)
+        if consumer.read_bytes() != original:
+            raise ValueError('consumer_changed')
+    print('Approved modules refreshed; shared consumer and historical files preserved.')
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--release-nonce', help='Refresh existing hooks from this exact published approval')
+    args = parser.parse_args()
     if os.geteuid() != 0:
         raise ValueError('root required')
     source = Path(__file__).resolve().parent
@@ -128,7 +191,10 @@ def main():
         raise ValueError('install only from official production Git checkout')
     if subprocess.check_output(['git', '-C', '/opt/pastelerias-erp', 'status', '--porcelain']).strip():
         raise ValueError('dirty production checkout')
-    install(source)
+    if args.release_nonce:
+        refresh(source, args.release_nonce)
+    else:
+        install(source)
 
 
 if __name__ == '__main__':
