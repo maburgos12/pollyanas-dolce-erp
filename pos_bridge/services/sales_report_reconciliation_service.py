@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 from django.db.models import Sum
 
+from pos_bridge.services.archive_access import open_source
 from pos_bridge.models import PointDailySale
 from recetas.models import VentaHistorica
 
@@ -83,38 +84,39 @@ class SalesReportReconciliationService:
         return SalesReconciliationResult(summary=summary, rows=rows, report_path=str(csv_path))
 
     def _parse_excel_report(self, report_path: str) -> tuple[dict[str, dict], dict[str, Decimal]]:
-        path = Path(report_path)
-        sheet1 = pd.read_excel(path, sheet_name="Sheet1", header=None)
-        sheet2 = pd.read_excel(path, sheet_name="Sheet2", header=None)
+        with open_source(report_path) as source:
+            path = source.local_path
+            sheet1 = pd.read_excel(path, sheet_name="Sheet1", header=None)
+            sheet2 = pd.read_excel(path, sheet_name="Sheet2", header=None)
 
-        data = defaultdict(self._empty_row)
-        current_category = ""
-        for _, row in sheet1.iterrows():
-            category, code, product, qty, venta = row[0], row[3], row[4], row[5], row[9]
-            if isinstance(category, str) and category.strip() and category != "CATEGORÍA":
-                current_category = category.strip()
-            if isinstance(product, str) and ("Total de la categoría" in product or product == "PRODUCTO"):
-                continue
-            try:
-                if pd.notna(code) and pd.notna(product) and pd.notna(qty) and pd.notna(venta):
-                    code_str = str(code).strip()
-                    qty_dec = Decimal(str(qty))
-                    venta_dec = Decimal(str(venta))
-                    data[code_str]["producto"] = str(product).strip()
-                    data[code_str]["categoria"] = current_category
-                    data[code_str]["qty"] += qty_dec
-                    data[code_str]["venta"] += venta_dec
-            except Exception:
-                continue
+            data = defaultdict(self._empty_row)
+            current_category = ""
+            for _, row in sheet1.iterrows():
+                category, code, product, qty, venta = row[0], row[3], row[4], row[5], row[9]
+                if isinstance(category, str) and category.strip() and category != "CATEGORÍA":
+                    current_category = category.strip()
+                if isinstance(product, str) and ("Total de la categoría" in product or product == "PRODUCTO"):
+                    continue
+                try:
+                    if pd.notna(code) and pd.notna(product) and pd.notna(qty) and pd.notna(venta):
+                        code_str = str(code).strip()
+                        qty_dec = Decimal(str(qty))
+                        venta_dec = Decimal(str(venta))
+                        data[code_str]["producto"] = str(product).strip()
+                        data[code_str]["categoria"] = current_category
+                        data[code_str]["qty"] += qty_dec
+                        data[code_str]["venta"] += venta_dec
+                except Exception:
+                    continue
 
-        declared = {"venta": Decimal("0"), "venta_neta": Decimal("0")}
-        for _, row in sheet2.iterrows():
-            values = [value for value in row.tolist() if pd.notna(value)]
-            if values and values[0] == "Total Ventas":
-                declared["venta"] = Decimal(str(values[3]))
-                declared["venta_neta"] = Decimal(str(values[5]))
-                break
-        return data, declared
+            declared = {"venta": Decimal("0"), "venta_neta": Decimal("0")}
+            for _, row in sheet2.iterrows():
+                values = [value for value in row.tolist() if pd.notna(value)]
+                if values and values[0] == "Total Ventas":
+                    declared["venta"] = Decimal(str(values[3]))
+                    declared["venta_neta"] = Decimal(str(values[5]))
+                    break
+            return data, declared
 
     def _load_canonical_rows(self, *, start_date: date, end_date: date) -> dict[str, dict]:
         rows = defaultdict(self._empty_row)

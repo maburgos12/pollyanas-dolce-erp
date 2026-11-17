@@ -1,0 +1,8 @@
+[Unit]
+Description=Recover requested Point sources and prepare eligible cleanup lots
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=30s
+Unit=erp-point-archive.service
+[Install]
+WantedBy=timers.target

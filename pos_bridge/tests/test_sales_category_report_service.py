@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -115,3 +117,27 @@ class PointSalesCategoryReportServiceTests(SimpleTestCase):
                 }
             ],
         )
+
+
+    def test_fetch_collision_preserves_closed_source_bytes(self):
+        service = PointSalesCategoryReportService()
+        response = SimpleNamespace(content=b'new report', raise_for_status=lambda: None)
+        session = SimpleNamespace(session=SimpleNamespace(get=Mock(return_value=response)))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'closed.xls'
+            path.write_bytes(b'closed historical report')
+            service._output_path = Mock(return_value=path)
+            with self.assertRaises(FileExistsError):
+                service.fetch_report_with_session(auth_session=session, start_date=date(2026, 1, 1), end_date=date(2026, 1, 31))
+            self.assertEqual(path.read_bytes(), b'closed historical report')
+
+    def test_fetch_failed_write_removes_only_newly_created_file(self):
+        service = PointSalesCategoryReportService()
+        response = SimpleNamespace(content=object(), raise_for_status=lambda: None)
+        session = SimpleNamespace(session=SimpleNamespace(get=Mock(return_value=response)))
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / 'new.xls'
+            service._output_path = Mock(return_value=path)
+            with self.assertRaises(TypeError):
+                service.fetch_report_with_session(auth_session=session, start_date=date(2026, 1, 1), end_date=date(2026, 1, 31))
+            self.assertFalse(path.exists())

@@ -1,0 +1,26 @@
+[Unit]
+Description=Execute only exact current Telegram-approved Point archive lots
+Wants=network-online.target
+After=network-online.target
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+StateDirectory=erp-cleanup-execute
+StateDirectoryMode=0700
+LoadCredential=telegram.json:/etc/erp-mac-ia-watchdog/telegram.json
+ExecStart=/usr/bin/python3 -B /opt/pastelerias-erp/ops/erp-telegram-release/erp_cleanup_execute.py --once
+TimeoutStartSec=1800
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/opt/pastelerias-erp/storage/pos_bridge/archive /opt/pastelerias-erp/storage/pos_bridge/raw_exports /var/lib/erp-point-decision/cleanups /run/lock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+MemoryMax=512M
+TasksMax=64
+Nice=15
+IOSchedulingClass=idle

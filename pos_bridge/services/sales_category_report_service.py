@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urljoin
 import pandas as pd
 from django.utils import timezone
 
+from pos_bridge.services.archive_access import open_source
 from pos_bridge.config import PointBridgeSettings, load_point_bridge_settings
 from pos_bridge.services.point_http_session_service import PointHttpSessionService
 from pos_bridge.utils.helpers import decimal_from_value, safe_slug
@@ -146,7 +147,13 @@ class PointSalesCategoryReportService:
             credito=credito,
         )
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_bytes(response.content)
+        output = output_path.open("xb")
+        try:
+            with output:
+                output.write(response.content)
+        except Exception:
+            output_path.unlink(missing_ok=True)
+            raise
         return PointSalesCategoryReportResult(
             request_url=f"{request_url}?{urlencode(params)}",
             report_path=str(output_path),
@@ -190,11 +197,12 @@ class PointSalesCategoryReportService:
         return branches
 
     def parse_report(self, *, report_path: str) -> PointSalesCategoryParsedReport:
-        path = Path(report_path)
-        workbook = pd.ExcelFile(path)
-        detail_rows = self._parse_detail_sheet(path=path, sheet_names=workbook.sheet_names)
-        summary = self._parse_summary_sheet(path=path, sheet_names=workbook.sheet_names)
-        return PointSalesCategoryParsedReport(rows=detail_rows, summary=summary, report_path=str(path))
+        with open_source(report_path) as source:
+            path = source.local_path
+            with pd.ExcelFile(path) as workbook:
+                detail_rows = self._parse_detail_sheet(path=path, sheet_names=workbook.sheet_names)
+                summary = self._parse_summary_sheet(path=path, sheet_names=workbook.sheet_names)
+            return PointSalesCategoryParsedReport(rows=detail_rows, summary=summary, report_path=str(source.logical_path))
 
     def _parse_detail_sheet(self, *, path: Path, sheet_names: list[str]) -> list[dict]:
         for sheet_name in sheet_names:

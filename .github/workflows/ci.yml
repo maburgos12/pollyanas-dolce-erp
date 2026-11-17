@@ -103,6 +103,10 @@ jobs:
           python -m unittest discover -s scripts/tests -p test_vps_backup_health.py
           python -m unittest discover -s scripts/tests -p test_vps_backup_alerts.py
           python -m unittest discover -s scripts/tests -p test_cleanup_prepare.py
+          python -m unittest discover -s scripts/tests -p test_cleanup_execute.py
+          python -m unittest discover -s scripts/tests -p test_point_archive.py
+          python -m unittest discover -s scripts/tests -p test_lifecycle_install.py
+          systemd-analyze verify scripts/ops/erp-point-archive.service scripts/ops/erp-point-archive.timer scripts/ops/erp-cleanup-execute.service scripts/ops/erp-cleanup-execute.timer
           python -m unittest discover -s scripts/tests -p test_nas_vps_monitor.py
           python -m unittest discover -s scripts/tests -p test_carga_point_alerts.py
           python -m unittest discover -s scripts/tests -p 'test_telegram*.py'
