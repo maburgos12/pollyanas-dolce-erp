@@ -85,7 +85,8 @@ class PointLifecycleFixture:
         return {'entries': entries, 'next_id': 1, 'has_more': False}
 
     def prepare(self):
-        with patch.object(archive.prep, 'disk_percent', return_value=80):
+        with patch.object(archive.prep, 'disk_percent', return_value=80), \
+             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: self.broker)):
             return self.broker.prepare(self.ledger, self.config, self.send)
 
     def row(self):
@@ -104,9 +105,39 @@ class PointLifecycleFixture:
 
 class PointBrokerTests(unittest.TestCase):
     def setUp(self):
+        clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.fixture = PointLifecycleFixture(Path(self.temp.name).resolve())
+
+    def test_night_has_no_preparation_or_request(self):
+        f = self.fixture
+        with patch('time.time', return_value=1794938400 - 9*3600):
+            self.assertEqual(f.prepare(), 'outside_approval_hours')
+        f.send.assert_not_called()
+        self.assertEqual(f.nas.get_calls, 0)
+        self.assertTrue(f.source.exists())
+
+    def test_pending_point_lot_revalidated_once_next_morning(self):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        f = self.fixture
+        day = datetime(2026, 11, 17, 7, tzinfo=ZoneInfo('America/Mazatlan')).timestamp()
+        with patch('time.time', return_value=day):
+            self.assertEqual(f.prepare(), 'requested')
+            first = f.row()
+        before = f.nas.get_calls
+        with patch('time.time', return_value=day+86400), \
+             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: f.broker)):
+            cleanup.process_scheduled(f.ledger, f.config, f.send)
+            cleanup.process_scheduled(f.ledger, f.config, f.send)
+            self.assertEqual(f.prepare(), 'waiting')
+        self.assertEqual(f.send.call_count, 4)
+        self.assertEqual(f.nas.get_calls, before+1)
+        rows = [f.ledger.read(p.stem) for p in f.ledger.directory.glob('*.json')]
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({r['proposal_sha256'] for r in rows}, {first['proposal_sha256']})
+        self.assertTrue(f.source.exists())
 
     def test_prepare_approve_retire_queue_recover_preserves_bytes_and_evidence(self):
         f = self.fixture
@@ -115,7 +146,7 @@ class PointBrokerTests(unittest.TestCase):
         self.assertTrue(f.source.exists())
         entry = f.store.catalog_entry(relative_path=f.source.name)
         self.assertEqual(f.store.catalog_entry(entry_id=entry['id']), entry)
-        self.assertEqual(f.nas.get_calls, 1)
+        self.assertEqual(f.nas.get_calls, 2)
         self.assertEqual(f.execute(), 'not_approved')
         f.decide()
         self.assertEqual(f.execute(), 'completed')

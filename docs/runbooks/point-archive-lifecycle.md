@@ -73,3 +73,12 @@ y ledger. Si hubo retiros, recuperar todas las fuentes afectadas y comprobar byt
 antes de retirar el lector. No revertir a lectores locales antiguos con fuentes
 archivadas. Fallar una activación conserva módulos compatibles; no revierte código
 mientras un job recién iniciado podría estar usándolo.
+
+## Coordinación con horario Telegram
+
+Depende del horario permanente del PR #1729. El broker prepara solicitudes
+solo entre 07:00 y 20:00, America/Mazatlan; la recuperación pedida por lectores
+continúa fuera de ese horario. El programador compartido revalida a las 07:00
+el mismo lote pendiente vencido, sin generar una propuesta distinta. Rechazos,
+aprobaciones y ejecuciones no se renuevan. La instalación conserva los módulos
+y el timer del horario; no debe desplegarse una versión anterior encima.

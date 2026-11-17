@@ -103,7 +103,7 @@ Decisiones humanas siguen preservadas: pendiente, aprobada, rechazada, revocada 
 - Reclamar operación durable con identificador único. Escribir y sincronizar intención por archivo antes del unlink, y resultado después. Si reinicia entre ambos, comprobar existencia/hash y reconciliar; no repetir operación ambigua a ciegas.
 - Si vence a mitad del lote, detener los archivos restantes y reportar resultado parcial. Nunca mantener la autorización viva porque empezó antes de vencer. No borrar nuevos originales con una aprobación anterior.
 - Notificaciones con outbox durable separado: reintento acotado de entrega, deduplicación por evento. No asumir entrega al usuario si Telegram no confirmó.
-- Solicitud vencida sin efectos: revalidar todo y permitir una única nueva solicitud por el mismo incidente; después esperar intervención y evitar spam. Rechazo explícito bloquea esa propuesta hasta instrucción nueva. No renovar decisiones ambiguas.
+- Ajuste autorizado por Mauricio el 17/11: solicitud vencida sin decisión ni efectos se revalida a las 07:00 mediante el programador compartido de Telegram, máximo un intento por día y propuesta exacta. El broker no genera lotes sustitutos para eludir decisiones. Rechazo explícito bloquea esa propuesta hasta instrucción nueva. No renovar decisiones ambiguas.
 - Confirmación final: archivos realmente retirados/omitidos, bytes netos `df`, porcentaje, evidencia NAS y preservación de servicios/backups. 75% no se comunica como menos de 75%.
 
 ## 6. Qué hacer cuando una comprobación no pasa
