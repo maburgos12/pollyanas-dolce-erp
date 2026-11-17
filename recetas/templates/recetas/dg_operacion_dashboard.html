@@ -288,7 +288,10 @@
         <a class="btn btn-secondary" href="{% url 'reportes:ventas' %}?months=6">Abrir ventas</a>
       </div>
       {% if point_ticket_summary.rows %}
-        <p class="pd-chart-source">{{ point_ticket_summary.with_tickets_count }} de {{ point_ticket_summary.branch_count }} sucursales con tickets</p>
+        <p class="pd-chart-source">
+          Corte del {{ fecha_operacion|date:"d/m/Y" }} · {{ point_ticket_summary.with_tickets_count }} de {{ point_ticket_summary.branch_count }} sucursales con tickets
+          {% if point_ticket_summary_updated %} · Point actualizado después de guardar el corte{% endif %}
+        </p>
         <div class="table-responsive">
           <table class="table">
             <thead><tr><th scope="col">Sucursal</th><th scope="col">Tickets</th><th scope="col">Promedio (MXN)</th></tr></thead>

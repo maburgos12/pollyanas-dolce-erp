@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.template.loader import render_to_string
 from django.test import TestCase
 from django.utils import timezone
 
@@ -195,6 +196,57 @@ class DecisionSupportServicesTests(TestCase):
             captured_at=captured_at,
             sync_job=self.sync_job,
         )
+
+    def test_waste_exposure_preserves_retail_and_excludes_cedis_commercial_proxy(self):
+        cedis, _ = Sucursal.objects.get_or_create(codigo="CEDIS", defaults={"nombre": "Unidad de producción"})
+        tienda = Sucursal.objects.create(codigo="TIENDA-CEDIS", nombre="Tienda cerca de CEDIS")
+        for branch, recipe, produced, sold, waste in (
+            (cedis, self.recipe_hot, 100, 0, 0),
+            (cedis, self.recipe_cold, 100, 0, 5),
+            (tienda, self.recipe_cold, 100, 85, 5),
+        ):
+            FactProduccionDiaria.objects.create(
+                fecha=self.target_date - timedelta(days=1), sucursal=branch,
+                receta=recipe, producido=produced, vendido=sold, merma=waste,
+            )
+        with patch("reportes.waste_detection_service._latest_unit_cost_map",
+                   return_value={self.recipe_hot.pk: Decimal("7"), self.recipe_cold.pk: Decimal("7")}):
+            result = build_waste_detection_context(reference_date=self.target_date, top_n=None)
+        rows = {(row["branch_id"], row["recipe_id"]): row for row in result["rows"]}
+        self.assertNotIn((cedis.pk, self.recipe_hot.pk), rows)
+        centro = rows[(cedis.pk, self.recipe_cold.pk)]
+        self.assertEqual(centro["waste_units"], Decimal("5"))
+        self.assertEqual(centro["realized_impact"], Decimal("35"))
+        self.assertIsNone(centro["exposed_impact"])
+        self.assertIsNone(centro["rotation_pct"])
+        self.assertEqual(centro["risk_level"], "MEDIO")
+        tienda_row = rows[(tienda.pk, self.recipe_cold.pk)]
+        self.assertEqual(tienda_row["sold_units"], Decimal("85"))
+        self.assertEqual(tienda_row["waste_units"], Decimal("5"))
+        self.assertEqual(tienda_row["realized_impact"], Decimal("35"))
+        self.assertEqual(tienda_row["exposed_impact"], Decimal("105"))
+        self.assertEqual(tienda_row["rotation_pct"], Decimal("85"))
+        self.assertEqual(tienda_row["risk_level"], "MEDIO")
+        self.assertEqual(result["summary"]["exposed_impact"],
+                         sum(row["exposed_impact"] for row in result["rows"] if row["branch_id"] != cedis.pk))
+
+    def test_dashboard_does_not_show_stale_cedis_exposure(self):
+        html = render_to_string("core/dashboard_executive.html", {
+            "dashboard_base_template": "core/dashboard_fragment_base.html",
+            "dashboard_exec_ready": True,
+            "decision_support": {"waste": {"rows": [
+                {"branch_code": "CEDIS", "recipe_name": "Centro QA",
+                 "waste_units": Decimal("5.25"), "realized_impact": Decimal("36.75"),
+                 "exposed_impact": Decimal("700")},
+                {"branch_code": "TIENDA-CEDIS", "recipe_name": "Tienda QA",
+                 "waste_units": Decimal("5"), "realized_impact": Decimal("35"),
+                 "exposed_impact": Decimal("105")},
+            ]}},
+        })
+        self.assertIn("Centro QA", html)
+        self.assertIn("36.75", html)
+        self.assertNotIn("$700.00", html)
+        self.assertIn("$105.00", html)
 
     def test_services_return_explainable_recommendations(self):
         forecast_context = build_daily_forecast_context(target_date=self.target_date, reference_date=self.target_date, top_n=10)

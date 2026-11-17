@@ -73,30 +73,40 @@ def build_waste_detection_context(*, reference_date: date | None = None, lookbac
         produced = _to_decimal(row.get("produced"))
         sold = _to_decimal(row.get("sold"))
         waste = _to_decimal(row.get("waste"))
-        if produced <= ZERO and waste <= ZERO:
+        branch_code = row.get("sucursal__codigo") or ""
+        es_cedis = branch_code.upper() == "CEDIS"
+        if waste <= ZERO and (produced <= ZERO or es_cedis):
             continue
         reference_units = max(produced, sold, waste)
-        rotation_pct = (sold / reference_units * Decimal("100")) if reference_units > ZERO else ZERO
+        rotation_pct = None if es_cedis else (
+            sold / reference_units * Decimal("100") if reference_units > ZERO else ZERO
+        )
         waste_rate_pct = (waste / reference_units * Decimal("100")) if reference_units > ZERO else ZERO
-        excess_units = max(produced - sold, ZERO)
+        excess_units = None if es_cedis else max(produced - sold, ZERO)
         unit_cost = _to_decimal(cost_map.get(int(row["receta_id"])))
         realized_impact = waste * unit_cost
-        exposed_impact = excess_units * unit_cost
-        if waste_rate_pct >= Decimal("8") or rotation_pct <= Decimal("75"):
+        exposed_impact = excess_units * unit_cost if excess_units is not None else None
+        if waste_rate_pct >= Decimal("8") or (rotation_pct is not None and rotation_pct <= Decimal("75")):
             risk_level = "ALTO"
-        elif waste_rate_pct >= Decimal("4") or rotation_pct <= Decimal("90"):
+        elif waste_rate_pct >= Decimal("4") or (rotation_pct is not None and rotation_pct <= Decimal("90")):
             risk_level = "MEDIO"
         else:
             risk_level = "BAJO"
-        why = (
-            f"Produccion {produced.quantize(Decimal('0.01'))} pzs, venta {sold.quantize(Decimal('0.01'))}, "
-            f"merma {waste.quantize(Decimal('0.01'))} ({waste_rate_pct.quantize(Decimal('0.01'))}%), "
-            f"rotacion {rotation_pct.quantize(Decimal('0.01'))}%."
-        )
+        if es_cedis:
+            why = (
+                f"Producción {produced.quantize(Decimal('0.01'))} pzs, "
+                f"merma registrada {waste.quantize(Decimal('0.01'))} pzs."
+            )
+        else:
+            why = (
+                f"Producción {produced.quantize(Decimal('0.01'))} pzs, venta {sold.quantize(Decimal('0.01'))}, "
+                f"merma {waste.quantize(Decimal('0.01'))} ({waste_rate_pct.quantize(Decimal('0.01'))}%), "
+                f"rotación {rotation_pct.quantize(Decimal('0.01'))}%."
+            )
         risk_rows.append(
             {
                 "branch_id": int(row["sucursal_id"]),
-                "branch_code": row.get("sucursal__codigo") or "",
+                "branch_code": branch_code,
                 "branch_name": row.get("sucursal__nombre") or "",
                 "recipe_id": int(row["receta_id"]),
                 "recipe_name": row.get("receta__nombre") or "",
@@ -105,17 +115,18 @@ def build_waste_detection_context(*, reference_date: date | None = None, lookbac
                 "produced_units": _quantize_units(produced),
                 "sold_units": _quantize_units(sold),
                 "waste_units": _quantize_units(waste),
-                "excess_units": _quantize_units(excess_units),
-                "rotation_pct": rotation_pct.quantize(Decimal("0.01")),
+                "excess_units": _quantize_units(excess_units) if excess_units is not None else None,
+                "rotation_pct": rotation_pct.quantize(Decimal("0.01")) if rotation_pct is not None else None,
                 "waste_rate_pct": waste_rate_pct.quantize(Decimal("0.01")),
                 "risk_level": risk_level,
                 "realized_impact": _quantize_money(realized_impact),
-                "exposed_impact": _quantize_money(exposed_impact),
+                "exposed_impact": _quantize_money(exposed_impact) if exposed_impact is not None else None,
                 "why": why,
             }
         )
         total_realized += realized_impact
-        total_exposed += exposed_impact
+        if exposed_impact is not None:
+            total_exposed += exposed_impact
     risk_rows.sort(
         key=lambda item: (
             _to_decimal(item.get("realized_impact")) + _to_decimal(item.get("exposed_impact")),
@@ -132,5 +143,5 @@ def build_waste_detection_context(*, reference_date: date | None = None, lookbac
             "exposed_impact": _quantize_money(total_exposed),
             "high_risk_rows": sum(1 for row in risk_rows if row["risk_level"] == "ALTO"),
         },
-        "note": "Se marca riesgo por sobreproduccion persistente, baja rotacion y merma historica sobre los ultimos 28 dias.",
+        "note": "El riesgo comercial considera producción, ventas y merma. En CEDIS se considera la merma registrada.",
     }

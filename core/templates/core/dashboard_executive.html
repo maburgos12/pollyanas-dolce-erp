@@ -443,7 +443,7 @@
       <div class="home-exec-section-head">
         <div>
           <h2 class="home-exec-title">Productos en riesgo</h2>
-          <p class="home-exec-copy">Sobreproducción, baja rotación y merma histórica convertidas a impacto económico visible.</p>
+          <p class="home-exec-copy">Merma registrada y exposición estimada por producción menos ventas en sucursales comerciales. En CEDIS la exposición comercial no aplica.</p>
         </div>
         <div class="home-exec-panel-actions">
           <span class="home-exec-pill">{{ decision_support.waste.summary.high_risk_rows|default:0 }} alto riesgo</span>
@@ -453,7 +453,7 @@
         {% for row in decision_support.waste.rows|slice:":3" %}
         <article class="home-exec-list-item {% if row.risk_level == 'ALTO' %}is-danger{% elif row.risk_level == 'MEDIO' %}is-warning{% else %}is-success{% endif %}">
           <strong>{{ row.recipe_name }} · {{ row.branch_code }}</strong>
-          <div>Merma {{ row.waste_units|floatformat:0|intcomma }} pzs · impacto real ${{ row.realized_impact|floatformat:2|intcomma }} · expuesto ${{ row.exposed_impact|floatformat:2|intcomma }}</div>
+          <div>Merma {{ row.waste_units|floatformat:-3|intcomma }} pzs · costo estimado ${{ row.realized_impact|floatformat:2|intcomma }}{% if row.branch_code|upper != "CEDIS" and row.exposed_impact is not None %} · exposición comercial ${{ row.exposed_impact|floatformat:2|intcomma }}{% endif %}</div>
           <div class="home-exec-subtle">{{ row.why }}</div>
         </article>
         {% empty %}
