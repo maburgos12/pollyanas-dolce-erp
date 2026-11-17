@@ -1157,23 +1157,53 @@ def _bi_daily_sales_snapshot(*, daily_only: bool = False) -> dict[str, object]:
     return snapshot
 
 
-def _bi_branch_weekday_comparisons(limit: int = 5) -> list[dict[str, object]]:
-    source = _sales_source_context()
+def _bi_closed_weekday_comparison() -> tuple[date, date, tuple[int, ...]] | None:
+    current_date = closed_sales.latest_closed_sales_date()
+    if current_date is None:
+        return None
+    previous_date = current_date - timedelta(days=7)
+    if closed_sales.latest_closed_sales_date(today=previous_date + timedelta(days=1)) != previous_date:
+        return None
+    current_branches = {row["branch_id"] for row in closed_sales.required_sales_branches(current_date)}
+    previous_branches = {row["branch_id"] for row in closed_sales.required_sales_branches(previous_date)}
+    shared_branches = tuple(sorted(current_branches & previous_branches))
+    return (current_date, previous_date, shared_branches) if shared_branches else None
+
+
+def _bi_comparison_scope(source, closed_comparison):
+    if closed_comparison is not None:
+        return closed_comparison
     latest_date = source["latest_date"]
-    if not latest_date:
-        return []
-    comparable_date = next((date_value for date_value in _sales_previous_dates(source, latest_date) if date_value.weekday() == latest_date.weekday()), None)
-    if not comparable_date:
+    if latest_date is None:
+        return None, None, None
+    comparable_date = next(
+        (day for day in _sales_previous_dates(source, latest_date) if day.weekday() == latest_date.weekday()),
+        None,
+    )
+    return latest_date, comparable_date, None
+
+
+def _bi_branch_weekday_comparisons(
+    limit: int = 5, *, closed_comparison: tuple[date, date, tuple[int, ...]] | None = None,
+) -> list[dict[str, object]]:
+    source = _sales_source_context()
+    latest_date, comparable_date, branch_ids = _bi_comparison_scope(source, closed_comparison)
+    if not latest_date or not comparable_date:
         return []
     if source["mode"] == "point_stage":
         bulk = get_daily_sales_bulk(
             fechas=[latest_date, comparable_date],
+            sucursales=branch_ids,
             dimension="branch",
             include_indicators=True,
             coverage_policy="strict_priority",
         )
         current_payload = bulk["dates"].get(latest_date.isoformat(), {})
         comparable_payload = bulk["dates"].get(comparable_date.isoformat(), {})
+        if closed_comparison is not None and not (
+            current_payload.get("coverage_accepted") and comparable_payload.get("coverage_accepted")
+        ):
+            return []
         current_rows = list(current_payload.get("rows") or [])
         current_indicator_map = current_payload.get("indicator_map") or {}
         comparable_map = {
@@ -1181,6 +1211,8 @@ def _bi_branch_weekday_comparisons(limit: int = 5) -> list[dict[str, object]]:
             for row in comparable_payload.get("rows") or []
         }
         comparable_indicator_map = comparable_payload.get("indicator_map") or {}
+    elif closed_comparison is not None:
+        return []
     else:
         current_rows = list(_sales_rows_for_date(source, latest_date).exclude(sucursal_id__isnull=True).values("sucursal_id", "sucursal__codigo", "sucursal__nombre").annotate(units=Sum("cantidad"), amount=Sum("monto_total"), tickets=Sum("tickets")))
         comparable_map = {row["sucursal_id"]: row for row in _sales_rows_for_date(source, comparable_date).exclude(sucursal_id__isnull=True).values("sucursal_id").annotate(units=Sum("cantidad"), amount=Sum("monto_total"), tickets=Sum("tickets"))}
@@ -1232,27 +1264,33 @@ def _bi_branch_weekday_comparisons(limit: int = 5) -> list[dict[str, object]]:
     return rows[:limit]
 
 
-def _bi_product_weekday_comparisons(limit: int = 5) -> list[dict[str, object]]:
+def _bi_product_weekday_comparisons(
+    limit: int = 5, *, closed_comparison: tuple[date, date, tuple[int, ...]] | None = None,
+) -> list[dict[str, object]]:
     source = _sales_source_context()
-    latest_date = source["latest_date"]
-    if not latest_date:
-        return []
-    comparable_date = next((date_value for date_value in _sales_previous_dates(source, latest_date) if date_value.weekday() == latest_date.weekday()), None)
-    if not comparable_date:
+    latest_date, comparable_date, branch_ids = _bi_comparison_scope(source, closed_comparison)
+    if not latest_date or not comparable_date:
         return []
     if source["mode"] == "point_stage":
         bulk = get_daily_sales_bulk(
             fechas=[latest_date, comparable_date],
+            sucursales=branch_ids,
             dimension="product",
             coverage_policy="strict_priority",
         )
         current_payload = bulk["dates"].get(latest_date.isoformat(), {})
         comparable_payload = bulk["dates"].get(comparable_date.isoformat(), {})
+        if closed_comparison is not None and not (
+            current_payload.get("coverage_accepted") and comparable_payload.get("coverage_accepted")
+        ):
+            return []
         current_rows = list(current_payload.get("rows") or [])
         comparable_map = {
             row["key"]: row
             for row in comparable_payload.get("rows") or []
         }
+    elif closed_comparison is not None:
+        return []
     else:
         current_rows = list(_sales_rows_for_date(source, latest_date).exclude(receta_id__isnull=True).filter(monto_total__gt=0).values("receta_id", "receta__nombre").annotate(units=Sum("cantidad"), amount=Sum("monto_total"), branch_count=Count("sucursal", distinct=True)))
         comparable_map = {row["receta_id"]: row for row in _sales_rows_for_date(source, comparable_date).exclude(receta_id__isnull=True).filter(monto_total__gt=0).values("receta_id").annotate(units=Sum("cantidad"), amount=Sum("monto_total"), branch_count=Count("sucursal", distinct=True))}
@@ -6343,8 +6381,13 @@ def bi(request: HttpRequest) -> HttpResponse:
     if export_format == "branches_pdf":
         return _export_branches_bi_pdf(executive_panels["branch_contribution_panel"])
 
+    closed_comparison = _bi_closed_weekday_comparison()
+    comparison_cache_parts = (
+        (closed_comparison[0], closed_comparison[1], *closed_comparison[2]) if closed_comparison else ()
+    )
     context = {
         "bi_detail_loaded": True,
+        "closed_weekday_comparison": closed_comparison,
         "sales_confidence": executive_panels["sales_confidence"],
         "forecast_panel": executive_panels["forecast_panel"],
         "yoy_panel": executive_panels["yoy_panel"],
@@ -6363,16 +6406,16 @@ def bi(request: HttpRequest) -> HttpResponse:
         ),
         "branch_weekday_rows": _bi_cached_value(
             runtime_cache=bi_runtime_cache,
-            section="branch-weekday-rows",
-            builder=_bi_branch_weekday_comparisons,
-            parts=(timezone.localdate().isoformat(),),
-        ),
+            section="branch-closed-weekday-rows",
+            builder=lambda: _bi_branch_weekday_comparisons(closed_comparison=closed_comparison),
+            parts=comparison_cache_parts,
+        ) if closed_comparison else [],
         "product_weekday_rows": _bi_cached_value(
             runtime_cache=bi_runtime_cache,
-            section="product-weekday-rows",
-            builder=_bi_product_weekday_comparisons,
-            parts=(timezone.localdate().isoformat(),),
-        ),
+            section="product-closed-weekday-rows",
+            builder=lambda: _bi_product_weekday_comparisons(closed_comparison=closed_comparison),
+            parts=comparison_cache_parts,
+        ) if closed_comparison else [],
         "current_year": executive_panels["yoy_panel"]["current_year"],
         "prev_year": executive_panels["yoy_panel"]["prev_year"],
         "prev2_year": executive_panels["yoy_panel"]["prev2_year"],
