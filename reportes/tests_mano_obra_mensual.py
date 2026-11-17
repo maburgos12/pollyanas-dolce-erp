@@ -254,6 +254,22 @@ class ManoObraMensualTests(TestCase):
         self.assertEqual(wb['Simulacion']['H4'].value, 10.001)
         self.assertEqual(self.client.get(url, {'periodo': 'invalido'}).status_code, 400)
 
+    def test_vista_distingue_importes_y_conserva_cierre_aprobado(self):
+        cierre = aprobar('2026-09', calcular('2026-09')['fingerprint'], self.user)
+        persona = Empleado.objects.create(codigo='MO-2', nombre='Puesto pendiente',
+            departamento='PRODUCCION', departamento_origen='PRODUCCION')
+        linea = NominaLinea.objects.create(periodo=self.periodo, empleado=persona,
+            departamento_snapshot='PRODUCCION', total_percepciones=Decimal('20.02'))
+        NominaLinea.objects.filter(pk=linea.pk).update(total_percepciones=Decimal('20.02'))
+        self.client.force_login(self.user)
+        result = self.client.get(reverse('reportes:mano_obra_mensual'), {'periodo': '2026-09'})
+        self.assertContains(result, 'Fondo clasificado pendiente de reparto: <strong>$100.01</strong>')
+        self.assertContains(result, 'Nómina pendiente de clasificar: <strong>$20.02</strong>')
+        self.assertContains(result, 'Las fuentes actuales cambiaron; Finanzas conserva el cierre aprobado.')
+        self.assertNotContains(result, 'Sin cierre aprobado para este periodo.')
+        self.assertEqual(result.context['cierre'].pk, cierre.pk)
+        self.assertEqual(CierreManoObraMensual.objects.count(), 1)
+
     def test_permisos_csrf_confirmacion(self):
         url = reverse('reportes:mano_obra_mensual')
         otro = User.objects.create_user('lector', password='test-password')
