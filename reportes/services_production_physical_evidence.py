@@ -20,7 +20,7 @@ def add_physical_evidence(user, cutoff, groups):
     if not puede_coordinar(user):
         reviewed = AccesoConteoSucursal.objects.filter(user_id=user.pk, activo=True, revisar=True)
         visible = visible.filter(sucursal_id__in=reviewed.values("sucursal_id"))
-    visible = visible.filter(sucursal_id__in=Sucursal.objects.filter(sucursales_operativas_q()).values("pk"))
+    visible = visible.filter(sucursal_id__in=Sucursal.objects.filter(sucursales_operativas_q(cutoff)).values("pk"))
     pairs = {
         (branch, product): cases[pk]
         for pk, branch, product in ProductInventoryAuditCase.objects.filter(pk__in=cases)

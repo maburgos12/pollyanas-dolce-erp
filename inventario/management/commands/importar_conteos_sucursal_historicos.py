@@ -121,7 +121,7 @@ def _resolver_linea(raw, *, bloquear=False):
     }
 
 
-def validar_payload(payload, *, bloquear=False):
+def validar_payload(payload, *, bloquear=False, siete_sucursales=False):
     if not isinstance(payload, dict) or set(payload) != {"fuente", "fecha", "actor", "sucursales"}:
         raise CommandError("El payload debe contener fuente, fecha, actor y sucursales.")
     source = payload["fuente"]
@@ -170,18 +170,20 @@ def validar_payload(payload, *, bloquear=False):
     if not puede_coordinar(actor):
         raise CommandError("El actor no tiene permiso vigente para coordinar conteos.")
     branches = payload["sucursales"]
-    if not isinstance(branches, list) or len(branches) != 4:
-        raise CommandError("El payload debe contener exactamente cuatro sucursales.")
+    expected = 7 if siete_sucursales else 4
+    size_label = "siete" if siete_sucursales else "cuatro"
+    if not isinstance(branches, list) or len(branches) != expected:
+        raise CommandError(f"El payload debe contener exactamente {size_label} sucursales.")
     codes = []
     for raw_branch in branches:
         if not isinstance(raw_branch, dict) or set(raw_branch) != {"codigo", "conteos"}:
             raise CommandError("Cada sucursal debe contener exclusivamente codigo y conteos.")
         codes.append(_text(raw_branch["codigo"], "sucursal.codigo", 20))
-    if len(set(codes)) != 4:
-        raise CommandError("Las cuatro sucursales deben ser distintas.")
+    if len(set(codes)) != expected:
+        raise CommandError(f"Las {size_label} sucursales deben ser distintas.")
     query = Sucursal.objects.select_for_update() if bloquear else Sucursal.objects
     catalog = {branch.codigo: branch for branch in query.filter(codigo__in=sorted(codes))}
-    if len(catalog) != 4:
+    if len(catalog) != expected:
         raise CommandError("Alguna sucursal no existe.")
 
     payload_hash = _fingerprint(payload)
@@ -224,9 +226,11 @@ def validar_payload(payload, *, bloquear=False):
     return source, count_date, actor, payload_hash, plans
 
 
-def aplicar_payload(payload):
+def aplicar_payload(payload, *, siete_sucursales=False):
     with transaction.atomic():
-        source, count_date, actor, payload_hash, plans = validar_payload(payload, bloquear=True)
+        source, count_date, actor, payload_hash, plans = validar_payload(
+            payload, bloquear=True, siete_sucursales=siete_sucursales,
+        )
         created = 0
         for plan in plans:
             if plan["previous"]:
@@ -313,6 +317,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("archivo")
         parser.add_argument("--aplicar", action="store_true")
+        parser.add_argument("--siete-sucursales", action="store_true", help="Exige siete sucursales en este lote.")
 
     def handle(self, *args, **options):
         path = Path(options["archivo"]).expanduser()
@@ -322,7 +327,7 @@ class Command(BaseCommand):
         except (OSError, UnicodeError, json.JSONDecodeError) as exc:
             raise CommandError(f"No se pudo leer el payload JSON: {exc}") from exc
         if not options["aplicar"]:
-            _, _, _, _, plans = validar_payload(payload)
+            _, _, _, _, plans = validar_payload(payload, siete_sucursales=options["siete_sucursales"])
             existing = sum(plan["previous"] is not None for plan in plans)
             self.stdout.write(
                 self.style.WARNING(
@@ -330,7 +335,7 @@ class Command(BaseCommand):
                 )
             )
             return
-        created, existing = aplicar_payload(payload)
+        created, existing = aplicar_payload(payload, siete_sucursales=options["siete_sucursales"])
         self.stdout.write(
             self.style.SUCCESS(f"Importación completa: {created} creados, {existing} ya importados.")
         )
