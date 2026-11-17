@@ -228,7 +228,9 @@
           <p class="dg-panel-subtitle">Sucursales que requieren atención.</p>
         </div>
         <div class="dg-panel-actions">
-          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}">Abrir control</a>
+          {% with cut_date=point_closure_summary.closure_date|date:'Y-m-d' %}
+          <a class="btn btn-secondary" href="{% url 'control:discrepancias' %}{% if cut_date %}?from={{ cut_date }}&amp;to={{ cut_date }}{% endif %}">Abrir control</a>
+          {% endwith %}
           <a class="btn btn-secondary" href="{% url 'recetas:reabasto_cedis' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir reabasto</a>
           <a class="btn btn-secondary" href="{% url 'recetas:consolidado_cedis_revision' %}?fecha={{ fecha_operacion|date:'Y-m-d' }}">Abrir consolidado</a>
         </div>
