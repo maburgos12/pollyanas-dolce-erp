@@ -563,22 +563,30 @@
     }
   }
   @media (max-width: 720px) {
+    .dg-shell,
     .dg-kpi-grid,
     .dg-status-grid,
     .dg-grid-2,
     .dg-grid-3,
     .dg-filters {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
     .dg-kpi-grid--4,
     .dg-grid-3--compact,
     .dg-grid-2--compact,
     .dg-alert-grid,
     .dg-filters-compact {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
     }
     .dg-title {
       font-size: 1.5rem;
+    }
+    .table-responsive > .dg-ticket-table {
+      width: 100%;
+    }
+    .table-responsive > .dg-ticket-table tbody th,
+    .table-responsive > .dg-ticket-table tbody td:last-child {
+      white-space: normal;
     }
     .dg-panel-actions {
       justify-content: flex-start;
