@@ -4,7 +4,7 @@
 {% block page_title %}Dirección General · Operación Integrada{% endblock %}
 {% block body_class %}page-dg-operacion-dashboard{% endblock %}
 {% block extra_css %}
-<link rel="stylesheet" href="/static/css/template_modules/recetas-templates-recetas-dg-operacion-dashboard.css?v=20260614-ui100-v1">
+<link rel="stylesheet" href="/static/css/template_modules/recetas-templates-recetas-dg-operacion-dashboard.css?v=20261117-dg-mobile-v1">
 <link rel="stylesheet" href="{% static 'css/pollyana_dashboards.css' %}?v=20260525-dashboard-v2">
 {% endblock %}
 {% block content %}
@@ -293,7 +293,7 @@
           {% if point_ticket_summary_updated %} · Point actualizado después de guardar el corte{% endif %}
         </p>
         <div class="table-responsive">
-          <table class="table">
+          <table class="table dg-ticket-table">
             <thead><tr><th scope="col">Sucursal</th><th scope="col">Tickets</th><th scope="col">Promedio (MXN)</th></tr></thead>
             <tbody>
             {% for row in point_ticket_summary.rows %}
