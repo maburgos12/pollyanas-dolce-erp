@@ -32,7 +32,10 @@ monitores existentes, respaldos, servicios y toda fuente fuera del lote.
 
 1. Publicar por el flujo Telegram/GitHub existente. Verificar CI, decisión y SHA
    publicado en el ledger. No copiar código por SCP ni hacer pull manual.
-2. Desde `/opt/pastelerias-erp`, ejecutar como root:
+2. Desde `/opt/pastelerias-erp`, ejecutar como root primero
+   `python3 -B ops/erp-telegram-release/install.py --release-nonce NONCE`
+   para activar los módulos y el timer de las 07:00 desde la revisión aprobada
+   actual; verificar que `erp-telegram-release.timer` quede activo. Después:
    `python3 -B ops/erp-telegram-release/install_lifecycle.py --release-nonce NONCE`.
    Conserva byte a byte el receptor Point/Mac-IA y sus timers; instala nuevas
    unidades inactivas. Rechaza otro hash de receptor o trabajos residentes activos.

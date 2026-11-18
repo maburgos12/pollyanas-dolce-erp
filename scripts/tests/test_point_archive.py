@@ -100,7 +100,7 @@ class PointLifecycleFixture:
         return cleanup.decide(query, self.config, self.ledger)
 
     def execute(self):
-        return execute.execute(self.row()['nonce'], self.ledger, self.adapter)
+        return execute.execute(self.row()['nonce'], self.ledger, self.adapter, now=time.time)
 
 
 class PointBrokerTests(unittest.TestCase):

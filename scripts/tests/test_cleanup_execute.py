@@ -59,9 +59,9 @@ class ExecutionTests(unittest.TestCase):
             manifest.write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'manifest_changed'):adapter.preflight(self.item)
     def test_pending_rejected_do_not_delete(self):
-        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'not_approved');c.decide(self.query('r'),self.config,self.ledger);self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'not_approved');self.assertTrue(self.adapter.file.exists())
+        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'not_approved');c.decide(self.query('r'),self.config,self.ledger);self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'not_approved');self.assertTrue(self.adapter.file.exists())
     def test_approve_executes_once_and_keeps_decision(self):
-        self.approve();self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'completed');self.assertFalse(self.adapter.file.exists());self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'completed');self.assertEqual(self.ledger.read(self.row['nonce'])['state'],'approved')
+        self.approve();self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'completed');self.assertFalse(self.adapter.file.exists());self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'completed');self.assertEqual(self.ledger.read(self.row['nonce'])['state'],'approved')
         with self.assertRaises(c.RecordedDecision) as ctx:c.decide(self.query(),self.config,self.ledger)
         self.assertEqual(ctx.exception.state,'completed')
     def test_expiry_during_verify_stops_before_remove(self):
@@ -69,12 +69,12 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=lambda:t[0]),'partial');self.assertTrue(self.adapter.file.exists())
     def test_restart_after_unlink_reconciles_without_second_remove(self):
         self.approve();self.adapter.kill=True
-        with self.assertRaises(KeyboardInterrupt):e.execute(self.row['nonce'],self.ledger,self.adapter)
+        with self.assertRaises(KeyboardInterrupt):e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time)
         self.adapter.remove=Mock(side_effect=AssertionError('must not repeat unlink'))
-        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'completed');self.adapter.remove.assert_not_called()
+        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'completed');self.adapter.remove.assert_not_called()
     def test_restart_preflight_failure_preserves_intent_and_history(self):
         self.approve();self.adapter.kill=True
-        with self.assertRaises(KeyboardInterrupt):e.execute(self.row['nonce'],self.ledger,self.adapter)
+        with self.assertRaises(KeyboardInterrupt):e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time)
         original=c.execution_state(self.ledger,self.row['nonce']);self.adapter.fail=True;t=time.time()
         for offset in (0,61,362):e.execute(self.row['nonce'],self.ledger,self.adapter,now=lambda:t+offset)
         record=c.execution_state(self.ledger,self.row['nonce'])
@@ -82,12 +82,12 @@ class ExecutionTests(unittest.TestCase):
     def test_terminal_receipt_recovers_without_repeating_remove(self):
         self.approve()
         with patch.object(c,'enqueue',side_effect=OSError('disk')):
-            with self.assertRaises(OSError):e.execute(self.row['nonce'],self.ledger,self.adapter)
+            with self.assertRaises(OSError):e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time)
         self.adapter.remove=Mock(side_effect=AssertionError('repeat'))
-        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'completed')
+        self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'completed')
         self.adapter.remove.assert_not_called()
     def test_changed_source_is_not_removed(self):
-        self.approve();self.adapter.file.write_bytes(b'changed');self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter),'partial');self.assertEqual(self.adapter.file.read_bytes(),b'changed')
+        self.approve();self.adapter.file.write_bytes(b'changed');self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'partial');self.assertEqual(self.adapter.file.read_bytes(),b'changed')
     def test_preflight_backoff_and_three_attempt_cap(self):
         self.approve();self.adapter.fail=True;t=time.time()
         for offset,expected in [(0,'retry'),(1,'backoff'),(61,'retry'),(362,'blocked'),(1000,'blocked')]:self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=lambda:t+offset),expected)
@@ -96,7 +96,7 @@ class ExecutionTests(unittest.TestCase):
         q=self.query();q['from']['id']=18
         with self.assertRaises(ValueError):c.decide(q,self.config,self.ledger)
         self.approve();frozen=self.ledger.directory/'proposals'/(self.row['nonce']+'.json');p=json.loads(frozen.read_text());p['risk']='changed';frozen.write_text(json.dumps(p))
-        with self.assertRaisesRegex(ValueError,'proposal_changed'):e.execute(self.row['nonce'],self.ledger,self.adapter)
+        with self.assertRaisesRegex(ValueError,'proposal_changed'):e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time)
         self.assertTrue(self.adapter.file.exists())
     def test_explicit_notification_failure_retries_but_ambiguity_does_not(self):
         c.enqueue(self.ledger,self.row,'event','test');fail=Mock(side_effect=TelegramRejected('not accepted'));c.flush(self.ledger,self.config,fail)
