@@ -278,7 +278,13 @@
                 {% endif %}
                 {% endwith %}
                 {% for count in case.physical_evidence %}
-                <p><strong>{{ case.branch }} · {% if count.historical %}Excel histórico importado{% else %}Conteo físico ERP{% endif %} #{{ count.conteo.pk }}</strong><br>
+                {% with can_open=count.conteo.sucursal.esta_operativa %}
+                <p><strong>{{ case.branch }} ·
+                  {% if can_open %}<a href="{% url 'inventario:conteos_erp:detalle' count.conteo.pk %}">{% endif %}
+                  {% if count.historical %}Excel histórico importado{% else %}Conteo físico ERP{% endif %} #{{ count.conteo.pk }}
+                  {% if can_open %}</a>{% endif %}
+                </strong><br>
+                {% endwith %}
                   {{ count.conteo.fecha|date:"d/m/Y" }} · {{ count.conteo.get_estado_display }}
                   {% if count.round %}· Ronda {% if not count.historical %}enviada {% endif %}{{ count.round }}{% endif %}
                   · {% if count.quantity is None %}Sin lectura{% else %}{{ count.quantity|floatformat:"-6u" }} {{ count.unit }}{% endif %}
