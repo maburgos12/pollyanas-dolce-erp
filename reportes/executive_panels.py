@@ -2779,6 +2779,7 @@ def build_executive_bi_panels(
     branch_id: int | None = None,
     action_filter: str | None = None,
     budget_month: int | None = None,
+    include_sales_confidence: bool = True,
 ) -> dict[str, object]:
     from reportes.sales_confidence import build_sales_confidence
     trusted_sales_latest = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
@@ -2786,7 +2787,9 @@ def build_executive_bi_panels(
     common_flow_date = _common_flow_cutoff_date() or trusted_sales_latest
     return {
         "latest_cutoff_date": trusted_sales_latest,
-        "sales_confidence": build_sales_confidence(start_date=trusted_sales_latest.replace(day=1), end_date=trusted_sales_latest),
+        "sales_confidence": build_sales_confidence(
+            start_date=trusted_sales_latest.replace(day=1), end_date=trusted_sales_latest,
+        ) if include_sales_confidence else None,
         "forecast_panel": build_sales_forecast_panel(latest_date=trusted_sales_latest),
         "yoy_panel": build_closed_yoy_panel(cutoff=closed_cutoff, months=months),
         "sales_closed_cutoff_date": closed_cutoff,

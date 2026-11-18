@@ -6355,6 +6355,7 @@ def bi(request: HttpRequest) -> HttpResponse:
             branch_id=branch_id,
             action_filter=action_filter,
             budget_month=budget_month,
+            include_sales_confidence=False,
         ),
         parts=(
             months_window,
@@ -6365,9 +6366,6 @@ def bi(request: HttpRequest) -> HttpResponse:
         ),
     )
 
-    from reportes.sales_confidence import build_sales_confidence
-    cutoff = executive_panels.get("latest_cutoff_date") or timezone.localdate()
-    executive_panels["sales_confidence"] = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
     if branch_id and export_format == "csv":
         return _export_branch_bi_csv(executive_panels["branch_pricing_panel"], executive_panels["branch_contribution_panel"])
     if branch_id and export_format == "xlsx":
@@ -6381,6 +6379,9 @@ def bi(request: HttpRequest) -> HttpResponse:
     if export_format == "branches_pdf":
         return _export_branches_bi_pdf(executive_panels["branch_contribution_panel"])
 
+    from reportes.sales_confidence import build_sales_confidence
+    cutoff = executive_panels.get("latest_cutoff_date") or timezone.localdate()
+    sales_confidence = build_sales_confidence(start_date=cutoff.replace(day=1), end_date=cutoff)
     closed_comparison = _bi_closed_weekday_comparison()
     comparison_cache_parts = (
         (closed_comparison[0], closed_comparison[1], *closed_comparison[2]) if closed_comparison else ()
@@ -6388,7 +6389,7 @@ def bi(request: HttpRequest) -> HttpResponse:
     context = {
         "bi_detail_loaded": True,
         "closed_weekday_comparison": closed_comparison,
-        "sales_confidence": executive_panels["sales_confidence"],
+        "sales_confidence": sales_confidence,
         "forecast_panel": executive_panels["forecast_panel"],
         "yoy_panel": executive_panels["yoy_panel"],
         "profitability_panel": executive_panels["profitability_panel"],

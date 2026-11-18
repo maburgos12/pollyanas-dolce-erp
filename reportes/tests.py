@@ -204,6 +204,14 @@ class ReportesBITests(TestCase):
         waste.assert_not_called()
         snapshot.assert_not_called()
 
+    def test_bi_detail_calculates_current_sales_confidence_once(self):
+        with patch("reportes.sales_confidence.build_sales_confidence", return_value={}) as confidence:
+            response = self.client.get(reverse("reportes:bi"), {"detalle": "1"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("sales_confidence", response.context)
+        confidence.assert_called_once()
+
     def test_bi_alerts_compare_closed_days_and_link_to_that_cut(self):
         fecha_abierta = date(2026, 11, 17)
         now = timezone.make_aware(datetime(2026, 11, 17, 12))
