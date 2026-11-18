@@ -834,10 +834,15 @@ class ForecastWeek:
     atypical_reason: str
 
 
-def _operational_projection_for_week(*, start_date: date, end_date: date) -> dict[str, object] | None:
+def _operational_projection_for_week(
+    *, start_date: date, end_date: date, reuse_weekly_forecast_reads: bool = False,
+) -> dict[str, object] | None:
     from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 
-    projection = calcular_proyeccion_operativa(start_date, end_date, include_validation=False)
+    projection = calcular_proyeccion_operativa(
+        start_date, end_date, include_validation=False,
+        reuse_weekly_forecast_reads=reuse_weekly_forecast_reads,
+    )
     summary = projection.get("resumen") or {}
     amount = _to_decimal(summary.get("total_ingreso"))
     quantity = _to_decimal(summary.get("total_piezas"))
@@ -860,7 +865,10 @@ def _operational_projection_for_week(*, start_date: date, end_date: date) -> dic
     }
 
 
-def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_weeks: int = 8, baseline_weeks: int = 3) -> dict[str, object]:
+def build_sales_forecast_panel(
+    *, latest_date: date | None = None, lookback_weeks: int = 8, baseline_weeks: int = 3,
+    reuse_weekly_forecast_reads: bool = False,
+) -> dict[str, object]:
     latest_date = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
     min_high_uplift_pct = _to_decimal(
         getattr(settings, "ERP_DASHBOARD_FORECAST_HIGH_SCENARIO_MIN_UPLIFT_PCT", "5"),
@@ -946,7 +954,10 @@ def build_sales_forecast_panel(*, latest_date: date | None = None, lookback_week
         )
     next_week_start = current_week_start + timedelta(days=7)
     next_week_end = next_week_start + timedelta(days=6)
-    operational_projection = _operational_projection_for_week(start_date=next_week_start, end_date=next_week_end)
+    operational_projection = _operational_projection_for_week(
+        start_date=next_week_start, end_date=next_week_end,
+        reuse_weekly_forecast_reads=reuse_weekly_forecast_reads,
+    )
     forecast_source = "historical_weekly_average"
     if operational_projection:
         base_amount = _to_decimal(operational_projection["amount"])
@@ -2780,6 +2791,7 @@ def build_executive_bi_panels(
     action_filter: str | None = None,
     budget_month: int | None = None,
     include_sales_confidence: bool = True,
+    reuse_weekly_forecast_reads: bool = False,
 ) -> dict[str, object]:
     from reportes.sales_confidence import build_sales_confidence
     trusted_sales_latest = latest_date or _sales_cutoff_date() or (timezone.localdate() - timedelta(days=1))
@@ -2790,7 +2802,9 @@ def build_executive_bi_panels(
         "sales_confidence": build_sales_confidence(
             start_date=trusted_sales_latest.replace(day=1), end_date=trusted_sales_latest,
         ) if include_sales_confidence else None,
-        "forecast_panel": build_sales_forecast_panel(latest_date=trusted_sales_latest),
+        "forecast_panel": build_sales_forecast_panel(
+            latest_date=trusted_sales_latest, reuse_weekly_forecast_reads=reuse_weekly_forecast_reads,
+        ),
         "yoy_panel": build_closed_yoy_panel(cutoff=closed_cutoff, months=months),
         "sales_closed_cutoff_date": closed_cutoff,
         "profitability_panel": build_profitability_panel(latest_date=trusted_sales_latest),

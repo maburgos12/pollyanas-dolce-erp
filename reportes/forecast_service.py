@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from math import sqrt
@@ -334,21 +335,12 @@ def _build_backtest_summary(
     }
 
 
-def build_daily_forecast_context(
-    *,
-    target_date: date | None = None,
-    reference_date: date | None = None,
-    lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
-    top_n: int | None = DEFAULT_TOP_ROWS,
-    validation_days: int = DEFAULT_VALIDATION_DAYS,
-    include_validation: bool = True,
-) -> dict[str, object]:
-    reference_date = reference_date or timezone.localdate()
-    target_date = target_date or reference_date
-    history_anchor = min(target_date, reference_date)
-    history_start = history_anchor - timedelta(days=(lookback_weeks * 7) + validation_days + 28)
-    history_end = max(reference_date, target_date)
-    sales_rows = list(
+def _forecast_history_start(history_anchor: date, lookback_weeks: int, validation_days: int) -> date:
+    return history_anchor - timedelta(days=(lookback_weeks * 7) + validation_days + 28)
+
+
+def _read_forecast_sales(history_start: date, history_end: date) -> list[dict]:
+    return list(
         FactVentaDiaria.objects.filter(
             fecha__range=(history_start, history_end),
             receta_id__isnull=False,
@@ -373,6 +365,64 @@ def build_daily_forecast_context(
         .order_by("sucursal__codigo", "receta__nombre", "fecha")
     )
 
+
+def build_daily_forecast_context(
+    *,
+    target_date: date | None = None,
+    reference_date: date | None = None,
+    lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
+    top_n: int | None = DEFAULT_TOP_ROWS,
+    validation_days: int = DEFAULT_VALIDATION_DAYS,
+    include_validation: bool = True,
+) -> dict[str, object]:
+    reference_date = reference_date or timezone.localdate()
+    target_date = target_date or reference_date
+    history_anchor = min(target_date, reference_date)
+    history_start = _forecast_history_start(history_anchor, lookback_weeks, validation_days)
+    history_end = max(reference_date, target_date)
+    return _daily_forecast_context(
+        target_date=target_date,
+        reference_date=reference_date,
+        lookback_weeks=lookback_weeks,
+        top_n=top_n,
+        validation_days=validation_days,
+        include_validation=include_validation,
+        sales_rows=_read_forecast_sales(history_start, history_end),
+    )
+
+
+def iter_future_forecast_contexts(
+    target_days: list[date], *, reference_date: date, lookback_weeks: int,
+) -> Iterator[dict[str, object]]:
+    history_start = _forecast_history_start(reference_date, lookback_weeks, DEFAULT_VALIDATION_DAYS)
+    sales_rows = _read_forecast_sales(history_start, max(target_days))
+    calibration = load_latest_calibration_profiles(reference_date=reference_date)
+    for target_day in target_days:
+        # Keep each target's original upper bound, including already recorded future sales.
+        yield _daily_forecast_context(
+            target_date=target_day,
+            reference_date=reference_date,
+            lookback_weeks=lookback_weeks,
+            top_n=None,
+            validation_days=DEFAULT_VALIDATION_DAYS,
+            include_validation=False,
+            sales_rows=(row for row in sales_rows if row["fecha"] <= target_day),
+            calibration=calibration,
+        )
+
+
+def _daily_forecast_context(
+    *,
+    target_date: date,
+    reference_date: date,
+    lookback_weeks: int,
+    top_n: int | None,
+    validation_days: int,
+    include_validation: bool,
+    sales_rows: Iterable[dict],
+    calibration=None,
+) -> dict[str, object]:
+    history_anchor = min(target_date, reference_date)
     series_by_key: dict[tuple[int, int], dict[date, dict[str, Decimal]]] = defaultdict(dict)
     labels_by_key: dict[tuple[int, int], dict[str, object]] = {}
     recent_revenue_by_key: dict[tuple[int, int], Decimal] = defaultdict(lambda: ZERO)
@@ -400,7 +450,9 @@ def build_daily_forecast_context(
     )
     selected_keys = ranked_keys if top_n is None or top_n <= 0 else ranked_keys[:top_n]
     contribution_map = _latest_contribution_map(set(selected_keys))
-    calibration_profiles, calibration_summary = load_latest_calibration_profiles(reference_date=reference_date)
+    if calibration is None:
+        calibration = load_latest_calibration_profiles(reference_date=reference_date)
+    calibration_profiles, calibration_summary = calibration
     rows: list[dict[str, object]] = []
     backtest_candidates: list[tuple[tuple[int, int], dict[str, object], dict[date, dict[str, Decimal]]]] = []
     for key in selected_keys:
