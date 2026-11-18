@@ -1,0 +1,3 @@
+{% if rent.estado == "SIN_DATOS" %}
+  {% if rent.en_perimetro_fuente or rent.gastos_mensuales.filas %}Datos parciales{% else %}Sin datos del mes{% endif %}
+{% else %}{{ rent.get_estado_display }}{% endif %}

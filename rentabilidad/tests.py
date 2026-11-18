@@ -182,5 +182,9 @@ class RentabilidadGastosFuenteTests(TestCase):
 
         self.assertContains(response, "gastos no cargados")
         self.assertContains(response, "No calculable")
-        self.assertContains(response, "Sin datos suficientes")
+        self.assertContains(response, "Datos parciales")
+        self.assertContains(response, "Referencia histórica · enero–septiembre 2026")
+        self.assertNotContains(response, "Sin datos suficientes")
+        snapshot.refresh_from_db()
+        self.assertEqual(snapshot.estado, EstadoRentabilidad.RENTABLE)
         self.assertNotContains(response, "sin gasto fijo")

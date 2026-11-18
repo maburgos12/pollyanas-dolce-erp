@@ -28,7 +28,7 @@
       </div>
     </div>
     <div class="header-actions">
-      <span class="estado-badge">{{ rent.get_estado_display }}</span>
+      <span class="estado-badge">{% include "rentabilidad/_estado_datos.html" with rent=rent only %}</span>
       <button
         id="analizarBtn"
         class="btn-ia"
@@ -283,7 +283,7 @@
               <div><span class="state-pill current">Periodo actual</span></div>
               {% endif %}
             </td>
-            <td><span class="state-pill">{{ item.get_estado_display }}</span></td>
+            <td><span class="state-pill">{% include "rentabilidad/_estado_datos.html" with rent=item only %}</span></td>
             <td class="num">${{ item.ventas_netas|floatformat:0|intcomma }}</td>
             <td class="num">{{ item.porcentaje_margen_bruto }}%</td>
             <td class="num {% if item.utilidad_operativa >= 0 %}positive{% else %}negative{% endif %}">
