@@ -72,7 +72,7 @@ def add_physical_evidence(user, cutoff, groups):
         for line in LineaConteoSucursal.objects.filter(
             conteo__in=visible, producto_id__in={product for _, product in pairs},
             conteo__sucursal_id__in={branch for branch, _ in pairs},
-        ).select_related("conteo").order_by("conteo_id", "id")
+        ).select_related("conteo__sucursal").order_by("conteo_id", "id")
         if (line.conteo.sucursal_id, line.producto_id) in pairs
     }
     submissions = defaultdict(list)

@@ -13,12 +13,13 @@ from django.db import connection
 from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
 from core.models import Sucursal
 from inventario.models_conteos import (
-    ConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal, LineaConteoSucursal,
+    AccesoConteoSucursal, ConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal, LineaConteoSucursal,
 )
 from pos_bridge.models import PointBranch, PointProduct
 from recetas.models import Receta
@@ -65,7 +66,10 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.make_case(point_closing=9)
         users = get_user_model().objects
         admin = users.create_superuser(username="conteo-admin")
+        reviewer = users.create_user(username="conteo-reviewer")
         reader = users.create_user(username="conteo-reader")
+        AccesoConteoSucursal.objects.create(user=reviewer, sucursal=branch, revisar=True)
+        AccesoConteoSucursal.objects.create(user=reader, sucursal=branch, capturar=True)
         count = ConteoSucursal.objects.create(
             sucursal=branch, responsable=admin, creado_por=admin,
             fecha=date(2026, 8, 31), titulo="Cierre", estado="RECONTEO",
@@ -78,7 +82,8 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         EventoConteoSucursal.objects.create(conteo=count, actor=admin, action="enviar",
             payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0",
                                    "contado_en": None}]})
-        for actor, visible in ((admin, True), (reader, False)):
+        detail_url = reverse("inventario:conteos_erp:detalle", args=[count.pk])
+        for actor, visible in ((admin, True), (reviewer, True), (reader, False)):
             request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
             request.user = actor
             self.view.setup(request)
@@ -94,9 +99,13 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
                 self.assertContains(response, "Ronda enviada 1")
                 self.assertContains(response, "Reconteo")
                 self.assertContains(response, "Hora no registrada")
+                self.assertContains(response, f'href="{detail_url}"')
+                self.client.force_login(actor)
+                self.assertContains(self.client.get(detail_url), "Conciliación nocturna al cierre")
             else:
                 self.assertNotContains(response, "Ronda enviada")
                 self.assertNotContains(response, "Físico vs Point:")
+                self.assertNotContains(response, f'href="{detail_url}"')
 
     def test_physical_match_missing_count_and_unverified_closing_are_distinct(self):
         branch = Sucursal.objects.create(codigo="PVS-CRUCE", nombre="Sucursal de cruce")
