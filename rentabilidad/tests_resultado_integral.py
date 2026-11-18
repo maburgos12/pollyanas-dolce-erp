@@ -102,7 +102,7 @@ class ResultadoIntegralTests(TestCase):
         ProductoReventaCostoHistoricoMensual.objects.all().delete()
         response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo": "2026-09"})
         self.assertContains(response, "Costos aún sin confirmar")
-        self.assertContains(response, "Falta confirmar")
+        self.assertContains(response, "Faltan:")
         self.assertContains(response, "Datos parciales")
         self.assertIsNone(response.context["totales"]["pct_margen_bruto"])
         self.assertFalse(response.context["totales"]["margen_disponible"])
