@@ -10,13 +10,9 @@ import unittest
 from unittest.mock import Mock, patch
 
 MODULES = Path(__file__).resolve().parents[2] / 'ops/erp-telegram-release'
-spec = importlib.util.spec_from_file_location('erp_telegram_release', MODULES / 'erp_telegram_release.py')
-r = importlib.util.module_from_spec(spec)
-sys.modules[spec.name] = r
-spec.loader.exec_module(r)
-spec = importlib.util.spec_from_file_location('cleanup', MODULES / 'erp_telegram_cleanup.py')
-c = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(c)
+sys.path.insert(0,str(MODULES))
+import erp_telegram_release as r
+import erp_telegram_cleanup as c
 
 
 class CleanupTests(unittest.TestCase):
@@ -182,7 +178,7 @@ class CleanupTests(unittest.TestCase):
     def test_callback_only_records_no_external_action(self):
         send = Mock()
         c.handle(self.query(), self.config, Path(self.temp.name), send)
-        self.assertEqual(send.call_count, 1)
+        self.assertEqual([call.args[1] for call in send.call_args_list], ['sendMessage','answerCallbackQuery'])
         self.assertEqual(send.call_args.args[1], 'answerCallbackQuery')
         self.assertIn('Nada borrado', send.call_args.args[2]['text'])
         self.assertEqual(self.ledger.read(self.row['nonce'])['state'], 'approved')

@@ -481,6 +481,10 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+class TelegramRejected(RuntimeError):
+    """Telegram explicitly rejected the request; no delivery occurred."""
+
+
 def telegram(config, method, data):
     try:
         if method not in {'sendMessage', 'answerCallbackQuery', 'editMessageReplyMarkup'}:
@@ -493,9 +497,14 @@ def telegram(config, method, data):
             raise ValueError('response_size')
         result = json.loads(raw)
         if not result.get('ok'):
-            raise ValueError('response_failed')
+            raise TelegramRejected('telegram_rejected')
         return result['result']
-    except Exception:
+    except TelegramRejected:
+        raise
+    except Exception as exc:
+        from urllib.error import HTTPError
+        if isinstance(exc, HTTPError) and exc.code in {400, 401, 403, 404, 429}:
+            raise TelegramRejected('telegram_rejected') from None
         # Telegram errors include the credential-bearing URL; never retain them in logs.
         raise RuntimeError('telegram_transport_failed') from None
 

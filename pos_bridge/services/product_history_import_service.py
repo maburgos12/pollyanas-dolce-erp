@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 from django.utils import timezone
 
+from pos_bridge.services.archive_access import open_source
 from pos_bridge.models import (
     PointBranch,
     PointProduct,
@@ -66,7 +67,11 @@ class PointProductHistoryImportService:
             return Decimal("0")
 
     def _file_hash(self, path: Path) -> str:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def _extract_title_cell(self, dataframe: pd.DataFrame) -> str:
         for _, row in dataframe.head(8).iterrows():
@@ -146,23 +151,24 @@ class PointProductHistoryImportService:
         return rows
 
     def parse_report(self, *, report_path: str) -> ParsedProductHistoryReport:
-        path = Path(report_path)
-        dataframe = pd.read_excel(path, sheet_name=0, header=None)
-        title_cell = self._extract_title_cell(dataframe)
-        product_name, branch_name, report_date = self._parse_title_metadata(title_cell)
-        header_index = self._find_header_index(dataframe)
-        rows = self._parse_rows(dataframe, start_index=header_index)
-        return ParsedProductHistoryReport(
-            file_hash=self._file_hash(path),
-            source_filename=path.name,
-            report_path=str(path),
-            report_title=title_cell,
-            product_name=product_name,
-            branch_name=branch_name,
-            report_date=report_date,
-            rows=rows,
-            metadata={"header_row_index": header_index + 1},
-        )
+        with open_source(report_path) as source:
+            path = source.local_path
+            dataframe = pd.read_excel(path, sheet_name=0, header=None)
+            title_cell = self._extract_title_cell(dataframe)
+            product_name, branch_name, report_date = self._parse_title_metadata(title_cell)
+            header_index = self._find_header_index(dataframe)
+            rows = self._parse_rows(dataframe, start_index=header_index)
+            return ParsedProductHistoryReport(
+                file_hash=self._file_hash(path),
+                source_filename=source.logical_path.name,
+                report_path=str(source.logical_path),
+                report_title=title_cell,
+                product_name=product_name,
+                branch_name=branch_name,
+                report_date=report_date,
+                rows=rows,
+                metadata={"header_row_index": header_index + 1},
+            )
 
     def _resolve_branch(self, branch_name: str) -> PointBranch | None:
         normalized = normalizar_nombre(branch_name)

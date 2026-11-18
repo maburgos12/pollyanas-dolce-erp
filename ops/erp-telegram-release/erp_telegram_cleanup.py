@@ -1,4 +1,4 @@
-"""Manual cleanup authorization only: no deletion, worker, shell or deployment."""
+"""Authenticated cleanup decisions; deletion belongs to the opt-in resident executor."""
 import argparse
 import hashlib
 import hmac
@@ -67,6 +67,38 @@ def validate_manifest(item, proposal_id):
         raise ValueError('manifest_digest_mismatch')
 
 
+def point_manifest_id(files):
+    raw = json.dumps(files, sort_keys=True, separators=(',', ':')).encode()
+    return 'sha256:' + hashlib.sha256(raw).hexdigest()
+
+
+def validate_point_manifest(item):
+    if set(item) != {'type', 'id', 'files', 'recovery'} or not isinstance(item['files'], list) or not 1 <= len(item['files']) <= 10:
+        raise ValueError('invalid_point_manifest')
+    seen = set()
+    for entry in item['files']:
+        fields = {'schema', 'id', 'relative_path', 'sha256', 'bytes', 'nas_key', 'verified_at', 'consumers'}
+        if not isinstance(entry, dict) or set(entry) != fields:
+            raise ValueError('invalid_point_entry')
+        name, digest = entry['relative_path'], entry['sha256']
+        if (entry['schema'] != 1 or not isinstance(name, str) or not re.fullmatch(r'[A-Za-z0-9_-]+\.xls', name)
+                or not isinstance(digest, str) or not DIGEST.fullmatch(digest)
+                or type(entry['bytes']) is not int or not 0 < entry['bytes'] <= 100_000_000
+                or type(entry['verified_at']) is not int or entry['verified_at'] <= 0
+                or entry['consumers'] != ['category_report'] or name in seen
+                or entry['nas_key'] != 'point-archive/objects/' + digest + '.xls'
+                or entry['id'] != hashlib.sha256((name + '\0' + digest).encode()).hexdigest()):
+            raise ValueError('invalid_point_entry')
+        seen.add(name)
+    if sum(e['bytes'] for e in item['files']) > 100_000_000:
+        raise ValueError('point_pilot_limit')
+    recovery = item['recovery']
+    if (set(recovery) != {'files_verified', 'verified_at'} or recovery['files_verified'] != len(item['files'])
+            or type(recovery['verified_at']) is not int or recovery['verified_at'] <= 0
+            or item['id'] != point_manifest_id(item['files'])):
+        raise ValueError('invalid_point_recovery')
+
+
 def read_proposal(path):
     with Path(path).open('rb') as stream:
         raw = stream.read(131073)
@@ -75,17 +107,26 @@ def read_proposal(path):
     proposal = json.loads(raw)
     fields = {'delete_candidates', 'execution', 'expected_recovery', 'expected_usage', 'host',
               'id', 'preconditions', 'preserve', 'risk', 'status'}
-    if not isinstance(proposal, dict) or set(proposal) != fields:
+    if not isinstance(proposal, dict) or set(proposal) not in (fields, fields | {'schema', 'executor'}):
         raise ValueError('invalid_proposal_schema')
     if (proposal['host'] != '68.183.165.47' or not isinstance(proposal['id'], str)
             or not PROPOSAL_ID.fullmatch(proposal['id']) or proposal['status'] != 'awaiting_explicit_approval'):
         raise ValueError('invalid_proposal')
+    resident = proposal.get('schema') == 2 and proposal.get('executor') == 'resident-v1'
+    if ('schema' in proposal or 'executor' in proposal) and not resident:
+        raise ValueError('invalid_executor_opt_in')
     candidates = proposal['delete_candidates']
     if not isinstance(candidates, list) or len(candidates) != 1:
         raise ValueError('one_scope_only')
     item = candidates[0]
-    if isinstance(item, dict) and item.get('type') == 'cache_log_manifest':
+    if isinstance(item, dict) and item.get('type') == 'point_archive_manifest':
+        if not resident:
+            raise ValueError('point_requires_resident_contract')
+        validate_point_manifest(item)
+    elif isinstance(item, dict) and item.get('type') == 'cache_log_manifest':
         validate_manifest(item, proposal['id'])
+        if resident:
+            raise ValueError('apt_logs_require_producer_coordination')
     else:
         if (not isinstance(item, dict) or set(item) != {'bytes_logical', 'container_references', 'id', 'tag', 'type', 'unique_size_docker_report'}
                 or item['type'] != 'docker_image' or not isinstance(item['id'], str) or not IMAGE.fullmatch(item['id'])
@@ -103,6 +144,8 @@ def read_proposal(path):
         texts.extend(proposal[key])
     if any(not isinstance(s, str) or not 1 <= len(s) <= 600 or any(ord(c) < 32 for c in s) for s in texts):
         raise ValueError('invalid_proposal_text')
+    if resident and item['type'] == 'docker_image':
+        raise ValueError('image_requires_manual_execution')
     return proposal, hashlib.sha256(raw).hexdigest()
 
 
@@ -243,11 +286,22 @@ def _request(path, ledger, config, send=telegram):
     with ledger.lock():
         for file in ledger.directory.glob('*.json'):
             old = ledger.read(file.stem)
+            if old['state']=='notifying' or (old['state'] in {'pending','approved'} and int(time.time())<old['expires'] and not execution_state(ledger,old['nonce'])):
+                raise ValueError('existing_request_requires_resolution')
             if ((old['proposal_id'] == row['proposal_id'] or old['image_id'] == row['image_id'])
                     and (old.get('decision_at') is not None or old['state'] in {'notifying', 'approved', 'rejected'}
                          or (old['state'] == 'pending' and int(time.time()) < old['expires']))):
                 raise ValueError('existing_request_requires_resolution')
         ledger.write(row)
+        proposals = ledger.directory / 'proposals'
+        proposals.mkdir(mode=0o700, exist_ok=True)
+        with (proposals / (row['nonce'] + '.json')).open('xb') as frozen:
+            frozen.write(Path(path).read_bytes())
+            frozen.flush()
+            os.fsync(frozen.fileno())
+        fd=os.open(proposals,os.O_RDONLY)
+        try:os.fsync(fd)
+        finally:os.close(fd)
         # Only fixed, bounded operational fields are sent; arbitrary proposal prose stays local.
         if item['type'] == 'docker_image':
             text = (f"Autorizar limpieza VPS · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
@@ -261,6 +315,14 @@ def _request(path, ledger, config, send=telegram):
                     'Recuperación pendiente de verificar; una tarea futura podría necesitar restaurar la imagen. '
                     'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
                     'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+        elif item['type'] == 'point_archive_manifest':
+            text = (f"Autorizar archivo de históricos Point · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
+                    f"{len(item['files'])} XLS verificados, {sum(e['bytes'] for e in item['files']) / 1e6:.2f} MB.\n"
+                    'Copia NAS, lectura de regreso y parseo equivalentes comprobados. Se conservan registros y referencias; '
+                    'el lector recupera el original si vuelve a necesitarse. Si el NAS falla, la consulta del archivo puede esperar.\n'
+                    'Conservar todos los respaldos, bases, servicios y archivos fuera de este lote. '
+                    'El ejecutor residente retirará sólo estos originales tras aprobación vigente y nueva comprobación. '
+                    'Vence en 1 hora. Rechazar revoca hasta que comience la ejecución; al vencer se detienen los retiros pendientes.')
         else:
             file_bytes = sum(entry['bytes'] for entry in item['files'])
             cache_bytes = sum(entry['bytes'] for entry in item['build_cache'])
@@ -323,8 +385,13 @@ def decide(query, config, ledger, now=None):
                 or message.get('message_id') != row['message_id'] or row['message_id'] is None
                 or not hmac.compare_digest(query['data'], signed(config, row, action))):
             raise ValueError('unauthorized_cleanup_callback')
+        execution = execution_state(ledger, row['nonce'])
+        if execution:
+            raise RecordedDecision(row, execution['state'])
+        if row['state'] == 'rejected' or (row['state'] == 'approved' and action == 'a'):
+            raise RecordedDecision(row, row['state'])
         if now >= row['expires']:
-            raise ValueError('expired')
+            raise RecordedDecision(row, 'expired')
         if row['state'] != 'pending' and not (row['state'] == 'approved' and action == 'r'):
             raise ValueError('already_decided')
         row.update(state='approved' if action == 'a' else 'rejected', decision_at=now)
@@ -340,16 +407,104 @@ def status(path, nonce, ledger, now=None):
                 or row['image_id'] != proposal['delete_candidates'][0]['id']):
             raise ValueError('proposal_changed')
         valid = row['state'] == 'approved' and (int(time.time()) if now is None else now) < row['expires']
-        return {**row, 'approved': valid, 'automatic_deletion': False}
+        return {**row, 'approved': valid, 'automatic_deletion': proposal.get('executor') == 'resident-v1'}
+
+
+class RecordedDecision(ValueError):
+    def __init__(self, row, state):
+        self.row, self.state = row, state
+        super().__init__('expired' if state == 'expired' else 'already_decided:' + state)
+
+
+def execution_state(ledger, nonce):
+    path = ledger.directory / 'executions' / (nonce + '.json')
+    if not path.exists():
+        return None
+    info = path.lstat()
+    if path.is_symlink() or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise ValueError('unsafe_execution_state')
+    value = json.loads(path.read_text())
+    if value.get('nonce') != nonce or value.get('state') not in {'executing', 'completed', 'partial', 'blocked', 'uncertain'}:
+        raise ValueError('invalid_execution_state')
+    if value.get('proposal_sha256') != ledger.read(nonce)['proposal_sha256']:
+        raise ValueError('execution_proposal_mismatch')
+    return value
+
+
+def decision_text(state):
+    return {'approved': 'Aprobación ya registrada. Nada borrado por esta pulsación; ejecución sujeta a vigencia y comprobaciones.',
+            'rejected': 'Limpieza rechazada / revocada. No se ejecutará este lote.',
+            'expired': 'Solicitud vencida. No se autorizó un retiro nuevo.',
+            'executing': 'La limpieza ya está en ejecución; recibirás el resultado.',
+            'completed': 'La limpieza ya terminó. No se repetirá.',
+            'partial': 'La limpieza terminó parcialmente. Consulta el resultado; no se repetirá.',
+            'blocked': 'La limpieza está bloqueada. Se conservan los archivos pendientes.',
+            'uncertain': 'La ejecución requiere revisar su registro antes de continuar.'}[state]
+
+
+def _receipt(value):
+    if not isinstance(value, dict) or set(value) != {'nonce', 'events'} or not NONCE.fullmatch(value['nonce']) or not isinstance(value['events'], dict):
+        raise ValueError('invalid_receipt')
+    for event in value['events'].values():
+        if set(event) not in ({'text', 'state', 'message_id'}, {'text', 'state', 'message_id', 'attempts', 'next_at'}) or event['state'] not in {'pending', 'sending', 'sent', 'uncertain'} or not isinstance(event['text'], str) or len(event['text']) > 3500:
+            raise ValueError('invalid_receipt_event')
+        if any(type(event.get(k,0)) is not int or event.get(k,0)<0 for k in ('attempts','next_at')):
+            raise ValueError('invalid_receipt_retry')
+    return value
+
+
+def enqueue(ledger, row, key, text):
+    box = Ledger(ledger.directory / 'receipts', validator=_receipt)
+    with box.lock():
+        record = box.read(row['nonce']) if box.path(row['nonce']).exists() else {'nonce': row['nonce'], 'events': {}}
+        record['events'].setdefault(key, {'text': row['proposal_id'] + ' · ' + time.strftime('%Y-%m-%d %H:%M:%S UTC',time.gmtime()) + '\n' + text, 'state': 'pending', 'message_id': None, 'attempts':0, 'next_at':0})
+        box.write(record)
+
+
+def flush(ledger, config, send=telegram):
+    box = Ledger(ledger.directory / 'receipts', validator=_receipt)
+    with box.lock(worker=True), box.lock():
+        for file in sorted(box.directory.glob('*.json')):
+            record = box.read(file.stem)
+            for event in record['events'].values():
+                if event['state'] == 'sending':
+                    event['state'] = 'uncertain'
+                    box.write(record)
+                if event['state'] != 'pending' or event.get('next_at',0)>time.time():
+                    continue
+                event['state'] = 'sending'
+                box.write(record)
+                try:
+                    result = send(config, 'sendMessage', {'chat_id': config['chat_id'], 'text': event['text']})
+                    verify_message(result, config['chat_id'])
+                    event.update(state='sent', message_id=result['message_id'])
+                except Exception as exc:
+                    from erp_telegram_release import TelegramRejected
+                    if isinstance(exc,TelegramRejected) and event.get('attempts',0)<3:
+                        event['attempts']=event.get('attempts',0)+1
+                        event['next_at']=int(time.time())+[60,300,900][event['attempts']-1]
+                        event['state']='pending'
+                        box.write(record)
+                        continue
+                    # An ambiguous Telegram send must not repeat the cleanup or spam receipts.
+                    event['state'] = 'uncertain'
+                box.write(record)
 
 
 def handle(query, config, state, send):
+    row = None
     try:
-        row = decide(query, config, Ledger(Path(state) / 'cleanups', validator=validate))
-        text = ('Autorización registrada. Nada borrado; Codex debe verificar recuperación y vigencia.'
-                if row['state'] == 'approved' else 'Limpieza rechazada / revocada. Nada borrado por esta solicitud.')
+        ledger = Ledger(Path(state) / 'cleanups', validator=validate)
+        row = decide(query, config, ledger)
+        text = decision_text(row['state'])
+        # Durable receipts are separate from the original human decision.
+        enqueue(ledger, row, 'decision-' + row['state'], text)
+        flush(ledger, config, send)
+    except RecordedDecision as recorded:
+        text = decision_text(recorded.state)
     except (OSError, ValueError, KeyError, TypeError):
-        text = 'Solicitud inválida, vencida o ya decidida. No se autorizó una limpieza nueva.'
+        text = ('Decisión registrada; confirmación de entrega pendiente.' if row else
+                'No se pudo validar esta solicitud. No se autorizó una limpieza nueva.')
     send(config, 'answerCallbackQuery', {'callback_query_id': query['id'], 'text': text, 'show_alert': True})
 
 

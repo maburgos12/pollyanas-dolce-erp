@@ -4,6 +4,9 @@ from datetime import date
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from types import SimpleNamespace
+from unittest.mock import patch
+
+from pos_bridge.services.archive_access import ArchivePending
 
 from django.test import TestCase
 
@@ -75,6 +78,19 @@ class PointSalesRebuildServiceTests(TestCase):
             credito_scope="null",
             status=PointSalesExtractionTask.STATUS_PENDING,
         )
+
+    def test_archive_pending_never_persists_success_or_empty_sales(self):
+        service, temp_path = self._build_service()
+        self.addCleanup(Path(temp_path).unlink, missing_ok=True)
+        with patch('pos_bridge.services.sales_pipeline.rebuild_service.open_source', side_effect=ArchivePending('Recovery pending')):
+            with self.assertRaises(ArchivePending):
+                service.process_task(task=self.task, session_cache={})
+        self.task.refresh_from_db()
+        self.assertEqual(self.task.status, PointSalesExtractionTask.STATUS_FAILED)
+        self.assertIn('Recovery pending', self.task.last_error)
+        self.assertFalse(PointSalesRawStaging.objects.filter(task=self.task).exists())
+        self.assertFalse(PointSalesNormalized.objects.filter(task=self.task).exists())
+        self.assertFalse(VentaAutoritativaPoint.objects.exists())
 
     def _build_service(self):
         temp = NamedTemporaryFile(delete=False, suffix=".xls")

@@ -398,7 +398,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIsNone(r.NoRedirect().redirect_request(None, None, 302, 'redirect', {}, 'https://evil.test'))
         with patch.object(r, 'build_opener', return_value=Mock(open=Mock(side_effect=
                 HTTPError('https://api.telegram.org/botSECRET/sendMessage', 403, 'SECRET', {}, None)))):
-            with self.assertRaisesRegex(RuntimeError, '^telegram_transport_failed$') as error:
+            with self.assertRaisesRegex(r.TelegramRejected, '^telegram_rejected$') as error:
                 r.telegram(self.config, 'sendMessage', {})
         self.assertTrue(error.exception.__suppress_context__)
         self.assertNotIn('SECRET', str(error.exception))

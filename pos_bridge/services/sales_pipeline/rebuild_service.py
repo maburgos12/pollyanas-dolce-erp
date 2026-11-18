@@ -10,6 +10,8 @@ from django.db import transaction
 from django.db.models import Count, Sum
 from django.utils import timezone
 
+from pos_bridge.services.archive_access import open_source
+
 from core.cache_versions import bump_cache_scopes
 from pos_bridge.models import (
     PointDailySale,
@@ -608,20 +610,20 @@ class PointSalesRebuildService:
         try:
             report, fetch_ms = self._fetch_report_with_retry(task=task, session_cache=session_cache)
             timings_ms["download"] = fetch_ms
-            if not Path(report.report_path).exists():
-                raise RuntimeError(f"Point devolvió una ruta inexistente: {report.report_path}")
-            file_size = Path(report.report_path).stat().st_size
-            if file_size <= 0:
-                raise RuntimeError(f"Descarga incompleta o vacía: {report.report_path}")
+            with open_source(report.report_path) as source:
+                if not source.local_path.exists():
+                    raise RuntimeError(f"Point devolvió una ruta inexistente: {report.report_path}")
+                file_size = source.local_path.stat().st_size
+                if file_size <= 0:
+                    raise RuntimeError(f"Descarga incompleta o vacía: {report.report_path}")
 
-            hash_started = time.perf_counter()
-            source_hash = self._sha256_file(report.report_path)
-            timings_ms["checksum"] = int((time.perf_counter() - hash_started) * 1000)
+                hash_started = time.perf_counter()
+                source_hash = self._sha256_file(source.local_path)
+                timings_ms["checksum"] = int((time.perf_counter() - hash_started) * 1000)
 
-            parse_started = time.perf_counter()
-            parsed = self.report_service.parse_report(report_path=report.report_path)
-            timings_ms["parse"] = int((time.perf_counter() - parse_started) * 1000)
-
+                parse_started = time.perf_counter()
+                parsed = self.report_service.parse_report(report_path=report.report_path)
+                timings_ms["parse"] = int((time.perf_counter() - parse_started) * 1000)
             extracted_at = timezone.now()
             persist_started = time.perf_counter()
             summary = self._persist_successful_task(

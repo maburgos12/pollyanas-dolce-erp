@@ -1,0 +1,8 @@
+[Unit]
+Description=Check current exact Point cleanup approvals without Codex or Mac
+[Timer]
+OnBootSec=45s
+OnUnitInactiveSec=30s
+Unit=erp-cleanup-execute.service
+[Install]
+WantedBy=timers.target
