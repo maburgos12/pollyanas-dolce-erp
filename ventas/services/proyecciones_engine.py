@@ -5,12 +5,13 @@ from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
 from django.db.models import Sum
+from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointSalesDailyProductFact
 from recetas.models import Receta
 from reportes.models import FactVentaDiaria
-from reportes.forecast_service import build_daily_forecast_context
+from reportes.forecast_service import build_daily_forecast_context, iter_future_forecast_contexts
 from ventas.services.pronostico_engine import (
     MONTHS_ES,
     ORDEN_CATEGORIAS,
@@ -353,6 +354,7 @@ def calcular_proyeccion_operativa(
     point_product_ids: set[int] | list[int] | None = None,
     *,
     include_validation: bool = True,
+    reuse_weekly_forecast_reads: bool = False,
 ) -> dict:
     selected_days = list(_date_range(fecha_inicio, fecha_fin))
     if not selected_days:
@@ -395,13 +397,23 @@ def calcular_proyeccion_operativa(
     factors_by_recipe: dict[int, list[Decimal]] = defaultdict(list)
     validations = []
 
-    for target_day in selected_days:
-        forecast = build_daily_forecast_context(
-            target_date=target_day,
-            lookback_weeks=THREE_WEEK_LOOKBACK,
-            top_n=None,
-            include_validation=include_validation,
+    reference_date = timezone.localdate() if reuse_weekly_forecast_reads else None
+    if reference_date and not include_validation and len(selected_days) == 7 and selected_days[0] > reference_date:
+        forecasts = iter_future_forecast_contexts(
+            selected_days, reference_date=reference_date, lookback_weeks=THREE_WEEK_LOOKBACK,
         )
+    else:
+        forecasts = (
+            build_daily_forecast_context(
+                target_date=target_day,
+                lookback_weeks=THREE_WEEK_LOOKBACK,
+                top_n=None,
+                include_validation=include_validation,
+            )
+            for target_day in selected_days
+        )
+
+    for target_day, forecast in zip(selected_days, forecasts, strict=True):
         validations.append(forecast.get("validation") or {})
         for row in forecast.get("rows") or []:
             branch_id = int(row.get("branch_id") or 0)

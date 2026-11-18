@@ -6356,6 +6356,7 @@ def bi(request: HttpRequest) -> HttpResponse:
             action_filter=action_filter,
             budget_month=budget_month,
             include_sales_confidence=False,
+            reuse_weekly_forecast_reads=True,
         ),
         parts=(
             months_window,

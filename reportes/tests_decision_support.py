@@ -4,17 +4,27 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+from django.db import connection
 from django.template.loader import render_to_string
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
 from core.models import Sucursal
 from pos_bridge.models import PointBranch, PointInventorySnapshot, PointProduct, PointSyncJob
 from recetas.models import Receta
+from ventas.services.proyecciones_engine import calcular_proyeccion_operativa
 from reportes.dashboard_full_dataset import build_dashboard_full_payload
 from reportes.decision_score_service import build_decision_score_context
+from reportes import forecast_service
 from reportes.forecast_service import build_daily_forecast_context
-from reportes.models import FactProduccionDiaria, FactVentaDiaria, ProductoCostoOperativoMensual, ProductoSucursalContribucionMensual
+from reportes.models import (
+    FactProduccionDiaria,
+    FactVentaDiaria,
+    ForecastCalibrationProfile,
+    ProductoCostoOperativoMensual,
+    ProductoSucursalContribucionMensual,
+)
 from reportes.opportunity_service import build_opportunity_context
 from reportes.production_recommendation_service import build_production_recommendation_context
 from reportes.waste_detection_service import build_waste_detection_context
@@ -298,6 +308,96 @@ class DecisionSupportServicesTests(TestCase):
         self.assertEqual(forecast_only["rows"], complete["rows"])
         self.assertEqual(forecast_only["summary"], complete["summary"])
         self.assertEqual(forecast_only["validation"], {})
+
+    def test_future_week_reuses_reads_with_identical_daily_contexts(self):
+        days = [self.target_date + timedelta(days=7 + offset) for offset in range(7)]
+        FactVentaDiaria.objects.create(
+            fecha=days[-1], sucursal=self.branch, receta=self.recipe_cold,
+            producto_clave="ROS001", producto_nombre="Rosca Canela",
+            categoria="Temporada", cantidad=Decimal("300"), venta_neta=Decimal("30000"),
+        )
+        short_recipe = Receta.objects.create(
+            nombre="Receta sin historia suficiente", tipo=Receta.TIPO_PRODUCTO_FINAL,
+            hash_contenido="forecast-short-history",
+        )
+        FactVentaDiaria.objects.create(
+            fecha=self.target_date - timedelta(days=1), sucursal=self.branch, receta=short_recipe,
+            producto_clave="SHORT-FC", producto_nombre=short_recipe.nombre,
+            cantidad=Decimal("21"), venta_neta=Decimal("2000"),
+        )
+
+        for pattern, bias in (
+            (ForecastCalibrationProfile.PATTERN_MON_WED, Decimal("1.10")),
+            (ForecastCalibrationProfile.PATTERN_THU_SUN, Decimal("0.80")),
+        ):
+            ForecastCalibrationProfile.objects.create(
+                reference_date=self.target_date, sucursal=self.branch, familia="Pasteles",
+                weekly_pattern=pattern, rotation_band=ForecastCalibrationProfile.ROTATION_HIGH,
+                sample_size=25, recent_weight=Decimal("0.55"), mid_weight=Decimal("0.30"),
+                older_weight=Decimal("0.15"), bias_adjustment=bias,
+            )
+
+        with CaptureQueriesContext(connection) as baseline_queries:
+            expected = [
+                build_daily_forecast_context(
+                    target_date=day, reference_date=self.target_date, lookback_weeks=3,
+                    top_n=None, include_validation=False,
+                )
+                for day in days
+            ]
+        with CaptureQueriesContext(connection) as batch_queries, patch.object(
+            forecast_service, "load_latest_calibration_profiles",
+            wraps=forecast_service.load_latest_calibration_profiles,
+        ) as calibration:
+            actual = list(forecast_service.iter_future_forecast_contexts(
+                days, reference_date=self.target_date, lookback_weeks=3,
+            ))
+
+        def grouped_fact_reads(captured):
+            return sum(
+                '"reportes_factventadiaria"' in row["sql"] and "GROUP BY" in row["sql"]
+                for row in captured.captured_queries
+            )
+
+        self.assertEqual(grouped_fact_reads(baseline_queries), 7)
+        self.assertEqual(grouped_fact_reads(batch_queries), 1)
+        calibration.assert_called_once_with(reference_date=self.target_date)
+        self.assertTrue(all(len(context["rows"]) == 2 for context in actual))
+        self.assertEqual(actual, expected)
+
+    def test_weekly_projection_preserves_totals_filters_and_special_event(self):
+        start = date(2026, 4, 27)
+        end = date(2026, 5, 3)
+        event = date(2026, 4, 30)
+        filters = {"sucursal_ids": {self.branch.id}, "point_product_ids": {self.point_product_hot.id}}
+        with patch.object(timezone, "localdate", return_value=self.target_date), patch(
+            "ventas.services.proyecciones_engine._selected_recipe_ids", return_value={self.recipe_hot.id},
+        ), patch(
+            "ventas.services.proyecciones_engine._context_uplift_lookup",
+            return_value={(event, self.branch.id, self.recipe_hot.id): Decimal("1.5")},
+        ):
+            expected = calcular_proyeccion_operativa(start, end, include_validation=False, **filters)
+            actual = calcular_proyeccion_operativa(
+                start, end, include_validation=False, reuse_weekly_forecast_reads=True, **filters,
+            )
+
+        self.assertEqual(actual, expected)
+        self.assertEqual({p["receta_id"] for p in actual["por_producto"]}, {self.recipe_hot.id})
+        self.assertTrue(any(d["es_fecha_especial"] and d["total_piezas"] > 0 for d in actual["por_dia"]))
+
+    def test_weekly_projection_keeps_daily_reads_when_range_crosses_reference(self):
+        start = self.target_date - timedelta(days=1)
+        end = start + timedelta(days=6)
+        with patch.object(timezone, "localdate", return_value=self.target_date), patch(
+            "ventas.services.proyecciones_engine.iter_future_forecast_contexts",
+        ) as batch:
+            expected = calcular_proyeccion_operativa(start, end, include_validation=False)
+            actual = calcular_proyeccion_operativa(
+                start, end, include_validation=False, reuse_weekly_forecast_reads=True,
+            )
+
+        batch.assert_not_called()
+        self.assertEqual(actual, expected)
 
     def test_future_forecast_uses_latest_real_history_not_future_holes(self):
         current_context = build_daily_forecast_context(

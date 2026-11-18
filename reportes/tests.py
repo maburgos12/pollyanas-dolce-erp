@@ -508,6 +508,7 @@ class ReportesBITests(TestCase):
         operational_projection_mock.assert_called_once_with(
             start_date=date(2026, 4, 13),
             end_date=date(2026, 4, 19),
+            reuse_weekly_forecast_reads=False,
         )
 
     def test_daily_snapshot_marks_missing_required_branch(self):
