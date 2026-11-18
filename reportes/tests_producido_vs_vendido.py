@@ -83,6 +83,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
             payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0",
                                    "contado_en": None}]})
         detail_url = reverse("inventario:conteos_erp:detalle", args=[count.pk])
+        LecturaConteoSucursal.objects.create(linea=line, ronda=2, cantidad=None, actor=admin)
         for actor, visible in ((admin, True), (reviewer, True), (reader, False)):
             request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
             request.user = actor
@@ -94,7 +95,8 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
                 self.assertContains(response, "1 con diferencia")
                 self.assertContains(response, "Físico vs Point: Con diferencia")
                 self.assertContains(response, "Físico − Point: -9 PZA")
-                self.assertContains(response, "Provisional: reconteo pendiente")
+                self.assertContains(response, "Provisional: se usa la última ronda enviada")
+                self.assertContains(response, "Ronda 2 sin envío")
                 self.assertContains(response, "1 cotejo provisional")
                 self.assertContains(response, "Ronda enviada 1")
                 self.assertContains(response, "Reconteo")
@@ -236,6 +238,39 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         headers = next(sheet.iter_rows(min_row=5, max_row=5, values_only=True))
         detail = next(sheet.iter_rows(min_row=7, max_row=7, values_only=True))
         self.assertEqual(detail[headers.index("Ini. Point")], "Parcial: 10 (1/2 sucursales)")
+
+    def test_html_shows_partial_calculation_and_covered_zero_activity_without_replacing_totals(self):
+        stamp = timezone.now()
+        self.audit_run.rebuilt_at = stamp
+        self.audit_run.last_successful_rebuild_at = stamp
+        self.audit_run.save(update_fields=["rebuilt_at", "last_successful_rebuild_at"])
+        self.make_case(production=0, sales=0, expected_closing=10, point_closing=9, difference=-1)
+        other = PointBranch.objects.create(external_id="AUDITOR-ZERO", name="Sucursal sin apertura")
+        self.make_case(branch=other, production=0, sales=0, point_closing=0,
+            movement_status="SOURCE_INCOMPLETE", source_trace={"opening": [], "closing": [1]},
+            issue_codes=["SOURCE_INCOMPLETE"])
+
+        actor = get_user_model().objects.create_superuser(username="revisor-cobertura")
+        request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
+        request.user = actor
+        self.view.setup(request)
+        response = self.view.get(request).render()
+        context = response.context_data
+        row = context["groups"][0]["rows"][0]
+        self.assertEqual(row["estado_inventario"], "Falta información")
+        self.assertIsNone(row["inventario_final_teorico"])
+        self.assertIsNone(row["diferencia_inventario"])
+        self.assertContains(response, "Parcial: -1")
+        self.assertContains(response, "1 de 2 sucursales")
+        self.assertContains(response, "Saldo inicial Point por comprobar")
+        self.assertContains(response, "Ventas y producción registradas en cero")
+        self.assertNotIn("calculation_coverage", context["json_rows"][0])
+        self.assertNotIn("Parcial: -1", self.view._export_csv(context).content.decode())
+
+        self.audit_run.partial_published = True
+        self.audit_run.save(update_fields=["partial_published"])
+        partial = self.view.get(request).render()
+        self.assertNotContains(partial, "Ventas y producción registradas en cero")
 
     def test_unknown_slice_origin_does_not_create_fractional_parent_exit(self):
         self.make_case(conversion_in=414, conversion_out=0, issue_codes=["CONVERSION_SOURCE_UNRESOLVED"])

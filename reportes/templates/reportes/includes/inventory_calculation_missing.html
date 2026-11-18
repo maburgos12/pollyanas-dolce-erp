@@ -1,0 +1,7 @@
+{% load humanize %}
+{% if coverage.known %}
+<span title="Suma de los casos con cálculo disponible; no es el total del corte">Parcial: {{ coverage.known_sum|floatformat:"-4"|intcomma }}</span>
+<small class="muted d-block">{{ coverage.known }} de {{ coverage.total }} {{ unit }}</small>
+{% else %}
+<span class="muted">{% if is_open_period %}{{ open_label }}{% else %}Sin cálculo comprobado{% endif %}</span>
+{% endif %}

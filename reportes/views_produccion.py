@@ -343,8 +343,43 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             return self._export_xlsx(context)
         if export_format == "pdf":
             return self._export_pdf(context)
+        self._add_html_coverage(context)
         add_physical_evidence(request.user, context["closing_reference"], context["groups"])
         return self.render_to_response(context)
+
+    @staticmethod
+    def _add_html_coverage(context):
+        fields = {
+            "inventario_final_teorico": "calculated",
+            "diferencia_inventario": "difference",
+        }
+
+        def attach(target, cases):
+            target["calculation_coverage"] = {}
+            for key, field in fields.items():
+                known = [case[field] for case in cases if case[field] is not None]
+                target["calculation_coverage"][key] = {
+                    "known": len(known), "total": len(cases), "known_sum": sum(known, ZERO),
+                }
+
+        all_cases = []
+        for group in context["groups"]:
+            group_cases = []
+            for row in group["rows"]:
+                cases = row["cases"]
+                attach(row, cases)
+                group_cases.extend(cases)
+                if context["activity_covered"] and row["vendido"] == row["producido"] == ZERO:
+                    row["covered_zero_activity"] = True
+                    if row["estado_inventario"] == "Falta información":
+                        incomplete = [case for case in cases if case["traceability_status"] == "Falta información"]
+                        if all(case["opening"] is None and case["closing"] is not None for case in incomplete):
+                            row["stock_display_status"] = "Saldo inicial Point por comprobar"
+                        else:
+                            row["stock_display_status"] = "Saldo o movimientos por comprobar"
+            attach(group["total"], group_cases)
+            all_cases.extend(group_cases)
+        attach(context["grand_total"], all_cases)
 
     def _export_csv(self, context: dict[str, Any]) -> HttpResponse:
         period = _filename_period(context)
@@ -564,6 +599,10 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             "previous_publication": previous_publication,
             "selected_audit_branch_id": report["selected_audit_branch_id"],
             "audit_metadata": metadata,
+            "activity_covered": bool(
+                month < current and updated and not report["partial"] and not report["stale"]
+                and not report["run"].source_issues
+            ),
             "audit_version": audit_report_version(month, report["selected_branch"]),
             "audit_updated_at": updated,
             "branches": report["branches"], "selected_branch": report["selected_branch"],
