@@ -198,6 +198,8 @@ class ArchiveStore:
             except FileNotFoundError:
                 try:
                     fd = stack.enter_context(_regular(path, os.O_RDWR | os.O_CREAT | os.O_EXCL, 0o666))
+                    # Broker root and worker must share the inode despite private service umasks.
+                    os.fchmod(fd, 0o666)
                 except ArchiveUnavailable:
                     fd = stack.enter_context(_regular(path, os.O_RDWR))
             deadline = time.monotonic() + max(0, timeout)
