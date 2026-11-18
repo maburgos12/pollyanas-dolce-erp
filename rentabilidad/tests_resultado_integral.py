@@ -96,6 +96,27 @@ class ResultadoIntegralTests(TestCase):
         self.assertContains(response, "No calculable")
         self.assertNotContains(response, "Completado")
 
+    def test_rentabilidad_distingue_fuentes_parciales_de_ausencia(self):
+        user = get_user_model().objects.create_superuser("fuentes-visibles")
+        self.client.force_login(user)
+        ProductoReventaCostoHistoricoMensual.objects.all().delete()
+        response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo": "2026-09"})
+        self.assertContains(response, "Costos aún sin confirmar")
+        self.assertContains(response, "Falta confirmar")
+        self.assertContains(response, "Datos parciales")
+        self.assertIsNone(response.context["totales"]["pct_margen_bruto"])
+        self.assertFalse(response.context["totales"]["margen_disponible"])
+
+        response = self.client.get(reverse("rentabilidad_detalle", args=[self.rent.pk]))
+        self.assertContains(response, "Datos parciales")
+        self.assertContains(response, "Costos por confirmar")
+
+        branch = Sucursal.objects.create(codigo="SIN-FUENTE", nombre="Sin fuente")
+        empty = SucursalRentabilidad.objects.create(sucursal=branch, periodo=self.periodo)
+        response = self.client.get(reverse("rentabilidad_detalle", args=[empty.pk]))
+        self.assertContains(response, "Sin datos del mes")
+        self.assertNotContains(response, "Datos parciales")
+
     def test_receta_lote_se_convierte_a_unidad_sin_mo_ni_porcentaje_inventado(self):
         from recetas.models import Receta, RecetaCostoVersion
         from django.utils import timezone
@@ -139,3 +160,4 @@ class ResultadoIntegralTests(TestCase):
         response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo": "2026-09"})
         self.assertEqual(response.context["totales"]["resultado_empresa_parcial"], Decimal("420"))
         self.assertNotIn(centro.nombre, str(response.context["fuente_estado"]["discrepancias"]))
+        self.assertContains(response, "Merma registrada sin ventas del mes")

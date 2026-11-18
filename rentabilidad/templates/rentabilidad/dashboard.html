@@ -63,10 +63,10 @@
   </section>
 
   <section class="rent-panel">
-    <h2>Reparto conciliado · enero–septiembre 2026</h2>
+    <h2>{% if cierre_conciliado %}Reparto conciliado{% else %}Referencia histórica{% endif %} · enero–septiembre 2026</h2>
     <p>Utilidad por sucursal después de distribuir los fondos de costos, producción, administración y logística del Estado de resultados.</p>
     <a class="btn btn-secondary" href="{% url 'rentabilidad_dashboard' %}?periodo={{ periodo|date:'Y-m' }}&amp;tab=reparto">Ver reparto conciliado y descargar detalle</a>
-    {% if not cierre_conciliado %}<p>El análisis mensual de abajo utiliza costos de productos vendidos y ventas sin impuestos. Sus márgenes tienen una base distinta del reparto.</p>{% endif %}
+    {% if not cierre_conciliado %}<p>El reparto histórico cubre enero a septiembre. Para el periodo seleccionado, consulta los datos del mes y sus pendientes abajo.</p>{% endif %}
   </section>
   {% if not cierre_conciliado %}{% include "reportes/partials/sales_confidence.html" %}{% endif %}
 
@@ -99,7 +99,7 @@
   </section>
   {% endif %}
   {% if not totales.gastos_completos %}
-  <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Utilidad y punto de equilibrio se calculan con los gastos ya cargados, así que el PE está subestimado y la utilidad sobreestimada. Revisa la pestaña Gastos para ver qué falta por sucursal.</p>
+  <p role="status"><strong>Resultado provisional:</strong> hay gastos o asignaciones pendientes. Utilidad y punto de equilibrio se calculan con los gastos ya cargados, así que el PE está subestimado y la utilidad sobreestimada. Revisa Gastos para ver qué falta por sucursal y distinguir las partidas ya registradas.</p>
   {% endif %}
   {% for item in sucursales_data %}{% if item.obj.advertencias_costos %}<p role="status"><strong>{{ item.obj.sucursal.nombre }} — costos por revisar:</strong> {{ item.obj.advertencias_costos|join:"; " }}. Se conservan en el cálculo, incluso si producen margen negativo.</p>{% endif %}{% endfor %}
   <section class="kpi-grid">
@@ -421,7 +421,10 @@
           <tr>
             <td data-label="Sucursal">
               {% if r.pk %}<a class="branch-name" href="{% url 'rentabilidad_detalle' r.pk %}">{{ r.sucursal.nombre }}</a>{% else %}<span class="branch-name">{{ r.sucursal.nombre }}</span><span class="cell-note">Lectura fuente; sin cierre guardado</span>{% endif %}
-              <div class="pd-u-40df0f88aa"><span class="estado-badge estado-{{ r.estado }}">{{ r.get_estado_display }}</span></div>
+              <div class="pd-u-40df0f88aa"><span class="estado-badge estado-{{ r.estado }}">{% include "rentabilidad/_estado_datos.html" with rent=r only %}</span></div>
+              {% if r.en_perimetro_fuente and not r.en_perimetro_ventas %}<span class="cell-note">Merma registrada sin ventas del mes</span>{% endif %}
+              {% if r.gastos_faltantes_display %}<span class="cell-note">Falta confirmar {{ r.gastos_faltantes_display|join:", " }}</span>{% endif %}
+              {% if r.en_perimetro_fuente and r.costos_pendientes %}<span class="cell-note">Costos aún sin confirmar</span>{% endif %}
             </td>
             <td class="num" data-label="Ventas">${{ r.ventas_netas|floatformat:0|intcomma }}</td>
             <td class="num" data-label="Costo variable">${{ r.costo_variable_total|floatformat:0|intcomma }}</td>
