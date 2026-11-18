@@ -25,6 +25,26 @@ class ArchiveAccessTests(TestCase):
                           sha256=digest, bytes=8, nas_key=f'point-archive/objects/{digest}.xls',
                           verified_at=1700000000, consumers=['category_report'])
 
+    def test_new_lock_is_shared_under_private_umask_and_reuses_inode(self):
+        previous = os.umask(0o077)
+        try:
+            with self.store.path_lock(self.path.name) as fd:
+                created = os.fstat(fd)
+                self.assertEqual(created.st_mode & 0o777, 0o666)
+            with self.store.path_lock(self.path.name, exclusive=True) as fd:
+                self.assertEqual(os.fstat(fd).st_ino, created.st_ino)
+                self.assertEqual(os.fstat(fd).st_mode & 0o777, 0o666)
+        finally:
+            os.umask(previous)
+
+    def test_existing_lock_permissions_are_not_rewritten(self):
+        with self.store.path_lock(self.path.name) as fd:
+            os.fchmod(fd, 0o600)
+            inode = os.fstat(fd).st_ino
+        with self.store.path_lock(self.path.name) as fd:
+            self.assertEqual(os.fstat(fd).st_ino, inode)
+            self.assertEqual(os.fstat(fd).st_mode & 0o777, 0o600)
+
     def test_local_never_needs_catalog_or_queue(self):
         with self.store.open_source(self.path) as source:
             self.assertEqual(source.local_path.read_bytes(), b'workbook')

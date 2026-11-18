@@ -110,3 +110,6 @@ storage/dg_reports/logs/*.log
 # Evidencias operativas privadas; nunca forman parte del artefacto Git.
 /storage/conteos_evidencias/
 /storage/private/conciliaciones/
+
+# Point archive catalog, requests, staging and persistent coordination locks.
+/storage/pos_bridge/archive/
