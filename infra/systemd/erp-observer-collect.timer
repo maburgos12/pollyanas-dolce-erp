@@ -1,0 +1,11 @@
+[Unit]
+Description=Collect completed Doctor results without running Doctor
+
+[Timer]
+OnBootSec=45
+OnUnitInactiveSec=60
+AccuracySec=5
+Unit=erp-observer-collect.service
+
+[Install]
+WantedBy=timers.target
