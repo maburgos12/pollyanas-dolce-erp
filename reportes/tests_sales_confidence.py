@@ -12,6 +12,62 @@ from django.db.models.functions import Coalesce
 from rentabilidad.views_rentabilidad import _build_productos_panel
 
 
+class LattePointIdentityConfidenceTests(TestCase):
+    def setUp(self):
+        from pos_bridge.models import PointProduct
+        from recetas.models import Receta
+        from reportes.models import RecetaCostoHistoricoMensual
+
+        self.branch = Sucursal.objects.create(codigo="LATTE-ID-TEST", nombre="Latte identity")
+        self.recipe = Receta.objects.create(pk=139, nombre="Latte", codigo_point="0-2", hash_contenido="latte_identity")
+        self.frans = PointProduct.objects.create(pk=1001, external_id="official:010408", sku="010408", name="Nombre actualizado")
+        self.original = PointProduct.objects.create(external_id="1013", sku="0-2", name="Latte")
+        RecetaCostoHistoricoMensual.objects.create(receta=self.recipe, periodo=date(2026, 10, 1),
+                                                   costo_total=Decimal("5.609361"), coverage_pct=100)
+
+    def fact(self, product, **kwargs):
+        return FactVentaDiaria.objects.create(fecha=date(2026, 10, 10), sucursal=self.branch,
+            producto_clave="receta:139", producto_nombre="Latte", point_product=product,
+            receta=self.recipe, source_kind="V2_FACT", cantidad=1, venta_neta=100, venta_total=100, **kwargs)
+
+    def confidence(self, incremental=False):
+        from reportes.sales_confidence import build_sales_confidence
+        return build_sales_confidence(start_date=date(2026, 10, 1), end_date=date(2026, 10, 31),
+                                      aplicar_componentes_incrementales=incremental)
+
+    def test_known_foreign_recipe_is_not_cost_evidence_and_fact_is_preserved(self):
+        fact = self.fact(self.frans)
+        for incremental in (False, True):
+            with self.subTest(incremental=incremental):
+                result = self.confidence(incremental)
+                self.assertEqual(result["missing_cost_rows"], 1)
+                self.assertEqual(result["missing_cost_sales"], Decimal("100"))
+                self.assertIsNone(result["margin"])
+        fact.refresh_from_db()
+        self.assertEqual((fact.point_product_id, fact.receta_id, fact.producto_nombre), (1001, 139, "Latte"))
+
+    def test_materialized_cost_cannot_override_documented_identity_conflict(self):
+        self.fact(self.frans, costo_estimado=Decimal("5.61"), metadata={
+            "costing": {"source": "producto_costo_operativo_mensual", "period": "2026-10-01"}})
+        self.assertEqual(self.confidence()["missing_cost_rows"], 1)
+
+    def test_original_point_product_keeps_recipe_cost(self):
+        self.fact(self.original)
+        result = self.confidence()
+        self.assertEqual(result["missing_cost_rows"], 0)
+        self.assertEqual(result["margin"], Decimal("94.39"))
+
+    def test_documented_conflict_does_not_expand_to_other_months(self):
+        fact = self.fact(self.frans)
+        fact.fecha = date(2026, 9, 10)
+        fact.save(update_fields=["fecha"])
+        from reportes.models import RecetaCostoHistoricoMensual
+        from reportes.sales_confidence import build_sales_confidence
+        RecetaCostoHistoricoMensual.objects.create(receta=self.recipe, periodo=date(2026, 9, 1), costo_total=5, coverage_pct=100)
+        result = build_sales_confidence(start_date=date(2026, 9, 1), end_date=date(2026, 9, 30))
+        self.assertEqual(result["missing_cost_rows"], 0)
+
+
 class SalesConfidenceTests(TestCase):
     def setUp(self):
         self.branch = Sucursal.objects.create(codigo="CRUCERO-TEST", nombre="Crucero", activa=False)
