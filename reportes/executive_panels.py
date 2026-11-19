@@ -495,8 +495,8 @@ def _decimal_median(values: list[Decimal]) -> Decimal:
     return (ordered[middle - 1] + ordered[middle]) / Decimal("2")
 
 
-def _safe_pct(delta: Decimal, base: Decimal) -> Decimal | None:
-    if base == 0:
+def _safe_pct(delta: Decimal | None, base: Decimal | None) -> Decimal | None:
+    if delta is None or base is None or base == 0:
         return None
     return (delta / base) * Decimal("100")
 
@@ -1958,14 +1958,19 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
             line.monthly_budget
         )
 
-    def _general_budget_total(month: int, *concepts: str) -> Decimal:
-        return sum(
-            (
-                general_monthly_budget_by_concept[_normalized_concept(concept)].get(month, ZERO)
-                for concept in concepts
-            ),
-            ZERO,
-        )
+    def _general_budget_total(month: int, *concepts: str) -> Decimal | None:
+        values = [months[month] for concept in concepts
+                  if month in (months := general_monthly_budget_by_concept.get(_normalized_concept(concept), {}))]
+        return sum(values, ZERO) if values else None
+
+    from reportes.services_presupuesto_maestro import PresupuestoMaestroService
+    from reportes.models import LineaPresupuestoMensual
+    master_sales = {
+        item["periodo"].month: item["total"]
+        for item in PresupuestoMaestroService()._budget_lines_for_kpi(
+            year=target_year, version=LineaPresupuestoMensual.VERSION_ORIGINAL,
+        ).order_by().values("periodo").annotate(total=Sum("monto_presupuesto"))
+    }
 
     source_groups_map: dict[str, dict[str, object]] = {}
     source_group_months: dict[str, dict[int, tuple[Decimal, Decimal]]] = defaultdict(lambda: defaultdict(lambda: (ZERO, ZERO)))
@@ -2037,6 +2042,8 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
     ytd_product_cost_budget = ZERO
     ytd_recurrent_expense_budget = ZERO
     ytd_budget_result = ZERO
+    ytd_budget_complete = {"sales": True, "product": True, "expense": True, "result": True}
+    ytd_budget_scope_count = 0
     ytd_actual_expense = ZERO
     ytd_sales = ZERO
     ytd_costed_sales = ZERO
@@ -2066,11 +2073,18 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         budget_total, actual_total = operating_budget_map.get(month, (ZERO, ZERO))
         variance_pct = _safe_pct(actual_total - budget_total, budget_total)
         sales_budget_total = _general_budget_total(month, *budget_sales_concepts)
-        if sales_budget_total == 0:
+        if sales_budget_total is None:
             sales_budget_total = _general_budget_total(month, *budget_sales_fallback_concepts)
+        sales_budget_source = "GENERAL" if sales_budget_total is not None else ""
+        if sales_budget_total is None and month in master_sales:
+            sales_budget_total = _to_decimal(master_sales[month])
+            sales_budget_source = "MAESTRO_ACTIVO"
         product_cost_budget_total = _general_budget_total(month, *budget_product_cost_concepts)
-        recurrent_expense_budget_total = monthly_recurrent_budget.get(month, ZERO)
-        budget_result_total = sales_budget_total - product_cost_budget_total - recurrent_expense_budget_total
+        recurrent_expense_budget_total = monthly_recurrent_budget.get(month)
+        budget_result_total = (sales_budget_total - product_cost_budget_total - recurrent_expense_budget_total
+                              if all(value is not None for value in
+                                     (sales_budget_total, product_cost_budget_total, recurrent_expense_budget_total)) else None)
+        has_budget = budget_total > 0 or actual_total > 0 or sales_budget_total is not None
         monthly_official = monthly_official_rows.get(month)
         sales_total = _to_decimal(getattr(finance, "venta_total", ZERO))
         finance_meta = getattr(finance, 'metadata', {}) or {}
@@ -2136,15 +2150,21 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
             if month <= ytd_cutoff_month:
                 ytd_budget_master += budget_master_total
                 ytd_actual_master += actual_master_total
-        if budget_total > 0 or actual_total > 0:
+        if has_budget:
             months_with_budget += 1
             if month <= ytd_cutoff_month:
                 ytd_budget += budget_total
                 ytd_actual += actual_total
-                ytd_sales_budget += sales_budget_total
-                ytd_product_cost_budget += product_cost_budget_total
-                ytd_recurrent_expense_budget += recurrent_expense_budget_total
-                ytd_budget_result += budget_result_total
+        if month <= ytd_cutoff_month and (has_budget or finance is not None):
+            ytd_budget_scope_count += 1
+            for key, value in (("sales", sales_budget_total), ("product", product_cost_budget_total),
+                               ("expense", recurrent_expense_budget_total), ("result", budget_result_total)):
+                if value is None:
+                    ytd_budget_complete[key] = False
+            ytd_sales_budget += sales_budget_total if sales_budget_total is not None else ZERO
+            ytd_product_cost_budget += product_cost_budget_total if product_cost_budget_total is not None else ZERO
+            ytd_recurrent_expense_budget += recurrent_expense_budget_total if recurrent_expense_budget_total is not None else ZERO
+            ytd_budget_result += budget_result_total if budget_result_total is not None else ZERO
         if finance is not None and not (projection_marked and not financial_projection_verified):
             months_with_finance += 1
             if month <= ytd_cutoff_month:
@@ -2162,12 +2182,15 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
 
         budget_attainment_pct = _safe_pct(actual_total, budget_total)
         sales_budget_attainment_pct = _safe_pct(sales_total, sales_budget_total)
-        sales_gap_total = sales_total - sales_budget_total
+        sales_gap_total = sales_total - sales_budget_total if sales_budget_total is not None else None
         sales_gap_pct = _safe_pct(sales_gap_total, sales_budget_total)
-        budget_result_variance_pct = _safe_pct(operating_profit_total - budget_result_total, budget_result_total)
-        product_cost_budget_mix_pct = _safe_pct(product_cost_budget_total, sales_budget_total)
-        recurrent_expense_budget_mix_pct = _safe_pct(recurrent_expense_budget_total, sales_budget_total)
-        budget_result_margin_pct = _safe_pct(budget_result_total, sales_budget_total)
+        budget_result_variance_pct = (_safe_pct(operating_profit_total - budget_result_total, budget_result_total)
+                                      if budget_result_total is not None else None)
+        product_cost_budget_mix_pct = (_safe_pct(product_cost_budget_total, sales_budget_total)
+                                      if product_cost_budget_total is not None else None)
+        recurrent_expense_budget_mix_pct = (_safe_pct(recurrent_expense_budget_total, sales_budget_total)
+                                           if recurrent_expense_budget_total is not None else None)
+        budget_result_margin_pct = _safe_pct(budget_result_total, sales_budget_total) if budget_result_total is not None else None
         actual_product_cost_mix_pct = _safe_pct(product_variable_cost_total, sales_total)
         actual_expense_mix_pct = _safe_pct(operating_expense_total, sales_total)
         operating_margin_pct = _safe_pct(operating_profit_total, sales_total)
@@ -2207,6 +2230,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 "actual_total": actual_total,
                 "variance_pct": variance_pct,
                 "sales_budget_total": sales_budget_total,
+                "sales_budget_source": sales_budget_source,
                 "sales_total": sales_total,
                 "product_cost_budget_total": product_cost_budget_total,
                 "costed_sales_total": costed_sales_total,
@@ -2251,7 +2275,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 "expense_signal": expense_signal,
                 "margin_signal": margin_signal,
                 "health_signal": health_signal,
-                "has_budget": budget_total > 0 or actual_total > 0 or sales_budget_total > 0,
+                "has_budget": has_budget,
                 "has_finance": finance is not None,
             }
         )
@@ -2356,6 +2380,11 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         ),
     }
 
+    ytd_sales_budget = ytd_sales_budget if ytd_budget_scope_count and ytd_budget_complete["sales"] else None
+    ytd_product_cost_budget = ytd_product_cost_budget if ytd_budget_scope_count and ytd_budget_complete["product"] else None
+    ytd_recurrent_expense_budget = ytd_recurrent_expense_budget if ytd_budget_scope_count and ytd_budget_complete["expense"] else None
+    ytd_budget_result = ytd_budget_result if ytd_budget_scope_count and ytd_budget_complete["result"] else None
+
     return {
         "year": target_year,
         "rows": rows,
@@ -2380,7 +2409,8 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         "ytd_recurrent_expense_budget": ytd_recurrent_expense_budget,
         "ytd_budget_result": ytd_budget_result,
         "ytd_actual_expense": ytd_actual_expense,
-        "ytd_structured_budget_total": ytd_product_cost_budget + ytd_recurrent_expense_budget,
+        "ytd_structured_budget_total": (ytd_product_cost_budget + ytd_recurrent_expense_budget
+                                        if ytd_product_cost_budget is not None and ytd_recurrent_expense_budget is not None else None),
         "ytd_sales": ytd_sales,
         "ytd_costed_sales": ytd_costed_sales if ytd_coverage_complete else None,
         "ytd_non_recipe": ytd_non_recipe if ytd_coverage_complete else None,
@@ -2390,11 +2420,11 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         "ytd_operating_profit": ytd_profit,
         "ytd_budget_master_variance_pct": _safe_pct(ytd_actual_master - ytd_budget_master, ytd_budget_master),
         "ytd_budget_variance_pct": _safe_pct(ytd_actual - ytd_budget, ytd_budget),
-        "ytd_sales_budget_variance_pct": _safe_pct(ytd_sales - ytd_sales_budget, ytd_sales_budget),
-        "ytd_budget_result_variance_pct": _safe_pct(ytd_profit - ytd_budget_result, ytd_budget_result),
-        "ytd_product_cost_budget_mix_pct": _safe_pct(ytd_product_cost_budget, ytd_sales_budget),
-        "ytd_recurrent_expense_budget_mix_pct": _safe_pct(ytd_recurrent_expense_budget, ytd_sales_budget),
-        "ytd_budget_result_margin_pct": _safe_pct(ytd_budget_result, ytd_sales_budget),
+        "ytd_sales_budget_variance_pct": _safe_pct(ytd_sales - ytd_sales_budget, ytd_sales_budget) if ytd_sales_budget is not None else None,
+        "ytd_budget_result_variance_pct": _safe_pct(ytd_profit - ytd_budget_result, ytd_budget_result) if ytd_budget_result is not None else None,
+        "ytd_product_cost_budget_mix_pct": _safe_pct(ytd_product_cost_budget, ytd_sales_budget) if ytd_product_cost_budget is not None else None,
+        "ytd_recurrent_expense_budget_mix_pct": _safe_pct(ytd_recurrent_expense_budget, ytd_sales_budget) if ytd_recurrent_expense_budget is not None else None,
+        "ytd_budget_result_margin_pct": _safe_pct(ytd_budget_result, ytd_sales_budget) if ytd_budget_result is not None else None,
         "ytd_actual_product_cost_mix_pct": _safe_pct(ytd_manufacturing, ytd_sales),
         "ytd_actual_expense_mix_pct": _safe_pct(ytd_actual_expense, ytd_sales),
         "ytd_actual_result_margin_pct": _safe_pct(ytd_profit, ytd_sales),

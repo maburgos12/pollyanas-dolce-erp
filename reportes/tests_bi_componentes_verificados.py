@@ -54,6 +54,7 @@ class ComponentesFinancierosVerificadosTests(TestCase):
         for importe in ['1,628,518.29', '11,656.98', '2,019,689.29', '847,540.20']:
             self.assertIn(importe, html)
         self.assertIn('Costo producto y merma', html)
+        self.assertIn('costo de producto y merma registrado pesa', html)
         self.assertIn('44.6%', html)
         self.assertIn('Lectura parcial', html)
         self.assertNotIn('Cierre completo', html)

@@ -47,7 +47,45 @@ def hora_extra_estados_nomina() -> list[str]:
     return [HoraExtra.ESTADO_AUTORIZADO, HoraExtra.ESTADO_PAGADO]
 
 
-def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> dict:
+def _nomina_del_cierre(periodo: date, sucursal_ids: set[int]) -> dict:
+    """The payroll field retained by the closed report, without product costing.
+
+    Keep the full reader's perimeter: a source-backed branch, or an existing
+    active branch with current fixed expense. Missing payroll remains None.
+    """
+    from control.models import MermaMensualSucursal
+    from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
+    from reportes.services_rentabilidad_personal import leer_personal_mensual
+    from reportes.services_rentabilidad_mensual import costos_de_sucursal
+    from .models_rentabilidad import SucursalRentabilidad
+    from .services_resultado import ventas_para_costeo
+
+    gastos = leer_gastos_mensuales(periodo, usar_reparto_consolidado=True)
+    personal = leer_personal_mensual(periodo)
+    fuentes = {"filas": gastos["filas"] + personal["filas"],
+               "pendientes": gastos["pendientes"] + personal["pendientes"],
+               "ciclos_facturacion": gastos.get("ciclos_facturacion", [])}
+    fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
+    con_fuente = set(ventas_para_costeo(periodo, fin).values_list("sucursal_historica_id", flat=True))
+    con_fuente.update(MermaMensualSucursal.objects.filter(periodo=periodo).values_list("sucursal_id", flat=True))
+    registradas_activas = set(SucursalRentabilidad.objects.filter(
+        periodo=periodo, sucursal_id__in=sucursal_ids, sucursal__activa=True,
+    ).values_list("sucursal_id", flat=True))
+    nominas = {}
+    for sid in sucursal_ids:
+        resumen = costos_de_sucursal(fuentes, sid)
+        if sid not in con_fuente and not (
+            sid in registradas_activas and sum(resumen["campos"].values(), Decimal("0"))
+        ):
+            continue
+        nominas[sid] = (_quantize(resumen["campos"].get("nomina_directa", Decimal("0")))
+                       if {"nomina", "cargas_patronales"} & set(resumen["totales"]) else None)
+    return nominas
+
+
+def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None,
+                         *, periodos_requeridos: set[date] | None = None,
+                         periodos_salida: set[date] | None = None) -> dict:
     """{periodo: {sucursal_id: {nombre, ingresos, nomina, utilidad}}}"""
     from rentabilidad.models_rentabilidad import SucursalRentabilidad
 
@@ -65,9 +103,34 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
         raise ValueError("Cierre enero–septiembre sin conciliar: " + "; ".join(cierre["errores"]))
     if cierre:
         periodos.update(date(2026, f["mes"], 1) for f in cierre["detalle"] if desde <= date(2026, f["mes"], 1) <= hasta)
+    if periodos_requeridos is not None:
+        periodos.intersection_update(periodos_requeridos)
+    filas_cierre = {
+        periodo: resumen_cierre_mensual(cierre, periodo, sucursal_id)["filas"]
+        for periodo in periodos
+        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1)
+    }
+    if periodos_salida is not None:
+        # These 2025 rows only served YoY, which already rejects their fiscal
+        # partial scope against the populated 2026 reconciled distribution.
+        # Never skip an output month, an empty close, or a comparable base.
+        incompatibles = {_month_add(periodo, -12) for periodo, filas in filas_cierre.items()
+                         if filas and periodo in periodos_salida}
+        periodos.difference_update(incompatibles - periodos_salida)
     data = {}
     for periodo in periodos:
         mes = data.setdefault(periodo, {})
+        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
+            filas = filas_cierre[periodo]
+            nominas = _nomina_del_cierre(periodo, {f["sucursal_id"] for f in filas})
+            for fila in filas:
+                sid = fila["sucursal_id"]
+                mes[sid] = {"nombre": fila["nombre"], "ingresos": fila["ventas"],
+                            "nomina": nominas.get(sid),
+                            "utilidad": fila["utilidad"], "central_registrado": None,
+                            "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"],
+                            "financiero": _detalle_financiero(fila)}
+            continue
         for row in registros_del_mes(periodo):
             if sucursal_id and row.sucursal_id != sucursal_id:
                 continue
@@ -80,18 +143,6 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None) -> 
                 "utilidad": _quantize(row.utilidad_operativa),
                 "central_registrado": getattr(row, "central_registrado", None),
             }
-        if cierre and date(2026, 1, 1) <= periodo <= date(2026, 9, 1):
-            anteriores = mes.copy()
-            mes.clear()
-            for fila in resumen_cierre_mensual(cierre, periodo, sucursal_id)["filas"]:
-                sid = fila["sucursal_id"]
-                if fila["mes"] != periodo.month or (sucursal_id and sid != sucursal_id):
-                    continue
-                mes[sid] = {"nombre": fila["nombre"], "ingresos": fila["ventas"],
-                            "nomina": anteriores.get(sid, {}).get("nomina"),
-                            "utilidad": fila["utilidad"], "central_registrado": None,
-                            "alcance": "REPARTO_CONCILIADO", "etapa": fila["etapa"],
-                            "financiero": _detalle_financiero(fila)}
     return data
 
 
@@ -243,7 +294,10 @@ def build_reporte_mensual_consolidado(
     # Se consulta un año extra hacia atrás para poder calcular YoY.
     desde_con_yoy = _month_add(desde, -12)
 
-    rent = _rentabilidad_por_mes(desde_con_yoy, hasta, sucursal_id)
+    periodos_salida = {_month_add(desde, offset) for offset in range(meses)}
+    requeridos = periodos_salida | {_month_add(periodo, -12) for periodo in periodos_salida}
+    rent = _rentabilidad_por_mes(desde_con_yoy, hasta, sucursal_id,
+                                periodos_requeridos=requeridos, periodos_salida=periodos_salida)
     horas = _horas_extra_por_mes(desde_con_yoy, hasta, sucursal_id)
 
     filas_por_periodo: dict[date, dict] = {}

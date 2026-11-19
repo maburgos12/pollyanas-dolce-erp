@@ -1,4 +1,4 @@
-const CACHE_NAME = "pollyanas-erp-shell-20261119-pvv-hora-conteo-v14";
+const CACHE_NAME = "pollyanas-erp-shell-20261119-reporte-mensual-v15";
 const INSTALL_ASSETS = [
   "/static/manifest.webmanifest",
   "/static/favicon-192x192.png?v=20260525-logo-v1",

@@ -1022,7 +1022,11 @@ class ReportesBITests(TestCase):
         self.assertContains(resp, "$120,000.00")
         self.assertContains(resp, "$40,000.00")
         self.assertContains(resp, "$60,000.00")
-        self.assertContains(resp, "$-20,000.00")
+        # No product-cost budget source: subtracting an assumed zero invented
+        # a -20k result. Keep the known sales/expense amounts, not that result.
+        self.assertIsNone(resp.context["budget_operating_panel"]["selected_row"]["product_cost_budget_total"])
+        self.assertIsNone(resp.context["budget_operating_panel"]["selected_row"]["budget_result_total"])
+        self.assertNotContains(resp, "$-20,000.00")
 
     def test_bi_budget_panel_prefers_monthly_official_sales_total(self):
         EmpresaResultadoMensual.objects.create(
