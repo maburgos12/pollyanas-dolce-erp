@@ -57,7 +57,12 @@ Registrar y restablecer cualquier pausa temporal del timer; no silenciar los
 monitores de disco ni inventarios.
 
 La unidad de recuperación usa `--verify-only`: verifica y registra recuperación,
-sin iniciar rotación ni mantenimiento Docker. El cron del rotador existente sigue
+sin iniciar rotación ni mantenimiento Docker. Los recibos nuevos se guardan en
+`/var/lib/erp-backup-restore/verification-receipts`, un directorio privado separado
+de `receipts`, que consume el rotador. Verificar no convierte un respaldo nuevo en
+elegible para retiro. Puede leer recibos canónicos válidos, pero no los modifica;
+siempre comprueba nuevamente el contenido del NAS antes de informar éxito.
+El cron del rotador existente sigue
 usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
 no amplía su autorización ni autoriza otros lotes de limpieza.
 El límite total de la unidad sigue siendo ocho horas: su ejecución programada

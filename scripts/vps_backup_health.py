@@ -7,6 +7,7 @@ import importlib.machinery
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -39,13 +40,20 @@ def atomic(path, text):
     temp.replace(path)
 
 
-def verify_point(rotator, stem):
+def verify_point(rotator, stem, receipts=None):
     manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
-    path = rotator.RECEIPTS / (stem + '.json')
-    try:
-        proof = rotator.read_receipt(path, stem)
-        rotator.require(proof['manifest_sha256'] == checksum, 'Changed manifest')
-    except (OSError, ValueError, KeyError, TypeError):
+    directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
+    path = directories[0] / (stem + '.json')
+    proof = None
+    for directory in directories:
+        try:
+            candidate = rotator.read_receipt(directory / path.name, stem)
+            rotator.require(candidate['manifest_sha256'] == checksum, 'Changed manifest')
+            proof = candidate
+            break
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if proof is None:
         payload = json.loads(run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ConnectTimeout=20', 'qnap-nasdolce-archive',
                                   NAS_PYTHON, NAS_RUNNER, stem, checksum]))
@@ -55,7 +63,8 @@ def verify_point(rotator, stem):
         # Reuse only root-owned aliases; current byte/hash validation below remains mandatory.
         aliases = {}
         names = {row['path'] for row in json.loads((rotator.BACKUPS / (stem + '.media.json')).read_text())['files']}
-        for previous in sorted(rotator.RECEIPTS.glob('*.json')):
+        previous_receipts = {p for directory in directories for p in directory.glob('*.json')}
+        for previous in sorted(previous_receipts):
             try:
                 old = rotator.read_receipt(previous, previous.stem)
                 aliases.update({k: v for k, v in old.get('media_aliases', {}).items() if k in names})
@@ -72,6 +81,16 @@ def verify_point(rotator, stem):
 
 
 def maintain(rotator, verify_only=False):
+    receipts = None
+    if verify_only:
+        receipts = STATE / 'verification-receipts'
+        for directory in (STATE, receipts):
+            if directory == receipts:
+                directory.mkdir(mode=0o700, exist_ok=True)
+            info = directory.lstat()
+            forbidden_mode = 0o077 if directory == receipts else 0o022
+            rotator.require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                            and not info.st_mode & forbidden_mode, 'Verification receipts require a private owned directory and safe parent')
     # This lock also serializes with the daily backup and existing cron rotator.
     with (rotator.BACKUPS / '.backup.flock').open('r') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -83,7 +102,7 @@ def maintain(rotator, verify_only=False):
                         'Newest backup is over 48 hours old')
         run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
              'qnap-nasdolce-archive', 'true'])
-        verified = [verify_point(rotator, point) for point in points]
+        verified = [verify_point(rotator, point, receipts=receipts) for point in points]
     if verify_only:
         return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
     # The rotator reacquires its lock and checks the current newest set and every proof.
