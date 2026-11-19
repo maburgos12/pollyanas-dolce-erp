@@ -265,6 +265,15 @@
               <details id="trace-product-{{ row.product_id }}"><summary>Ver detalle</summary>
                 {% for case in row.cases %}
                 <p><a href="{{ case.url }}">{{ case.branch }}</a> · Inicial Point: {% if case.opening is None %}pendiente{% else %}{{ case.opening|floatformat:"-1"|intcomma }}{% endif %} · Saldo calculado: {% if case.calculated is None %}pendiente{% else %}{{ case.calculated|floatformat:"-1"|intcomma }}{% endif %} · Final Point: {% if case.closing is None %}pendiente{% else %}{{ case.closing|floatformat:"-1"|intcomma }}{% endif %} · Diferencia: {% if case.difference is None %}pendiente{% else %}{{ case.difference|floatformat:"-1"|intcomma }}{% endif %} · {% if case.pending_reason %}{{ case.pending_reason }}{% else %}{{ case.status }}{% if case.status == 'Conciliado' and case.traceability_status != 'Conciliado' %} · trazabilidad pendiente{% endif %}{% endif %}</p>
+                {% with observed=case.operational_opening_evidence %}
+                {% if observed %}
+                <p><strong>Inicio operativo observado · {{ observed.captured_at|date:"d/m/Y H:i:s" }} (Mazatlán)</strong><br>
+                  {{ observed.quantity|floatformat:"-6u" }} {{ observed.unit }} · Captura Point #{{ observed.snapshot_id }}
+                  · extracción #{{ observed.job_id }} · bitácora #{{ observed.log_id }}<br>
+                  <small>Saldo al 30/09 pendiente. Esta captura del 03/10 no sustituye la apertura mensual ni se suma al cierre.</small>
+                </p>
+                {% endif %}
+                {% endwith %}
                 {% with comparison=case.physical_comparison %}
                 {% if comparison %}
                 <p><strong>Físico vs Point: {{ comparison.label }}</strong>
