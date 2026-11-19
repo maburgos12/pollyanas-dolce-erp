@@ -83,7 +83,7 @@ class IncrementalLabelsTests(TestCase):
         delta = Decimal("0")
         for branch_id, quantity in self.branch_quantities.items():
             row = result["sucursales"][branch_id]
-            full_base = Decimal("139.957253") * quantity
+            full_base = (Decimal("139.957253") * quantity).quantize(Decimal(".01"))
             self.assertEqual(row["costo_materia_prima"] - full_base,
                              (Decimal("1.004099") * quantity).quantize(Decimal(".01")))
             self.assertEqual(row["costo_reventa"], 0)
@@ -161,6 +161,30 @@ class IncrementalLabelsTests(TestCase):
         asignar_costos_filas([row], PERIOD, END)
         self.assertIsNone(row["cost_evidence"])
         self.assertNotIn(516, _costos_recetas_para_periodo({516}, PERIOD, END))
+
+    def test_existing_material_half_cent_tie_preserves_exact_incremental_delta(self):
+        from types import SimpleNamespace
+        from rentabilidad.services_resultado import aplicar_resultado
+
+        RecetaCostoHistoricoMensual.objects.filter(receta=self.base, periodo=PERIOD).update(costo_total="0.001")
+        self.rule.refresh_from_db()
+        authorized = deepcopy(self.rule.metadata)
+        self.rule.metadata = {}
+        self.rule.save()
+        before = leer_resultado_mensual(PERIOD)
+        self.rule.metadata = authorized
+        self.rule.save()
+        after = leer_resultado_mensual(PERIOD)
+        delta = Decimal("0")
+        for branch_id, quantity in self.branch_quantities.items():
+            original = SimpleNamespace(sucursal_id=branch_id)
+            updated = SimpleNamespace(sucursal_id=branch_id)
+            aplicar_resultado(original, before)
+            aplicar_resultado(updated, after)
+            branch_delta = updated.costo_materia_prima - original.costo_materia_prima
+            self.assertEqual(branch_delta, (Decimal("1.004099") * quantity).quantize(Decimal(".01")))
+            delta += branch_delta
+        self.assertEqual(delta, Decimal("167.69"))
 
     def test_legitimate_names_can_change_without_reassigning_product_identity(self):
         self.product.name = "Nuevo nombre de catálogo"

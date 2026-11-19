@@ -115,7 +115,11 @@ def leer_resultado_mensual(periodo):
         if costo <= 0 and fila["cantidad"] and not (evidence and evidence.get("authorized")):
             suc["pendientes"].append(f"Costo sin confirmar: producto {fila['product_id']}, receta {fila['receta_id']}")
     for sucursal_id, importe in material_incremental.items():
-        sucursales[sucursal_id]["costo_materia_prima"] += importe.quantize(Decimal("0.01"))
+        suc = sucursales[sucursal_id]
+        suc["costo_materia_prima"] = (
+            suc["costo_materia_prima"].quantize(Decimal("0.01"))
+            + importe.quantize(Decimal("0.01"))
+        )
     for merma in mermas:
         suc = sucursales[merma.sucursal_id]
         costo_merma = merma.costo_merma

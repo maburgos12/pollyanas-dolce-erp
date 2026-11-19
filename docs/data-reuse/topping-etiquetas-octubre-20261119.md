@@ -28,7 +28,7 @@ Extender la relación aprobada existente con metadata JSON, default vacío y sin
 
 El documento mensual queda en `monthly_sold_material_treatments[2026-10-01]` con contrato, ámbito, autorización, identidad, componentes, precios y filas fuente, ventas comprobadas, componentes absorbidos y fecha de aplicación. El comando reutiliza la normalización y los pesos del algoritmo mensual existente. No crea una segunda captura de ingredientes o ventas.
 
-El costo de Etiqueta G es $0.435795 y el de Etiqueta Rectangular $0.568304. Una unidad consume una pieza de cada etiqueta. El importe de sucursal es `round(cantidad de sucursal × 1.004099, 2)`. Se añade ese importe al material existente una vez. La suma de las diez sucursales es $167.69. El panel de productos suma esos mismos importes por sucursal y el reporte mensual/CSV utiliza el mismo lector de resultados.
+El costo de Etiqueta G es $0.435795 y el de Etiqueta Rectangular $0.568304. Una unidad consume una pieza de cada etiqueta. El importe de sucursal es `round(cantidad de sucursal × 1.004099, 2)`. Se añade al material previamente cuantizado a centavos una vez, conservando el importe anterior también en los empates de medio centavo. La suma de las diez sucursales es $167.69. El panel de productos suma esos mismos importes por sucursal y el reporte mensual/CSV utiliza el mismo lector de resultados.
 
 El lector de material vendido activa explícitamente este tratamiento solo en Rentabilidad. La etiqueta del panel es Complemento incremental. Los consumidores de receta completa, costeo semanal, merma, logística, mano de obra y confianza general conservan su lectura existente. No se guarda el importe incremental en un histórico que represente el costo total de una receta.
 
