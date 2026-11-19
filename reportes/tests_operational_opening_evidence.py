@@ -145,3 +145,38 @@ class OperationalOpeningEvidenceTests(InventoryAuditAgentFixtures, TestCase):
         self.branch.save(update_fields=["erp_branch"])
         self.add()
         self.assertNotIn("operational_opening_evidence", self.visible)
+
+    def test_zero_operational_result_is_visible_and_invalidates_without_changing_monthly_values(self):
+        # Other monthly frontiers can remain incomplete while this independently
+        # verified operational interval is displayed. No global state promotion.
+        self.audit_run.status = "SOURCE_INCOMPLETE"
+        self.audit_run.save(update_fields=["status"])
+        self.snapshot.stock = Decimal("0")
+        self.snapshot.raw_payload["row"][4] = "0"
+        self.snapshot.save(update_fields=["stock", "raw_payload"])
+        operation = {"verified": True, "no_activity": True, "opening": Decimal("0"),
+            "closing": Decimal("0"), "calculated": Decimal("0"), "difference": Decimal("0"),
+            "flows": {"sales": Decimal("0")}}
+        with patch("reportes.services_operational_opening_evidence.read_operational_reconciliation",
+                   return_value={self.product.pk: operation}) as reader:
+            self.add()
+            self.assertEqual(reader.call_count, 1)
+            self.assertEqual(self.visible["operational_reconciliation"], operation)
+            self.assertEqual(self.groups[0]["rows"][0]["operational_verified_count"], 1)
+            from django.template.loader import render_to_string
+            from django.contrib.auth.models import AnonymousUser
+            request = RequestFactory().get("/reportes/produccion/", {"periodo": "2026-10"})
+            request.user = AnonymousUser()
+            html = render_to_string("reportes/producido_vs_vendido.html", {"groups": self.groups}, request=request)
+            self.assertIn("Sin actividad en tramo operativo acreditado", html)
+            self.assertIn("Conciliación operativa desde captura 03/10 10:48 hasta 31/10", html)
+            self.assertIn("Saldo al 30/09 pendiente", html)
+            self.assertNotIn("Octubre cerrado", html)
+        with patch("reportes.services_operational_opening_evidence.read_operational_reconciliation", return_value={}):
+            self.add()
+            self.assertNotIn("operational_reconciliation", self.visible)
+            self.assertEqual(self.groups[0]["rows"][0]["operational_verified_count"], 0)
+            self.assertIn("operational_opening_evidence", self.visible)
+        self.assertIsNone(self.visible["opening"])
+        self.case.refresh_from_db()
+        self.assertEqual(self.case.opening_point, 0)

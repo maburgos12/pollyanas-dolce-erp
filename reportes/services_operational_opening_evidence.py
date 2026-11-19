@@ -10,23 +10,31 @@ from zoneinfo import ZoneInfo
 
 from pos_bridge.models import PointExtractionLog, PointInventorySnapshot, PointSyncJob
 from reportes.models import ProductInventoryAuditCase
+from reportes.services_operational_reconciliation import read_operational_reconciliation
 
 _CAPTURED_AT = datetime(2026, 10, 3, 17, 48, 28, 494613, tzinfo=timezone.utc)
 _HEADERS = ["Código", "Producto", "Cantidad", "Unidad", "Costo Unitario", "Costo Total", "Último Movimiento", "Opciones"]
 
 
 def add_operational_opening_evidence(cutoff, groups):
-    """Enrich only already-visible HTML cases; never recalculate or persist."""
+    """Enrich visible HTML cases without replacing or persisting monthly values."""
+    for group in groups:
+        for row in group["rows"]:
+            row["operational_verified_count"] = 0
+            for case in row["cases"]:
+                case.pop("operational_opening_evidence", None)
+                case.pop("operational_reconciliation", None)
     if cutoff != date(2026, 10, 31):
         return
     cases = {case["id"]: case for group in groups for row in group["rows"]
              for case in row["cases"] if case["opening"] is None}
     if not cases:
         return
-    pairs = dict(ProductInventoryAuditCase.objects.filter(
+    stored_cases = list(ProductInventoryAuditCase.objects.filter(
         pk__in=cases, month=date(2026, 10, 1), branch_id=28,
         branch__external_id="14", branch__erp_branch_id=18,
-    ).values_list("product_id", "pk"))
+    ).select_related("branch", "product"))
+    pairs = {case.product_id: case.pk for case in stored_cases}
     if not pairs or not PointExtractionLog.objects.filter(
         pk=302317, sync_job_id=81086, level=PointExtractionLog.LEVEL_INFO,
         message="Sucursal procesada 14.",
@@ -39,6 +47,7 @@ def add_operational_opening_evidence(cutoff, groups):
         sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
     ).select_related("product"))
     counts = Counter(item.product_id for item in snapshots)
+    eligible = {}
     for snapshot in snapshots:
         raw = snapshot.raw_payload
         row = raw.get("row") if isinstance(raw, dict) else None
@@ -55,8 +64,23 @@ def add_operational_opening_evidence(cutoff, groups):
                 continue
         except (InvalidOperation, TypeError, ValueError):
             continue
+        if quantity == 0:
+            eligible[snapshot.product_id] = snapshot
+        cases[pairs[snapshot.product_id]].pop("operational_reconciliation", None)
         cases[pairs[snapshot.product_id]]["operational_opening_evidence"] = {
             "quantity": quantity, "unit": row[5], "snapshot_id": snapshot.pk,
             "job_id": snapshot.sync_job_id, "log_id": 302317,
             "captured_at": snapshot.captured_at.astimezone(ZoneInfo("America/Mazatlan")),
         }
+    # A monthly opening can remain incomplete while this later interval has
+    # full independent coverage. The batch reader revalidates its own sources.
+    candidates = [case for case in stored_cases if case.product_id in eligible]
+    reconciled = read_operational_reconciliation(candidates, eligible) if candidates else {}
+    for case in candidates:
+        result = reconciled.get(case.product_id)
+        if result is not None:
+            cases[case.pk]["operational_reconciliation"] = result
+    for group in groups:
+        for row in group["rows"]:
+            row["operational_verified_count"] = sum(bool(case.get("operational_reconciliation"))
+                for case in row["cases"])
