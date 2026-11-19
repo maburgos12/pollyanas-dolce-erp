@@ -276,6 +276,38 @@ class SalesConfidenceTests(TestCase):
         FactVentaDiaria.objects.filter(pk=fact.pk).update(producto_clave="0169", producto_nombre="Pirotecnia")
         self.assertIsNone(self.confidence()["margin"])
 
+    def test_full_official_identity_uses_existing_authorized_gift_without_native_sku(self):
+        from pos_bridge.models import PointProduct
+        from reportes.models import ProductoReventaCosto
+        product, source = self.resale(external_id="official:3468", name="Estuche Escolar 🐻", cost=0)
+        product.sku = "3468"
+        product.save(update_fields=["sku"])
+        source.fuente = ProductoReventaCosto.FUENTE_MANUAL
+        source.metadata.update(cost_treatment="SUPPLIER_GIFT", authorization="Mauricio",
+                               point_external_id=product.external_id)
+        source.save()
+        PointProduct.objects.create(external_id="native-3468", sku="3468", name=product.name)
+        fact = self.fact(key=product.external_id, producto_nombre=product.name)
+        result = self.confidence()
+        self.assertEqual(result["missing_cost_rows"], 0)
+        self.assertEqual(result["authorized_zero_sales"], 100)
+        self.assertEqual(result["margin"], 100)
+        fact.refresh_from_db()
+        self.assertIsNone(fact.point_product_id)
+        self.assertEqual(fact.producto_clave, "official:3468")
+
+    def test_legacy_unprefixed_identity_retains_existing_official_cost(self):
+        product, source = self.resale(external_id="official:169")
+        self.fact(key="169", producto_nombre=product.name)
+        self.assertEqual(self.confidence()["margin"], 80)
+
+    def test_full_official_identity_never_uses_another_name_or_native_sku(self):
+        product, source = self.resale(external_id="169")
+        self.fact(key="official:169", producto_nombre=product.name)
+        self.assertIsNone(self.confidence()["margin"])
+        other, other_source = self.resale(external_id="official:169", name="Otro artículo")
+        self.assertIsNone(self.confidence()["margin"])
+
     def test_rejected_or_future_source_uses_valid_prior_cost_and_keeps_its_date(self):
         from reportes.models import ProductoReventaCosto, ProductoReventaCostoHistoricoMensual
         from reportes.sales_confidence import build_sales_confidence
