@@ -24,7 +24,7 @@ Los ocho pares usan el producto ERP 568 / artículo Point 70, con IDs de sucursa
 
 Extender el suplemento documental existente. Reutilizar los validadores de snapshot y su contraste con los movimientos retenidos, preservando precedencia de fronteras existentes y evidencia de origen. Una captura posterior solo acredita el corte cuando el último movimiento verificable es anterior y el contraste retenido resulta favorable. No se promueve cobertura de historial ni verificación de conteo físico.
 
-Se conserva el manifiesto #7 íntegro. El código lee fuentes existentes. Una reconstrucción real posterior actualizaría la proyección e investigaría los casos mediante el flujo existente, y requiere revisión de impacto. El preview dry_run se ejecuta en READ ONLY sin aplicar esa reconstrucción.
+Se conserva el manifiesto #7 íntegro. El código lee fuentes existentes. Una reconstrucción real posterior actualizaría la proyección e investigaría los casos mediante el flujo existente, y requiere revisión de impacto. El preview dry_run se ejecuta en READ ONLY sin aplicar esa reconstrucción. La lectura de casos existentes usa bloqueo de filas únicamente en aplicación real, conservando el bloqueo mensual en simulación. La regresión reproduce el acceso dentro de una transacción PostgreSQL READ ONLY.
 
 ## Evidencia reproducible
 

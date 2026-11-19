@@ -4,8 +4,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.db import connection
-from django.test import TestCase
+from django.db import connection, transaction
+from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from pos_bridge.models import (PointBranch, PointProduct, PointProductHistoryImport,
@@ -192,6 +192,8 @@ class OriginalBoundaryWithoutManifestLineTests(TestCase):
         self.assertEqual(proof["snapshot_boundary_evidence"]["snapshot_id"], snapshot.pk)
         with patch.object(service, "build", return_value=trace), self.captureOnCommitCallbacks() as callbacks:
             with CaptureQueriesContext(connection) as captured:
+                InventoryAuditMaterializer()._canonical_existing_cases(
+                    month=self.month, branch_aliases={}, prepared_lines=[prepared], dry_run=True)
                 preview = InventoryAuditMaterializer(traceability_service=service).rebuild(
                     self.month, dry_run=True, allow_partial=True)
         self.assertTrue(preview)
@@ -199,6 +201,26 @@ class OriginalBoundaryWithoutManifestLineTests(TestCase):
         mutations = [query["sql"] for query in captured if query["sql"].lstrip().split()[0].upper()
                      in {"INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP"}]
         self.assertEqual(mutations, [])
+        self.assertFalse(any("FOR UPDATE" in query["sql"].upper() for query in captured))
         opening.refresh_from_db()
         self.assertEqual(opening.source_fingerprint, "opening-preserved")
         self.assertEqual(opening.lines.count(), 1)
+
+
+    def test_real_rebuild_existing_cases_retains_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            InventoryAuditMaterializer()._canonical_existing_cases(
+                month=self.month, branch_aliases={}, prepared_lines=[], dry_run=False)
+        self.assertTrue(any("FOR UPDATE" in query["sql"].upper() for query in captured))
+
+
+class InventoryAuditReadOnlyPreviewTests(TransactionTestCase):
+    def test_existing_case_preview_runs_in_postgresql_read_only_transaction(self):
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
+            callbacks = list(connection.run_on_commit)
+            result = InventoryAuditMaterializer()._canonical_existing_cases(
+                month=date(2026, 10, 1), branch_aliases={}, prepared_lines=[], dry_run=True)
+            self.assertEqual(result, {})
+            self.assertEqual(connection.run_on_commit, callbacks)
