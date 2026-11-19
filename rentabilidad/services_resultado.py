@@ -88,13 +88,14 @@ def leer_resultado_mensual(periodo):
     filas = list(ventas.values("sucursal_historica_id", "receta_id", "product_id", "product__sku", "product__name")
                  .annotate(brutas=Sum("gross_amount"), impuestos=Sum("tax_amount"),
                            descuentos=Sum("discount_amount"), cantidad=Sum("quantity")))
-    asignar_costos_filas(filas, periodo, fin)
+    asignar_costos_filas(filas, periodo, fin, aplicar_componentes_incrementales=True)
     mermas = list(MermaMensualSucursal.objects.filter(periodo=periodo))
     receta_ids = {f["receta_id"] for f in filas if f["receta_id"]}
     receta_ids.update(m.receta_id for m in mermas if m.receta_id)
     recetas = _costos_recetas_para_periodo(receta_ids, periodo, fin)
     sucursales = defaultdict(lambda: {"ventas_brutas": ZERO, "descuentos": ZERO,
         "costo_materia_prima": ZERO, "costo_reventa": ZERO, "merma": ZERO, "pendientes": [], "advertencias": [], "tiene_ventas": False})
+    material_incremental = defaultdict(lambda: ZERO)
     for fila in filas:
         suc = sucursales[fila["sucursal_historica_id"]]
         suc["tiene_ventas"] = True
@@ -103,12 +104,18 @@ def leer_resultado_mensual(periodo):
         evidence = fila["cost_evidence"]
         costo = evidence["cost"] if evidence else ZERO
         campo = "costo_reventa" if fila["cost_is_resale"] else "costo_materia_prima"
-        suc[campo] += costo * (fila["cantidad"] or ZERO)
+        importe = costo * (fila["cantidad"] or ZERO)
+        if evidence and evidence.get("treatment") == "INCREMENTAL_COMPONENTS":
+            material_incremental[fila["sucursal_historica_id"]] += importe
+        else:
+            suc[campo] += importe
         neto = (fila["brutas"] or ZERO) - (fila["impuestos"] or ZERO) - (fila["descuentos"] or ZERO)
         if neto > 0 and costo * (fila["cantidad"] or ZERO) > neto:
             suc["advertencias"].append(f"Revisar costo/unidad superior a venta: producto {fila['product_id']}")
         if costo <= 0 and fila["cantidad"] and not (evidence and evidence.get("authorized")):
             suc["pendientes"].append(f"Costo sin confirmar: producto {fila['product_id']}, receta {fila['receta_id']}")
+    for sucursal_id, importe in material_incremental.items():
+        sucursales[sucursal_id]["costo_materia_prima"] += importe.quantize(Decimal("0.01"))
     for merma in mermas:
         suc = sucursales[merma.sucursal_id]
         costo_merma = merma.costo_merma
