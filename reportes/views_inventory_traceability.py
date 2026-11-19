@@ -349,13 +349,22 @@ def _source_evidence_by_step(
     }
     for role in ("opening", "closing"):
         proof = trace.get("historical_boundary_evidence", {}).get(role, {})
-        if proof.get("contract") != "POINT_ORIGINAL_HISTORY_BOUNDARY_V1" or not has_documentary_boundary(trace, role):
+        if not has_documentary_boundary(trace, role) or proof.get("line_id") is not None:
+            continue
+        snapshot = proof.get("snapshot_boundary_evidence", {})
+        if snapshot.get("snapshot_id"):
+            source_id = snapshot["snapshot_id"]
+            reference = f"Captura Point #{source_id}: saldo comprobado al corte"
+        elif proof.get("contract") == "POINT_ORIGINAL_HISTORY_BOUNDARY_V1":
+            source_id = proof["original_batch_evidence"]["import_id"]
+            reference = "Historial original de Point: saldo comprobado al corte"
+        else:
             continue
         evidence[source_steps[role]].append(_evidence_row(
-            source=role, source_id=proof["original_batch_evidence"]["import_id"],
+            source=role, source_id=source_id,
             date_value=parse_datetime(proof["cutoff"]), location=case.branch.name,
             quantity=Decimal(proof["effective_stock"]), actor=None,
-            reference="Historial original de Point: saldo comprobado al corte",
+            reference=reference,
         ))
 
     for source in (

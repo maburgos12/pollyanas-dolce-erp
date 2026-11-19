@@ -19,7 +19,7 @@ from pos_bridge.services.audit_stock_history_service import (
 )
 from pos_bridge.services.monthly_product_balance_service import (
     MonthlyPointProductBalanceService, documentary_historical_boundary,
-    _original_stock_delta_matches,
+    _original_stock_delta_matches, documentary_original_boundaries, has_documentary_boundary,
 )
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from recetas.models import Receta
@@ -462,6 +462,68 @@ class SnapshotHistoricalBoundaryTests(TestCase):
             setattr(row, field, value)
         row.save()
         self.assertEqual(self._read()[0], {})  # magnitude never relaxes direction
+
+    def test_absent_manifest_pair_uses_verified_snapshot_without_promoting_history(self):
+        snapshot = self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        original_rows = list(record.rows.values())
+        original_metadata = dict(record.raw_metadata)
+        with patch("requests.sessions.Session.request", side_effect=AssertionError("No HTTP")):
+            values = documentary_original_boundaries(
+                [self.line], month=self.month, boundary="closing", excluded_keys=set(), cache={})
+        quantity, proof = values[(self.branch.pk, self.product.pk)]
+        self.assertEqual(quantity, Decimal("0"))
+        self.assertIsNone(proof["line_id"])
+        self.assertTrue(proof["snapshot_boundary_verified"])
+        self.assertEqual(proof["snapshot_boundary_evidence"]["snapshot_id"], snapshot.pk)
+        self.assertFalse(proof["canonical_history_verified"])
+        self.assertFalse(proof["physical_count_verified"])
+        self.assertTrue(has_documentary_boundary(
+            {"historical_boundary_evidence": {"closing": proof}}, "closing"))
+        from types import SimpleNamespace
+        from reportes.views_inventory_traceability import _source_evidence_by_step
+        evidence, _ = _source_evidence_by_step(SimpleNamespace(
+            branch=self.branch, source_trace={"historical_boundary_evidence": {"closing": proof}}))
+        row, = evidence["point_closing"]
+        self.assertEqual(row["quantity"], Decimal("0"))
+        self.assertIn(str(snapshot.pk), row["reference"])
+        for field in ("snapshot_id", "sync_job_id", "raw_signature", "provenance_signature",
+                      "qualified_snapshot_signature", "branch_provenance_log_ids"):
+            with self.subTest(missing=field):
+                incomplete = deepcopy(proof)
+                incomplete["snapshot_boundary_evidence"].pop(field)
+                self.assertFalse(has_documentary_boundary(
+                    {"historical_boundary_evidence": {"closing": incomplete}}, "closing"))
+        mismatched = deepcopy(proof)
+        mismatched["product_id"] = self.product.pk + 1
+        self.assertFalse(has_documentary_boundary(
+            {"historical_boundary_evidence": {"closing": mismatched}}, "closing"))
+        record.refresh_from_db()
+        self.assertEqual(record.raw_metadata, original_metadata)
+        self.assertEqual(list(record.rows.values()), original_rows)
+        self.assertEqual(self.closing.lines.count(), 1)
+
+    def test_snapshot_supplement_rejects_excluded_pair_and_missing_provenance(self):
+        self._snapshot(stock="0")
+        self._complete_without_batch_membership()
+        key = (self.branch.pk, self.product.pk)
+        self.assertEqual(documentary_original_boundaries(
+            [self.line], month=self.month, boundary="closing", excluded_keys={key}, cache={}), {})
+        self.log.delete()
+        self.assertEqual(documentary_original_boundaries(
+            [self.line], month=self.month, boundary="closing", excluded_keys=set(), cache={}), {})
+
+    def test_snapshot_supplement_rejects_canonical_contradiction_and_incomplete_proof(self):
+        self._snapshot(stock="0")
+        record = self._complete_without_batch_membership()
+        row = record.rows.first()
+        row.raw_payload["Movimiento"] = "UNKNOWN"
+        row.save(update_fields=["raw_payload"])
+        self.assertEqual(documentary_original_boundaries(
+            [self.line], month=self.month, boundary="closing", excluded_keys=set(), cache={}), {})
+        self.assertFalse(has_documentary_boundary({"historical_boundary_evidence": {
+            "closing": {"contract": "POINT_PRODUCT_SNAPSHOT_LAST_MOVEMENT_UTC_V1",
+                        "effective_stock": "0", "snapshot_boundary_verified": True}}}, "closing"))
 
     def test_complete_without_batch_membership_uses_independent_snapshot_not_canonical_proof(self):
         self._snapshot(stock="0")
