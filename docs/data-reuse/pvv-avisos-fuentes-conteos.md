@@ -29,3 +29,11 @@ Reutilizar fuentes y aviso None del lector. Extender únicamente enriquecimiento
 Consultas: inventario_fuentes_datos --term conteo --term ronda conPG16; candidatos léxicos no prueban identidad. Evidencia productiva acotada ya recuperada porPoint; no repetir APIs ni lecturas masivas. Pruebas locales cubrirán fuente incompleta, cero real, envío posterior, intervención manual, payload inválido, importación y permisos.
 
 Riesgos y pendientes: el aviso no repara autoridad de transferencias ni cierra octubre. La recuperación deljob152101 y su entrega unacked están separadas y no se ejecutan en esta tarea. La ronda histórica tampoco acredita hora de corte compartida.
+
+## Corrección de acceso canónico y gate de entrega
+
+Doctor detectó que el lector operativo publicado en1753 importaba y consultaba ventas diarias directamente. Se reutiliza `official_point_sales_rows_for_range` de ventas, ya utilizado por el ledger mensual. Es el mismo queryset oficial, con rango inclusivo01–03octubre, filtro por ubicaciones y exclusión de cantidades explícitas en cero. La resolución de identidad de cada fila y las autoridades/coberturas posteriores se conservan. No se cambia la allowlist ni se crea una API.
+
+La regresión de frontera se comprueba antes y después de sustituir la consulta: excluye30septiembre,4octubre, endpointreciente y otras sucursales;1–3octubre con cantidad no cero bloquean la acreditación, también una cantidad negativa. Un cero acreditado no dispara esta barrera. La fecha diaria no permite ubicar una venta no cero antes/después de10:48del03octubre.
+
+CI incorpora el guard stdlib existente `python scripts/check_pointdailysale_usage.py` en el job checks junto a `manage.py check`, para que una lectura directa vuelva a bloquear la entrega antes de publicar.
