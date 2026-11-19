@@ -1043,6 +1043,48 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertEqual(issue.branch_id, self.centro.id)
         self.assertEqual(issue.source_ids, (ambiguous.id,))
 
+    def test_cheesecake_official_sale_resolves_to_documented_point_pk_from_historical_snapshot(self):
+        official = PointProduct.objects.create(
+            external_id="official:CHEESECAKEINDL", sku="CHEESECAKEINDL", name="Nombre comercial",
+        )
+        stock = PointProduct.objects.create(external_id="913", sku="CHEESECAKEINDL", name="Nombre Stock")
+        indexes = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        row = SimpleNamespace(
+            product_id=official.pk, sale_date=date(2026, 10, 14),
+            branch=SimpleNamespace(external_id="13"),
+            source_endpoint="/Report/PrintReportes?idreporte=3",
+            raw_payload={"source": "POINT_OFFICIAL_REPORT", "sku": "CHEESECAKEINDL"},
+        )
+
+        self.assertEqual(self.service._resolve_sales_product(row, indexes), (stock.pk, None))
+        self.assertEqual(row.product_id, official.pk)
+        self.assertEqual(PointProduct.objects.get(pk=official.pk).external_id, "official:CHEESECAKEINDL")
+
+        for changes in (
+            {"sale_date": date(2026, 6, 4)},
+            {"source_endpoint": "/otra-fuente"},
+            {"raw_payload": {"source": "POINT_OFFICIAL_REPORT", "sku": "OTRO"}},
+            {"raw_payload": {"source": "OTRA_FUENTE", "sku": "CHEESECAKEINDL"}},
+        ):
+            with self.subTest(changes=changes):
+                changed = SimpleNamespace(**{**vars(row), **changes})
+                self.assertEqual(self.service._resolve_sales_product(changed, indexes), (official.pk, None))
+
+        for branch, when in (("11", date(2026, 9, 30)), ("13", date(2026, 11, 1))):
+            historical = SimpleNamespace(**{
+                **vars(row), "branch": SimpleNamespace(external_id=branch), "sale_date": when,
+            })
+            self.assertEqual(self.service._resolve_sales_product(historical, indexes), (stock.pk, None))
+
+        PointProduct.objects.create(external_id="OTRO", sku="CHEESECAKEINDL", name="Mismo nombre")
+        ambiguous = self.service._build_product_indexes(list(PointProduct.objects.all()))
+        self.assertEqual(self.service._resolve_sales_product(row, ambiguous), (official.pk, None))
+
+        stock.sku = "OTRO"
+        stock.save()
+        wrong_sku = self.service._build_product_indexes([official, stock])
+        self.assertEqual(self.service._resolve_sales_product(row, wrong_sku), (official.pk, None))
+
     def test_current_product_name_resolves_when_historical_key_is_stale(self):
         PointProduct.objects.filter(pk=self.product.pk).update(
             normalized_name="nombre historico"
