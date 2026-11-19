@@ -16,7 +16,7 @@ ZERO = Decimal("0")
 Q2 = Decimal("0.01")
 
 
-def _cost_evidence(groups, end_date):
+def _cost_evidence(groups, end_date, *, aplicar_componentes_incrementales=False):
     from pos_bridge.models import PointProduct
     from recetas.utils.normalizacion import normalizar_nombre
     from rentabilidad.services_costos import asignar_costos_filas, productos_nativos_por_sku
@@ -50,7 +50,11 @@ def _cost_evidence(groups, end_date):
         group["product__name"] = group["producto_nombre"]
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
-        asignar_costos_filas([g for g in groups if g["month"] == month], month, cutoff)
+        rows = [g for g in groups if g["month"] == month]
+        if aplicar_componentes_incrementales:
+            asignar_costos_filas(rows, month, cutoff, aplicar_componentes_incrementales=True)
+        else:
+            asignar_costos_filas(rows, month, cutoff)
 
 
 def _source_priority():
@@ -116,7 +120,7 @@ def selected_sales_facts(*, start_date, end_date, branch_id=None):
 
 
 
-def build_sales_confidence(*, start_date, end_date):
+def build_sales_confidence(*, start_date, end_date, aplicar_componentes_incrementales=False):
     """Coverage refers to observed facts, not certified operational completeness.
 
     Keep historical ERP branch IDs and product keys. Select a single source per
@@ -133,6 +137,19 @@ def build_sales_confidence(*, start_date, end_date):
     identity_pending = facts.filter(
         Q(sucursal__isnull=True) | Q(fecha__lt=F("sucursal__fecha_apertura")),
     ).count()
+    aggregations = {
+        "rows": Count("id"), "positive_sales": Sum("venta_neta", filter=Q(venta_neta__gt=0)),
+        "cost": Sum("costo_estimado"), "quantity": Sum("cantidad"),
+    }
+    if aplicar_componentes_incrementales:
+        from django.contrib.postgres.aggregates import JSONBAgg
+        from django.db.models import CharField
+        from django.db.models.functions import Cast, JSONObject
+
+        aggregations["incremental_quantities"] = JSONBAgg(
+            JSONObject(branch=F("sucursal_id"), quantity=Cast("cantidad", CharField())),
+            filter=Q(point_product_id=186) | Q(point_product_id__isnull=True, producto_clave="961"),
+        )
     groups = list(facts.annotate(
         month=TruncMonth("fecha"),
         positive_quantity=Case(When(cantidad__gt=0, then=1), default=0, output_field=IntegerField()),
@@ -143,17 +160,14 @@ def build_sales_confidence(*, start_date, end_date):
         "month", "source_kind", "metadata__costing__source",
         "metadata__costing__period", "backed_amount", "positive_quantity",
         "point_product_id", "producto_clave", "producto_nombre", "receta_id",
-    ).annotate(
-        rows=Count("id"), positive_sales=Sum("venta_neta", filter=Q(venta_neta__gt=0)),
-        cost=Sum("costo_estimado"),
-        quantity=Sum("cantidad"),
-    ))
-    _cost_evidence(groups, end_date)
+    ).annotate(**aggregations))
+    _cost_evidence(groups, end_date, aplicar_componentes_incrementales=aplicar_componentes_incrementales)
     missing_sales = prior_sales = covered_sales = positive_sales = costs = ZERO
     missing_rows = 0
     authorized_zero_sales = service_unallocated_sales = ZERO
     sources = set()
     periods = set()
+    incremental_by_branch = defaultdict(lambda: ZERO)
     for group in groups:
         sources.add(group["source_kind"])
         sales = group["positive_sales"] or ZERO
@@ -186,10 +200,15 @@ def build_sales_confidence(*, start_date, end_date):
             if evidence.get("treatment") == "UNALLOCATED_SERVICE":
                 service_unallocated_sales += sales
         covered_sales += sales
-        costs += cost
+        if evidence and evidence.get("treatment") == "INCREMENTAL_COMPONENTS":
+            for item in group["incremental_quantities"] or []:
+                incremental_by_branch[item["branch"]] += Decimal(item["quantity"]) * evidence["cost"]
+        else:
+            costs += cost
         periods.add(period)
         if period < group["month"]:
             prior_sales += sales
+    costs += sum((amount.quantize(Q2) for amount in incremental_by_branch.values()), ZERO)
     summary.update(
         start_date=start_date, end_date=end_date, sources=sorted(sources),
         cost_periods=sorted(periods), identity_pending_rows=identity_pending,

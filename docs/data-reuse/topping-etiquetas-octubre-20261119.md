@@ -32,6 +32,8 @@ El costo de Etiqueta G es $0.435795 y el de Etiqueta Rectangular $0.568304. Una 
 
 El lector de material vendido activa explícitamente este tratamiento solo en Rentabilidad. La etiqueta del panel es Complemento incremental. Los consumidores de receta completa, costeo semanal, merma, logística, mano de obra y confianza general conservan su lectura existente. No se guarda el importe incremental en un histórico que represente el costo total de una receta.
 
+La banda de confianza financiera del dashboard también recibe el opt-in explícito. Su consulta conserva cantidades por sucursal únicamente para el producto candidato y agrega los grupos de recetas antes de redondear, con cantidades convertidas a texto para conservar precisión decimal. La confianza general conserva su comportamiento por defecto. Las filas autorizadas desaparecen del contador de costos faltantes de Rentabilidad y los restantes faltantes conservan su estado.
+
 ## Comprobaciones y límites
 
 El comando valida fuentes de precio exactas, costos finitos positivos, unidades, 20 g de crumble compartidos, venta gratuita, absorción diaria por base y cantidades aprobadas. Usa REPEATABLE READ y el mutex mensual. El tratamiento rechaza metadata de otro mes, identidad, ámbito, costo o componentes. No altera otras relaciones ni períodos, ventas o mermas. La autorización de este costo conserva los restantes pendientes de octubre y el estado financiero de cierre.

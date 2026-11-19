@@ -7,16 +7,18 @@ import json
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.contrib.auth.models import User
 from django.db import connection
 from django.test import TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 
 from core.models import Sucursal
 from control.models import MermaMensualSucursal
 from maestros.models import CostoInsumo, Insumo, UnidadMedida
 from pos_bridge.models import PointBranch, PointDailySale, PointProduct
 from recetas.models import LineaReceta, Receta, RecetaAgrupacionAddon
-from reportes.models import RecetaCostoHistoricoMensual
+from reportes.models import FactVentaDiaria, RecetaCostoHistoricoMensual
 from rentabilidad.services_costos import _costos_recetas_para_periodo, asignar_costos_filas
 from rentabilidad.services_resultado import leer_resultado_mensual
 
@@ -184,6 +186,26 @@ class IncrementalLabelsTests(TestCase):
         self.assertEqual(products[0]["cantidad"], Decimal("167"))
         self.assertEqual(products[0]["costo_total"], Decimal("167.69"))
         self.assertEqual(products[0]["sucursales"], 10)
+
+    def test_dashboard_financial_coverage_uses_incremental_scope_and_generic_confidence_does_not(self):
+        from reportes.sales_confidence import build_sales_confidence
+
+        Sucursal.objects.filter(pk__in=self.branch_quantities).update(fecha_apertura=None)
+        facts = []
+        for index, sale in enumerate(PointDailySale.objects.filter(product=self.product).select_related("branch")):
+            facts.append(FactVentaDiaria(fecha=sale.sale_date, sucursal_id=sale.branch.erp_branch_id,
+                point_product=self.product, producto_clave="961", producto_nombre=self.product.name,
+                cantidad=sale.quantity, source_kind="AUTHORITATIVE",
+                receta_id=55 if index < 40 else 516 if index < 80 else None))
+        FactVentaDiaria.objects.bulk_create(facts)
+        self.assertEqual(build_sales_confidence(start_date=PERIOD, end_date=END)["missing_cost_rows"], 123)
+        user = User.objects.create_user(username="incremental-review", is_superuser=True, is_staff=True)
+        self.client.force_login(user)
+        response = self.client.get(reverse("rentabilidad_dashboard"), {"periodo": "2026-10"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["sales_confidence"]["missing_cost_rows"], 0)
+        self.assertEqual(response.context["sales_confidence"]["margin"], Decimal("-167.69"))
+        self.assertEqual(build_sales_confidence(start_date=PERIOD, end_date=END)["missing_cost_rows"], 123)
 
     def test_missing_authorization_keeps_the_economic_pending(self):
         self.rule.refresh_from_db()

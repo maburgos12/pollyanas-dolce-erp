@@ -448,7 +448,8 @@ def dashboard_rentabilidad(request):
     fuente_estado["cuadra"] = conciliacion["reconciled"]
     fuente_estado["discrepancias"] = conciliacion["discrepancies"]
 
-    sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
+    sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin,
+                                            aplicar_componentes_incrementales=True)
     totales["margen_disponible"] = bool(
         fuente_estado["cuadra"] and sales_confidence["margin"] is not None
         and all(not item["obj"].costos_pendientes for item in sucursales_data if item["obj"].en_perimetro_fuente)
