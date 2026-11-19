@@ -53,9 +53,14 @@ class Command(BaseCommand):
             for recipe in (rule.base_receta, rule.addon_receta):
                 if not recipe.lineas.filter(insumo_id=384, cantidad=20, unidad_texto__iexact="Gr").exists():
                     raise CommandError("La base y el complemento deben conservar los 20 g de crumble comprobados.")
+            if rule.base_receta.lineas.filter(insumo_id__in=[98, 99]).exists():
+                raise CommandError("Las etiquetas ya aparecen en la base. Se requiere revisar su absorción.")
             provenance = []
             costing = MonthlyHistoricalCostingService()
             for component in COMPONENTS:
+                lines = list(rule.addon_receta.lineas.filter(insumo_id=component["insumo_id"]))
+                if len(lines) != 1 or lines[0].cantidad != 1 or lines[0].unidad_texto.strip().upper() != "PZA":
+                    raise CommandError("El complemento debe conservar una pieza de cada etiqueta.")
                 ingredient = Insumo.objects.get(pk=component["insumo_id"])
                 prices = [row for row in costing._purchase_like_costs(insumo=ingredient, period_end=END)
                           if row.fecha >= PERIOD and row.costo_unitario > 0]
@@ -113,6 +118,12 @@ class Command(BaseCommand):
                 "branch_quantities": {str(pk): str(qty) for pk, qty in by_branch.items()},
                 "branch_costs": {str(pk): str(cost) for pk, cost in branch_costs.items()},
                 "source_costs": provenance, "source_sale_ids": sorted(row["id"] for row in addon_sales),
+                "source_recipe_lines": {
+                    str(recipe.pk): [{"line_id": line.pk, "insumo_id": line.insumo_id,
+                        "quantity": str(line.cantidad), "unit": line.unidad_texto}
+                        for line in recipe.lineas.order_by("pk")]
+                    for recipe in (rule.base_receta, rule.addon_receta)
+                },
             }
             if not isinstance(rule.metadata, dict):
                 raise CommandError("La metadata existente requiere revisión.")

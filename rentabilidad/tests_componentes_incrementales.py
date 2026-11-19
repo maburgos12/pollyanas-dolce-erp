@@ -206,6 +206,9 @@ class IncrementalLabelsCommandTests(TransactionTestCase):
         gram, _ = UnidadMedida.objects.get_or_create(codigo="g", defaults={"nombre": "Gramo", "tipo": "MASS"})
         for pk, name in ((98, "Etiqueta G"), (99, "Etiqueta rectangular"), (384, "Crumble Zanahoria")):
             ingredient = Insumo.objects.create(pk=pk, nombre=name, unidad_base=piece if pk != 384 else gram)
+            if pk in (98, 99):
+                LineaReceta.objects.create(receta_id=516, insumo=ingredient, insumo_texto=name,
+                    cantidad=1, unidad_texto="PZA", unidad=piece)
             if pk == 384:
                 for recipe_id in (55, 516):
                     LineaReceta.objects.create(receta_id=recipe_id, insumo=ingredient, insumo_texto=name,
@@ -262,6 +265,19 @@ class IncrementalLabelsCommandTests(TransactionTestCase):
         sale = PointDailySale.objects.filter(product_id=186).first()
         sale.quantity += 1
         sale.save()
+        with self.assertRaises(CommandError):
+            self.command(apply=True)
+        self.rule.refresh_from_db()
+        self.assertEqual(self.rule.metadata, {"preserved": "previous context"})
+
+    def test_labels_already_in_base_or_missing_in_addon_are_rejected(self):
+        ingredient = Insumo.objects.get(pk=98)
+        extra = LineaReceta.objects.create(receta_id=55, insumo=ingredient, insumo_texto=ingredient.nombre,
+            cantidad=1, unidad_texto="PZA", unidad=ingredient.unidad_base)
+        with self.assertRaises(CommandError):
+            self.command(apply=True)
+        extra.delete()
+        LineaReceta.objects.filter(receta_id=516, insumo_id=98).delete()
         with self.assertRaises(CommandError):
             self.command(apply=True)
         self.rule.refresh_from_db()
