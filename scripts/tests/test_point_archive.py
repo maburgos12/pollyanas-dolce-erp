@@ -86,7 +86,7 @@ class PointLifecycleFixture:
 
     def prepare(self):
         with patch.object(archive.prep, 'disk_percent', return_value=80), \
-             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: self.broker)):
+             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: self.broker, collect=lambda now: ({}, 80))):
             return self.broker.prepare(self.ledger, self.config, self.send)
 
     def row(self):
