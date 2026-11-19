@@ -8,7 +8,9 @@ Pastelerías ERP; tarea `mac-ia-02-20261119`. No reemplaza Mac-IA Debian.
 - MacBook Pro de 15 pulgadas (2018), Intel Core i7 2.2 GHz de seis núcleos,
   16 GiB de RAM, macOS 15.1 (24B83), arquitectura x86_64.
 - Disco observado al alta: 233 GiB, 62 GiB disponibles antes de instalar el modelo.
-- Host observado: `macbookpro.lan`; usuario `mauricioburgos`.
+- Host observado en casa: `macbookpro.lan`; usuario `mauricioburgos`.
+- GPU adicional detectada: Radeon Pro 555X, 4 GiB de VRAM. El binario instalado
+  lista sólo BLAS/Accelerate: esta configuración usa CPU, sin prometer aceleración AMD.
 - Alias del cliente de gestión: `pastelerias-mac-ia-02`, en `~/.ssh/config`.
 - Autenticación por llave exclusiva `~/.ssh/pastelerias_mac_ia_02_ed25519`.
   La clave privada permanece en la Mac de gestión y NO va a Git ni al ERP.
@@ -24,9 +26,44 @@ Desde la Mac de gestión, prueba sin contraseña:
 ssh pastelerias-mac-ia-02 'hostname'
 ```
 
-El alias depende de la red donde se resuelve `macbookpro.lan`. Una IP fija o una
-ruta desde otra red NO quedan probadas por este alias. Un nuevo cliente necesita
-su propia llave y verificación de identidad; el repositorio no contiene accesos.
+El alias principal usa el VPS como salto y no necesita resolver `.lan`. Mauricio
+autorizó expresamente el acceso entre redes en este chat, después de revisar la
+propuesta de cuenta restringida y puerto privado. La alternativa directa para la
+red de casa es `pastelerias-mac-ia-02-lan`. Un nuevo cliente necesita su propia
+llave y verificación de identidad; el repositorio no contiene accesos.
+
+### Acceso desde casa, Dolce u otra red
+
+La MacBook mantiene un túnel SSH saliente al VPS existente `68.183.165.47`:
+
+- Cuenta de transporte: `erp_mac_ia_02`, sin contraseña, TTY ni sesiones.
+- Configuración exclusiva: `/etc/ssh/sshd_config.d/80-pastelerias-mac-ia-02.conf`.
+  `AllowTcpForwarding remote`, `GatewayPorts no`, `MaxSessions 0`,
+  `PermitListen 127.0.0.1:22066`. La llave añade `restrict,port-forwarding` y el
+  mismo `permitlisten`; no habilita acceso shell o forwarding local.
+- En el VPS sólo escucha `127.0.0.1:22066`; destino `127.0.0.1:22` de MacBook.
+  No se abrieron puertos en routers ni se publicaron endpoints de inferencia.
+- Registro del recurso: `/var/lib/pastelerias-mac-ia-02/ownership.txt`.
+- Llave de transporte en MacBook: `~/.ssh/pastelerias_mac_ia_02_vps_ed25519`.
+  Host VPS fijado en `~/.ssh/pastelerias_mac_ia_02_vps_known_hosts`; huella
+  `SHA256:vl6ULl+3tzY1C9Y6dp5wO5GHoSF/5xnBemtDZ0WfgCM`, contrastada mediante
+  la sesión administrativa existente.
+- LaunchAgent MacBook: `com.pollyanasdolce.mac-ia-02.vps-tunnel`, arranque al
+  iniciar sesión, keepalive 30 segundos y relanzamiento mínimo cada 30 segundos.
+- El alias de la Mac principal usa su acceso SSH administrativo existente al VPS
+  (`~/.ssh/agente_dg_ops`) como salto y la llave exclusiva de MacBook para el
+  destino final; no se copió la llave administrativa al nodo.
+
+Conservar la huella original del destino incluso a través del salto. Para
+comprobar el servicio de transporte desde la red local:
+
+```bash
+ssh pastelerias-mac-ia-02-lan 'launchctl print gui/502/com.pollyanasdolce.mac-ia-02.vps-tunnel'
+```
+
+El cambio de red física no se simula desconectando a otros usuarios. Validar la
+ruta por VPS y su reconexión no equivale a haber probado cada red: necesita
+Internet y salida SSH al VPS. FileVault y el inicio de sesión siguen siendo límites.
 
 ## Runtime local
 
@@ -44,6 +81,11 @@ Directorio propio en la MacBook:
 - `api.key` y `client.curl`: credencial local y configuración de cliente, modo
   0600. No imprimir, copiar al repositorio ni pasar la credencial como argumento.
 - `logs/`: salida del proceso; `evidence/`: comprobaciones sin información privada.
+- `runtime/qwen3-4b-official.jinja`: plantilla oficial de `Qwen/Qwen3-4B`, revisión
+  `1cfa9a7208912126459214e8b04321603b3df60c`, SHA256
+  `a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8`.
+  Se carga con `--chat-template-file`: la plantilla antigua del GGUF forzaba
+  `<think>` e ignoraba el control de thinking. No se alteraron pesos para corregirlo.
 - Una solicitud a la vez, contexto de 4096 tokens, cuatro hilos, CPU, prioridad
   reducida. Thinking desactivado como punto de partida para extracción breve.
 - API: `http://127.0.0.1:18124/v1`, con autenticación. No escuchar en `0.0.0.0`.
@@ -109,7 +151,9 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18124:127.0.0.1:18124 pasteleria
 Abrir `http://127.0.0.1:18124` mientras el túnel esté activo. Desde la propia
 MacBook se puede abrir esa dirección sin túnel. La interfaz permite conversaciones
 y respuestas en vivo; no es un tablero de trabajos del ERP. La credencial de la
-interfaz se entrega por un medio local privado, sin publicarla en documentación.
+interfaz se usa localmente, sin publicarla en documentación ni en el chat.
+Para tareas breves, seleccionar `Reasoning effort → Off` en la interfaz; el
+cliente puede enviar su propia preferencia por encima del valor del servidor.
 Las conversaciones del navegador no sustituyen la bitácora de un trabajo.
 
 Las métricas de generación están disponibles en `/metrics`. La visibilidad de
@@ -146,8 +190,9 @@ No mostrar a Codex toda la entrada/salida si basta un resultado compacto validad
 El ERP mantiene su orquestador. Este nodo no incorpora una segunda cola, no tiene
 credenciales de base operativa y no aplica cambios en el ERP. El servicio del
 modelo puede estar encendido sin que haya un agente trabajando. Las tareas
-programadas nuevas y el acceso desde el VPS requieren su integración y prueba
-explícitas; no quedan activados por instalar este nodo.
+programadas nuevas requieren su integración y prueba explícitas. El transporte
+SSH desde el VPS no concede al ERP permiso para aplicar cambios ni ejecuta tareas
+por sí mismo.
 
 ## Modelos mayores y verificación
 
@@ -173,7 +218,8 @@ local persistente propiedad de Pastelerías, conservada para este objetivo.
 No son contenedores ni una base operativa. Esta tarea no necesita Docker ni una
 base local: no levantar PostgreSQL para validar documentación o el modelo.
 
-El túnel persistente de la Mac de gestión se conserva como recurso operativo;
+El túnel persistente de la Mac de gestión y el transporte saliente de la MacBook
+al VPS se conservan como recursos operativos;
 los túneles adicionales de prueba se cierran al terminar. No confundirlo con
 acceso desde otra red. El worktree se retira por el ciclo de vida oficial después de integrar
 y verificar. No borrar recursos de Mac-IA Debian, NAS, otras tareas o producción.
