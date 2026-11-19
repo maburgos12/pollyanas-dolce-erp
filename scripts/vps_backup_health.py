@@ -65,8 +65,9 @@ def verify_point(rotator, stem):
         rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
         atomic(path.with_suffix('.restore.log'), evidence)
         atomic(path, json.dumps(proof, indent=2) + '\n')
-        proof = rotator.read_receipt(path, stem)
-    rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+        rotator.require(rotator.read_receipt(path, stem) == proof, 'Published receipt changed')
+    else:
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 

@@ -1,5 +1,6 @@
 import importlib.util
 import os
+import signal
 import sys
 import subprocess
 import tempfile
@@ -94,13 +95,77 @@ print(json.dumps({'request':r,'result':[sys.argv[2],{'payload':'b'*64},'latest']
             newest = root / 'backup_20261119_020001.manifest'
             old.touch()
             newest.touch()
-            def probe(*args):
+            def probe(*args, **kwargs):
                 (root / 'backup_20261119_030001.incomplete').touch()
                 return old.name, {}, 'latest'
             with patch.object(r, 'local_set', return_value=('manifest', 'a' * 64, {})), patch.object(r, 'read_receipt', return_value={}), patch.object(r, 'bounded_check_proof', side_effect=probe):
                 r.rotate(root, root, root, Path('/unused-nas'), True)
             self.assertTrue(old.exists())
             self.assertTrue(newest.exists())
+
+    def test_rotation_budget_limits_second_probe_and_preserves_on_timeout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / '.backup.flock').touch()
+            for day in (17, 18, 19):
+                (root / f'backup_202611{day}_020001.manifest').touch()
+            before = set(root.iterdir())
+            with patch.object(r.time, 'monotonic', side_effect=[0, 0, 1200]), patch.object(r, 'local_set'), patch.object(r, 'read_receipt', return_value={}), patch.object(r, 'bounded_check_proof', side_effect=ValueError('timeout')) as probe:
+                r.rotate(root, root, root, Path('/unused-nas'), True)
+            self.assertEqual([call.kwargs['timeout'] for call in probe.call_args_list], [2040, 840])
+            self.assertEqual(set(root.iterdir()), before)
+
+    def test_exhausted_rotation_budget_does_not_start_probe(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / '.backup.flock').touch()
+            for day in (18, 19):
+                (root / f'backup_202611{day}_020001.manifest').touch()
+            with patch.object(r.time, 'monotonic', side_effect=[0, 2040]), patch.object(r, 'local_set'), patch.object(r, 'read_receipt', return_value={}), patch.object(r, 'bounded_check_proof') as probe:
+                r.rotate(root, root, root, Path('/unused-nas'), True)
+            probe.assert_not_called()
+            self.assertTrue((root / 'backup_20261118_020001.manifest').exists())
+
+    def test_budget_expires_after_verification_before_any_unlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            export = root / 'export'
+            export.mkdir()
+            (root / '.backup.flock').touch()
+            for day in (18, 19):
+                (root / f'backup_202611{day}_020001.manifest').touch()
+            old = root / 'backup_20261118_020001.manifest'
+            with patch.object(r.time, 'monotonic', side_effect=[0, 0, 2040]), patch.object(r, 'local_set'), patch.object(r, 'read_receipt', return_value={}), patch.object(r, 'bounded_check_proof', return_value=(old.name, {}, 'latest')):
+                r.rotate(root, export, root, Path('/unused-nas'), True)
+            self.assertTrue(old.exists())
+
+    def test_sigterm_relays_without_wait_and_restores_previous_handler(self):
+        original = signal.getsignal(signal.SIGTERM)
+        for previous in (signal.SIG_DFL, lambda *_: None):
+            with self.subTest(previous=previous):
+                signal.signal(signal.SIGTERM, previous)
+                child = Mock(pid=99999999)
+                child.wait.side_effect = lambda **_: signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+                try:
+                    with patch.object(r.subprocess, 'Popen', return_value=child), patch.object(r.os, 'killpg') as kill:
+                        with self.assertRaises(SystemExit) as error:
+                            r.bounded_check_proof(Path('/unused'), Path('/unused-nas'), 'backup_20261119_020001', {})
+                        self.assertEqual(error.exception.code, 128 + signal.SIGTERM)
+                        kill.assert_called_once_with(child.pid, signal.SIGKILL)
+                        self.assertEqual(child.wait.call_count, 1)
+                        self.assertIs(signal.getsignal(signal.SIGTERM), previous)
+                finally:
+                    signal.signal(signal.SIGTERM, original)
+
+    def test_spawn_failure_restores_signal_state(self):
+        previous = signal.getsignal(signal.SIGTERM)
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+        with patch.object(r.subprocess, 'Popen', side_effect=OSError('spawn failed')), patch.object(r.os, 'killpg') as kill:
+            with self.assertRaisesRegex(OSError, 'spawn failed'):
+                r.bounded_check_proof(Path('/unused'), Path('/unused-nas'), 'backup_20261119_020001', {})
+            kill.assert_not_called()
+        self.assertIs(signal.getsignal(signal.SIGTERM), previous)
+        self.assertEqual(signal.pthread_sigmask(signal.SIG_BLOCK, set()), previous_mask)
 
     def test_child_rejects_concurrent_probe(self):
         import fcntl

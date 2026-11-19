@@ -39,6 +39,15 @@ aislado, sin heredar el candado del respaldo. Al exceder el plazo se conserva el
 conjunto y el padre libera su candado; el candado separado del lector evita
 acumular verificadores si el kernel aún no puede terminarlo. Un timeout no prueba
 recuperación ni repara la conexión: conservar el PID y revisar CIFS/WireGuard.
+El lector admite hasta una hora por punto; la comprobación real de todos los
+medios puede superar 20 minutos. La rotación aplica además su presupuesto menor.
+
+El rotador tiene un presupuesto total de 34 minutos, anterior al límite de
+35 minutos del cron existente. Cada lector recibe como máximo el tiempo restante;
+si se agota antes del retiro, conserva el conjunto. Una señal de terminación al
+padre también cancela el grupo lector, sin esperar indefinidamente al kernel.
+Esto no garantiza terminar la rotación: una comprobación completa que no quepa
+en esa ventana requiere diagnóstico, nunca omitir hashes para acelerar el retiro.
 
 Después de restablecer la conexión, comprobar el último manifiesto completo y
 si el respaldo diario omitió su ejecución por el candado. Un respaldo compensatorio
@@ -51,6 +60,10 @@ La unidad de recuperación usa `--verify-only`: verifica y registra recuperació
 sin iniciar rotación ni mantenimiento Docker. El cron del rotador existente sigue
 usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
 no amplía su autorización ni autoriza otros lotes de limpieza.
+El límite total de la unidad sigue siendo ocho horas: su ejecución programada
+a las 08:00 de Mazatlán deja margen antes del respaldo de las 19:00 (02:00 UTC).
+Antes de un arranque manual, comprobar ese margen; la restauración remota y los
+puntos pendientes también consumen tiempo mientras se conserva el candado local.
 
 Antes de sustituir la entrada externa del rotador, el instalador conserva su
 original conocido con el SHA-256 en el nombre y verifica sus bytes. Una reversión

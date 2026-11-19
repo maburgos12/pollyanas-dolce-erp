@@ -1,6 +1,7 @@
 import fcntl
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import re
 import tempfile
@@ -41,6 +42,41 @@ class RestoreGatesTests(unittest.TestCase):
             path.write_bytes(b'corrupted')
             with self.assertRaisesRegex(ValueError, 'payload mismatch'):
                 nas.manifest(point, expected)
+
+    def test_receipt_publication_has_one_fresh_probe_and_checks_published_proof(self):
+        for outcome in ('new', 'existing', 'timeout', 'invalid-published', 'changed-published'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                receipts = root / 'receipts'
+                receipts.mkdir()
+                stem = 'backup_20261119_020001'
+                (root / (stem + '.media.json')).write_text('{"files": []}')
+                evidence = 'SQL and media restore passed'
+                proof = dict(point=stem, manifest_sha256='a' * 64, verified_media=3,
+                             evidence_sha256=hashlib.sha256(evidence.encode()).hexdigest(), media_aliases={})
+                payload = json.dumps(dict(receipt=proof, evidence=evidence))
+                published = dict(proof)
+                if outcome == 'changed-published':
+                    published['manifest_sha256'] = 'b' * 64
+                reads = [proof] if outcome == 'existing' else [FileNotFoundError(),
+                         ValueError('invalid published proof') if outcome == 'invalid-published' else published]
+                events = []
+                def probe(*args):
+                    events.append('probe')
+                    if outcome == 'timeout':
+                        raise ValueError('NAS timeout')
+                rotator = types.SimpleNamespace(BACKUPS=root, RECEIPTS=receipts, NAS=Path('/unused-nas'),
+                    require=nas.require, local_set=Mock(return_value=(stem + '.manifest', 'a' * 64, {})),
+                    read_receipt=Mock(side_effect=reads), bounded_check_proof=Mock(side_effect=probe))
+                with patch.object(health, 'run', return_value=payload), patch.object(health, 'atomic', side_effect=lambda *args: events.append('publish')):
+                    if outcome in ('new', 'existing'):
+                        self.assertEqual(health.verify_point(rotator, stem)['media'], 3)
+                    else:
+                        with self.assertRaises(ValueError):
+                            health.verify_point(rotator, stem)
+                rotator.bounded_check_proof.assert_called_once()
+                self.assertEqual(events, ['probe'] if outcome in ('timeout', 'existing') else ['probe', 'publish', 'publish'])
+                self.assertEqual(rotator.read_receipt.call_count, 1 if outcome in ('timeout', 'existing') else 2)
 
     def test_verify_only_never_rotates_or_calls_nas_in_parent(self):
         with tempfile.TemporaryDirectory() as tmp:

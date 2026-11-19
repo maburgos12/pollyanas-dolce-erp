@@ -13,6 +13,7 @@ import signal
 import tempfile
 import subprocess
 import sys
+import time
 
 BACKUPS = Path('/opt/backups/erp')
 EXPORT = BACKUPS / 'hbs-export/daily'
@@ -24,7 +25,8 @@ POINT = re.compile(r'backup_[0-9]{8}_[0-9]{6}')
 GENERATION = re.compile(r'latest|[0-9]{12}\.Q')
 SHA256 = re.compile(r'[a-f0-9]{64}')
 PROBE_LOCK = Path('/var/lib/erp-backup-restore/nas-probe.lock')
-PROBE_TIMEOUT = 20 * 60
+PROBE_TIMEOUT = 60 * 60  # Full NAS media checks exceed 20 minutes; rotation caps its own total.
+ROTATION_TIMEOUT = 34 * 60  # Existing cron kills the entire rotation after 35 minutes.
 
 PAYLOADS = ('sql.gz', 'conteos.tar.gz', 'inventory-audit.tar.gz', 'media.json')
 
@@ -160,22 +162,36 @@ def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT):
     with tempfile.TemporaryFile() as source, tempfile.TemporaryFile() as output:
         source.write(json.dumps(request).encode())
         source.seek(0)
-        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--nas-probe'],
-                                 stdin=source, stdout=output, stderr=output,
-                                 close_fds=True, start_new_session=True)
+        child = None
+        def terminate(signum, _frame):
+            raise SystemExit(128 + signum)
+        # Block TERM only across spawn/handler setup so the reader cannot escape that race.
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})
+        previous_handler = signal.signal(signal.SIGTERM, terminate)
         try:
-            start_ticks = Path(f'/proc/{child.pid}/stat').read_text().rpartition(')')[2].split()[19]
-        except (OSError, IndexError):
-            start_ticks = 'unavailable'
-        try:
-            code = child.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
+            child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--nas-probe'],
+                                     stdin=source, stdout=output, stderr=output,
+                                     close_fds=True, start_new_session=True)
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
             try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            # A CIFS task in D cannot be reaped yet; never wait for it while holding backup.flock.
-            raise ValueError(f'NAS verification timed out; reader PID {child.pid}, start_ticks {start_ticks}; backups preserved') from None
+                start_ticks = Path(f'/proc/{child.pid}/stat').read_text().rpartition(')')[2].split()[19]
+            except (OSError, IndexError):
+                start_ticks = 'unavailable'
+            try:
+                code = child.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                raise ValueError(f'NAS verification timed out; reader PID {child.pid}, start_ticks {start_ticks}; backups preserved') from None
+        except BaseException:
+            if child is not None:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            # A CIFS task in D cannot be reaped yet; never wait while holding backup.flock.
+            raise
+        finally:
+            signal.signal(signal.SIGTERM, previous_handler)
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
         output.seek(0)
         raw = output.read(1024 * 1024 + 1)
         require(len(raw) <= 1024 * 1024, 'respuesta NAS demasiado grande')
@@ -191,6 +207,7 @@ def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT):
 
 
 def rotate(root, export, receipts, nas, apply):
+    deadline = time.monotonic() + ROTATION_TIMEOUT
     for path in (root, export, receipts):
         require(path.resolve() == path and path.is_dir(), 'ruta local inesperada')
     lock = root / '.backup.flock'
@@ -210,7 +227,10 @@ def rotate(root, export, receipts, nas, apply):
             try:
                 proof = read_receipt(receipts / (stem + '.json'), stem)
                 require(not (root / (stem + '.incomplete')).exists(), 'conjunto con marca incompleta')
-                manifest, payloads, generation = bounded_check_proof(root, nas, stem, proof)
+                remaining = deadline - time.monotonic()
+                require(remaining > 0, 'presupuesto total de rotación agotado; conjunto conservado')
+                manifest, payloads, generation = bounded_check_proof(root, nas, stem, proof,
+                                                                    timeout=min(PROBE_TIMEOUT, remaining))
                 require(read_receipt(receipts / (stem + '.json'), stem) == proof, 'prueba local cambió')
                 require(not list(root.glob('backup_*.incomplete')), 'respaldo incompleto durante la verificación')
                 local_set(root, newest)
@@ -227,6 +247,7 @@ def rotate(root, export, receipts, nas, apply):
                     else:
                         require(s.st_nlink == 1, 'otro propietario conserva un enlace local')
                     links.append(original)
+                require(time.monotonic() < deadline, 'presupuesto total de rotación agotado; conjunto conservado')
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as e:
                 reason = str(e) if isinstance(e, ValueError) else type(e).__name__
                 print(f'Conservado {stem}: {reason}', flush=True)
@@ -246,6 +267,7 @@ def main():
     mode.add_argument('--nas-probe', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.nas_probe:
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
         print(json.dumps(probe(json.load(sys.stdin))), flush=True)
     elif args.check_proof:
         stem = args.check_proof
