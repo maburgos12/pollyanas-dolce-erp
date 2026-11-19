@@ -277,10 +277,14 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
     for gasto, obligacion in fuentes:
         fuente = gasto or obligacion
         categoria, centro = fuente.categoria_gasto, fuente.centro_costo
+        cobertura_documentada = any(
+            (r.filtros or {}).get('cobertura_mensual_documentada') == f'{periodo:%Y-%m}'
+            and _vigente(r, periodo) and _coincide(r, centro, categoria.pk, obligacion)
+            for r in reglas) if categoria.bucket == 'INDIRECTO_PROD' else False
         if (categoria.codigo in PERSONAL_CODIGOS | {"INVERSION", "CAPEX"}
                 or categoria.bucket in {"MANO_OBRA_PROD", "EMPAQUE_PROD"}
                 or (categoria.capa_objetivo == "FABRICACION" and not (
-                    incluir_indirectos_produccion and categoria.bucket == "INDIRECTO_PROD"))):
+                    (incluir_indirectos_produccion or cobertura_documentada) and categoria.bucket == "INDIRECTO_PROD"))):
             continue
         if categoria.codigo == "OPEX_TOTAL_SUC":
             continue  # Agregado de otras fuentes, nunca una fuente adicional.
