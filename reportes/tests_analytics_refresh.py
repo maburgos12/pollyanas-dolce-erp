@@ -763,6 +763,80 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
 
+    def test_inventory_provenance_shows_all_locations_without_certifying_balances(self):
+        fact_stock = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo).stock_final
+        bom = ExistenciaInsumo.objects.create(
+            insumo=self.insumo, almacen="CUARTO_FRIO", stock_actual=Decimal("-999"),
+            trazabilidad_stock={"fuente": "CONSUMO_BOM", "creado_automaticamente": True},
+            actualizado_en=datetime(2026, 4, 8, 15, tzinfo=UTC),
+        )
+        missing = ExistenciaInsumo.objects.create(
+            insumo=self.insumo, almacen="LIMPIEZA", stock_actual=Decimal("24"),
+            trazabilidad_stock={},
+        )
+        before = list(ExistenciaInsumo.objects.order_by("pk").values())
+        reading = SimpleNamespace(
+            freshness=InventoryFreshness.FRESH, quantity_base=Decimal("20"),
+            captured_at=datetime(2026, 4, 8, 15, tzinfo=UTC),
+        )
+        with timezone.override("America/Mazatlan"), patch(
+            "reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many",
+            return_value={self.insumo.pk: reading},
+        ):
+            response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+        inventory = response.context["closure"]["inventory"]
+        self.assertEqual(inventory["untraceable_count"], 2)
+        self.assertEqual(inventory["traceable_count"], 1)
+        self.assertEqual(inventory["existence_count"], 3)
+        self.assertEqual(inventory["untraceable_insumo_count"], 1)
+        self.assertEqual(inventory["untraceable_legacy_bom_count"], 1)
+        self.assertEqual(inventory["untraceable_empty_metadata_count"], 1)
+        row = response.context["closure"]["inventory_references"][0]
+        self.assertEqual({item["existence_id"] for item in row["trace_locations"]}, {self.existencia.pk, bom.pk, missing.pk})
+        self.assertEqual((row["expected_stock"], row["visible_stock"]), (fact_stock, 20))
+        self.assertNotIn("difference", row)
+        self.assertContains(response, "Registro automático por receta (BOM)")
+        self.assertContains(response, "Origen no registrado")
+        self.assertContains(response, "Apertura y saldo por acreditar")
+        self.assertContains(response, "Cuarto Frío")
+        self.assertContains(response, "Almacén de Limpieza")
+        self.assertContains(response, "2026-04-08 08:00")
+        self.assertContains(response, "Requiere revisión")
+        self.assertEqual(response.context["target_date"], self.target_date)
+        self.assertEqual(list(ExistenciaInsumo.objects.order_by("pk").values()), before)
+
+    def test_inventory_provenance_requires_strict_bom_marker_and_keeps_pending_rules(self):
+        reading = SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("0"), captured_at=None)
+        cases = [
+            ({"fuente": "CONSUMO_BOM", "creado_automaticamente": True}, 1, 0, 0, 1, 0),
+            ({"fuente": "CONSUMO_BOM", "creado_automaticamente": "true"}, 0, 0, 1, 1, 0),
+            ({"fuente": "OTRO", "creado_automaticamente": True}, 0, 0, 1, 1, 0),
+            ({}, 0, 1, 0, 1, 0),
+            ({"source": "UNTRACED", "label": "Sin traza suficiente"}, 0, 0, 1, 1, 1),
+            ({"source": "MANUAL_SYNC", "label": "Sync manual", "fuente": "CONSUMO_BOM", "creado_automaticamente": True}, 0, 0, 0, 0, 1),
+        ]
+        for metadata, bom, empty, other, pending, previous_traceable in cases:
+            with self.subTest(metadata=metadata):
+                ExistenciaInsumo.objects.filter(pk=self.existencia.pk).update(trazabilidad_stock=metadata, stock_actual=0)
+                with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many", return_value={self.insumo.pk: reading}):
+                    inventory = _inventory_domain(self.target_date)
+                self.assertEqual(inventory["untraceable_legacy_bom_count"], bom)
+                self.assertEqual(inventory["untraceable_empty_metadata_count"], empty)
+                self.assertEqual(inventory["untraceable_other_count"], other)
+                self.assertEqual(inventory["untraceable_count"], pending)
+                self.assertEqual(inventory["traceable_count"], previous_traceable)
+
+    def test_inventory_location_detail_has_no_per_location_queries(self):
+        fact_stock = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo).stock_final
+        for location in ("CUARTO_FRIO", "ALMACEN_CASA_1", "ALMACEN_CASA_2", "LIMPIEZA"):
+            ExistenciaInsumo.objects.create(insumo=self.insumo, almacen=location, stock_actual=0)
+        reading = SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("20"), captured_at=None)
+        with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many", return_value={self.insumo.pk: reading}):
+            with self.assertNumQueries(2):
+                rows = _inventory_references(self.target_date)
+        self.assertEqual(len(rows[0]["trace_locations"]), 5)
+        self.assertEqual((rows[0]["expected_stock"], rows[0]["visible_stock"]), (fact_stock, 20))
+
     def test_inventory_comparison_uses_local_capture_date(self):
         reading = SimpleNamespace(
             freshness=InventoryFreshness.FRESH,

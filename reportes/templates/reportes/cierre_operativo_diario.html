@@ -207,7 +207,12 @@
             <tr><th>Última reconstrucción fact</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Fecha de las referencias</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
             <tr><th>Trazabilidad de existencias ERP</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
-            <tr><th>Registros ERP sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
+            <tr><th>Registros ERP revisados</th><td class="is-right">{{ domain.existence_count|intcomma }} registros por insumo y ubicación</td></tr>
+            <tr><th>Registros ERP sin traza completa</th><td class="is-right">{{ domain.untraceable_count|intcomma }} registros · {{ domain.untraceable_insumo_count|intcomma }} insumos</td></tr>
+            {% if domain.untraceable_count %}
+            <tr><th>Procedencia de los pendientes</th><td class="is-right">{{ domain.untraceable_legacy_bom_count|intcomma }} con registro automático por receta (BOM) · {{ domain.untraceable_empty_metadata_count|intcomma }} sin origen registrado{% if domain.untraceable_other_count %} · {{ domain.untraceable_other_count|intcomma }} con otra procedencia por revisar{% endif %}</td></tr>
+            <tr><th>Ubicaciones pendientes</th><td class="is-right">{% for location in domain.untraceable_locations %}{{ location.warehouse_name }}: {{ location.count|intcomma }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+            {% endif %}
             {% endif %}
           </tbody>
         </table>
@@ -262,6 +267,7 @@
         <div>
           <h2 class="closure-card-title">Referencias de inventario por insumo</h2>
           <p class="closure-copy">El saldo global ERP y el stock vivo de Point ALMACÉN cubren ubicaciones distintas. Cada renglón se expresa en la unidad base del insumo.</p>
+          <p class="closure-copy">La procedencia se detalla para cada registro actual de insumo y ubicación. Su fecha de actualización puede ser posterior al día auditado. Un origen registrado no acredita por sí solo la apertura ni el saldo físico.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -270,7 +276,7 @@
             <tr>
               <th>Insumo</th>
               <th>Unidad</th>
-              <th>Traza de existencias ERP</th>
+              <th>Procedencia por ubicación ERP</th>
               <th class="is-right">Saldo global ERP al cierre</th>
               <th class="is-right">Stock vivo Point ALMACÉN</th>
             </tr>
@@ -280,7 +286,25 @@
             <tr>
               <td>{{ row.insumo_name }}</td>
               <td title="{{ row.unit_name }}">{{ row.unit_code }}</td>
-              <td title="{{ row.trace_effective_at|default:'Sin fecha efectiva' }}">{{ row.trace_label }}</td>
+              <td>
+                {% if row.trace_locations %}
+                <details>
+                  <summary>{{ row.trace_locations|length }} {{ row.trace_locations|length|pluralize:"registro,registros" }} por ubicación</summary>
+                  <ul>
+                    {% for location in row.trace_locations %}
+                    <li>
+                      <strong>{{ location.warehouse_name }}</strong>
+                      <div>{{ location.origin_label }}</div>
+                      {% if location.pending %}<div class="closure-muted">Apertura y saldo por acreditar</div>{% endif %}
+                      <div class="closure-muted">Actualizado <time datetime="{{ location.updated_at|date:'c' }}">{{ location.updated_at|date:"Y-m-d H:i" }}</time></div>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                </details>
+                {% else %}
+                Sin registro de existencia por ubicación
+                {% endif %}
+              </td>
               <td class="is-right">{{ row.expected_stock|floatformat:3|intcomma }}</td>
               <td class="is-right">{% if row.inventory_ready %}{{ row.visible_stock|floatformat:3|intcomma }}{% else %}Sin lectura vigente{% endif %}</td>
             </tr>

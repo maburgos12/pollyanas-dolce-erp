@@ -10,6 +10,7 @@ from control.models import MermaPOS
 from core.models import AuditLog, sucursales_operativas
 from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInventario
 from inventario.canonical_point_inventory import CanonicalPointInventoryService, InventoryFreshness
+from inventario.stock_trace import TRACE_LABELS, TRACE_UNTRACED
 from maestros.models import Insumo
 from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointProductionLine, PointSyncJob, PointWasteLine
 from recetas.models import PlanProduccion, PlanProduccionItem
@@ -267,6 +268,26 @@ def _waste_domain(target_date: date) -> dict[str, object]:
     }
 
 
+def _existence_origin_context(existencia: ExistenciaInsumo) -> dict[str, object]:
+    """Describe existing provenance without accrediting an opening or balance."""
+    trace = dict(existencia.trazabilidad_stock or {})
+    source = str(trace.get("source") or "")
+    pending = not source or source == TRACE_UNTRACED
+    if not pending:
+        group = "recorded"
+        label = str(trace.get("label") or TRACE_LABELS.get(source) or "Procedencia registrada")
+    elif trace.get("fuente") == "CONSUMO_BOM" and trace.get("creado_automaticamente") is True:
+        group = "legacy_bom"
+        label = "Registro automático por receta (BOM)"
+    elif not trace:
+        group = "empty_metadata"
+        label = "Origen no registrado"
+    else:
+        group = "other_pending"
+        label = str(trace.get("label") or "Procedencia por revisar")
+    return {"source": source, "pending": pending, "origin_group": group, "origin_label": label}
+
+
 def _inventory_domain(target_date: date) -> dict[str, object]:
     fact_qs = FactInventarioDiario.objects.filter(fecha=target_date, sucursal__isnull=True)
     moved_insumo_ids = list(fact_qs.values_list("insumo_id", flat=True))
@@ -308,16 +329,28 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
     trace_counts: dict[str, int] = {}
     traceable_count = 0
     untraceable_count = 0
-    for existencia in visible_qs.only("trazabilidad_stock"):
-        trace = dict(existencia.trazabilidad_stock or {})
-        label = str(trace.get("label") or "Sin traza suficiente")
+    existence_count = 0
+    pending_insumo_ids: set[int] = set()
+    pending_origins = {"legacy_bom": 0, "empty_metadata": 0, "other_pending": 0}
+    pending_locations: dict[str, dict[str, object]] = {}
+    for existencia in visible_qs.only("insumo_id", "almacen", "trazabilidad_stock"):
+        origin = _existence_origin_context(existencia)
+        existence_count += 1
+        label = origin["origin_label"]
         trace_counts[label] = trace_counts.get(label, 0) + 1
-        if str(trace.get("source") or ""):
+        # Preserve the previous source/pending counting rules, including UNTRACED.
+        if origin["source"]:
             traceable_count += 1
-            if str(trace.get("source")) == "UNTRACED":
-                untraceable_count += 1
-        else:
+        if origin["pending"]:
             untraceable_count += 1
+            pending_insumo_ids.add(existencia.insumo_id)
+            pending_origins[origin["origin_group"]] += 1
+            location = pending_locations.setdefault(existencia.almacen, {
+                "warehouse_code": existencia.almacen,
+                "warehouse_name": existencia.get_almacen_display(),
+                "count": 0,
+            })
+            location["count"] += 1
     trace_sources_text = ", ".join(f"{label}: {total}" for label, total in sorted(trace_counts.items())) or "Sin traza suficiente"
 
     if unavailable_count:
@@ -361,6 +394,12 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
         "traceable_count": traceable_count,
         "untraceable_count": untraceable_count,
         "trace_sources_text": trace_sources_text,
+        "existence_count": existence_count,
+        "untraceable_insumo_count": len(pending_insumo_ids),
+        "untraceable_legacy_bom_count": pending_origins["legacy_bom"],
+        "untraceable_empty_metadata_count": pending_origins["empty_metadata"],
+        "untraceable_other_count": pending_origins["other_pending"],
+        "untraceable_locations": sorted(pending_locations.values(), key=lambda row: row["warehouse_name"]),
         "latest_sync_run": latest_sync_run,
         "latest_sync_any": latest_sync_any,
         "publication": publication,
@@ -480,10 +519,20 @@ def _inventory_references(target_date: date) -> list[dict[str, object]]:
         location="ALMACEN",
     )
     visible_map: dict[int, ExistenciaInsumo] = {}
+    locations_map: dict[int, list[dict[str, object]]] = {}
     for row in ExistenciaInsumo.objects.filter(insumo_id__in=insumo_ids).order_by(
         "insumo_id", "-actualizado_en", "-id"
-    ):
+    ).only("insumo_id", "almacen", "trazabilidad_stock", "actualizado_en"):
         visible_map.setdefault(int(row.insumo_id), row)
+        origin = _existence_origin_context(row)
+        locations_map.setdefault(row.insumo_id, []).append({
+            "existence_id": row.pk,
+            "warehouse_code": row.almacen,
+            "warehouse_name": row.get_almacen_display(),
+            "origin_label": origin["origin_label"],
+            "pending": origin["pending"],
+            "updated_at": row.actualizado_en,
+        })
     rows: list[dict[str, object]] = []
     for fact in fact_rows:
         existence = visible_map.get(fact.insumo_id)
@@ -496,6 +545,7 @@ def _inventory_references(target_date: date) -> list[dict[str, object]]:
             "unit_name": getattr(fact.insumo.unidad_base, "nombre", "") or "Sin unidad base",
             "trace_label": str(trace.get("label") or "Sin traza suficiente"),
             "trace_effective_at": str(trace.get("effective_at") or ""),
+            "trace_locations": locations_map.get(fact.insumo_id, []),
             "expected_stock": _to_decimal(fact.stock_final),
             "visible_stock": _to_decimal(reading.quantity_base) if ready else None,
             "inventory_ready": ready,
@@ -543,7 +593,8 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
     if inventory["untraceable_count"] > 0:
         add(
             "Registros de existencias ERP sin traza suficiente", "warning",
-            f"Revisa los registros de existencias ERP pendientes de trazar ({inventory['untraceable_count']}).",
+            f"Hay {inventory['untraceable_count']} registros de insumo por ubicación con apertura y saldo por acreditar. "
+            "La procedencia automática registrada no equivale a un conteo físico ni a un faltante de insumos.",
             "Inventarios",
         )
     if production["plan_count"] == 0:
