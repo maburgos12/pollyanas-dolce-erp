@@ -195,7 +195,7 @@
           </h2>
           <p class="bi-panel-copy">
             {% if budget_operating_panel.show_budget_primary %}
-            Lectura simple del negocio: venta planeada, costo de producto, gasto recurrente y resultado. Todo sale de la base verificada.
+            Lectura simple del negocio: venta planeada, costo de producto, gasto recurrente y resultado. Importes registrados; los márgenes permanecen provisionales.
             {% else %}
             La lectura principal queda anclada en operación real. El presupuesto maestro se mueve a auditoría hasta reconstruirlo desde hojas detalladas confiables.
             {% endif %}
@@ -230,10 +230,10 @@
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_product_cost_budget|floatformat:2|intcomma }}</div>
             <div class="bi-subtle">
               {% if budget_operating_panel.ytd_product_cost_budget_mix_pct is not None %}{{ budget_operating_panel.ytd_product_cost_budget_mix_pct|floatformat:1 }}% de la meta{% endif %}
-              · real {% if budget_operating_panel.ytd_actual_product_cost_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_product_cost_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+              · registrado {% if budget_operating_panel.ytd_actual_product_cost_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_product_cost_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
             </div>
             <div class="bi-inline-health">
-              <span class="bi-tone {{ budget_operating_panel.ytd_product_cost_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_product_cost_signal.label }}</span>
+              {% include "reportes/partials/bi_financial_signal.html" with signal=budget_operating_panel.ytd_product_cost_signal only %}
             </div>
           </div>
           <div class="bi-metric">
@@ -241,10 +241,10 @@
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_recurrent_expense_budget|floatformat:2|intcomma }}</div>
             <div class="bi-subtle">
               {% if budget_operating_panel.ytd_recurrent_expense_budget_mix_pct is not None %}{{ budget_operating_panel.ytd_recurrent_expense_budget_mix_pct|floatformat:1 }}% de la meta{% endif %}
-              · real {% if budget_operating_panel.ytd_actual_expense_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_expense_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+              · registrado {% if budget_operating_panel.ytd_actual_expense_mix_pct is not None %}{{ budget_operating_panel.ytd_actual_expense_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}
             </div>
             <div class="bi-inline-health">
-              <span class="bi-tone {{ budget_operating_panel.ytd_expense_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_expense_signal.label }}</span>
+              {% include "reportes/partials/bi_financial_signal.html" with signal=budget_operating_panel.ytd_expense_signal only %}
             </div>
           </div>
           <div class="bi-metric">
@@ -252,11 +252,11 @@
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_budget_result|floatformat:2|intcomma }}</div>
             <div class="bi-subtle">
               {% if budget_operating_panel.ytd_budget_result_margin_pct is not None %}Margen pres. {{ budget_operating_panel.ytd_budget_result_margin_pct|floatformat:1 }}%{% endif %}
-              · real {% if budget_operating_panel.ytd_actual_result_margin_pct is not None %}{{ budget_operating_panel.ytd_actual_result_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+              · registrado {% if budget_operating_panel.ytd_actual_result_margin_pct is not None %}{{ budget_operating_panel.ytd_actual_result_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
             </div>
             <div class="bi-inline-health">
-              <span class="bi-tone {{ budget_operating_panel.ytd_margin_signal.tone|default:'neutral' }}">{{ budget_operating_panel.ytd_margin_signal.label }}</span>
-              <span class="bi-pill {{ budget_operating_panel.ytd_health_signal.tone|default:'warning' }}">{{ budget_operating_panel.ytd_health_signal.label }}</span>
+              {% include "reportes/partials/bi_financial_signal.html" with signal=budget_operating_panel.ytd_margin_signal only %}
+              <span class="bi-pill warning">Acumulado provisional</span>
             </div>
           </div>
           {% else %}
@@ -277,14 +277,14 @@
             </div>
           </div>
           <div class="bi-metric">
-            <div class="bi-metric-label">Costo fabricación YTD</div>
+            <div class="bi-metric-label">Costo fabricación registrado YTD</div>
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_manufacturing|floatformat:2|intcomma }}</div>
-            <div class="bi-subtle">Costo de producto fabricado visible</div>
+            <div class="bi-subtle">Costo de fabricación registrado · provisional</div>
           </div>
           <div class="bi-metric">
-            <div class="bi-metric-label">Utilidad operativa YTD</div>
+            <div class="bi-metric-label">Utilidad operativa provisional YTD</div>
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_operating_profit|floatformat:2|intcomma }}</div>
-            <div class="bi-subtle">Snapshot hasta {{ budget_operating_panel.latest_finance_label }}</div>
+            <div class="bi-subtle">Acumulado provisional · snapshot hasta {{ budget_operating_panel.latest_finance_label }}</div>
           </div>
           {% endif %}
         </div>
@@ -432,7 +432,7 @@
             <label>Lectura</label>
             <div class="bi-pill is-muted">
               {% if budget_operating_panel.selected_row and budget_operating_panel.selected_row.finance_close_complete %}
-              Mes cerrado y comparable
+              Costos y gastos registrados
               {% elif budget_operating_panel.selected_row and budget_operating_panel.selected_row.has_finance %}
               Venta real disponible · cierre pendiente
               {% else %}
@@ -455,33 +455,32 @@
               </div>
               <div class="bi-budget-story-signals">
                 <span class="bi-tone {{ row.sales_signal.tone|default:'neutral' }}">{{ row.sales_signal.label }}</span>
-                <span class="bi-pill {{ row.health_signal.tone|default:'warning' }}">
-                  {% if row.finance_close_complete %}{{ row.health_signal.label }}{% else %}Lectura parcial{% endif %}
-                </span>
-                <span class="bi-pill {% if row.finance_close_complete %}success{% else %}warning{% endif %}">
-                  {% if row.finance_close_complete %}Cierre completo{% else %}Cierre pendiente{% endif %}
+                <span class="bi-pill warning">{% if row.has_finance %}Lectura provisional{% else %}Solo presupuesto{% endif %}</span>
+                <span class="bi-pill warning">
+                  {% if row.finance_close_complete %}Cierre no acreditado{% else %}Cierre pendiente{% endif %}
                 </span>
               </div>
             </div>
           </div>
           <div class="bi-note bi-note-compact">
             <strong>Lectura global del mes:</strong>
+            {% if row.has_finance %}Los costos y gastos registrados no acreditan un cierre financiero completo. Este margen es provisional y no certifica la rentabilidad total.{% endif %}
             {% if row.finance_close_complete %}
-              la venta real va en
+              La venta real va en
               <strong>{% if row.sales_budget_attainment_pct is not None %}{{ row.sales_budget_attainment_pct|floatformat:1 }}% de la meta{% else %}N/D{% endif %}</strong>,
-              el costo real pesa
+              el costo registrado pesa
               <strong>{% if row.actual_product_cost_mix_pct is not None %}{{ row.actual_product_cost_mix_pct|floatformat:1 }}% del ingreso{% else %}N/D{% endif %}</strong>,
-              el gasto recurrente pesa
+              el gasto recurrente registrado pesa
               <strong>{% if row.actual_expense_mix_pct is not None %}{{ row.actual_expense_mix_pct|floatformat:1 }}% del ingreso{% else %}N/D{% endif %}</strong>
-              y el margen real queda en
+              y el margen provisional queda en
               <strong>{% if row.operating_margin_pct is not None %}{{ row.operating_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}</strong>.
             {% elif row.has_finance %}
               hay <strong>venta real confirmada</strong>
               {% if row.actual_product_cost_mix_pct is not None %}
-              y <strong>costo real de producto en {{ row.actual_product_cost_mix_pct|floatformat:1 }}% del ingreso</strong>
+              y <strong>costo registrado de producto en {{ row.actual_product_cost_mix_pct|floatformat:1 }}% del ingreso</strong>
               {% endif %},
-              pero el <strong>cierre financiero sigue pendiente</strong> porque falta gasto recurrente real completo.
-              Por eso aquí todavía <strong>no</strong> estamos calificando el margen del mes como sano o completo.
+              pero el <strong>cierre financiero sigue pendiente</strong> porque su cobertura todavía no está acreditada.
+              La lectura financiera es provisional.
             {% else %}
               este mes todavía está en
               <strong>solo presupuesto</strong>.
@@ -497,11 +496,11 @@
               <strong>${{ row.sales_total|floatformat:0|intcomma }}</strong>
             </div>
             <div class="bi-budget-story-compare-item">
-              <span>Margen bruto real</span>
+              <span>Margen bruto provisional</span>
               <strong>{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:0|intcomma }}{% else %}Pendiente{% endif %}</strong>
               <div class="bi-subtle">
                 {% if row.gross_margin_pct is not None %}
-                {{ row.gross_margin_pct|floatformat:1 }}% · {{ row.gross_margin_signal.label }}
+                {{ row.gross_margin_pct|floatformat:1 }}% · provisional
                 {% else %}
                 Sin lectura
                 {% endif %}
@@ -520,10 +519,10 @@
           <div class="bi-note bi-note-compact">
             <strong>Lectura costo vs precio global:</strong>
             {% if row.has_finance and row.actual_product_cost_mix_pct is not None and row.gross_margin_pct is not None %}
-              del total vendido real, el <strong>costo de producción pesa {{ row.actual_product_cost_mix_pct|floatformat:1 }}%</strong>
-              y deja un <strong>margen bruto real de {{ row.gross_margin_pct|floatformat:1 }}%</strong>.
-              Estado actual:
-              <span class="bi-tone {{ row.gross_margin_signal.tone|default:'neutral' }}">{{ row.gross_margin_signal.label }}</span>.
+              del total vendido real, el <strong>costo de producción registrado pesa {{ row.actual_product_cost_mix_pct|floatformat:1 }}%</strong>
+              y deja un <strong>margen bruto provisional de {{ row.gross_margin_pct|floatformat:1 }}%</strong>.
+              Lectura de los importes registrados:
+              {% include "reportes/partials/bi_financial_signal.html" with signal=row.gross_margin_signal only %}.
             {% else %}
               todavía no hay base suficiente para leer costo real contra venta real.
             {% endif %}
@@ -534,9 +533,9 @@
                 <tr>
                   <th>Concepto</th>
                   <th class="text-end">Presup.</th>
-                  <th class="text-end">Real</th>
+                  <th class="text-end">Registrado</th>
                   <th class="text-end">Relación ingreso</th>
-                  <th>Salud</th>
+                  <th>Lectura provisional</th>
                 </tr>
               </thead>
               <tbody>
@@ -553,18 +552,18 @@
                   <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.product_cost_budget_mix_pct is not None %}Pres. {{ row.product_cost_budget_mix_pct|floatformat:1 }}%{% endif %}
-                    {% if row.actual_product_cost_mix_pct is not None %}<br>{% if row.finance_close_complete %}Real{% else %}Real parcial{% endif %} {{ row.actual_product_cost_mix_pct|floatformat:1 }}%{% endif %}
+                    {% if row.actual_product_cost_mix_pct is not None %}<br>Registrado {{ row.actual_product_cost_mix_pct|floatformat:1 }}%{% endif %}
                   </td>
-                  <td><span class="bi-tone {{ row.product_cost_signal.tone|default:'neutral' }}">{{ row.product_cost_signal.label }}</span></td>
+                  <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.product_cost_signal only %}</td>
                 </tr>
                 <tr>
-                  <td>Margen bruto real</td>
+                  <td>Margen bruto provisional</td>
                   <td class="text-end">N/D</td>
                   <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
-                    {% if row.gross_margin_pct is not None %}Real {{ row.gross_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
+                    {% if row.gross_margin_pct is not None %}Provisional {{ row.gross_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
                   </td>
-                  <td><span class="bi-tone {{ row.gross_margin_signal.tone|default:'neutral' }}">{{ row.gross_margin_signal.label }}</span></td>
+                  <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.gross_margin_signal only %}</td>
                 </tr>
                 <tr>
                   <td>Gasto recurrente</td>
@@ -572,9 +571,9 @@
                   <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.recurrent_expense_budget_mix_pct is not None %}Pres. {{ row.recurrent_expense_budget_mix_pct|floatformat:1 }}%{% endif %}
-                    {% if row.finance_close_complete and row.actual_expense_mix_pct is not None %}<br>Real {{ row.actual_expense_mix_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                    {% if row.finance_close_complete and row.actual_expense_mix_pct is not None %}<br>Registrado {{ row.actual_expense_mix_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
                   </td>
-                  <td><span class="bi-tone {{ row.expense_signal.tone|default:'neutral' }}">{{ row.expense_signal.label }}</span></td>
+                  <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.expense_signal only %}</td>
                 </tr>
                 <tr>
                   <td>Resultado</td>
@@ -582,9 +581,9 @@
                   <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.budget_result_margin_pct is not None %}Pres. {{ row.budget_result_margin_pct|floatformat:1 }}%{% endif %}
-                    {% if row.finance_close_complete and row.operating_margin_pct is not None %}<br>Real {{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                    {% if row.finance_close_complete and row.operating_margin_pct is not None %}<br>Registrado {{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
                   </td>
-                  <td><span class="bi-tone {{ row.margin_signal.tone|default:'neutral' }}">{{ row.margin_signal.label }}</span></td>
+                  <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.margin_signal only %}</td>
                 </tr>
               </tbody>
             </table>
@@ -609,7 +608,7 @@
                   <th class="text-end">Venta real</th>
                   <th class="text-end">Dif.</th>
                   <th class="text-end">Cumpl.</th>
-                  <th class="text-end">Margen real</th>
+                  <th class="text-end">Margen provisional</th>
                   <th>Estado</th>
                 </tr>
               </thead>
@@ -624,7 +623,7 @@
                   <td class="text-end">{% if row.finance_close_complete and row.operating_margin_pct is not None %}{{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}Pend.{% else %}N/D{% endif %}</td>
                   <td>
                     {% if row.finance_close_complete %}
-                    <span class="bi-tone {{ row.health_signal.tone|default:'neutral' }}">{{ row.health_signal.label }}</span>
+                    {% include "reportes/partials/bi_financial_signal.html" with signal=row.health_signal only %}
                     {% elif row.has_finance %}
                     <span class="bi-tone warning">Lectura parcial</span>
                     {% else %}

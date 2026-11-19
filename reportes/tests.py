@@ -1059,9 +1059,9 @@ class ReportesBITests(TestCase):
         self.assertEqual(panel["selected_row"]["gross_margin_total"], Decimal("2128390.21"))
         self.assertContains(resp, "Lectura parcial")
         self.assertContains(resp, "Cierre pendiente")
-        self.assertContains(resp, "Margen bruto real")
+        self.assertContains(resp, "Margen bruto provisional")
         self.assertContains(resp, "Lectura costo vs precio global")
-        self.assertContains(resp, "costo de producción pesa")
+        self.assertContains(resp, "costo de producción registrado pesa")
         self.assertContains(resp, "64.0%")
         self.assertNotContains(resp, "Cierre completo")
 
