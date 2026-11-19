@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from control.models import MermaPOS
@@ -12,8 +13,8 @@ from inventario.models import AlmacenSyncRun, ExistenciaInsumo, MovimientoInvent
 from inventario.canonical_point_inventory import CanonicalPointInventoryService, InventoryFreshness
 from inventario.stock_trace import TRACE_LABELS, TRACE_UNTRACED
 from maestros.models import Insumo
-from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointProductionLine, PointSyncJob, PointWasteLine
-from recetas.models import PlanProduccion, PlanProduccionItem
+from pos_bridge.models import PointDailyBranchIndicator, PointDailySale, PointProductionLine, PointSyncJob, PointTransferLine, PointWasteLine
+from recetas.models import PlanProduccion, PlanProduccionItem, Receta
 from reportes.models import FactInventarioDiario, FactProduccionDiaria, FactVentaDiaria
 
 
@@ -193,7 +194,83 @@ def _production_domain(target_date: date) -> dict[str, object]:
     }
 
 
-def _waste_domain(target_date: date) -> dict[str, object]:
+def _accredited_dimension(row):
+    return bool(row["unit"] and row["family"] in {"producto", "preparación", "insumo"})
+
+
+def _quantity_groups(rows):
+    groups = {}
+    for row in rows:
+        if not _accredited_dimension(row):
+            continue
+        key = row["family"], row["unit"]
+        group = groups.setdefault(key, {"family": key[0], "unit": key[1], "quantity": ZERO, "rows": 0})
+        group["quantity"] += row["quantity"]
+        group["rows"] += 1
+    return [groups[key] for key in sorted(groups)]
+
+
+def _physical_quantity(rows):
+    """A number is meaningful only with one accredited family/unit, including zero."""
+    groups = _quantity_groups(rows)
+    if rows and all(_accredited_dimension(row) for row in rows) and len(groups) == 1:
+        return groups[0]["quantity"]
+    return None
+
+
+def _waste_quantities(target_date: date):
+    """Three bulk reads; source hashes identify records, never names or unit aliases."""
+    visible = list(MermaPOS.objects.filter(fecha=target_date).order_by("pk").values(
+        "id", "source_hash", "fecha", "cantidad", "receta_id", "sucursal_id", "producto_texto",
+    ))
+    hashes = {row["source_hash"] for row in visible if row["source_hash"]}
+    point = list(PointWasteLine.objects.filter(
+        Q(movement_at__date=target_date) | Q(source_hash__in=hashes),
+    ).order_by("pk").values(
+        "id", "source_hash", "movement_at", "quantity", "unit", "total_cost", "item_name",
+        "insumo_id", "receta_id", "receta__tipo", "erp_branch_id",
+    ))
+    by_hash = defaultdict(list)
+    for row in point:
+        by_hash[row["source_hash"]].append(row)
+
+    def family(row):
+        if row["insumo_id"] and not row["receta_id"]:
+            return "insumo"
+        if row["receta_id"] and not row["insumo_id"]:
+            return "producto" if row["receta__tipo"] == "PRODUCTO_FINAL" else "preparación"
+        return "sin clasificación acreditada"
+
+    point_rows = [dict(id=row["id"], name=row["item_name"], family=family(row),
+                       unit=(row["unit"] or "").strip(), quantity=row["quantity"],
+                       branch_id=row["erp_branch_id"], total_cost=row["total_cost"])
+                  for row in point if timezone.localdate(row["movement_at"]) == target_date]
+    branch_rows = []
+    for row in visible:
+        candidates = by_hash.get(row["source_hash"], []) if row["source_hash"] else []
+        source = candidates[0] if len(candidates) == 1 else None
+        accredited = bool(source and source["quantity"] == row["cantidad"]
+                          and timezone.localdate(source["movement_at"]) == row["fecha"]
+                          and source["receta_id"] == row["receta_id"]
+                          and source["erp_branch_id"] == row["sucursal_id"]
+                          and (source["unit"] or "").strip())
+        branch_rows.append(dict(id=row["id"], name=row["producto_texto"], quantity=row["cantidad"],
+                                unit=source["unit"].strip() if accredited else "",
+                                family=family(source) if accredited else "sin clasificación acreditada",
+                                branch_id=row["sucursal_id"]))
+    # The legacy importer does not persist unidad_texto or convert cantidad.
+    # A master's base unit cannot certify the unit of these imported quantities.
+    ingredient_rows = [dict(id=row["id"], name=row["insumo__nombre"], quantity=row["cantidad"],
+                            unit="", family="insumo", branch_id=None)
+                       for row in MovimientoInventario.objects.filter(
+                           fecha__date=target_date, tipo=MovimientoInventario.TIPO_CONSUMO,
+                           referencia__startswith="MERMA|",
+                       ).order_by("pk").values("id", "cantidad", "insumo__nombre")]
+    return {"point": point_rows, "branch": branch_rows, "ingredient": ingredient_rows}
+
+
+def _waste_domain(target_date: date, *, quantities=None) -> dict[str, object]:
+    quantities = quantities if quantities is not None else _waste_quantities(target_date)
     raw_qs = PointWasteLine.objects.filter(movement_at__date=target_date)
     fact_qs = FactProduccionDiaria.objects.filter(fecha=target_date)
     branch_visible_qs = MermaPOS.objects.filter(fecha=target_date)
@@ -213,21 +290,22 @@ def _waste_domain(target_date: date) -> dict[str, object]:
     ).order_by("-fecha").values_list("fecha", flat=True).first()
     visible_max = max([value for value in [branch_visible_max, cedis_visible_max.date() if cedis_visible_max else None] if value], default=None)
 
-    raw_units = _to_decimal(raw_qs.aggregate(total=Sum("quantity")).get("total"))
-    raw_cost = _to_decimal(raw_qs.aggregate(total=Sum("total_cost")).get("total"))
-    fact_units = _to_decimal(fact_qs.aggregate(total=Sum("merma")).get("total"))
-    branch_visible_units = _to_decimal(branch_visible_qs.aggregate(total=Sum("cantidad")).get("total"))
-    cedis_visible_units = _to_decimal(cedis_visible_qs.aggregate(total=Sum("cantidad")).get("total"))
-    visible_units = branch_visible_units + cedis_visible_units
+    raw_units = _physical_quantity(quantities["point"])
+    raw_cost = sum((row["total_cost"] for row in quantities["point"]), ZERO)
+    fact_units = None  # Facts have no persisted unit; their rows remain unchanged.
+    branch_visible_units = _physical_quantity(quantities["branch"])
+    cedis_visible_units = _physical_quantity(quantities["ingredient"])
+    visible_units = _physical_quantity(quantities["branch"] + quantities["ingredient"])
+    visible_rows = len(quantities["branch"]) + len(quantities["ingredient"])
 
     latest_job = _latest_sync_job(PointSyncJob.JOB_TYPE_WASTE)
     latest_audit = _latest_audit_for_trigger("point_waste_sync")
 
-    if raw_qs.exists() and visible_units > 0:
+    if raw_qs.exists() and visible_rows:
         publication = _status_row(
-            label="Publicado",
+            label="Registros visibles",
             tone="success",
-            detail="La merma del día ya impacta el resumen visible del ERP y la comparativa operativa.",
+            detail="Hay registros de merma en el ERP. Revisa cantidades por fuente y unidad; su presencia no certifica una conciliación completa.",
         )
     elif raw_qs.exists():
         publication = _status_row(
@@ -253,7 +331,7 @@ def _waste_domain(target_date: date) -> dict[str, object]:
         "visible_max_date": visible_max,
         "raw_rows": raw_qs.count(),
         "fact_rows": fact_qs.filter(merma__gt=0).count(),
-        "visible_rows": branch_visible_qs.count() + cedis_visible_qs.count(),
+        "visible_rows": visible_rows,
         "raw_branch_count": raw_qs.exclude(erp_branch_id__isnull=True).values("erp_branch_id").distinct().count(),
         "visible_branch_count": branch_visible_qs.exclude(sucursal_id__isnull=True).values("sucursal_id").distinct().count(),
         "raw_units": raw_units,
@@ -262,6 +340,11 @@ def _waste_domain(target_date: date) -> dict[str, object]:
         "branch_visible_units": branch_visible_units,
         "cedis_visible_units": cedis_visible_units,
         "visible_units": visible_units,
+        "point_quantity_groups": _quantity_groups(quantities["point"]),
+        "branch_quantity_groups": _quantity_groups(quantities["branch"]),
+        "point_unknown_rows": [row for row in quantities["point"] if not _accredited_dimension(row)],
+        "branch_unknown_rows": [row for row in quantities["branch"] if not _accredited_dimension(row)],
+        "cedis_unknown_rows": quantities["ingredient"],
         "publication": publication,
         "latest_job": latest_job,
         "latest_audit": latest_audit,
@@ -406,7 +489,59 @@ def _inventory_domain(target_date: date) -> dict[str, object]:
     }
 
 
-def _branch_rows(target_date: date) -> list[dict[str, object]]:
+def _piece_fact_branches(target_date: date, facts: list[dict]) -> set[int]:
+    """Certify existing fact operands, never convert or repair their quantities.
+
+    Production/receipts follow rebuild_production_facts' exact FK/date filters.
+    Sales do not persist a unit: only an explicitly recorded zero can be a
+    neutral operand, never a missing row/default or a nonzero inferred piece
+    count. Missing/extra source keys or untyped facts fail closed.
+    """
+    sources = {name: defaultdict(lambda: ZERO) for name in ("produced", "sold", "transferred")}
+    invalid = set()
+    production = PointProductionLine.objects.filter(
+        production_date=target_date, is_insumo=False, receta_id__isnull=False,
+    ).values("branch__erp_branch_id", "receta_id", "receta__tipo", "unit", "produced_quantity")
+    transfers = PointTransferLine.objects.filter(
+        received_at__date=target_date, is_insumo=False, is_cancelled=False, receta_id__isnull=False,
+    ).values("erp_destination_branch_id", "receta_id", "receta__tipo", "unit", "received_quantity")
+    sales = FactVentaDiaria.objects.filter(fecha=target_date).values(
+        "sucursal_id", "receta_id", "receta__tipo", "cantidad",
+    )
+    for rows, branch_field, quantity_field, operand in (
+        (production, "branch__erp_branch_id", "produced_quantity", "produced"),
+        (transfers, "erp_destination_branch_id", "received_quantity", "transferred"),
+        (sales, "sucursal_id", "cantidad", "sold"),
+    ):
+        for row in rows:
+            branch_id = row[branch_field]
+            if branch_id is None:
+                continue
+            if (row["receta_id"] is None or row["receta__tipo"] != Receta.TIPO_PRODUCTO_FINAL
+                    or (operand != "sold" and (row["unit"] or "").strip().casefold() != "pza")):
+                invalid.add(branch_id)
+            if operand == "sold" and _to_decimal(row[quantity_field]) != ZERO:
+                invalid.add(branch_id)
+            sources[operand][(branch_id, row["receta_id"])] += _to_decimal(row[quantity_field])
+    branches = set()
+    fact_keys = set()
+    for row in facts:
+        branch_id = row["sucursal_id"]
+        key = (branch_id, row["receta_id"])
+        fact_keys.add(key)
+        branches.add(branch_id)
+        if row["receta_id"] is None or row["receta__tipo"] != Receta.TIPO_PRODUCTO_FINAL:
+            invalid.add(branch_id)
+        for operand, field in (("produced", "producido"), ("sold", "vendido"), ("transferred", "transferido")):
+            if key not in sources[operand] or _to_decimal(row[field]) != sources[operand][key]:
+                invalid.add(branch_id)
+    for source in sources.values():
+        invalid.update(branch_id for branch_id, recipe_id in source if (branch_id, recipe_id) not in fact_keys)
+    return branches - invalid
+
+
+def _branch_rows(target_date: date, *, quantities=None) -> list[dict[str, object]]:
+    quantities = quantities if quantities is not None else _waste_quantities(target_date)
     sales_map = {
         int(row["sucursal_id"]): row
         for row in FactVentaDiaria.objects.filter(fecha=target_date, sucursal_id__isnull=False)
@@ -417,29 +552,13 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
             tickets=Sum("tickets"),
         )
     }
-    prod_map = {
-        int(row["sucursal_id"]): row
-        for row in FactProduccionDiaria.objects.filter(fecha=target_date, sucursal_id__isnull=False)
-        .values("sucursal_id")
-        .annotate(
-            produced=Sum("producido"),
-            sold=Sum("vendido"),
-            waste=Sum("merma"),
-            transferred=Sum("transferido"),
-        )
-    }
-    waste_point_map = {
-        int(row["erp_branch_id"]): row
-        for row in PointWasteLine.objects.filter(movement_at__date=target_date, erp_branch_id__isnull=False)
-        .values("erp_branch_id")
-        .annotate(point_waste=Sum("quantity"))
-    }
-    waste_visible_map = {
-        int(row["sucursal_id"]): row
-        for row in MermaPOS.objects.filter(fecha=target_date, sucursal_id__isnull=False)
-        .values("sucursal_id")
-        .annotate(visible_waste=Sum("cantidad"))
-    }
+    facts = list(FactProduccionDiaria.objects.filter(fecha=target_date, sucursal_id__isnull=False)
+                 .values("sucursal_id", "receta_id", "receta__tipo", "producido", "vendido", "merma", "transferido"))
+    piece_branches = _piece_fact_branches(target_date, facts)
+    prod_map = defaultdict(lambda: {"produced": ZERO, "sold": ZERO, "waste": ZERO, "transferred": ZERO})
+    for fact in facts:
+        for label, field in (("produced", "producido"), ("sold", "vendido"), ("waste", "merma"), ("transferred", "transferido")):
+            prod_map[fact["sucursal_id"]][label] += _to_decimal(fact[field])
     indicator_map = {
         int(row["branch__erp_branch_id"]): row
         for row in PointDailyBranchIndicator.objects.filter(
@@ -455,25 +574,28 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
         sales_row = sales_map.get(int(branch.id), {})
         indicator_row = indicator_map.get(int(branch.id), {})
         prod_row = prod_map.get(int(branch.id), {})
-        point_waste_row = waste_point_map.get(int(branch.id), {})
-        visible_waste_row = waste_visible_map.get(int(branch.id), {})
+        point_waste_rows = [row for row in quantities["point"] if row["branch_id"] == branch.id]
+        visible_waste_rows = [row for row in quantities["branch"] if row["branch_id"] == branch.id]
         sales_units = _to_decimal(sales_row.get("sales_units"))
         sales_amount = _to_decimal(sales_row.get("sales_amount"))
         produced = _to_decimal(prod_row.get("produced"))
         sold = _to_decimal(prod_row.get("sold"))
         fact_waste = _to_decimal(prod_row.get("waste"))
         transferred = _to_decimal(prod_row.get("transferred"))
-        point_waste = _to_decimal(point_waste_row.get("point_waste"))
-        visible_waste = _to_decimal(visible_waste_row.get("visible_waste"))
-        net_units = produced + transferred - sold - visible_waste
-        if produced > 0 and sales_units > produced + transferred:
+        point_waste = _physical_quantity(point_waste_rows)
+        comparable = bool(visible_waste_rows) and all(
+            row["family"] == "producto" and row["unit"].casefold() == "pza" for row in visible_waste_rows
+        )
+        visible_waste = sum((row["quantity"] for row in visible_waste_rows), ZERO) if comparable else None
+        net_units = produced + transferred - sold - visible_waste if comparable and branch.id in piece_branches else None
+        if branch.id in piece_branches and produced > 0 and sales_units > produced + transferred:
             status = "Tensión"
             tone = "danger"
             detail = "La venta del día supera la producción/transferencia visible de la sucursal."
-        elif sales_units > 0 or produced > 0 or visible_waste > 0:
+        elif sales_units > 0 or produced > 0 or any(row["quantity"] > ZERO for row in visible_waste_rows):
             status = "Con actividad"
             tone = "success"
-            detail = "Sucursal con señal operativa suficiente para conciliación diaria."
+            detail = "Sucursal con actividad registrada; las cantidades conservan su fuente."
         else:
             status = "Sin actividad"
             tone = "warning"
@@ -490,6 +612,7 @@ def _branch_rows(target_date: date) -> list[dict[str, object]]:
                 "waste_units_fact": fact_waste,
                 "waste_units_point": point_waste,
                 "waste_units_visible": visible_waste,
+                "waste_records": len(visible_waste_rows),
                 "transferred_units": transferred,
                 "net_units": net_units,
                 "status": status,
@@ -572,7 +695,7 @@ def _build_alerts(*, target_date: date, sales: dict[str, object], production: di
             f"Point tiene {production['raw_rows']} renglones de producción del {target_date.isoformat()} pendientes de publicación en el ERP.",
             "Integraciones Point",
         )
-    if waste["raw_rows"] > 0 and waste["visible_units"] <= 0:
+    if waste["raw_rows"] > 0 and waste["visible_rows"] == 0:
         add(
             "Merma pendiente de publicación", "danger",
             f"Point tiene {waste['raw_rows']} renglones de merma del {target_date.isoformat()} pendientes de reflejarse en el ERP.",
@@ -637,7 +760,8 @@ def _overall_status(*, alerts: list[dict[str, str]]) -> dict[str, str]:
 def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
     sales = _sales_domain(target_date)
     production = _production_domain(target_date)
-    waste = _waste_domain(target_date)
+    waste_quantities = _waste_quantities(target_date)
+    waste = _waste_domain(target_date, quantities=waste_quantities)
     inventory = _inventory_domain(target_date)
     alerts = _build_alerts(
         target_date=target_date,
@@ -647,7 +771,7 @@ def build_daily_operational_closure(*, target_date: date) -> dict[str, object]:
         inventory=inventory,
     )
     overall = _overall_status(alerts=alerts)
-    branch_rows = _branch_rows(target_date)
+    branch_rows = _branch_rows(target_date, quantities=waste_quantities)
     inventory_references = _inventory_references(target_date)
 
     domains = [sales, production, waste, inventory]

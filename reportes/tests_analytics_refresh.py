@@ -928,4 +928,4 @@ class DailyOperationalClosureViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["closure"]["sales"]["fact_tickets"], 5)
-        self.assertContains(response, "8 piezas · 5 tickets")
+        self.assertContains(response, "Cantidad reportada 8 · unidad por acreditar · 5 tickets")
