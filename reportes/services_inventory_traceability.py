@@ -455,11 +455,10 @@ class InventoryAuditMaterializer:
             .annotate(total=Count("id"))
             .values_list("case_id", "total")
         )
-        cases = list(
-            ProductInventoryAuditCase.objects.sold_products()
-            .select_for_update(of=("self",))
-            .filter(month=month)
-        )
+        cases_query = ProductInventoryAuditCase.objects.sold_products().filter(month=month)
+        if not dry_run:
+            cases_query = cases_query.select_for_update(of=("self",))
+        cases = list(cases_query)
         for case in cases:
             case.audit_event_count = event_counts.get(case.id, 0)
         grouped = {}

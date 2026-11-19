@@ -63,8 +63,21 @@ class InventoryAuditCaseLockTests(InventoryAuditAgentFixtures, TransactionTestCa
             self.assertEqual(agent.run_month(self.month)["total"], 1)
         self.assertEqual(agent.run_month(self.month)["updated"], 0)
 
-    def test_rebuild_locks_only_canonical_cases(self):
+    def test_rebuild_application_locks_only_canonical_cases(self):
         with transaction.atomic():
+            cases = InventoryAuditMaterializer()._canonical_existing_cases(
+                month=self.month,
+                branch_aliases={self.branch.pk: self.branch.pk},
+                prepared_lines=[],
+                dry_run=False,
+            )
+            self.assertEqual(list(cases.values()), [self.case])
+            self.assert_only_case_is_locked()
+
+    def test_dry_run_reads_canonical_cases_without_row_locks(self):
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
             cases = InventoryAuditMaterializer()._canonical_existing_cases(
                 month=self.month,
                 branch_aliases={self.branch.pk: self.branch.pk},
@@ -72,7 +85,22 @@ class InventoryAuditCaseLockTests(InventoryAuditAgentFixtures, TransactionTestCa
                 dry_run=True,
             )
             self.assertEqual(list(cases.values()), [self.case])
-            self.assert_only_case_is_locked()
+            probe = connection.copy(alias="inventory_audit_preview_lock_probe")
+            try:
+                with probe.cursor() as cursor:
+                    cursor.execute("BEGIN")
+                    try:
+                        for instance in (self.case, self.product, self.branch, self.audit_run):
+                            cursor.execute(
+                                f'SELECT id FROM "{instance._meta.db_table}" '
+                                "WHERE id = %s FOR UPDATE NOWAIT",
+                                [instance.pk],
+                            )
+                            self.assertEqual(cursor.fetchone()[0], instance.pk)
+                    finally:
+                        cursor.execute("ROLLBACK")
+            finally:
+                probe.close()
 
     def test_history_reconciliation_locks_only_cases(self):
         def checked_history(cases, month):

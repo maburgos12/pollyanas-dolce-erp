@@ -816,6 +816,22 @@ def has_documentary_boundary(trace, boundary):
         return True
     proof = trace.get("historical_boundary_evidence", {}).get(boundary, {})
     batch = proof.get("original_batch_evidence", {})
+    if proof.get("contract") == SNAPSHOT_BOUNDARY_CONTRACT:
+        snapshot = proof.get("snapshot_boundary_evidence", {})
+        consistency = snapshot.get("canonical_consistency", {})
+        return bool(
+            proof.get("boundary") == boundary and proof.get("snapshot_boundary_verified")
+            and snapshot.get("contract") == SNAPSHOT_BOUNDARY_CONTRACT
+            and snapshot.get("snapshot_id") and snapshot.get("sync_job_id")
+            and snapshot.get("branch_provenance_log_ids") and snapshot.get("raw_signature")
+            and snapshot.get("provenance_signature") and snapshot.get("qualified_snapshot_signature")
+            and snapshot.get("branch_id") == proof.get("branch_id")
+            and snapshot.get("product_id") == proof.get("product_id")
+            and snapshot.get("effective_at") == proof.get("cutoff")
+            and snapshot.get("stock") == proof.get("effective_stock")
+            and consistency.get("valid") and consistency.get("source_signature")
+            and consistency.get("coverage_promoted") is False
+        )
     return bool(proof.get("contract") == "POINT_ORIGINAL_HISTORY_BOUNDARY_V1"
                 and proof.get("boundary") == boundary and proof.get("canonical_history_verified")
                 and proof.get("effective_stock") is not None and proof.get("movement_ids")
@@ -825,15 +841,20 @@ def has_documentary_boundary(trace, boundary):
 
 @transaction.atomic(savepoint=False)
 def documentary_original_boundaries(lines, *, month, boundary, excluded_keys, cache):
-    """Supplement absent manifest pairs from verified originals, never override a line."""
+    """Supplement absent manifest pairs from verified original evidence."""
     if boundary not in {"opening", "closing"}:
         raise ValueError("Frontera documental inválida.")
     lock_product_month_sources([month])
     if cache.get("source_transaction_scope") is not connection.run_on_commit:
         cache.clear()
         cache["source_transaction_scope"] = connection.run_on_commit
-    candidates = {(line.branch.id, line.product.id): line for line in lines
-                  if (line.branch.id, line.product.id) not in excluded_keys}
+    candidates = {
+        (line.branch.id, line.product.id): SimpleNamespace(
+            branch=line.branch, product=line.product,
+            branch_id=line.branch.id, product_id=line.product.id, difference=ZERO,
+        )
+        for line in lines if (line.branch.id, line.product.id) not in excluded_keys
+    }
     monthly = cache.setdefault(month, {})
     requested = [SimpleNamespace(branch=line.branch, product=line.product, difference=ZERO)
                  for key, line in candidates.items() if key not in monthly]
@@ -860,6 +881,29 @@ def documentary_original_boundaries(lines, *, month, boundary, excluded_keys, ca
             "original_batch_evidence": dict(batch), "coverage_status": history.coverage_status,
             "canonical_history_verified": True, "physical_count_verified": False,
         })
+    missing = [line for key, line in candidates.items()
+               if key not in result and not str(line.product.external_id).startswith("official:")]
+    snapshots = _snapshot_historical_boundaries(missing, cutoff=cutoff, cache=cache)
+    consistency = _snapshot_canonical_consistency(
+        missing, snapshots=snapshots, reconciliations=monthly,
+        cutoff=cutoff, cache=cache, month=month,
+    )
+    for line in missing:
+        key = (line.branch_id, line.product_id)
+        snapshot = snapshots.get(key)
+        check = consistency.get(key, {})
+        if snapshot and check.get("valid"):
+            stock, snapshot_proof = snapshot
+            result[key] = (Decimal(stock), {
+                "contract": SNAPSHOT_BOUNDARY_CONTRACT, "line_id": None,
+                "branch_id": key[0], "product_id": key[1], "month": month.isoformat(),
+                "boundary": boundary, "cutoff": snapshot_proof["effective_at"],
+                "effective_stock": str(stock),
+                "snapshot_boundary_verified": True,
+                "snapshot_boundary_evidence": {**snapshot_proof, "canonical_consistency": dict(check)},
+                "coverage_status": monthly[key].coverage_status,
+                "canonical_history_verified": False, "physical_count_verified": False,
+            })
     return result
 
 

@@ -4,10 +4,13 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.db import connection, transaction
+from django.test import TestCase, TransactionTestCase
+from django.test.utils import CaptureQueriesContext
 
 from pos_bridge.models import (PointBranch, PointProduct, PointProductHistoryImport,
-    PointHistoricalInventoryClosing, PointHistoricalInventoryClosingLine)
+    PointHistoricalInventoryClosing, PointHistoricalInventoryClosingLine,
+    PointInventorySnapshot, PointSyncJob, PointExtractionLog)
 from recetas.models import Receta
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.monthly_product_balance_service import (
@@ -148,3 +151,76 @@ class OriginalBoundaryWithoutManifestLineTests(TestCase):
         reconciled = replace(line, production=history.production, sales=history.sales,
                              expected_closing=Decimal('2'), difference=Decimal('0'))
         self.assertEqual(ProductDocumentaryCloseService._pending_reason(reconciled, history), '')
+
+
+    def test_snapshot_supplement_reaches_monthly_trace_and_materializer_consumers(self):
+        record = PointProductHistoryImport.objects.get()
+        record.raw_metadata = {
+            "source": "POINT_STOCK_HISTORY_API", "fetched_rows": 3, "history_limit": 5,
+            "fetched_movement_ids": [101, 102, 103],
+            "fetched_at": "2026-10-04T18:00:00+00:00",
+        }
+        record.save(update_fields=["raw_metadata"])
+        job = PointSyncJob.objects.create(job_type="inventory", status="SUCCESS")
+        PointExtractionLog.objects.create(
+            sync_job=job, level="INFO", message="Sucursal procesada 24.",
+            context={"branch_id": self.branch.pk, "branch_external_id": "24",
+                     "products_seen": 1, "snapshots_created": 1})
+        snapshot = PointInventorySnapshot.objects.create(
+            branch=self.branch, product=self.product, sync_job=job, stock=0,
+            captured_at=datetime(2026, 9, 3, 15, tzinfo=timezone.utc),
+            raw_payload={"headers": ["Código", "Producto", "Cantidad", "Unidad", "Costo unitario",
+                                     "Costo total", "Último Movimiento"],
+                         "row": ["1048", "4358", "Dot Cake", "Pasteles", "0",
+                                 "Pza", "10", "10", "2026-08-15T02:18:44.487", False]})
+        opening, closing = self.manifests()
+        monthly_values, meta, _ = MonthlyPointProductBalanceService()._load_historical_closing(
+            snapshot_date=opening.operational_date, source="opening_snapshot")
+        self.assertEqual(monthly_values[Receta.objects.get(codigo_point="4358").pk][0], Decimal("0"))
+        service = BranchInventoryTraceabilityService()
+        movements = tuple({} for _ in range(11)) + ([], [])
+        movements[0][(self.branch.pk, self.product.pk)] = (Decimal("1"), [102])
+        with patch.object(service, "_load_direct_movements", return_value=movements):
+            trace = service.build(self.month, allow_partial=True)
+        line = next(line for line in trace.lines if line.product.pk == self.product.pk)
+        self.assertEqual(line.opening, Decimal("0"))
+        self.assertTrue(has_documentary_boundary(line.source_trace, "opening"))
+        history = AuditStockHistoryService().reconcile(self.branch, self.product, self.month)
+        prepared = InventoryAuditMaterializer()._prepare_line(line, point_history=history)
+        self.assertEqual(Decimal(prepared["quantities"]["opening_point"]), Decimal("0"))
+        proof = prepared["source_trace"]["historical_boundary_evidence"]["opening"]
+        self.assertEqual(proof["snapshot_boundary_evidence"]["snapshot_id"], snapshot.pk)
+        with patch.object(service, "build", return_value=trace), self.captureOnCommitCallbacks() as callbacks:
+            with CaptureQueriesContext(connection) as captured:
+                InventoryAuditMaterializer()._canonical_existing_cases(
+                    month=self.month, branch_aliases={}, prepared_lines=[prepared], dry_run=True)
+                preview = InventoryAuditMaterializer(traceability_service=service).rebuild(
+                    self.month, dry_run=True, allow_partial=True)
+        self.assertTrue(preview)
+        self.assertEqual(callbacks, [])
+        mutations = [query["sql"] for query in captured if query["sql"].lstrip().split()[0].upper()
+                     in {"INSERT", "UPDATE", "DELETE", "TRUNCATE", "CREATE", "ALTER", "DROP"}]
+        self.assertEqual(mutations, [])
+        self.assertFalse(any("FOR UPDATE" in query["sql"].upper() for query in captured))
+        opening.refresh_from_db()
+        self.assertEqual(opening.source_fingerprint, "opening-preserved")
+        self.assertEqual(opening.lines.count(), 1)
+
+
+    def test_real_rebuild_existing_cases_retains_row_lock(self):
+        with CaptureQueriesContext(connection) as captured:
+            InventoryAuditMaterializer()._canonical_existing_cases(
+                month=self.month, branch_aliases={}, prepared_lines=[], dry_run=False)
+        self.assertTrue(any("FOR UPDATE" in query["sql"].upper() for query in captured))
+
+
+class InventoryAuditReadOnlyPreviewTests(TransactionTestCase):
+    def test_existing_case_preview_runs_in_postgresql_read_only_transaction(self):
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute("SET TRANSACTION READ ONLY")
+            callbacks = list(connection.run_on_commit)
+            result = InventoryAuditMaterializer()._canonical_existing_cases(
+                month=date(2026, 10, 1), branch_aliases={}, prepared_lines=[], dry_run=True)
+            self.assertEqual(result, {})
+            self.assertEqual(connection.run_on_commit, callbacks)
