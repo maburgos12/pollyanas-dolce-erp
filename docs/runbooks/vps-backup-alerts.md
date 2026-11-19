@@ -52,6 +52,16 @@ sin iniciar rotación ni mantenimiento Docker. El cron del rotador existente sig
 usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
 no amplía su autorización ni autoriza otros lotes de limpieza.
 
+Antes de sustituir la entrada externa del rotador, el instalador conserva su
+original conocido con el SHA-256 en el nombre y verifica sus bytes. Una reversión
+del checkout debe restaurar también esa entrada: el wrapper nuevo no es compatible
+con una revisión que aún no contenga `scripts/rotate_verified_backups.py`.
+Verificar el hash del original antes de restaurarlo y conservar la evidencia;
+no reconstruirlo desde logs ni reemplazar una versión desconocida. La unidad
+anterior tampoco acepta `--verify-only`: mantener su timer pausado, con responsable
+y fecha de revisión, hasta validar una versión compatible. La reversión no autoriza
+rotación, reinicios ajenos ni retirar respaldos.
+
 El preparador de limpieza consulta las identidades de archivos en `/proc` sin
 seguir enlaces a montajes externos. Si no puede determinar el dispositivo, reserva
 el inode conservadoramente y excluye el candidato. Los errores del sistema guardan

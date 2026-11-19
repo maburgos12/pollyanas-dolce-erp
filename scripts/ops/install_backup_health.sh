@@ -9,10 +9,19 @@ rotator=/usr/local/sbin/erp-rotate-verified-backups
 wrapper='#!/bin/sh
 exec /usr/bin/python3 /opt/pastelerias-erp/scripts/rotate_verified_backups.py "$@"'
 test -x "$rotator"
-# Refuse to overwrite an operator's unreviewed replacement.
+original_sha=e8cba9307cf6486aa2429004a0f81e62bdbd472f8afe6b6117f9da6a28de1e2f
+baseline="$rotator.baseline.$original_sha"
+# Keep the known original outside Git so rollback can restore its Python entrypoint.
 if ! cmp -s "$rotator" <(printf '%s\n' "$wrapper"); then
-  test "$(sha256sum "$rotator" | cut -d ' ' -f 1)" = e8cba9307cf6486aa2429004a0f81e62bdbd472f8afe6b6117f9da6a28de1e2f
+  test "$(sha256sum "$rotator" | cut -d ' ' -f 1)" = "$original_sha"
+  if ! test -e "$baseline" && ! test -L "$baseline"; then
+    (set -o noclobber; cat "$rotator" > "$baseline")
+    chmod 700 "$baseline"
+  fi
 fi
+test -f "$baseline" && ! test -L "$baseline" && test -O "$baseline"
+/usr/bin/python3 -c 'import os, sys; assert os.stat(sys.argv[1]).st_mode & 0o777 == 0o700' "$baseline"
+test "$(sha256sum "$baseline" | cut -d ' ' -f 1)" = "$original_sha"
 /usr/bin/python3 -m py_compile "$repo/scripts/rotate_verified_backups.py" "$repo/scripts/vps_backup_health.py"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes qnap-nasdolce-archive \
   "test -d $nas_home/runtime && test -O $nas_home && chmod 700 $nas_home"
@@ -23,7 +32,7 @@ install -m 644 "$repo/scripts/ops/erp-backup-health.service" /etc/systemd/system
 install -m 644 "$repo/scripts/ops/erp-backup-health.timer" /etc/systemd/system/
 systemd-analyze verify /etc/systemd/system/erp-backup-health.service /etc/systemd/system/erp-backup-health.timer
 printf '%s\n' "$wrapper" > "$rotator.next"
-chmod 755 "$rotator.next"
+chmod 700 "$rotator.next"
 mv "$rotator.next" "$rotator"
 systemctl daemon-reload
 # Enable the timer only after the first successful service run has been inspected.
