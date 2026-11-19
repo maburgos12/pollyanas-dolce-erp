@@ -126,6 +126,14 @@ class PrepareTests(unittest.TestCase):
                 self.assertEqual(p.prepare(state, self.ledger, self.config, nas, send, 1_800_000_001), 'backoff')
                 self.assertEqual(send.call_count, 1)
 
+    def test_oserror_diagnostic_preserves_errno_and_path_without_request(self):
+        p.candidates.side_effect = OSError(5, 'Input/output error', '/proc/123/fdinfo/1')
+        self.assertEqual(self.run_once(), 'blocked')
+        status = json.loads((self.state / 'status.json').read_text())
+        self.assertEqual(status['error'], {'type': 'OSError', 'errno': 5, 'filename': '/proc/123/fdinfo/1', 'message': 'Input/output error'})
+        self.assertFalse(self.nas.events)
+        self.assertFalse(list(self.ledger.directory.glob('*.json')))
+
     def test_local_capacity_blocks_before_nas(self):
         p.shutil.disk_usage.return_value = Mock(total=100, used=80, free=p.RESERVE)
         self.assertEqual(self.run_once(), 'blocked')
@@ -241,15 +249,66 @@ class FileTests(unittest.TestCase):
         p.verify_archive(archive, [entry], destination)
         self.assertEqual((destination/'1').read_bytes(), source.read_bytes())
 
-    def test_proc_scan_fd_and_mapped_files(self):
-        source = self.root / 'log'
-        source.write_bytes(b'x')
-        for name in ('fd', 'map_files'):
-            directory = self.root / '123' / name
-            directory.mkdir(parents=True)
-            (directory / '1').symlink_to(source)
-        info = source.stat()
-        self.assertIn((info.st_dev, info.st_ino), p.in_use(self.root))
+    def proc_fixture(self, target='/unavailable/nas/log', mount_id=7):
+        pid = self.root / '123'
+        (pid / 'fdinfo').mkdir(parents=True)
+        (pid / 'fd').mkdir()
+        (pid / 'fd' / '1').symlink_to(target)
+        (pid / 'fdinfo' / '1').write_text(f'pos:\t0\nflags:\t0100000\nmnt_id:\t{mount_id}\nino:\t42\n')
+        (pid / 'mountinfo').write_text('7 1 8:2 / / rw - ext4 /dev/x rw\n')
+        (pid / 'maps').write_text('1000-2000 r--p 00000000 08:02 43 /mapped/log (deleted)\n')
+        return pid
+
+    def test_proc_scan_fd_and_mapped_files_without_following_targets(self):
+        self.proc_fixture()
+        with patch.object(Path, 'stat', side_effect=AssertionError('must not stat remote targets')):
+            used = p.in_use(self.root)
+        self.assertEqual(used, {(p.os.makedev(8, 2), 42), (p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_synthetic_descriptors_without_mount_reserve_only_inode(self):
+        pid = self.proc_fixture(mount_id=99)
+        for target in ('socket:[42]', 'pipe:[42]', 'anon_inode:[eventpoll]', 'net:[4026531840]'):
+            with self.subTest(target=target):
+                (pid / 'fd' / '1').unlink()
+                (pid / 'fd' / '1').symlink_to(target)
+                self.assertEqual(p.in_use(self.root), {(None, 42), (p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_unknown_mount_reserves_inode_on_all_devices(self):
+        self.proc_fixture(mount_id=99)
+        self.assertIn((None, 42), p.in_use(self.root))
+        with patch.object(p, 'in_use', return_value={(None, 42)}), patch.object(p, 'snapshot') as snapshot:
+            with self.assertRaisesRegex(ValueError, 'source_changed_or_in_use'):
+                p.unchanged([{'path': '/var/log/syslog.1', 'metadata': [123, 42]}])
+            snapshot.assert_not_called()
+
+    def test_proc_scan_permission_denied_fails_closed(self):
+        self.proc_fixture()
+        with patch.object(Path, 'read_text', side_effect=PermissionError(13, 'denied', '/proc/123/maps')):
+            with self.assertRaises(PermissionError):
+                p.in_use(self.root)
+
+    def test_proc_scan_closed_descriptor_is_ignored(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').unlink()
+        self.assertEqual(p.in_use(self.root), {(p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_empty_process_does_not_read_mountinfo(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').unlink()
+        (pid / 'mountinfo').unlink()
+        self.assertEqual(p.in_use(self.root), {(p.os.makedev(8, 2), 43)})
+
+    def test_unknown_mount_inode_is_excluded_from_candidates(self):
+        walk = [('/var/log', [], ['syslog.1'])]
+        with patch.object(p.os, 'walk', side_effect=[[], walk]), patch.object(p, 'in_use', return_value={(None, 42)}), patch.object(Path, 'lstat', return_value=Mock(st_dev=123, st_ino=42)), patch.object(p, 'snapshot') as snapshot:
+            self.assertEqual(p.candidates(), [])
+            snapshot.assert_not_called()
+
+    def test_proc_scan_malformed_metadata_fails_closed(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').write_text('mnt_id: invalid\nino: 42\n')
+        with self.assertRaises(ValueError):
+            p.in_use(self.root)
 
     def test_historical_files_do_not_consume_batch_budget(self):
         entries = [dict(path=f'/var/log/log{i}.1', bytes=10, sha256=str(i), metadata=[1, i]) for i in range(3)]

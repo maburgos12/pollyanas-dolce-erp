@@ -1,5 +1,5 @@
 [Unit]
-Description=ERP NAS restore verification and guarded backup rotation
+Description=ERP NAS restore verification without cleanup
 Wants=network-online.target
 After=network-online.target docker.service
 
@@ -7,7 +7,7 @@ After=network-online.target docker.service
 Type=oneshot
 User=root
 UMask=0077
-ExecStart=/usr/bin/python3 /opt/pastelerias-erp/scripts/vps_backup_health.py
+ExecStart=/usr/bin/python3 /opt/pastelerias-erp/scripts/vps_backup_health.py --verify-only
 TimeoutStartSec=8h
 Nice=10
 IOSchedulingClass=idle

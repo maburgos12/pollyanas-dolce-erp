@@ -78,16 +78,28 @@ def in_use(proc=Path('/proc')):
     for pid in proc.iterdir():
         if not pid.name.isdigit():
             continue
-        for directory in ('fd', 'map_files'):
-            try:
-                for link in (pid / directory).iterdir():
-                    try:
-                        info = link.stat()
-                        used.add((info.st_dev, info.st_ino))
-                    except FileNotFoundError:
-                        pass  # Process or descriptor exited during enumeration.
-            except FileNotFoundError:
-                pass
+        try:
+            for line in (pid / 'maps').read_text().splitlines():
+                fields = line.split()
+                inode = int(fields[4])
+                if inode:
+                    used.add((os.makedev(*(int(n, 16) for n in fields[3].split(':'))), inode))
+            descriptors = list((pid / 'fdinfo').iterdir())
+            if not descriptors:
+                continue
+            devices = {}
+            for line in (pid / 'mountinfo').read_text().splitlines():
+                fields = line.split()
+                devices[int(fields[0])] = os.makedev(*(int(n) for n in fields[2].split(':')))
+            for descriptor in descriptors:
+                try:
+                    fields = dict(line.split(':', 1) for line in descriptor.read_text().splitlines() if ':' in line)
+                    # Unmounted/private files and sockets may lack a visible mount; reserve their inode conservatively.
+                    used.add((devices.get(int(fields['mnt_id'])), int(fields['ino'])))
+                except FileNotFoundError:
+                    pass  # Descriptor closed during enumeration.
+        except FileNotFoundError:
+            pass  # Process exited during enumeration.
     return used
 
 
@@ -104,7 +116,7 @@ def candidates(reserved=frozenset()):
             break
         try:
             info = path.lstat()
-            if (info.st_dev, info.st_ino) in used:
+            if (info.st_dev, info.st_ino) in used or (None, info.st_ino) in used:
                 continue
             entry = snapshot(path)
         except (FileNotFoundError, ValueError):
@@ -119,7 +131,7 @@ def candidates(reserved=frozenset()):
 def unchanged(entries):
     used = in_use()
     for entry in entries:
-        if tuple(entry['metadata'][:2]) in used or snapshot(Path(entry['path'])) != entry:
+        if tuple(entry['metadata'][:2]) in used or (None, entry['metadata'][1]) in used or snapshot(Path(entry['path'])) != entry:
             raise ValueError('source_changed_or_in_use')
 
 
@@ -374,6 +386,9 @@ def prepare(state, ledger, config, nas=None, send=telegram, now=None):
             reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
             reason = reason if reason.replace('_', '').isalnum() and len(reason) <= 80 else 'preparation_failed'
             failure = dict(retry_after=now + RETRY, reason=reason, failed_at=now)
+            if isinstance(exc, OSError):
+                failure['error'] = dict(type=type(exc).__name__, errno=exc.errno,
+                                        filename=exc.filename, message=exc.strerror)
             atomic_json(status_path, failure)
             explanations = {
                 'no_eligible_new_candidates': 'No hay archivos nuevos elegibles fuera de los alcances ya propuestos.',

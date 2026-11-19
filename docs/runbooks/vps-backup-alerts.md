@@ -27,6 +27,37 @@ El nombre del helper no implica dependencia de Mac-IA: ambos corren en el VPS.
 Responsable: Mauricio/Codex. Si no se resuelve con estas comprobaciones, conservar
 los datos y diagnosticar la causa antes de autorizar cambios adicionales.
 
+### NAS bloqueado y respaldo local pendiente
+
+Un proceso en estado `D` dentro de CIFS puede conservar `.backup.flock` incluso
+después de que systemd marque el servicio como fallido. Comprobar PID, espera del
+kernel y propietario de ambos locks antes de reintentar. No borrar los archivos
+de lock: eso crea otro inode y permite dos operaciones concurrentes.
+
+La verificación CIFS del recuperador y del rotador se ejecuta en un proceso lector
+aislado, sin heredar el candado del respaldo. Al exceder el plazo se conserva el
+conjunto y el padre libera su candado; el candado separado del lector evita
+acumular verificadores si el kernel aún no puede terminarlo. Un timeout no prueba
+recuperación ni repara la conexión: conservar el PID y revisar CIFS/WireGuard.
+
+Después de restablecer la conexión, comprobar el último manifiesto completo y
+si el respaldo diario omitió su ejecución por el candado. Un respaldo compensatorio
+debe conservar los anteriores y usar el script oficial, sin invocar manualmente
+la rotación. Validar recuperación por separado antes de cualquier retiro aprobado.
+Registrar y restablecer cualquier pausa temporal del timer; no silenciar los
+monitores de disco ni inventarios.
+
+La unidad de recuperación usa `--verify-only`: verifica y registra recuperación,
+sin iniciar rotación ni mantenimiento Docker. El cron del rotador existente sigue
+usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
+no amplía su autorización ni autoriza otros lotes de limpieza.
+
+El preparador de limpieza consulta las identidades de archivos en `/proc` sin
+seguir enlaces a montajes externos. Si no puede determinar el dispositivo, reserva
+el inode conservadoramente y excluye el candidato. Los errores del sistema guardan
+`errno`, ruta y mensaje en su estado privado para distinguir acceso, montaje y
+capacidad, sin publicar esos detalles en Telegram.
+
 ## Entrega y repetición
 
 Se avisa al aparecer o cambiar una condición y cada seis horas si persiste.
