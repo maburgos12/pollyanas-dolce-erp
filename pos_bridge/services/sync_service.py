@@ -33,7 +33,7 @@ from pos_bridge.services.recipe_gap_audit_service import PointRecipeGapAuditServ
 from pos_bridge.services.sales_branch_indicator_service import PointSalesBranchIndicatorService
 from pos_bridge.services.sales_extractor import PointSalesExtractor
 from pos_bridge.services.sales_matching_service import PointSalesMatchingService
-from pos_bridge.utils.exceptions import PersistenceError, PosBridgeError
+from pos_bridge.utils.exceptions import ExtractionError, PersistenceError, PosBridgeError
 from pos_bridge.utils.helpers import normalize_text, sanitize_sensitive_data
 from pos_bridge.utils.logger import get_job_logger, get_pos_bridge_logger
 from pos_bridge.utils.source_retry import source_error_metadata
@@ -444,6 +444,125 @@ class PointSyncService:
         )
         return sync_job
 
+    def _validate_inventory_cut(self, branch_results, *, full_scope: bool) -> None:
+        observed = {
+            branch_result.branch["external_id"]: {
+                (row["external_id"], row["sku"]) for row in branch_result.inventory_rows
+            }
+            for branch_result in branch_results
+        }
+        published = PointInventorySnapshot.objects.filter(
+            Q(sync_job__result_summary__inventory_cut_published=True)
+            | Q(sync_job__status=PointSyncJob.STATUS_SUCCESS)
+            | Q(sync_job__status=PointSyncJob.STATUS_PARTIAL, sync_job__result_summary__inventory_cost_status="FAILED"),
+            sync_job__job_type=PointSyncJob.JOB_TYPE_INVENTORY,
+        ).order_by("-captured_at", "-pk")
+        # Match the audited run by timestamp as well as ID to avoid collisions in other databases.
+        initial_cut = Q(
+            sync_job_id=147041,
+            sync_job__started_at="2026-11-16T04:05:18.676533Z",
+            sync_job__status=PointSyncJob.STATUS_SUCCESS,
+        )
+        if published.filter(initial_cut).exists():
+            published = published.filter(initial_cut | Q(sync_job__result_summary__inventory_cut_published=True))
+
+        if full_scope:
+            # Compare equivalent cuts. A one-branch refresh cannot replace the reference for all stores.
+            full_cut = published.filter(
+                Q(sync_job__parameters__branch_filter="") | Q(sync_job__parameters__branch_filter__isnull=True),
+                Q(sync_job__parameters__limit_branches=None) | Q(sync_job__parameters__limit_branches__isnull=True),
+            )
+            reference_job = full_cut.values_list("sync_job_id", flat=True).first()
+            expected = published.filter(sync_job_id=reference_job)
+        else:
+            expected_scope = Q(pk__in=[])
+            for branch_id in observed:
+                reference_job = published.filter(branch__external_id=branch_id).values_list("sync_job_id", flat=True).first()
+                expected_scope |= Q(branch__external_id=branch_id, sync_job_id=reference_job)
+            expected = published.filter(expected_scope)
+
+        excluded = {name.strip().casefold() for name in self.settings.sales_excluded_branches} if full_scope else set()
+        missing_by_branch = {}
+        for branch_id, branch_name, job_id, product_id, sku, name in expected.filter(
+            branch__status=PointBranch.STATUS_ACTIVE, product__active=True,
+        ).order_by("branch__external_id", "product__external_id").values_list(
+            "branch__external_id", "branch__name", "sync_job_id", "product__external_id", "product__sku", "product__name",
+        ).distinct():
+            if branch_name.strip().casefold() in excluded or (product_id, sku) in observed.get(branch_id, ()):
+                continue
+            missing_branch = missing_by_branch.setdefault(branch_id, {
+                "branch_external_id": branch_id, "branch_name": branch_name, "reference_job_id": job_id, "products": [],
+            })
+            missing_branch["products"].append({"product_external_id": product_id, "sku": sku, "name": name})
+
+        if missing_by_branch:
+            missing_count = sum(len(branch["products"]) for branch in missing_by_branch.values())
+            raise ExtractionError(
+                f"Corte Point incompleto ({missing_count} faltantes por sucursal y producto). "
+                "Se conserva el último corte publicado.",
+                context={"missing_inventory_products": list(missing_by_branch.values()), "retryable": True},
+            )
+
+    def _validate_requested_inventory_branches(self, branch_results, branch_filter: str, limit_branches: int | None) -> None:
+        catalog = [
+            {"value": external_id, "label": name}
+            for external_id, name in PointBranch.objects.values_list("external_id", "name")
+        ]
+        requested = PointInventoryExtractor._apply_branch_filter(catalog, branch_filter)
+        observed = [result.branch["external_id"] for result in branch_results]
+        expected = {branch["value"] for branch in requested}
+        if not expected:
+            # Allow the first capture for a branch when Point returns an exact ID or name.
+            token = branch_filter.strip().casefold()
+            expected = {
+                result.branch["external_id"]
+                for result in branch_results
+                if token in {
+                    result.branch["external_id"].strip().casefold(),
+                    result.branch["name"].strip().casefold(),
+                }
+            }
+
+        observed_ids = set(observed)
+        if (
+            len(observed) == len(observed_ids)
+            and observed_ids <= expected
+            and len(observed_ids) == (len(expected) if limit_branches is None else min(limit_branches, len(expected)))
+        ):
+            return
+
+        raise ExtractionError(
+            "El corte Point devolvió sucursales distintas de las solicitadas. Se conserva el último corte publicado.",
+            context={
+                "requested_inventory_branch_ids": sorted(expected),
+                "observed_inventory_branch_ids": sorted(observed),
+                "retryable": True,
+            },
+        )
+
+    @transaction.atomic
+    def _publish_inventory_cut(self, sync_job, branch_results, summary, *, full_scope: bool) -> None:
+        branch_filter = sync_job.parameters["branch_filter"]
+        if branch_filter:
+            self._validate_requested_inventory_branches(branch_results, branch_filter, sync_job.parameters["limit_branches"])
+        self._validate_inventory_cut(branch_results, full_scope=full_scope)
+        for branch_result in branch_results:
+            branch_summary = self.persist_branch_inventory(sync_job, branch_result)
+            summary["branches_processed"] += 1
+            summary["products_seen"] += branch_summary["products_seen"]
+            summary["snapshots_created"] += branch_summary["snapshots_created"]
+            summary["raw_exports"].append(branch_result.raw_export_path)
+            self.record_log(
+                sync_job,
+                PointExtractionLog.LEVEL_INFO,
+                f"Sucursal procesada {branch_result.branch['external_id']}.",
+                context=branch_summary,
+            )
+        # Inventory is already visible while optional cost capture runs separately.
+        summary["inventory_cut_published"] = True
+        sync_job.result_summary = sanitize_sensitive_data(summary)
+        sync_job.save(update_fields=["result_summary", "updated_at"])
+
     def run_inventory_sync(
         self,
         *,
@@ -469,14 +588,6 @@ class PointSyncService:
         self.record_log(sync_job, PointExtractionLog.LEVEL_INFO, "Inicio de sincronización Point inventario.", context=parameters)
 
         try:
-            with point_account_session_lock(wait=True):
-                branch_results = self.extractor.extract(
-                    branch_filter=branch_filter,
-                    limit_branches=limit_branches,
-                )
-            if not branch_results:
-                raise PersistenceError("La extracción no devolvió sucursales ni inventario. Ajusta selectores/configuración.")
-
             summary = {
                 "branches_processed": 0,
                 "products_seen": 0,
@@ -497,17 +608,12 @@ class PointSyncService:
                 "inventory_cost_zero_cost_samples": [],
                 "inventory_cost_rejected_samples": [],
             }
-            for branch_result in branch_results:
-                branch_summary = self.persist_branch_inventory(sync_job, branch_result)
-                summary["branches_processed"] += 1
-                summary["products_seen"] += branch_summary["products_seen"]
-                summary["snapshots_created"] += branch_summary["snapshots_created"]
-                summary["raw_exports"].append(branch_result.raw_export_path)
-                self.record_log(
-                    sync_job,
-                    PointExtractionLog.LEVEL_INFO,
-                    f"Sucursal procesada {branch_result.branch['external_id']}.",
-                    context=branch_summary,
+            with point_account_session_lock(wait=True):
+                branch_results = self.extractor.extract(branch_filter=branch_filter, limit_branches=limit_branches)
+                if not branch_results:
+                    raise PersistenceError("La extracción no devolvió sucursales ni inventario. Ajusta selectores/configuración.")
+                self._publish_inventory_cut(
+                    sync_job, branch_results, summary, full_scope=not branch_filter and limit_branches is None,
                 )
             if should_capture_costs:
                 try:

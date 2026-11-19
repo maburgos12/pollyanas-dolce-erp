@@ -2,9 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-import re
-from time import monotonic
-from urllib.parse import parse_qs, urlsplit
 
 from pos_bridge.browser.client import PlaywrightBrowserClient
 from pos_bridge.browser.inventory_page import PointInventoryPage
@@ -52,7 +49,8 @@ class PointInventoryExtractor:
         path = self.settings.raw_exports_dir / filename
         return write_json_file(path, payload)
 
-    def _apply_branch_filter(self, branches: list[dict], branch_filter: str | None) -> list[dict]:
+    @staticmethod
+    def _apply_branch_filter(branches: list[dict], branch_filter: str | None) -> list[dict]:
         if not branch_filter:
             return branches
         branch_filter_norm = branch_filter.strip().lower()
@@ -83,111 +81,46 @@ class PointInventoryExtractor:
             if str(branch.get("label", "")).strip().casefold() not in excluded
         ]
 
-    def _extract_product_rows_by_category(self, inventory_page: PointInventoryPage) -> tuple[list[dict], list[dict]]:
-        category_options = inventory_page.list_category_options(kind="products")
-        category_options = [
-            option
-            for option in category_options
+    def _extract_product_rows_by_category(self, inventory_page: PointInventoryPage, branch_id: str):
+        options = [
+            option for option in inventory_page.list_category_options(kind="products")
             if option.get("value") and "SELECCIONE" not in str(option.get("label", "")).upper()
         ]
-        if not category_options:
-            parsed = self.parser.parse_inventory_table(inventory_page.extract_inventory_table(kind="products"), "", "")
-            return parsed["items"], []
+        if not options:
+            raise ExtractionError("Point no devolvió categorías para confirmar el corte.")
 
-        all_rows: list[dict] = []
-        audit_rows: list[dict] = []
-        seen_keys: set[str] = set()
+        normalized_rows = []
+        category_audit = []
+        table_payload = {"headers": [], "rows": []}
+        seen_keys = set()
+        for option in options:
+            payload = inventory_page.read_product_category(branch_id, option["value"])
+            parsed = self.parser.parse_inventory_table(payload, branch_id, "")
+            expected = normalize_text(option["label"])
+            accepted = {expected, PRODUCT_CATEGORY_ROW_ALIASES.get(expected, expected)}
+            observed = {normalize_text(item["category"]) for item in parsed["items"] if item["category"]}
+            if not observed <= accepted:
+                raise ExtractionError(
+                    f"Point no confirmó la tabla de la categoría {option['label']}.",
+                    context={"category": option["label"], "observed_categories": sorted(observed)},
+                )
 
-        reads_per_selection = 4
-        for index, option in enumerate(category_options):
-            browser_page = inventory_page.page
-            started = monotonic()
-            trace = {"requested_id": option["value"], "responses": [], "reads": []}
-
-            def elapsed_ms():
-                return round((monotonic() - started) * 1000)
-
-            def observe_response(response):
-                if response.request.resource_type not in ("xhr", "fetch"):
-                    return
-                url = urlsplit(response.url)
-                if url.netloc != urlsplit(browser_page.url).netloc:
-                    return
-                if not re.fullmatch(r"/(?:Stock|Catalogos)/[A-Za-z_]{1,64}", url.path, re.I):
-                    return
-                if len(trace["responses"]) >= 16:
-                    return
-                category = parse_qs(url.query).get("categoria", [""])[0]
-                trace["responses"].append({
-                    "elapsed_ms": elapsed_ms(),
-                    "route": url.path,
-                    "status": response.status,
-                    "category_id": category if re.fullmatch(r"[0-9]{1,12}", category) else None,
-                })
-
-            browser_page.on("response", observe_response)
-            try:
-                inventory_page.select_category(option["value"], kind="products")
-                expected_category = normalize_text(option["label"])
-                accepted_categories = {expected_category, PRODUCT_CATEGORY_ROW_ALIASES.get(expected_category, expected_category)}
-                for attempt in range(2 * reads_per_selection):
-                    if attempt == reads_per_selection:
-                        # Move away once so Point sees a fresh transition to the target.
-                        if len(category_options) > 1:
-                            inventory_page.select_category(category_options[index - 1]["value"], kind="products")
-                        inventory_page.select_category(option["value"], kind="products")
-                    parsed = self.parser.parse_inventory_table(
-                        inventory_page.extract_inventory_table(kind="products"), "", ""
-                    )
-                    observed_categories = {
-                        normalize_text(item["category"]) for item in parsed["items"] if item.get("category")
-                    }
-                    trace["reads"].append({
-                        "elapsed_ms": elapsed_ms(),
-                        "selection": attempt // reads_per_selection + 1,
-                        "observed_categories": sorted(observed_categories),
-                        "rows": len(parsed["items"]),
-                    })
-                    # After seeing stale rows, an intermediate empty table cannot confirm the refresh.
-                    if observed_categories and observed_categories <= accepted_categories:
-                        break
-                    if not observed_categories and attempt == 0 and parsed["items"]:
-                        break
-                    # shortcut: confirm empty twice until Point exposes a category-specific empty result.
-                    if attempt == 1 and not trace["reads"][0]["rows"] and not parsed["items"]:
-                        break
-                    if (attempt + 1) % reads_per_selection:
-                        inventory_page.page.wait_for_timeout(750)
-                else:
-                    raise ExtractionError(
-                        f"Point no confirmó la tabla de la categoría {option['label']}.",
-                        context={
-                            "category": option["label"],
-                            "observed_categories": sorted(observed_categories),
-                            "category_trace": trace,
-                        },
-                    )
-            finally:
-                browser_page.remove_listener("response", observe_response)
-            category_rows = 0
+            count = 0
             for item in parsed["items"]:
-                item["category"] = item.get("category") or option["label"]
+                item["category"] = item["category"] or option["label"]
                 normalized = self.normalizer.normalize_inventory_row(item)
-                dedupe_key = normalized["external_id"] or normalized["sku"] or normalized["name"]
-                if dedupe_key in seen_keys:
-                    continue
-                seen_keys.add(dedupe_key)
-                all_rows.append(normalized)
-                category_rows += 1
-            audit = {"category": option["label"], "rows": category_rows}
-            if not trace["reads"][0]["rows"]:
-                audit["category_trace"] = trace
-            audit_rows.append(audit)
-        return all_rows, audit_rows
+                key = normalized["external_id"] or normalized["sku"] or normalized["name"]
+                if key not in seen_keys:
+                    seen_keys.add(key)
+                    normalized_rows.append(normalized)
+                    count += 1
+            category_audit.append({"category": option["label"], "category_id": option["value"], "rows": count})
+            table_payload["headers"] = payload["headers"]
+            table_payload["rows"].extend(payload["rows"])
+        return normalized_rows, category_audit, table_payload
 
     def _extract_branch(self, inventory_page: PointInventoryPage, branch_option: dict) -> ExtractedBranchInventory:
-        selected_branch = inventory_page.select_branch(branch_option)
-        table_payload = inventory_page.extract_inventory_table(kind="products")
+        selected_branch = inventory_page.select_branch(branch_option, require_confirmation=True)
         branch_payload = self.normalizer.normalize_branch_payload(
             {
                 "external_id": selected_branch["value"],
@@ -197,7 +130,9 @@ class PointInventoryExtractor:
             }
         )
         try:
-            normalized_rows, category_audit = self._extract_product_rows_by_category(inventory_page)
+            normalized_rows, category_audit, table_payload = self._extract_product_rows_by_category(
+                inventory_page, selected_branch["value"]
+            )
         except ExtractionError as error:
             error.context.setdefault("branch_external_id", selected_branch["value"])
             raise
