@@ -302,6 +302,10 @@ def blocked(ledger, identity, now):
             row = ledger.read(file.stem)
             if row['image_id'] == identity or row['state'] == 'notifying' or (row['state'] in {'pending', 'approved'} and row['expires'] > now):
                 return True
+    for path in (ledger.directory / 'scheduled').glob('*.json'):
+        item = cleanup.validate_intent(json.loads(path.read_text()))
+        if item['kind'] == 'cleanup' and item['phase'] == 'waiting' and item['error'] == 'backup_recovery_pending':
+            return True
     return False
 
 
@@ -328,6 +332,8 @@ def reserved_files(state):
 
 
 def prepare(state, ledger, config, nas=None, send=telegram, now=None):
+    if not callable(getattr(cleanup, 'require_recovery', None)) or not hasattr(cleanup, 'RecoveryPending'):
+        return 'activation_pending'
     if not approval_window()[0]:
         return 'outside_approval_hours'
     now = int(time.time()) if now is None else now
@@ -340,6 +346,7 @@ def prepare(state, ledger, config, nas=None, send=telegram, now=None):
         try:
             if disk_percent() <= 75:
                 return 'below_threshold'
+            cleanup.require_recovery()
             if blocked(ledger, None, now):
                 return 'existing_scope_or_request'
             # Filter history before the batch budget so old files cannot starve new candidates.
@@ -379,9 +386,13 @@ def prepare(state, ledger, config, nas=None, send=telegram, now=None):
             atomic_json(evidence_path, evidence)
             # Mark before contacting Telegram; an ambiguous send is terminal, never blindly retried.
             row = cleanup.request(proposal_path, ledger, config, send)
+            if row['state'] == 'deferred':
+                return 'recovery_pending' if row.get('reason') == 'backup_recovery_pending' else 'deferred'
             evidence.update(phase='requested', nonce=row['nonce'], message_id=row['message_id'])
             atomic_json(evidence_path, evidence)
             return 'requested'
+        except cleanup.RecoveryPending:
+            return 'recovery_pending'
         except Exception as exc:
             reason = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
             reason = reason if reason.replace('_', '').isalnum() and len(reason) <= 80 else 'preparation_failed'

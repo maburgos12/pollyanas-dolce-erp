@@ -8,6 +8,7 @@ import re
 import sys
 import tarfile
 import tempfile
+import types
 import unittest
 from unittest.mock import Mock, patch
 
@@ -16,6 +17,27 @@ sys.path.insert(0, str(MODULES))
 spec = importlib.util.spec_from_file_location('erp_cleanup_prepare', MODULES / 'erp_cleanup_prepare.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
+
+
+class OldInstalledContractTests(unittest.TestCase):
+    def test_checkout_imports_with_old_installed_modules_defer_before_work(self):
+        old_cleanup = types.ModuleType('erp_telegram_cleanup')
+        old_release = types.ModuleType('erp_telegram_release')
+        old_release.Ledger = p.Ledger
+        old_release.telegram = Mock()
+        old_release.approval_window = lambda: (True, '2026-11-19')
+        with patch.dict(sys.modules, erp_telegram_cleanup=old_cleanup, erp_telegram_release=old_release):
+            spec = importlib.util.spec_from_file_location('pending_prepare', MODULES / 'erp_cleanup_prepare.py')
+            pending = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(pending)
+            self.assertEqual(pending.prepare(Path('/must-not-write'), None, {}), 'activation_pending')
+            with patch.dict(sys.modules, erp_cleanup_prepare=pending):
+                spec = importlib.util.spec_from_file_location('pending_point', MODULES / 'erp_point_archive.py')
+                point = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(point)
+                broker = object.__new__(point.Broker)
+                self.assertEqual(broker.prepare(None, {}), 'activation_pending')
+        old_release.telegram.assert_not_called()
 
 
 class FakeNAS:
@@ -55,6 +77,9 @@ class FakeNAS:
 
 class PrepareTests(unittest.TestCase):
     def setUp(self):
+        health = patch.object(p.cleanup, 'require_recovery', create=True)
+        health.start()
+        self.addCleanup(health.stop)
         recovery = patch.object(p.cleanup, "revalidate_proposal")
         recovery.start()
         self.addCleanup(recovery.stop)
@@ -93,6 +118,37 @@ class PrepareTests(unittest.TestCase):
                    message_id=None if state == 'notifying' else 42, state=state,
                    decision_at=2 if state in {'approved', 'rejected'} else None)
         self.ledger.write(row)
+
+    def test_old_installed_contract_waits_for_activation_without_work(self):
+        with patch.object(p.cleanup, 'require_recovery', None):
+            self.assertEqual(self.run_once(), 'activation_pending')
+        self.assertFalse(self.nas.events)
+        self.assertFalse(self.sent)
+        self.assertFalse(list(self.state.glob('VPS-LIM-*')))
+        self.assertFalse((self.state / 'status.json').exists())
+
+    def test_recovery_pending_is_quiet_and_retries_without_spending_attempts(self):
+        with patch.object(p.cleanup, 'require_recovery', side_effect=p.cleanup.RecoveryPending('backup_recovery_pending')):
+            for now in (1_800_000_000, 1_800_000_300):
+                self.assertEqual(self.run_once(now), 'recovery_pending')
+        self.assertFalse(list(self.state.glob('VPS-LIM-*')))
+        self.assertFalse((self.state / 'status.json').exists())
+        self.assertFalse(self.nas.events)
+        self.assertFalse(self.sent)
+        self.assertEqual(self.run_once(1_800_000_301), 'requested')
+
+    def test_recovery_lost_before_buttons_keeps_exact_prepared_intent(self):
+        with patch.object(p.cleanup, 'require_recovery', side_effect=[None, p.cleanup.RecoveryPending('backup_recovery_pending')]):
+            self.assertEqual(self.run_once(), 'recovery_pending')
+        evidence = [path for path in self.state.glob('VPS-LIM-*.json')]
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(json.loads(evidence[0].read_text())['phase'], 'requesting')
+        self.assertFalse((self.state / 'status.json').exists())
+        self.assertFalse(self.sent)
+        self.assertEqual(self.run_once(), 'existing_scope_or_request')
+        p.cleanup.process_scheduled(self.ledger, self.config, self.send)
+        self.assertEqual(len(self.sent), 2)
+        self.assertEqual(len(list(self.state.glob('VPS-LIM-*.json'))), 1)
 
     def test_threshold_strictly_greater_than_75(self):
         for used in (0, 74, 75):

@@ -192,6 +192,8 @@ class Broker:
         return results
 
     def prepare(self,ledger,config,send=telegram):
+        if not callable(getattr(cleanup,'require_recovery',None)) or not hasattr(cleanup,'RecoveryPending'):
+            return 'activation_pending'
         if not approval_window()[0]:
             return 'outside_approval_hours'
         self.state.mkdir(mode=0o700,parents=True,exist_ok=True)
@@ -202,6 +204,7 @@ class Broker:
             return 'attempt_limit'
         entries=[];total=0
         try:
+            cleanup.require_recovery()
             scan=self.inventory(after_id=status.get('cursor',0))
             self.nas.provision()
             catalog=list((self.store.root/'catalog/objects').glob('*.json'))
@@ -266,6 +269,8 @@ class Broker:
             row=cleanup.request(path,ledger,config,send)
             status.update(proposal=proposal_id,nonce=row['nonce']);prep.atomic_json(state_path,status)
             return 'deferred' if row['state']=='deferred' else 'requested'
+        except cleanup.RecoveryPending:
+            return 'recovery_pending'
         except Exception as exc:
             status.update(next_at=int(time.time())+21600,error=type(exc).__name__,failures=status.get('failures',0)+1)
             prep.atomic_json(state_path,status)

@@ -169,3 +169,32 @@ para borrar otros archivos.
 
 Pruebas: `python3 -m unittest discover -s scripts/tests -p test_cleanup_prepare.py`
 y `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.
+
+### Elegibilidad global antes de solicitar limpieza (19/11/2026)
+
+Preparación APT/logs y Point, revalidación programada y emisión de botones reutilizan
+`vps_backup_alerts.collect`: recuperación ausente, fallida, de más de 36 horas,
+unidad fallida/no disponible o NAS inaccesible dejan el lote pendiente. Las alertas
+de disco 75/85 % no bloquean esta elegibilidad. La prueba individual del lote sigue
+siendo obligatoria; una pulsación no sustituye la comprobación previa al retiro.
+
+`recovery_pending` no envía avisos adicionales, no consume un intento de recuperación
+ni el día de autorización y se revisa en el siguiente ciclo normal. Si el lote ya
+estaba recuperado, conserva la propuesta congelada y la cola `waiting`: no crea
+otro lote. Los demás fallos conservan sus esperas y límites; no se reinician
+aprobaciones, rechazos ni entregas ambiguas. Se mantiene la política existente de
+revalidación de solicitudes pendientes vencidas, sin renovar decisiones. Este filtro
+no cambia el cron de respaldos ni su política de retención y no reactiva decisiones.
+
+Tras desplegar el SHA aprobado, el preparador/Point pueden devolver
+`activation_pending` hasta actualizar los módulos copiados del receptor. Ejecutar
+el instalador oficial únicamente cuando la publicación haya terminado:
+`python3 ops/erp-telegram-release/install.py --release-nonce NONCE`;
+actualiza primero `erp_telegram_release.py`, después `erp_telegram_cleanup.py` y
+reinicia el receptor compartido por su procedimiento existente. `operational_module`
+carga el evaluador desde `scripts/vps_backup_alerts.py` del checkout desplegado;
+no se mantiene una segunda copia de sus reglas. Comprobar los imports desde el
+receptor instalado y que desaparece `activation_pending`, además de instalar y
+validar la unidad de recuperación con `install_backup_health.sh`. Restaurar los
+estados previos de los timers si se pausaron durante la instalación; no reiniciar
+servicios ERP adicionales ni borrar históricos para validar este cambio.

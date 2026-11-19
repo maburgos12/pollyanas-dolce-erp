@@ -13,7 +13,7 @@ import shutil
 import subprocess
 
 from erp_telegram_release import (Ledger, NONCE, telegram, verify_message, schedule_request,
-                                  approval_window, validate_intent, operational_module)
+                                  approval_window, validate_intent, operational_module, RecoveryPending)
 
 STATE = Path('/var/lib/erp-point-decision/cleanups')
 DIGEST = re.compile(r'[0-9a-f]{64}')
@@ -176,6 +176,15 @@ def signed(config, row, action):
     return body + ':' + signature
 
 
+def require_recovery():
+    try:
+        failures, _ = operational_module('vps_backup_alerts').collect(time.time())
+    except (OSError, ValueError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
+        raise RecoveryPending('backup_recovery_pending') from error
+    if set(failures) - {'disk_warning', 'disk_urgent'}:
+        raise RecoveryPending('backup_recovery_pending')
+
+
 def request(path, ledger, config, send=telegram):
     proposal, digest = read_proposal(path)
     directory = ledger.directory / 'scheduled-proposals'
@@ -210,6 +219,7 @@ def request(path, ledger, config, send=telegram):
 
 
 def revalidate_proposal(proposal, state):
+    require_recovery()
     item = proposal['delete_candidates'][0]
     if item['type'] == 'point_archive_manifest':
         operational_module('erp_point_archive').Broker().verify_batch(item['files'])
@@ -276,6 +286,9 @@ def process_scheduled(ledger, config, send=telegram):
 
 
 def _request(path, ledger, config, send=telegram):
+    if not approval_window()[0]:
+        raise ValueError('outside_approval_hours')
+    require_recovery()
     if not approval_window()[0]:
         raise ValueError('outside_approval_hours')
     proposal, digest = read_proposal(path)

@@ -160,6 +160,39 @@ class CleanupHoursTests(unittest.TestCase):
         self.f.ledger = r.Ledger(Path(self.f.temp.name) / 'hours', validator=c.validate)
         self.f.send.reset_mock()
 
+    def test_recovery_pending_preserves_day_and_retries_same_intent_once(self):
+        with patch('time.time', return_value=epoch('2026-11-17T07:00:00')):
+            with patch.object(c, 'revalidate_proposal', side_effect=c.RecoveryPending('backup_recovery_pending')):
+                for _ in range(2):
+                    result = c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+                    self.assertEqual(result['reason'], 'backup_recovery_pending')
+            intent_path = next((self.f.ledger.directory / 'scheduled').glob('*.json'))
+            self.assertEqual(json.loads(intent_path.read_text())['last_day'], '')
+            self.f.send.assert_not_called()
+            c.process_scheduled(self.f.ledger, self.f.config, self.f.send)
+            c.process_scheduled(self.f.ledger, self.f.config, self.f.send)
+            self.assertEqual(self.f.send.call_count, 2)
+
+    def test_late_health_gate_before_send_does_not_consume_day(self):
+        with patch('time.time', return_value=epoch('2026-11-17T07:00:00')):
+            with patch.object(c, 'require_recovery', side_effect=c.RecoveryPending('backup_recovery_pending')):
+                result = c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+            self.assertEqual(result['state'], 'deferred')
+            self.assertFalse(list(self.f.ledger.directory.glob('*.json')))
+            self.f.send.assert_not_called()
+            self.assertEqual(c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)['state'], 'pending')
+            self.assertEqual(self.f.send.call_count, 2)
+
+    def test_late_health_check_crossing_twenty_never_sends(self):
+        clock = [epoch('2026-11-17T19:59:59')]
+        def slow_health():
+            clock[0] = epoch('2026-11-17T20:00:00')
+        with patch('time.time', side_effect=lambda: clock[0]), patch.object(c, 'require_recovery', side_effect=slow_health):
+            with self.assertRaisesRegex(ValueError, 'outside_approval_hours'):
+                c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+        self.f.send.assert_not_called()
+        self.assertFalse(list(self.f.ledger.directory.glob('*.json')))
+
     def test_deferred_cleanup_recovery_failure_creates_no_buttons(self):
         with patch('time.time', return_value=epoch('2026-11-17T02:00:00')):
             result = c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)

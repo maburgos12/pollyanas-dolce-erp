@@ -36,6 +36,9 @@ class Adapter:
 class ExecutionTests(unittest.TestCase):
     def setUp(self):
         clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
+        health = patch.object(c, 'require_recovery', create=True)
+        health.start()
+        self.addCleanup(health.stop)
         recovery=patch.object(c,'revalidate_proposal');recovery.start();self.addCleanup(recovery.stop)
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name).resolve()
         self.ledger=Ledger(self.root/'cleanups',validator=c.validate);self.config={'token':'test','chat_id':17};digest=hashlib.sha256(b'original').hexdigest();name='20260101_010101_point_sales_category_test.xls'
