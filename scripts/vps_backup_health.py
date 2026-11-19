@@ -64,7 +64,7 @@ def verify_point(rotator, stem, receipts=None):
         aliases = {}
         names = {row['path'] for row in json.loads((rotator.BACKUPS / (stem + '.media.json')).read_text())['files']}
         previous_receipts = {p for directory in directories for p in directory.glob('*.json')}
-        for previous in sorted(previous_receipts):
+        for previous in sorted(previous_receipts, key=lambda p: (p.stem, str(p.parent))):
             try:
                 old = rotator.read_receipt(previous, previous.stem)
                 aliases.update({k: v for k, v in old.get('media_aliases', {}).items() if k in names})

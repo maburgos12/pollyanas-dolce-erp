@@ -140,6 +140,7 @@ class RestoreGatesTests(unittest.TestCase):
             for directory in (canonical, private):
                 directory.mkdir(mode=0o700)
                 (directory / 'backup_20261118_020001.json').touch()
+            (private / 'backup_20261117_020001.json').touch()
             stem = 'backup_20261119_020001'
             (root / (stem + '.media.json')).write_text('{"files": [{"path":"a"}, {"path":"b"}]}')
             evidence = 'restore passed'
@@ -147,6 +148,8 @@ class RestoreGatesTests(unittest.TestCase):
                          evidence_sha256=hashlib.sha256(evidence.encode()).hexdigest())
             def receipt(path, point):
                 if point != stem:
+                    if point == 'backup_20261117_020001':
+                        return {'media_aliases': {'a': 'outdated_alias'}}
                     return {'media_aliases': {'a': 'a_alias'} if path.parent == canonical else {'b': 'b_alias'}}
                 return json.loads(path.read_text())
             rotator = types.SimpleNamespace(BACKUPS=root, RECEIPTS=canonical, NAS=Path('/unused-nas'),
