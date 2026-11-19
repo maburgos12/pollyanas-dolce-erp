@@ -21,11 +21,11 @@ Mostrar la cantidad observada por producto y sucursal al inicio operativo autori
 | Captura03/10 / saldo30/09 | Distintos | Fecha y hora originales; autorización operativa del usuario | Saldo mensual sigue pendiente |
 
 ## Decisión de diseño
-Reutilizar el snapshot existente exclusivamente como evidencia visible después de resolver la salida HTML. Cantidad exacta y unidad original, fecha/hora Mazatlán y referencias snapshot/job/log. No recalcular el mes ni escribir casos, no modificar cantidades mensuales, confianza, API, JSON ni exportaciones. No promover el stock observado a apertura a medianoche. La venta disponible del03/10 tiene granularidad diaria y todavía impide conciliar un intervalo operativo completo sin evidencia horaria.
+Reutilizar el snapshot existente exclusivamente como evidencia visible después de resolver la salida HTML. Cantidad exacta y unidad original, fecha/hora Mazatlán y referencias snapshot/job/log. No recalcular el mes ni escribir casos, no modificar cantidades mensuales, confianza, API, JSON ni exportaciones. No promover el stock observado a apertura a medianoche. La comprobación por producto distingue las ventas diarias que pudieran intersectar la captura; en los 44 productos visibles no hay venta el 03/10 ni actividad previa a la captura.
 
 Procedimiento: `inventario_fuentes_datos --term saldo --term inventario --term snapshot` con PG16 configurado; fuentes léxicas no equivalen a identidad. Consulta acotada de producción por job81086/sucursal28 y log302317; no llamadas nuevas a Point para renderizar.
 
-Pendientes: primera nota y conversiones/ajustes previos a la captura; 30/09 sigue sin soporte. La vista conserva todo pendiente mensual que corresponda.
+Pendientes en este alcance: diferencia de transferencias de Crunch y vínculo comercial de Bollo Mini Chocolate. No se pide primera nota del 03/10 para estos 44, pues no tuvieron venta ese día. La vista conserva el estado mensual y muestra por separado el intervalo operativo acreditado.
 
 
 ## Conciliación suplementaria del tramo operativo
@@ -41,3 +41,15 @@ Las 41 etiquetas sin actividad exigen totales en cero y ausencia de movimientos 
 Servidor productivo, lectura aislada REPEATABLE READ READ ONLY, sin escrituras ni callbacks. Helper global: 15.19→4.25 s al retirar joins; mapas, autoridades y hash idénticos. Scope Leyva: 2.12 s/32 consultas, mismos mapas locales y autoridades. GET completo con Python nuevo y LocMem privado vacío: base 10.83 s/509 consultas; candidato 13.66 s/563 consultas. El incremento aproximado de 2.83 s corresponde a evidencia nueva revalidada, **no es una mejora de la carga completa**. La caché productiva no se borró ni modificó. La medición HTTP/Safari y validación visual móvil/escritorio son comprobaciones distintas y quedan para la revisión del consumidor tras despliegue.
 
 El primer sondeo con DummyCache no representa caché inicialmente vacía que puede llenarse durante el request y no se usa para afirmar tiempos causales de usuario. Los resultados de consultas de producción adicional 5942/5943 se conservan en expediente separado; este PR no cambia su procedencia ni proyecciones.
+
+
+### Guardas adicionales de revisión independiente
+
+El lector no pone al GET en espera detrás del escritor mensual: intenta el mismo mutex PostgreSQL con `pg_try_advisory_xact_lock` y, si está ocupado, conserva la captura sin acreditar conciliación y muestra «Revalidación no disponible». Se prueba contención real con una segunda conexión PG16 y se comprueba que la transacción sigue sana.
+
+Los mapas contables fusionan IDs de transferencias y miembros congelados de distintos modelos. La guarda temporal no deduce el tipo desde esos números: consulta transferencias reales por ubicación/fecha y miembros explícitamente desde su tabla, resuelve la identidad con el lector existente y reemplaza versiones por la referencia de negocio transferencia/detalle. Fechas ausentes o anteriores a la captura impiden acreditar. Las regresiones cubren colisiones de PK de ambos modelos y source_line_id distinto.
+
+El bump del shell ERP se alinea en sus tres lugares (CACHE_NAME, registro de base y login); permanece network-only y no introduce caché de datos.
+
+
+Las muestras posteriores del mismo método aislado muestran variación del servidor: baseline 11.75 s y candidato final 12.44 s; otro candidato final midió 18.51 s con el contexto preexistente también más lento. La revalidación nueva midió entre 2.87 y 4.11 s. Se conservan todas las muestras; no se atribuye una mejora causal de carga completa al parche. El baseline HTTP de Safari de la coordinación (mediana 6.61 s, caché HTTP desactivada y Redis intacto) es otra condición y no se mezcla con estas cifras.

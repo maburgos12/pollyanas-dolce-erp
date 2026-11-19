@@ -4,17 +4,18 @@ from datetime import date
 from decimal import Decimal
 
 from django.db import connection, transaction
+from django.db.models import Q
 
 from pos_bridge.models import (
     PointConversionLine, PointDailySale, PointHistoricalInventoryClosingLine, PointInventorySnapshot,
     PointProduct, PointProductHistoryImport, PointProductHistoryRow,
-    PointProductionLine, PointTransferLine, PointWasteLine,
+    PointProductionLine, PointTransferLine, PointWasteLine, PointOpenTransferSnapshotMember,
 )
 from pos_bridge.services.audit_stock_history_service import AuditStockHistoryService
 from pos_bridge.services.branch_inventory_traceability_service import BranchInventoryTraceabilityService
 from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
 from pos_bridge.services.historical_inventory_capture import point_stock_history_instant, HistoricalInventoryCaptureError
-from pos_bridge.services.product_month_source_mutex import lock_product_month_sources
+from pos_bridge.services.product_month_source_mutex import PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE
 
 _MONTH = date(2026, 10, 1)
 _END = date(2026, 10, 31)
@@ -46,12 +47,44 @@ def verify_operational_balance(snapshot, flows, closing, history, *, blocked=Fal
     }
 
 
+def transfer_temporal_blockers(rows, members, *, service, indexes, locations, product_ids, lower, capture):
+    """Mutable lines and immutable members keep distinct primary-key domains."""
+    frozen_references = {(row.transfer_external_id, row.detail_external_id) for row in members}
+    records = [row for row in rows
+               if (row.transfer_external_id, row.detail_external_id) not in frozen_references]
+    blocked = set()
+    for row in [*records, *members]:
+        if row.is_insumo or row.is_cancelled:
+            continue
+        product, issue = service._resolve_transfer_product(row, indexes)
+        if product is None:
+            blocked.update(product_ids)
+            continue
+        if product not in product_ids:
+            continue
+        if issue:
+            blocked.add(product)
+        for branch, quantity, instant in (
+            (row.origin_branch_id, row.sent_quantity, row.sent_at),
+            (row.destination_branch_id, row.received_quantity, row.received_at),
+        ):
+            if branch in locations and quantity and (instant is None or lower <= instant < capture):
+                blocked.add(product)
+    return blocked
+
+
 @transaction.atomic
 def read_operational_reconciliation(cases, snapshots):
     """One fresh batch for the visible pairs; no cache or materialization."""
     if not cases:
         return {}
-    lock_product_month_sources([_MONTH])
+    with connection.cursor() as cursor:
+        # Same namespace and YYYYMM key as the existing monthly mutex, but a
+        # reader must not queue behind a long-running writer.
+        cursor.execute("SELECT pg_try_advisory_xact_lock(%s, %s)",
+            [PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE, _MONTH.year * 100 + _MONTH.month])
+        if not cursor.fetchone()[0]:
+            return None
     # The display capture was read before this transaction. Recheck its exact
     # content under the existing monthly mutex before certifying an interval.
     fresh = list(PointInventorySnapshot.objects.filter(sync_job_id=81086, branch_id=28,
@@ -134,18 +167,33 @@ def read_operational_reconciliation(cases, snapshots):
     # Inspect current family dates in batch too: ERP and Stock timestamps can
     # disagree even when a monthly sum is unchanged.
     ids = {name: {pk for case in cases for pk in maps[name].get((28, case.product_id), (ZERO, ()))[1]}
-           for name in ("waste", "transfer_in", "transfer_out", "conversion_in", "conversion_out")}
+           for name in ("waste", "conversion_in", "conversion_out")}
     before_ids = {}
     for name, model, field, quantity_field in (
         ("waste", PointWasteLine, "movement_at", "quantity"),
         ("conversion_in", PointConversionLine, "movement_at", "quantity"),
         ("conversion_out", PointConversionLine, "movement_at", "quantity"),
-        ("transfer_in", PointTransferLine, "received_at", "received_quantity"),
-        ("transfer_out", PointTransferLine, "sent_at", "sent_quantity"),
     ):
         before_ids[name] = {row[0] for row in model.objects.filter(pk__in=ids[name])
             .values_list("pk", field, quantity_field)
             if row[2] and (row[1] is None or row[1] < capture)}
+    # The balance maps merge IDs from two models. Never look those IDs up in
+    # PointTransferLine. Read live rows by location/date, and frozen evidence
+    # explicitly in its own model; override live rows by stable business refs.
+    lower, upper = svc._month_datetime_bounds(_MONTH)
+    real_rows = list(PointTransferLine.objects.filter(
+        Q(origin_branch_id__in=locations) | Q(destination_branch_id__in=locations),
+        Q(sent_at__gte=lower, sent_at__lt=upper)
+        | Q(received_at__gte=lower, received_at__lt=upper)
+        | Q(registered_at__gte=lower, registered_at__lt=upper),
+        is_current_snapshot=True, is_insumo=False, is_cancelled=False))
+    member_ids = {pk for name in ("open_transfer_snapshot_in", "open_transfer_snapshot_out")
+                  for _quantity, source_ids in maps[name].values() for pk in source_ids}
+    members = list(PointOpenTransferSnapshotMember.objects.filter(pk__in=member_ids))
+    if len(members) != len(member_ids):
+        blocked.update(product_ids)
+    blocked.update(transfer_temporal_blockers(real_rows, members, service=svc, indexes=indexes,
+        locations=locations, product_ids=product_ids, lower=lower, capture=capture))
     results = {}
     for case in cases:
         key = (28, case.product_id)

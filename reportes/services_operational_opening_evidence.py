@@ -24,6 +24,7 @@ def add_operational_opening_evidence(cutoff, groups):
             for case in row["cases"]:
                 case.pop("operational_opening_evidence", None)
                 case.pop("operational_reconciliation", None)
+                case.pop("operational_revalidation_unavailable", None)
     if cutoff != date(2026, 10, 31):
         return
     cases = {case["id"]: case for group in groups for row in group["rows"]
@@ -76,7 +77,11 @@ def add_operational_opening_evidence(cutoff, groups):
     # full independent coverage. The batch reader revalidates its own sources.
     candidates = [case for case in stored_cases if case.product_id in eligible]
     reconciled = read_operational_reconciliation(candidates, eligible) if candidates else {}
+    unavailable = reconciled is None
+    reconciled = reconciled or {}
     for case in candidates:
+        if unavailable:
+            cases[case.pk]["operational_revalidation_unavailable"] = True
         result = reconciled.get(case.product_id)
         if result is not None:
             cases[case.pk]["operational_reconciliation"] = result

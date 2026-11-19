@@ -270,7 +270,8 @@
                 <p><strong>Inicio operativo observado · {{ observed.captured_at|date:"d/m/Y H:i:s" }} (Mazatlán)</strong><br>
                   {{ observed.quantity|floatformat:"-6u" }} {{ observed.unit }} · Captura Point #{{ observed.snapshot_id }}
                   · extracción #{{ observed.job_id }} · bitácora #{{ observed.log_id }}<br>
-                  <small>Saldo al 30/09 pendiente. Esta captura del 03/10 no sustituye la apertura mensual ni se suma al cierre.</small>
+                  <small>Saldo al 30/09 pendiente. Esta captura del 03/10 no sustituye la apertura mensual ni se suma al cierre.</small>{% if case.operational_revalidation_unavailable %}<br>
+                  <small>Revalidación no disponible en este momento; se conserva la captura observada.</small>{% endif %}
                 </p>
                 {% endif %}
                 {% endwith %}

@@ -180,3 +180,22 @@ class OperationalOpeningEvidenceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIsNone(self.visible["opening"])
         self.case.refresh_from_db()
         self.assertEqual(self.case.opening_point, 0)
+
+    def test_busy_revalidation_keeps_capture_without_reusing_a_prior_verified_badge(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        self.snapshot.stock = Decimal("0")
+        self.snapshot.raw_payload["row"][4] = "0"
+        self.snapshot.save(update_fields=["stock", "raw_payload"])
+        self.visible["operational_reconciliation"] = {"verified": True}
+        with patch("reportes.services_operational_opening_evidence.read_operational_reconciliation", return_value=None):
+            self.add()
+        self.assertNotIn("operational_reconciliation", self.visible)
+        self.assertIn("operational_opening_evidence", self.visible)
+        self.assertTrue(self.visible["operational_revalidation_unavailable"])
+        request = RequestFactory().get("/reportes/produccion/")
+        request.user = AnonymousUser()
+        html = render_to_string("reportes/producido_vs_vendido.html", {"groups": self.groups}, request=request)
+        self.assertIn("Revalidación no disponible", html)
+        self.assertNotIn("Conciliación operativa desde captura", html)
+        self.assertEqual(self.groups[0]["rows"][0]["operational_verified_count"], 0)
