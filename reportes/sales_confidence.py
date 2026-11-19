@@ -33,6 +33,7 @@ def _cost_evidence(groups, end_date, *, aplicar_componentes_incrementales=False)
     for product in products.values():
         # La clave autoritativa es externa: nunca interpretarla como PK ni resolver por nombre solo.
         identities[(product.external_id.removeprefix("official:"), normalizar_nombre(product.name))].add(product.pk)
+        identities[(product.external_id, normalizar_nombre(product.name))].add(product.pk)
     for group in groups:
         product_id = group["point_product_id"]
         if not product_id and group["month"].year == 2025 and group["producto_clave"] in nativos:
