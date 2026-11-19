@@ -547,6 +547,8 @@ class BranchInventoryTraceabilityService:
                 "sync_job_id",
                 "sale_date",
                 "quantity",
+                "source_endpoint",
+                "raw_payload",
             )
             .order_by("id")
         )
@@ -717,7 +719,7 @@ class BranchInventoryTraceabilityService:
         issues: list[TraceSourceIssue] = []
 
         for row in sales_rows:
-            product_id, issue_code = self._resolve_product(row, product_indexes)
+            product_id, issue_code = self._resolve_sales_product(row, product_indexes)
             self._record_direct_row(
                 balances=sales,
                 issues=issues,
@@ -1713,6 +1715,26 @@ class BranchInventoryTraceabilityService:
             getattr(row, "item_name", ""),
             indexes,
         )
+
+    @classmethod
+    def _resolve_sales_product(cls, row, indexes) -> tuple[int | None, str | None]:
+        official_id = indexes["external_id"].get("official:CHEESECAKEINDL")
+        point_id = indexes["external_id"].get("913")
+        raw = row.raw_payload if isinstance(getattr(row, "raw_payload", None), Mapping) else {}
+        sale_date = getattr(row, "sale_date", None)
+        # Candidate for DG review: snapshot 16020993 links PK 913 and this SKU before October.
+        if (
+            official_id is not None and point_id is not None
+            and row.product_id == official_id
+            and set(indexes["sku"].get("CHEESECAKEINDL", ())) == {official_id, point_id}
+            and isinstance(sale_date, date)
+            and sale_date >= date(2026, 6, 5)
+            and getattr(row, "source_endpoint", "") == "/Report/PrintReportes?idreporte=3"
+            and raw.get("source") == "POINT_OFFICIAL_REPORT"
+            and raw.get("sku") == "CHEESECAKEINDL"
+        ):
+            return int(point_id), None
+        return cls._resolve_product(row, indexes)
 
     @classmethod
     def _resolve_production_product(cls, row, indexes) -> tuple[int | None, str | None]:
