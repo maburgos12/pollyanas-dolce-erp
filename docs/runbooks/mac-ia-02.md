@@ -94,7 +94,13 @@ No desactivar FileVault ni configurar inicio de sesión automático para eludirl
 ## Interfaz de navegador
 
 Usar la interfaz nativa del servidor mediante un túnel SSH limitado a localhost
-por ambos extremos. Desde la Mac de gestión:
+por ambos extremos. En la Mac de gestión queda instalado el LaunchAgent
+`~/Library/LaunchAgents/com.pollyanasdolce.mac-ia-02.tunnel.plist`, con arranque
+al iniciar sesión, reconexión y espera de 30 segundos entre intentos. Logs en
+`~/Library/Logs/PasteleriasMacIA02/`. No depende de mantener Terminal abierta.
+Comprobarlo con `launchctl print gui/502/com.pollyanasdolce.mac-ia-02.tunnel`.
+
+Si se detiene ese túnel y se necesita una conexión manual desde la Mac de gestión:
 
 ```bash
 ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:18124:127.0.0.1:18124 pastelerias-mac-ia-02
@@ -167,6 +173,7 @@ local persistente propiedad de Pastelerías, conservada para este objetivo.
 No son contenedores ni una base operativa. Esta tarea no necesita Docker ni una
 base local: no levantar PostgreSQL para validar documentación o el modelo.
 
-Los túneles de prueba se cierran al terminar; no confundirlos con acceso desde
-otra red. El worktree se retira por el ciclo de vida oficial después de integrar
+El túnel persistente de la Mac de gestión se conserva como recurso operativo;
+los túneles adicionales de prueba se cierran al terminar. No confundirlo con
+acceso desde otra red. El worktree se retira por el ciclo de vida oficial después de integrar
 y verificar. No borrar recursos de Mac-IA Debian, NAS, otras tareas o producción.
