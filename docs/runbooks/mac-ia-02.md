@@ -74,24 +74,23 @@ Directorio propio en la MacBook:
   build 12211, commit reportado `7d7f02875`.
 - Archivo de distribución: `llama-b12211-bin-macos-x64.tar.gz`, SHA256
   `6055cc672cc5c744481bb88ac1a7739ff476966c8a190ddaa20676034693a358`.
-- `models/Qwen3-4B-Q4_K_M.gguf`: modelo existente reutilizado del almacén local de
-  Ollama `qwen3:4b`; no implica que Ollama esté instalado en la MacBook.
-  2,497,280,480 bytes; SHA256
-  `3e4cb14174460404e7a233e531675303b2fbf7749c02f91864fe311ab6344e4f`.
+- `models/Qwen3-8B-Q4_K_M.gguf`: modelo oficial de `Qwen/Qwen3-8B-GGUF`,
+  revisión `7c41481f57cb95916b40956ab2f0b139b296d974`, 5,027,783,488 bytes.
+  SHA256 `d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785`.
+  Identidad en metadatos: `Qwen3 8B Awq Compatible Instruct`, arquitectura qwen3,
+  variante `awq-compatible-Instruct`. Verificar el contenido; no inferir identidad
+  solamente por la etiqueta del proveedor o el nombre del archivo.
 - `api.key` y `client.curl`: credencial local y configuración de cliente, modo
   0600. No imprimir, copiar al repositorio ni pasar la credencial como argumento.
 - `logs/`: salida del proceso; `evidence/`: comprobaciones sin información privada.
-- `runtime/qwen3-4b-official.jinja`: plantilla oficial de `Qwen/Qwen3-4B`, revisión
-  `1cfa9a7208912126459214e8b04321603b3df60c`, SHA256
-  `a55ee1b1660128b7098723e0abcd92caa0788061051c62d51cbe87d9cf1974d8`.
-  Se carga con `--chat-template-file`: la plantilla antigua del GGUF forzaba
-  `<think>` e ignoraba el control de thinking. No se alteraron pesos para corregirlo.
 - Una solicitud a la vez, contexto de 4096 tokens, cuatro hilos, CPU, prioridad
-  reducida. Thinking desactivado como punto de partida para extracción breve.
+  reducida y salida predeterminada de 512 tokens. Razonamiento extendido desactivado
+  como punto de partida para tareas breves; se usa la plantilla incluida en el GGUF.
 - API: `http://127.0.0.1:18124/v1`, con autenticación. No escuchar en `0.0.0.0`.
 
 Fuentes del runtime: [release oficial](https://github.com/ggml-org/llama.cpp/releases/tag/b12211)
 y [servidor llama.cpp](https://github.com/ggml-org/llama.cpp/tree/master/tools/server).
+Fuente del modelo: [Qwen3 8B GGUF, revisión fijada](https://huggingface.co/Qwen/Qwen3-8B-GGUF/tree/7c41481f57cb95916b40956ab2f0b139b296d974).
 Los hashes se verifican antes de usar el binario y el modelo. Un `.part` no es
 un modelo instalado ni un resultado de validación.
 
@@ -178,7 +177,7 @@ Ejemplo desde la Mac de gestión, con `solicitud.json` preparado localmente:
 ssh pastelerias-mac-ia-02 'curl -fsS --max-time 180 --config "$HOME/.local/share/pastelerias/mac-ia-02/client.curl" -H "Content-Type: application/json" --data-binary @- http://127.0.0.1:18124/v1/chat/completions' < solicitud.json
 ```
 
-El JSON debe seleccionar `pastelerias-qwen3-4b`, contener mensajes acotados,
+El JSON debe seleccionar `pastelerias-qwen3-8b`, contener mensajes acotados,
 `max_tokens` limitado y `stream: false`. En extracción, exigir un JSON con
 campos y tipos conocidos y conservar evidencia de origen.
 
@@ -196,11 +195,18 @@ por sí mismo.
 
 ## Modelos mayores y verificación
 
-Qwen3 4B es la referencia inicial. Qwen3 8B Q4 es un candidato para evaluación,
-no una mejora demostrada ni un modelo instalado por esta documentación. No
-cargar dos modelos a la vez. Antes de cambiar el predeterminado, comparar las
-mismas fuentes y respuestas esperadas, medir tiempo, presión de memoria y errores.
-Un 14B puede dejar poco margen en 16 GiB: no adoptarlo sólo porque el archivo cabe.
+Qwen3 8B Q4 es el modelo elegido para el chat y las tareas acotadas. No cargar
+varios modelos a la vez. Antes de sustituirlo, comparar las mismas fuentes y
+respuestas esperadas, medir tiempo, presión de memoria y errores. Un 14B puede
+dejar poco margen en 16 GiB: no adoptarlo sólo porque el archivo cabe.
+
+La etiqueta Ollama `qwen3:4b` que existía en la Mac de gestión apuntaba realmente
+a `Qwen3-4B-Thinking-2507`, según `general.name` y `general.finetune`. La extracción
+con esquema pasó, pero el chat libre mantuvo respuestas largas de razonamiento.
+No tratar esa variante como un modelo de chat con razonamiento desactivable. El
+archivo fuente de la Mac de gestión se conserva; la copia de prueba en este nodo
+se retira después de validar el sustituto. No afirmar mejora de calidad por tener
+más parámetros ni extrapolar una extracción breve a una conciliación integral.
 
 Criterios antes de declarar disponible el nodo:
 
