@@ -11,6 +11,7 @@ from inventario.models_conteos import (
     AccesoConteoSucursal, EventoConteoSucursal, LecturaConteoSucursal, LineaConteoSucursal,
 )
 from reportes.models import ProductInventoryAuditCase
+from reportes.services_physical_recorded_time import add_recorded_time_comparisons
 
 
 def _physical_comparison(case):
@@ -181,6 +182,7 @@ def add_physical_evidence(user, cutoff, groups):
 
     for case in pairs.values():
         case["physical_comparison"] = _physical_comparison(case)
+    add_recorded_time_comparisons(pairs.values(), cutoff)
     for row in rows:
         comparisons = [case["physical_comparison"] for case in row["cases"] if "physical_comparison" in case]
         row["physical_summary"] = dict(Counter(result["summary"] for result in comparisons))

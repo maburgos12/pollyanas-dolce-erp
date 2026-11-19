@@ -44,6 +44,24 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         request.user = AnonymousUser()
         return render_to_string(self.view.template_name, context, request=request)
 
+    def test_recorded_time_result_keeps_month_end_reference_visible(self):
+        self.make_case()
+        context = self.context()
+        case = context["groups"][0]["rows"][0]["cases"][0]
+        case["physical_comparison"] = {
+            "label": "Coincide al momento registrado", "quantity": Decimal("10"),
+            "closing": Decimal("9"), "delta": Decimal("1"), "unit": "PZA",
+            "basis": "Referencia del cierre del mes declarado",
+            "at_recorded_time": {"stamp": timezone.now(), "point": Decimal("10"), "difference": Decimal("0"),
+                                 "variation": Decimal("-1"), "movement_ids": [1]},
+        }
+        html = self.render(context)
+        for text in ("Coincide al momento registrado", "Point a esa hora: 10 PZA",
+                     "Diferencia a esa hora: 0 PZA", "Referencia del cierre del mes declarado",
+                     "Final Point: 9 PZA", "Físico − Point: 1 PZA",
+                     "Cierre 9 − variación posterior (-1) = 10 PZA", "1 movimiento posterior al conteo"):
+            self.assertIn(text, html)
+
     def test_all_quantities_are_the_auditors_persisted_values(self):
         self.make_case(opening_point=10, production=5, sales=4, waste=1, transfer_in=2,
             transfer_out=1, conversion_in=2, conversion_out=3, identified_adjustment=1,
@@ -93,7 +111,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
             if visible:
                 self.assertContains(response, "0 PZA")
                 self.assertContains(response, "1 con diferencia")
-                self.assertContains(response, "Físico vs Point: Con diferencia")
+                self.assertContains(response, "Físico vs Point: Diferencia con cierre declarado")
                 self.assertContains(response, "Físico − Point: -9 PZA")
                 self.assertContains(response, "Provisional: se usa la última ronda enviada")
                 self.assertContains(response, "Ronda 2 sin envío")
@@ -142,7 +160,7 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
                                    "contado_en": "2026-08-31T19:00:00-07:00"}]})
         response = self.view.get(request).render()
         self.assertContains(response, "Físico − Point: 1 PZA")
-        self.assertContains(response, "Provisional: hora de corte común por confirmar")
+        self.assertContains(response, "Provisional: Falta historial original de este producto y sucursal.")
 
         case.movement_status = "SOURCE_INCOMPLETE"
         case.source_trace = {}
@@ -212,8 +230,8 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertContains(response, "Estado automático histórico; se conserva el único conteo enviado")
         self.assertContains(response, "Ronda enviada 1")
         self.assertNotContains(response, "Ronda 2 sin envío")
-        self.assertContains(response, "Físico vs Point: Coincide")
-        self.assertContains(response, "hora de corte común por confirmar")
+        self.assertContains(response, "Físico vs Point: Coincide con cierre declarado")
+        self.assertContains(response, "Referencia del cierre; no se verificó Point a la hora registrada.")
         self.assertTrue(all(query["sql"].lstrip().startswith("SELECT") for query in queries))
         round_reads = [query for query in queries
                        if 'FROM "inventario_lecturaconteosucursal"' in query["sql"]]
