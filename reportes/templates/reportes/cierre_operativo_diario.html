@@ -81,19 +81,20 @@
     <article class="closure-card">
       <div class="closure-kpi-value">{{ closure.sales.fact_amount|floatformat:2|intcomma }}</div>
       <div class="bi-kpi-label">Ventas del día</div>
-      <div class="closure-copy">{{ closure.sales.fact_units|floatformat:0|intcomma }} piezas · {{ closure.sales.fact_tickets|intcomma }} tickets</div>
+      <div class="closure-copy">Cantidad reportada {{ closure.sales.fact_units|floatformat:"-3"|intcomma }} · unidad por acreditar · {{ closure.sales.fact_tickets|intcomma }} tickets</div>
       <div class="closure-muted">Fuente visible: {{ closure.sales.visible_source }}</div>
     </article>
     <article class="closure-card">
-      <div class="closure-kpi-value {% if closure.production.fact_produced > 0 %}success{% else %}warning{% endif %}">{{ closure.production.fact_produced|floatformat:0|intcomma }}</div>
+      <div class="closure-kpi-value {% if closure.production.fact_produced > 0 %}success{% else %}warning{% endif %}">{{ closure.production.fact_produced|floatformat:"-3"|intcomma }}</div>
       <div class="bi-kpi-label">Producción Point del día</div>
-      <div class="closure-copy">Venta fact {{ closure.production.fact_sold|floatformat:0|intcomma }} · merma fact {{ closure.production.fact_waste|floatformat:0|intcomma }}</div>
-      <div class="closure-muted">Plan visible del día: {{ closure.production.plan_units|floatformat:0|intcomma }} u</div>
+      <div class="closure-copy">Cantidad reportada; unidad por acreditar.</div>
+      <div class="closure-copy">Venta del resumen ERP {{ closure.production.fact_sold|floatformat:"-3"|intcomma }} · <a href="#mermas-por-unidad">Ver merma por fuente y unidad</a></div>
+      <div class="closure-muted">Cantidad reportada del plan del día: {{ closure.production.plan_units|floatformat:"-3"|intcomma }} · unidad por acreditar</div>
     </article>
     <article class="closure-card">
-      <div class="closure-kpi-value {% if closure.waste.visible_units > 0 %}warning{% else %}success{% endif %}">{{ closure.waste.visible_units|floatformat:0|intcomma }}</div>
+      <div class="closure-kpi-value {% if closure.waste.visible_rows %}warning{% endif %}">{{ closure.waste.visible_rows|intcomma }} registros</div>
       <div class="bi-kpi-label">Merma visible del día</div>
-      <div class="closure-copy">Point {{ closure.waste.raw_units|floatformat:0|intcomma }} · visible sucursal/CEDIS {{ closure.waste.visible_units|floatformat:0|intcomma }}</div>
+      <div class="closure-copy">Cantidades separadas por fuente y unidad. <a href="#mermas-por-unidad">Ver desglose</a></div>
       <div class="closure-muted">Costo Point estimado ${{ closure.waste.raw_cost|floatformat:2|intcomma }}</div>
     </article>
     <article class="closure-card">
@@ -112,7 +113,7 @@
       <div class="closure-card-head">
         <div>
           <h2 class="closure-card-title">Publicación e integración</h2>
-          <p class="closure-copy">Máxima fecha en Point, fact y capa visible por dominio para detectar rezagos reales.</p>
+          <p class="closure-copy">Última fecha registrada en Point, resumen ERP y lectura visible por módulo para detectar rezagos reales.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -121,7 +122,7 @@
             <tr>
               <th>Dominio</th>
               <th>Point</th>
-              <th>Fact</th>
+              <th>Resumen ERP</th>
               <th>Visible</th>
               <th class="is-right">Estado</th>
             </tr>
@@ -162,7 +163,7 @@
 
   <section class="closure-grid-2">
     {% for domain in closure.domains %}
-    <article class="closure-card">
+    <article class="closure-card"{% if domain.key == 'mermas' %} id="mermas-por-unidad"{% endif %}>
       <div class="closure-card-head">
         <div>
           <h2 class="closure-card-title">{{ domain.label }}</h2>
@@ -178,24 +179,26 @@
         <table class="closure-table">
           <tbody>
             {% if domain.key == "ventas" %}
-            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
-            <tr><th>Rows fact</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
-            <tr><th>Importe fact</th><td class="is-right">${{ domain.fact_amount|floatformat:2|intcomma }}</td></tr>
-            <tr><th>Unidades fact</th><td class="is-right">{{ domain.fact_units|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Registros Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Registros del resumen ERP</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
+            <tr><th>Importe del resumen ERP</th><td class="is-right">${{ domain.fact_amount|floatformat:2|intcomma }}</td></tr>
+            <tr><th>Cantidad reportada del resumen ERP</th><td class="is-right">{{ domain.fact_units|floatformat:"-3"|intcomma }}</td></tr>
             <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
             <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
             {% elif domain.key == "produccion" %}
-            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
-            <tr><th>Rows fact</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
-            <tr><th>Producido fact</th><td class="is-right">{{ domain.fact_produced|floatformat:0|intcomma }}</td></tr>
-            <tr><th>Plan visible</th><td class="is-right">{{ domain.plan_units|floatformat:0|intcomma }} u</td></tr>
+            <tr><th>Registros Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Registros del resumen ERP</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
+            <tr><th>Producción del resumen ERP</th><td class="is-right">{{ domain.fact_produced|floatformat:"-3"|intcomma }}</td></tr>
+            <tr><th>Cantidad reportada del plan</th><td class="is-right">{{ domain.plan_units|floatformat:"-3"|intcomma }} · unidad por acreditar</td></tr>
             <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
             <tr><th>Nota</th><td class="is-right">{{ domain.plan_note }}</td></tr>
             {% elif domain.key == "mermas" %}
-            <tr><th>Rows Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
-            <tr><th>Rows visibles</th><td class="is-right">{{ domain.visible_rows|intcomma }}</td></tr>
-            <tr><th>Merma Point</th><td class="is-right">{{ domain.raw_units|floatformat:0|intcomma }}</td></tr>
-            <tr><th>Merma visible</th><td class="is-right">{{ domain.visible_units|floatformat:0|intcomma }}</td></tr>
+            <tr><th>Registros Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
+            <tr><th>Registros visibles</th><td class="is-right">{{ domain.visible_rows|intcomma }}</td></tr>
+            <tr><th>Cantidades Point</th><td class="is-right">{% for group in domain.point_quantity_groups %}<div>{{ group.quantity|floatformat:"-3"|intcomma }} {{ group.unit }} · {{ group.family }}</div>{% empty %}Sin subtotal físico comparable{% endfor %}{% for item in domain.point_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }}{% if item.unit %} {{ item.unit }} · clasificación por acreditar{% else %} · unidad por acreditar{% endif %}</div>{% endfor %}</td></tr>
+            <tr><th>Cantidades visibles ERP (MermaPOS)</th><td class="is-right">{% for group in domain.branch_quantity_groups %}<div>{{ group.quantity|floatformat:"-3"|intcomma }} {{ group.unit }} · {{ group.family }}</div>{% empty %}Sin subtotal físico comparable{% endfor %}{% for item in domain.branch_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }}{% if item.unit %} {{ item.unit }} · clasificación por acreditar{% else %} · unidad por acreditar{% endif %}</div>{% endfor %}</td></tr>
+            <tr><th>Merma de insumos importada</th><td class="is-right">{% for item in domain.cedis_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }} · unidad por acreditar</div>{% empty %}Sin registros para esta fecha{% endfor %}</td></tr>
+            <tr><th>Cómo leer las cantidades</th><td>No se suman productos e insumos ni unidades distintas. Una cantidad sin unidad permanece registrada; N/D indica que no hay una unidad acreditada para compararla, no que falte la captura.</td></tr>
             <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
             <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
             {% else %}
@@ -204,10 +207,15 @@
             <tr><th>Última actualización stock visible</th><td class="is-right">{{ domain.visible_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Último sync almacén OK</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sync OK" }}</td></tr>
             <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
-            <tr><th>Última reconstrucción fact</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
+            <tr><th>Última actualización del resumen ERP</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Fecha de las referencias</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
             <tr><th>Trazabilidad de existencias ERP</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
-            <tr><th>Registros ERP sin traza</th><td class="is-right">{{ domain.untraceable_count|intcomma }}</td></tr>
+            <tr><th>Registros ERP revisados</th><td class="is-right">{{ domain.existence_count|intcomma }} registros por insumo y ubicación</td></tr>
+            <tr><th>Registros ERP sin traza completa</th><td class="is-right">{{ domain.untraceable_count|intcomma }} registros · {{ domain.untraceable_insumo_count|intcomma }} insumos</td></tr>
+            {% if domain.untraceable_count %}
+            <tr><th>Procedencia de los pendientes</th><td class="is-right">{{ domain.untraceable_legacy_bom_count|intcomma }} con registro automático por receta (BOM) · {{ domain.untraceable_empty_metadata_count|intcomma }} sin origen registrado{% if domain.untraceable_other_count %} · {{ domain.untraceable_other_count|intcomma }} con otra procedencia por revisar{% endif %}</td></tr>
+            <tr><th>Ubicaciones pendientes</th><td class="is-right">{% for location in domain.untraceable_locations %}{{ location.warehouse_name }}: {{ location.count|intcomma }}{% if not forloop.last %} · {% endif %}{% endfor %}</td></tr>
+            {% endif %}
             {% endif %}
           </tbody>
         </table>
@@ -220,7 +228,7 @@
     <div class="closure-card-head">
       <div>
         <h2 class="closure-card-title">Comparativa operativa por sucursal</h2>
-        <p class="closure-copy">Lectura diaria para comparar producción, venta y merma visible por sucursal operativa.</p>
+        <p class="closure-copy">Cantidades reportadas por fuente de venta y producción, con unidad homogénea por acreditar. Se conservan los registros; no acreditan por sí solos comparabilidad con merma ni un neto físico.</p>
       </div>
     </div>
     <div class="table-responsive">
@@ -229,10 +237,10 @@
           <tr>
             <th>Sucursal</th>
             <th class="is-right">Venta $</th>
-            <th class="is-right">Venta u</th>
-            <th class="is-right">Producción u</th>
-            <th class="is-right">Merma visible u</th>
-            <th class="is-right">Neto u</th>
+            <th class="is-right">Venta reportada</th>
+            <th class="is-right">Producción reportada</th>
+            <th class="is-right">Merma comparable (pza)</th>
+            <th class="is-right">Neto comparable (pza)</th>
             <th class="is-right">Estado</th>
           </tr>
         </thead>
@@ -244,10 +252,10 @@
               <div class="closure-muted">{{ row.branch_name }}</div>
             </td>
             <td class="is-right">${{ row.sales_amount|floatformat:2|intcomma }}</td>
-            <td class="is-right">{{ row.sales_units|floatformat:0|intcomma }}</td>
-            <td class="is-right">{{ row.produced_units|floatformat:0|intcomma }}</td>
-            <td class="is-right">{{ row.waste_units_visible|floatformat:0|intcomma }}</td>
-            <td class="is-right">{{ row.net_units|floatformat:0|intcomma }}</td>
+            <td class="is-right">{{ row.sales_units|floatformat:"-3"|intcomma }}</td>
+            <td class="is-right">{{ row.produced_units|floatformat:"-3"|intcomma }}</td>
+            <td class="is-right">{% if row.waste_units_visible is not None %}{{ row.waste_units_visible|floatformat:"-3"|intcomma }}{% elif row.waste_records %}<abbr title="Cantidad registrada sin una unidad de producto comparable; consulta el desglose de merma.">N/D</abbr>{% else %}Sin registros{% endif %}</td>
+            <td class="is-right">{% if row.net_units is not None %}{{ row.net_units|floatformat:"-3"|intcomma }}{% else %}<abbr title="No se calcula el neto físico si producción, traslados, ventas y merma no tienen cantidades de producto comparables acreditadas; los registros fuente se conservan.">N/D</abbr>{% endif %}</td>
             <td class="is-right"><span class="closure-pill {% if row.tone == 'success' %}success{% elif row.tone == 'danger' %}danger{% else %}warning{% endif %}">{{ row.status }}</span></td>
           </tr>
           {% endfor %}
@@ -262,6 +270,7 @@
         <div>
           <h2 class="closure-card-title">Referencias de inventario por insumo</h2>
           <p class="closure-copy">El saldo global ERP y el stock vivo de Point ALMACÉN cubren ubicaciones distintas. Cada renglón se expresa en la unidad base del insumo.</p>
+          <p class="closure-copy">La procedencia se detalla para cada registro actual de insumo y ubicación. Su fecha de actualización puede ser posterior al día auditado. Un origen registrado no acredita por sí solo la apertura ni el saldo físico.</p>
         </div>
       </div>
       <div class="table-responsive">
@@ -270,7 +279,7 @@
             <tr>
               <th>Insumo</th>
               <th>Unidad</th>
-              <th>Traza de existencias ERP</th>
+              <th>Procedencia por ubicación ERP</th>
               <th class="is-right">Saldo global ERP al cierre</th>
               <th class="is-right">Stock vivo Point ALMACÉN</th>
             </tr>
@@ -280,7 +289,25 @@
             <tr>
               <td>{{ row.insumo_name }}</td>
               <td title="{{ row.unit_name }}">{{ row.unit_code }}</td>
-              <td title="{{ row.trace_effective_at|default:'Sin fecha efectiva' }}">{{ row.trace_label }}</td>
+              <td>
+                {% if row.trace_locations %}
+                <details>
+                  <summary>{{ row.trace_locations|length }} {{ row.trace_locations|length|pluralize:"registro,registros" }} por ubicación</summary>
+                  <ul>
+                    {% for location in row.trace_locations %}
+                    <li>
+                      <strong>{{ location.warehouse_name }}</strong>
+                      <div>{{ location.origin_label }}</div>
+                      {% if location.pending %}<div class="closure-muted">Apertura y saldo por acreditar</div>{% endif %}
+                      <div class="closure-muted">Actualizado <time datetime="{{ location.updated_at|date:'c' }}">{{ location.updated_at|date:"Y-m-d H:i" }}</time></div>
+                    </li>
+                    {% endfor %}
+                  </ul>
+                </details>
+                {% else %}
+                Sin registro de existencia por ubicación
+                {% endif %}
+              </td>
               <td class="is-right">{{ row.expected_stock|floatformat:3|intcomma }}</td>
               <td class="is-right">{% if row.inventory_ready %}{{ row.visible_stock|floatformat:3|intcomma }}{% else %}Sin lectura vigente{% endif %}</td>
             </tr>
