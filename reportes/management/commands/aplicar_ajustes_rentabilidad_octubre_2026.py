@@ -40,8 +40,19 @@ def huella(rows):
 
 def bloquear_fuentes():
     """Bloqueo granular: los padres también impiden insertar hijos durante el ajuste."""
+    # Los padres y las filas se fijan antes de derivar identidades o leer conceptos.
+    periodos = list(NominaPeriodo.objects.filter(pk__in=[22, 24]).order_by('pk').select_for_update().values_list('pk', flat=True))
+    if periodos != [22, 24]:
+        raise CommandError('Faltan los periodos de nómina conciliados.')
+    pool = NominaLinea.objects.filter(periodo_id__in=periodos).order_by('pk')
+    nominales = list(pool.select_for_update().values('pk', 'empleado_id'))
+    empleados = sorted({n['empleado_id'] for n in nominales})
+    bloqueados = list(Empleado.objects.filter(pk__in=empleados).order_by('pk').select_for_update().values_list('pk', flat=True))
+    if bloqueados != empleados or nominales != list(pool.values('pk', 'empleado_id')):
+        raise CommandError('Cambiaron las identidades de nómina durante el bloqueo.')
     gastos = GastoOperativoMensual.objects.filter(pk__in=GASTOS)
-    cfdi_ids = list(gastos.values_list('cfdi_soporte_id', flat=True))
+    gastos_fijos = list(gastos.order_by('pk').select_for_update().values('pk', 'cfdi_soporte_id', 'categoria_gasto_id', 'centro_costo_id'))
+    cfdi_ids = [g['cfdi_soporte_id'] for g in gastos_fijos]
     if gastos.count() != 6 or set(cfdi_ids) != {794, 8884, 1993, 2002, 2047, 2207}:
         raise CommandError('Faltan los seis gastos originales o sus CFDI.')
     nominas = NominaLinea.objects.filter(periodo_id__in=[22, 24]).filter(
@@ -192,7 +203,7 @@ class Command(BaseCommand):
         if aplicar and not (options.get('backup_file') or options.get('restore_file')):
             raise CommandError('--apply exige --backup-file para el respaldo recuperable previo.')
         with connection.cursor() as cursor:
-            cursor.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+            cursor.execute('SET TRANSACTION ISOLATION LEVEL READ COMMITTED')
             cursor.execute("SET LOCAL lock_timeout='2s'")
             cursor.execute("SET LOCAL statement_timeout='30s'")
         lineas = list(L.objects.select_for_update().filter(pk__in=LINEAS).select_related('rubro__area'))

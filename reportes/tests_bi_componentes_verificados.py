@@ -103,3 +103,30 @@ class ComponentesFinancierosVerificadosTests(TestCase):
                 self.assertFalse(row['financial_amounts_available'])
                 data = build_dashboard_charts_payload(year=2026)
                 self.assertEqual(data['sources']['waste_reconciled_periods'], {})
+
+    def test_presupuesto_rechaza_snapshot_marcado_inconsistente_sin_persistir(self):
+        from reportes.services_budget_vs_actual import BudgetVsActualSnapshotService
+        from reportes.models import PresupuestoResumenMensual
+        self.snapshot.metadata.pop('merma_registrada')
+        self.snapshot.save(update_fields=['metadata'])
+        with self.assertRaisesMessage(ValueError, 'componentes financieros'):
+            BudgetVsActualSnapshotService().build_snapshot(period_start=date(2026,10,1))
+        self.assertFalse(PresupuestoResumenMensual.objects.exists())
+
+    def test_consumidores_informan_conflicto_sin_publicar_margen_invalido(self):
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        from django.contrib.auth import get_user_model
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from api.reportes_budget_views import BudgetVsActualView
+        self.snapshot.metadata['merma_registrada'] = 'NaN'
+        self.snapshot.save(update_fields=['metadata'])
+        user = get_user_model().objects.create_superuser('finance-test', 'test@example.invalid', 'synthetic-only')
+        request = APIRequestFactory().get('/api/reportes/presupuesto-real/2026-10/')
+        force_authenticate(request,user=user)
+        response = BudgetVsActualView.as_view()(request,periodo='2026-10')
+        self.assertEqual(response.status_code,409)
+        self.assertIn('componentes financieros',response.data['detail'])
+        self.assertNotIn('rows',response.data)
+        with self.assertRaisesMessage(CommandError,'componentes financieros'):
+            call_command('snapshot_budget_vs_actual',period='2026-10')

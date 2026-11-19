@@ -334,3 +334,25 @@ class AplicacionAcotadaTests(TransactionTestCase):
             bloquear_fuentes()
             self.assertEqual(pool.submit(competir).result(timeout=5), '55P03')
             self.assertEqual(pool.submit(competir, True).result(timeout=5), '55P03')
+
+    def test_insercion_confirmada_antes_del_bloqueo_de_fuentes_aborta(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from django.db import connections
+        from rrhh.models import NominaConceptoLinea
+        from reportes.management.commands.aplicar_ajustes_rentabilidad_octubre_2026 import bloquear_fuentes
+        def insertar():
+            try:
+                NominaConceptoLinea.objects.create(linea_id=1409, codigo_concepto='77',
+                    tipo='PERCEPCION', nombre='Confirmado antes del bloqueo', importe=1)
+            finally:
+                connections['default'].close()
+        def intercalar():
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(insertar).result(timeout=5)
+            return bloquear_fuentes()
+        with patch('reportes.management.commands.aplicar_ajustes_rentabilidad_octubre_2026.bloquear_fuentes', side_effect=intercalar):
+            with self.assertRaisesMessage(CommandError, 'composición'):
+                self.ejecutar(apply=True)
+        self.assertTrue(NominaConceptoLinea.objects.filter(linea_id=1409,codigo_concepto='77').exists())
+        self.assertFalse(Path(self.backup).exists())
+        self.assertEqual(LineaPresupuestoMensual.objects.get(pk=8826).monto_real,D('81848.84'))

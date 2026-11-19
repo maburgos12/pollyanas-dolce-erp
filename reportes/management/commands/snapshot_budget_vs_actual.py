@@ -19,10 +19,13 @@ class Command(BaseCommand):
         except Exception as exc:
             raise CommandError(f"Periodo inválido: {period_raw}") from exc
 
-        summary = BudgetVsActualSnapshotService().build_snapshot(
-            period_start=period_start,
-            dry_run=bool(options.get("dry_run")),
-        )
+        try:
+            summary = BudgetVsActualSnapshotService().build_snapshot(
+                period_start=period_start,
+                dry_run=bool(options.get("dry_run")),
+            )
+        except ValueError as exc:
+            raise CommandError(str(exc)) from exc
         self.stdout.write(
             f"Presupuesto vs Real · {summary.period:%Y-%m} · persisted={summary.persisted} · presupuesto_fuente={summary.budget_source}"
         )

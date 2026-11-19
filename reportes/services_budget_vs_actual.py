@@ -588,13 +588,16 @@ class BudgetVsActualSnapshotService:
     def _actual_by_concept(self, result: EmpresaResultadoMensual | None) -> dict[str, Decimal]:
         if result is None:
             return {}
+        marked = result.periodo == date(2026, 10, 1) and (result.metadata or {}).get('ajustes_verificados_octubre_2026') is True
+        if marked and merma_financiera_verificada(result) is None:
+            raise ValueError('Los componentes financieros de octubre 2026 requieren validación; no se generó el reporte.')
         return {
             "ventas": money_decimal(result.venta_total),
             "costo_mp": money_decimal(result.costo_materia_prima_total),
             "costo_reventa": money_decimal(result.costo_reventa_total),
             "utilidad_bruta": money_decimal(
                 result.margen_bruto_total
-                if result.periodo == date(2026, 10, 1) and (result.metadata or {}).get('ajustes_verificados_octubre_2026') is True
+                if marked
                 else result.venta_total - result.costo_materia_prima_total - result.costo_reventa_total
             ),
             "nomina": money_decimal(result.mano_obra_prod_total),

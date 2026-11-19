@@ -49,7 +49,11 @@ no permite intercalar modificaciones ni altas hijas. Conserva la huella completa
 de fuentes y destinos y la exige también cuando informa YA_APLICADO. Pruebas con
 dos sesiones acreditan bloqueo de UPDATE e INSERT de conceptos (SQLSTATE55P03).
 Comprueba hashes de las demás líneas, conserva auditoría e impide una segunda
-aplicación. Usa transacción REPEATABLE READ; una discrepancia revierte todo.
+aplicación. Usa READ COMMITTED y bloquea periodos, filas de nómina y empleados antes de
+derivar identidades y leer conceptos; vuelve a comprobar los IDs derivados.
+Una inserción confirmada antes del bloqueo se ve y obliga a abortar por composición
+distinta; tras el bloqueo, UPDATE e INSERT no pueden intercalarse. Una discrepancia
+revierte todo.
 No refresca costos por producto,
 inventarios, tareas, pricing o contribuciones históricas.
 
@@ -75,7 +79,9 @@ Presupuesto vs Real comparten el margen registrado. Los demás meses conservan s
 contrato anterior; ningún GET ejecuta el costeo. La proyección de octubre conserva
 la venta neta del snapshot frente a ventas comerciales distintas. Merma requiere
 importe finito no negativo y conciliación exacta con el margen; una marca con
-componentes inválidos no acredita importes. La cobertura de venta costeada/no receta
+componentes inválidos no acredita importes. Presupuesto vs Real rechaza ese
+snapshot antes de calcular o persistir; API y pantalla informan conflicto409,
+y el comando informa CommandError sin sobrescribir el consumidor. La cobertura de venta costeada/no receta
 no se infiere del antecedente: octubre y su acumulado muestran N/D. La nota YTD
 identifica que solo la merma de octubre fue acreditada por este ajuste.
 
