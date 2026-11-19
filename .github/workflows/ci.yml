@@ -97,6 +97,8 @@ jobs:
         run: pip install -r requirements.txt
       - name: Django checks
         run: python manage.py check
+      - name: Enforce canonical Point sales reads
+        run: python scripts/check_pointdailysale_usage.py
       - name: Verify backup and full-suite partition contracts
         run: |
           python -m unittest discover -s scripts/tests -p test_backup_db.py

@@ -199,3 +199,75 @@ class OperationalOpeningEvidenceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("Revalidación no disponible", html)
         self.assertNotIn("Conciliación operativa desde captura", html)
         self.assertEqual(self.groups[0]["rows"][0]["operational_verified_count"], 0)
+
+    def test_incomplete_global_source_shows_unavailable_without_losing_capture_or_writing(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        self.snapshot.stock = Decimal("0")
+        self.snapshot.raw_payload["row"][4] = "0"
+        self.snapshot.save(update_fields=["stock", "raw_payload"])
+        self.visible["operational_reconciliation"] = {"verified": True}
+        callbacks = list(connection.run_on_commit)
+        with patch("pos_bridge.services.branch_inventory_traceability_service."
+                   "BranchInventoryTraceabilityService._load_direct_movements",
+                   return_value=({}, {}, {}, {}, {}, {}, {}, {}, {}, (), ("source incomplete",))):
+            with CaptureQueriesContext(connection) as queries:
+                self.add()
+        self.assertTrue(self.visible.get("operational_revalidation_unavailable"))
+        self.assertIn("operational_opening_evidence", self.visible)
+        self.assertNotIn("operational_reconciliation", self.visible)
+        self.assertIsNone(self.visible["opening"])
+        self.assertEqual(callbacks, connection.run_on_commit)
+        self.assertTrue(all(query["sql"].lstrip().split()[0] in
+                            {"SELECT", "SAVEPOINT", "RELEASE"} for query in queries))
+        request = RequestFactory().get("/reportes/produccion/")
+        request.user = AnonymousUser()
+        html = render_to_string("reportes/producido_vs_vendido.html", {"groups": self.groups}, request=request)
+        self.assertIn("Revalidación no disponible", html)
+        self.assertIn("fuente de movimientos pendiente de completar o en actualización", html)
+        self.assertNotIn("Conciliación operativa desde captura", html)
+        self.assertNotIn("Sin actividad en tramo operativo acreditado", html)
+
+    def test_official_sales_temporal_guard_keeps_range_identity_and_explicit_zero(self):
+        from contextlib import ExitStack
+        from pos_bridge.models import PointDailySale, PointHistoricalInventoryClosing
+        from pos_bridge.services.audit_stock_history_service import PointHistoryReconciliation
+        from reportes import services_operational_reconciliation as operating
+        self.snapshot.stock = Decimal("0")
+        self.snapshot.raw_payload["row"][4] = "0"
+        self.snapshot.save(update_fields=["stock", "raw_payload"])
+        other = PointBranch.objects.create(external_id="OTHER-LOCATION", name="Otra sucursal")
+        official = "/Report/PrintReportes?idreporte=3"
+        sale = PointDailySale.objects.create(branch=self.branch, product=self.product,
+            sale_date=date(2026, 10, 3), quantity=1, source_endpoint=official)
+        samples = [
+            (date(2026, 9, 30), "1", official, self.branch, False),
+            (date(2026, 10, 1), "1", official, self.branch, True),
+            (date(2026, 10, 2), "1", official, self.branch, True),
+            # Daily data cannot place a nonzero sale before/after 10:48 that day.
+            (date(2026, 10, 3), "1", official, self.branch, True),
+            (date(2026, 10, 3), "-1", official, self.branch, True),
+            (date(2026, 10, 3), "0", official, self.branch, False),
+            (date(2026, 10, 4), "1", official, self.branch, False),
+            (date(2026, 10, 3), "1", "/Report/VentasCategorias", self.branch, False),
+            (date(2026, 10, 3), "1", official, other, False),
+        ]
+        for day, quantity, endpoint, branch, expected in samples:
+            with self.subTest(day=day, quantity=quantity, endpoint=endpoint, branch=branch.pk):
+                sale.sale_date, sale.quantity = day, Decimal(quantity)
+                sale.source_endpoint, sale.branch = endpoint, branch
+                sale.save()
+                with ExitStack() as stack:
+                    stack.enter_context(patch.object(operating.BranchInventoryTraceabilityService,
+                        "_load_direct_movements", return_value=({}, {}, {}, {}, {}, {}, {}, {}, {}, (), ())))
+                    stack.enter_context(patch.object(operating.BranchInventoryTraceabilityService,
+                        "_select_closing", return_value=PointHistoricalInventoryClosing(pk=999999)))
+                    stack.enter_context(patch.object(operating.AuditStockHistoryService, "reconcile_many",
+                        return_value={(28, self.product.pk): PointHistoryReconciliation(coverage_status="COMPLETE")}))
+                    stack.enter_context(patch.object(operating, "documentary_historical_boundary",
+                        return_value=({}, {}, ())))
+                    verify = stack.enter_context(patch.object(operating, "verify_operational_balance",
+                        wraps=operating.verify_operational_balance))
+                    self.add()
+                verify.assert_called_once()
+                self.assertEqual(verify.call_args.kwargs["blocked"], expected)

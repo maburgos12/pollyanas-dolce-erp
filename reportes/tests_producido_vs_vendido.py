@@ -187,6 +187,58 @@ class ProducidoVsVendidoAuditTests(InventoryAuditAgentFixtures, TestCase):
         self.assertNotIn("6", [reading["quantity"] for reading in case["physical_evidence"]])
         self.assertContains(response, "Físico − Point: -6 PZA")
 
+    def test_automatic_historical_recount_keeps_only_real_submission_and_permissions(self):
+        branch = Sucursal.objects.create(codigo="PVS-AUTO", nombre="Sucursal automática")
+        self.branch.erp_branch = branch
+        self.branch.save(update_fields=["erp_branch"])
+        audit_case = self.make_case(point_closing=0)
+        actor = get_user_model().objects.create_superuser(username="auto-admin")
+        count = ConteoSucursal.objects.create(sucursal=branch, responsable=actor, creado_por=actor,
+            fecha=date(2026, 8, 31), titulo="Cierre", estado="RECONTEO", ronda=2,
+            request_id=uuid4(), payload_hash="a" * 64)
+        line = LineaConteoSucursal.objects.create(conteo=count, producto=self.product,
+            codigo=self.product.sku, nombre=self.product.name, unidad="PZA", fuente_unidad="Point")
+        EventoConteoSucursal.objects.create(conteo=count, actor=actor, action="enviar",
+            payload={"snapshot": [{"linea_id": line.pk, "ronda": 1, "cantidad": "0",
+                                   "contado_en": "2026-08-31T20:00:00-07:00"}]})
+        EventoConteoSucursal.objects.create(conteo=count, actor=None, action="conciliacion_nocturna",
+            payload={"ronda": 1, "automatizacion": {"accion": "RECONTEO", "linea_ids": [line.pk]}})
+        reading = LecturaConteoSucursal.objects.create(linea=line, ronda=2, cantidad=None, actor=actor)
+        request = self.factory.get("/reportes/produccion/", {"periodo": "2026-08"})
+        request.user = actor
+        self.view.setup(request)
+        with CaptureQueriesContext(connection) as queries:
+            response = self.view.get(request).render()
+        self.assertContains(response, "Estado automático histórico; se conserva el único conteo enviado")
+        self.assertContains(response, "Ronda enviada 1")
+        self.assertNotContains(response, "Ronda 2 sin envío")
+        self.assertContains(response, "Físico vs Point: Coincide")
+        self.assertContains(response, "hora de corte común por confirmar")
+        self.assertTrue(all(query["sql"].lstrip().startswith("SELECT") for query in queries))
+        round_reads = [query for query in queries
+                       if 'FROM "inventario_lecturaconteosucursal"' in query["sql"]]
+        self.assertEqual(len(round_reads), 1)
+        self.assertIn('"ronda"', round_reads[0]["sql"])
+        count.refresh_from_db()
+        reading.refresh_from_db()
+        audit_case.refresh_from_db()
+        self.assertEqual((count.estado, count.ronda), ("RECONTEO", 2))
+        self.assertIsNone(reading.cantidad)
+        self.assertEqual(audit_case.point_closing, 0)
+        reader = get_user_model().objects.create_user(username="auto-capture-only")
+        AccesoConteoSucursal.objects.create(user=reader, sucursal=branch, capturar=True)
+        request.user = reader
+        self.view.setup(request)
+        self.assertNotContains(self.view.get(request).render(), "Estado automático histórico")
+        # A real zero captured in the next round is activity, never an empty row.
+        reading.cantidad = 0
+        reading.save(update_fields=["cantidad"])
+        request.user = actor
+        self.view.setup(request)
+        response = self.view.get(request).render()
+        self.assertNotContains(response, "Estado automático histórico")
+        self.assertContains(response, "Ronda 2 sin envío")
+
     def test_balanced_stock_keeps_pending_transfer_visible(self):
         self.make_case(difference=0, movement_status="NEEDS_EXPLANATION",
                        issue_codes=["INCOMPLETE_TRANSFER"])

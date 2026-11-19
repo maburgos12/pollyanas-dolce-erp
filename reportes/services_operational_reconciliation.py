@@ -7,7 +7,7 @@ from django.db import connection, transaction
 from django.db.models import Q
 
 from pos_bridge.models import (
-    PointConversionLine, PointDailySale, PointHistoricalInventoryClosingLine, PointInventorySnapshot,
+    PointConversionLine, PointHistoricalInventoryClosingLine, PointInventorySnapshot,
     PointProduct, PointProductHistoryImport, PointProductHistoryRow,
     PointProductionLine, PointTransferLine, PointWasteLine, PointOpenTransferSnapshotMember,
 )
@@ -16,6 +16,7 @@ from pos_bridge.services.branch_inventory_traceability_service import BranchInve
 from pos_bridge.services.monthly_product_balance_service import documentary_historical_boundary
 from pos_bridge.services.historical_inventory_capture import point_stock_history_instant, HistoricalInventoryCaptureError
 from pos_bridge.services.product_month_source_mutex import PRODUCT_MONTH_SOURCE_LOCK_NAMESPACE
+from ventas.services.sales_canonical_source import official_point_sales_rows_for_range
 
 _MONTH = date(2026, 10, 1)
 _END = date(2026, 10, 31)
@@ -110,7 +111,9 @@ def read_operational_reconciliation(cases, snapshots):
     source = svc._load_direct_movements(month_start=_MONTH, closing_date=_END,
         product_indexes=indexes, branch_ids=locations)
     if source[-1]:
-        return {}
+        # Global source authority is unavailable, not an individual product
+        # discrepancy. Retain observed captures through the existing None path.
+        return None
     maps = {name: svc._canonicalize_balance_map(source[index], aliases)
             for index, name in enumerate(_FAMILIES)}
     issues = source[-2]
@@ -132,9 +135,9 @@ def read_operational_reconciliation(cases, snapshots):
     product_ids = {case.product_id for case in cases}
     # Daily commercial sales and production cannot be placed before/after a
     # morning capture. Resolve identity with the existing ledger's exact rules.
-    for row in PointDailySale.objects.filter(branch_id__in=locations,
-        sale_date__gte=_MONTH, sale_date__lte=date(2026, 10, 3),
-        source_endpoint="/Report/PrintReportes?idreporte=3").exclude(quantity=0):
+    for row in official_point_sales_rows_for_range(
+        start_date=_MONTH, end_date=date(2026, 10, 3),
+    ).filter(branch_id__in=locations).exclude(quantity=0):
         product, _issue = svc._resolve_sales_product(row, indexes)
         if product in product_ids:
             blocked.add(product)
