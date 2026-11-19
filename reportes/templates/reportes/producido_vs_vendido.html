@@ -271,7 +271,7 @@
                   {{ observed.quantity|floatformat:"-6u" }} {{ observed.unit }} · Captura Point #{{ observed.snapshot_id }}
                   · extracción #{{ observed.job_id }} · bitácora #{{ observed.log_id }}<br>
                   <small>Saldo al 30/09 pendiente. Esta captura del 03/10 no sustituye la apertura mensual ni se suma al cierre.</small>{% if case.operational_revalidation_unavailable %}<br>
-                  <small>Revalidación no disponible en este momento; se conserva la captura observada.</small>{% endif %}
+                  <small>Revalidación no disponible: fuente de movimientos pendiente de completar o en actualización. Se conserva la captura observada; no acredita por sí sola el tramo operativo.</small>{% endif %}
                 </p>
                 {% endif %}
                 {% endwith %}
@@ -314,11 +314,11 @@
                   {% if can_open %}</a>{% endif %}
                 </strong><br>
                 {% endwith %}
-                  {{ count.conteo.fecha|date:"d/m/Y" }} · {{ count.conteo.get_estado_display }}
+                  {{ count.conteo.fecha|date:"d/m/Y" }} · {% if count.automatic_history %}Estado automático histórico; se conserva el único conteo enviado{% else %}{{ count.conteo.get_estado_display }}{% endif %}
                   {% if count.round %}· Ronda {% if not count.historical %}enviada {% endif %}{{ count.round }}{% endif %}
                   · {% if count.quantity is None %}Sin lectura{% else %}{{ count.quantity|floatformat:"-6u" }} {{ count.unit }}{% endif %}
                   · {% if count.counted_at %}Contado {{ count.counted_at|date:"d/m/Y H:i:s" }}{% else %}Hora no registrada{% endif %}
-                  {% if count.conteo.estado == "RECONTEO" %}· Ronda {{ count.conteo.ronda }} sin envío{% endif %}
+                  {% if count.conteo.estado == "RECONTEO" and not count.automatic_history %}· Ronda {{ count.conteo.ronda }} sin envío{% endif %}
                   {% if count.file %}<br>{{ count.file }}{% if count.sheet and count.cell %} · {{ count.sheet }}!{{ count.cell }}{% endif %}{% endif %}
                 </p>
                 {% endfor %}{% endfor %}

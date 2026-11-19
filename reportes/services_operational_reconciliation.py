@@ -110,7 +110,9 @@ def read_operational_reconciliation(cases, snapshots):
     source = svc._load_direct_movements(month_start=_MONTH, closing_date=_END,
         product_indexes=indexes, branch_ids=locations)
     if source[-1]:
-        return {}
+        # Global source authority is unavailable, not an individual product
+        # discrepancy. Retain observed captures through the existing None path.
+        return None
     maps = {name: svc._canonicalize_balance_map(source[index], aliases)
             for index, name in enumerate(_FAMILIES)}
     issues = source[-2]

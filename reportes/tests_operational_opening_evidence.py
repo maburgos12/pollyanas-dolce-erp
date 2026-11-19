@@ -199,3 +199,31 @@ class OperationalOpeningEvidenceTests(InventoryAuditAgentFixtures, TestCase):
         self.assertIn("Revalidación no disponible", html)
         self.assertNotIn("Conciliación operativa desde captura", html)
         self.assertEqual(self.groups[0]["rows"][0]["operational_verified_count"], 0)
+
+    def test_incomplete_global_source_shows_unavailable_without_losing_capture_or_writing(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        self.snapshot.stock = Decimal("0")
+        self.snapshot.raw_payload["row"][4] = "0"
+        self.snapshot.save(update_fields=["stock", "raw_payload"])
+        self.visible["operational_reconciliation"] = {"verified": True}
+        callbacks = list(connection.run_on_commit)
+        with patch("pos_bridge.services.branch_inventory_traceability_service."
+                   "BranchInventoryTraceabilityService._load_direct_movements",
+                   return_value=({}, {}, {}, {}, {}, {}, {}, {}, {}, (), ("source incomplete",))):
+            with CaptureQueriesContext(connection) as queries:
+                self.add()
+        self.assertTrue(self.visible.get("operational_revalidation_unavailable"))
+        self.assertIn("operational_opening_evidence", self.visible)
+        self.assertNotIn("operational_reconciliation", self.visible)
+        self.assertIsNone(self.visible["opening"])
+        self.assertEqual(callbacks, connection.run_on_commit)
+        self.assertTrue(all(query["sql"].lstrip().split()[0] in
+                            {"SELECT", "SAVEPOINT", "RELEASE"} for query in queries))
+        request = RequestFactory().get("/reportes/produccion/")
+        request.user = AnonymousUser()
+        html = render_to_string("reportes/producido_vs_vendido.html", {"groups": self.groups}, request=request)
+        self.assertIn("Revalidación no disponible", html)
+        self.assertIn("fuente de movimientos pendiente de completar o en actualización", html)
+        self.assertNotIn("Conciliación operativa desde captura", html)
+        self.assertNotIn("Sin actividad en tramo operativo acreditado", html)
