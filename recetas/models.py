@@ -574,6 +574,7 @@ class RecetaAgrupacionAddon(models.Model):
     cooccurrence_branches = models.PositiveIntegerField(default=0)
     cooccurrence_qty = models.DecimalField(max_digits=18, decimal_places=3, default=0)
     confidence_score = models.DecimalField(max_digits=8, decimal_places=4, default=0)
+    metadata = models.JSONField(default=dict, blank=True)
     notas = models.TextField(blank=True, default="")
     activo = models.BooleanField(default=True)
     creado_en = models.DateTimeField(default=timezone.now)

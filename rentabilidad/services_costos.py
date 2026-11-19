@@ -192,7 +192,7 @@ def _asignar_recetas_historicas_2025(filas, periodo):
             fila["receta_id"] = next(iter(ids))
 
 
-def asignar_costos_filas(filas, periodo, fin_periodo):
+def asignar_costos_filas(filas, periodo, fin_periodo, *, aplicar_componentes_incrementales=False):
     """Misma precedencia de receta, adquisición y decisión DG en todos los lectores."""
     from recetas.models import Receta
     from recetas.utils.normalizacion import normalizar_nombre
@@ -221,6 +221,11 @@ def asignar_costos_filas(filas, periodo, fin_periodo):
     manufactured = fuentes_produccion_documental(
         {f["product_id"] for f in filas if f["product_id"] and f["receta_id"] is None
          and f["product_id"] not in resale}, periodo, fin_periodo)
+    incremental = {}
+    if aplicar_componentes_incrementales:
+        from .services_componentes_incrementales import sold_material_treatments
+
+        incremental = sold_material_treatments({f["product_id"] for f in filas}, periodo)
     for row in filas:
         evidence = recipes.get(row["receta_id"])
         acquisition = resale.get(row["product_id"])
@@ -232,4 +237,9 @@ def asignar_costos_filas(filas, periodo, fin_periodo):
                 and row["product__sku"] == native["historical_sku"]
                 and row["product__name"] == native["historical_name"]):
             row["cost_evidence"] = native
+            row["cost_is_resale"] = False
+        if row["product_id"] in incremental and row["product__sku"] == "1254":
+            row["recipe_identity_corrected"] = row["receta_id"] != 516
+            row["receta_id"] = 516
+            row["cost_evidence"] = incremental[row["product_id"]]
             row["cost_is_resale"] = False

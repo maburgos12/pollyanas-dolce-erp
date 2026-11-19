@@ -97,14 +97,26 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
         "product_id", "product__name", "product__category", "product__sku", "receta_id"
     ).annotate(venta=Sum("gross_amount") - Sum("tax_amount") - Sum("discount_amount"),
                cantidad=Sum("quantity"), sucursales=Count("branch", distinct=True)))
-    asignar_costos_filas(rows, periodo, fecha_fin)
+    asignar_costos_filas(rows, periodo, fecha_fin, aplicar_componentes_incrementales=True)
+    consolidated_rows = []
+    incremental_rows = {}
+    for row in rows:
+        evidence = row["cost_evidence"]
+        if evidence and evidence.get("treatment") == "INCREMENTAL_COMPONENTS":
+            previous = incremental_rows.get(row["product_id"])
+            if previous is not None:
+                previous["cantidad"] += row["cantidad"] or Decimal("0")
+                previous["venta"] += row["venta"] or Decimal("0")
+                continue
+            incremental_rows[row["product_id"]] = row
+        consolidated_rows.append(row)
 
     productos = []
     costo_faltante = 0
     costo_faltante_reventa = 0
     costo_faltante_fabricado = 0
     costo_faltante_anticipo = 0  # tarjetas/vales: pasivo, no alerta de costo
-    for row in rows:
+    for row in consolidated_rows:
         cantidad = Decimal(row["cantidad"] or 0)
         venta = Decimal(row["venta"] or 0)
         costo_unitario = Decimal("0")
@@ -118,11 +130,19 @@ def _build_productos_panel(periodo, fecha_inicio, fecha_fin):
             costo_unitario = evidence["cost"]
             tiene_costo = costo_unitario > 0 or bool(evidence.get("authorized"))
         tipo = "Anticipo" if es_anticipo else "Reventa" if row["cost_is_resale"] else "Fabricado"
+        if evidence and evidence.get("treatment") == "INCREMENTAL_COMPONENTS":
+            tipo = "Complemento incremental"
         if evidence and evidence.get("treatment") == "UNALLOCATED_SERVICE":
             tipo = "Servicio sin costo asignado"
             tiene_costo = False  # No presentar margen de servicio como si fuera gratuito.
 
         costo_total = (costo_unitario * cantidad).quantize(Decimal("0.01"))
+        if evidence and evidence.get("treatment") == "INCREMENTAL_COMPONENTS":
+            sucursales = list(ventas_para_costeo(fecha_inicio, fecha_fin).filter(product_id=row["product_id"]).values(
+                "sucursal_historica_id").annotate(cantidad=Sum("quantity")))
+            row["sucursales"] = len(sucursales)
+            costo_total = sum(((s["cantidad"] * costo_unitario).quantize(Decimal("0.01"))
+                               for s in sucursales), Decimal("0"))
         utilidad = venta - costo_total if tiene_costo and not es_anticipo else None
         margen = _pct(utilidad, venta) if utilidad is not None and venta > 0 else None
         if not tiene_costo and venta > 0 and not (evidence and evidence.get("authorized")):
@@ -428,7 +448,8 @@ def dashboard_rentabilidad(request):
     fuente_estado["cuadra"] = conciliacion["reconciled"]
     fuente_estado["discrepancias"] = conciliacion["discrepancies"]
 
-    sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin)
+    sales_confidence = build_sales_confidence(start_date=fecha_inicio, end_date=fecha_fin,
+                                            aplicar_componentes_incrementales=True)
     totales["margen_disponible"] = bool(
         fuente_estado["cuadra"] and sales_confidence["margin"] is not None
         and all(not item["obj"].costos_pendientes for item in sucursales_data if item["obj"].en_perimetro_fuente)
