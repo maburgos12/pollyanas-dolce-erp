@@ -1,0 +1,7 @@
+{% if signal.tone == "success" %}
+<span class="bi-tone warning">Lectura provisional</span>
+{% elif signal.label %}
+<span class="bi-tone {{ signal.tone|default:'neutral' }}">{{ signal.label }}{% if signal.tone != "neutral" %} · provisional{% endif %}</span>
+{% else %}
+<span class="bi-tone neutral">Sin lectura</span>
+{% endif %}
