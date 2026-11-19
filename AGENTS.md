@@ -801,3 +801,15 @@ tareas inscritas. No borrar ni editar el registro para eludirlo. Las tareas
 anteriores/ajenas conservan su ciclo de vida; no inscribirlas automáticamente.
 Un comando exitoso no sustituye la revisión profesional ni la comprobación de
 aceptación. Nunca usar salidas simuladas como evidencia de producción.
+
+## IA local — Mac-IA-02
+
+Para resúmenes, clasificación y extracción acotada, consultar primero
+`docs/runbooks/mac-ia-02.md` y comprobar disponibilidad del nodo por SSH.
+Usar el modelo local cuando la tarea sea adecuada y validar su resultado antes
+de consumirlo; devolver sólo evidencia compacta para evitar repetir contexto.
+No delegar cálculos exactos ni decisiones operativas; no ejecutar comandos
+generados por el modelo. Si el nodo no responde, registrar el motivo y continuar
+con el flujo autorizado, sin activar APIs pagadas nuevas ni reintentos indefinidos.
+La instalación del modelo no implica tareas programadas del ERP. El acceso entre
+redes usa el túnel privado del VPS documentado en el runbook.
