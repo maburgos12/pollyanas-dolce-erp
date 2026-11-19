@@ -48,6 +48,17 @@ def _cost_evidence(groups, end_date, *, aplicar_componentes_incrementales=False)
         product = products.get(product_id)
         group["product__sku"] = product.sku if product else (group["producto_clave"] if group["month"].year == 2025 else "")
         group["product__name"] = group["producto_nombre"]
+        # Fact 3694462 / daily fact 737827 crossed Point 1064 (010408)
+        # with recipe 139, whose audited Point identity is 1013 (0-2).
+        # Reject only the documented October pair; do not infer a replacement.
+        if (group["month"] == date(2026, 10, 1)
+                and group["source_kind"] == FactVentaDiaria.SOURCE_V2
+                and product_id == 1001 and group["receta_id"] == 139
+                and product and product.external_id == "official:010408"
+                and product.sku == "010408"):
+            group["source_recipe_id"] = group["receta_id"]
+            group["recipe_identity_conflict"] = True
+            group["receta_id"] = None
     for month in {g["month"] for g in groups}:
         cutoff = min(end_date, month.replace(day=monthrange(month.year, month.month)[1]))
         rows = [g for g in groups if g["month"] == month]
@@ -184,7 +195,8 @@ def build_sales_confidence(*, start_date, end_date, aplicar_componentes_incremen
         evidence = group["cost_evidence"]
         monthly_evidence = (evidence and evidence.get("through") and evidence["through"] <= end_date
                             and evidence["cost"] > ZERO and (not period or evidence["period"] >= period))
-        if monthly_evidence or group.get("recipe_identity_corrected") or (evidence and evidence.get("authorized")):
+        if (monthly_evidence or group.get("recipe_identity_corrected")
+                or group.get("recipe_identity_conflict") or (evidence and evidence.get("authorized"))):
             backed = False  # El histórico vigente o la decisión DG reemplazan el costo materializado antiguo.
         if not backed:
             if evidence and (evidence["cost"] > ZERO or evidence.get("authorized")) and group["quantity"] > ZERO and evidence.get("through", end_date) <= end_date:
