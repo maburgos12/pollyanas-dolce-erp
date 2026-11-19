@@ -37,6 +37,8 @@ class BIFinancialPresentationTests(SimpleTestCase):
 
     def test_recorded_costs_and_expenses_do_not_certify_financial_close(self):
         html = self.render_panel()
+        self.assertIn("costo de producción registrado pesa", html)
+        self.assertNotIn("costo de producto y merma registrado pesa", html)
         self.assertIn("Margen bruto provisional", html)
         self.assertIn("Cierre no acreditado", html)
         self.assertIn("55.7%", html)

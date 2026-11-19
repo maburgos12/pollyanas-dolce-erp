@@ -6352,7 +6352,7 @@ def bi(request: HttpRequest) -> HttpResponse:
 
     executive_panels = _bi_cached_value(
         runtime_cache=bi_runtime_cache,
-        section="executive-panels-confidence-v1",
+        section="executive-panels-budget-presence-v2",
         builder=lambda: build_executive_bi_panels(
             months=months_window,
             branch_id=branch_id,

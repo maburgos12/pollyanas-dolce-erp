@@ -612,15 +612,10 @@ def reporte_mensual(request):
     if formato == "json":
         return JsonResponse(reporte_a_json(reporte))
     if formato == "csv":
-        from django.core.management import call_command
-        from io import StringIO
+        from .management.commands.reporte_mensual_consolidado import Command
 
-        buffer = StringIO()
-        args = ["--formato", "csv", "--detalle", "--hasta", reporte["hasta"].strftime("%Y-%m")]
-        if sucursal_id:
-            args += ["--sucursal", str(sucursal_id)]
-        call_command("reporte_mensual_consolidado", *args, stdout=buffer)
-        response = HttpResponse(buffer.getvalue(), content_type="text/csv; charset=utf-8")
+        response = HttpResponse(Command()._render_csv(reporte, detalle=True),
+                                content_type="text/csv; charset=utf-8")
         response["Content-Disposition"] = (
             f"attachment; filename=reporte_mensual_{reporte['hasta'].strftime('%Y_%m')}.csv"
         )

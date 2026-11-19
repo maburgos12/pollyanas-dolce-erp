@@ -16,6 +16,28 @@ from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriod
 
 
 class PersonalMensualTests(TestCase):
+    def test_cedis_does_not_require_sales_payroll_but_unknown_and_commercial_keep_alerts(self):
+        cedis, _ = Sucursal.objects.update_or_create(codigo="CEDIS", defaults={"nombre": "Centro", "activa": True})
+        store = Sucursal.objects.create(codigo="MATRIZ", nombre="Comercial", activa=True)
+        result = self.leer()
+        self.assertFalse([p for p in result["pendientes"] if p["sucursal_id"] == cedis.pk and p["registro_id"] is None])
+        for branch in (store, self.sucursal):
+            self.assertTrue([p for p in result["pendientes"] if p["sucursal_id"] == branch.pk and p["familia"] == "nomina"])
+
+    def test_cedis_keeps_actual_payroll_and_sua_rows_without_creating_sales_obligations(self):
+        cedis, _ = Sucursal.objects.update_or_create(codigo="CEDIS", defaults={"nombre": "Centro", "activa": True})
+        self.sucursal = cedis
+        line = self.nomina()
+        rubro = RubroPresupuesto.objects.create(area=self.area, sucursal=cedis, concepto="Infonavit-RCV", tipo="EGRESO")
+        LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=date(2026, 6, 1),
+            monto_real=Decimal("50.01"), fuente_real="AUTO:SIPARE",
+            metadata={"cedula_imss": {"tipo": "BIMESTRAL", "registro_patronal": "E52-40157-10-0"}})
+        result = self.leer()
+        self.assertEqual(sum(f["monto_mensual"] for f in result["filas"]
+                             if f["sucursal_id"] == cedis.pk and f["familia"] == "nomina"), line.total_percepciones)
+        self.assertEqual(sum(f["monto_mensual"] for f in result["filas"]
+                             if f["sucursal_id"] == cedis.pk and f["familia"] == "cargas_patronales"), Decimal("50.01"))
+
     def test_rrhh_solo_deja_aviso_cuando_sueldo_central_coincide_con_fuente(self):
         linea = self.nomina(departamento='RRHH')
         def avisos():

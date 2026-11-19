@@ -5,6 +5,7 @@ sucursal conservada al generar la nómina; para líneas legadas sin snapshot,
 se conserva el criterio del expediente de RRHH.
 """
 from collections import defaultdict
+from calendar import monthrange
 from datetime import date
 from decimal import Decimal, InvalidOperation
 import re
@@ -238,7 +239,15 @@ def leer_personal_mensual(periodo: date) -> dict:
                 if es_sipare else "Captura manual: falta comprobar que corresponde exclusivamente a la parte patronal."
             ),
         ))
-    for sid in Sucursal.objects.filter(activa=True).values_list("id", flat=True):
+    from core.branch_catalog import canonical_point_network_branch_qs
+    fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
+    comerciales = set(canonical_point_network_branch_qs(fin).values_list("id", flat=True))
+    for sid, codigo in Sucursal.objects.filter(activa=True).values_list("id", "codigo"):
+        # The documented CEDIS location is not a retail payroll obligation.
+        # Unknown active locations retain their warnings; actual rows above
+        # are never removed, including payroll or SUA assigned to this center.
+        if codigo == "CEDIS" and sid not in comerciales:
+            continue
         if sid not in importes:
             pendientes.append(_fila(
                 periodo, origen="NOMINA", registro_id=None, sucursal_id=sid, familia="nomina",
