@@ -297,6 +297,16 @@
                 {% with comparison=case.physical_comparison %}
                 {% if comparison %}
                 <p><strong>Físico vs Point: {{ comparison.label }}</strong>
+                  {% with at_time=comparison.at_recorded_time %}{% if at_time %}<br>
+                  Hora registrada: {{ at_time.stamp|date:"d/m/Y H:i:s" }} ·
+                  Conteo: {{ comparison.quantity|floatformat:"-6u" }} {{ comparison.unit }} ·
+                  Point a esa hora: {{ at_time.point|floatformat:"-6u" }} {{ comparison.unit }} ·
+                  Diferencia a esa hora: {{ at_time.difference|floatformat:"-6u" }} {{ comparison.unit }}<br>
+                  <small>Cierre {{ comparison.closing|floatformat:"-6u" }} − variación posterior ({{ at_time.variation|floatformat:"-6u" }}) = {{ at_time.point|floatformat:"-6u" }} {{ comparison.unit }}.
+                    {% if at_time.movement_ids %}<a href="{{ case.url }}">{{ at_time.movement_ids|length }} movimiento{{ at_time.movement_ids|length|pluralize }} posterior{{ at_time.movement_ids|length|pluralize:",es" }} al conteo</a>.{% else %}Sin movimientos posteriores al conteo.{% endif %}
+                  </small>
+                  {% endif %}{% endwith %}
+                  {% if comparison.basis %}<br><small>{{ comparison.basis }}</small>{% endif %}
                   {% if comparison.delta is not None and comparison.quantity is not None %}<br>
                   Conteo: {{ comparison.quantity|floatformat:"-6u" }} {{ comparison.unit }} ·
                   Final Point: {{ comparison.closing|floatformat:"-6u" }} {{ comparison.unit }} ·
