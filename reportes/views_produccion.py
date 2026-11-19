@@ -26,6 +26,7 @@ from recetas.utils.derived_product_presentations import get_total_cost_map
 from reportes.models import ProductInventoryAuditRun
 from reportes.services_inventory_audit_report import read_audit_report, audit_report_version
 from reportes.services_production_physical_evidence import add_physical_evidence
+from reportes.services_operational_opening_evidence import add_operational_opening_evidence
 
 
 ZERO = Decimal("0")
@@ -345,6 +346,7 @@ class ProducidoVsVendidoMermaView(LoginRequiredMixin, TemplateView):
             return self._export_pdf(context)
         self._add_html_coverage(context)
         add_physical_evidence(request.user, context["closing_reference"], context["groups"])
+        add_operational_opening_evidence(context["closing_reference"], context["groups"])
         return self.render_to_response(context)
 
     @staticmethod

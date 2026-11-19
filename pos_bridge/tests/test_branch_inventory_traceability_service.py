@@ -3095,3 +3095,35 @@ class BranchInventoryTraceabilityServiceTests(TestCase):
         self.assertTrue(expanded.source_complete)
         self.assertEqual(len(expanded_queries), len(baseline_queries))
         self.assertLessEqual(len(expanded_queries), 25)
+
+    def test_direct_loader_omits_unused_job_and_product_payload_joins(self):
+        self._sale()
+        self._production()
+        self._waste()
+        indexes = self.service._build_product_indexes([self.product])
+        with CaptureQueriesContext(connection) as queries:
+            self.service._load_direct_movements(month_start=date(2026, 8, 1),
+                closing_date=date(2026, 8, 31), product_indexes=indexes)
+        for table in ("pos_bridge_daily_sales", "pos_bridge_production_lines", "pos_bridge_waste_lines"):
+            sql = next(q["sql"] for q in queries if f'FROM "{table}"' in q["sql"])
+            self.assertNotIn('JOIN "pos_bridge_sync_jobs"', sql)
+            self.assertNotIn('JOIN "pos_bridge_products"', sql)
+
+    def test_direct_loader_branch_scope_preserves_global_coverage_and_local_quantities(self):
+        self._sale(branch=self.centro, quantity="2")
+        self._sale(branch=self.plaza, quantity="3")
+        self._production(branch=self.centro, quantity="4")
+        self._production(branch=self.plaza, quantity="5")
+        self._waste(branch=self.centro, quantity="1")
+        self._waste(branch=self.plaza, quantity="2")
+        indexes = self.service._build_product_indexes([self.product])
+        kwargs = dict(month_start=date(2026, 8, 1), closing_date=date(2026, 8, 31), product_indexes=indexes)
+        full = self.service._load_direct_movements(**kwargs)
+        scoped = self.service._load_direct_movements(**kwargs, branch_ids=(self.centro.pk,))
+        for global_map, scoped_map in zip(full[:11], scoped[:11]):
+            self.assertEqual({key: value for key, value in global_map.items() if key[0] == self.centro.pk}, scoped_map)
+        self.assertEqual(full[-1], scoped[-1])
+        self.assertEqual(scoped[-1], ())
+        self.production_job.status = PointSyncJob.STATUS_FAILED
+        self.production_job.save(update_fields=["status"])
+        self.assertTrue(self.service._load_direct_movements(**kwargs, branch_ids=(self.centro.pk,))[-1])

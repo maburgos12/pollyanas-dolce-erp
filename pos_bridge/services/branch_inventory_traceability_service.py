@@ -530,13 +530,18 @@ class BranchInventoryTraceabilityService:
             }
         )
 
-    def _load_direct_movements(self, *, month_start, closing_date, product_indexes):
+    def _load_direct_movements(self, *, month_start, closing_date, product_indexes, branch_ids=None):
+        # A scoped consumer reuses the monthly authority contracts, while reading
+        # row-level events only for its requested Point locations. Default stays
+        # the full-network ledger used by the audit materializer.
+        scope = None if branch_ids is None else set(branch_ids)
+        branch_filter = {} if scope is None else {"branch_id__in": scope}
         lower_bound, upper_bound = self._month_datetime_bounds(month_start)
         sales_rows = list(
             official_point_sales_rows_for_range(
                 start_date=month_start, end_date=closing_date
             )
-            .select_related("branch", "product", "sync_job")
+            .select_related("branch")
             .only(
                 "id",
                 "branch_id",
@@ -555,9 +560,9 @@ class BranchInventoryTraceabilityService:
         production_rows = list(
             PointProductionLine.objects.filter(
                 production_date__gte=month_start,
-                production_date__lte=closing_date,
+                production_date__lte=closing_date, **branch_filter,
             )
-            .select_related("branch", "sync_job")
+            .select_related(None)
             .only(
                 "id",
                 "branch_id",
@@ -574,9 +579,9 @@ class BranchInventoryTraceabilityService:
         waste_rows = list(
             PointWasteLine.objects.filter(
                 movement_at__gte=lower_bound,
-                movement_at__lt=upper_bound,
+                movement_at__lt=upper_bound, **branch_filter,
             )
-            .select_related("branch", "sync_job", "receta")
+            .select_related("receta")
             .only(
                 "id",
                 "branch_id",
@@ -601,6 +606,7 @@ class BranchInventoryTraceabilityService:
                     registered_at__lt=upper_bound,
                 )
             )
+            .filter(Q() if scope is None else Q(origin_branch_id__in=scope) | Q(destination_branch_id__in=scope))
             .only(
                 "id",
                 "origin_branch_id",
@@ -628,7 +634,7 @@ class BranchInventoryTraceabilityService:
         conversion_rows = list(
             PointConversionLine.objects.filter(
                 movement_at__gte=lower_bound,
-                movement_at__lt=upper_bound,
+                movement_at__lt=upper_bound, **branch_filter,
             )
             .only(
                 "id",
@@ -656,13 +662,17 @@ class BranchInventoryTraceabilityService:
             family="production",
             month_start=month_start,
             month_end=closing_date,
-            row_job_ids=[row.sync_job_id for row in production_rows],
+            row_job_ids=([row.sync_job_id for row in production_rows] if scope is None else list(
+                PointProductionLine.objects.filter(production_date__gte=month_start,
+                    production_date__lte=closing_date).values_list("sync_job_id", flat=True))),
         )
         waste_authority = authority_service._validate_month_movement_job(
             family="waste",
             month_start=month_start,
             month_end=closing_date,
-            row_job_ids=[row.sync_job_id for row in waste_rows],
+            row_job_ids=([row.sync_job_id for row in waste_rows] if scope is None else list(
+                PointWasteLine.objects.filter(movement_at__gte=lower_bound,
+                    movement_at__lt=upper_bound).values_list("sync_job_id", flat=True))),
         )
         transfer_authority = self._validate_transfer_authority(
             month_start=month_start,
@@ -673,7 +683,9 @@ class BranchInventoryTraceabilityService:
             family="conversions",
             month_start=month_start,
             month_end=closing_date,
-            row_job_ids=[row.sync_job_id for row in conversion_rows],
+            row_job_ids=([row.sync_job_id for row in conversion_rows] if scope is None else list(
+                PointConversionLine.objects.filter(movement_at__gte=lower_bound,
+                    movement_at__lt=upper_bound).values_list("sync_job_id", flat=True))),
         )
         authorities = {
             "sales": {
@@ -719,6 +731,8 @@ class BranchInventoryTraceabilityService:
         issues: list[TraceSourceIssue] = []
 
         for row in sales_rows:
+            if scope is not None and row.branch_id not in scope:
+                continue
             product_id, issue_code = self._resolve_sales_product(row, product_indexes)
             self._record_direct_row(
                 balances=sales,
@@ -799,7 +813,7 @@ class BranchInventoryTraceabilityService:
             conversion_out_impacts=conversion_out_impacts,
             issues=issues,
         )
-        return (
+        maps = (
             sales,
             production,
             waste,
@@ -811,9 +825,10 @@ class BranchInventoryTraceabilityService:
             conversion_out,
             conversion_in_impacts,
             conversion_out_impacts,
-            tuple(issues),
-            tuple(authority_issues),
         )
+        if scope is not None:
+            maps = tuple({key: value for key, value in values.items() if key[0] in scope} for values in maps)
+        return (*maps, tuple(issues), tuple(authority_issues))
 
     @classmethod
     def _validate_transfer_authority(cls, *, month_start, month_end, rows):
