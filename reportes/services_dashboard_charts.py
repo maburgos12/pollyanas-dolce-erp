@@ -7,7 +7,7 @@ from django.db.models import Sum
 
 from control.models import MermaMensualSucursal
 from reportes.models import EmpresaResultadoMensual, PresupuestoResumenMensual
-from reportes.services_budget_vs_actual import BUDGET_VS_ACTUAL_SOURCE
+from reportes.services_budget_vs_actual import BUDGET_VS_ACTUAL_SOURCE, merma_financiera_verificada
 
 ZERO = Decimal("0")
 SHORT_MONTH_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
@@ -105,12 +105,20 @@ def build_dashboard_charts_payload(*, year: int) -> dict[str, object]:
         costs["logistica"].append(_money(logistica))
         ventas_context.append(_money(ventas))
 
-    waste_rows = (
+    waste_rows = list(
         MermaMensualSucursal.objects.filter(periodo__year=year)
         .values("periodo")
         .annotate(costo=Sum("costo_merma"))
         .order_by("periodo")
     )
+    waste_reconciled_sources = {}
+    octubre = finance_by_month.get(10) if year == 2026 else None
+    verified_waste = merma_financiera_verificada(octubre)
+    if verified_waste is not None:
+        waste_rows = [r for r in waste_rows if r['periodo'] != octubre.periodo]
+        waste_rows.append({'periodo': octubre.periodo, 'costo': verified_waste})
+        waste_rows.sort(key=lambda r: r['periodo'])
+        waste_reconciled_sources[octubre.periodo.isoformat()] = 'reportes.EmpresaResultadoMensual.metadata.merma_registrada'
     waste_labels: list[str] = []
     waste_periods: list[str] = []
     waste_cost: list[str] = []
@@ -133,6 +141,7 @@ def build_dashboard_charts_payload(*, year: int) -> dict[str, object]:
             "actual": "reportes.EmpresaResultadoMensual",
             "budget": "reportes.PresupuestoResumenMensual",
             "waste": "control.MermaMensualSucursal",
+            "waste_reconciled_periods": waste_reconciled_sources,
         },
         "charts": {
             "ventas_vs_presupuesto": {

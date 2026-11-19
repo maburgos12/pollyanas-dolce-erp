@@ -6,7 +6,7 @@ se conserva el criterio del expediente de RRHH.
 """
 from collections import defaultdict
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import re
 
 from core.models import Sucursal
@@ -94,12 +94,32 @@ def leer_personal_mensual(periodo: date) -> dict:
     importes = defaultdict(lambda: ZERO)
     periodos = defaultdict(set)
     discrepancias = defaultdict(set)
-    nominas = (
+    nominas = list(
         NominaLinea.objects.filter(
             periodo__fecha_fin__year=periodo.year, periodo__fecha_fin__month=periodo.month,
             periodo__estatus__in=(NominaPeriodo.ESTATUS_CERRADA, NominaPeriodo.ESTATUS_PAGADA),
         ).select_related("empleado", "periodo").prefetch_related("conceptos")
     )
+    rrhh_total = sum((n.total_percepciones for n in nominas
+                     if (n.departamento_snapshot or n.empleado.departamento) == 'RRHH'), ZERO)
+    rrhh_central = ZERO
+    for central in LineaPresupuestoMensual.objects.filter(
+        periodo=periodo, version='ORIGINAL', rubro__activo=True,
+        rubro__area__codigo='administracion', fuente_real__startswith='AUTO:NOMINA',
+        monto_real__isnull=False,
+    ):
+        meta = central.metadata or {}
+        partes = meta.get('real_breakdown', [])
+        if meta.get('sin_datos_fuente') or not isinstance(partes, list):
+            continue
+        try:
+            montos = [Decimal(str(p['monto'])) for p in partes]
+            if any(not m.is_finite() for m in montos) or sum(montos, ZERO) != central.monto_real:
+                continue
+            rrhh_central += sum((m for p, m in zip(partes, montos)
+                if p.get('tipo_fuente') == 'NOMINA' and (p.get('filtros') or {}).get('departamento') == 'RRHH'), ZERO)
+        except (KeyError, TypeError, ValueError, InvalidOperation):
+            continue
     for linea in nominas:
         # Producción ya pertenece al costo de fabricación, no a ventas.
         historica = linea.snapshot_origen == NominaLinea.SNAPSHOT_HISTORICA
@@ -107,6 +127,10 @@ def leer_personal_mensual(periodo: date) -> dict:
             linea.departamento_snapshot or linea.empleado.departamento or "").upper()
         if departamento in {"PRODUCCION", "LOGISTICA", "ADMINISTRACION"}:
             continue
+        if departamento == 'RRHH' and rrhh_total > ZERO and rrhh_central == rrhh_total:
+            from .services_personal_registrado import destino_personal
+            if destino_personal(linea) == 'administracion':
+                continue
         sucursal_id = linea.sucursal_snapshot_id if historica else (
             linea.sucursal_snapshot_id or linea.empleado.sucursal_ref_id)
         if departamento != "VENTAS" or sucursal_id is None:

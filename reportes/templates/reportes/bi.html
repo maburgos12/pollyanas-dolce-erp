@@ -267,7 +267,7 @@
           </div>
           <div class="bi-metric">
             <div class="bi-metric-label">Venta costeada YTD</div>
-            <div class="bi-metric-value">${{ budget_operating_panel.ytd_costed_sales|floatformat:2|intcomma }}</div>
+            <div class="bi-metric-value">{% if budget_operating_panel.ytd_costed_sales is not None %}${{ budget_operating_panel.ytd_costed_sales|floatformat:2|intcomma }}{% else %}N/D{% endif %}</div>
             <div class="bi-subtle">
               {% if budget_operating_panel.ytd_costed_coverage_pct is not None %}
                 Cobertura {{ budget_operating_panel.ytd_costed_coverage_pct|floatformat:1 }}%
@@ -277,9 +277,9 @@
             </div>
           </div>
           <div class="bi-metric">
-            <div class="bi-metric-label">Costo fabricación registrado YTD</div>
+            <div class="bi-metric-label">{% if budget_operating_panel.ytd_includes_recorded_waste %}Costo producto y merma YTD{% else %}Costo fabricación registrado YTD{% endif %}</div>
             <div class="bi-metric-value">${{ budget_operating_panel.ytd_manufacturing|floatformat:2|intcomma }}</div>
-            <div class="bi-subtle">Costo de fabricación registrado · provisional</div>
+            <div class="bi-subtle">{% if budget_operating_panel.ytd_includes_recorded_waste %}Costo de producto registrado · merma acreditada solo en octubre de 2026{% else %}Costo de fabricación registrado{% endif %} · provisional</div>
           </div>
           <div class="bi-metric">
             <div class="bi-metric-label">Utilidad operativa provisional YTD</div>
@@ -497,7 +497,7 @@
             </div>
             <div class="bi-budget-story-compare-item">
               <span>Margen bruto provisional</span>
-              <strong>{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:0|intcomma }}{% else %}Pendiente{% endif %}</strong>
+              <strong>{% if row.has_finance and not row.financial_projection_invalid and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:0|intcomma }}{% else %}Pendiente{% endif %}</strong>
               <div class="bi-subtle">
                 {% if row.gross_margin_pct is not None %}
                 {{ row.gross_margin_pct|floatformat:1 }}% · provisional
@@ -547,9 +547,9 @@
                   <td><span class="bi-tone {{ row.sales_signal.tone|default:'neutral' }}">{{ row.sales_signal.label }}</span></td>
                 </tr>
                 <tr>
-                  <td>Costo producto</td>
+                  <td>{% if row.financial_projection_invalid %}Componentes pendientes de validar · {% endif %}Costo producto{% if row.financial_projection_verified %} y merma{% endif %}</td>
                   <td class="text-end">${{ row.product_cost_budget_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">{% if row.financial_projection_verified %}${{ row.product_variable_cost_total|floatformat:2|intcomma }}<br><small>Material ${{ row.materia_prima_total|floatformat:2|intcomma }}<br>Reventa ${{ row.resale_cost_total|floatformat:2|intcomma }}<br>Merma ${{ row.recorded_waste_total|floatformat:2|intcomma }}</small>{% elif row.has_finance and not row.financial_projection_invalid and row.manufacturing_total > 0 %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.product_cost_budget_mix_pct is not None %}Pres. {{ row.product_cost_budget_mix_pct|floatformat:1 }}%{% endif %}
                     {% if row.actual_product_cost_mix_pct is not None %}<br>Registrado {{ row.actual_product_cost_mix_pct|floatformat:1 }}%{% endif %}
@@ -559,7 +559,7 @@
                 <tr>
                   <td>Margen bruto provisional</td>
                   <td class="text-end">N/D</td>
-                  <td class="text-end">{% if row.has_finance and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance and not row.financial_projection_invalid and row.manufacturing_total > 0 %}${{ row.gross_margin_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.gross_margin_pct is not None %}Provisional {{ row.gross_margin_pct|floatformat:1 }}%{% else %}N/D{% endif %}
                   </td>
@@ -568,20 +568,20 @@
                 <tr>
                   <td>Gasto recurrente</td>
                   <td class="text-end">${{ row.recurrent_expense_budget_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">{% if row.financial_amounts_available or row.finance_close_complete %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.recurrent_expense_budget_mix_pct is not None %}Pres. {{ row.recurrent_expense_budget_mix_pct|floatformat:1 }}%{% endif %}
-                    {% if row.finance_close_complete and row.actual_expense_mix_pct is not None %}<br>Registrado {{ row.actual_expense_mix_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                    {% if row.financial_amounts_available|default:row.finance_close_complete and row.actual_expense_mix_pct is not None %}<br>Registrado {{ row.actual_expense_mix_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
                   </td>
                   <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.expense_signal only %}</td>
                 </tr>
                 <tr>
                   <td>Resultado</td>
                   <td class="text-end">${{ row.budget_result_total|floatformat:2|intcomma }}</td>
-                  <td class="text-end">{% if row.finance_close_complete %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
+                  <td class="text-end">{% if row.financial_amounts_available or row.finance_close_complete %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}Cierre pendiente{% endif %}</td>
                   <td class="text-end">
                     {% if row.budget_result_margin_pct is not None %}Pres. {{ row.budget_result_margin_pct|floatformat:1 }}%{% endif %}
-                    {% if row.finance_close_complete and row.operating_margin_pct is not None %}<br>Registrado {{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
+                    {% if row.financial_amounts_available|default:row.finance_close_complete and row.operating_margin_pct is not None %}<br>Registrado {{ row.operating_margin_pct|floatformat:1 }}%{% elif row.has_finance %}<br>Pendiente cierre{% endif %}
                   </td>
                   <td>{% include "reportes/partials/bi_financial_signal.html" with signal=row.margin_signal only %}</td>
                 </tr>
@@ -589,8 +589,8 @@
             </table>
           </div>
           <div class="bi-branch-mix">
-            <span class="bi-mix-pill">No receta ${{ row.non_recipe_total|floatformat:0|intcomma }}</span>
-            <span class="bi-mix-pill">Fab. ${{ row.manufacturing_total|floatformat:0|intcomma }}</span>
+            <span class="bi-mix-pill">No receta {% if row.non_recipe_total is not None %}${{ row.non_recipe_total|floatformat:0|intcomma }}{% else %}N/D{% endif %}</span>
+            {% if row.financial_projection_verified %}<span class="bi-mix-pill">Producto y merma ${{ row.product_variable_cost_total|floatformat:0|intcomma }}</span>{% else %}<span class="bi-mix-pill">Fab. ${{ row.manufacturing_total|floatformat:0|intcomma }}</span>{% endif %}
             <span class="bi-mix-pill">Comercial ${{ row.commercial_total|floatformat:0|intcomma }}</span>
             <span class="bi-mix-pill">Corporativo ${{ row.corporate_total|floatformat:0|intcomma }}</span>
           </div>
@@ -662,12 +662,12 @@
                   <td class="text-end">{% if row.has_budget %}${{ row.sales_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_finance %}${{ row.sales_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_budget %}${{ row.product_cost_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
-                  <td class="text-end">{% if row.has_finance %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.financial_projection_verified %}${{ row.product_variable_cost_total|floatformat:2|intcomma }}{% elif row.has_finance and not row.financial_projection_invalid %}${{ row.manufacturing_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_budget %}${{ row.recurrent_expense_budget_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_finance %}${{ row.operating_expense_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_budget %}${{ row.budget_result_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.has_finance %}${{ row.operating_profit_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
-                  <td class="text-end">{% if row.has_finance %}${{ row.non_recipe_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
+                  <td class="text-end">{% if row.has_finance and row.non_recipe_total is not None %}${{ row.non_recipe_total|floatformat:2|intcomma }}{% else %}N/D{% endif %}</td>
                   <td class="text-end">{% if row.costed_coverage_pct is not None %}{{ row.costed_coverage_pct|floatformat:1 }}%{% else %}N/D{% endif %}</td>
                 </tr>
                 {% endfor %}
@@ -944,7 +944,7 @@
                 <div class="bi-branch-mix">
                   <span class="bi-mix-pill">Fabricado {% if row.fabricated_mix_pct is not None %}{{ row.fabricated_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
                   <span class="bi-mix-pill">Reventa {% if row.resale_mix_pct is not None %}{{ row.resale_mix_pct|floatformat:1 }}%{% else %}N/D{% endif %}</span>
-                  <span class="bi-mix-pill">No receta ${{ row.non_recipe_total|floatformat:0|intcomma }}</span>
+                  <span class="bi-mix-pill">No receta {% if row.non_recipe_total is not None %}${{ row.non_recipe_total|floatformat:0|intcomma }}{% else %}N/D{% endif %}</span>
                   <span class="bi-mix-pill">Residual ${{ row.non_recipe_resale_total|floatformat:0|intcomma }}</span>
                   <span class="bi-mix-pill">Accesorio ${{ row.non_recipe_accessory_total|floatformat:0|intcomma }}</span>
                   <span class="bi-mix-pill">Servicio ${{ row.non_recipe_service_total|floatformat:0|intcomma }}</span>

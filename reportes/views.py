@@ -4116,10 +4116,13 @@ def costo_receta(request: HttpRequest) -> HttpResponse:
     profitability_panel = finance_context["profitability_panel"]
     from reportes.services_mano_obra_mensual import analisis_aprobado, puede_revisar
     mano_obra_mensual = analisis_aprobado(selected_budget_period.strftime('%Y-%m'))
-    budget_vs_actual = BudgetVsActualSnapshotService().build_snapshot(
-        period_start=selected_budget_period,
-        dry_run=True,
-    )
+    try:
+        budget_vs_actual = BudgetVsActualSnapshotService().build_snapshot(
+            period_start=selected_budget_period,
+            dry_run=True,
+        )
+    except ValueError as exc:
+        return HttpResponse(str(exc), status=409, content_type='text/plain; charset=utf-8')
     hero_delta_pct = _safe_pct_local(
         _to_decimal(finance_context["total_delta"], "0"),
         _to_decimal(finance_context["previous_total"], "0"),

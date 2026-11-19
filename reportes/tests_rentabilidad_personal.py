@@ -16,6 +16,23 @@ from rrhh.models import Empleado, NominaConceptoLinea, NominaLinea, NominaPeriod
 
 
 class PersonalMensualTests(TestCase):
+    def test_rrhh_solo_deja_aviso_cuando_sueldo_central_coincide_con_fuente(self):
+        linea = self.nomina(departamento='RRHH')
+        def avisos():
+            return [p for p in self.leer()['pendientes'] if p['sucursal_id'] is None
+                    and p['origen'] == 'NOMINA' and p['registro_id'] == linea.periodo_id]
+        self.assertTrue(avisos())
+        area = AreaPresupuesto.objects.create(codigo='administracion', nombre='Administración')
+        rubro = RubroPresupuesto.objects.create(area=area, concepto='Sueldo', tipo='EGRESO')
+        central = LineaPresupuestoMensual.objects.create(rubro=rubro, periodo=date(2026, 6, 1),
+            monto_presupuesto=0, monto_real=linea.total_percepciones, fuente_real='AUTO:NOMINA',
+            metadata={'real_breakdown': [{'tipo_fuente': 'NOMINA', 'monto': str(linea.total_percepciones),
+                'filtros': {'departamento': 'RRHH'}}]})
+        self.assertFalse(avisos())
+        central.metadata['sin_datos_fuente'] = True
+        central.save(update_fields=['metadata'])
+        self.assertTrue(avisos())
+
     @classmethod
     def setUpTestData(cls):
         cls.sucursal = Sucursal.objects.create(codigo="PER-MAT", nombre="Matriz")

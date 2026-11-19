@@ -121,6 +121,7 @@ class PresupuestoRealConsolidacionService:
         periodo: date,
         version: str = LineaPresupuestoMensual.VERSION_ORIGINAL,
         areas: list[str] | None = None,
+        rubro_ids: list[int] | None = None,
         dry_run: bool = False,
     ) -> ConsolidacionSummary:
         periodo = periodo.replace(day=1)
@@ -133,6 +134,8 @@ class PresupuestoRealConsolidacionService:
         )
         if areas:
             lineas = lineas.filter(rubro__area__codigo__in=areas)
+        if rubro_ids is not None:
+            lineas = lineas.filter(rubro_id__in=rubro_ids)
 
         indices: dict[str, dict] = {}  # un índice por tipo de fuente, perezoso
 
@@ -262,6 +265,24 @@ class PresupuestoRealConsolidacionService:
     def _monto_regla(
         self, regla: ReglaFuenteRubro, periodo: date, indices: dict
     ) -> tuple[Decimal, bool]:
+        if regla.tipo_fuente in {ReglaFuenteRubro.FUENTE_NOMINA, ReglaFuenteRubro.FUENTE_NOMINA_CONCEPTO}:
+            if not _vigente(regla, periodo):
+                return Decimal('0'), False
+        if (regla.filtros or {}).get('cobertura_mensual_documentada') == f'{periodo:%Y-%m}':
+            if regla.tipo_fuente not in {ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO,
+                                         ReglaFuenteRubro.FUENTE_OBLIGACION_GASTO}:
+                raise ValueError('La cobertura mensual requiere una fuente de gasto.')
+            if 'cobertura_mensual' not in indices:
+                from .services_rentabilidad_gastos import leer_gastos_mensuales
+                indices['cobertura_mensual'] = leer_gastos_mensuales(
+                    periodo, incluir_indirectos_produccion=True)
+            lectura = indices['cobertura_mensual']
+            filas = [f for f in lectura['filas'] if f.get('regla_id') == regla.pk]
+            pendientes = [f for f in lectura['pendientes'] if f.get('regla_id') == regla.pk]
+            if pendientes or any(f['estado'] != 'COMPLETO' for f in filas):
+                raise ValueError('Cobertura mensual incompleta; no publicar un subtotal.')
+            # El lector ya aplicó el signo; consolidar lo aplicará una sola vez.
+            return sum((f['monto_mensual'] for f in filas), Decimal('0')) / regla.signo, bool(filas)
         if regla.tipo_fuente == ReglaFuenteRubro.FUENTE_GASTO_OPERATIVO:
             if not _vigente(regla, periodo):
                 return (Decimal("0"), False)

@@ -20,7 +20,10 @@ class BudgetVsActualView(APIView):
         except Exception:
             return Response({"detail": "Periodo inválido. Usa formato YYYY-MM."}, status=status.HTTP_400_BAD_REQUEST)
 
-        summary = BudgetVsActualSnapshotService().build_snapshot(period_start=period_start, dry_run=True)
+        try:
+            summary = BudgetVsActualSnapshotService().build_snapshot(period_start=period_start, dry_run=True)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=status.HTTP_409_CONFLICT)
         return Response(
             {
                 "period": summary.period.isoformat(),

@@ -16,6 +16,7 @@ from django.db.models import Count, Max, Min, Q, Sum
 from django.utils import timezone
 from unidecode import unidecode
 
+from reportes.services_budget_vs_actual import merma_financiera_verificada
 from core.cache_versions import get_or_set_versioned_cache
 from pos_bridge.config import load_point_bridge_settings
 from pos_bridge.models import (
@@ -2039,6 +2040,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
     ytd_actual_expense = ZERO
     ytd_sales = ZERO
     ytd_costed_sales = ZERO
+    ytd_coverage_complete = True
     ytd_non_recipe = ZERO
     ytd_manufacturing = ZERO
     ytd_commercial = ZERO
@@ -2071,7 +2073,9 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         budget_result_total = sales_budget_total - product_cost_budget_total - recurrent_expense_budget_total
         monthly_official = monthly_official_rows.get(month)
         sales_total = _to_decimal(getattr(finance, "venta_total", ZERO))
-        if monthly_official is not None:
+        finance_meta = getattr(finance, 'metadata', {}) or {}
+        projection_marked = period == date(2026, 10, 1) and finance_meta.get('ajustes_verificados_octubre_2026') is True
+        if monthly_official is not None and not projection_marked:
             sales_total = _to_decimal(monthly_official.total_amount)
         manufacturing_total = _to_decimal(getattr(finance, "costo_fabricacion_total", ZERO))
         materia_prima_total = _to_decimal(getattr(finance, "costo_materia_prima_total", ZERO))
@@ -2094,6 +2098,12 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
             if has_finance_breakdown
             else manufacturing_total
         )
+        finance_meta = getattr(finance, 'metadata', {}) or {}
+        verified_waste = merma_financiera_verificada(finance)
+        financial_projection_verified = verified_waste is not None
+        product_cost_before_waste = product_variable_cost_total
+        recorded_waste_total = verified_waste if projection_marked else ZERO
+        product_variable_cost_total += verified_waste if verified_waste is not None else ZERO
         commercial_total = _to_decimal(getattr(finance, "gasto_comercial_total", ZERO))
         corporate_total = _to_decimal(getattr(finance, "gasto_corporativo_total", ZERO))
         production_load_total = (
@@ -2106,13 +2116,19 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         finance_meta = getattr(finance, "metadata", {}) or {}
         costed_sales_total = _to_decimal(finance_meta.get("venta_costeada_total", ZERO))
         non_recipe_total = _to_decimal(finance_meta.get("venta_no_receta_total", ZERO))
-        costed_coverage_pct = _safe_pct(costed_sales_total, sales_total)
+        if projection_marked:
+            costed_sales_total = None
+            non_recipe_total = None
+        costed_coverage_pct = _safe_pct(costed_sales_total, sales_total) if costed_sales_total is not None else None
         finance_close_complete = (
             finance is not None
             and sales_total > 0
-            and costed_sales_total > 0
+            and costed_sales_total is not None and costed_sales_total > 0
             and operating_expense_total > 0
         )
+        financial_amounts_available = finance_close_complete or (
+            financial_projection_verified and bool(finance_meta.get('fuente_corte'))
+            and sales_total > 0 and product_variable_cost_total > 0 and operating_expense_total > 0)
         gross_margin_total = sales_total - product_variable_cost_total
         gross_margin_pct = _safe_pct(gross_margin_total, sales_total)
 
@@ -2129,12 +2145,15 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 ytd_product_cost_budget += product_cost_budget_total
                 ytd_recurrent_expense_budget += recurrent_expense_budget_total
                 ytd_budget_result += budget_result_total
-        if finance is not None:
+        if finance is not None and not (projection_marked and not financial_projection_verified):
             months_with_finance += 1
             if month <= ytd_cutoff_month:
                 ytd_sales += sales_total
-                ytd_costed_sales += costed_sales_total
-                ytd_non_recipe += non_recipe_total
+                if costed_sales_total is None or non_recipe_total is None:
+                    ytd_coverage_complete = False
+                else:
+                    ytd_costed_sales += costed_sales_total
+                    ytd_non_recipe += non_recipe_total
                 ytd_manufacturing += product_variable_cost_total
                 ytd_commercial += commercial_total
                 ytd_corporate += corporate_total
@@ -2204,6 +2223,11 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 "production_overhead_total": production_overhead_total,
                 "production_packaging_total": production_packaging_total,
                 "product_variable_cost_total": product_variable_cost_total,
+                "product_cost_before_waste": product_cost_before_waste,
+                "recorded_waste_total": recorded_waste_total,
+                "financial_projection_verified": financial_projection_verified,
+                "financial_projection_invalid": projection_marked and not financial_projection_verified,
+                "financial_amounts_available": financial_amounts_available,
                 "production_load_total": production_load_total,
                 "gross_margin_total": gross_margin_total,
                 "gross_margin_pct": gross_margin_pct,
@@ -2231,6 +2255,10 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
                 "has_finance": finance is not None,
             }
         )
+        if projection_marked and not financial_projection_verified:
+            rows[-1].update(gross_margin_total=None, gross_margin_pct=None,
+                actual_product_cost_mix_pct=None, actual_expense_mix_pct=None, operating_margin_pct=None,
+                gross_margin_signal=_pending_signal('Sin lectura', 'Los componentes del corte requieren validación.'))
 
     latest_finance_month = max(finance_rows.keys(), default=None)
     latest_budget_month = max(budget_rows.keys(), default=None)
@@ -2340,6 +2368,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         "months_with_budget": months_with_budget,
         "months_with_finance": months_with_finance,
         "ytd_cutoff_label": month_labels[ytd_cutoff_month - 1],
+        "ytd_includes_recorded_waste": any(r['financial_projection_verified'] and r['period'].month <= ytd_cutoff_month for r in rows),
         "latest_finance_label": month_labels[latest_finance_month - 1] if latest_finance_month else "Sin snapshot",
         "latest_budget_label": month_labels[latest_budget_month - 1] if latest_budget_month else "Sin presupuesto",
         "ytd_budget_master": ytd_budget_master,
@@ -2353,8 +2382,8 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
         "ytd_actual_expense": ytd_actual_expense,
         "ytd_structured_budget_total": ytd_product_cost_budget + ytd_recurrent_expense_budget,
         "ytd_sales": ytd_sales,
-        "ytd_costed_sales": ytd_costed_sales,
-        "ytd_non_recipe": ytd_non_recipe,
+        "ytd_costed_sales": ytd_costed_sales if ytd_coverage_complete else None,
+        "ytd_non_recipe": ytd_non_recipe if ytd_coverage_complete else None,
         "ytd_manufacturing": ytd_manufacturing,
         "ytd_commercial": ytd_commercial,
         "ytd_corporate": ytd_corporate,
@@ -2377,7 +2406,7 @@ def build_budget_operating_panel(*, year: int | None = None, selected_month: int
             _expense_ratio_signal(_safe_pct(ytd_actual_expense, ytd_sales)),
             _margin_ratio_signal(_safe_pct(ytd_profit, ytd_sales)),
         ),
-        "ytd_costed_coverage_pct": _safe_pct(ytd_costed_sales, ytd_sales),
+        "ytd_costed_coverage_pct": _safe_pct(ytd_costed_sales, ytd_sales) if ytd_coverage_complete else None,
         "coverage_note": coverage_note,
         "budget_confidence_status": budget_confidence_status,
         "budget_confidence_label": budget_confidence_label,
