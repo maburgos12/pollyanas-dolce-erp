@@ -5682,7 +5682,15 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     sales_meta = closure_metadata.get("sales_meta", {})
     fact_meta = closure_metadata.get("fact_meta", {})
     validation = closure_metadata.get("validation", {})
-    automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
+    automation_reviews = [
+        review if isinstance(review, dict) else {
+            "label": "Revisión automática",
+            "status": "Pendiente de revisión",
+            "detail": str(review),
+            "passed": False,
+        }
+        for review in (validation.get("automation_reviews") or [])
+    ] if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
     lock_event = closure_metadata.get("lock_event", {})
     fact_status = str(fact_meta.get("status") or "").strip()
