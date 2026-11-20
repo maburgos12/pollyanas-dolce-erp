@@ -929,3 +929,83 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["closure"]["sales"]["fact_tickets"], 5)
         self.assertContains(response, "Cantidad reportada 8 · unidad por acreditar · 5 tickets")
+
+
+class DailyClosureSourceCopyTests(SimpleTestCase):
+    """Technical provenance stays available without being the operational label."""
+
+    def _render(self, domains):
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        request = RequestFactory().get("/reportes/cierre-operativo/?fecha=2026-11-18")
+        request.user = AnonymousUser()
+        return render_to_string("reportes/cierre_operativo_diario.html", {"request": request,
+            "closure": {
+                "domains": domains,
+                "sales": {"visible_source": "FactVentaDiaria", "fact_amount": Decimal("104124.01")},
+                "source_notes": [{"label": "Inventario", "detail": "FactInventarioDiario; Point ALMACÉN"}],
+            },
+            "target_date_iso": "2026-11-18",
+        })
+
+    def test_operator_labels_keep_technical_provenance_in_closed_details(self):
+        from html.parser import HTMLParser
+        from copy import deepcopy
+
+        class DefaultText(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.depth = 0
+                self.summary = False
+                self.text = []
+                self.open_details = 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "details":
+                    self.depth += 1
+                    self.open_details += int("open" in dict(attrs))
+                if tag == "summary":
+                    self.summary = True
+
+            def handle_endtag(self, tag):
+                if tag == "details":
+                    self.depth -= 1
+                if tag == "summary":
+                    self.summary = False
+
+            def handle_data(self, data):
+                if not self.depth or self.summary:
+                    self.text.append(data)
+
+        domains = [
+            {"key": "ventas", "source_truth": "PointDailySale -> FactVentaDiaria", "visible_source": "FactVentaDiaria"},
+            {"key": "produccion", "source_truth": "PointProductionLine -> FactProduccionDiaria", "visible_source": "FactProduccionDiaria", "plan_note": "PlanProduccion no es PointProductionLine", "plan_visible_max_date": date(2026, 11, 18)},
+            {"key": "mermas", "source_truth": "PointWasteLine -> MermaPOS", "visible_source": "MovimientoInventario MERMA|"},
+            {"key": "inventario", "source_truth": "FactInventarioDiario", "visible_source": "Point ALMACÉN"},
+        ]
+        before = deepcopy(domains)
+        rendered = self._render(domains)
+        parser = DefaultText()
+        parser.feed(rendered)
+        visible = " ".join(parser.text)
+        for label in ["Ventas de Point", "Producción de Point", "Mermas de Point y del ERP", "Movimientos del ERP y stock de Point", "Cantidades de merma en sucursales"]:
+            self.assertIn(label, visible)
+        for technical in ["PointDailySale", "FactVentaDiaria", "PointProductionLine", "FactProduccionDiaria", "PlanProduccion", "PointWasteLine", "MermaPOS", "MovimientoInventario", "FactInventarioDiario"]:
+            self.assertNotIn(technical, visible)
+            self.assertIn(technical, rendered)
+        self.assertIn("104,124.01", visible)
+        self.assertIn("2026-11-18", visible)
+        self.assertEqual(domains, before)
+        self.assertEqual(parser.open_details, 0)
+
+    def test_unknown_domain_keeps_source_available_without_invented_mapping(self):
+        rendered = self._render([{"key": "future", "source_truth": "ExactFutureSource", "visible_source": "ExactFutureReader"}])
+        self.assertIn("Referencia del módulo", rendered)
+        self.assertIn("ExactFutureSource", rendered)
+        self.assertIn("ExactFutureReader", rendered)
+
+    def test_no_plan_notice_remains_visible(self):
+        notice = "No existe plan cargado para la fecha auditada; la producción Point y el plan siguen siendo fuentes distintas."
+        rendered = self._render([{"key": "produccion", "plan_visible_max_date": None, "plan_note": notice}])
+        self.assertIn('<tr><th>Lectura del plan</th><td class="is-right">' + notice + '</td></tr>', rendered)
