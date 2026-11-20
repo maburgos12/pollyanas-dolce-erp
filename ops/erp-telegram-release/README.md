@@ -13,7 +13,7 @@ Ninguna ruta, comando o argumento de ejecución se toma del diagnóstico generad
 ## Contrato de aprobación
 
 - Botón **Aprobar y desplegar**: repo fijo, PR, SHA, base y producción iguales,
-  nonce aleatorio, expiración de una hora, chat privado autorizado y message_id.
+  nonce aleatorio, expiración de 12 horas, chat privado autorizado y message_id.
 - HMAC incluye todos esos datos de revisión. El actor Telegram debe coincidir con
   el chat privado configurado. Una pulsación repetida no ejecuta dos publicaciones.
 - **Rechazar / revocar** funciona antes de que el worker reclame la aprobación.
@@ -175,7 +175,7 @@ python3 -B /usr/local/libexec/erp-point-decision/erp_telegram_cleanup.py status 
 
 Ledger separado `/var/lib/erp-point-decision/cleanups` con permisos root0700/0600.
 HMAC liga namespace, nonce, ID de propuesta, SHA256 de **bytes exactos**, imagen,
-chat, mensaje y vencimiento de una hora. Se persiste el message_id antes de añadir
+chat, mensaje y vencimiento de 12 horas. Se persiste el message_id antes de añadir
 botones. Respuesta inicial perdida deja `notifying`, sin reintento automático; una
 solicitud viva bloquea duplicados. Cualquier identidad, firma o mensaje distinto
 falla cerrado. Aprobación repetida no se acepta; rechazo es terminal, revocación
