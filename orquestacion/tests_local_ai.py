@@ -82,6 +82,7 @@ class LocalAISummaryTests(TransactionTestCase):
         panel = local_ai.panel()
         self.assertEqual(panel["jobs"][0]["status"], "resolved")
         self.assertEqual(panel["jobs"][0]["tokens"], 225)
+        self.assertTrue(panel["jobs"][0]["started_at"])
         self.assertNotIn(job["lease"], str(panel))
         self.assertEqual(local_ai.enqueue()["created"], 0)
 

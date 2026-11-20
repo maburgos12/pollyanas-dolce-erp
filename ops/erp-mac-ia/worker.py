@@ -69,7 +69,7 @@ def infer(job, key):
                 or not isinstance(result["summary"], str) or not 1 <= len(result["summary"].strip()) <= 800):
             raise ValueError("invalid_output")
         usage = response["usage"]
-        if any(type(usage.get(k)) is not int or not 0 <= usage[k] <= 100000
+        if not isinstance(usage, dict) or any(type(usage.get(k)) is not int or not 0 <= usage[k] <= 100000
                for k in ("prompt_tokens", "completion_tokens")):
             raise ValueError("invalid_output")
     except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
@@ -111,9 +111,9 @@ def main():
             completed = {"error": "offline"}
         except ValueError as exc:
             completed = {"error": str(exc) if str(exc) in {"invalid_output", "http_error"} else "invalid_output"}
-        command("finish", {"task_id": job["id"], "lease": job["lease"], **completed})
+        outcome = command("finish", {"task_id": job["id"], "lease": job["lease"], **completed})
         command("heartbeat", "idle" if "error" not in completed else "offline")
-        print(json.dumps({"task_id": job["id"], "completed": "error" not in completed,
+        print(json.dumps({"task_id": job["id"], "status": outcome["status"],
                           "error": completed.get("error"), "duration": completed.get("duration")}))
 
 

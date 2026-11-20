@@ -127,6 +127,8 @@ def _current(task):
 
 
 def _save(task, status, payload):
+    if task.output_payload.get("started_at"):
+        payload.setdefault("started_at", task.output_payload["started_at"])
     task.status = status
     task.output_payload = payload
     task.save(update_fields=["status", "output_payload", "due_at", "updated_at"])

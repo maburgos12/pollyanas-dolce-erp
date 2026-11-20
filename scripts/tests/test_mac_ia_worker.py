@@ -46,7 +46,7 @@ class LocalWorkerTests(unittest.TestCase):
             self.assertEqual(result["usage"]["prompt_tokens"], 80)
             self.assertEqual(request.call_args.args[2]["max_tokens"], 192)
             self.assertEqual(request.call_args.args[2]["response_format"]["type"], "json_schema")
-        for field, value in [("model", "paid-provider"), ("usage", {"prompt_tokens": -1})]:
+        for field, value in [("model", "paid-provider"), ("usage", {"prompt_tokens": -1}), ("usage", None), ("usage", [])]:
             with patch.object(worker, "request", return_value={**good, field: value}):
                 with self.assertRaises(ValueError):
                     worker.infer(job, "test-key")
