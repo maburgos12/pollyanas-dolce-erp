@@ -46,7 +46,7 @@
 
 {% block content %}
 <div class="cedula-shell">
-  {% if module_tabs %}<section class="module-tabs report-tabs" aria-label="Secciones de reportes">{% for tab in module_tabs %}<a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>{% endfor %}</section>{% endif %}
+  {% if module_tabs %}{% include "reportes/_module_tabs.html" with module_tabs=module_tabs report_tabs_class="report-tabs" report_tabs_label="Secciones de reportes" report_tabs_section=True only %}{% endif %}
   <p class="cedula-intro">Reúne la cédula SUA con su evidencia oficial en un expediente auditable. Primero revisa la conciliación; aplicar queda disponible únicamente después de una previsualización válida.</p>
   <section class="cedula-panel" aria-labelledby="cedula-upload-title">
     <h2 id="cedula-upload-title">Preparar expediente</h2>

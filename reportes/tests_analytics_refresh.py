@@ -1009,3 +1009,37 @@ class DailyClosureSourceCopyTests(SimpleTestCase):
         notice = "No existe plan cargado para la fecha auditada; la producción Point y el plan siguen siendo fuentes distintas."
         rendered = self._render([{"key": "produccion", "plan_visible_max_date": None, "plan_note": notice}])
         self.assertIn('<tr><th>Lectura del plan</th><td class="is-right">' + notice + '</td></tr>', rendered)
+
+
+class ReportesNavigationRenderTests(SimpleTestCase):
+    def test_shared_navigation_preserves_links_order_active_and_accessible_label(self):
+        from django.template.loader import render_to_string
+        tabs = [
+            {"label": "Planeación de personal", "url": "/reportes/planeacion-personal/?mes=2026-10", "active": True},
+            {"label": "Mermas y Devoluciones", "url": "/reportes/mermas-devoluciones/", "active": False},
+        ]
+        expected_links = '<a class="module-tab active" href="/reportes/planeacion-personal/?mes=2026-10">Planeación de personal</a><a class="module-tab" href="/reportes/mermas-devoluciones/">Mermas y Devoluciones</a>'
+        for section in (False, True):
+            with self.subTest(section=section):
+                rendered = render_to_string("reportes/_module_tabs.html", {
+                    "module_tabs": tabs,
+                    "report_tabs_label": "Secciones de reportes", "report_tabs_section": section,
+                })
+                tag = "section" if section else "nav"
+                self.assertHTMLEqual(rendered, f'<{tag} class="module-tabs report-tabs reportes-module-tabs" aria-label="Secciones de reportes">{expected_links}</{tag}>')
+
+    def test_closure_and_master_budget_reuse_identical_navigation(self):
+        import re
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        tabs = [{"label": "Planeación de personal", "url": "/personal/", "active": True}, {"label": "Mermas y Devoluciones", "url": "/mermas/", "active": False}]
+        request = RequestFactory().get("/reportes/")
+        request.user = AnonymousUser()
+        expected = render_to_string("reportes/_module_tabs.html", {"module_tabs": tabs})
+        for template in ["reportes/cierre_operativo_diario.html", "reportes/presupuesto_maestro.html"]:
+            with self.subTest(template=template):
+                rendered = render_to_string(template, {"request": request, "module_tabs": tabs, "closure": {}})
+                navs = re.findall(r'<nav class="module-tabs report-tabs reportes-module-tabs"[^>]*>.*?</nav>', rendered, re.S)
+                self.assertEqual(len(navs), 1)
+                self.assertHTMLEqual(navs[0], expected)

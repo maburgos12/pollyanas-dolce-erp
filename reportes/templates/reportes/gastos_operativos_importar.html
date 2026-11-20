@@ -12,11 +12,7 @@
 
 {% block content %}
 <div class="investment-shell opex-shell">
-  <nav class="module-tabs">
-    {% for tab in module_tabs %}
-    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
-  </nav>
+  {% include "reportes/_module_tabs.html" with module_tabs=module_tabs only %}
 
   <section class="investment-header">
     <article class="investment-hero">

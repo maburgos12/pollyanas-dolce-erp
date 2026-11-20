@@ -34,12 +34,3 @@
   @media (max-width: 1180px) {
     .closure-grid-4, .closure-grid-2, .closure-source-list { grid-template-columns:minmax(0,1fr); }
   }
-
-/* Keep long report names inside their desktop navigation target.
-   Mobile retains the shared horizontal scrolling navigation. */
-@media (min-width: 761px) {
-  .main-content[data-hallmark-scope="erp"] .closure-shell > .module-tabs .module-tab {
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-}

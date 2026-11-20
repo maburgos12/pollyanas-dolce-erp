@@ -10,7 +10,7 @@
 </style>
 {% endblock %}
 {% block content %}
-<nav class="module-tabs report-tabs" aria-label="Secciones de reportes">{% for tab in module_tabs %}<a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>{% endfor %}</nav>
+{% include "reportes/_module_tabs.html" with module_tabs=module_tabs report_tabs_class="report-tabs" report_tabs_label="Secciones de reportes" only %}
 <main class="personal-plan">
 <section class="card">
   <h1>Presupuesto de personal con ventas reales</h1>
