@@ -155,7 +155,7 @@ def dashboard(request):
     source_labels = {"inventory_adjustment_authorization_guard": "Inventario",
                      "plan_demand_chain_review": "Demanda", "plan_production_chain_review": "Producción",
                      "plan_purchase_chain_review": "Compras", "plan_director_chain_review": "Dirección"}
-    for job in local_ai["jobs"]:
+    for job in [*local_ai["jobs"], *local_ai["router"]["jobs"]]:
         for ref in job["references"]:
             inventory = ref["task_type"] == "inventory_adjustment_authorization_guard"
             ref["label"] = source_labels.get(ref["task_type"], "Seguimiento")

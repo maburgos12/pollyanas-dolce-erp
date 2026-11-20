@@ -97,9 +97,10 @@ def enqueue():
     changed = [cases[key] for key in sorted(cases) if _signature(cases[key]) not in seen]
     capacity = max(0, 8 - jobs.filter(status__in=["pending", "running"]).count())
     created = 0
+    width = 2 if routed else 4
     if not stats["truncated"]:
-        for offset in range(0, min(len(changed), capacity * 4), 4):
-            batch = changed[offset:offset + 4]
+        for offset in range(0, min(len(changed), capacity * width), width):
+            batch = changed[offset:offset + width]
             digest = _signature(batch)
             if routed:
                 data = {"cases": batch, "references": [references[c["key"]] for c in batch]}
@@ -127,7 +128,7 @@ def enqueue():
                 input_payload={"cases": batch, "references": [references[c["key"]] for c in batch]},
                 output_payload={"attempts": 0})
             created += 1
-    stats.update(created=created, unchanged=len(cases) - len(changed), queued_cases=min(len(changed), created * 4))
+    stats.update(created=created, unchanged=len(cases) - len(changed), queued_cases=min(len(changed), created * width))
     rule.condition_json = {**rule.condition_json, "last_scan": timezone.now().isoformat(), "scan": stats}
     rule.save(update_fields=["condition_json", "updated_at"])
     return stats

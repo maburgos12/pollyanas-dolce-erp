@@ -122,6 +122,7 @@ class LocalRouterTests(TransactionTestCase):
         data = {"cases": list(cases.values()), "references": list(refs.values())}
         key = uuid4()
         first = self.submit("summary_cases", data, key)
+        self.assertEqual(first["references"], data["references"])
         job = local_router.claim("mac_ia")
         AgentTask.objects.create(run=run, agent=self.agent, title="Replacement", task_type=source.task_type, input_payload=source.input_payload)
         self.assertEqual(self.submit("summary_cases", data, key)["id"], first["id"])
@@ -162,3 +163,19 @@ class LocalRouterTests(TransactionTestCase):
         self.assertEqual(self.submit(data={"text": "á" * 600})["model"], "qwen8b")
         with self.assertRaises(ValueError):
             self.submit(data={"text": "á" * 1300})
+
+    def test_short_work_uses_spare_mac_when_debian_already_has_work(self):
+        self.assertEqual(self.submit()["node"], "mac_ia")
+        spare = self.submit()
+        self.assertEqual((spare["node"], spare["model"]), ("mac_ia_02", "qwen8b"))
+        self.assertEqual(self.submit()["node"], "mac_ia")
+
+    def test_periodic_batches_can_work_on_both_nodes(self):
+        from orquestacion.models import OrchestrationRun
+        from orquestacion.services import local_ai
+        local_ai.configure(enabled=True)
+        run = OrchestrationRun.objects.create(run_key="two-node-source")
+        for entity in range(1, 5):
+            AgentTask.objects.create(run=run, agent=self.agent, title="Source", task_type="plan_purchase_chain_review", input_payload={"plan_id": entity})
+        self.assertEqual(local_ai.enqueue()["created"], 2)
+        self.assertEqual(set(AgentTask.objects.filter(task_type=local_router.TASK).values_list("input_payload__node", flat=True)), {"mac_ia", "mac_ia_02"})

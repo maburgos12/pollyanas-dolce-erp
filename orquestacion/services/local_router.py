@@ -129,6 +129,11 @@ def submit(*, agent, kind, data, request_id):
     model, reason = route(kind, data)
     if AgentTask.objects.filter(task_type=TASK, status__in=["pending", "running"]).count() >= 16:
         raise ValueError("queue_full")
+    if model == "qwen4b":
+        queued = AgentTask.objects.filter(task_type=TASK, status__in=["pending", "running"])
+        if (queued.filter(input_payload__node="mac_ia").exists()
+                and not queued.filter(input_payload__node="mac_ia_02").exists()):
+            model, reason = "qwen8b", "Resumen compatible: Debian tiene trabajo asignado y la Mac de 16 GB no tiene cola"
     node = MODELS.get(model)
     status = "pending" if model else "blocked"
     run = OrchestrationRun.objects.create(run_key=f"{TASK}:{request_id}", rule=rule,
@@ -155,7 +160,7 @@ def receipt(task):
             display = value["summary"]
     return {"id": task.id, "agent": task.agent.code, "agent_name": task.agent.name,
             "kind_label": {"summary": "Resumen", "extract": "Extracción de campos", "verify": "Cotejo numérico", "summary_cases": "Resumen de expedientes"}.get(request["kind"], "Revisión requerida"),
-            "display_result": display, "kind": request["kind"], "node": request["node"],
+            "display_result": display, "references": request["data"].get("references", []), "kind": request["kind"], "node": request["node"],
             "model": request["model"], "reason": request["reason"], "status": task.status, "label": task.get_status_display(),
             "attempts": result.get("attempts", 0), "error": result.get("error", ""),
             "result": result.get("result"), "duration": result.get("duration"),
