@@ -84,9 +84,18 @@ def _load_email_css() -> str:
 
 def inline_email_styles(html_message: str, css_text: str | None = None) -> str:
     document = lxml_html.document_fromstring(html_message)
+    original_inline_styles = {
+        element: element.get("style")
+        for element in document.xpath("//*[@style]")
+    }
     for selector, declarations in _parse_rules(css_text or _load_email_css()):
         for element in _select(document, selector):
             element.set("style", _merge_style(element.get("style"), declarations))
+    for element, inline_style in original_inline_styles.items():
+        element.set(
+            "style",
+            _merge_style(element.get("style"), _parse_declarations(inline_style)),
+        )
     return "<!doctype html>\n" + lxml_html.tostring(document, encoding="unicode", method="html")
 
 
