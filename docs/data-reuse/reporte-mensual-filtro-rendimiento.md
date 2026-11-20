@@ -6,6 +6,12 @@ Fecha: 19/11/2026. Base 29c778fb; PostgreSQL16 local exclusivo55635, sin datos o
 
 Resultado mensual por sucursal, con doce meses de salida, sus bases anuales cuando aportan un YoY comparable y desglose de personal/alcance. Evitar costear toda la red en bases que el consumidor finalmente descarta; no eliminar meses o fuentes necesarios, no convertir ausencia en cero ni cambiar reglas financieras.
 
+### Continuación: selección sin sucursales en el cierre
+
+Tarea `mensual-nomina-sin-sucursales-20261120`, base `80a849b3`, PostgreSQL 16 propio en puerto 55637 con fixtures sintéticos. `_nomina_del_cierre` solo construye salida para los IDs recibidos: el conjunto vacío ahora devuelve `{}` antes de leer gastos, personal, ventas y merma. No se omiten sucursales con nómina cero o ausente; la condición no depende del importe. El único llamador es `_rentabilidad_por_mes`, después del filtro del reparto; consumidores: constructor mensual y sus HTML/JSON/CSV/CLI. Horas extra se agregan después y se conservan aunque no haya fila del cierre.
+
+Regresión con fuentes reales de prueba: conjunto vacío tenía 15 consultas innecesarias; debe tener 0, conservar el mes solo con extras y sus ingresos/nómina/resultado `None`, y mantener lectura no vacía y consolidado. Pruebas existentes de perímetro cubren nómina 0 frente a ausente. Inventario léxico local por nómina/horas extra registrado, sin equivalencias nuevas. No escritores, caché, fuentes, parámetros públicos, contratos financieros ni versiones SW modificados. Medición productiva antes/después y QA quedan pendientes de ventana y revisión; no extrapolar el perfil histórico de un mes al ahorro total ni afirmar BI resuelto.
+
 ## Fuentes existentes
 
 |Concepto|Fuente y autor|Clave/ámbito|Evidencia y consumidores|
