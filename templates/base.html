@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="/static/css/pollyana_ops_ui.css?v=20260614-ui-fase-final-v1">
     {% block extra_css %}{% endblock %}
     <link rel="stylesheet" href="/static/css/pollyana_generated_utilities.css?v=20260614-ui100-v1">
-    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20260703-erp-group-tabs-v2">
+    <link rel="stylesheet" href="/static/css/hallmark_guardrails.css?v=20261120-reportes-nav-v20">
 </head>
 <body class="{% block body_class %}{% endblock %}{% if ui_preview.active %} preview-read-only{% endif %}">
     <a class="skip-link" href="#main-content">Saltar al contenido</a>
@@ -1240,7 +1240,7 @@
     // ponytail: no offline ERP cache; installable shell only, data stays network-fresh.
     (function () {
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/erp-sw.js?v=20261119-cierre-layout-v19').catch(function () {});
+            navigator.serviceWorker.register('/erp-sw.js?v=20261120-cierre-rotulos-v20').catch(function () {});
         }
     })();
     </script>

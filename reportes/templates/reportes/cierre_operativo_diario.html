@@ -7,16 +7,12 @@
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
-<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-cierre-operativo-diario.css?v=20261119-cierre-layout-v19">
+<link rel="stylesheet" href="/static/css/template_modules/reportes-templates-reportes-cierre-operativo-diario.css?v=20261120-cierre-rotulos-v20">
 {% endblock %}
 
 {% block content %}
 <div class="module-shell bi-shell closure-shell">
-  <nav class="module-tabs">
-    {% for tab in module_tabs %}
-    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
-  </nav>
+  {% include "reportes/_module_tabs.html" with module_tabs=module_tabs only %}
 
   <section class="bi-hero">
     <div class="bi-hero-main">
@@ -82,7 +78,7 @@
       <div class="closure-kpi-value">{{ closure.sales.fact_amount|floatformat:2|intcomma }}</div>
       <div class="bi-kpi-label">Ventas del día</div>
       <div class="closure-copy">Cantidad reportada {{ closure.sales.fact_units|floatformat:"-3"|intcomma }} · unidad por acreditar · {{ closure.sales.fact_tickets|intcomma }} tickets</div>
-      <div class="closure-muted">Fuente visible: {{ closure.sales.visible_source }}</div>
+      <div class="closure-muted">Resumen diario de ventas del ERP</div>
     </article>
     <article class="closure-card">
       <div class="closure-kpi-value {% if closure.production.fact_produced > 0 %}success{% else %}warning{% endif %}">{{ closure.production.fact_produced|floatformat:"-3"|intcomma }}</div>
@@ -172,9 +168,28 @@
         <span class="closure-pill {% if domain.publication.tone == 'success' %}success{% elif domain.publication.tone == 'danger' %}danger{% else %}warning{% endif %}">{{ domain.publication.label }}</span>
       </div>
       <div class="closure-meta-row pd-u-e4ad4a163b">
-        <span class="closure-pill">Fuente: {{ domain.source_truth }}</span>
-        <span class="closure-pill">Visible: {{ domain.visible_source }}</span>
+        {% if domain.key == "ventas" %}
+        <span class="closure-pill">Ventas de Point</span>
+        <span class="closure-pill">Resumen diario del ERP</span>
+        {% elif domain.key == "produccion" %}
+        <span class="closure-pill">Producción de Point</span>
+        <span class="closure-pill">Resumen diario y plan por separado</span>
+        {% elif domain.key == "mermas" %}
+        <span class="closure-pill">Mermas de Point y del ERP</span>
+        <span class="closure-pill">Sucursales e insumos por separado</span>
+        {% elif domain.key == "inventario" %}
+        <span class="closure-pill">Movimientos del ERP y stock de Point</span>
+        <span class="closure-pill">Cierre global y stock actual de una ubicación</span>
+        {% else %}
+        <span class="closure-pill">Referencia del módulo</span>
+        {% endif %}
       </div>
+      <details>
+        <summary>Ver referencias técnicas</summary>
+        <div class="closure-copy">Origen: {{ domain.source_truth }}</div>
+        <div class="closure-copy">Lectura: {{ domain.visible_source }}</div>
+        {% if domain.plan_note %}<div class="closure-copy">{{ domain.plan_note }}</div>{% endif %}
+      </details>
       <div class="table-responsive">
         <table class="closure-table">
           <tbody>
@@ -183,30 +198,30 @@
             <tr><th>Registros del resumen ERP</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
             <tr><th>Importe del resumen ERP</th><td class="is-right">${{ domain.fact_amount|floatformat:2|intcomma }}</td></tr>
             <tr><th>Cantidad reportada del resumen ERP</th><td class="is-right">{{ domain.fact_units|floatformat:"-3"|intcomma }}</td></tr>
-            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
+            <tr><th>Última sincronización</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin registro" }}</td></tr>
             <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
             {% elif domain.key == "produccion" %}
             <tr><th>Registros Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
             <tr><th>Registros del resumen ERP</th><td class="is-right">{{ domain.fact_rows|intcomma }}</td></tr>
             <tr><th>Producción del resumen ERP</th><td class="is-right">{{ domain.fact_produced|floatformat:"-3"|intcomma }}</td></tr>
             <tr><th>Cantidad reportada del plan</th><td class="is-right">{{ domain.plan_units|floatformat:"-3"|intcomma }} · unidad por acreditar</td></tr>
-            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
-            <tr><th>Nota</th><td class="is-right">{{ domain.plan_note }}</td></tr>
+            <tr><th>Última sincronización</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin registro" }}</td></tr>
+            <tr><th>Lectura del plan</th><td class="is-right">{% if domain.plan_visible_max_date %}El plan y la producción registrada en Point son referencias distintas.{% else %}{{ domain.plan_note }}{% endif %}</td></tr>
             {% elif domain.key == "mermas" %}
             <tr><th>Registros Point</th><td class="is-right">{{ domain.raw_rows|intcomma }}</td></tr>
             <tr><th>Registros visibles</th><td class="is-right">{{ domain.visible_rows|intcomma }}</td></tr>
             <tr><th>Cantidades Point</th><td class="is-right">{% for group in domain.point_quantity_groups %}<div>{{ group.quantity|floatformat:"-3"|intcomma }} {{ group.unit }} · {{ group.family }}</div>{% empty %}Sin subtotal físico comparable{% endfor %}{% for item in domain.point_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }}{% if item.unit %} {{ item.unit }} · clasificación por acreditar{% else %} · unidad por acreditar{% endif %}</div>{% endfor %}</td></tr>
-            <tr><th>Cantidades visibles ERP (MermaPOS)</th><td class="is-right">{% for group in domain.branch_quantity_groups %}<div>{{ group.quantity|floatformat:"-3"|intcomma }} {{ group.unit }} · {{ group.family }}</div>{% empty %}Sin subtotal físico comparable{% endfor %}{% for item in domain.branch_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }}{% if item.unit %} {{ item.unit }} · clasificación por acreditar{% else %} · unidad por acreditar{% endif %}</div>{% endfor %}</td></tr>
+            <tr><th>Cantidades de merma en sucursales</th><td class="is-right">{% for group in domain.branch_quantity_groups %}<div>{{ group.quantity|floatformat:"-3"|intcomma }} {{ group.unit }} · {{ group.family }}</div>{% empty %}Sin subtotal físico comparable{% endfor %}{% for item in domain.branch_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }}{% if item.unit %} {{ item.unit }} · clasificación por acreditar{% else %} · unidad por acreditar{% endif %}</div>{% endfor %}</td></tr>
             <tr><th>Merma de insumos importada</th><td class="is-right">{% for item in domain.cedis_unknown_rows %}<div>{{ item.name }}: {{ item.quantity|floatformat:"-3"|intcomma }} · unidad por acreditar</div>{% empty %}Sin registros para esta fecha{% endfor %}</td></tr>
             <tr><th>Cómo leer las cantidades</th><td>No se suman productos e insumos ni unidades distintas. Una cantidad sin unidad permanece registrada; N/D indica que no hay una unidad acreditada para compararla, no que falte la captura.</td></tr>
-            <tr><th>Último sync</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin job" }}</td></tr>
+            <tr><th>Última sincronización</th><td class="is-right">{{ domain.latest_job.started_at|date:"Y-m-d H:i"|default:"Sin registro" }}</td></tr>
             <tr><th>Última publicación</th><td class="is-right">{{ domain.latest_audit.timestamp|date:"Y-m-d H:i"|default:"Sin auditoría" }}</td></tr>
             {% else %}
             <tr><th>Movimientos del día</th><td class="is-right">{{ domain.movement_rows|intcomma }}</td></tr>
             <tr><th>Insumos con movimiento</th><td class="is-right">{{ domain.movement_insumo_count|intcomma }}</td></tr>
             <tr><th>Última actualización stock visible</th><td class="is-right">{{ domain.visible_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
-            <tr><th>Último sync almacén OK</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sync OK" }}</td></tr>
-            <tr><th>Último sync almacén visto</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin runs" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
+            <tr><th>Última sincronización de almacén completada</th><td class="is-right">{{ domain.latest_sync_run.started_at|date:"Y-m-d H:i"|default:"Sin sincronización completada" }}</td></tr>
+            <tr><th>Última sincronización de almacén registrada</th><td class="is-right">{{ domain.latest_sync_any.started_at|date:"Y-m-d H:i"|default:"Sin registros" }}{% if domain.latest_sync_any %} · {{ domain.latest_sync_any.status }}{% endif %}</td></tr>
             <tr><th>Última actualización del resumen ERP</th><td class="is-right">{{ domain.fact_updated_max|date:"Y-m-d H:i"|default:"Sin dato" }}</td></tr>
             <tr><th>Fecha de las referencias</th><td class="is-right">{{ domain.comparison_scope }}</td></tr>
             <tr><th>Trazabilidad de existencias ERP</th><td class="is-right">{{ domain.trace_sources_text }}</td></tr>
@@ -342,15 +357,15 @@
   <section class="closure-card">
     <div class="closure-card-head">
       <div>
-        <h2 class="closure-card-title">Fuentes y notas de gobierno</h2>
-        <p class="closure-copy">Qué fuente manda por bloque para evitar lecturas falsas entre Point, plan y stock vivo.</p>
+        <h2 class="closure-card-title">Referencias de la información</h2>
+        <p class="closure-copy">Consulta el origen de cada bloque. El plan, los movimientos del día y el stock actual conservan sus propias referencias.</p>
       </div>
     </div>
     <div class="closure-source-list">
       {% for note in closure.source_notes %}
       <div class="closure-source-item">
         <strong>{{ note.label }}</strong>
-        <div class="closure-copy">{{ note.detail }}</div>
+        <details><summary>Ver referencia técnica de {{ note.label|lower }}</summary><div class="closure-copy">{{ note.detail }}</div></details>
       </div>
       {% endfor %}
     </div>

@@ -1,0 +1,5 @@
+{% if report_tabs_section %}<section{% else %}<nav{% endif %} class="module-tabs {{ report_tabs_class|default:'report-tabs' }} reportes-module-tabs"{% if report_tabs_label %} aria-label="{{ report_tabs_label }}"{% endif %}>
+  {% for tab in module_tabs %}
+  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
+  {% endfor %}
+{% if report_tabs_section %}</section>{% else %}</nav>{% endif %}

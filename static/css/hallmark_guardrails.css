@@ -1202,3 +1202,11 @@ body,
   overflow-wrap: anywhere !important;
   word-break: normal !important;
 }
+
+/* Reportes shares one navigation component; do not change other module tabs. */
+@media (min-width: 761px) {
+  .main-content[data-hallmark-scope="erp"] .reportes-module-tabs .module-tab {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}

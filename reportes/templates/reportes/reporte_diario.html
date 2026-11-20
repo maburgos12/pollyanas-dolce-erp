@@ -35,11 +35,7 @@
 
 {% block content %}
 <div class="module-shell bi-shell report-shell">
-  <nav class="module-tabs report-tabs" aria-label="Reportes">
-    {% for tab in module_tabs %}
-    <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-    {% endfor %}
-  </nav>
+  {% include "reportes/_module_tabs.html" with module_tabs=module_tabs report_tabs_class="report-tabs" report_tabs_label="Reportes" only %}
 
   <section class="report-card">
     <div class="report-kicker">Dirección general</div>
