@@ -245,7 +245,7 @@ y extracción real de la copia. Un fallo deja la solicitud sin enviar. Las
 propuestas antiguas de imágenes o BuildKit requieren revisión del operador:
 no existe en ese formato un contrato suficiente de recuperación automática.
 
-La vigencia continúa siendo una hora desde la emisión. La propuesta y revisión
+La vigencia de las solicitudes nuevas es de 12 horas desde la emisión. La propuesta y revisión
 no se sustituyen automáticamente. Un rechazo no vuelve a pedir aprobación al
 día siguiente y una respuesta perdida de Telegram exige resolución manual.
 Este programador no elimina archivos ni amplía permisos del ejecutor.
@@ -259,3 +259,7 @@ No usar la instalación inicial del hook para actualizar un consumidor que ya
 incluya otros hooks. Verificar hashes instalados, timer y servicio activo antes
 de declarar el horario habilitado. Conservar intenciones y decisiones al revertir;
 una versión antigua no comprende el nuevo estado `deferred` de limpieza.
+
+Las solicitudes históricas conservan su vencimiento firmado. Una solicitud de la tarde
+que siga vigente a las 07:00 no se duplica: al vencer, se revalida antes de emitir
+otra durante el horario permitido. Las decisiones previas no se renuevan.

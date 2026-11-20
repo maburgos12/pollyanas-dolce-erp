@@ -1,5 +1,7 @@
 """Authenticated cleanup decisions; deletion belongs to the opt-in resident executor."""
 import argparse
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import hashlib
 import hmac
 import json
@@ -13,7 +15,7 @@ import shutil
 import subprocess
 
 from erp_telegram_release import (Ledger, NONCE, telegram, verify_message, schedule_request,
-                                  approval_window, validate_intent, operational_module, RecoveryPending)
+                                  approval_window, validate_intent, operational_module, RecoveryPending, APPROVAL_TTL_SECONDS)
 
 STATE = Path('/var/lib/erp-point-decision/cleanups')
 DIGEST = re.compile(r'[0-9a-f]{64}')
@@ -294,7 +296,7 @@ def _request(path, ledger, config, send=telegram):
     proposal, digest = read_proposal(path)
     item = proposal['delete_candidates'][0]
     row = dict(proposal_id=proposal['id'], proposal_sha256=digest, image_id=item['id'],
-               nonce=secrets.token_hex(12), expires=int(time.time()) + 3600, chat_id=config['chat_id'],
+               nonce=secrets.token_hex(12), expires=int(time.time()) + APPROVAL_TTL_SECONDS, chat_id=config['chat_id'],
                message_id=None, state='notifying', decision_at=None)
     with ledger.lock():
         for file in ledger.directory.glob('*.json'):
@@ -327,7 +329,7 @@ def _request(path, ledger, config, send=telegram):
                     'recuperación aislada al mismo ID. Si falla, no se borra. Sin prune ni borrado forzado.\n'
                     'Recuperación pendiente de verificar; una tarea futura podría necesitar restaurar la imagen. '
                     'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
-                    'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+                    'y la recuperación antes de cualquier retiro. Vence en 12 horas; rechazar revoca la autorización.')
         elif item['type'] == 'point_archive_manifest':
             text = (f"Autorizar archivo de históricos Point · {row['proposal_id']}\nPropuesta SHA-256: {digest}\n"
                     f"{len(item['files'])} XLS verificados, {sum(e['bytes'] for e in item['files']) / 1e6:.2f} MB.\n"
@@ -335,7 +337,7 @@ def _request(path, ledger, config, send=telegram):
                     'el lector recupera el original si vuelve a necesitarse. Si el NAS falla, la consulta del archivo puede esperar.\n'
                     'Conservar todos los respaldos, bases, servicios y archivos fuera de este lote. '
                     'El ejecutor residente retirará sólo estos originales tras aprobación vigente y nueva comprobación. '
-                    'Vence en 1 hora. Rechazar revoca hasta que comience la ejecución; al vencer se detienen los retiros pendientes.')
+                    'Vence en 12 horas. Rechazar revoca hasta que comience la ejecución; al vencer se detienen los retiros pendientes.')
         else:
             file_bytes = sum(entry['bytes'] for entry in item['files'])
             cache_bytes = sum(entry['bytes'] for entry in item['build_cache'])
@@ -354,7 +356,9 @@ def _request(path, ledger, config, send=telegram):
                     'El histórico retirado se consulta desde NAS; las próximas construcciones pueden tardar más. '
                     'Ahorro real por medir; no garantiza bajar del umbral.\n'
                     'Esta aprobación no ejecuta borrados ni despliegues. Codex verificará la decisión vigente '
-                    'y la recuperación antes de cualquier retiro. Vence en 1 hora; rechazar revoca la autorización.')
+                    'y la recuperación antes de cualquier retiro. Vence en 12 horas; rechazar revoca la autorización.')
+        deadline = datetime.fromtimestamp(row['expires'], ZoneInfo('America/Mazatlan')).strftime('%d/%m %H:%M')
+        text += f'\nVencimiento: {deadline}, hora de Mazatlán.'
         if not approval_window()[0]:
             row['state'] = 'deferred'
             ledger.write(row)
