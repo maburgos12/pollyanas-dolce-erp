@@ -46,7 +46,9 @@ def infer(job, key):
     }, "required": ["summary", "case_keys"], "additionalProperties": False}
     prompt = (
         "Resume en español, en máximo 60 palabras, las tareas agrupadas del ERP. "
-        "Son evidencias registradas, no estados operativos verificados. Describe prioridad y revisión humana. "
+        "Son evidencias registradas, no estados operativos verificados. "
+        "Menciona los casos de prioridad alta o crítica y los conteos que señalan faltantes o recetas incompletas, si existen. "
+        "No calcules totales. Evita avisos genéricos; ya aparecen en el panel. "
         "No autorices, no inventes datos ni sugieras comandos. ajuste=inventario; demand=demanda; "
         "production=producción; purchase=compras; director=dirección. "
         "Devuelve JSON con summary y case_keys exactamente en el mismo orden: "
