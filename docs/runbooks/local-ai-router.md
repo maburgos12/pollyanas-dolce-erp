@@ -80,6 +80,21 @@ operativo. `exact` valida cotejos; la extracción sólo acredita citas presentes
 los resúmenes requieren revisión humana. Tokens locales no equivalen a cuota
 Codex ahorrada ni dinero ahorrado.
 
+## Diagnóstico seguro de fallos
+
+El journal del trabajador conserva ID/nodo/modelo y, ante fallo, un diagnóstico
+con fase y categoría de una lista cerrada. Distingue transporte/timeout, parseo,
+fallo del ejecutor y rechazo de `finish`; éste aporta sólo un motivo permitido
+(`invalid_output`, `invalid_usage`, `expired_lease`, `invalid_error`, `unknown`).
+No se guardan prompts, respuestas fallidas, leases, claves, stderr completo ni
+mensajes arbitrarios de excepción. Un diagnóstico remoto mal formado se descarta.
+La categoría describe el punto de fallo; no prueba por sí sola su causa física.
+
+Un resultado rechazado o un trabajo bloqueado requiere revisión de esa evidencia.
+No crear UUID nuevos ni reactivar el mismo trabajo para gastar más inferencias a
+ciegas. Los tres intentos y sus esperas conservan el contrato existente; ninguna
+instrumentación convierte una extracción inválida en resuelta.
+
 ## Transporte y recursos permanentes
 
 VPS: `/etc/pastelerias-local-router/` (root0700), dos llaves de ejecución propias,

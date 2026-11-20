@@ -29,4 +29,5 @@ class Command(BaseCommand):
                 result = getattr(local_router, action)(**request)
             self.stdout.write(json.dumps(result, ensure_ascii=False, allow_nan=False))
         except (ValueError, TypeError, KeyError, AgentTask.DoesNotExist) as exc:
-            raise CommandError("Invalid local router request") from exc
+            reason = str(exc) if type(exc) is ValueError and str(exc) in {"invalid_output", "invalid_usage", "expired_lease", "invalid_error"} else "unknown"
+            raise CommandError(json.dumps({"router_error": reason})) from exc

@@ -25,6 +25,33 @@ class RouterNodeTests(unittest.TestCase):
         self.assertEqual(schema["required"], ["estado"])
         self.assertFalse(schema["additionalProperties"])
 
+    def test_error_response_contains_only_fixed_diagnostic_enums(self):
+        import json
+        node = module()
+        node.PHASE = "parse"
+        result = node.error_response(json.JSONDecodeError("SECRET", "PRIVATE-PROMPT", 0))
+        self.assertEqual(result, {"error": "worker_error", "diagnostic": {"phase": "parse", "category": "json", "reason": "unknown"}})
+        self.assertNotIn("SECRET", str(result))
+        self.assertNotIn("PRIVATE", str(result))
+        self.assertEqual(node.error_response(RuntimeError("busy"))["error"], "busy")
+
+    def test_mac_rejected_completion_explains_token_limit_without_inference(self):
+        node = module()
+        response = {"model": "pastelerias-qwen3-8b", "choices": [{"finish_reason": "length", "message": {"content": "SECRET"}}]}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "api.key").write_text("PRIVATE")
+            (root / "api.key").chmod(0o600)
+            with patch.object(node, "OP", root), patch.object(node, "mac_busy", return_value=False), patch.object(node, "mac_memory", return_value=(50, 0)), patch.object(node, "request", return_value=response):
+                with self.assertRaises(ValueError) as error:
+                    node.mac_infer("qwen8b", "PRIVATE-PROMPT", {}, root)
+            self.assertEqual(str(error.exception), "invalid_output")
+            result = node.error_response(error.exception)
+        self.assertEqual(result["diagnostic"], {"phase": "parse", "category": "contract", "reason": "token_limit"})
+        self.assertNotIn("PRIVATE", str(result))
+        self.assertNotIn("SECRET", str(result))
+        self.assertEqual(node.error_response(node.InvalidOutput("PRIVATE"))["diagnostic"]["reason"], "unknown")
+
     def test_exact_arithmetic_and_cli_completion_marker(self):
         node = module()
         self.assertEqual(node.verify({"rows": [{"expected": "0.3", "actual": "0.30"}, {"expected": "2", "actual": "1"}]}),
