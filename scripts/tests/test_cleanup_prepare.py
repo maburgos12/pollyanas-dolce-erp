@@ -8,6 +8,7 @@ import re
 import sys
 import tarfile
 import tempfile
+import types
 import unittest
 from unittest.mock import Mock, patch
 
@@ -16,6 +17,27 @@ sys.path.insert(0, str(MODULES))
 spec = importlib.util.spec_from_file_location('erp_cleanup_prepare', MODULES / 'erp_cleanup_prepare.py')
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
+
+
+class OldInstalledContractTests(unittest.TestCase):
+    def test_checkout_imports_with_old_installed_modules_defer_before_work(self):
+        old_cleanup = types.ModuleType('erp_telegram_cleanup')
+        old_release = types.ModuleType('erp_telegram_release')
+        old_release.Ledger = p.Ledger
+        old_release.telegram = Mock()
+        old_release.approval_window = lambda: (True, '2026-11-19')
+        with patch.dict(sys.modules, erp_telegram_cleanup=old_cleanup, erp_telegram_release=old_release):
+            spec = importlib.util.spec_from_file_location('pending_prepare', MODULES / 'erp_cleanup_prepare.py')
+            pending = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(pending)
+            self.assertEqual(pending.prepare(Path('/must-not-write'), None, {}), 'activation_pending')
+            with patch.dict(sys.modules, erp_cleanup_prepare=pending):
+                spec = importlib.util.spec_from_file_location('pending_point', MODULES / 'erp_point_archive.py')
+                point = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(point)
+                broker = object.__new__(point.Broker)
+                self.assertEqual(broker.prepare(None, {}), 'activation_pending')
+        old_release.telegram.assert_not_called()
 
 
 class FakeNAS:
@@ -55,6 +77,9 @@ class FakeNAS:
 
 class PrepareTests(unittest.TestCase):
     def setUp(self):
+        health = patch.object(p.cleanup, 'require_recovery', create=True)
+        health.start()
+        self.addCleanup(health.stop)
         recovery = patch.object(p.cleanup, "revalidate_proposal")
         recovery.start()
         self.addCleanup(recovery.stop)
@@ -94,6 +119,37 @@ class PrepareTests(unittest.TestCase):
                    decision_at=2 if state in {'approved', 'rejected'} else None)
         self.ledger.write(row)
 
+    def test_old_installed_contract_waits_for_activation_without_work(self):
+        with patch.object(p.cleanup, 'require_recovery', None):
+            self.assertEqual(self.run_once(), 'activation_pending')
+        self.assertFalse(self.nas.events)
+        self.assertFalse(self.sent)
+        self.assertFalse(list(self.state.glob('VPS-LIM-*')))
+        self.assertFalse((self.state / 'status.json').exists())
+
+    def test_recovery_pending_is_quiet_and_retries_without_spending_attempts(self):
+        with patch.object(p.cleanup, 'require_recovery', side_effect=p.cleanup.RecoveryPending('backup_recovery_pending')):
+            for now in (1_800_000_000, 1_800_000_300):
+                self.assertEqual(self.run_once(now), 'recovery_pending')
+        self.assertFalse(list(self.state.glob('VPS-LIM-*')))
+        self.assertFalse((self.state / 'status.json').exists())
+        self.assertFalse(self.nas.events)
+        self.assertFalse(self.sent)
+        self.assertEqual(self.run_once(1_800_000_301), 'requested')
+
+    def test_recovery_lost_before_buttons_keeps_exact_prepared_intent(self):
+        with patch.object(p.cleanup, 'require_recovery', side_effect=[None, p.cleanup.RecoveryPending('backup_recovery_pending')]):
+            self.assertEqual(self.run_once(), 'recovery_pending')
+        evidence = [path for path in self.state.glob('VPS-LIM-*.json')]
+        self.assertEqual(len(evidence), 1)
+        self.assertEqual(json.loads(evidence[0].read_text())['phase'], 'requesting')
+        self.assertFalse((self.state / 'status.json').exists())
+        self.assertFalse(self.sent)
+        self.assertEqual(self.run_once(), 'existing_scope_or_request')
+        p.cleanup.process_scheduled(self.ledger, self.config, self.send)
+        self.assertEqual(len(self.sent), 2)
+        self.assertEqual(len(list(self.state.glob('VPS-LIM-*.json'))), 1)
+
     def test_threshold_strictly_greater_than_75(self):
         for used in (0, 74, 75):
             p.disk_percent.return_value = used
@@ -125,6 +181,14 @@ class PrepareTests(unittest.TestCase):
                 self.assertFalse(list(state.glob('verify-*')))
                 self.assertEqual(p.prepare(state, self.ledger, self.config, nas, send, 1_800_000_001), 'backoff')
                 self.assertEqual(send.call_count, 1)
+
+    def test_oserror_diagnostic_preserves_errno_and_path_without_request(self):
+        p.candidates.side_effect = OSError(5, 'Input/output error', '/proc/123/fdinfo/1')
+        self.assertEqual(self.run_once(), 'blocked')
+        status = json.loads((self.state / 'status.json').read_text())
+        self.assertEqual(status['error'], {'type': 'OSError', 'errno': 5, 'filename': '/proc/123/fdinfo/1', 'message': 'Input/output error'})
+        self.assertFalse(self.nas.events)
+        self.assertFalse(list(self.ledger.directory.glob('*.json')))
 
     def test_local_capacity_blocks_before_nas(self):
         p.shutil.disk_usage.return_value = Mock(total=100, used=80, free=p.RESERVE)
@@ -241,15 +305,66 @@ class FileTests(unittest.TestCase):
         p.verify_archive(archive, [entry], destination)
         self.assertEqual((destination/'1').read_bytes(), source.read_bytes())
 
-    def test_proc_scan_fd_and_mapped_files(self):
-        source = self.root / 'log'
-        source.write_bytes(b'x')
-        for name in ('fd', 'map_files'):
-            directory = self.root / '123' / name
-            directory.mkdir(parents=True)
-            (directory / '1').symlink_to(source)
-        info = source.stat()
-        self.assertIn((info.st_dev, info.st_ino), p.in_use(self.root))
+    def proc_fixture(self, target='/unavailable/nas/log', mount_id=7):
+        pid = self.root / '123'
+        (pid / 'fdinfo').mkdir(parents=True)
+        (pid / 'fd').mkdir()
+        (pid / 'fd' / '1').symlink_to(target)
+        (pid / 'fdinfo' / '1').write_text(f'pos:\t0\nflags:\t0100000\nmnt_id:\t{mount_id}\nino:\t42\n')
+        (pid / 'mountinfo').write_text('7 1 8:2 / / rw - ext4 /dev/x rw\n')
+        (pid / 'maps').write_text('1000-2000 r--p 00000000 08:02 43 /mapped/log (deleted)\n')
+        return pid
+
+    def test_proc_scan_fd_and_mapped_files_without_following_targets(self):
+        self.proc_fixture()
+        with patch.object(Path, 'stat', side_effect=AssertionError('must not stat remote targets')):
+            used = p.in_use(self.root)
+        self.assertEqual(used, {(p.os.makedev(8, 2), 42), (p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_synthetic_descriptors_without_mount_reserve_only_inode(self):
+        pid = self.proc_fixture(mount_id=99)
+        for target in ('socket:[42]', 'pipe:[42]', 'anon_inode:[eventpoll]', 'net:[4026531840]'):
+            with self.subTest(target=target):
+                (pid / 'fd' / '1').unlink()
+                (pid / 'fd' / '1').symlink_to(target)
+                self.assertEqual(p.in_use(self.root), {(None, 42), (p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_unknown_mount_reserves_inode_on_all_devices(self):
+        self.proc_fixture(mount_id=99)
+        self.assertIn((None, 42), p.in_use(self.root))
+        with patch.object(p, 'in_use', return_value={(None, 42)}), patch.object(p, 'snapshot') as snapshot:
+            with self.assertRaisesRegex(ValueError, 'source_changed_or_in_use'):
+                p.unchanged([{'path': '/var/log/syslog.1', 'metadata': [123, 42]}])
+            snapshot.assert_not_called()
+
+    def test_proc_scan_permission_denied_fails_closed(self):
+        self.proc_fixture()
+        with patch.object(Path, 'read_text', side_effect=PermissionError(13, 'denied', '/proc/123/maps')):
+            with self.assertRaises(PermissionError):
+                p.in_use(self.root)
+
+    def test_proc_scan_closed_descriptor_is_ignored(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').unlink()
+        self.assertEqual(p.in_use(self.root), {(p.os.makedev(8, 2), 43)})
+
+    def test_proc_scan_empty_process_does_not_read_mountinfo(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').unlink()
+        (pid / 'mountinfo').unlink()
+        self.assertEqual(p.in_use(self.root), {(p.os.makedev(8, 2), 43)})
+
+    def test_unknown_mount_inode_is_excluded_from_candidates(self):
+        walk = [('/var/log', [], ['syslog.1'])]
+        with patch.object(p.os, 'walk', side_effect=[[], walk]), patch.object(p, 'in_use', return_value={(None, 42)}), patch.object(Path, 'lstat', return_value=Mock(st_dev=123, st_ino=42)), patch.object(p, 'snapshot') as snapshot:
+            self.assertEqual(p.candidates(), [])
+            snapshot.assert_not_called()
+
+    def test_proc_scan_malformed_metadata_fails_closed(self):
+        pid = self.proc_fixture()
+        (pid / 'fdinfo' / '1').write_text('mnt_id: invalid\nino: 42\n')
+        with self.assertRaises(ValueError):
+            p.in_use(self.root)
 
     def test_historical_files_do_not_consume_batch_budget(self):
         entries = [dict(path=f'/var/log/log{i}.1', bytes=10, sha256=str(i), metadata=[1, i]) for i in range(3)]

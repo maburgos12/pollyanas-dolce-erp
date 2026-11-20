@@ -103,6 +103,8 @@ jobs:
         run: |
           python -m unittest discover -s scripts/tests -p test_backup_db.py
           python -m unittest discover -s scripts/tests -p test_vps_backup_health.py
+          python -m unittest discover -s scripts/tests -p test_rotate_verified_backups.py
+          python -m unittest discover -s scripts/tests -p test_install_backup_health.py
           python -m unittest discover -s scripts/tests -p test_vps_backup_alerts.py
           python -m unittest discover -s scripts/tests -p test_cleanup_prepare.py
           python -m unittest discover -s scripts/tests -p test_cleanup_execute.py

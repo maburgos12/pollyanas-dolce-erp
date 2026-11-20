@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """VPS scheduler entrypoint: restore proof first, existing guarded rotation second."""
+import argparse
 import fcntl
 import hashlib
 import importlib.machinery
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import time
@@ -13,7 +15,7 @@ import time
 STATE = Path('/var/lib/erp-backup-restore')
 NAS_PYTHON = '/share/CACHEDEV1_DATA/.qpkg/HybridBackup/CloudConnector3/python/bin/python3'
 NAS_RUNNER = '/share/homes/DolcePasteleria/.erp-backup-verifier/nas_restore_daily.py'
-ROTATOR = '/usr/local/sbin/erp-rotate-verified-backups'
+ROTATOR = str(Path(__file__).with_name('rotate_verified_backups.py'))
 DOCKER_MAINTENANCE = Path('/usr/local/sbin/docker-disk-maintenance.sh')
 DOCKER_MAINTENANCE_SHA = '06e7e1dab800f2a7c92cf33a71c79f3535a1cfbfa03e12a1c57f4dfb1d229799'
 
@@ -38,13 +40,20 @@ def atomic(path, text):
     temp.replace(path)
 
 
-def verify_point(rotator, stem, nas_device):
+def verify_point(rotator, stem, receipts=None):
     manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
-    path = rotator.RECEIPTS / (stem + '.json')
-    try:
-        proof = rotator.read_receipt(path, stem)
-        rotator.require(proof['manifest_sha256'] == checksum, 'Changed manifest')
-    except (OSError, ValueError, KeyError, TypeError):
+    directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
+    path = directories[0] / (stem + '.json')
+    proof = None
+    for directory in directories:
+        try:
+            candidate = rotator.read_receipt(directory / path.name, stem)
+            rotator.require(candidate['manifest_sha256'] == checksum, 'Changed manifest')
+            proof = candidate
+            break
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    if proof is None:
         payload = json.loads(run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ConnectTimeout=20', 'qnap-nasdolce-archive',
                                   NAS_PYTHON, NAS_RUNNER, stem, checksum]))
@@ -54,22 +63,34 @@ def verify_point(rotator, stem, nas_device):
         # Reuse only root-owned aliases; current byte/hash validation below remains mandatory.
         aliases = {}
         names = {row['path'] for row in json.loads((rotator.BACKUPS / (stem + '.media.json')).read_text())['files']}
-        for previous in sorted(rotator.RECEIPTS.glob('*.json')):
+        previous_receipts = {p for directory in directories for p in directory.glob('*.json')}
+        for previous in sorted(previous_receipts, key=lambda p: (p.stem, str(p.parent))):
             try:
                 old = rotator.read_receipt(previous, previous.stem)
                 aliases.update({k: v for k, v in old.get('media_aliases', {}).items() if k in names})
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         proof['media_aliases'] = aliases
-        rotator.check_proof(rotator.BACKUPS, rotator.NAS, stem, proof, nas_device)
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
         atomic(path.with_suffix('.restore.log'), evidence)
         atomic(path, json.dumps(proof, indent=2) + '\n')
-        proof = rotator.read_receipt(path, stem)
-    rotator.check_proof(rotator.BACKUPS, rotator.NAS, stem, proof, nas_device)
+        rotator.require(rotator.read_receipt(path, stem) == proof, 'Published receipt changed')
+    else:
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 
-def maintain(rotator):
+def maintain(rotator, verify_only=False):
+    receipts = None
+    if verify_only:
+        receipts = STATE / 'verification-receipts'
+        for directory in (STATE, receipts):
+            if directory == receipts:
+                directory.mkdir(mode=0o700, exist_ok=True)
+            info = directory.lstat()
+            forbidden_mode = 0o077 if directory == receipts else 0o022
+            rotator.require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                            and not info.st_mode & forbidden_mode, 'Verification receipts require a private owned directory and safe parent')
     # This lock also serializes with the daily backup and existing cron rotator.
     with (rotator.BACKUPS / '.backup.flock').open('r') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -81,13 +102,21 @@ def maintain(rotator):
                         'Newest backup is over 48 hours old')
         run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
              'qnap-nasdolce-archive', 'true'])
-        nas_device = rotator.actual_nas_device(rotator.NAS)
-        verified = [verify_point(rotator, point, nas_device) for point in points]
+        verified = [verify_point(rotator, point, receipts=receipts) for point in points]
+    if verify_only:
+        return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")
     # The rotator reacquires its lock and checks the current newest set and every proof.
-    rotation = run([ROTATOR, '--apply'])
-    rotator.local_set(rotator.BACKUPS, newest)
-    rotator.require(not any((rotator.BACKUPS / (point + '.manifest')).exists() for point in points[:-1]),
-                    'Rotation preserved older points; inspect NAS/rotator log')
+    rotation = run([sys.executable, ROTATOR, '--apply'])
+    # A daily backup may complete between our verification and the rotator's lock.
+    with (rotator.BACKUPS / '.backup.flock').open('r') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        current = sorted(p.stem for p in rotator.BACKUPS.glob('backup_*.manifest') if rotator.POINT.fullmatch(p.stem))
+        rotator.require(current and not list(rotator.BACKUPS.glob('backup_*.incomplete')),
+                        'Current backup set incomplete after rotation')
+        newest = current[-1]
+        rotator.local_set(rotator.BACKUPS, newest)
+        rotator.require(not any((rotator.BACKUPS / (point + '.manifest')).exists() for point in points[:-1]),
+                        'Rotation preserved older points; inspect NAS/rotator log')
     if int(run(['df', '-P', '/']).splitlines()[-1].split()[4].rstrip('%')) >= 75:
         rotator.secure_file(DOCKER_MAINTENANCE)
         rotator.require(rotator.digest(DOCKER_MAINTENANCE) == DOCKER_MAINTENANCE_SHA, 'Docker maintenance changed; review required')
@@ -96,6 +125,9 @@ def maintain(rotator):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--verify-only', action='store_true', help='Verify recovery without rotation or Docker maintenance')
+    args = parser.parse_args()
     os.umask(0o077)
     STATE.mkdir(exist_ok=True)
     report = dict(started_epoch=time.time(), success=False)
@@ -104,7 +136,7 @@ def main():
         try:
             report['before'] = snapshot()
             rotator = importlib.machinery.SourceFileLoader('rotator', ROTATOR).load_module()
-            report.update(maintain(rotator))
+            report.update(maintain(rotator, verify_only=args.verify_only))
             report['success'] = True
         except Exception as error:
             report['error'] = str(error)

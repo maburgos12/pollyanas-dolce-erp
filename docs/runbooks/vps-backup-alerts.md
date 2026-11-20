@@ -27,6 +27,65 @@ El nombre del helper no implica dependencia de Mac-IA: ambos corren en el VPS.
 Responsable: Mauricio/Codex. Si no se resuelve con estas comprobaciones, conservar
 los datos y diagnosticar la causa antes de autorizar cambios adicionales.
 
+### NAS bloqueado y respaldo local pendiente
+
+Un proceso en estado `D` dentro de CIFS puede conservar `.backup.flock` incluso
+después de que systemd marque el servicio como fallido. Comprobar PID, espera del
+kernel y propietario de ambos locks antes de reintentar. No borrar los archivos
+de lock: eso crea otro inode y permite dos operaciones concurrentes.
+
+La verificación CIFS del recuperador y del rotador se ejecuta en un proceso lector
+aislado, sin heredar el candado del respaldo. Al exceder el plazo se conserva el
+conjunto y el padre libera su candado; el candado separado del lector evita
+acumular verificadores si el kernel aún no puede terminarlo. Un timeout no prueba
+recuperación ni repara la conexión: conservar el PID y revisar CIFS/WireGuard.
+El lector admite hasta una hora por punto; la comprobación real de todos los
+medios puede superar 20 minutos. La rotación aplica además su presupuesto menor.
+
+El rotador tiene un presupuesto total de 34 minutos, anterior al límite de
+35 minutos del cron existente. Cada lector recibe como máximo el tiempo restante;
+si se agota antes del retiro, conserva el conjunto. Una señal de terminación al
+padre también cancela el grupo lector, sin esperar indefinidamente al kernel.
+Esto no garantiza terminar la rotación: una comprobación completa que no quepa
+en esa ventana requiere diagnóstico, nunca omitir hashes para acelerar el retiro.
+
+Después de restablecer la conexión, comprobar el último manifiesto completo y
+si el respaldo diario omitió su ejecución por el candado. Un respaldo compensatorio
+debe conservar los anteriores y usar el script oficial, sin invocar manualmente
+la rotación. Validar recuperación por separado antes de cualquier retiro aprobado.
+Registrar y restablecer cualquier pausa temporal del timer; no silenciar los
+monitores de disco ni inventarios.
+
+La unidad de recuperación usa `--verify-only`: verifica y registra recuperación,
+sin iniciar rotación ni mantenimiento Docker. Los recibos nuevos se guardan en
+`/var/lib/erp-backup-restore/verification-receipts`, un directorio privado separado
+de `receipts`, que consume el rotador. Verificar no convierte un respaldo nuevo en
+elegible para retiro. Puede leer recibos canónicos válidos, pero no los modifica;
+siempre comprueba nuevamente el contenido del NAS antes de informar éxito.
+El cron del rotador existente sigue
+usando su entrada oficial, ahora conectada al verificador acotado. Esta reparación
+no amplía su autorización ni autoriza otros lotes de limpieza.
+El límite total de la unidad sigue siendo ocho horas: su ejecución programada
+a las 08:00 de Mazatlán deja margen antes del respaldo de las 19:00 (02:00 UTC).
+Antes de un arranque manual, comprobar ese margen; la restauración remota y los
+puntos pendientes también consumen tiempo mientras se conserva el candado local.
+
+Antes de sustituir la entrada externa del rotador, el instalador conserva su
+original conocido con el SHA-256 en el nombre y verifica sus bytes. Una reversión
+del checkout debe restaurar también esa entrada: el wrapper nuevo no es compatible
+con una revisión que aún no contenga `scripts/rotate_verified_backups.py`.
+Verificar el hash del original antes de restaurarlo y conservar la evidencia;
+no reconstruirlo desde logs ni reemplazar una versión desconocida. La unidad
+anterior tampoco acepta `--verify-only`: mantener su timer pausado, con responsable
+y fecha de revisión, hasta validar una versión compatible. La reversión no autoriza
+rotación, reinicios ajenos ni retirar respaldos.
+
+El preparador de limpieza consulta las identidades de archivos en `/proc` sin
+seguir enlaces a montajes externos. Si no puede determinar el dispositivo, reserva
+el inode conservadoramente y excluye el candidato. Los errores del sistema guardan
+`errno`, ruta y mensaje en su estado privado para distinguir acceso, montaje y
+capacidad, sin publicar esos detalles en Telegram.
+
 ## Entrega y repetición
 
 Se avisa al aparecer o cambiar una condición y cada seis horas si persiste.
@@ -110,3 +169,32 @@ para borrar otros archivos.
 
 Pruebas: `python3 -m unittest discover -s scripts/tests -p test_cleanup_prepare.py`
 y `python3 -m unittest discover -s scripts/tests -p 'test_telegram*.py'`.
+
+### Elegibilidad global antes de solicitar limpieza (19/11/2026)
+
+Preparación APT/logs y Point, revalidación programada y emisión de botones reutilizan
+`vps_backup_alerts.collect`: recuperación ausente, fallida, de más de 36 horas,
+unidad fallida/no disponible o NAS inaccesible dejan el lote pendiente. Las alertas
+de disco 75/85 % no bloquean esta elegibilidad. La prueba individual del lote sigue
+siendo obligatoria; una pulsación no sustituye la comprobación previa al retiro.
+
+`recovery_pending` no envía avisos adicionales, no consume un intento de recuperación
+ni el día de autorización y se revisa en el siguiente ciclo normal. Si el lote ya
+estaba recuperado, conserva la propuesta congelada y la cola `waiting`: no crea
+otro lote. Los demás fallos conservan sus esperas y límites; no se reinician
+aprobaciones, rechazos ni entregas ambiguas. Se mantiene la política existente de
+revalidación de solicitudes pendientes vencidas, sin renovar decisiones. Este filtro
+no cambia el cron de respaldos ni su política de retención y no reactiva decisiones.
+
+Tras desplegar el SHA aprobado, el preparador/Point pueden devolver
+`activation_pending` hasta actualizar los módulos copiados del receptor. Ejecutar
+el instalador oficial únicamente cuando la publicación haya terminado:
+`python3 ops/erp-telegram-release/install.py --release-nonce NONCE`;
+actualiza primero `erp_telegram_release.py`, después `erp_telegram_cleanup.py` y
+reinicia el receptor compartido por su procedimiento existente. `operational_module`
+carga el evaluador desde `scripts/vps_backup_alerts.py` del checkout desplegado;
+no se mantiene una segunda copia de sus reglas. Comprobar los imports desde el
+receptor instalado y que desaparece `activation_pending`, además de instalar y
+validar la unidad de recuperación con `install_backup_health.sh`. Restaurar los
+estados previos de los timers si se pausaron durante la instalación; no reiniciar
+servicios ERP adicionales ni borrar históricos para validar este cambio.

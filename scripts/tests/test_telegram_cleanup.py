@@ -2,6 +2,7 @@ import copy
 import hashlib
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 import sys
 import tempfile
@@ -13,6 +14,51 @@ MODULES = Path(__file__).resolve().parents[2] / 'ops/erp-telegram-release'
 sys.path.insert(0,str(MODULES))
 import erp_telegram_release as r
 import erp_telegram_cleanup as c
+
+
+class BackupRecoveryGateTests(unittest.TestCase):
+    def test_shared_evaluator_blocks_recovery_failures_but_not_disk_alerts(self):
+        alerts = r.operational_module('vps_backup_alerts')
+        now = 200000
+        healthy = dict(success=True, finished_epoch=now)
+        cases = [(None, 'success', True), (dict(success=False), 'success', True),
+                 (dict(success=True, finished_epoch=0), 'success', True),
+                 (healthy, 'timeout', True), (healthy, 'success', False)]
+        with patch.object(c, 'operational_module', return_value=alerts):
+            for report, service, nas_ok in cases:
+                found = alerts.issues(85, nas_ok, report, service, now)
+                with self.subTest(found=found), patch.object(alerts, 'collect', return_value=(found, 85)):
+                    with self.assertRaises(c.RecoveryPending):
+                        c.require_recovery()
+                    with self.assertRaises(c.RecoveryPending):
+                        c.revalidate_proposal({'delete_candidates': []}, Path('/unused'))
+            for percent in (74, 79, 90):
+                found = alerts.issues(percent, True, healthy, 'success', now)
+                with patch.object(alerts, 'collect', return_value=(found, percent)):
+                    c.require_recovery()
+            with patch.object(alerts, 'collect', side_effect=OSError('unavailable')):
+                with self.assertRaises(c.RecoveryPending):
+                    c.require_recovery()
+
+    def test_installed_copies_share_exception_and_load_evaluator_from_checkout(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / 'installed'
+            target.mkdir()
+            for name in ('erp_telegram_release.py', 'erp_telegram_cleanup.py'):
+                shutil.copy2(MODULES / name, target / name)
+            spec = importlib.util.spec_from_file_location('installed_release', target / 'erp_telegram_release.py')
+            installed = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(installed)
+            installed.APP = MODULES.parents[1]
+            with patch.dict(sys.modules, erp_telegram_release=installed):
+                cleanup = installed.operational_module('erp_telegram_cleanup')
+            self.assertIs(cleanup.RecoveryPending, installed.RecoveryPending)
+            self.assertIs(cleanup.schedule_request.__globals__['RecoveryPending'], installed.RecoveryPending)
+            alerts = cleanup.operational_module('vps_backup_alerts')
+            self.assertEqual(Path(alerts.__file__), installed.APP / 'scripts/vps_backup_alerts.py')
+            with patch.object(cleanup, 'operational_module', return_value=Mock(collect=Mock(return_value=({'verification': 'missing'}, 79)))):
+                with self.assertRaises(installed.RecoveryPending):
+                    cleanup.require_recovery()
 
 
 class CleanupTests(unittest.TestCase):
@@ -33,6 +79,9 @@ class CleanupTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.proposal))
         self.config = {'token': 'local-test', 'chat_id': 17}
         self.send = Mock(side_effect=lambda config, method, payload: {'message_id': 42, 'chat': {'id': 17, 'type': 'private'}, **({'reply_markup': payload['reply_markup']} if method == 'editMessageReplyMarkup' else {})})
+        health = patch.object(c, 'require_recovery', create=True)
+        health.start()
+        self.addCleanup(health.stop)
         recovery = patch.object(c, "revalidate_proposal")
         recovery.start()
         self.addCleanup(recovery.stop)

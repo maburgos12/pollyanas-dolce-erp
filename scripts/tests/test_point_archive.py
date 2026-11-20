@@ -86,7 +86,7 @@ class PointLifecycleFixture:
 
     def prepare(self):
         with patch.object(archive.prep, 'disk_percent', return_value=80), \
-             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: self.broker)):
+             patch.object(cleanup, 'operational_module', return_value=Mock(Broker=lambda: self.broker, collect=lambda now: ({}, 80))):
             return self.broker.prepare(self.ledger, self.config, self.send)
 
     def row(self):
@@ -108,7 +108,29 @@ class PointBrokerTests(unittest.TestCase):
         clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        health = patch.object(cleanup, 'require_recovery', create=True)
+        health.start()
+        self.addCleanup(health.stop)
         self.fixture = PointLifecycleFixture(Path(self.temp.name).resolve())
+
+    def test_old_installed_contract_waits_for_activation(self):
+        f = self.fixture
+        with patch.object(cleanup, 'require_recovery', None):
+            self.assertEqual(f.prepare(), 'activation_pending')
+        f.send.assert_not_called()
+        self.assertEqual(f.nas.get_calls, 0)
+        self.assertFalse((f.broker.state / 'status.json').exists())
+
+    def test_global_recovery_pending_does_not_copy_or_consume_failures(self):
+        f = self.fixture
+        with patch.object(cleanup, 'require_recovery', side_effect=cleanup.RecoveryPending('backup_recovery_pending')):
+            self.assertEqual(f.prepare(), 'recovery_pending')
+            self.assertEqual(f.prepare(), 'recovery_pending')
+        f.send.assert_not_called()
+        self.assertFalse((f.broker.state / 'status.json').exists())
+        self.assertEqual(f.nas.get_calls, 0)
+        self.assertTrue(f.source.exists())
+        self.assertEqual(f.prepare(), 'requested')
 
     def test_night_has_no_preparation_or_request(self):
         f = self.fixture

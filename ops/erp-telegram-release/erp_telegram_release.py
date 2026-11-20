@@ -30,6 +30,10 @@ FIELDS = {'repo', 'pr', 'head_sha', 'base_sha', 'production_sha', 'nonce', 'expi
           'message_id', 'chat_id', 'state', 'decision', 'decision_at', 'release_sha', 'notification_id'}
 
 
+class RecoveryPending(ValueError):
+    """Global backup recovery is not ready; no approval attempt was made."""
+
+
 def validate(row):
     if not isinstance(row, dict) or set(row) not in (FIELDS, FIELDS | {'receipt_id'}) or row['repo'] != REPO:
         raise ValueError('invalid_ledger')
@@ -270,11 +274,12 @@ def approval_time():
 
 
 def operational_module(name):
-    if name not in {'erp_telegram_cleanup', 'erp_cleanup_prepare', 'erp_point_archive'}:
+    if name not in {'erp_telegram_cleanup', 'erp_cleanup_prepare', 'erp_point_archive', 'vps_backup_alerts'}:
         raise ValueError('unknown_operational_module')
-    source = Path(__file__).with_name(name + '.py')
+    relative = Path('scripts') if name == 'vps_backup_alerts' else Path('ops/erp-telegram-release')
+    source = Path(__file__).resolve().parents[2] / relative / (name + '.py') if name == 'vps_backup_alerts' else Path(__file__).with_name(name + '.py')
     if not source.is_file():
-        source = APP / 'ops/erp-telegram-release' / (name + '.py')
+        source = APP / relative / (name + '.py')
     if str(source.parent) not in sys.path:
         sys.path.insert(0, str(source.parent))
     spec = importlib.util.spec_from_file_location(name, source)
@@ -344,10 +349,15 @@ def schedule_request(kind, binding, ledger, matching, issue, revalidate):
         if not allowed or item['last_day'] == day:
             return deferred
         # Persist the day's attempt before expensive recovery checks; failures do not busy-loop.
+        previous_day = item['last_day']
         item.update(last_day=day, error='')
         queue.write(item)
         try:
             revalidate()
+        except RecoveryPending:
+            item.update(last_day=previous_day, error='backup_recovery_pending')
+            queue.write(item)
+            return dict(deferred, reason='backup_recovery_pending')
         except (ValueError, OSError, RuntimeError, KeyError, subprocess.SubprocessError) as exc:
             item['error'] = type(exc).__name__
             queue.write(item)
@@ -355,7 +365,12 @@ def schedule_request(kind, binding, ledger, matching, issue, revalidate):
         if not approval_window()[0]:
             return deferred
         # issue() persists the request before Telegram. A failed preflight is not an ambiguous send.
-        result = issue()
+        try:
+            result = issue()
+        except RecoveryPending:
+            item.update(last_day=previous_day, error='backup_recovery_pending')
+            queue.write(item)
+            return dict(deferred, reason='backup_recovery_pending')
         item['phase'] = 'waiting'
         queue.write(item)
         return result
