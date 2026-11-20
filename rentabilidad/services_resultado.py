@@ -17,11 +17,11 @@ CENTRALES = {"produccion", "logistica", "administracion"}
 
 def _personal_historico(periodo, centrales):
     """Reconoce el gasto corporativo sin inventar su distribución por sucursal."""
-    from reportes.services_planeacion_personal import build_personnel_plan
+    from reportes.services_planeacion_personal import _build_personnel_plan
     from reportes.services_rentabilidad_personal import leer_personal_mensual
 
     fin = date(periodo.year, periodo.month, monthrange(periodo.year, periodo.month)[1])
-    selected = build_personnel_plan(fin)["selected"]
+    selected = _build_personnel_plan(fin, solo_actuals=True)
     registered = selected["registered"]
     montos = {"nomina": registered["total"] if registered else None,
               **{key: selected[key] for key in ("imss", "rcv", "isn", "fees")}}

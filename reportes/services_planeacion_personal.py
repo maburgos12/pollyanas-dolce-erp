@@ -105,6 +105,10 @@ def _ajustes_conciliados(registered, fiscal_uuids):
 
 
 def build_personnel_plan(cutoff=None):
+    return _build_personnel_plan(cutoff)
+
+
+def _build_personnel_plan(cutoff=None, *, solo_actuals=False):
     today = timezone.localdate()
     last_month = today.replace(day=1) - timedelta(days=1)
     cutoff = min(cutoff or last_month, last_month)
@@ -115,32 +119,33 @@ def build_personnel_plan(cutoff=None):
     rows = {m: dict(month=m, sales=None, ordinary=ZERO, extraordinary=ZERO,
                     imss=None, rcv=None, isn=None, fees=None, cfdis=0,
                     sources=[], errors=[]) for m in periods}
-    sales = official_point_sales_rows_for_range(
-        start_date=start, end_date=end - timedelta(days=1))
-    for item in sales.annotate(month=TruncMonth('sale_date')).values('month').annotate(
-            amount=Sum('total_amount'), branches=Count('branch_id', distinct=True)):
-        month = item['month']
-        if hasattr(month, 'date'):
-            month = month.date()
-        rows[month].update(sales=item['amount'], branches=item['branches'])
+    if not solo_actuals:
+        sales = official_point_sales_rows_for_range(
+            start_date=start, end_date=end - timedelta(days=1))
+        for item in sales.annotate(month=TruncMonth('sale_date')).values('month').annotate(
+                amount=Sum('total_amount'), branches=Count('branch_id', distinct=True)):
+            month = item['month']
+            if hasattr(month, 'date'):
+                month = month.date()
+            rows[month].update(sales=item['amount'], branches=item['branches'])
 
-    # El export histórico cubre días sin captura oficial; nunca se suman ambas fuentes del mismo local/día.
-    # shortcut: histórico auditado de 2025; ampliar tras verificar identidades y linaje de otros ejercicios.
-    historical_candidates = selected_sales_facts(start_date=start, end_date=end - timedelta(days=1)).filter(
-        source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE, fecha__year=2025)
-    for item in historical_candidates.filter(sucursal_id__isnull=True).annotate(
-            month=TruncMonth('fecha')).values('month').annotate(count=Count('id')):
-        rows[item['month']]['errors'].append(
-            f"{item['count']} ventas históricas sin sucursal: no se incorporan sin resolver su identidad.")
-    historical = historical_candidates.filter(sucursal_id__isnull=False).annotate(point_day=Exists(sales.filter(
-        sale_date=OuterRef('fecha'), branch__erp_branch_id=OuterRef('sucursal_id'),
-    ))).filter(point_day=False)
-    historical_months = list(historical.annotate(month=TruncMonth('fecha')).values(
-        'month', 'sucursal_id', 'sucursal__nombre').annotate(
-            amount=Sum('venta_total'), first=Min('fecha'), last=Max('fecha')))
-    for item in historical_months:
-        row = rows[item['month']]
-        row['sales'] = (row['sales'] or ZERO) + item['amount']
+        # El export histórico cubre días sin captura oficial; nunca se suman ambas fuentes del mismo local/día.
+        # shortcut: histórico auditado de 2025; ampliar tras verificar identidades y linaje de otros ejercicios.
+        historical_candidates = selected_sales_facts(start_date=start, end_date=end - timedelta(days=1)).filter(
+            source_kind=FactVentaDiaria.SOURCE_AUTHORITATIVE, fecha__year=2025)
+        for item in historical_candidates.filter(sucursal_id__isnull=True).annotate(
+                month=TruncMonth('fecha')).values('month').annotate(count=Count('id')):
+            rows[item['month']]['errors'].append(
+                f"{item['count']} ventas históricas sin sucursal: no se incorporan sin resolver su identidad.")
+        historical = historical_candidates.filter(sucursal_id__isnull=False).annotate(point_day=Exists(sales.filter(
+            sale_date=OuterRef('fecha'), branch__erp_branch_id=OuterRef('sucursal_id'),
+        ))).filter(point_day=False)
+        historical_months = list(historical.annotate(month=TruncMonth('fecha')).values(
+            'month', 'sucursal_id', 'sucursal__nombre').annotate(
+                amount=Sum('venta_total'), first=Min('fecha'), last=Max('fecha')))
+        for item in historical_months:
+            row = rows[item['month']]
+            row['sales'] = (row['sales'] or ZERO) + item['amount']
 
     # El expediente aplicado es el control fiscal canónico del ISN. Se carga
     # antes que los CFDI para que el comprobante fuente no se sume otra vez.
@@ -404,6 +409,10 @@ def build_personnel_plan(cutoff=None):
         row['errors'].extend(control['errors'])
         if control['errors']:
             row['reconciled_components'] = False
+
+    # Rentabilidad histórica solo consume importes y trazabilidad, sin planeación de ventas.
+    if solo_actuals:
+        return rows[month_shift(end, -1)]
 
     recent = [month_shift(end, n) for n in (-3, -2, -1)]
     policy = budget_policy([rows.get(m, {}).get('sales') for m in recent])
