@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from django.db import connection
 from django.template.loader import render_to_string
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
@@ -483,3 +483,59 @@ class DecisionSupportServicesTests(TestCase):
 
 
 ZERO = Decimal("0")
+
+
+class ForecastHistoricalStatsTests(SimpleTestCase):
+    def test_complete_contexts_keep_order_calibration_and_history_edges(self):
+        reference = date(2026, 4, 6)
+        days = [reference + timedelta(days=offset) for offset in (7, 1, 5, 2, 6, 3, 4)]
+        sales = []
+        for recipe_id in range(1, 7):
+            for offset in range(1, 57):
+                qty = Decimal("3")
+                if recipe_id == 2 and offset > 14:
+                    qty = Decimal("0")
+                if recipe_id == 3 and offset > 13:
+                    qty = Decimal("-1")
+                if recipe_id == 4 and offset == 1:
+                    qty = Decimal("1000")
+                sales.append({
+                    "sucursal_id": 1, "receta_id": recipe_id,
+                    "fecha": reference - timedelta(days=offset),
+                    "receta__familia": "Familia", "qty": qty, "revenue": qty * 10,
+                })
+        sales.reverse()
+        sales.append(dict(sales[-1], qty=Decimal("6"), revenue=Decimal("60")))
+        sales.append(dict(sales[-1], fecha=reference + timedelta(days=4), qty=Decimal("900")))
+        profiles = {
+            (1, "Familia", pattern, band): {"bias_adjustment": bias if band == "HIGH" else bias + Decimal("0.2")}
+            for pattern, bias in (("MON_WED", Decimal("1.1")), ("THU_SUN", Decimal("0.8")))
+            for band in ("LOW", "HIGH")
+        }
+        with patch.object(forecast_service, "_read_forecast_sales", return_value=sales) as reads, patch.object(
+            forecast_service, "load_latest_calibration_profiles", return_value=(profiles, {}),
+        ) as calibration, patch.object(forecast_service, "_latest_contribution_map", return_value={}) as contribution:
+            expected = [forecast_service._daily_forecast_context(
+                target_date=day, reference_date=reference, lookback_weeks=8,
+                top_n=None, validation_days=14, include_validation=False,
+                sales_rows=[row for row in sales if row["fecha"] <= day],
+            ) for day in days]
+            calibration.reset_mock()
+            contribution.reset_mock()
+            with patch.object(forecast_service, "_historical_forecast_stats", wraps=forecast_service._historical_forecast_stats) as stats:
+                actual = list(forecast_service.iter_future_forecast_contexts(days, reference_date=reference, lookback_weeks=8))
+            self.assertEqual(stats.call_count, 5)
+            reads.assert_called_once()
+            calibration.assert_called_once_with(reference_date=reference)
+            self.assertEqual(contribution.call_count, 7)
+        self.assertEqual(actual, expected)
+        self.assertEqual({row["recipe_id"] for row in actual[0]["rows"]}, {1, 2, 4, 5, 6})
+        self.assertEqual(next(row["history_days"] for row in actual[0]["rows"] if row["recipe_id"] == 2), 14)
+        order = [row["recipe_id"] for row in actual[0]["rows"]]
+        self.assertLess(order.index(6), order.index(5))
+        outlier = next(row for row in actual[0]["rows"] if row["recipe_id"] == 4)
+        self.assertEqual(outlier["rotation_band"], "LOW")
+        self.assertEqual(outlier["bias_adjustment"], Decimal("1.1000"))
+        self.assertEqual(next(row for row in actual[2]["rows"] if row["recipe_id"] == 4)["bias_adjustment"], Decimal("0.8000"))
+        actual[0]["rows"][0]["why"] = "mutated"
+        self.assertNotEqual(actual[1]["rows"][0]["why"], "mutated")
