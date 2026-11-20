@@ -811,5 +811,10 @@ de consumirlo; devolver sólo evidencia compacta para evitar repetir contexto.
 No delegar cálculos exactos ni decisiones operativas; no ejecutar comandos
 generados por el modelo. Si el nodo no responde, registrar el motivo y continuar
 con el flujo autorizado, sin activar APIs pagadas nuevas ni reintentos indefinidos.
-La instalación del modelo no implica tareas programadas del ERP. El acceso entre
-redes usa el túnel privado del VPS documentado en el runbook.
+El piloto automático aprobado agrupa evidencia de inventario y planes; consultar
+su estado/resúmenes compactos con `python manage.py mac_ia_jobs status` en el VPS
+o `/orquestacion/#mac-ia-02` antes de repetir una lectura masiva de esas tareas.
+El comentario de IA no prueba cierre operativo; verificar la fuente cuando haga
+falta decidir. No enviar prompts extensos si el resumen y las referencias bastan.
+La activación es explícita con `mac_ia_jobs enable`; desactivar con `disable`.
+El acceso entre redes usa los túneles privados documentados en el runbook.

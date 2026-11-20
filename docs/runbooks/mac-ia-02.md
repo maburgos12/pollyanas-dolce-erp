@@ -229,3 +229,20 @@ al VPS se conservan como recursos operativos;
 los túneles adicionales de prueba se cierran al terminar. No confundirlo con
 acceso desde otra red. El worktree se retira por el ciclo de vida oficial después de integrar
 y verificar. No borrar recursos de Mac-IA Debian, NAS, otras tareas o producción.
+
+## Piloto de tareas automáticas (autorizado 2026-11-19)
+
+Diseño y alcance aprobados en
+[`../superpowers/specs/2026-11-19-mac-ia-02-automatico.md`](../superpowers/specs/2026-11-19-mac-ia-02-automatico.md).
+Fuentes y límites: [ficha](../superpowers/specs/2026-11-19-mac-ia-02-fuentes.md).
+Instalación, operación, pausa y recuperación:
+[`ops/erp-mac-ia/README.md`](../../ops/erp-mac-ia/README.md).
+El horario y ejecutor requieren activación explícita; instalar el código no los
+activa. Seguimiento autenticado en `/orquestacion/#mac-ia-02`.
+
+Transporte exclusivo del modelo: cuenta `erp_mac_ia_02_llm`, listener privado del
+VPS `127.0.0.1:18125` → Mac `127.0.0.1:18124`, sin modificar gestión 22066 ni NAS.
+Llave de salida de la Mac: `~/.ssh/pastelerias_mac_ia_02_llm_ed25519`;
+LaunchAgent `com.pollyanasdolce.mac-ia-02.llm-tunnel`. Credencial Bearer en el VPS
+fuera del repositorio, sólo legible por root. Los trabajos sólo generan resúmenes
+para revisión humana, con trazas y consumo; no autorizan ni ejecutan operaciones.
