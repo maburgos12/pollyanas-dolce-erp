@@ -228,7 +228,8 @@ class AplicacionAcotadaTests(TransactionTestCase):
             variance='-2469.13', variance_pct='-20', tone='warning', type='EGRESO', evidencia='original')
         resumen.metadata['rows'].append(ajeno)
         resumen.save(update_fields=['metadata'])
-        otro = PresupuestoResumenMensual.objects.create(period=date(2026, 9, 1), tipo='FUENTE',
+        # El pk=10 del fixture no avanza la secuencia de PostgreSQL.
+        otro = PresupuestoResumenMensual.objects.create(pk=11, period=date(2026, 9, 1), tipo='FUENTE',
             fuente_nombre='PRESUPUESTO_VS_REAL', total_actual=D('123.45'), metadata={'rows': [ajeno]})
         before = PresupuestoResumenMensual.objects.filter(pk=otro.pk).values().get()
         self.ejecutar(apply=True)
