@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django_celery_beat.models import IntervalSchedule, PeriodicTask
 
 from orquestacion.models import AgentDefinition, AgentTask, OrchestrationRule, OrchestrationRun
@@ -233,8 +234,9 @@ def panel():
             "attempts": payload.get("attempts", 0), "duration": payload.get("duration"),
             "tokens": sum(usage.values()), "prompt_tokens": usage.get("prompt_tokens", 0),
             "completion_tokens": usage.get("completion_tokens", 0), "updated_at": task.updated_at,
-            "started_at": payload.get("started_at"), "lease_until": task.due_at if task.status == "running" else None})
+            "started_at": parse_datetime(payload["started_at"]) if payload.get("started_at") else None, "lease_until": task.due_at if task.status == "running" else None})
     return {"enabled": bool(rule and rule.is_active), "model": "Qwen3-8B Q4_K_M · CPU local", "jobs": jobs,
-            "state": config.get("worker_state", "unknown"), "heartbeat_at": config.get("heartbeat_at"),
-            "last_connected_at": config.get("last_connected_at"), "last_scan": config.get("last_scan"),
+            "state": config.get("worker_state", "unknown"), "heartbeat_at": parse_datetime(config["heartbeat_at"]) if config.get("heartbeat_at") else None,
+            "last_connected_at": parse_datetime(config["last_connected_at"]) if config.get("last_connected_at") else None,
+            "last_scan": parse_datetime(config["last_scan"]) if config.get("last_scan") else None,
             "scan": config.get("scan", {})}
