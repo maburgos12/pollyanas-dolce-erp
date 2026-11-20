@@ -3232,6 +3232,85 @@ class ReportesCanonicosTests(TestCase):
         self.assertEqual(response.context["profitability_panel"]["rows"], [])
         self.assertContains(response, 'option value="base" selected')
 
+    def test_cierre_producto_renders_legacy_reviews_without_mutating_closure(self):
+        reviews = [
+            "BAMOA: conteo 198 está RECONTEO.",
+            "La auditoría visible todavía no está lista.",
+        ]
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 10, 1),
+            month_end=date(2026, 10, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            metadata={"validation": {
+                "lock_ready": False,
+                "blocking_issues": reviews,
+                "automation_reviews": reviews,
+            }},
+        )
+        before = ProductoMonthClosure.objects.filter(pk=closure.pk).values().get()
+
+        response = self.client.get(reverse("reportes:cierre_producto"), {"month": "2026-10"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.context["automation_reviews"]), len(reviews))
+        for original, displayed in zip(reviews, response.context["automation_reviews"]):
+            self.assertContains(response, original)
+            self.assertEqual(displayed["detail"], original)
+            self.assertIs(displayed["passed"], False)
+            self.assertEqual(displayed["status"], "Pendiente de revisión")
+        self.assertFalse(response.context["validation"]["lock_ready"])
+        self.assertEqual(ProductoMonthClosure.objects.filter(pk=closure.pk).values().get(), before)
+
+    def test_cierre_producto_mixed_reviews_preserve_dicts_and_csv_none_zero(self):
+        closure = ProductoMonthClosure.objects.create(
+            month_start=date(2026, 10, 1),
+            month_end=date(2026, 10, 31),
+            status=ProductoMonthClosure.STATUS_BUILT,
+            opening_source=ProductoMonthClosure.OPENING_SOURCE_POINT_SNAPSHOT,
+        )
+        for name, metadata in (
+            ("Pastel cero observado", {}),
+            ("Pastel sin fuente observado", {
+                "balance_contract": "POINT_PRODUCT_BALANCE_V1",
+                "point_difference": "",
+                "point_status": "REVISAR_FUENTE",
+                "issues": ["OPENING_SNAPSHOT_MISSING", "CALCULATED_CLOSING_MISSING", "CLOSING_SNAPSHOT_MISSING"],
+            }),
+        ):
+            receta = Receta.objects.create(
+                nombre=name, codigo_point=name, hash_contenido=name,
+                tipo=Receta.TIPO_PRODUCTO_FINAL,
+            )
+            ProductoMonthClosureLine.objects.create(closure=closure, receta_padre=receta, metadata=metadata)
+        url = reverse("reportes:cierre_producto")
+        params = {"month": "2026-10", "export": "csv"}
+        baseline = self.client.get(url, params)
+        self.assertEqual(baseline.status_code, 200)
+        csv_rows = list(csv.reader(StringIO(baseline.content.decode("utf-8"))))
+        header = csv_rows[csv_rows.index([]) + 1]
+        values = {row[0]: row for row in csv_rows[csv_rows.index([]) + 2:] if row}
+        self.assertEqual(Decimal(values["Pastel cero observado"][header.index("Ini. Point")]), Decimal("0"))
+        self.assertEqual(values["Pastel sin fuente observado"][header.index("Ini. Point")], "Sin dato")
+        proven = {"label": "Fuente", "status": "Comprobada", "detail": "Cantidad cero", "passed": True, "value": 0, "missing": None}
+        pending = {"label": "Auditoría", "status": "Pendiente", "detail": "Frontera pendiente", "passed": None}
+        closure.metadata = {"validation": {"lock_ready": False, "automation_reviews": [proven, "Aviso legado", pending]}}
+        closure.save(update_fields=["metadata"])
+        before = ProductoMonthClosure.objects.filter(pk=closure.pk).values().get()
+        lines_before = list(closure.lines.order_by("pk").values())
+
+        response = self.client.get(url, {"month": "2026-10"})
+        exported = self.client.get(url, params)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["automation_reviews"][0], proven)
+        self.assertEqual(response.context["automation_reviews"][2], pending)
+        for text in ("Cantidad cero", "Aviso legado", "Frontera pendiente"):
+            self.assertContains(response, text)
+        self.assertEqual(exported.status_code, 200)
+        self.assertEqual(exported.content, baseline.content)
+        self.assertEqual(ProductoMonthClosure.objects.filter(pk=closure.pk).values().get(), before)
+        self.assertEqual(list(closure.lines.order_by("pk").values()), lines_before)
+
     def test_cierre_producto_view_renders_existing_closure(self):
         receta = Receta.objects.create(
             nombre="Pastel Cierre Operativo",
