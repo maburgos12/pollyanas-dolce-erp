@@ -818,3 +818,19 @@ El comentario de IA no prueba cierre operativo; verificar la fuente cuando haga
 falta decidir. No enviar prompts extensos si el resumen y las referencias bastan.
 La activación es explícita con `mac_ia_jobs enable`; desactivar con `disable`.
 El acceso entre redes usa los túneles privados documentados en el runbook.
+
+## Asignación automática a los dos nodos locales
+
+Para solicitudes acotadas de un agente, usar primero `scripts/local_ai_request.py`
+según `docs/runbooks/local-ai-router.md`: `verify` dirige cotejos exactos a Python
+Debian; `summary` elige Qwen4B Debian para hasta1000 bytes UTF-8 y Qwen8B Mac16
+para hasta2500; `extract` dirige citas/campos a Nemotron Mac16. El cliente mantiene
+UUID estable para evidencia idéntica. Enviar sólo el JSON mínimo saneado; consultar
+el recibo antes de repetir inferencia o lectura de datos. El encolador horario ya
+canaliza sus nuevos lotes al activar el router; no crear otro cron lector Point.
+La interfaz es privada, usa el SSH administrativo existente y no concede acceso
+administrativo a modelos/nodos. Un agente nuevo necesita su registro activo y
+conserva sus propios permisos/fuentes antes de enviar evidencia. Revisar tipos,
+valores ausentes y estados originales; un resumen local no autoriza negocio ni
+prueba ahorro de cuota Codex. Sin contrato compatible, escalar explícitamente;
+no ejecutar salidas, activar API pagada ni saturar nodos para aparentar actividad.

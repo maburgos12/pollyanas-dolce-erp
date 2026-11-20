@@ -1,3 +1,22 @@
+{% if local_ai.router.enabled or local_ai.router.jobs %}
+<div class="card">
+  <div class="card-header orq-local-heading"><h2>Asignación de trabajo local</h2>
+    <span class="badge {% if local_ai.router.enabled %}b-active{% else %}b-paused{% endif %}">{% if local_ai.router.enabled %}Asignación activa{% else %}Asignación en pausa{% endif %}</span>
+  </div>
+  <p>Debian: Python y Qwen 4B. Mac de 16 GB: Qwen 8B y Nemotron. El tipo y tamaño de la solicitud determinan el destino; cada equipo recibe un trabajo a la vez.</p>
+  <p class="muted">Últimas 12 solicitudes · actualización cada 15 segundos</p>
+  <ol class="orq-router-jobs">
+    {% for job in local_ai.router.jobs %}<li>
+      <h3>#{{ job.id }} · {{ job.agent_name }}</h3>
+      <p><span class="badge b-{{ job.status }}">{{ job.label }}</span> · {{ job.kind_label }}</p>
+      <p>{% if job.node == 'mac_ia' %}Mac-IA Debian{% elif job.node == 'mac_ia_02' %}Mac-IA de 16 GB{% else %}Revisión requerida{% endif %} · <strong>{{ job.model|default:"Sin modelo local" }}</strong><br>{{ job.reason }}</p>
+      <p class="orq-router-result">{% if job.display_result %}{{ job.display_result }}{% elif job.status == 'running' %}Procesando evidencia.{% elif job.status == 'pending' %}Esperando turno disponible.{% else %}{{ job.error }}{% endif %}</p>
+      <p class="muted">{{ job.updated_at }} · intento {{ job.attempts }}/3{% if job.duration != None %} · {{ job.duration }} s{% endif %}</p>
+    </li>{% empty %}<li>Lista para recibir solicitudes de los agentes y nuevos cambios de la cola existente.</li>{% endfor %}
+  </ol>
+  <p class="muted">Python coteja números exactos. La extracción verifica que los valores aparezcan en la evidencia; los resúmenes requieren revisión humana. Los trabajos técnicos conservan separado el estado de las operaciones originales.</p>
+</div>
+{% endif %}
 <div class="card">
   <div class="card-header orq-local-heading"><h2 id="mac-ia-title">Mac-IA-02 · seguimiento local</h2>
     <span class="badge {% if local_ai.enabled %}b-active{% else %}b-paused{% endif %}">{% if local_ai.enabled %}Piloto activo{% else %}Piloto desactivado{% endif %}</span>

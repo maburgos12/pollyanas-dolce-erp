@@ -2,6 +2,7 @@
 import hashlib
 import json
 import secrets
+from uuid import NAMESPACE_URL, uuid5
 from datetime import timedelta
 
 from django.db import transaction
@@ -85,12 +86,14 @@ def enqueue():
     if not rule or not rule.is_active:
         return {"created": 0}
     cases, references, stats = _sources()
-    jobs = AgentTask.objects.filter(task_type=TASK)
+    from . import local_router
+    routed = OrchestrationRule.objects.filter(code=local_router.RULE, is_active=True).exists()
+    jobs = AgentTask.objects.filter(task_type__in=[TASK, local_router.TASK])
     # Content-addressed evidence is reusable even when routine IDs/timestamps change.
     seen = set()
     # shortcut: 2000 recent jobs cover this pilot; review retention before expanding sources.
     for payload in jobs.exclude(status="cancelled").order_by("-id").values_list("input_payload", flat=True)[:2000]:
-        seen.update(_signature(case) for case in payload.get("cases", []))
+        seen.update(_signature(case) for case in payload.get("cases", payload.get("data", {}).get("cases", [])))
     changed = [cases[key] for key in sorted(cases) if _signature(cases[key]) not in seen]
     capacity = max(0, 8 - jobs.filter(status__in=["pending", "running"]).count())
     created = 0
@@ -98,6 +101,14 @@ def enqueue():
         for offset in range(0, min(len(changed), capacity * 4), 4):
             batch = changed[offset:offset + 4]
             digest = _signature(batch)
+            if routed:
+                data = {"cases": batch, "references": [references[c["key"]] for c in batch]}
+                cancelled = jobs.filter(task_type=local_router.TASK, status="cancelled",
+                    input_payload__kind="summary_cases", input_payload__data=data).order_by("-id").values_list("id", flat=True).first()
+                receipt = local_router.submit(agent=rule.primary_agent.code, kind="summary_cases", data=data,
+                    request_id=str(uuid5(NAMESPACE_URL, f"{TASK}:{_signature(data)}:after:{cancelled or 0}")))
+                created += int(receipt["created"])
+                continue
             run, new = OrchestrationRun.objects.get_or_create(run_key=f"{TASK}:{digest}", defaults={
                 "trigger_source": "local_ai_hourly", "rule": rule, "status": "pending",
                 "context_json": {"node": NODE},
@@ -222,6 +233,7 @@ def heartbeat(state):
 
 
 def panel():
+    from . import local_router
     rule = OrchestrationRule.objects.filter(code=RULE).first()
     config = rule.condition_json if rule else {}
     jobs = []
@@ -239,4 +251,4 @@ def panel():
             "state": config.get("worker_state", "unknown"), "heartbeat_at": parse_datetime(config["heartbeat_at"]) if config.get("heartbeat_at") else None,
             "last_connected_at": parse_datetime(config["last_connected_at"]) if config.get("last_connected_at") else None,
             "last_scan": parse_datetime(config["last_scan"]) if config.get("last_scan") else None,
-            "scan": config.get("scan", {})}
+            "scan": config.get("scan", {}), "router": local_router.panel()}
