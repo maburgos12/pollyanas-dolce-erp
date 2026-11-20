@@ -74,7 +74,7 @@ def prepare(job):
             prompt = prefix + "Resume en español, máximo 60 palabras, en summary. Conserva estados, ausencias y necesidad de revisión."
         else:
             fields = data["fields"]
-            if (not isinstance(fields, list) or not 1 <= len(fields) <= 6 
+            if (not isinstance(fields, list) or not 1 <= len(fields) <= 6
                     or any(not isinstance(f, str) or not f.isidentifier() or len(f) > 40 for f in fields)
                     or len(set(fields)) != len(fields)):
                 raise ValueError("invalid_output")

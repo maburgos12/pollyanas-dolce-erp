@@ -13,9 +13,11 @@ Alta19/11/2026. Revisión de recursos permanentes26/11/2026.
 | summary_cases | casos y referencias del lector existente | <=2 Debian Qwen4B; 3–4 Mac16 Qwen8B | Esquema, claves, fuentes y referencias vigentes; revisión humana |
 
 La solicitud declara su contrato; reglas deterministas eligen equipo/modelo.
-Si Debian ya tiene trabajo y la Mac16 no tiene cola, un resumen breve compatible
-se deriva a Qwen8B. Antes de reservar, el ejecutor comprueba que el nodo esté
-disponible. Los cambios periódicos se agrupan de dos en dos para poder repartir
+Si Debian ya tiene trabajo, los resúmenes breves compatibles pueden derivarse
+a Qwen8B. La referencia de reparto es21s frente a43s del recibo de calibración:
+tras usar ambos nodos, se permite aproximadamente el doble de cola breve en4B
+antes de sumar otro trabajo a8B. Es una heurística acotada, no una promesa de
+velocidad. Antes de reservar, el ejecutor comprueba disponibilidad. Los cambios periódicos se agrupan de dos en dos para poder repartir
 trabajo entre ambos nodos; el piloto anterior conserva lotes de cuatro.
 No se gasta otra inferencia para decidir el destino. La identidad del agente se
 registra y debe estar activa. No se interpreta una frase ambigua como permiso
@@ -86,7 +88,9 @@ El trabajador corre desde el commit desplegado, no desde copias sueltas.
 `pastelerias-local-router.timer` activa un oneshot cada60s después de terminar.
 Sin trabajo elegible no consulta modelos/nodos. Comparte
 `/run/pastelerias-mac-ia/worker.lock` con el piloto y puede usar ambos nodos en
-paralelo. `systemctl status pastelerias-local-router.service` y journal contienen
+paralelo. Atiende hasta cuatro trabajos por nodo sin pausa intermedia; deja de
+iniciar nuevos al alcanzar120s, conservando el timeout propio de cada corrida.
+Cede si el nodo está ocupado o un intento falla; no insiste durante el backoff. `systemctl status pastelerias-local-router.service` y journal contienen
 sólo IDs, estados y modelos, sin prompts ni errores SSH completos.
 
 Cada llave de ejecución permite exclusivamente el comando forzado

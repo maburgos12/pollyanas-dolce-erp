@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import subprocess
+import time
 
 from worker import command as pilot_command
 
@@ -61,6 +62,18 @@ def work(node):
         return {"node": node, "state": "offline"}
 
 
+def drain(node):
+    started, results = time.monotonic(), []
+    for _ in range(4):
+        if time.monotonic() - started >= 120:
+            break
+        value = work(node)
+        results.append(value)
+        if value.get("status") not in {"resolved", "cancelled"}:
+            break
+    return results
+
+
 def main():
     os.umask(0o077)
     with open("/run/pastelerias-mac-ia/worker.lock", "a") as lock:
@@ -75,8 +88,9 @@ def main():
         if any(j["status"] in {"pending", "running"} for j in pilot_command("status")["jobs"]):
             return
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            for value in pool.map(work, [node for node in ("mac_ia", "mac_ia_02") if status["ready_by_node"].get(node)]):
-                print(json.dumps(value), flush=True)
+            for results in pool.map(drain, [node for node in ("mac_ia", "mac_ia_02") if status["ready_by_node"].get(node)]):
+                for value in results:
+                    print(json.dumps(value), flush=True)
 
 
 if __name__ == "__main__":

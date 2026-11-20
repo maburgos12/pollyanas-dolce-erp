@@ -30,6 +30,19 @@ class RouterWorkerTests(unittest.TestCase):
         finished = next(payload for action, payload in calls if action == "finish")
         self.assertEqual(finished, {"task_id": 7, "lease": "server-owned", "error": "invalid_output"})
 
+    def test_backlog_drains_bounded_jobs_without_an_idle_minute_between(self):
+        with patch.object(router_worker, "work", return_value={"id": 1, "status": "resolved"}) as work, patch.object(router_worker.time, "monotonic", return_value=0):
+            self.assertEqual(len(router_worker.drain("mac_ia")), 4)
+            self.assertEqual(work.call_count, 4)
+
+    def test_drain_yields_when_node_busy_or_budget_expires(self):
+        with patch.object(router_worker, "work", return_value={"state": "busy"}) as work:
+            self.assertEqual(router_worker.drain("mac_ia"), [{"state": "busy"}])
+            self.assertEqual(work.call_count, 1)
+        with patch.object(router_worker, "work", return_value={"id": 1, "status": "resolved"}) as work, patch.object(router_worker.time, "monotonic", side_effect=[0, 0, 130]):
+            self.assertEqual(len(router_worker.drain("mac_ia")), 1)
+            self.assertEqual(work.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

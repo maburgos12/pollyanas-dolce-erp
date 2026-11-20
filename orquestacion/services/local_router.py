@@ -131,9 +131,11 @@ def submit(*, agent, kind, data, request_id):
         raise ValueError("queue_full")
     if model == "qwen4b":
         queued = AgentTask.objects.filter(task_type=TASK, status__in=["pending", "running"])
-        if (queued.filter(input_payload__node="mac_ia").exists()
-                and not queued.filter(input_payload__node="mac_ia_02").exists()):
-            model, reason = "qwen8b", "Resumen compatible: Debian tiene trabajo asignado y la Mac de 16 GB no tiene cola"
+        debian = queued.filter(input_payload__node="mac_ia").count()
+        mac = queued.filter(input_payload__node="mac_ia_02").count()
+        # Calibration of these short summaries: 4B ~21s, 8B ~43s; probe still gates execution.
+        if debian > 0 and (mac == 0 or debian > 2 * mac):
+            model, reason = "qwen8b", "Reparto de cola: Qwen 8B recibe un resumen breve compatible"
     node = MODELS.get(model)
     status = "pending" if model else "blocked"
     run = OrchestrationRun.objects.create(run_key=f"{TASK}:{request_id}", rule=rule,

@@ -179,3 +179,8 @@ class LocalRouterTests(TransactionTestCase):
             AgentTask.objects.create(run=run, agent=self.agent, title="Source", task_type="plan_purchase_chain_review", input_payload={"plan_id": entity})
         self.assertEqual(local_ai.enqueue()["created"], 2)
         self.assertEqual(set(AgentTask.objects.filter(task_type=local_router.TASK).values_list("input_payload__node", flat=True)), {"mac_ia", "mac_ia_02"})
+
+    def test_eight_brief_requests_share_work_using_measured_model_speed(self):
+        destinations = [self.submit()["node"] for _ in range(8)]
+        self.assertEqual(destinations.count("mac_ia"), 5)
+        self.assertEqual(destinations.count("mac_ia_02"), 3)
