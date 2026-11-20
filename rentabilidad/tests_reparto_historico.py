@@ -87,6 +87,38 @@ class RepartoRentabilidadTests(TestCase):
         self.assertIn(self.bamoa.pk,old)
         self.assertNotIn(self.crucero.pk,old)
 
+    def test_empty_closed_selection_skips_payroll_reads_and_preserves_only_extras(self):
+        from rrhh.models import Empleado, HoraExtra
+        from .services_reporte_mensual import _nomina_del_cierre, build_reporte_mensual_consolidado
+
+        period = date(2026, 6, 1)
+        with self.assertNumQueries(0):
+            self.assertEqual(_nomina_del_cierre(period, set()), {})
+
+        employee = Empleado.objects.create(nombre='Personal de prueba', sucursal_ref=self.bamoa)
+        HoraExtra.objects.create(
+            empleado=employee, fecha=date(2026, 6, 10), horas=Decimal('1'),
+            monto_calculado=Decimal('12.50'), estado=HoraExtra.ESTADO_AUTORIZADO,
+        )
+        selected = build_reporte_mensual_consolidado(
+            hasta=period, meses=1, sucursal_id=self.bamoa.pk,
+        )['filas'][0]
+        self.assertEqual(selected['alcance'], 'SIN_DATOS')
+        self.assertEqual(selected['horas_extra'], Decimal('12.50'))
+        self.assertEqual(selected['sucursales'][0]['sucursal_id'], self.bamoa.pk)
+        for field in ('ingresos', 'nomina', 'nomina_total', 'utilidad_neta'):
+            self.assertIsNone(selected[field])
+            self.assertIsNone(selected['sucursales'][0][field])
+
+        with CaptureQueriesContext(connection) as queries:
+            payroll = _nomina_del_cierre(period, {self.crucero.pk})
+        self.assertGreater(len(queries), 0)
+        self.assertEqual(payroll, {self.crucero.pk: None})
+        global_row = build_reporte_mensual_consolidado(hasta=period, meses=1)['filas'][0]
+        self.assertEqual(global_row['ingresos'], Decimal('100'))
+        self.assertEqual(global_row['horas_extra'], Decimal('12.50'))
+        self.assertEqual(global_row['alcance'], 'REPARTO_CONCILIADO')
+
     def test_primary_monthly_view_uses_closed_sources_without_partial_model(self):
         self.client.force_login(self.user)
         with patch('rentabilidad.views_rentabilidad.leer_costos_mensuales', side_effect=AssertionError('No mezclar bases')):

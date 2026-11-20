@@ -53,6 +53,9 @@ def _nomina_del_cierre(periodo: date, sucursal_ids: set[int]) -> dict:
     Keep the full reader's perimeter: a source-backed branch, or an existing
     active branch with current fixed expense. Missing payroll remains None.
     """
+    if not sucursal_ids:
+        return {}
+
     from control.models import MermaMensualSucursal
     from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
     from reportes.services_rentabilidad_personal import leer_personal_mensual
