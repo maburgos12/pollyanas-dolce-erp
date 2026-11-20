@@ -5,8 +5,17 @@ from syncfy_client.models import CuentaBancaria, LogSyncfy, MovimientoBancario
 
 @admin.register(CuentaBancaria)
 class CuentaBancariaAdmin(admin.ModelAdmin):
-    list_display = ("banco", "nombre_display", "numero_cuenta", "activa", "ultima_sync", "saldo_actual")
-    list_filter = ("banco", "activa", "creado_en")
+    list_display = (
+        "banco",
+        "nombre_display",
+        "tipo_cuenta",
+        "cuenta_principal",
+        "numero_cuenta",
+        "activa",
+        "ultima_sync",
+        "saldo_actual",
+    )
+    list_filter = ("banco", "tipo_cuenta", "activa", "creado_en")
     search_fields = ("nombre_display", "numero_cuenta", "id_site_syncfy", "id_credential", "id_account")
     readonly_fields = ("creado_en", "actualizado_en", "ultima_sync", "saldo_actual")
 

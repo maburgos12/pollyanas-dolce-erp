@@ -8,6 +8,10 @@ class CuentaBancaria(models.Model):
     BANCO_AMEX = "amex"
     ORIGEN_SYNCFY = "syncfy"
     ORIGEN_MANUAL = "manual"
+    TIPO_INDEPENDIENTE = "independiente"
+    TIPO_PRINCIPAL = "principal"
+    TIPO_APARTADO = "apartado"
+    TIPO_OPERATIVA = "operativa"
     BANCO_CHOICES = [
         (BANCO_BANBAJIO, "BanBajio Empresas"),
         (BANCO_BBVA, "BBVA Empresas"),
@@ -17,14 +21,32 @@ class CuentaBancaria(models.Model):
         (ORIGEN_SYNCFY, "Syncfy"),
         (ORIGEN_MANUAL, "Carga manual"),
     ]
+    TIPO_CUENTA_CHOICES = [
+        (TIPO_INDEPENDIENTE, "Cuenta independiente"),
+        (TIPO_PRINCIPAL, "Cuenta principal"),
+        (TIPO_APARTADO, "Apartado"),
+        (TIPO_OPERATIVA, "Cuenta operativa relacionada"),
+    ]
 
-    banco = models.CharField(max_length=20, choices=BANCO_CHOICES, unique=True)
+    banco = models.CharField(max_length=20, choices=BANCO_CHOICES)
     nombre_display = models.CharField(max_length=100)
     id_site_syncfy = models.CharField(max_length=50)
     origen = models.CharField(max_length=20, choices=ORIGEN_CHOICES, default=ORIGEN_SYNCFY)
     id_credential = models.CharField(max_length=100, null=True, blank=True)
     id_account = models.CharField(max_length=100, null=True, blank=True)
     numero_cuenta = models.CharField(max_length=32, null=True, blank=True)
+    tipo_cuenta = models.CharField(
+        max_length=20,
+        choices=TIPO_CUENTA_CHOICES,
+        default=TIPO_INDEPENDIENTE,
+    )
+    cuenta_principal = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cuentas_relacionadas",
+    )
     activa = models.BooleanField(default=True)
     ultima_sync = models.DateTimeField(null=True, blank=True)
     saldo_actual = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
@@ -34,6 +56,17 @@ class CuentaBancaria(models.Model):
     class Meta:
         verbose_name = "Cuenta Bancaria"
         verbose_name_plural = "Cuentas Bancarias"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["banco", "numero_cuenta"],
+                condition=models.Q(numero_cuenta__isnull=False) & ~models.Q(numero_cuenta=""),
+                name="syncfy_cuenta_banco_numero_unico",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["banco", "activa"]),
+            models.Index(fields=["cuenta_principal", "tipo_cuenta"]),
+        ]
 
     def __str__(self) -> str:
         return f"{self.get_banco_display()} - {self.numero_cuenta or 'sin numero'}"
