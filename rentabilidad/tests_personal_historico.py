@@ -1,5 +1,6 @@
 from datetime import date
 from decimal import Decimal as D
+from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.db import connection
 from django.test import TestCase
@@ -59,6 +60,57 @@ class PersonalHistoricoResultadoTests(TestCase):
         self.assertFalse(any(q['sql'].lstrip().upper().startswith(('INSERT','UPDATE','DELETE')) for q in queries))
         self.lines[0].refresh_from_db()
         self.assertIsNone(self.lines[0].sucursal_snapshot_id)
+
+    def test_personal_historico_no_calcula_planeacion_descartada(self):
+        from reportes import services_planeacion_personal as personal
+        with patch.object(personal, 'official_point_sales_rows_for_range',
+                          wraps=personal.official_point_sales_rows_for_range) as point, \
+                patch.object(personal, 'selected_sales_facts',
+                             wraps=personal.selected_sales_facts) as historical, \
+                patch.object(personal, 'resumen_personal_global',
+                             wraps=personal.resumen_personal_global) as global_summary, \
+                patch.object(personal, 'budget_policy', wraps=personal.budget_policy) as policy:
+            result = leer_resultado_mensual(self.month)
+        self.assertEqual(result['central_registrado'], D(220))
+        point.assert_not_called()
+        historical.assert_not_called()
+        global_summary.assert_not_called()
+        policy.assert_not_called()
+
+    def test_lectura_privada_conserva_importes_periodos_y_fuentes(self):
+        from reportes.services_planeacion_personal import build_personnel_plan, _build_personnel_plan
+        self.cedula('MENSUAL', self.month, D('30.00'), D('35.00'))
+        self.cedula('BIMESTRAL', date(2025, 10, 1), D('20.01'), D('22.01'))
+
+        def consumed(row):
+            registered = row['registered']
+            return {**{k: row[k] for k in ('imss', 'rcv', 'isn', 'fees', 'sources')},
+                    'registered': ({k: registered[k] for k in ('total', 'periodos')}
+                                   if registered else None)}
+
+        for month in range(1, 13):
+            cutoff = date(2025, month, 1)
+            with self.subTest(month=month):
+                self.assertEqual(consumed(_build_personnel_plan(cutoff, solo_actuals=True)),
+                                 consumed(build_personnel_plan(cutoff)['selected']))
+
+    def test_json_csv_mensual_identicos_a_lector_completo(self):
+        from reportes import services_planeacion_personal as personal
+        from .services_reporte_mensual import build_reporte_mensual_consolidado, reporte_a_json
+        from .management.commands.reporte_mensual_consolidado import Command
+        self.cedula('MENSUAL', self.month, D('30.00'), D('35.00'))
+        self.cedula('BIMESTRAL', date(2025, 10, 1), D('20.01'), D('22.01'))
+        core = personal._build_personnel_plan
+        for branch_id in (None, self.branch.pk):
+            args = dict(hasta=date(2025, 12, 1), meses=12, sucursal_id=branch_id)
+            optimized = build_reporte_mensual_consolidado(**args)
+            with patch.object(personal, '_build_personnel_plan',
+                              side_effect=lambda cutoff, **kwargs: core(cutoff)['selected']):
+                complete = build_reporte_mensual_consolidado(**args)
+            with self.subTest(branch_id=branch_id):
+                self.assertEqual(reporte_a_json(optimized), reporte_a_json(complete))
+                self.assertEqual(Command()._render_csv(optimized, detalle=True),
+                                 Command()._render_csv(complete, detalle=True))
 
     def test_nomina_ya_asignada_se_resta_del_costo_de_empresa_sin_repartir_el_resto(self):
         NominaLinea.objects.filter(pk=self.lines[0].pk).update(sucursal_snapshot=self.branch)

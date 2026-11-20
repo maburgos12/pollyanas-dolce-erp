@@ -35,3 +35,29 @@ Procedimiento reproducible: `inventario_fuentes_datos --term nomina --term cedul
 Validación: reproducción inicial con 6 fallos de 7 pruebas; nuevos casos de control mixto y exportación histórica fallan antes de corregirlos. Pruebas PostgreSQL del lector compartido, integración con pantalla/reporte, conservación de snapshots y ausencia de escrituras. Los importes de producción se vuelven a contrastar con el lector canónico después del despliegue, no con constantes de esta ficha.
 
 Riesgos y pendientes: el resultado sigue siendo parcial mientras falten costos materiales, soportes operativos y asignaciones históricas. La nómina neta de recibo no equivale al flujo bancario. No se certifica el cierre integral por incorporar estos componentes. Reutilizar el lector de planeación añade su tiempo de consulta; la comprobación anual de fuentes en producción tardó 4.97 s.
+
+## Lectura histórica sin planeación descartada — 2026-11-19
+
+Se reutiliza el mismo núcleo documental mediante `_build_personnel_plan(...,
+solo_actuals=True)` exclusivamente desde `_personal_historico`. Se conservan el
+rango temporal completo, nómina registrada, controles patronales, ISN, comisiones,
+conciliaciones y fuentes. Esta ruta omite ventas, presupuesto, plantilla actual y
+resumen global, que el consumidor histórico descarta. El contrato público
+`build_personnel_plan(cutoff=None)` conserva la planeación y su resultado completo.
+No se crean fuentes, tablas, capturas ni equivalencias; tampoco se distribuye el
+remanente histórico ni se transforma un faltante en cero.
+
+Ambiente de comprobación: PostgreSQL 16 local aislado, puerto 55641, tarea
+`mensual-personal-actuals-20261119`, propietario `codex-mensual-personal`.
+`inventario_fuentes_datos --term nomina --term cedula --term personal` encontró 49
+modelos candidatos por metadatos. La consulta acotada de solo lectura confirmó
+tablas de nómina, cédulas, ISN y CFDI sin registros operativos en esta base nueva;
+la paridad se prueba con fixtures sintéticos. Los conteos de producción arriba
+son evidencia histórica del 5 de noviembre, no una verificación nueva.
+
+Las pruebas comparan la proyección realmente consumida (total/periodos de nómina,
+IMSS, RCV, ISN, comisiones y fuentes) durante los doce meses, y JSON/CSV del reporte
+mensual completo para empresa y sucursal. La fila privada no promete ventas,
+ratios ni resumen global. Los resultados y comandos locales quedan en el
+expediente privado de la tarea; rendimiento y validación productiva requieren
+medición comparable posterior, sin inferir ahorro a partir del diff.
