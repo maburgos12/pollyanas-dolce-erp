@@ -19697,33 +19697,27 @@ def _latest_point_inventory_branch_totals(
     recent_branch_ids: set[int] = set()
     with connection.cursor() as cursor:
         cursor.execute(
-            """
-            WITH ranked_snapshots AS (
-                SELECT
-                    branch.erp_branch_id AS erp_branch_id,
-                    snapshot.stock AS stock,
-                    snapshot.captured_at AS captured_at,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY snapshot.branch_id, snapshot.product_id
-                        ORDER BY snapshot.captured_at DESC, snapshot.id DESC
-                    ) AS rn
-                FROM pos_bridge_inventory_snapshots AS snapshot
-                INNER JOIN pos_bridge_branches AS branch
-                    ON snapshot.branch_id = branch.id
-                INNER JOIN core_sucursal AS sucursal
-                    ON branch.erp_branch_id = sucursal.id
-                WHERE snapshot.captured_at < %s
-                  AND branch.erp_branch_id IS NOT NULL
-                  AND sucursal.activa
-            )
-            SELECT
-                erp_branch_id,
-                COALESCE(SUM(stock), 0) AS total_stock,
-                MAX(captured_at) AS latest_snapshot_at
-            FROM ranked_snapshots
-            WHERE rn = 1
-            GROUP BY erp_branch_id
-            """,
+            """SELECT
+    branch.erp_branch_id AS erp_branch_id,
+    COALESCE(SUM(latest_snapshot.stock), 0) AS total_stock,
+    MAX(latest_snapshot.captured_at) AS latest_snapshot_at
+FROM pos_bridge_branches AS branch
+INNER JOIN core_sucursal AS sucursal
+    ON branch.erp_branch_id = sucursal.id
+CROSS JOIN pos_bridge_products AS product
+INNER JOIN LATERAL (
+    SELECT snapshot.stock, snapshot.captured_at
+    FROM pos_bridge_inventory_snapshots AS snapshot
+    WHERE snapshot.branch_id = branch.id
+      AND snapshot.product_id = product.id
+      AND snapshot.captured_at < %s
+    ORDER BY snapshot.captured_at DESC, snapshot.id DESC
+    LIMIT 1
+) AS latest_snapshot ON TRUE
+WHERE branch.erp_branch_id IS NOT NULL
+  AND sucursal.activa
+GROUP BY branch.erp_branch_id
+""",
             [before_dt],
         )
         rows = cursor.fetchall()
