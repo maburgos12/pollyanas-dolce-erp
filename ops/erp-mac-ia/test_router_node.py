@@ -1,4 +1,6 @@
 import importlib.util
+import json
+import re
 from pathlib import Path
 import unittest
 import tempfile
@@ -11,6 +13,35 @@ def module():
     value = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(value)
     return value
+
+
+def rendered_edges(value):
+    edges={}
+    for line in value.splitlines():
+        match=re.fullmatch(r'span-(\d+) ::= (.+)',line)
+        if not match:continue
+        index=int(match[1]);body=match[2];at=0;edges[index]=[]
+        while True:
+            literal,end=json.JSONDecoder().raw_decode(body[at:]);at+=end
+            target=re.match(r' span-(\d+)\?',body[at:])
+            dest=int(target[1]) if target else None
+            if target:at+=target.end()
+            edges[index].append((literal,dest))
+            if at==len(body):break
+            assert body[at:at+3]==' | ';at+=3
+    return edges
+
+def accepts(edges,value):
+    if not value:return False
+    encoded=json.dumps(value,ensure_ascii=False)[1:-1];pending=[(0,0)]
+    while pending:
+        state,at=pending.pop()
+        for token,target in edges[state]:
+            if encoded.startswith(token,at):
+                end=at+len(token)
+                if end==len(encoded):return True
+                if target is not None:pending.append((target,end))
+    return False
 
 
 class RouterNodeTests(unittest.TestCase):
@@ -51,6 +82,69 @@ class RouterNodeTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(result))
         self.assertNotIn("SECRET", str(result))
         self.assertEqual(node.error_response(node.InvalidOutput("PRIVATE"))["diagnostic"]["reason"], "unknown")
+
+    def test_extract_grammar_preserves_all_spans_escapes_and_null(self):
+        import itertools
+        import json
+        node = module()
+        for text in ('a', 'ababa', 'No está demostrada la causa.', 'café cafe\u0301 "A\\B"\n\t\0 😀'):
+            grammar = node._source_grammar(text, ['estado', 'causa'])
+            edges = rendered_edges(grammar)
+            self.assertIn('"null"', grammar)
+            self.assertIn(json.dumps(json.dumps('causa')), grammar)
+            for start in range(len(text)):
+                for end in range(start + 1, len(text) + 1):
+                    self.assertTrue(accepts(edges, text[start:end]))
+            self.assertFalse(accepts(edges, ''))
+            self.assertFalse(accepts(edges, 'NONLITERAL_NOT_IN_SOURCE'))
+            for candidate in map(''.join, itertools.product('ab"', repeat=3)):
+                self.assertEqual(accepts(edges, candidate), candidate in text)
+
+    def test_extract_grammar_is_bounded_at_full_input_and_six_fields(self):
+        import random
+        node = module()
+        rng = random.Random(42)
+        sources = ['a' * 2500, ''.join(rng.choice('abcdefghijklmnopqrstuvwxyz0123456789') for _ in range(2500)),
+                   ''.join(chr(rng.randrange(0x400, 0x7e8)) for _ in range(1250)), ('\\"\n\t\0' * 500)]
+        for text in sources:
+            self.assertEqual(len(text.encode()), 2500)
+            fields = ['f' + str(i) for i in range(6)]
+            node.prepare({'model': 'nemotron', 'kind': 'extract', 'data': {'text': text, 'fields': fields}})
+            grammar = node._source_grammar(text, fields)
+            edges = rendered_edges(grammar)
+            self.assertLessEqual(len(edges), 2 * len(text) + 1)
+            self.assertLessEqual(sum(map(len, edges.values())), 3 * len(text) + 1)
+            self.assertLessEqual(len(grammar.encode()), 512 * 1024)
+            self.assertTrue(accepts(edges, text))
+
+    def test_extract_dispatch_passes_grammar_and_keeps_prompt_limits(self):
+        import io
+        node = module()
+        job = {'model': 'nemotron', 'kind': 'extract', 'data': {'text': 'No está demostrada.', 'fields': ['causa']}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'api.key').write_text('private')
+            with patch.object(node, 'ROOT', root), patch.object(node, 'OP', root), patch.object(node, 'MAC', True), patch.object(node, 'mac_busy', return_value=False), patch.object(node.signal, 'signal'), patch.object(node.sys, 'stdin', io.StringIO(json.dumps(job))), patch.object(node, 'mac_infer', return_value={'result': {'causa': 'No está demostrada.'}, 'usage': {}}) as infer:
+                result = node.main()
+            self.assertEqual(result['result']['causa'], 'No está demostrada.')
+            args = infer.call_args.args
+            self.assertEqual(args[4], node._source_grammar(job['data']['text'], ['causa']))
+            self.assertIn('contexto y negación', args[1])
+
+    def test_http_grammar_replaces_schema_without_changing_generation_limits(self):
+        node = module()
+        response = {'model': 'pastelerias-qwen3-8b', 'choices': [{'finish_reason': 'stop', 'message': {'content': '{"causa":null}'}}], 'usage': {'prompt_tokens': 10, 'completion_tokens': 4}}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'api.key').write_text('private')
+            (root / 'api.key').chmod(0o600)
+            with patch.object(node, 'OP', root), patch.object(node, 'mac_busy', return_value=False), patch.object(node, 'mac_memory', return_value=(50, 0)), patch.object(node, 'request', return_value=response) as request:
+                node.mac_infer('qwen8b', 'source', {}, root, 'test-grammar')
+            payload = request.call_args.args[3]
+        self.assertEqual(payload['grammar'], 'test-grammar')
+        self.assertNotIn('response_format', payload)
+        self.assertEqual(payload['max_tokens'], 192)
+        self.assertEqual(payload['temperature'], 0)
 
     def test_exact_arithmetic_and_cli_completion_marker(self):
         node = module()

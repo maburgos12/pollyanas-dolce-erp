@@ -100,11 +100,60 @@ def prepare(job):
                 raise ValueError("invalid_output")
             schema = {"type": "object", "properties": {f: {"type": ["string", "null"]} for f in fields},
                       "required": fields, "additionalProperties": False}
-            prompt = prefix + "Extrae estos campos: " + json.dumps(fields) + ". Cada valor debe ser una cita literal exacta del texto o null si no está aportado. No sustituyas ausentes con cero."
+            prompt = prefix + "Extrae estos campos: " + json.dumps(fields) + ". Cita literalmente, con contexto y negación; null sólo si falta el dato, nunca cero."
     prompt += "\n<evidencia>\n" + text + "\n</evidencia>"
     if len(prompt.encode()) > (1500 if model == "qwen4b" else 3500):
         raise ValueError("invalid_output")
     return prompt, schema
+
+
+def _source_grammar(text, fields):
+    """Constrain decoded strings to every nonempty exact source span."""
+    # Suffix automaton keeps all substrings without enumerating quadratic candidates.
+    states = [{"length": 0, "link": -1, "next": {}}]
+    last = 0
+    for char in text:
+        cur = len(states)
+        states.append({"length": states[last]["length"] + 1, "link": 0, "next": {}})
+        pos = last
+        while pos >= 0 and char not in states[pos]["next"]:
+            states[pos]["next"][char] = cur
+            pos = states[pos]["link"]
+        if pos >= 0:
+            target = states[pos]["next"][char]
+            if states[pos]["length"] + 1 == states[target]["length"]:
+                states[cur]["link"] = target
+            else:
+                clone = len(states)
+                states.append({"length": states[pos]["length"] + 1,
+                               "link": states[target]["link"], "next": states[target]["next"].copy()})
+                while pos >= 0 and states[pos]["next"].get(char) == target:
+                    states[pos]["next"][char] = clone
+                    pos = states[pos]["link"]
+                states[target]["link"] = states[cur]["link"] = clone
+        last = cur
+    def quote(value):
+        return json.dumps(value, ensure_ascii=False)
+    parts = ['"{"', 'ws']
+    for i, field in enumerate(fields):
+        if i:
+            parts += ['","', 'ws']
+        parts += [quote(quote(field)), 'ws', '":"', 'ws', 'value']
+    parts += ['"}"', 'ws']
+    rules = ['root ::= ' + ' '.join(parts),
+             'value ::= ("null" | ' + quote('"') + ' span-0 ' + quote('"') + ') ws',
+             r'ws ::= [ \t\n\r]{0,20}']
+    for index, state in enumerate(states):
+        choices = []
+        for char, target in state["next"].items():
+            literal = quote(quote(char)[1:-1])
+            choices.append(literal + (' span-' + str(target) + '?' if states[target]["next"] else ''))
+        if choices:
+            rules.append('span-' + str(index) + ' ::= ' + ' | '.join(choices))
+    result = '\n'.join(rules) + '\n'
+    if len(result.encode()) > 512 * 1024:
+        raise ValueError("invalid_output")
+    return result
 
 
 def request(port, key, path, payload=None):
@@ -194,7 +243,7 @@ def debian_infer(prompt, schema, temp):
         terminate(proc)
 
 
-def mac_infer(model, prompt, schema, temp):
+def mac_infer(model, prompt, schema, temp, grammar=None):
     global PHASE
     PHASE = "guard"
     key_path = OP / "api.key"
@@ -248,9 +297,13 @@ def mac_infer(model, prompt, schema, temp):
         def generate():
             global PHASE
             PHASE = "generate"
-            response = request(port, key, "/v1/chat/completions", {
+            payload = {
                 "model": alias, "messages": [{"role": "user", "content": prompt}], "max_tokens": 192, "temperature": 0,
-                "response_format": {"type": "json_schema", "json_schema": {"name": "local_request", "strict": True, "schema": schema}}})
+                "response_format": {"type": "json_schema", "json_schema": {"name": "local_request", "strict": True, "schema": schema}}}
+            if grammar is not None:
+                payload.pop("response_format")
+                payload["grammar"] = grammar
+            response = request(port, key, "/v1/chat/completions", payload)
             choice = response["choices"][0]
             PHASE = "parse"
             if response.get("model") != alias:
@@ -317,7 +370,8 @@ def main():
                 if job["model"] == "python":
                     result = {"result": verify(job["data"]), "usage": {}}
                 elif MAC:
-                    result = mac_infer(job["model"], prompt, schema, Path(directory))
+                    grammar = _source_grammar(job["data"]["text"], job["data"]["fields"]) if job["kind"] == "extract" else None
+                    result = mac_infer(job["model"], prompt, schema, Path(directory), grammar)
                 else:
                     result = debian_infer(prompt, schema, Path(directory))
             return {**result, "duration": round(time.monotonic() - start, 3)}
