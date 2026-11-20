@@ -80,6 +80,23 @@ operativo. `exact` valida cotejos; la extracción sólo acredita citas presentes
 los resúmenes requieren revisión humana. Tokens locales no equivalen a cuota
 Codex ahorrada ni dinero ahorrado.
 
+## Extracción literal de Nemotron
+
+El nodo genera una gramática GBNF privada para `extract`: cada campo requerido
+admite `null` o cualquier substring no vacío exacto de la evidencia. Un autómata
+de sufijos conserva todos los spans, incluidos escapes JSON y Unicode, sin
+recortar candidatos ni transformar una respuesta inválida en `null`. El cuerpo
+HTTP usa `grammar` en lugar de `response_format` sólo para este contrato.
+El validador del ERP sigue verificando literalmente el resultado recibido.
+
+Se mantienen 2500 bytes de entrada, 1–6 campos, ctx4096 y salida192 tokens.
+La representación tiene estados/aristas lineales, identificadores numéricos y
+un máximo explícito de512KiB de gramática; ese presupuesto no es una medición
+de latencia del motor. Un span permitido no acredita correspondencia semántica:
+revisar contexto, negación y evidencia antes de aceptar el campo o cerrar tareas.
+Compatibilidad dirigida a llama.cpp b12211. La aceptación en el binario real
+se registra aparte de las pruebas puras, sin inferencias de demostración.
+
 ## Diagnóstico seguro de fallos
 
 El journal del trabajador conserva ID/nodo/modelo y, ante fallo, un diagnóstico
