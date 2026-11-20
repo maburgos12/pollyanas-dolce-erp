@@ -21,3 +21,14 @@ class PointInventoryPageTests(SimpleTestCase):
             branches = inventory_page.list_branches()
 
         self.assertEqual(branches, [{"value": "1", "label": "MATRIZ"}])
+
+    def test_confirmed_branch_uses_the_selected_option_read_from_point(self):
+        page = PointInventoryPage(Mock(), SimpleNamespace(selector_overrides={}, timeout_ms=30000))
+        locator = Mock()
+        locator.evaluate.return_value = {"value": "1", "label": "Matriz"}
+        with patch("pos_bridge.browser.inventory_page.find_first", return_value=locator):
+            selected = page.select_branch({"value": "1", "label": "Solicitud"}, require_confirmation=True)
+
+        locator.select_option.assert_called_once_with(value="1")
+        locator.evaluate.assert_called_once()
+        self.assertEqual(selected, {"value": "1", "label": "Matriz"})
