@@ -202,3 +202,24 @@ class InventoryCurrentScopeTests(APITestCase):
         self.assertTrue(available["results"][0]["available"])
         inactive = self.client.get("/api/pos-bridge/inventory/availability/", {"sku": "CND000979"}).json()
         self.assertEqual(inactive["count"], 0)
+
+    def test_latest_zero_is_not_replaced_by_an_older_positive(self):
+        # The smaller ID at this same captured_at still has stock=1.
+        self.winner.stock = Decimal("0")
+        self.winner.save(update_fields=["stock"])
+
+        current = self.request_current({"product": "0160", "branch": "1"})["results"][0]
+        self.assertEqual(current["total_stock"], "0.000")
+        self.assertEqual(current["branches"][0]["stock"], 0)
+        self.assertEqual(current["branches"][0]["captured_at"], self.winner.captured_at.isoformat())
+
+        available = self.client.get(
+            "/api/pos-bridge/inventory/availability/", {"sku": "0160", "branch": "1"},
+        ).json()["results"][0]
+        self.assertEqual(available["total_stock"], "0.000")
+        self.assertEqual(available["branches"][0]["stock"], 0)
+        self.assertFalse(available["available"])
+
+        low = self.client.get("/api/pos-bridge/inventory/low-stock/", {"branch": "1"}).json()
+        product = next(row for row in low["results"] if row["product_sku"] == "0160")
+        self.assertEqual(product["current_stock"], "0.000")
