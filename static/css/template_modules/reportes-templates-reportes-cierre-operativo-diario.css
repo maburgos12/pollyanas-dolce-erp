@@ -1,9 +1,10 @@
 /* Extracted from reportes/templates/reportes/cierre_operativo_diario.html */
-.closure-shell { display:grid; gap:18px; }
+.closure-shell { display:grid; gap:18px; grid-template-columns:minmax(0,1fr); }
   .closure-grid-4 { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); }
-  .closure-grid-2 { display:grid; gap:14px; grid-template-columns:1.15fr .85fr; }
-  .closure-card { padding:14px 16px; border-radius:20px; border:1px solid rgba(145,36,86,.10); background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,248,251,.96)); box-shadow:0 10px 30px rgba(93,22,59,.04); }
+  .closure-grid-2 { display:grid; gap:14px; min-width:0; grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr); }
+  .closure-card { min-width:0; padding:14px 16px; border-radius:20px; border:1px solid rgba(145,36,86,.10); background:linear-gradient(180deg,rgba(255,255,255,.98),rgba(255,248,251,.96)); box-shadow:0 10px 30px rgba(93,22,59,.04); }
   .closure-card-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:8px; }
+  .closure-card-head > div { min-width:0; }
   .closure-card-title { margin:0; color:#42292e; font-size:1.05rem; }
   .closure-copy { margin:0; color:#6f6170; line-height:1.4; }
   .closure-kpi-value { font-size:1.8rem; line-height:1; font-weight:700; color:#922456; margin-bottom:6px; }
@@ -31,5 +32,5 @@
   .closure-source-item { padding:12px 14px; border-radius:16px; border:1px solid rgba(145,36,86,.08); background:rgba(255,255,255,.92); }
   .closure-source-item strong { display:block; margin-bottom:6px; color:#42292e; }
   @media (max-width: 1180px) {
-    .closure-grid-4, .closure-grid-2, .closure-source-list { grid-template-columns:1fr; }
+    .closure-grid-4, .closure-grid-2, .closure-source-list { grid-template-columns:minmax(0,1fr); }
   }

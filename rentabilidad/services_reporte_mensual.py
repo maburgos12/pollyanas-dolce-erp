@@ -53,6 +53,9 @@ def _nomina_del_cierre(periodo: date, sucursal_ids: set[int]) -> dict:
     Keep the full reader's perimeter: a source-backed branch, or an existing
     active branch with current fixed expense. Missing payroll remains None.
     """
+    if not sucursal_ids:
+        return {}
+
     from control.models import MermaMensualSucursal
     from reportes.services_rentabilidad_gastos import leer_gastos_mensuales
     from reportes.services_rentabilidad_personal import leer_personal_mensual
@@ -113,10 +116,15 @@ def _rentabilidad_por_mes(desde: date, hasta: date, sucursal_id: int | None,
     if periodos_salida is not None:
         # These 2025 rows only served YoY, which already rejects their fiscal
         # partial scope against the populated 2026 reconciled distribution.
-        # Never skip an output month, an empty close, or a comparable base.
+        # A filtered empty managerial month also has no current amounts:
+        # _fila_mes(periodo, {}, horas) keeps income/payroll/profit None, even with extras.
+        # Every YoY is therefore None regardless of a rich prior-year base.
+        # Never skip an output month, an absent close, or a comparable base.
         incompatibles = {_month_add(periodo, -12) for periodo, filas in filas_cierre.items()
                          if filas and periodo in periodos_salida}
-        periodos.difference_update(incompatibles - periodos_salida)
+        sin_actual_seleccionado = {_month_add(periodo, -12) for periodo, filas in filas_cierre.items()
+                                  if sucursal_id and not filas and periodo in periodos_salida}
+        periodos.difference_update((incompatibles | sin_actual_seleccionado) - periodos_salida)
     data = {}
     for periodo in periodos:
         mes = data.setdefault(periodo, {})

@@ -176,3 +176,64 @@ class CommercialAnalyticsTests(TestCase):
         self.assertIn({'start_date':date(2026,9,1),'end_date':date(2026,9,10),'branch_id':self.closed.pk},periods)
         self.assertIn({'start_date':date(2025,9,1),'end_date':date(2025,9,10),'branch_id':self.closed.pk},periods)
         self.assertEqual(panel['delta'],D(50))
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_annual_selection_is_shared_without_losing_global_options_or_branch_cutoff(self, today):
+        self.fact(2025,1,amount=80)
+        self.fact(2025,12,amount=90,branch=self.open)
+        for branch, day in [(self.closed,2),(self.open,4)]:
+            FactVentaDiaria.objects.create(fecha=date(2026,10,day),sucursal=branch,
+                producto_clave='cutoff',source_kind='AUTHORITATIVE',venta_total=100)
+        with patch('reportes.commercial_analytics.selected_sales_facts', wraps=selected_sales_facts) as selected:
+            panel = _build_panel(2026,10,self.closed.pk)
+        annual_calls = [c for c in selected.call_args_list if c.kwargs['start_date'] == date(2025,1,1)]
+        self.assertEqual(len(annual_calls),1)
+        self.assertEqual({r['sucursal_id'] for r in panel['branch_options']},{self.closed.pk,self.open.pk})
+        self.assertEqual(panel['end'],date(2026,10,2))
+        self.assertEqual(panel['previous_end'],date(2025,10,2))
+        self.assertEqual(panel['monthly'][0]['previous'],D(80))
+        self.assertIsNone(panel['monthly'][11]['previous'])
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_unassigned_zero_and_negative_months_keep_presence_and_global_sum(self, today):
+        self.fact(2025,1,amount=0)
+        self.fact(2025,12,amount=-20)
+        FactVentaDiaria.objects.create(fecha=date(2025,12,31),sucursal=None,
+            producto_clave='unassigned',source_kind='LEGACY',venta_total=7)
+        panel = _build_panel(2025,0,None)
+        self.assertEqual(panel['monthly'][0]['current'],D(0))
+        self.assertIsNone(panel['monthly'][1]['current'])
+        self.assertEqual(panel['monthly'][11]['current'],D(-13))
+        self.assertEqual(panel['annual_current'],D(-13))
+        self.assertEqual(panel['annual_current_months'],2)
+        self.assertEqual(panel['branch_options'],[{'sucursal_id':self.closed.pk,'sucursal__nombre':'Crucero'}])
+        filtered = _build_panel(2025,0,self.closed.pk)
+        self.assertEqual(filtered['monthly'][11]['current'],D(-20))
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,1,4))
+    def test_january_comparison_keeps_december_history_and_excludes_future_dates(self, today):
+        self.fact(2025,12,amount=80)
+        self.fact(2026,1,amount=900)
+        FactVentaDiaria.objects.create(fecha=date(2026,1,3),sucursal=self.closed,
+            producto_clave='observed',source_kind='AUTHORITATIVE',venta_total=20)
+        panel = _build_panel(2026,1,None)
+        self.assertEqual(panel['end'],date(2026,1,3))
+        self.assertEqual(panel['previous_end'],date(2025,1,3))
+        self.assertEqual(panel['monthly'][0]['current'],D(20))
+        self.assertEqual(panel['monthly'][11]['previous'],D(80))
+        self.assertEqual(panel['annual_current'],D(20))
+
+    @patch('reportes.commercial_analytics.timezone.localdate', return_value=date(2026,10,4))
+    def test_options_preserve_distinct_ids_for_equal_names_and_database_name_order(self, today):
+        self.open.nombre = self.closed.nombre
+        self.open.save(update_fields=['nombre'])
+        third = Sucursal.objects.create(codigo='ACCENT',nombre='Álamo',activa=False)
+        for branch in (self.closed,self.open,third):
+            self.fact(branch=branch)
+            self.fact(month=12,branch=branch)
+        panel = _build_panel(2025,0,None)
+        expected = list(selected_sales_facts(start_date=date(2024,1,1),end_date=date(2025,12,31))
+            .exclude(sucursal_id=None).values('sucursal_id','sucursal__nombre').distinct().order_by('sucursal__nombre'))
+        self.assertEqual([r['sucursal__nombre'] for r in panel['branch_options']],
+            [r['sucursal__nombre'] for r in expected])
+        self.assertCountEqual(panel['branch_options'],expected)

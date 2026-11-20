@@ -150,6 +150,24 @@ def dashboard(request):
     if not can_view_orquestacion(request.user):
         raise PermissionDenied("No tienes permisos para ver Orquestación.")
 
+    from .services.local_ai import panel
+    local_ai = panel()
+    source_labels = {"inventory_adjustment_authorization_guard": "Inventario",
+                     "plan_demand_chain_review": "Demanda", "plan_production_chain_review": "Producción",
+                     "plan_purchase_chain_review": "Compras", "plan_director_chain_review": "Dirección"}
+    for job in [*local_ai["jobs"], *local_ai["router"]["jobs"]]:
+        for ref in job["references"]:
+            inventory = ref["task_type"] == "inventory_adjustment_authorization_guard"
+            ref["label"] = source_labels.get(ref["task_type"], "Seguimiento")
+            ref["url"], _ = _build_rule_source_link(
+                rule_code=ref["task_type"] if inventory else "plan_demand_production_purchase_chain",
+                details={"ajuste_id" if inventory else "plan_id": ref["entity_id"]},
+            )
+    if request.GET.get("section") == "local_ai":
+        response = render(request, "orquestacion/_local_ai.html", {"local_ai": local_ai})
+        response["Cache-Control"] = "no-store"
+        return response
+
     selected_rule = (request.GET.get("rule") or "").strip()
     selected_severity = (request.GET.get("severity") or "").strip()
     selected_decision = (request.GET.get("decision") or AgentSuggestion.DECISION_PENDING).strip()
@@ -270,6 +288,7 @@ def dashboard(request):
         "orquestacion/dashboard.html",
         {
             "summary": summary,
+            "local_ai": local_ai,
             "agents": agents,
             "rules": rules,
             "recent_runs": recent_runs,

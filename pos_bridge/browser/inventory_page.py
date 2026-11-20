@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
+from urllib.parse import parse_qs, urlsplit
+
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from pos_bridge.browser.waits import click_first, find_first, wait_for_any
 from pos_bridge.selectors.inventory_selectors import (
     BRANCH_SELECT_CANDIDATES,
@@ -10,7 +15,7 @@ from pos_bridge.selectors.inventory_selectors import (
     SUPPLY_CATEGORY_SELECT_CANDIDATES,
 )
 from pos_bridge.selectors.menu_selectors import INVENTORY_EXISTENCES_CANDIDATES, INVENTORY_MENU_CANDIDATES
-from pos_bridge.utils.exceptions import NavigationError
+from pos_bridge.utils.exceptions import ExtractionError, NavigationError
 from pos_bridge.utils.helpers import select_candidates
 
 
@@ -88,14 +93,14 @@ class PointInventoryPage:
             and "SELECCIONE" not in str(option.get("label", "")).upper()
         ]
 
-    def select_branch(self, branch: dict) -> dict:
+    def select_branch(self, branch: dict, *, require_confirmation: bool = False) -> dict:
         branch_locator = find_first(
             self.page,
             select_candidates(self.settings.selector_overrides, "inventory.branch_select", BRANCH_SELECT_CANDIDATES),
             timeout_ms=500,
         )
         if branch_locator is None:
-            if branch:
+            if branch and not require_confirmation:
                 return branch
             raise NavigationError("No se encontró selector de sucursal para el módulo de inventario.")
 
@@ -113,6 +118,24 @@ class PointInventoryPage:
         except Exception:
             pass
         self.page.wait_for_timeout(700)
+        if require_confirmation:
+            selected = branch_locator.evaluate(
+                """element => {
+                    const option = element.selectedOptions[0];
+                    return option ? {value: option.value.trim(), label: option.label.trim()} : null;
+                }"""
+            )
+            if (
+                not selected
+                or not selected["value"]
+                or (value and selected["value"] != value)
+                or (not value and selected["label"] != label)
+            ):
+                raise NavigationError(
+                    "Point no confirmó la sucursal seleccionada para el corte de inventario.",
+                    context={"requested_branch": branch, "selected_branch": selected},
+                )
+            return selected
         return {"value": value or label, "label": label or value}
 
     def list_category_options(self, kind: str = "products") -> list[dict]:
@@ -149,6 +172,46 @@ class PointInventoryPage:
         except Exception:
             pass
         self.page.wait_for_timeout(900)
+
+    def read_product_category(self, branch_id: str, category_id: str) -> dict:
+        origin = urlsplit(self.page.url)
+        context = {"branch_external_id": branch_id, "category_id": category_id}
+
+        def matches(response):
+            url = urlsplit(response.url)
+            params = parse_qs(url.query, keep_blank_values=True)
+            return (
+                (url.scheme, url.netloc) == (origin.scheme, origin.netloc)
+                and url.path == "/Stock/GetProductosPA"
+                and response.request.method == "GET"
+                and params.get("almacen") == [branch_id]
+                and params.get("categoria") == [category_id]
+            )
+
+        try:
+            with self.page.expect_response(matches, timeout=self.settings.timeout_ms) as pending:
+                self.select_category(category_id, kind="products")
+            response = pending.value
+        except PlaywrightTimeoutError as exc:
+            raise ExtractionError("Point no confirmó el almacén y la categoría del corte.", context=context) from exc
+        if not response.ok:
+            raise ExtractionError("Point rechazó la consulta de existencias.", context={**context, "status": response.status})
+        try:
+            records = response.json()
+            if not isinstance(records, list):
+                raise ValueError("Point no devolvió una lista")
+            rows = []
+            for record in records:
+                if not isinstance(record, dict):
+                    raise ValueError("Fila de Point inválida")
+                fields = ("PK_articulo", "Codigo", "Nombre", "Categoria", "Cantidad", "Unidad")
+                row = [str(record[field]).strip() if record.get(field) is not None else "" for field in fields]
+                if not all(row[index] for index in (0, 1, 2, 4)) or not Decimal(row[4].replace(",", "")).is_finite():
+                    raise ValueError("Identidad o cantidad de Point inválida")
+                rows.append(row)
+        except (ValueError, InvalidOperation, TypeError) as exc:
+            raise ExtractionError("Point devolvió existencias con formato inválido.", context=context) from exc
+        return {"headers": ["ID", "Código", "Producto", "Categoría", "Cantidad", "Unidad"], "rows": rows}
 
     def extract_inventory_table(self, kind: str = "products") -> dict:
         table_selector = select_candidates(

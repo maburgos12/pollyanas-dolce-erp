@@ -1,0 +1,58 @@
+{% if local_ai.router.enabled or local_ai.router.jobs %}
+<div class="card">
+  <div class="card-header orq-local-heading"><h2>Asignación de trabajo local</h2>
+    <span class="badge {% if local_ai.router.enabled %}b-active{% else %}b-paused{% endif %}">{% if local_ai.router.enabled %}Asignación activa{% else %}Asignación en pausa{% endif %}</span>
+  </div>
+  <p>Debian: Python y Qwen 4B. Mac de 16 GB: Qwen 8B y Nemotron. El tipo y tamaño de la solicitud determinan el destino; cada equipo recibe un trabajo a la vez.</p>
+  <p class="muted">Últimas 12 solicitudes · actualización cada 15 segundos</p>
+  <ol class="orq-router-jobs" role="list">
+    {% for job in local_ai.router.jobs %}<li>
+      <h3>#{{ job.id }} · {{ job.agent_name }}</h3>
+      <p><span class="badge b-{{ job.status }}">{{ job.label }}</span> · {{ job.kind_label }}</p>
+      <p>{% if job.node == 'mac_ia' %}Mac-IA Debian{% elif job.node == 'mac_ia_02' %}Mac-IA de 16 GB{% else %}Revisión requerida{% endif %} · <strong>{{ job.model|default:"Sin modelo local" }}</strong><br>{{ job.reason }}</p>
+      <p class="orq-router-result">{% if job.display_result %}{{ job.display_result }}{% elif job.status == 'running' %}Procesando evidencia.{% elif job.status == 'pending' %}Esperando turno disponible.{% else %}{{ job.error }}{% endif %}</p>
+      {% if job.references %}<p>Fuentes: {% for ref in job.references %}<a href="{{ ref.url }}">{{ ref.label }} · expediente {{ ref.entity_id }}</a>{% if not forloop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+      <p class="muted">{{ job.updated_at }} · intento {{ job.attempts }}/3{% if job.duration != None %} · {{ job.duration }} s{% endif %}</p>
+    </li>{% empty %}<li>Lista para recibir solicitudes de los agentes y nuevos cambios de la cola existente.</li>{% endfor %}
+  </ol>
+  <p class="muted">Python coteja números exactos. La extracción verifica que los valores aparezcan en la evidencia; los resúmenes requieren revisión humana. Los trabajos técnicos conservan separado el estado de las operaciones originales.</p>
+</div>
+{% endif %}
+<div class="card">
+  <div class="card-header orq-local-heading"><h2 id="mac-ia-title">Mac-IA-02 · seguimiento local</h2>
+    <span class="badge {% if local_ai.enabled %}b-active{% else %}b-paused{% endif %}">{% if local_ai.enabled %}Piloto activo{% else %}Piloto desactivado{% endif %}</span>
+  </div>
+  <p><strong>{{ local_ai.model }}</strong>. Resúmenes para revisión humana. Las tareas y autorizaciones originales conservan su propio estado.</p>
+  <p role="status" data-refresh-status>
+    {% if local_ai.state == 'running' %}Último estado comunicado: generando un resumen en la Mac.
+    {% elif local_ai.state == 'offline' %}Sin conexión con la Mac. La cola espera y no usa una API de pago.
+    {% elif local_ai.state == 'idle' %}Sin resumen en ejecución al último contacto.
+    {% elif local_ai.state == 'disabled' %}Ejecutor en pausa.
+    {% else %}Esperando el primer contacto del ejecutor.{% endif %}
+    {% if local_ai.heartbeat_at %} Última comprobación: {{ local_ai.heartbeat_at|date:"d/m/Y H:i:s" }}.{% endif %}
+  </p>
+  {% if local_ai.last_connected_at %}<p class="muted">Última conexión comprobada con el modelo: {{ local_ai.last_connected_at|date:"d/m/Y H:i:s" }}.</p>{% endif %}
+  {% if local_ai.last_scan %}
+  <p>Última agrupación: {{ local_ai.scan.source_count }} tareas → {{ local_ai.scan.case_count }} casos;
+    {{ local_ai.scan.unchanged }} con evidencia ya registrada en este piloto.
+    {% if local_ai.scan.truncated %}<strong>Lectura incompleta: no se encolaron resúmenes. Requiere revisión técnica.</strong>{% endif %}
+  </p>
+  {% endif %}
+  <div class="table-responsive">
+    <table class="table">
+      <caption class="muted">Últimos 12 trabajos técnicos · actualización cada 15 segundos · tokens de inferencia local</caption>
+      <thead><tr><th scope="col">Trabajo / estado</th><th scope="col">Fuentes agrupadas</th><th scope="col">Resultado para revisión</th><th scope="col">Consumo y actividad</th></tr></thead>
+      <tbody>
+      {% for job in local_ai.jobs %}
+        <tr>
+          <td><strong>#{{ job.id }}</strong><br><span class="badge b-{{ job.status }}">{{ job.label }}</span><br>Intento {{ job.attempts }}/3</td>
+          <td>{% for ref in job.references %}<div><a href="{{ ref.url }}">{{ ref.label }} · expediente {{ ref.entity_id }}</a><br><span class="muted">Tarea #{{ ref.task_id }} / corrida #{{ ref.run_id }}</span></div>{% endfor %}</td>
+          <td class="cell-wrap orq-local-summary">{% if job.summary %}{{ job.summary }}{% elif job.error %}{% if job.error == 'source_changed' %}La evidencia de origen cambió.{% elif job.error == 'lease_expired' %}El turno anterior venció.{% elif job.error == 'invalid_output' %}El resumen no pasó la validación.{% elif job.error == 'timeout' %}Se agotó el tiempo de respuesta.{% else %}Falló la conexión o el servicio local.{% endif %} {% if job.status == 'blocked' %}Requiere revisión técnica.{% elif job.status == 'cancelled' %}La evidencia cambió; el siguiente ciclo la agrupa de nuevo.{% else %}Reintento acotado en espera.{% endif %}{% elif job.status == 'running' %}Generando resumen. Inicio: {{ job.started_at|date:"d/m/Y H:i:s" }}.{% else %}Esperando turno en la Mac.{% endif %}</td>
+          <td>{% if job.status == 'resolved' %}{{ job.tokens }} tokens locales<br>{{ job.prompt_tokens }} entrada / {{ job.completion_tokens }} salida<br>{{ job.duration }} s{% endif %}{% if job.started_at %}<br>Inicio: {{ job.started_at|date:"d/m/Y H:i:s" }}{% endif %}<br>{{ job.updated_at|date:"d/m/Y H:i:s" }}{% if job.lease_until %}<br>Límite del turno: {{ job.lease_until|date:"H:i:s" }}{% endif %}</td>
+        </tr>
+      {% empty %}<tr><td colspan="4">Aún no hay trabajos. El ciclo horario agrupa cambios de inventario y de la cadena de planes existentes.</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="muted">La agrupación evita repetir contexto. Estos tokens no equivalen a ahorro monetario medido; las comprobaciones de origen siguen ejecutándose con reglas del ERP.</p>
+</div>

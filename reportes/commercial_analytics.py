@@ -86,10 +86,26 @@ def _build_panel(year, month, branch_id):
     previous_year = year-1
     annual_range = {"start_date": date(previous_year, 1, 1), "end_date": min(date(year, 12, 31), today)}
     annual = selected_sales_facts(**annual_range)
-    branch_options = list(annual.exclude(sucursal_id=None).values('sucursal_id', 'sucursal__nombre').distinct().order_by('sucursal__nombre'))
-    if branch_id:
-        annual = selected_sales_facts(**annual_range, branch_id=branch_id)
-    monthly_totals = list(annual.annotate(period=TruncMonth('fecha')).values('period').annotate(amount=Sum('venta_total'), latest=Max('fecha')))
+    annual_groups = annual.annotate(period=TruncMonth('fecha')).values(
+        'sucursal_id', 'sucursal__nombre', 'period',
+    ).annotate(amount=Sum('venta_total'), latest=Max('fecha')).order_by('sucursal__nombre')
+    # Source precedence/mirrors are branch/day local. Keep global options while
+    # deriving the selected branch's months and cutoff from the same scan.
+    branch_options, seen_branches, monthly = [], set(), {}
+    for row in annual_groups:
+        identity = row['sucursal_id']
+        if identity is not None and identity not in seen_branches:
+            branch_options.append({'sucursal_id': identity, 'sucursal__nombre': row['sucursal__nombre']})
+            seen_branches.add(identity)
+        if branch_id and identity != branch_id:
+            continue
+        period = row['period']
+        if period not in monthly:
+            monthly[period] = dict(period=period, amount=row['amount'], latest=row['latest'])
+        else:
+            monthly[period]['amount'] += row['amount']
+            monthly[period]['latest'] = max(monthly[period]['latest'], row['latest'])
+    monthly_totals = list(monthly.values())
     monthly_map = {r['period']: r['amount'] for r in monthly_totals}
     latest_current = max((r['latest'] for r in monthly_totals if r['period'].year == year), default=None)
     controls = dict(PointMonthlySalesOfficial.objects.filter(month_start__year=year).values_list('month_start', 'total_amount')) if not branch_id else {}

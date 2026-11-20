@@ -1,0 +1,36 @@
+# Ficha de fuentes — merma dimensional de Cierre diario
+
+Base29c778fb con procedencias b3baae12 incorporadas en125db958; tarea cierre-merma-unidades-20261119, autorpoint, PG16propio55636. Autorización de raíz19nov: presentación dimensional; sin datos, importadores, costes ni conversiones. Revisión antesPR y rebase único coordinado tras el filtro mensual1762. Paquete único de claridad Cierre; no dos publicaciones sucesivas.
+
+## Necesidad, fuentes y unidad
+
+Unidad de análisis: registro de merma y su cantidad en la unidad explícita acreditada. Un registro no es una pieza. Una cantidad sin unidad se conserva, no se vuelve cero ni falta de captura.
+
+- PointWasteLine: PK/source_hash único, movement_at,quantity,unit,cost,FKreceta/insumo/branch; fuente Point existente. Unit se muestra talcual recortando espacios, sin conversiones ni equivalencias nuevas. Producto, preparación e insumo permanecen separados por FK/tipo existente.
+- MermaPOS: source_hash,fecha,cantidad,FKreceta/sucursal. No persiste unidad; el escritor MovementSyncService copia PointWasteLine.quantity. Solo se recupera unidad si source_hash no vacío resuelve una única filaPoint con cantidad,fechaoperativa,receta y sucursal exactas y unidad explícita. Nombre/texto no son claves; mismatches permanecen por acreditar.
+- MovimientoInventario CONSUMO/referenciaMERMA|: ID,fecha,insumo,cantidad; origen importaciónExcel. El parseo conserva unidad_texto transitoriamente, pero el writer no la persiste ni convierte cantidad. La unidad_base del maestro NO acredita la de esa cantidad importada. Se muestra cada registro sin sumarlos como cantidades homogéneas.
+- FactProduccionDiaria y FactVentaDiaria: se conservan hechos/importes y las cantidades del lector existente. No se reimporta ni recalcula producción/venta. El neto por sucursal requiere todas sus mermas visibles de producto en pza acreditadas y hechos de receta PRODUCTO_FINAL con producción/recepciones acreditadas en pza y cantidades exactas por día/sucursal/receta. Tres lecturas bulk adicionales replican los filtros de rebuild_production_facts: PointProductionLine (branch.erp_branch, no insumo), PointTransferLine (erp_destination_branch, fecha recepción, no insumo/no cancelada) y FactVentaDiaria (no persiste unidad: únicamente venta explícita0 puede ser elemento neutro; venta distinta de0 siempre deja netoN/D). FKs, cantidades y conjunto de claves coinciden con los hechos; fuentes extra, faltantes o recetas sin identidad no acreditan neto. Cero con registros explícitos sigue cero; se exigen las tres claves fuente presentes, sin usar ausencia de ventas/recepción/producción como cero. Tipo PRODUCTO_FINAL no convierte ventas a piezas; tampoco se permite que filas+2/−2 acrediten cero por cancelación. No se usa metadata de Fact como unidad inexistente ni maestro como conversión. En otro caso N/D; cantidades fuente permanecen.
+
+## Defecto reproducido y evidencia
+
+Grafo search_graph/trace_path comprobó _waste_domain y _branch_rows llamados por build_daily_operational_closure; este por reportes.views.cierre_operativo y pruebas. Ruta /reportes/cierre-operativo/, único template cierre_operativo_diario.html; no API/export compartido encontrado. _build_alerts también consumía la suma inválida.
+
+El lector sumaba MermaPOS.cantidad + movimientosMERMA| sinunidad y agregaba Point.quantity ignorando unit. Dos regresiones previas al cambio fallan exactamente:2.125pza+3.250cantidad de insumo→5.375 y2pza+.375kg→2.375. Son fixtures sintéticos; no importes ni cantidades productivas inventados. Las QA archivadas del18nov muestran23 sin unidades y sucursales suman23MermaPOS, incluido1CEDIS; no acreditan si esos23mezclan dimensiones ni prueban que el1CEDIS sea un movimientoMERMA|. No se hizo otra consulta productiva.
+
+## Decisión y consumidores
+
+Reutilizar las mismas fuentes por lecturas bulk; cada familia/unidad se conserva separada. Las cantidades desconocidas se detallan por registro, sin asumir pza ni unidad del maestro. No tabla/maestro/captura/alias nuevo. Inventario automatizado local por términos merma/unidad enPG16 propio produce candidatos, no identidad semántica.
+
+KPI muestra número de registros ERP, no suma física. Desglose conserva cantidades, ceros, fracciones y costoPointMXN. Presence/publicación se describe como registros visibles, no conciliación completa ni equivalencia de cantidades. Alerta de publicación usa ausencia de filasERP, no suma de dimensiones. Campos privados de cantidad total sonNone cuando no existe una sola familia/unidad acreditada; contratos públicos/persistencia intactos. En KPI/tabla por sucursal se conservan venta/producción como «Cantidad reportada» con hasta3decimales; no se rotulan como piezas sin acreditación. Se explicita unidad homogénea por acreditar y que los agregados fuente no certifican comparación con merma/neto. N/D explica falta de comparabilidad dimensional, no pérdida de captura. Root ratificó estos rótulos el19nov. También se usan «Registros»/«resumen ERP» en lugar de Rows/fact y plan reportado con hasta3decimales/unidad por acreditar, sin alterar el conteo de planes.
+
+La extracción bulk se comparte entre dominio y tabla en build_daily_operational_closure; tres consultas de merma y tres de operandos del neto independientes del número de registros. La comparación del neto es conservadora: ausencia de unidad histórica de venta no se compensa con una solicitud nueva al personal. No consultas por sucursal ni por fila. La procedencia de inventario preserva las140 existencias/75 pendientes y todas las ubicaciones, fechas y fuentes de b3, sin acreditar apertura o saldo por su marcador BOM. Se conservan permisos, fuente, importes, filtros y fecha. Tres referenciasSWv19 se alinean después de integración de versión17; nunca se publica sobre base desactualizada.
+
+## Pruebas y límites
+
+PG16propio: regresiones kg/pza/unidadvacía, vínculoexacto/mismatch/fuenteausente/díalocal,0real, no unidadinferida demaestro, netocomparable/nocomparable, unidad/cantidad/receta de producción o transferencia discrepante, venta no coincidente, familias desconocidas separadas por registro, ceros acreditados, fuentesintactas ynoN+1. Consumidores existentes de Cierre y checks/migraciones; renderHTML con fuente desconocida, cero y cantidades fraccionarias. Navegador real390/1440 posterior a publicación por revisor coordinado.
+
+Este cambio no certifica cierre financiero ni inventario físico; tampoco cambia las75existencias pendientes ni datosSUA. Fuentes/fechas/cobertura explícitas. No se afirman ahorrosHTTP sin medición comparable ni se atribuyen23auna dimensión sin evidencia.
+
+## Continuación de aceptación visual
+
+La QA real del release67fd confirmó cantidades/fechas, pero detectó expansión min-content de las tarjetas y recorte por el contenedor exterior en390/1440. El follow-up limita tracks con minmax(0,fr) y mínimos de tarjetas/flex a0, conservando scroll interno y acceso a la última columna; no oculta filas ni cambia fuente/cálculo. El CSS lleva URL propia nueva y las tres referenciasSW19 alineadas. Los rojos geométricos real/local y la nueva aceptación se guardan fuera del repo; documentWidth aislado no acredita que el contenido sea accesible.

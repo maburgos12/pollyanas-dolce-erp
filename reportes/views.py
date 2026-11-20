@@ -1,7 +1,12 @@
 import csv
+import json
+import logging
 import re
 import tempfile
+import time
 from collections import defaultdict
+from contextlib import ExitStack
+from functools import wraps
 from io import BytesIO
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -15,7 +20,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.cache import cache
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import connections, transaction
 from django.db.models import Sum, Max, Count, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -5677,7 +5682,15 @@ def _build_product_closure_context(selected_month_start: date) -> dict[str, obje
     sales_meta = closure_metadata.get("sales_meta", {})
     fact_meta = closure_metadata.get("fact_meta", {})
     validation = closure_metadata.get("validation", {})
-    automation_reviews = list(validation.get("automation_reviews") or []) if closure else []
+    automation_reviews = [
+        review if isinstance(review, dict) else {
+            "label": "Revisión automática",
+            "status": "Pendiente de revisión",
+            "detail": str(review),
+            "passed": False,
+        }
+        for review in (validation.get("automation_reviews") or [])
+    ] if closure else []
     unmatched_products = list(opening_meta.get("unmatched_products") or [])[:8]
     lock_event = closure_metadata.get("lock_event", {})
     fact_status = str(fact_meta.get("status") or "").strip()
@@ -6306,7 +6319,66 @@ def cierre_producto(request: HttpRequest) -> HttpResponse:
     return render(request, "reportes/cierre_producto_point.html", context)
 
 
+def _measure_bi_request(view):
+    """Aggregate only this synchronous view/render; never retain SQL or request data."""
+    @wraps(view)
+    def measured(request, *args, **kwargs):
+        started = time.perf_counter()
+        sql_ms = 0.0
+        query_count = 0
+        response = None
+
+        def collect(execute, sql, params, many, context):
+            nonlocal sql_ms, query_count
+            query_started = time.perf_counter()
+            query_count += 1
+            try:
+                return execute(sql, params, many, context)
+            finally:
+                sql_ms += (time.perf_counter() - query_started) * 1000
+
+        try:
+            with ExitStack() as stack:
+                for alias in connections:
+                    stack.enter_context(connections[alias].execute_wrapper(collect))
+                response = view(request, *args, **kwargs)
+            return response
+        finally:
+            total_ms = (time.perf_counter() - started) * 1000
+            try:
+                operational_filters = ("period_days", "months", "branch_id", "budget_month", "action", "export")
+                variant = "detalle" if request.GET.get("detalle") == "1" or any(
+                    request.GET.get(key) for key in operational_filters
+                ) else "portada"
+            except Exception:
+                # A malformed query must not replace the view's original exception.
+                variant = "unknown"
+            try:
+                raw_ray = request.META.get("HTTP_CF_RAY", "")
+                ray = (
+                    re.fullmatch(r"([0-9a-fA-F]{16})(?:-[A-Z]{3})?", raw_ray)
+                    if isinstance(raw_ray, str) and len(raw_ray) <= 20 else None
+                )
+                status = response.status_code if response is not None else None
+                logging.getLogger("erp.performance").info("%s", json.dumps({
+                    "event": "bi_request_metrics",
+                    "view": "reportes.bi",
+                    "variant": variant,
+                    "total_ms": round(total_ms, 3),
+                    "sql_ms": round(sql_ms, 3),
+                    "query_count": query_count,
+                    "status": status,
+                    "failed": status is None or status >= 400,
+                    "cf_ray_id": ray.group(1).lower() if ray else None,
+                }, separators=(",", ":")))
+            except Exception:
+                # Telemetry and its sink must not change a response or exception.
+                pass
+    return measured
+
+
 @login_required
+@_measure_bi_request
 def bi(request: HttpRequest) -> HttpResponse:
     if not can_view_reportes(request.user):
         raise PermissionDenied("No tienes permisos para ver Reportes.")

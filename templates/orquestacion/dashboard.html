@@ -19,6 +19,15 @@
   .orq-chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;}
   .orq-cell-main{font-weight:700;color:var(--texto);}
   .orq-cell-sub{color:var(--texto-light);font-size:.86rem;margin-top:2px;}
+  #mac-ia-02{scroll-margin-top:90px;}
+  .orq-router-jobs{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:1rem;}
+  .orq-router-jobs li{min-width:0;border-top:1px solid var(--border-color,#e7dbe1);padding-top:1rem;overflow-wrap:anywhere;}
+  .orq-router-jobs h3{font:inherit;font-weight:700;margin:0;}
+  .orq-router-jobs p{margin:.5rem 0;}
+  .orq-router-result{white-space:pre-wrap;}
+  .orq-local-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
+  .orq-local-heading h2{font:inherit;margin:0;}
+  #mac-ia-02 .orq-local-summary{max-width:40ch;min-width:18rem;white-space:normal;overflow-wrap:anywhere;}
   .orq-accion{color:var(--vino);font-weight:600;}
 </style>
 {% endblock %}
@@ -29,6 +38,10 @@
   Torre de control de los agentes del ERP: sugerencias que esperan tu decisión, corridas de las reglas
   y cobertura del organigrama. Esta vista consolida los resultados; no ejecuta acciones sensibles por sí sola.
 </p>
+
+<section id="mac-ia-02" aria-labelledby="mac-ia-title" data-status-url="{% url 'orquestacion:dashboard' %}?section=local_ai">
+  {% include "orquestacion/_local_ai.html" %}
+</section>
 
 {# ---------- KPIs ---------- #}
 <section class="kpi-grid">
@@ -432,4 +445,28 @@
   </section>
 
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(() => {
+  const panel = document.getElementById('mac-ia-02');
+  if (!panel) return;
+  let busy = false;
+  async function refresh() {
+    if (document.hidden || busy || panel.contains(document.activeElement)) return;
+    busy = true;
+    try {
+      const response = await fetch(panel.dataset.statusUrl, {cache: 'no-store', signal: AbortSignal.timeout(10000)});
+      if (!response.ok || response.redirected) throw new Error('session');
+      panel.innerHTML = await response.text();
+    } catch (_) {
+      const status = panel.querySelector('[data-refresh-status]');
+      if (status) status.textContent = 'Sin actualización del panel. Se reintentará automáticamente.';
+    } finally { busy = false; }
+  }
+  setInterval(refresh, 15000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+})();
+</script>
 {% endblock %}

@@ -438,3 +438,34 @@ class ClosedSalesTests(TestCase):
         self.assertIsNone(row['amount_delta_pct'])
         self.assertEqual(row['comparison_label'], 'N/D')
         self.assertNotIn('venta cero', row['coverage_note'])
+
+
+class DashboardSalesQueryPlanTests(TestCase):
+    def test_daily_query_plan_excludes_monthly_sales_source(self):
+        from django.db import connection
+        from reportes.dashboard_sales_dataset import _fetch_dashboard_sales_dataset
+
+        for months in (0, 1):
+            with self.subTest(months=months):
+                queries = []
+
+                def capture(execute, sql, params, many, context):
+                    queries.append((sql, params))
+                    return execute(sql, params, many, context)
+
+                with connection.execute_wrapper(capture):
+                    _fetch_dashboard_sales_dataset(
+                        today=date(2026, 9, 7), months=months, visible_cutoff=date(2026, 9, 6),
+                    )
+                self.assertEqual(len(queries), 1)
+                sql, params = queries[0]
+                with connection.cursor() as cursor:
+                    cursor.execute('EXPLAIN (FORMAT JSON) ' + sql, params)
+                    plan = cursor.fetchone()[0][0]['Plan']
+                nodes = [plan]
+                relations = set()
+                while nodes:
+                    node = nodes.pop()
+                    relations.add(node.get('Relation Name'))
+                    nodes.extend(node.get('Plans', []))
+                self.assertEqual('pos_bridge_monthly_sales_official' in relations, months > 0)

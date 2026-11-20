@@ -1,0 +1,21 @@
+[Unit]
+Description=Pastelerias local AI request router
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/pastelerias-erp
+ExecStart=/usr/bin/python3 /opt/pastelerias-erp/ops/erp-mac-ia/router_worker.py
+TimeoutStartSec=600
+RuntimeDirectory=pastelerias-mac-ia
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+UMask=0077
+Nice=15
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/run/pastelerias-mac-ia

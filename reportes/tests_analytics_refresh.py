@@ -763,6 +763,80 @@ class DailyOperationalClosureViewTests(TestCase):
         self.assertContains(response, "Movimiento reconstruido")
         self.assertEqual(self.existencia.trazabilidad_stock.get("source"), TRACE_RECONSTRUCTED_MOVEMENT)
 
+    def test_inventory_provenance_shows_all_locations_without_certifying_balances(self):
+        fact_stock = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo).stock_final
+        bom = ExistenciaInsumo.objects.create(
+            insumo=self.insumo, almacen="CUARTO_FRIO", stock_actual=Decimal("-999"),
+            trazabilidad_stock={"fuente": "CONSUMO_BOM", "creado_automaticamente": True},
+            actualizado_en=datetime(2026, 4, 8, 15, tzinfo=UTC),
+        )
+        missing = ExistenciaInsumo.objects.create(
+            insumo=self.insumo, almacen="LIMPIEZA", stock_actual=Decimal("24"),
+            trazabilidad_stock={},
+        )
+        before = list(ExistenciaInsumo.objects.order_by("pk").values())
+        reading = SimpleNamespace(
+            freshness=InventoryFreshness.FRESH, quantity_base=Decimal("20"),
+            captured_at=datetime(2026, 4, 8, 15, tzinfo=UTC),
+        )
+        with timezone.override("America/Mazatlan"), patch(
+            "reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many",
+            return_value={self.insumo.pk: reading},
+        ):
+            response = self.client.get(reverse("reportes:cierre_operativo"), {"fecha": self.target_date.isoformat()})
+        inventory = response.context["closure"]["inventory"]
+        self.assertEqual(inventory["untraceable_count"], 2)
+        self.assertEqual(inventory["traceable_count"], 1)
+        self.assertEqual(inventory["existence_count"], 3)
+        self.assertEqual(inventory["untraceable_insumo_count"], 1)
+        self.assertEqual(inventory["untraceable_legacy_bom_count"], 1)
+        self.assertEqual(inventory["untraceable_empty_metadata_count"], 1)
+        row = response.context["closure"]["inventory_references"][0]
+        self.assertEqual({item["existence_id"] for item in row["trace_locations"]}, {self.existencia.pk, bom.pk, missing.pk})
+        self.assertEqual((row["expected_stock"], row["visible_stock"]), (fact_stock, 20))
+        self.assertNotIn("difference", row)
+        self.assertContains(response, "Registro automático por receta (BOM)")
+        self.assertContains(response, "Origen no registrado")
+        self.assertContains(response, "Apertura y saldo por acreditar")
+        self.assertContains(response, "Cuarto Frío")
+        self.assertContains(response, "Almacén de Limpieza")
+        self.assertContains(response, "2026-04-08 08:00")
+        self.assertContains(response, "Requiere revisión")
+        self.assertEqual(response.context["target_date"], self.target_date)
+        self.assertEqual(list(ExistenciaInsumo.objects.order_by("pk").values()), before)
+
+    def test_inventory_provenance_requires_strict_bom_marker_and_keeps_pending_rules(self):
+        reading = SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("0"), captured_at=None)
+        cases = [
+            ({"fuente": "CONSUMO_BOM", "creado_automaticamente": True}, 1, 0, 0, 1, 0),
+            ({"fuente": "CONSUMO_BOM", "creado_automaticamente": "true"}, 0, 0, 1, 1, 0),
+            ({"fuente": "OTRO", "creado_automaticamente": True}, 0, 0, 1, 1, 0),
+            ({}, 0, 1, 0, 1, 0),
+            ({"source": "UNTRACED", "label": "Sin traza suficiente"}, 0, 0, 1, 1, 1),
+            ({"source": "MANUAL_SYNC", "label": "Sync manual", "fuente": "CONSUMO_BOM", "creado_automaticamente": True}, 0, 0, 0, 0, 1),
+        ]
+        for metadata, bom, empty, other, pending, previous_traceable in cases:
+            with self.subTest(metadata=metadata):
+                ExistenciaInsumo.objects.filter(pk=self.existencia.pk).update(trazabilidad_stock=metadata, stock_actual=0)
+                with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many", return_value={self.insumo.pk: reading}):
+                    inventory = _inventory_domain(self.target_date)
+                self.assertEqual(inventory["untraceable_legacy_bom_count"], bom)
+                self.assertEqual(inventory["untraceable_empty_metadata_count"], empty)
+                self.assertEqual(inventory["untraceable_other_count"], other)
+                self.assertEqual(inventory["untraceable_count"], pending)
+                self.assertEqual(inventory["traceable_count"], previous_traceable)
+
+    def test_inventory_location_detail_has_no_per_location_queries(self):
+        fact_stock = FactInventarioDiario.objects.get(fecha=self.target_date, insumo=self.insumo).stock_final
+        for location in ("CUARTO_FRIO", "ALMACEN_CASA_1", "ALMACEN_CASA_2", "LIMPIEZA"):
+            ExistenciaInsumo.objects.create(insumo=self.insumo, almacen=location, stock_actual=0)
+        reading = SimpleNamespace(freshness=InventoryFreshness.FRESH, quantity_base=Decimal("20"), captured_at=None)
+        with patch("reportes.daily_operational_closure_service.CanonicalPointInventoryService.read_many", return_value={self.insumo.pk: reading}):
+            with self.assertNumQueries(2):
+                rows = _inventory_references(self.target_date)
+        self.assertEqual(len(rows[0]["trace_locations"]), 5)
+        self.assertEqual((rows[0]["expected_stock"], rows[0]["visible_stock"]), (fact_stock, 20))
+
     def test_inventory_comparison_uses_local_capture_date(self):
         reading = SimpleNamespace(
             freshness=InventoryFreshness.FRESH,
@@ -854,4 +928,118 @@ class DailyOperationalClosureViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.context["closure"]["sales"]["fact_tickets"], 5)
-        self.assertContains(response, "8 piezas · 5 tickets")
+        self.assertContains(response, "Cantidad reportada 8 · unidad por acreditar · 5 tickets")
+
+
+class DailyClosureSourceCopyTests(SimpleTestCase):
+    """Technical provenance stays available without being the operational label."""
+
+    def _render(self, domains):
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        request = RequestFactory().get("/reportes/cierre-operativo/?fecha=2026-11-18")
+        request.user = AnonymousUser()
+        return render_to_string("reportes/cierre_operativo_diario.html", {"request": request,
+            "closure": {
+                "domains": domains,
+                "sales": {"visible_source": "FactVentaDiaria", "fact_amount": Decimal("104124.01")},
+                "source_notes": [{"label": "Inventario", "detail": "FactInventarioDiario; Point ALMACÉN"}],
+            },
+            "target_date_iso": "2026-11-18",
+        })
+
+    def test_operator_labels_keep_technical_provenance_in_closed_details(self):
+        from html.parser import HTMLParser
+        from copy import deepcopy
+
+        class DefaultText(HTMLParser):
+            def __init__(self):
+                super().__init__()
+                self.depth = 0
+                self.summary = False
+                self.text = []
+                self.open_details = 0
+
+            def handle_starttag(self, tag, attrs):
+                if tag == "details":
+                    self.depth += 1
+                    self.open_details += int("open" in dict(attrs))
+                if tag == "summary":
+                    self.summary = True
+
+            def handle_endtag(self, tag):
+                if tag == "details":
+                    self.depth -= 1
+                if tag == "summary":
+                    self.summary = False
+
+            def handle_data(self, data):
+                if not self.depth or self.summary:
+                    self.text.append(data)
+
+        domains = [
+            {"key": "ventas", "source_truth": "PointDailySale -> FactVentaDiaria", "visible_source": "FactVentaDiaria"},
+            {"key": "produccion", "source_truth": "PointProductionLine -> FactProduccionDiaria", "visible_source": "FactProduccionDiaria", "plan_note": "PlanProduccion no es PointProductionLine", "plan_visible_max_date": date(2026, 11, 18)},
+            {"key": "mermas", "source_truth": "PointWasteLine -> MermaPOS", "visible_source": "MovimientoInventario MERMA|"},
+            {"key": "inventario", "source_truth": "FactInventarioDiario", "visible_source": "Point ALMACÉN"},
+        ]
+        before = deepcopy(domains)
+        rendered = self._render(domains)
+        parser = DefaultText()
+        parser.feed(rendered)
+        visible = " ".join(parser.text)
+        for label in ["Ventas de Point", "Producción de Point", "Mermas de Point y del ERP", "Movimientos del ERP y stock de Point", "Cantidades de merma en sucursales"]:
+            self.assertIn(label, visible)
+        for technical in ["PointDailySale", "FactVentaDiaria", "PointProductionLine", "FactProduccionDiaria", "PlanProduccion", "PointWasteLine", "MermaPOS", "MovimientoInventario", "FactInventarioDiario"]:
+            self.assertNotIn(technical, visible)
+            self.assertIn(technical, rendered)
+        self.assertIn("104,124.01", visible)
+        self.assertIn("2026-11-18", visible)
+        self.assertEqual(domains, before)
+        self.assertEqual(parser.open_details, 0)
+
+    def test_unknown_domain_keeps_source_available_without_invented_mapping(self):
+        rendered = self._render([{"key": "future", "source_truth": "ExactFutureSource", "visible_source": "ExactFutureReader"}])
+        self.assertIn("Referencia del módulo", rendered)
+        self.assertIn("ExactFutureSource", rendered)
+        self.assertIn("ExactFutureReader", rendered)
+
+    def test_no_plan_notice_remains_visible(self):
+        notice = "No existe plan cargado para la fecha auditada; la producción Point y el plan siguen siendo fuentes distintas."
+        rendered = self._render([{"key": "produccion", "plan_visible_max_date": None, "plan_note": notice}])
+        self.assertIn('<tr><th>Lectura del plan</th><td class="is-right">' + notice + '</td></tr>', rendered)
+
+
+class ReportesNavigationRenderTests(SimpleTestCase):
+    def test_shared_navigation_preserves_links_order_active_and_accessible_label(self):
+        from django.template.loader import render_to_string
+        tabs = [
+            {"label": "Planeación de personal", "url": "/reportes/planeacion-personal/?mes=2026-10", "active": True},
+            {"label": "Mermas y Devoluciones", "url": "/reportes/mermas-devoluciones/", "active": False},
+        ]
+        expected_links = '<a class="module-tab active" href="/reportes/planeacion-personal/?mes=2026-10">Planeación de personal</a><a class="module-tab" href="/reportes/mermas-devoluciones/">Mermas y Devoluciones</a>'
+        for section in (False, True):
+            with self.subTest(section=section):
+                rendered = render_to_string("reportes/_module_tabs.html", {
+                    "module_tabs": tabs,
+                    "report_tabs_label": "Secciones de reportes", "report_tabs_section": section,
+                })
+                tag = "section" if section else "nav"
+                self.assertHTMLEqual(rendered, f'<{tag} class="module-tabs report-tabs reportes-module-tabs" aria-label="Secciones de reportes">{expected_links}</{tag}>')
+
+    def test_closure_and_master_budget_reuse_identical_navigation(self):
+        import re
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        tabs = [{"label": "Planeación de personal", "url": "/personal/", "active": True}, {"label": "Mermas y Devoluciones", "url": "/mermas/", "active": False}]
+        request = RequestFactory().get("/reportes/")
+        request.user = AnonymousUser()
+        expected = render_to_string("reportes/_module_tabs.html", {"module_tabs": tabs})
+        for template in ["reportes/cierre_operativo_diario.html", "reportes/presupuesto_maestro.html"]:
+            with self.subTest(template=template):
+                rendered = render_to_string(template, {"request": request, "module_tabs": tabs, "closure": {}})
+                navs = re.findall(r'<nav class="module-tabs report-tabs reportes-module-tabs"[^>]*>.*?</nav>', rendered, re.S)
+                self.assertEqual(len(navs), 1)
+                self.assertHTMLEqual(navs[0], expected)

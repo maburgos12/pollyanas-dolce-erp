@@ -103,6 +103,7 @@ def _fetch_dashboard_sales_dataset(*, today: date, months: int, visible_cutoff: 
             WHERE fv.fecha BETWEEN ms.month_start
                 AND LEAST((ms.month_start + INTERVAL '1 month - 1 day')::date, (SELECT latest_date FROM latest))
         ) fact ON TRUE
+        WHERE %(months)s > 0
         ORDER BY ms.month_start
     ),
     monthly_json AS (

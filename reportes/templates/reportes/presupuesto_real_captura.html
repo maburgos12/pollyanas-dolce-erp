@@ -56,11 +56,7 @@
 {% block content %}
 
 {% if module_tabs %}
-<section class="module-tabs report-tabs" aria-label="Secciones de reportes">
-  {% for tab in module_tabs %}
-  <a class="module-tab{% if tab.active %} active{% endif %}" href="{{ tab.url }}">{{ tab.label }}</a>
-  {% endfor %}
-</section>
+{% include "reportes/_module_tabs.html" with module_tabs=module_tabs report_tabs_class="report-tabs" report_tabs_label="Secciones de reportes" report_tabs_section=True only %}
 {% endif %}
 
 <section class="card">

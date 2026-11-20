@@ -186,6 +186,27 @@ def _latest_contribution_map(keys: set[tuple[int, int]]) -> dict[tuple[int, int]
     }
 
 
+def _historical_forecast_stats(series, history_anchor, lookback_weeks):
+    weekday_window = max(lookback_weeks * 7, 7)
+    history = _history_window(series, history_anchor, 1, max(56, weekday_window))
+    recent_28 = history[:28]
+    recent_14 = _robust_mean(history[:14])
+    previous_14 = _robust_mean(history[14:28])
+    trend_factor, trend_pct = _trend_factor(recent_14, previous_14)
+    return {
+        "recent_avg_7": _robust_mean(history[:7]),
+        "recent_avg_28": _robust_mean(recent_28),
+        "recent_14": recent_14,
+        "previous_14": previous_14,
+        "older_28": _robust_mean(history[28:56]),
+        "weekday_average": _robust_mean(history[:weekday_window]),
+        "trend_factor": trend_factor,
+        "trend_pct": trend_pct,
+        "stddev_28": _stddev(recent_28),
+        "avg_price": _recent_avg_price(series, history_anchor),
+    }
+
+
 def _build_forecast_row(
     *,
     key: tuple[int, int],
@@ -196,12 +217,11 @@ def _build_forecast_row(
     lookback_weeks: int = DEFAULT_LOOKBACK_WEEKS,
     contribution: dict[str, Decimal] | None,
     calibration_profile: dict[str, Decimal] | None,
+    historical_stats=None,
 ) -> dict[str, object]:
     history_anchor = history_anchor or target_day
-    weekday_window = max(lookback_weeks * 7, 7)
-    history = _history_window(series, history_anchor, 1, max(56, weekday_window))
-    recent_28 = history[:28]
-    recent_avg_28 = _robust_mean(recent_28)
+    stats = historical_stats if historical_stats is not None else _historical_forecast_stats(series, history_anchor, lookback_weeks)
+    recent_avg_28 = stats["recent_avg_28"]
     weekly_pattern = weekly_pattern_for_day(target_day)
     rotation_band = rotation_band_for_avg(recent_avg_28)
     calibration_profile = calibration_profile or {}
@@ -213,14 +233,14 @@ def _build_forecast_row(
     segment_wape_pct = _to_decimal(calibration_profile.get("wape_after_pct") or calibration_profile.get("wape_before_pct"))
     execution_gap_pct = _to_decimal(calibration_profile.get("execution_gap_pct"))
 
-    recent_14 = _robust_mean(history[:14])
-    previous_14 = _robust_mean(history[14:28])
-    older_28 = _robust_mean(history[28:56])
+    recent_14 = stats["recent_14"]
+    previous_14 = stats["previous_14"]
+    older_28 = stats["older_28"]
     weighted_avg = (recent_14 * recent_weight) + (previous_14 * mid_weight) + (older_28 * older_weight)
     same_weekday_avg = _robust_mean(_same_weekday_history(series, target_day, lookback_weeks, history_anchor))
-    weekday_factor = _weekday_factor(same_weekday_avg, _robust_mean(history[:weekday_window]))
-    trend_factor, trend_pct = _trend_factor(recent_14, previous_14)
-    stddev_28 = _stddev(recent_28)
+    weekday_factor = _weekday_factor(same_weekday_avg, stats["weekday_average"])
+    trend_factor, trend_pct = stats["trend_factor"], stats["trend_pct"]
+    stddev_28 = stats["stddev_28"]
     base_forecast = weighted_avg * weekday_factor * trend_factor * bias_adjustment
     forecast_qty = _quantize_units(max(base_forecast, ZERO))
     dynamic_error_factor = min((segment_wape_pct / HUNDRED) * Decimal("0.35"), Decimal("0.25"))
@@ -232,9 +252,9 @@ def _build_forecast_row(
     buffer_units = _quantize_units(min(raw_buffer, forecast_qty * Decimal("0.65")))
     forecast_min = _quantize_units(max(forecast_qty - buffer_units, ZERO))
     forecast_max = _quantize_units(forecast_qty + buffer_units)
-    avg_price = _recent_avg_price(series, history_anchor)
+    avg_price = stats["avg_price"]
     forecast_amount = _quantize_money(forecast_qty * avg_price)
-    recent_avg_7 = _robust_mean(history[:7])
+    recent_avg_7 = stats["recent_avg_7"]
     contribution = contribution or {}
     why = (
         f"Promedio ponderado {weighted_avg.quantize(Decimal('0.01'))} pzs con pesos "
@@ -272,7 +292,7 @@ def _build_forecast_row(
         "margin_pct": _to_decimal(contribution.get("margin_pct")),
         "contribution_unit": _to_decimal(contribution.get("contribution_unit")),
         "contribution_total": _to_decimal(contribution.get("contribution_total")),
-        "history_days": sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO),
+        "history_days": stats["history_days"] if "history_days" in stats else sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO),
         "why": why,
     }
 
@@ -397,6 +417,7 @@ def iter_future_forecast_contexts(
     history_start = _forecast_history_start(reference_date, lookback_weeks, DEFAULT_VALIDATION_DAYS)
     sales_rows = _read_forecast_sales(history_start, max(target_days))
     calibration = load_latest_calibration_profiles(reference_date=reference_date)
+    historical_stats_by_key = {}
     for target_day in target_days:
         # Keep each target's original upper bound, including already recorded future sales.
         yield _daily_forecast_context(
@@ -408,6 +429,7 @@ def iter_future_forecast_contexts(
             include_validation=False,
             sales_rows=(row for row in sales_rows if row["fecha"] <= target_day),
             calibration=calibration,
+            historical_stats_by_key=historical_stats_by_key,
         )
 
 
@@ -421,6 +443,7 @@ def _daily_forecast_context(
     include_validation: bool,
     sales_rows: Iterable[dict],
     calibration=None,
+    historical_stats_by_key=None,
 ) -> dict[str, object]:
     history_anchor = min(target_date, reference_date)
     series_by_key: dict[tuple[int, int], dict[date, dict[str, Decimal]]] = defaultdict(dict)
@@ -457,9 +480,24 @@ def _daily_forecast_context(
     backtest_candidates: list[tuple[tuple[int, int], dict[str, object], dict[date, dict[str, Decimal]]]] = []
     for key in selected_keys:
         series = series_by_key[key]
-        if sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO) < 14:
+        stats = None
+        if historical_stats_by_key is not None:
+            stats_key = (key, history_anchor, lookback_weeks)
+            stats = historical_stats_by_key.get(stats_key)
+            if stats is None:
+                history_days = sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO)
+                stats = {"history_days": history_days}
+                if history_days >= 14:
+                    stats.update(_historical_forecast_stats(series, history_anchor, lookback_weeks))
+                    # Calibration uses the simple mean; row rotation uses the robust mean.
+                    stats["calibration_avg_28"] = _mean(_history_window(series, history_anchor, 1, 28))
+                historical_stats_by_key[stats_key] = stats
+            history_days = stats["history_days"]
+        else:
+            history_days = sum(1 for day in series if day < history_anchor and _to_decimal((series.get(day) or {}).get("qty")) > ZERO)
+        if history_days < 14:
             continue
-        avg_28 = _mean(_history_window(series, history_anchor, 1, 28))
+        avg_28 = stats["calibration_avg_28"] if stats is not None else _mean(_history_window(series, history_anchor, 1, 28))
         calibration_key = (
             int(key[0]),
             (labels_by_key[key].get("family") or "SIN_FAMILIA").strip()[:120],
@@ -475,6 +513,7 @@ def _daily_forecast_context(
             lookback_weeks=lookback_weeks,
             contribution=contribution_map.get(key),
             calibration_profile=calibration_profiles.get(calibration_key),
+            historical_stats=stats,
         )
         rows.append(row)
         if include_validation:
