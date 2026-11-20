@@ -21,6 +21,26 @@ OP = HOME / ".local/share/pastelerias/mac-ia-02"
 FOUR = HOME / ".local/share/modelos-erp/qwen3-4b"
 NEMO = HOME / ".local/share/pastelerias/benchmarks/nemotron-qwen-20261119/models/Nemotron-3.5-Bolt-E4B-Q4_K_M.gguf"
 MAC = sys.platform == "darwin"
+PHASE = "input"  # One forced-command process handles exactly one request.
+OUTPUT_REASONS = {"http_status", "response_size", "model_mismatch", "token_limit", "finish_reason"}
+
+
+class InvalidOutput(ValueError):
+    def __init__(self, reason):
+        super().__init__("invalid_output")
+        self.reason = reason
+
+
+def error_response(exc):
+    category = next((label for kind, label in (
+        (KeyboardInterrupt, "interrupted"), (subprocess.TimeoutExpired, "timeout"),
+        (TimeoutError, "timeout"), (subprocess.CalledProcessError, "process_exit"),
+        (OSError, "io"), (json.JSONDecodeError, "json"), (ValueError, "contract"),
+        (KeyError, "contract"), (RuntimeError, "runtime")) if isinstance(exc, kind)), "unknown")
+    value = str(exc)
+    error = value if value in {"busy", "timeout", "invalid_output", "offline"} else "worker_error"
+    reason = exc.reason if isinstance(exc, InvalidOutput) and exc.reason in OUTPUT_REASONS else "unknown"
+    return {"error": error, "diagnostic": {"phase": PHASE, "category": category, "reason": reason}}
 
 
 def verify(data):
@@ -94,8 +114,10 @@ def request(port, key, path, payload=None):
                      headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
         response = conn.getresponse()
         raw = response.read(32769)
-        if response.status != 200 or len(raw) > 32768:
-            raise ValueError("invalid_output")
+        if response.status != 200:
+            raise InvalidOutput("http_status")
+        if len(raw) > 32768:
+            raise InvalidOutput("response_size")
         return json.loads(raw)
     finally:
         conn.close()
@@ -173,6 +195,8 @@ def debian_infer(prompt, schema, temp):
 
 
 def mac_infer(model, prompt, schema, temp):
+    global PHASE
+    PHASE = "guard"
     key_path = OP / "api.key"
     if key_path.stat().st_mode & 0o077:
         raise RuntimeError("worker_error")
@@ -205,6 +229,7 @@ def mac_infer(model, prompt, schema, temp):
                     "--no-op-offload", "--parallel", "1", "--n-predict", "192", "--reasoning", "off", "--reasoning-budget", "0",
                     "--jinja", "--no-warmup", "--log-disable"]
             env = {k: v for k, v in os.environ.items() if not k.startswith("LLAMA_")}
+            PHASE = "startup"
             with (temp / "server.log").open("w") as log:
                 proc = subprocess.Popen(args, stdout=log, stderr=log, start_new_session=True, env=env)
             while True:
@@ -214,18 +239,24 @@ def mac_infer(model, prompt, schema, temp):
                 if time.monotonic() - start > 120:
                     raise RuntimeError("timeout")
                 try:
+                    PHASE = "health"
                     if request(port, key, "/health").get("status") == "ok":
                         break
                 except (OSError, ValueError):
                     pass
                 time.sleep(2)
         def generate():
+            global PHASE
+            PHASE = "generate"
             response = request(port, key, "/v1/chat/completions", {
                 "model": alias, "messages": [{"role": "user", "content": prompt}], "max_tokens": 192, "temperature": 0,
                 "response_format": {"type": "json_schema", "json_schema": {"name": "local_request", "strict": True, "schema": schema}}})
             choice = response["choices"][0]
-            if response.get("model") != alias or choice["finish_reason"] != "stop":
-                raise ValueError("invalid_output")
+            PHASE = "parse"
+            if response.get("model") != alias:
+                raise InvalidOutput("model_mismatch")
+            if choice["finish_reason"] != "stop":
+                raise InvalidOutput("token_limit" if choice["finish_reason"] == "length" else "finish_reason")
             return {"result": json.loads(choice["message"]["content"]),
                     "usage": {k: response["usage"][k] for k in ("prompt_tokens", "completion_tokens")}}
         # A background HTTP read permits killing only this task's Nemotron if operations start.
@@ -244,6 +275,7 @@ def mac_infer(model, prompt, schema, temp):
 
 
 def main():
+    global PHASE
     os.umask(0o077)
     def interrupted(signum, frame):
         raise KeyboardInterrupt
@@ -276,6 +308,7 @@ def main():
                     raise RuntimeError("busy")
             if job == {"probe": True}:
                 return {"state": "idle"}
+            PHASE = "prepare"
             prompt, schema = prepare(job)
             if job["model"] not in ({"qwen8b", "nemotron"} if MAC else {"python", "qwen4b"}):
                 raise ValueError("invalid_output")
@@ -297,6 +330,5 @@ if __name__ == "__main__":
     try:
         output = main()
     except (Exception, KeyboardInterrupt) as exc:
-        value = str(exc)
-        output = {"error": value if value in {"busy", "timeout", "invalid_output", "offline"} else "worker_error"}
+        output = error_response(exc)
     print(json.dumps(output, ensure_ascii=False, allow_nan=False))

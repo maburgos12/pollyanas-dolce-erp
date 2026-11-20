@@ -3,11 +3,24 @@ from datetime import timedelta
 from uuid import uuid4
 
 from django.db import close_old_connections
-from django.test import TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 from django.utils import timezone
 
 from orquestacion.models import AgentTask, AgentDefinition
 from orquestacion.services import local_router
+
+
+class LocalRouterCommandDiagnosticTests(SimpleTestCase):
+    def test_command_error_has_only_allowlisted_reason(self):
+        from io import StringIO
+        import json
+        from unittest.mock import patch
+        from django.core.management import call_command, CommandError
+        for cause, expected in [(ValueError("invalid_output"), "invalid_output"), (ValueError("SECRET-PROMPT"), "unknown"), (KeyError("PRIVATE"), "unknown")]:
+            with self.subTest(reason=expected), patch("orquestacion.services.local_router.panel", side_effect=cause):
+                with self.assertRaises(CommandError) as error:
+                    call_command("local_ai_route", "status", stdout=StringIO(), stderr=StringIO())
+                self.assertEqual(json.loads(str(error.exception)), {"router_error": expected})
 
 
 class LocalRouterTests(TransactionTestCase):

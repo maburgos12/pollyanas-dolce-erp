@@ -11,6 +11,35 @@ from worker import command as pilot_command
 
 ROOT = "/opt/pastelerias-erp"
 CONFIG = "/etc/pastelerias-local-router/ssh_config"
+PHASES = {"probe", "claim", "execute", "finish", "heartbeat", "input", "prepare", "guard", "startup", "health", "generate", "parse"}
+CATEGORIES = {"timeout", "process_exit", "io", "json", "contract", "runtime", "interrupted", "unknown"}
+REASONS = {"invalid_output", "invalid_usage", "expired_lease", "invalid_error", "unknown",
+           "http_status", "response_size", "model_mismatch", "token_limit", "finish_reason"}
+
+
+def diagnostic(exc, phase):
+    category = next((label for kind, label in (
+        (subprocess.TimeoutExpired, "timeout"), (TimeoutError, "timeout"),
+        (subprocess.CalledProcessError, "process_exit"), (OSError, "io"),
+        (json.JSONDecodeError, "json"), (ValueError, "contract"), (KeyError, "contract"))
+        if isinstance(exc, kind)), "unknown")
+    reason = "unknown"
+    if isinstance(exc, subprocess.CalledProcessError) and isinstance(exc.stderr, str) and len(exc.stderr.encode()) <= 256:
+        try:
+            value = json.loads(exc.stderr.removeprefix("CommandError: "))
+            if isinstance(value, dict) and set(value) == {"router_error"} and isinstance(value["router_error"], str) and value["router_error"] in REASONS:
+                reason = value["router_error"]
+        except ValueError:
+            pass
+    return {"phase": phase, "category": category, "reason": reason}
+
+
+def node_diagnostic(value):
+    if (isinstance(value, dict) and set(value) == {"phase", "category", "reason"}
+            and all(isinstance(v, str) for v in value.values())
+            and value["phase"] in PHASES and value["category"] in CATEGORIES and value["reason"] in REASONS):
+        return value
+    return None
 
 
 def command(action, payload=None):
@@ -33,33 +62,46 @@ def transport(node, payload):
 
 def work(node):
     job = None
+    phase, detail = "probe", None
     try:
         probe = transport(node, {"probe": True})
-        state = "idle" if probe == {"state": "idle"} else "busy" if probe == {"error": "busy"} else "offline"
+        state = "idle" if probe == {"state": "idle"} else "busy" if probe.get("error") == "busy" else "offline"
+        detail = node_diagnostic(probe.get("diagnostic"))
+        phase = "heartbeat"
         status = command("heartbeat", {"node": node, "state": state})
         if not status["enabled"] or state != "idle":
-            return {"node": node, "state": state}
+            return {"node": node, "state": state, **({"diagnostic": detail} if detail else {})}
+        phase = "claim"
         job = command("claim", {"node": node})
         if not job:
             return {"node": node, "state": "idle"}
+        phase = "heartbeat"
         command("heartbeat", {"node": node, "state": "running"})
+        phase = "execute"
         output = transport(node, {"model": job["model"], "kind": job["kind"], "data": job["data"]})
         if "error" in output:
-            output = {"error": output["error"] if output["error"] in {"busy", "timeout", "invalid_output", "offline"} else "worker_error"}
+            detail = node_diagnostic(output.get("diagnostic"))
+            output = {"error": output["error"] if isinstance(output["error"], str) and output["error"] in {"busy", "timeout", "invalid_output", "offline"} else "worker_error"}
         elif set(output) != {"result", "usage", "duration"}:
             output = {"error": "invalid_output"}
+        phase = "finish"
         finished = command("finish", {"task_id": job["id"], "lease": job["lease"], **output})
+        phase = "heartbeat"
         command("heartbeat", {"node": node, "state": "busy" if output.get("error") == "busy" else "idle"})
-        return {"node": node, "id": job["id"], "model": job["model"], "status": finished["status"]}
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+        return {"node": node, "id": job["id"], "model": job["model"], "status": finished["status"], **({"diagnostic": detail} if detail else {})}
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
         # Neither output nor transport stderr is logged: either may contain evidence.
+        detail = diagnostic(exc, phase)
         if job:
             try:
                 command("finish", {"task_id": job["id"], "lease": job["lease"], "error": "worker_error"})
-            except subprocess.SubprocessError:
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError):
                 pass
-        command("heartbeat", {"node": node, "state": "offline"})
-        return {"node": node, "state": "offline"}
+        try:
+            command("heartbeat", {"node": node, "state": "offline"})
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            pass
+        return {"node": node, "state": "offline", **({"id": job["id"], "model": job["model"]} if job else {}), "diagnostic": detail}
 
 
 def drain(node):
