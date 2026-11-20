@@ -49,3 +49,9 @@ def task_run_rule(
         "task_id": result.task_id,
         "suggestion_id": result.suggestion_id,
     }
+
+
+@shared_task(name="orquestacion.local_ai_enqueue", time_limit=90, soft_time_limit=60)
+def task_local_ai_enqueue():
+    from orquestacion.services.local_ai import enqueue
+    return enqueue()

@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll private Mac-IA-02 summary queue
+
+[Timer]
+OnBootSec=60
+OnUnitInactiveSec=60
+Unit=pastelerias-mac-ia.service
+
+[Install]
+WantedBy=timers.target

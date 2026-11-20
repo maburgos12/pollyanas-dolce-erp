@@ -1,0 +1,17 @@
+[Unit]
+Description=Pastelerias Mac-IA-02 local summaries (one job)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/pastelerias-erp
+ExecStart=/usr/bin/python3 /opt/pastelerias-erp/ops/erp-mac-ia/worker.py
+RuntimeDirectory=pastelerias-mac-ia
+RuntimeDirectoryPreserve=yes
+UMask=0077
+TimeoutStartSec=480
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=/run/pastelerias-mac-ia
