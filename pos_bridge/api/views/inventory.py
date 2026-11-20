@@ -23,6 +23,22 @@ from pos_bridge.models import PointInventorySnapshot
 ZERO = Decimal("0")
 
 
+def _branch_match(value: str) -> Q:
+    return (
+        Q(branch__name__icontains=value)
+        | Q(branch__external_id__iexact=value)
+        | Q(branch__erp_branch__codigo__iexact=value)
+    )
+
+
+def _product_match(value: str) -> Q:
+    return (
+        Q(product__name__icontains=value)
+        | Q(product__sku__iexact=value)
+        | Q(product__external_id__iexact=value)
+    )
+
+
 class InventoryFilter(filters.FilterSet):
     branch = filters.CharFilter(method="filter_branch")
     product = filters.CharFilter(method="filter_product")
@@ -35,18 +51,10 @@ class InventoryFilter(filters.FilterSet):
         fields = []
 
     def filter_branch(self, queryset, name, value):
-        return queryset.filter(
-            Q(branch__name__icontains=value)
-            | Q(branch__external_id__iexact=value)
-            | Q(branch__erp_branch__codigo__iexact=value)
-        )
+        return queryset.filter(_branch_match(value))
 
     def filter_product(self, queryset, name, value):
-        return queryset.filter(
-            Q(product__name__icontains=value)
-            | Q(product__sku__iexact=value)
-            | Q(product__external_id__iexact=value)
-        )
+        return queryset.filter(_product_match(value))
 
 
 class InventoryViewSet(ReadOnlyModelViewSet):
@@ -66,21 +74,20 @@ class InventoryViewSet(ReadOnlyModelViewSet):
     def get_queryset(self):
         return PointInventorySnapshot.objects.select_related("branch", "branch__erp_branch", "product")
 
-    def _latest_snapshot_qs(self, branch_filter: str | None = None):
+    def _latest_snapshot_qs(self, branch_filter: str | None = None, *, scoped_queryset=None):
+        qs = scoped_queryset if scoped_queryset is not None else self.get_queryset()
+        if branch_filter:
+            qs = qs.filter(_branch_match(branch_filter))
         if connection.vendor == "postgresql":
+            # These identity filters are constant within a branch/product pair.
+            # Keep them inside DISTINCT ON so a filtered request does not resolve
+            # the latest snapshot of every unrelated historical pair first.
             latest_snapshot_ids = (
-                PointInventorySnapshot.objects.order_by("branch_id", "product_id", "-captured_at", "-id")
+                qs.order_by("branch_id", "product_id", "-captured_at", "-id")
                 .distinct("branch_id", "product_id")
                 .values("id")
             )
-            qs = self.get_queryset().filter(id__in=Subquery(latest_snapshot_ids))
-            if branch_filter:
-                qs = qs.filter(
-                    Q(branch__name__icontains=branch_filter)
-                    | Q(branch__external_id__iexact=branch_filter)
-                    | Q(branch__erp_branch__codigo__iexact=branch_filter)
-                )
-            return qs
+            return qs.filter(id__in=Subquery(latest_snapshot_ids))
 
         latest_snapshot_id = (
             PointInventorySnapshot.objects.filter(
@@ -90,14 +97,7 @@ class InventoryViewSet(ReadOnlyModelViewSet):
             .order_by("-captured_at", "-id")
             .values("id")[:1]
         )
-        qs = self.get_queryset().filter(id=Subquery(latest_snapshot_id))
-        if branch_filter:
-            qs = qs.filter(
-                Q(branch__name__icontains=branch_filter)
-                | Q(branch__external_id__iexact=branch_filter)
-                | Q(branch__erp_branch__codigo__iexact=branch_filter)
-            )
-        return qs
+        return qs.filter(id=Subquery(latest_snapshot_id))
 
     @action(detail=False, methods=["get"], pagination_class=LargePagination)
     def current(self, request):
@@ -105,15 +105,12 @@ class InventoryViewSet(ReadOnlyModelViewSet):
         product_filter = request.query_params.get("product", "").strip()
         category_filter = request.query_params.get("category", "").strip()
 
-        qs = self._latest_snapshot_qs(branch_filter or None)
+        qs = self.get_queryset()
         if product_filter:
-            qs = qs.filter(
-                Q(product__name__icontains=product_filter)
-                | Q(product__sku__iexact=product_filter)
-                | Q(product__external_id__iexact=product_filter)
-            )
+            qs = qs.filter(_product_match(product_filter))
         if category_filter:
             qs = qs.filter(product__category__icontains=category_filter)
+        qs = self._latest_snapshot_qs(branch_filter or None, scoped_queryset=qs)
 
         product_map: dict[int, dict] = {}
         for snap in qs.order_by("product__name", "branch__name", "id"):
