@@ -14,9 +14,9 @@ Alcance y consumidores:
 - sat_client/services/efirma.py y forms.py: límites de archivos, certificado parseable y vigente, llave RSA coincidente, contraseña y RFC fijo de la empresa; autenticación antes de persistencia y errores seguros.
 - sat_client/views.py y templates/sat_client: autorización DG en servidor, CSRF, no-cache, contraseña no repoblada, contexto progresivo y prueba de e.firma activa.
 - sat_client/services/fiscal_tools.py: configuración no equivale a conexión validada.
-- static/erp-sw.js y templates/base.html: bump conjunto de la versión del shell según contrato PWA; se conserva el comportamiento exclusivamente de red.
+- static/erp-sw.js, templates/base.html y core/templates/core/login.html: bump conjunto de la versión del shell según contrato PWA; se conserva el comportamiento exclusivamente de red.
 - docs/ux/action-context-coverage.md y docs/data-reuse/sat-efirma-direccion.md: evidencia y límites.
-- Pruebas: sat_client completo y core.tests_actions; consumidores usan la misma API sin cambiar imports ni firmas existentes obligatorias.
+- Pruebas: sat_client completo, core.tests y core.tests_actions; consumidores usan la misma API sin cambiar imports ni firmas existentes obligatorias.
 
 Plan de ejecución en este chat:
 - [x] Preparar PostgreSQL 16 exclusivo, comprobar conectividad y migraciones de la base.
