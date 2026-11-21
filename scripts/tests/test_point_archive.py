@@ -113,6 +113,54 @@ class PointBrokerTests(unittest.TestCase):
         self.addCleanup(health.stop)
         self.fixture = PointLifecycleFixture(Path(self.temp.name).resolve())
 
+    def test_transient_inventory_failure_retries_bounded_and_preserves_sources(self):
+        f = self.fixture
+        f.broker.inventory = Mock(side_effect=archive.subprocess.CalledProcessError(
+            124, ['inventory'], stderr='secret=must-not-leak'))
+        start = time.time()
+        for offset, count, delay in ((0, 1, 60), (60, 2, 300), (360, 3, 21600)):
+            with patch('time.time', return_value=start + offset):
+                self.assertEqual(f.prepare(), 'blocked')
+            status = json.loads((f.broker.state / 'status.json').read_text())
+            self.assertEqual(status['failures'], count)
+            self.assertEqual(status['next_at'], start + offset + delay)
+            self.assertEqual(status['last_failure']['stage'], 'inventory')
+            self.assertNotIn('must-not-leak', json.dumps(status))
+        with patch('time.time', return_value=start + 30000):
+            self.assertEqual(f.prepare(), 'attempt_limit')
+        self.assertEqual(f.broker.inventory.call_count, 3)
+        self.assertTrue(f.source.exists())
+        self.assertEqual(list(f.ledger.directory.glob('*.json')), [])
+        self.assertNotIn('must-not-leak', str(f.send.call_args_list))
+
+    def test_unknown_failure_is_not_classified_as_transient(self):
+        error = archive.subprocess.CalledProcessError(1, ['unknown'], stderr='permission denied')
+        self.assertFalse(archive.failure_detail(error, 'inventory')['transient'])
+        self.assertFalse(archive.failure_detail(ValueError('object_hash_mismatch'), 'copy_and_readback')['transient'])
+        self.assertFalse(archive.failure_detail(archive.subprocess.TimeoutExpired('send', 30), 'request')['transient'])
+
+    def test_recognized_transient_errors_are_safe_codes_only(self):
+        for stderr, reason in (
+            ('canceling statement due to statement timeout', 'database_timeout'),
+            ('Container abc is not running', 'worker_unavailable'),
+            ('@ERROR: max connections (2) reached', 'nas_busy'),
+            ('Connection timed out', 'connection_timeout'),
+            ('Connection reset by peer', 'connection_reset'),
+        ):
+            with self.subTest(reason=reason):
+                detail = archive.failure_detail(archive.subprocess.CalledProcessError(1, ['cmd'], stderr=stderr), 'inventory')
+                self.assertTrue(detail['transient'])
+                self.assertEqual(detail['reason'], reason)
+                self.assertNotIn('stderr', detail)
+
+    def test_inventory_timeout_is_inside_container(self):
+        f = self.fixture
+        with patch.object(archive.subprocess, 'run', return_value=Mock(stdout='{}')) as run:
+            self.assertEqual(f.broker.command('--after-id', '3295'), {})
+        args = run.call_args.args[0]
+        self.assertEqual(args[3:8], ['exec', 'pastelerias-erp-worker-1', 'timeout', '30', 'python'])
+        self.assertGreater(run.call_args.kwargs['timeout'], 35)
+
     def test_old_installed_contract_waits_for_activation(self):
         f = self.fixture
         with patch.object(cleanup, 'require_recovery', None):
