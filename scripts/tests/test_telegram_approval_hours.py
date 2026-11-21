@@ -71,7 +71,7 @@ class ApprovalHoursTests(unittest.TestCase):
     def test_expiry_waits_next_day_and_never_renews_a_decision(self):
         with patch('time.time', return_value=epoch('2026-11-17T07:00:00')):
             first = self.request()
-        with patch('time.time', return_value=epoch('2026-11-17T09:00:00')):
+        with patch('time.time', return_value=epoch('2026-11-17T19:00:00')):
             self.assertEqual(self.request()['state'], 'deferred')
         with patch('time.time', return_value=epoch('2026-11-18T07:00:00')):
             second = self.request()
@@ -81,6 +81,44 @@ class ApprovalHoursTests(unittest.TestCase):
         with patch('time.time', return_value=epoch('2026-11-19T07:00:00')), self.assertRaises(ValueError):
             self.request()
         self.assertEqual(self.send.call_count, 2)
+
+    def test_twelve_hours_and_overnight_pending_survive_restart(self):
+        start = epoch('2026-11-17T19:30:00')
+        with patch('time.time', return_value=start):
+            first = self.request()
+        self.assertEqual(first['expires'], start + 12 * 3600)
+        text = self.send.call_args.args[2]['text']
+        self.assertIn('Vence en 12 horas', text)
+        self.assertIn('18/11 07:30', text)
+        self.f.ledger = r.Ledger(self.f.ledger.directory)
+        with patch('time.time', return_value=epoch('2026-11-18T07:00:00')):
+            with self.assertRaisesRegex(ValueError, 'existing_request'):
+                self.request()
+        self.assertEqual(self.send.call_count, 1)
+        with patch('time.time', return_value=epoch('2026-11-18T07:30:00')):
+            second = self.request()
+        self.assertNotEqual(first['nonce'], second['nonce'])
+        self.assertEqual(self.send.call_count, 2)
+        self.assertEqual(self.f.ledger.read(first['nonce'])['expires'], first['expires'])
+
+    def test_release_accepts_until_twelve_hour_boundary(self):
+        start = epoch('2026-11-17T07:00:00')
+        with patch('time.time', return_value=start):
+            row = self.request()
+        query = {'id': 'query', 'data': r.signed(self.f.config, row, 'a'), 'from': {'id': 17},
+                 'message': {'message_id': 99, 'chat': {'id': 17, 'type': 'private'}}}
+        with self.assertRaises(ValueError):
+            r.decide(query, self.f.config, self.f.ledger, now=row['expires'])
+        r.decide(query, self.f.config, self.f.ledger, now=start + 12 * 3600 - 1)
+        self.assertEqual(self.f.ledger.read(row['nonce'])['state'], 'approved')
+
+    def test_legacy_one_hour_expiry_is_not_extended(self):
+        row = dict(self.f.row, expires=epoch('2026-11-17T08:00:00'))
+        self.f.ledger.write(row)
+        with patch('time.time', return_value=epoch('2026-11-17T09:00:00')):
+            self.assertEqual(self.request()['state'], 'deferred')
+        self.assertEqual(self.f.ledger.read(row['nonce'])['expires'], row['expires'])
+        self.send.assert_not_called()
 
     def test_concurrent_requests_create_one_message(self):
         def run():
@@ -192,6 +230,29 @@ class CleanupHoursTests(unittest.TestCase):
                 c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
         self.f.send.assert_not_called()
         self.assertFalse(list(self.f.ledger.directory.glob('*.json')))
+
+    def test_cleanup_twelve_hours_and_next_morning_reissue(self):
+        start = epoch('2026-11-17T19:30:00')
+        with patch('time.time', return_value=start):
+            first = c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+        self.assertEqual(first['expires'], start + 12 * 3600)
+        text = self.f.send.call_args_list[0].args[2]['text']
+        self.assertIn('Vence en 12 horas', text)
+        self.assertIn('18/11 07:30', text)
+        self.f.ledger = r.Ledger(self.f.ledger.directory, validator=c.validate)
+        with patch('time.time', return_value=epoch('2026-11-18T07:00:00')):
+            with self.assertRaisesRegex(ValueError, 'existing_request'):
+                c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+        self.f.row = first
+        with self.assertRaises(ValueError):
+            c.decide(self.f.query(), self.f.config, self.f.ledger, now=first['expires'])
+        with patch('time.time', return_value=epoch('2026-11-18T07:30:00')):
+            second = c.request(self.f.path, self.f.ledger, self.f.config, self.f.send)
+        self.assertNotEqual(first['nonce'], second['nonce'])
+        self.assertEqual(self.f.send.call_count, 4)
+        self.f.row = second
+        c.decide(self.f.query(), self.f.config, self.f.ledger, now=second['expires'] - 1)
+        self.assertEqual(self.f.ledger.read(second['nonce'])['state'], 'approved')
 
     def test_deferred_cleanup_recovery_failure_creates_no_buttons(self):
         with patch('time.time', return_value=epoch('2026-11-17T02:00:00')):

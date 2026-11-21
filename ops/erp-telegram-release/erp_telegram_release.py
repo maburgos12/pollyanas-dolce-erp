@@ -20,6 +20,7 @@ from urllib.request import Request, build_opener, ProxyHandler, HTTPRedirectHand
 
 REPO = 'maburgos12/pollyanas-dolce-erp'
 PREFIX = '/repos/' + REPO
+APPROVAL_TTL_SECONDS = 12 * 3600
 STATE = Path('/var/lib/erp-point-decision/releases')
 APP = Path('/opt/pastelerias-erp')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -344,7 +345,8 @@ def schedule_request(kind, binding, ledger, matching, issue, revalidate):
         live = [row for row in previous if row['state'] == 'pending' and now < row['expires']]
         if live:
             raise ValueError('existing_request_requires_resolution')
-        if any(row['state'] == 'pending' and approval_window(row['expires'] - 3600)[1] == day for row in previous):
+        # Legacy requests without an issuance day retain their original one-hour interpretation.
+        if not item['last_day'] and any(row['state'] == 'pending' and approval_window(row['expires'] - 3600)[1] == day for row in previous):
             return deferred
         if not allowed or item['last_day'] == day:
             return deferred
@@ -401,7 +403,7 @@ def _request_release(number, api, ledger, config, telegram, production=productio
     if not approval_window()[0]:
         raise ValueError('outside_approval_hours')
     row = dict(repo=REPO, pr=number, head_sha=head, base_sha=base, production_sha=base,
-               nonce=secrets.token_hex(12), expires=int(time.time()) + 3600, message_id=None,
+               nonce=secrets.token_hex(12), expires=int(time.time()) + APPROVAL_TTL_SECONDS, message_id=None,
                chat_id=config['chat_id'], state='notifying', decision=None, decision_at=None, release_sha=None, notification_id=None)
     with ledger.lock():
         # One live request per PR: a new request must not leave older buttons usable.
@@ -417,7 +419,7 @@ def _request_release(number, api, ledger, config, telegram, production=productio
         ledger.write(row)
         deadline = datetime.fromtimestamp(row['expires'], ZoneInfo('America/Mazatlan')).strftime('%d/%m %H:%M')
         text = (f'Aprobar y desplegar ERP · PR #{number}\nhttps://github.com/{REPO}/pull/{number}\n'
-                f'Commit: {head}\nBase y producción: {base}\nVence en 1 hora. '
+                f'Commit: {head}\nBase y producción: {base}\nVence en 12 horas. '
                 f'Vencimiento: {deadline}, hora de Mazatlán. '
                 'Solo este commit; cualquier cambio exige nueva solicitud. Rechazar revoca hasta iniciar publicación.')
         if not approval_window()[0]:
