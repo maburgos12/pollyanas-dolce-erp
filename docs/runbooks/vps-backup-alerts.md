@@ -102,6 +102,22 @@ cubrir esa situación. No depende del Mac ni de Codex abierto.
 
 ## Instalación y pruebas
 
+### Retiro manual de un respaldo verificado
+
+Tras autorización del punto exacto, ejecutar
+`/usr/local/sbin/erp-rotate-verified-backups --retire-point backup_AAAAMMDD_HHMMSS`.
+Este modo vuelve a comprobar el manifiesto, cargas y medios contra el NAS real
+con un límite de una hora por punto. Acepta el recibo privado de restauración
+como evidencia para esa nueva comprobación; no lo publica como recibo del cron.
+La lectura del NAS no toma el bloqueo diario. Antes de retirar, el comando lo
+adquiere y comprueba nuevamente el punto, su recibo, los enlaces y que el
+respaldo más reciente local esté completo. Si falla, conserva el punto para
+revisión. No cambia el cron ni el modo `--verify-only`.
+
+Ejecutar secuencialmente y comparar `df -B1 /` antes y después de cada punto.
+
+### Monitor de alertas
+
 Después del merge y despliegue Git, instalar las dos unidades de `scripts/ops/`
 en `/etc/systemd/system/`, validar con `systemd-analyze verify`, ejecutar
 `systemctl daemon-reload` y `systemctl start erp-backup-alerts.service`.

@@ -1,4 +1,6 @@
 import importlib.util
+import fcntl
+import hashlib
 import os
 import signal
 import sys
@@ -11,6 +13,65 @@ from unittest.mock import Mock, patch
 spec = importlib.util.spec_from_file_location('rotator', Path(__file__).parents[1] / 'rotate_verified_backups.py')
 r = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(r)
+
+
+class RetirePointTests(unittest.TestCase):
+    def setUp(self):
+        tmp = self.enterContext(tempfile.TemporaryDirectory())
+        self.root = Path(tmp).resolve()
+        self.export = self.root / 'export'
+        self.receipts = self.root / 'verification-receipts'
+        self.export.mkdir()
+        self.receipts.mkdir()
+        self.lock = self.root / '.backup.flock'
+        self.lock.touch()
+        self.old, self.other, self.newest = (f'backup_202611{day}_020001' for day in (17, 18, 19))
+        for stem in (self.old, self.other, self.newest):
+            rows = []
+            for suffix in r.PAYLOADS:
+                path = self.root / f'{stem}.{suffix}'
+                payload = path.name.encode()
+                path.write_bytes(payload)
+                os.link(path, self.export / path.name)
+                rows.append(f'{hashlib.sha256(payload).hexdigest()}  {path.name}\n')
+            manifest = self.root / f'{stem}.manifest'
+            manifest.write_text(''.join(rows))
+            os.link(manifest, self.export / manifest.name)
+
+    def retire(self, stem, during_probe=None):
+        manifest, checksum, payloads = r.local_set(self.root, stem)
+        def probe(*args):
+            with self.lock.open() as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if during_probe:
+                    during_probe()
+            return manifest, payloads, 'latest'
+        with patch.object(r, 'read_receipt', return_value={'manifest_sha256': checksum}), patch.object(r, 'bounded_check_proof', side_effect=probe):
+            r.retire_point(self.root, self.export, self.receipts, Path('/test-nas'), stem)
+
+    def test_removes_only_the_exact_set_and_does_not_lock_during_nas_read(self):
+        self.retire(self.old)
+        for directory in (self.root, self.export):
+            self.assertFalse(list(directory.glob(self.old + '.*')))
+            self.assertEqual(len(list(directory.glob(self.other + '.*'))), 5)
+            self.assertEqual(len(list(directory.glob(self.newest + '.*'))), 5)
+
+    def test_latest_and_incomplete_sets_are_preserved(self):
+        with self.assertRaisesRegex(ValueError, 'último respaldo'):
+            self.retire(self.newest)
+        with self.assertRaisesRegex(ValueError, 'incompleto'):
+            self.retire(self.old, lambda: (self.root / (self.newest + '.incomplete')).touch())
+        self.assertEqual(len(list(self.root.glob(self.old + '.*'))), 5)
+
+    def test_local_change_or_foreign_link_prevents_unlink(self):
+        payload = self.root / (self.old + '.sql.gz')
+        with self.assertRaisesRegex(ValueError, 'no coincide'):
+            self.retire(self.old, lambda: payload.write_bytes(b'changed'))
+        payload.write_bytes(payload.name.encode())
+        os.link(payload, self.root / 'foreign-link')
+        with self.assertRaisesRegex(ValueError, 'otro propietario'):
+            self.retire(self.old)
+        self.assertEqual(len(list(self.root.glob(self.old + '.*'))), 5)
 
 
 class BoundedNASProofTests(unittest.TestCase):

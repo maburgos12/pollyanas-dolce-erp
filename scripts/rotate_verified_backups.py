@@ -18,6 +18,7 @@ import time
 BACKUPS = Path('/opt/backups/erp')
 EXPORT = BACKUPS / 'hbs-export/daily'
 RECEIPTS = Path('/var/lib/erp-backup-restore/receipts')
+VERIFICATION_RECEIPTS = RECEIPTS.with_name('verification-receipts')
 NAS = Path('/opt/pastelerias-erp/storage/nas/compartidos/erp_backups')
 NAS_SOURCE = '//10.77.216.2/ERP_BACKUPS'
 VERSIONS = Path('ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones')
@@ -206,6 +207,57 @@ def bounded_check_proof(root, nas, stem, proof, timeout=PROBE_TIMEOUT):
         return manifest, payloads, result[2]
 
 
+def retirement_links(root, export, manifest, payloads):
+    # Remove completion markers first and reject links owned by another workflow.
+    links = []
+    for name in (manifest, *payloads):
+        original, published = root / name, export / name
+        info = secure_file(original)
+        if published.exists() or published.is_symlink():
+            secure_file(published)
+            require(published.samefile(original), 'exportación apunta a otro archivo')
+            require(info.st_nlink == 2, 'otro propietario conserva un enlace local')
+            links.append(published)
+        else:
+            require(info.st_nlink == 1, 'otro propietario conserva un enlace local')
+        links.append(original)
+    return links
+
+
+def retire_point(root, export, receipts, nas, stem):
+    require(POINT.fullmatch(stem), 'identificador inválido')
+    for path in (root, export, receipts):
+        info = path.lstat()
+        require(path.resolve() == path and stat.S_ISDIR(info.st_mode)
+                and info.st_uid == os.geteuid() and not info.st_mode & 0o022,
+                'directorio inesperado o no protegido')
+    lock_path = root / '.backup.flock'
+    secure_file(lock_path)
+    with lock_path.open('r') as lock:
+        def protected_latest():
+            points = sorted(p.stem for p in root.glob('backup_*.manifest')
+                            if POINT.fullmatch(p.stem))
+            require(stem in points and stem != points[-1], 'el objetivo falta o es el último respaldo local')
+            require(not list(root.glob('backup_*.incomplete')), 'respaldo local incompleto')
+            return points[-1]
+
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        protected_latest()
+        receipt = receipts / (stem + '.json')
+        proof = read_receipt(receipt, stem)
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        manifest, payloads, generation = bounded_check_proof(root, nas, stem, proof)
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        newest = protected_latest()
+        require(read_receipt(receipt, stem) == proof, 'prueba local cambió')
+        require(local_set(root, stem) == (manifest, proof['manifest_sha256'], payloads),
+                'respaldo objetivo cambió durante la verificación')
+        local_set(root, newest)
+        for path in retirement_links(root, export, manifest, payloads):
+            path.unlink()
+    print(f'Retirado {stem}: NAS y medios {generation} verificados; conservado {newest}', flush=True)
+
+
 def rotate(root, export, receipts, nas, apply):
     deadline = time.monotonic() + ROTATION_TIMEOUT
     for path in (root, export, receipts):
@@ -234,19 +286,7 @@ def rotate(root, export, receipts, nas, apply):
                 require(read_receipt(receipts / (stem + '.json'), stem) == proof, 'prueba local cambió')
                 require(not list(root.glob('backup_*.incomplete')), 'respaldo incompleto durante la verificación')
                 local_set(root, newest)
-                # Remove the completion markers first. Never unlink another task's hardlinks.
-                links = []
-                for name in (manifest, *payloads):
-                    original, published = root / name, export / name
-                    s = secure_file(original)
-                    if published.exists() or published.is_symlink():
-                        secure_file(published)
-                        require(published.samefile(original), 'exportación apunta a otro archivo')
-                        links.append(published)
-                        require(s.st_nlink == 2, 'otro propietario conserva un enlace local')
-                    else:
-                        require(s.st_nlink == 1, 'otro propietario conserva un enlace local')
-                    links.append(original)
+                links = retirement_links(root, export, manifest, payloads)
                 require(time.monotonic() < deadline, 'presupuesto total de rotación agotado; conjunto conservado')
             except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as e:
                 reason = str(e) if isinstance(e, ValueError) else type(e).__name__
@@ -263,12 +303,18 @@ def main():
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--apply', action='store_true')
+    mode.add_argument('--retire-point', metavar='PUNTO', help='Retirar solo un respaldo antiguo tras revalidar el NAS')
     mode.add_argument('--check-proof')
     mode.add_argument('--nas-probe', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.nas_probe:
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
         print(json.dumps(probe(json.load(sys.stdin))), flush=True)
+    elif args.retire_point:
+        stem = args.retire_point
+        require(POINT.fullmatch(stem), 'identificador inválido')
+        receipts = VERIFICATION_RECEIPTS if (VERIFICATION_RECEIPTS / (stem + '.json')).exists() else RECEIPTS
+        retire_point(BACKUPS, EXPORT, receipts, NAS, stem)
     elif args.check_proof:
         stem = args.check_proof
         require(POINT.fullmatch(stem), 'identificador inválido')
