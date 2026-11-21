@@ -1,0 +1,24 @@
+# Sólo este repositorio; no modifica ~/.codex/config.toml.
+model_reasoning_effort = "medium"
+# 60% de la ventana de 500,000 tokens del modelo configurado (gpt-6.1-sol).
+# Recalcular si cambia la ventana efectiva del modelo elegido.
+model_auto_compact_token_limit = 300000
+tool_output_token_limit = 4000
+
+# Desactivar sólo estos servidores en el ERP. Declarar transporte permite
+# validar esta capa con --strict-config; args/credenciales globales se heredan.
+[mcp_servers.magic]
+command = "npx"
+enabled = false
+
+[mcp_servers.designcraft]
+command = "/Applications/ArtCraftCLI/designcraft-cli"
+enabled = false
+
+[mcp_servers.printcraft]
+command = "/Applications/ArtCraftCLI/printcraft-cli"
+enabled = false
+
+[mcp_servers.meta-developer-tools]
+url = "https://mcp.facebook.com/devtools"
+enabled = false
