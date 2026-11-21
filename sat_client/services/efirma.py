@@ -26,6 +26,7 @@ from sat_client.services.firma import load_private_key
 MAX_FILE_BYTES = 16 * 1024
 
 
+@sensitive_variables()
 def _cipher() -> MultiFernet:
     # Keep previous SECRET_KEY values in SECRET_KEY_FALLBACKS until credentials are re-encrypted.
     keys = [settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS]
