@@ -214,3 +214,30 @@ receptor instalado y que desaparece `activation_pending`, además de instalar y
 validar la unidad de recuperación con `install_backup_health.sh`. Restaurar los
 estados previos de los timers si se pausaron durante la instalación; no reiniciar
 servicios ERP adicionales ni borrar históricos para validar este cambio.
+
+### Bitácora 2026-11-21: preparación Point y errores de comandos
+
+El aviso `CalledProcessError` no identificaba etapa ni salida del comando.
+Una consulta posterior exitosa no explica el fallo original. Se observó además
+un cambio de inicio del worker durante el diagnóstico; no se acredita por ello
+que ese cambio causara el aviso anterior. Los originales se conservaron.
+
+El preparador registra `last_failure` y hasta tres entradas `failure_history`
+en `/var/lib/erp-point-archive/status.json`: etapa, tipo, salida, motivo permitido,
+fecha, cursor e intento. No publica stderr ni comandos arbitrarios: conserva sólo
+un hash del stderr acotado para correlación, evitando divulgar credenciales.
+
+Los timeouts y errores transitorios reconocidos de conexión, worker no disponible,
+consulta PostgreSQL agotada o NAS ocupado se reintentan tras 60 y 300 segundos.
+El tercer fallo bloquea la preparación y exige diagnóstico del operador. No se
+reinician contadores por una ejecución, despliegue o cambio de día. Los contadores
+anteriores se conservan. La espera no garantiza reparación y no autoriza borrar.
+Errores desconocidos conservan la espera previa de seis horas; integridad y
+permisos no se clasifican como transitorios. Una respuesta incierta de Telegram
+no habilita reenvíos rápidos ni duplicación de solicitudes.
+
+El comando de inventario lleva timeout dentro del contenedor además del límite
+externo, para que agotar la espera del cliente Docker no deje el lector ejecutando
+sin control. No se reinician servicios, modifican datos ni omiten hashes. Para
+cerrar un incidente, acreditar inventario, copia y recuperación NAS, solicitud
+única con botones y aprobación vigente antes del retiro del lote exacto.

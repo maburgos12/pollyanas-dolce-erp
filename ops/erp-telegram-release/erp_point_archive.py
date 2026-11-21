@@ -24,6 +24,36 @@ MAX_PILOT_FILES=10
 MAX_PILOT_BYTES=100_000_000
 
 
+def failure_detail(exc, stage):
+    """Persist only allowlisted diagnostics; stderr may contain credentials or data."""
+    raw = getattr(exc, 'stderr', '') or ''
+    if isinstance(raw, bytes):
+        raw = raw.decode('utf-8', errors='replace')
+    raw = raw[:8192]
+    code = getattr(exc, 'returncode', None)
+    reason = 'command_failed' if isinstance(exc, subprocess.CalledProcessError) else type(exc).__name__
+    transient = isinstance(exc, subprocess.TimeoutExpired) or code == 124
+    if transient:
+        reason = 'command_timeout'
+    elif isinstance(exc, subprocess.CalledProcessError):
+        for marker, label in (
+            ('canceling statement due to statement timeout', 'database_timeout'),
+            ('is not running', 'worker_unavailable'),
+            ('max connections (2) reached', 'nas_busy'),
+            ('Connection timed out', 'connection_timeout'),
+            ('Connection reset by peer', 'connection_reset'),
+        ):
+            if marker in raw:
+                reason, transient = label, True
+                break
+    # A lost Telegram response must not cause an automatic duplicate request.
+    if stage == 'request':
+        transient = False
+    return dict(stage=stage, error=type(exc).__name__, returncode=code,
+                reason=reason, transient=transient,
+                stderr_sha256=hashlib.sha256(raw.encode()).hexdigest() if raw else None)
+
+
 class ObjectNAS(prep.NAS):
     def path_for(self,entry):
         validate_entry(entry)
@@ -94,7 +124,7 @@ class Broker:
         self.inventory=inventory or self._inventory;self.parse=parse or self._parse
 
     def command(self,*args):
-        result=subprocess.run(['timeout','30','docker','exec','pastelerias-erp-worker-1','python','-B','manage.py','point_archive_inventory',*args],capture_output=True,text=True,timeout=35,check=True)
+        result=subprocess.run(['timeout','35','docker','exec','pastelerias-erp-worker-1','timeout','30','python','-B','manage.py','point_archive_inventory',*args],capture_output=True,text=True,timeout=40,check=True)
         return json.loads(result.stdout)
 
     def _inventory(self,name=None,after_id=0):
@@ -203,9 +233,12 @@ class Broker:
         if status.get('failures',0)>=3:
             return 'attempt_limit'
         entries=[];total=0
+        stage='recovery_gate'
         try:
             cleanup.require_recovery()
+            stage='inventory'
             scan=self.inventory(after_id=status.get('cursor',0))
+            stage='nas_provision'
             self.nas.provision()
             catalog=list((self.store.root/'catalog/objects').glob('*.json'))
             decisions={}
@@ -231,6 +264,7 @@ class Broker:
                 old_item = previous['delete_candidates'][0]
                 if old_item['type'] == 'point_archive_manifest':
                     reserved.update(entry['id'] for entry in old_item['files'])
+            stage='verify_catalog'
             for file in sorted(catalog):
                 entry=self.store.catalog_entry(entry_id=file.stem)
                 prior=decisions.get(entry['id'],[])
@@ -250,6 +284,7 @@ class Broker:
                     continue
                 except FileNotFoundError:
                     pass
+                stage='copy_and_readback'
                 entry=self.prepare_entry(candidate)
                 entries.append(entry);total+=candidate['bytes'];catalog.append(entry)
             status.update(cursor=scan['next_id'] if scan['has_more'] else 0,next_at=int(time.time())+300)
@@ -266,15 +301,28 @@ class Broker:
             cleanup.read_proposal(path)
             if prep.blocked(ledger,None,int(time.time())):
                 raise ValueError('concurrent_request')
+            stage='request'
             row=cleanup.request(path,ledger,config,send)
             status.update(proposal=proposal_id,nonce=row['nonce']);prep.atomic_json(state_path,status)
             return 'deferred' if row['state']=='deferred' else 'requested'
         except cleanup.RecoveryPending:
             return 'recovery_pending'
         except Exception as exc:
-            status.update(next_at=int(time.time())+21600,error=type(exc).__name__,failures=status.get('failures',0)+1)
+            detail=failure_detail(exc,stage)
+            count=status.get('failures',0)+1
+            delay=(60 if count==1 else 300) if detail['transient'] and count<3 else 21600
+            detail.update(at=int(time.time()),attempt=count,cursor=status.get('cursor',0))
+            history=status.get('failure_history',[])
+            history.append(detail)
+            status.update(next_at=int(time.time())+delay,error=type(exc).__name__,failures=count,
+                          failure_history=history[-3:],last_failure=detail)
             prep.atomic_json(state_path,status)
-            send(config,'sendMessage',{'chat_id':config['chat_id'],'text':'Preparación de archivo Point bloqueada: '+type(exc).__name__+'. Originales conservados. '+('Límite de tres fallas: requiere revisión del operador.' if status['failures']>=3 else 'Evidencia registrada; revisión en 6 horas.')})
+            followup=('Límite de tres fallas: requiere revisión del operador.' if count>=3 else
+                      f'Reintento automático en {delay//60} minutos.' if detail['transient'] else
+                      'No se aplicará una reparación a ciegas; revisión del operador en 6 horas.')
+            send(config,'sendMessage',{'chat_id':config['chat_id'],'text':
+                 f'Preparación Point bloqueada en {stage}: {detail["reason"]} '
+                 f'(salida {detail["returncode"]}, intento {count}/3). Originales conservados. '+followup})
             return 'blocked'
 
 
