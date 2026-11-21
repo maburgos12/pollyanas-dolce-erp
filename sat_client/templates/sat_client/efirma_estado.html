@@ -1,0 +1,13 @@
+  <div class="sat-status" id="sat-efirma-status" role="status">
+    {% if efirma.error %}
+      <span class="sat-chip is-warn">{{ efirma.error }}</span>
+    {% elif efirma.caducado %}
+      <span class="sat-chip is-warn">Certificado fuera de vigencia</span>
+    {% elif efirma.ultima_prueba_en %}
+      <span class="sat-chip {% if efirma.ultima_prueba_ok %}is-ok{% else %}is-warn{% endif %}">
+        {% if efirma.ultima_prueba_ok %}Autenticación SAT verificada{% else %}Última prueba SAT fallida{% endif %} · {{ efirma.ultima_prueba_en|date:"d/m/Y H:i" }}
+      </span>
+    {% else %}
+      <span class="sat-chip is-muted">Autenticación SAT sin verificar</span>
+    {% endif %}
+  </div>

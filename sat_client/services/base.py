@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
@@ -35,11 +35,18 @@ class SatRequestLimitExceeded(SatServiceError):
 class SatCredentials:
     cer_path: str
     key_path: str
-    password: str
+    password: str = field(repr=False)
     rfc: str
+    cer_data: bytes | None = field(default=None, repr=False)
+    key_data: bytes | None = field(default=None, repr=False)
 
 
 def get_sat_credentials() -> SatCredentials:
+    from sat_client.services.efirma import cargar_efirma
+
+    saved = cargar_efirma()
+    if saved is not None:
+        return saved
     credentials = SatCredentials(
         cer_path=(getattr(settings, "SAT_EFIRMA_CER_PATH", "") or "").strip(),
         key_path=(getattr(settings, "SAT_EFIRMA_KEY_PATH", "") or "").strip(),

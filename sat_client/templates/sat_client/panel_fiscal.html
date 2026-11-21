@@ -28,6 +28,15 @@
   .sat-kpi { border: 1px solid #eadde5; border-radius: 8px; padding: 12px; background: #fffafd; }
   .sat-kpi span { display: block; color: #6f5d68; font-size: .82rem; }
   .sat-kpi strong { display: block; margin-top: 6px; color: #321123; font-size: 1.35rem; }
+  .sat-efirma-form { display: grid; gap: 14px; margin-top: 18px; }
+  .sat-efirma-form label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .sat-efirma-form input { width: 100%; max-width: 100%; min-height: 44px; }
+  .sat-efirma-form .errorlist { color: #8c2020; padding-left: 20px; }
+  .sat-efirma-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 14px; }
+  #sat-efirma { scroll-margin-top: 80px; }
+  #sat-efirma .btn { min-height: 44px; }
+  #sat-efirma .btn:active { transform: scale(.97); }
+  @media (prefers-reduced-motion: reduce) { #sat-efirma .btn:active { transform: none; } }
   @media (max-width: 760px) {
     .sat-flow { grid-template-columns: 1fr; }
     .sat-flow-actions { justify-content: flex-start; }
@@ -41,8 +50,8 @@
     <h1>Automatizaciones SAT</h1>
     <p class="sat-note">Descarga documentos oficiales del SAT sin carga manual.</p>
     <div class="sat-status">
-      <span class="sat-chip {% if estado_sat.enabled and estado_sat.configured %}is-ok{% elif estado_sat.enabled %}is-warn{% else %}is-muted{% endif %}">
-        {% if estado_sat.enabled and estado_sat.configured %}Conexión SAT configurada{% elif estado_sat.enabled %}Conexión SAT incompleta{% else %}Descarga SAT pausada{% endif %}
+      <span class="sat-chip is-muted">
+        {% if estado_sat.enabled %}Descarga SAT habilitada{% else %}Descarga SAT pausada{% endif %}
       </span>
       <span class="sat-chip is-muted">{{ estado_sat.solicitudes_abiertas|intcomma }} solicitudes CFDI abiertas</span>
     </div>
@@ -62,6 +71,8 @@
       {% endfor %}
     </div>
   {% endif %}
+
+  {% if can_manage_efirma %}{% include "sat_client/efirma.html" %}{% endif %}
 
   <div class="sat-card">
     <h2>Documentos oficiales</h2>

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 from sat_client.services.base import (
     SAT_AUTH_NS,
+    SatCredentials,
     build_envelope,
     extract_access_token,
     get_endpoint,
@@ -22,18 +23,19 @@ from sat_client.services.firma import build_security_header
 AUTENTICACION_ACTION = "http://DescargaMasivaTerceros.gob.mx/IAutenticacion/Autentica"
 
 
-def build_autenticacion_envelope(now: datetime | None = None) -> etree._Element:
-    credentials = get_sat_credentials()
+def build_autenticacion_envelope(now: datetime | None = None, *, credentials: SatCredentials | None = None) -> etree._Element:
+    credentials = credentials or get_sat_credentials()
     autentica = etree.Element(etree.QName(SAT_AUTH_NS, "Autentica"), nsmap={None: SAT_AUTH_NS})
     return build_envelope(autentica, build_security_header(credentials, now=now))
 
 
-def obtener_token(*, transport: Transport | None = None) -> str:
-    envelope = build_autenticacion_envelope()
+def obtener_token(*, transport: Transport | None = None, credentials: SatCredentials | None = None, timeout_seconds: int = 60) -> str:
+    envelope = build_autenticacion_envelope(credentials=credentials)
     content = post_soap(
         get_endpoint("SAT_AUTENTICACION_URL"),
         envelope,
         soap_action=getattr(settings, "SAT_AUTENTICACION_ACTION", AUTENTICACION_ACTION),
         transport=transport,
+        timeout_seconds=timeout_seconds,
     )
     return extract_access_token(content)

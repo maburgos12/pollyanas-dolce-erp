@@ -8,6 +8,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from lxml import etree
+from django.views.decorators.debug import sensitive_variables
 
 from sat_client.services.base import WSU_NS, SatCredentials
 
@@ -23,19 +24,20 @@ BASE64_ENCODING_TYPE = (
 )
 
 
-def _read_certificate_der(path: str) -> bytes:
-    raw = open(path, "rb").read()
+def _read_certificate_der(path: str | bytes) -> bytes:
+    raw = path if isinstance(path, bytes) else open(path, "rb").read()
     if b"BEGIN CERTIFICATE" in raw:
         return x509.load_pem_x509_certificate(raw).public_bytes(serialization.Encoding.DER)
     return x509.load_der_x509_certificate(raw).public_bytes(serialization.Encoding.DER)
 
 
-def certificate_base64(path: str) -> str:
+def certificate_base64(path: str | bytes) -> str:
     return base64.b64encode(_read_certificate_der(path)).decode("ascii")
 
 
-def load_private_key(path: str, password: str):
-    raw = open(path, "rb").read()
+@sensitive_variables()
+def load_private_key(path: str | bytes, password: str):
+    raw = path if isinstance(path, bytes) else open(path, "rb").read()
     password_bytes = password.encode("utf-8") if password else None
     if b"BEGIN " in raw:
         return serialization.load_pem_private_key(raw, password=password_bytes)
@@ -129,7 +131,7 @@ def build_signature(
 def build_security_header(credentials: SatCredentials, *, now: datetime | None = None) -> etree._Element:
     now = now or datetime.now(dt_timezone.utc)
     token_id = f"uuid-{uuid.uuid4()}-4"
-    private_key = load_private_key(credentials.key_path, credentials.password)
+    private_key = load_private_key(credentials.key_data or credentials.key_path, credentials.password)
 
     security = etree.Element(
         etree.QName(WSS_NS, "Security"),
@@ -151,7 +153,7 @@ def build_security_header(credentials: SatCredentials, *, now: datetime | None =
         EncodingType=BASE64_ENCODING_TYPE,
     )
     binary_token.set(etree.QName(WSU_NS, "Id"), token_id)
-    binary_token.text = certificate_base64(credentials.cer_path)
+    binary_token.text = certificate_base64(credentials.cer_data or credentials.cer_path)
 
     security.append(build_signature(timestamp, private_key, token_reference_id=token_id))
     return security
@@ -162,11 +164,11 @@ def build_signed_sat_request(
     attributes: dict[str, str],
     credentials: SatCredentials,
 ) -> etree._Element:
-    private_key = load_private_key(credentials.key_path, credentials.password)
+    private_key = load_private_key(credentials.key_data or credentials.key_path, credentials.password)
     element = etree.Element(tag_name, nsmap={"u": WSU_NS})
     element.set(etree.QName(WSU_NS, "Id"), "_0")
     for key, value in attributes.items():
         if value not in (None, ""):
             element.set(key, str(value))
-    element.append(build_signature(element, private_key, certificate=certificate_base64(credentials.cer_path)))
+    element.append(build_signature(element, private_key, certificate=certificate_base64(credentials.cer_data or credentials.cer_path)))
     return element

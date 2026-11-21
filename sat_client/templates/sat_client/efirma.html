@@ -1,0 +1,32 @@
+<div class="sat-card" id="sat-efirma">
+  <h2>e.firma para descarga de CFDI</h2>
+  <p class="sat-note">Solo Dirección puede actualizarla. RFC de la empresa: <strong>{{ efirma.rfc|default:"Sin configurar" }}</strong>.</p>
+  {% if efirma.vigente_hasta %}
+    <p class="sat-note">Vigencia local hasta {{ efirma.vigente_hasta|date:"d/m/Y H:i" }} (hora de Mazatlán) · Configurada desde {{ efirma.origen }}.</p>
+  {% endif %}
+  {% include "sat_client/efirma_estado.html" %}
+  <div class="sat-efirma-actions">
+    <form method="post" action="{% url 'sat_client:panel_fiscal' %}#sat-efirma" data-async-action>
+      {% csrf_token %}
+      <input type="hidden" name="accion" value="probar_efirma">
+      <button class="btn btn-secondary" type="submit" data-pending-label="Probando…">Probar conexión actual</button>
+    </form>
+  </div>
+  <details {% if efirma_form.is_bound or efirma_expandida %}open{% endif %}>
+    <summary class="sat-note" style="min-height:44px; padding-top:14px; cursor:pointer">Actualizar e.firma</summary>
+    <p class="sat-note">Selecciona la e.firma vigente (.cer y .key) y su contraseña. Se activará solo si los archivos corresponden al RFC y la autenticación con el SAT es exitosa.</p>
+    <form class="sat-efirma-form" method="post" action="{% url 'sat_client:panel_fiscal' %}#sat-efirma" enctype="multipart/form-data" data-async-action autocomplete="off">
+      {% csrf_token %}
+      <input type="hidden" name="accion" value="actualizar_efirma">
+      {{ efirma_form.non_field_errors }}
+      {% for field in efirma_form %}
+        <div>
+          {{ field.label_tag }}{{ field }}{{ field.errors }}
+        </div>
+      {% endfor %}
+      <p class="sat-note">Máximo 16 KB por archivo. Los archivos y la contraseña se guardan cifrados. Si la prueba falla, se conserva la configuración anterior.</p>
+      <div><button class="btn btn-primary" type="submit" data-pending-label="Validando y conectando…">Validar y activar e.firma</button></div>
+    </form>
+  </details>
+  <p class="sat-note">La prueba autentica la e.firma; no descarga CFDI ni confirma cobertura. Constancia, opinión y buzón requieren sus conectores propios.</p>
+</div>
