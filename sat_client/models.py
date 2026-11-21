@@ -1,4 +1,24 @@
+from django.conf import settings
 from django.db import models
+
+
+class ConfiguracionEfirma(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    contenido_cifrado = models.BinaryField(editable=False)
+    rfc = models.CharField(max_length=13)
+    huella = models.CharField(max_length=64)
+    vigente_desde = models.DateTimeField()
+    vigente_hasta = models.DateTimeField()
+    actualizado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+    ultima_prueba_en = models.DateTimeField()
+    ultima_prueba_ok = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(check=models.Q(id=1), name="sat_efirma_unica")]
+
+    def __str__(self):
+        return "e.firma SAT"
 
 
 class SolicitudDescarga(models.Model):

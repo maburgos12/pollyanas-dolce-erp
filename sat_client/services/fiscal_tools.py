@@ -5,6 +5,7 @@ from typing import Any
 from django.conf import settings
 
 from sat_client.models import CfdiDescargado, LogDescargaSat, SolicitudDescarga, SolicitudDocumentoSat
+from sat_client.services.base import SatConfigurationError, get_sat_credentials
 
 
 def estado_sat() -> dict[str, Any]:
@@ -17,14 +18,11 @@ def estado_sat() -> dict[str, Any]:
             SolicitudDescarga.ESTADO_VENCIDA,
         ]
     ).count()
-    configured = all(
-        [
-            getattr(settings, "SAT_EFIRMA_CER_PATH", ""),
-            getattr(settings, "SAT_EFIRMA_KEY_PATH", ""),
-            getattr(settings, "SAT_EFIRMA_PASSWORD", ""),
-            getattr(settings, "SAT_RFC", ""),
-        ]
-    )
+    try:
+        get_sat_credentials()
+        configured = True
+    except SatConfigurationError:
+        configured = False
     return {
         "enabled": getattr(settings, "SAT_DESCARGA_ENABLED", False),
         "configured": configured,
