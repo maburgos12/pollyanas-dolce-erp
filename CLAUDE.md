@@ -108,10 +108,18 @@ ejecución de diseño.
 cd /opt/pastelerias-erp
 bash scripts/deploy_web_safe.sh
 ```
-Si migrate falla por columna duplicada: `migrate <app> <numero> --fake` en la migración específica.
-`restart web` queda reservado para cambios de imagen, dependencias del contenedor o variables de entorno; para código y estáticos normales se usa recarga `HUP` de Gunicorn para no abrir una ventana de `502`.
+Un error de migración exige diagnóstico; nunca usar `--fake` sin autorización
+explícita de Mauricio para la migración concreta y evidencia del esquema real.
 
-**Nunca hacer `git pull` manual en el VPS antes de correr `deploy_web_safe.sh`.** El script decide si reinicia `web`/`worker`/`beat` o solo manda `HUP` comparando el `HEAD` antes/después de **su propio** `git pull`; si el repo ya estaba actualizado a mano, no detecta cambios de `.py` y solo hace `HUP` — Gunicorn (`--preload`) sigue sirviendo el código viejo desde la memoria del proceso master aunque el filesystem ya tenga el commit nuevo. Señal de que pasó: el endpoint/feature nueva da 404 o el comportamiento viejo persiste pese a que `git log` en el VPS ya muestra el commit correcto. Verificar con `docker inspect <contenedor> --format '{{.State.StartedAt}}'`: si no cambió justo después del deploy, forzar `docker compose restart web worker beat` a mano.
+**Nunca hacer `git pull` manual en el VPS antes del script.**
+`scripts/deploy_web_safe.sh` compara su propio HEAD anterior/posterior: reconstruye
+imágenes si cambian dependencias/Dockerfile, recrea servicios si cambia Compose,
+y reinicia procesos si cambia Python (Gunicorn usa `--preload`). Para cambios
+sin esas condiciones usa HUP. Dejar esa selección al script; no sustituirla por
+reinicios manuales. Verificar revisión en ejecución y flujo visible. Si fallan,
+diagnosticar y presentar recuperación dentro de la autorización vigente.
+Los cambios exclusivos de documentación/instrucciones/configuración de Codex
+se validan en Git y Codex; no requieren desplegar ni reiniciar la aplicación.
 
 **Flujo mínimo obligatorio al cerrar cualquier cambio de código** (un PR mergeado sin
 deploy en VPS equivale a un cambio que no existe para el usuario — no abrir una
@@ -119,9 +127,10 @@ segunda tarea hasta que la primera esté deployada y validada en producción):
 1. PR mergeado a main
 2. `bash scripts/deploy_web_safe.sh` en el VPS (sin `git pull` manual antes, ver arriba)
 3. Verificar resultado visible en producción
-4. Borrar la rama local y remota ya mergeada/deployada/validada para que no se
-   atraviese en otros hilos: `git branch -D <rama>` y `git push origin --delete <rama>`,
-   luego `git fetch --prune origin`.
+4. Cerrar la tarea mediante `scripts/task_workspace_close.sh --state merged`
+   sólo después de corroborar merge, despliegue y validación cuando apliquen.
+   No borrar ramas/worktrees manualmente ni ejecutar `git branch -D` fuera
+   del ciclo de vida registrado y respaldado.
 
 **Prohibido:** crear PR y abrir otra tarea sin deployar; copiar archivos al VPS por
 SCP como atajo al flujo git (`git pull` es el único canal válido); declarar "listo"
@@ -305,45 +314,31 @@ la arquitectura, convenciones y contexto existentes.
 - **Implementación real:** trabajar en rama limpia, con checks, PR, deploy y validación
   en el lugar real donde se usa.
 
-### 2. Sincronizar entorno local con main ANTES de tocar cualquier archivo
+### 2. Inicio exclusivo mediante el ciclo de vida del proyecto
 
-**Obligatorio al inicio de cada tarea, sin excepción.**
-El entorno local puede estar días o semanas detrás de `origin/main`. Si no se sincroniza
-primero, aparecen migraciones "pendientes" de otras apps que no son de la tarea actual,
-`manage.py check` falla con ruido ajeno y el entorno no es confiable.
+Para una implementación, crear la tarea sólo con `scripts/task_workspace_start.sh`:
+el script sincroniza el checkout raíz de forma segura y registra dueño, rama,
+worktree, alcance y SHA base. No usar `git worktree add` como ruta alternativa.
+Continuar el entorno registrado propio si sigue siendo válido; no tomar uno ajeno.
 
 ```bash
-git fetch origin main
-git worktree add /Users/mauricioburgos/Downloads/codex_worktrees/<tarea> \
-  -b codex/<modulo>-<descripcion> origin/main
-cd /Users/mauricioburgos/Downloads/codex_worktrees/<tarea>
+bash scripts/task_workspace_start.sh --repo /Users/mauricioburgos/Downloads/pastelerias_erp_sprint1 \
+  --root /Users/mauricioburgos/Downloads/codex_worktrees --task TAREA \
+  --branch codex/modulo-descripcion --owner PROPIETARIO --scope ALCANCE
+cd /Users/mauricioburgos/Downloads/codex_worktrees/TAREA
 bash scripts/git_workspace_preflight.sh --write
-# Sustituir ambos valores por un nombre y un puerto libre exclusivos del worktree.
-export COMPOSE_PROJECT_NAME=erp_modulo_descripcion
-export DB_HOST_PORT=puerto_libre_asignado
-docker compose up -d db
-export APP_ENV=development
-export ALLOW_INSECURE_LOCAL_SECRET_KEY=1                 # solo desarrollo local temporal
-export DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${DB_HOST_PORT}/pastelerias_erp"
-docker compose exec -T db pg_isready -U postgres
-python manage.py migrate                                  # aplicar TODO lo que main ya tiene
-python manage.py migrate --check                           # debe quedar en 0 pendientes
-python manage.py check                                     # debe quedar en 0 errores
 ```
 
-El checkout raíz `/Users/mauricioburgos/Downloads/pastelerias_erp_sprint1` es
-el plano de control de solo lectura para implementación. Nunca crear ramas de tarea,
-ejecutar agentes con escritura ni implementar cambios dentro de esa carpeta.
-`scripts/task_workspace_start.sh` mantiene su rama `main` como espejo limpio de
-`origin/main`: bajo el bloqueo global valida rama y limpieza, ejecuta `fetch` y
-únicamente permite `merge --ff-only`. Si hay cambios locales, commits propios o
-divergencia, se detiene sin sobrescribir nada. El preflight sigue siendo obligatorio
-en el worktree registrado y bloquea `detached HEAD`, checkout raíz, rama `main`,
-cambios previos, archivos sin seguimiento o atraso frente a `origin/main`.
+El checkout raíz es plano de control de sólo lectura para implementación.
+Si el inicio o preflight detecta suciedad, divergencia o falta de propiedad,
+detener la escritura sin sobrescribir archivos ni cambiar ramas ajenas.
 
-**Regla:** si `migrate --check` no es 0 antes de empezar a escribir código, detener
-y aplicar las migraciones pendientes primero. Nunca iniciar una tarea sobre un entorno
-de DB desactualizado.
+Sólo si la tarea ejecutará Django, preparar PostgreSQL 16 aislado: registrar
+Compose, puerto y volumen exclusivos, configurar `DATABASE_URL`, comprobar
+conectividad y ejecutar `migrate`, `migrate --check` y `check` antes de escribir
+código de aplicación. Nunca usar SQLite como alternativa.
+Para documentación/instrucciones/configuración exclusiva de Codex, validar
+contenido, enlaces, TOML y diff; no levantar bases ni ejecutar Django.
 
 ### 3. Auditar estado del repo antes de cualquier cambio
 ```bash
@@ -401,13 +396,15 @@ git worktree list
 git diff origin/main..HEAD --stat   # qué archivos cambian
 ```
 - Verificar que la rama no mezcle tareas distintas
-- No abrir PR con `python manage.py check` con errores
+- Para cambios de aplicación, no abrir PR con `python manage.py check` con errores
 - No abrir PR si hay migraciones sin verificar en producción
 - No aprobar PR de Codex sin revisar el diff aquí primero
 
 ### 8. Validación mínima antes de cerrar
-- `python manage.py check` → 0 errores antes de cualquier commit
-- `python manage.py migrate --check` → sin migraciones pendientes antes de deploy
+- Código/configuración de aplicación: `python manage.py check` → 0 errores antes de commit
+- Antes de deploy de aplicación: `python manage.py migrate --check` sin pendientes
+- Sólo documentación/instrucciones/configuración Codex: contenido, enlaces, TOML y diff;
+  conservar CI remoto obligatorio, sin bases locales ni checks Django
 - Tests del módulo afectado cuando existan
 - Para UI, permisos, PWA, formularios o flujos visibles: validar en navegador real
   con consola y Network/XHR (ver "Verificación en navegador" abajo)
@@ -431,9 +428,11 @@ reportar el bloqueo exacto, lo que sí quedó hecho y qué falta para confirmar.
   python manage.py migrate --check
   python manage.py showmigrations bonos_produccion bonos_ventas rrhh
   ```
-- Si producción rompe con `AttributeError: object has no attribute 'campo'`
-  → la migración no se aplicó → `migrate <app> <num> --fake` + restart. No tocar código.
-- Si campos ya existen en BD pero la migración no está registrada: usar `--fake`
+- Un `AttributeError` no prueba que falte una migración: cotejar código,
+  versión en ejecución, historial de migraciones y esquema real en sólo lectura.
+- Prohibido usar `migrate --fake` o `--fake-initial` sin autorización explícita
+  de Mauricio para la migración concreta, incluso si una columna ya existe.
+  Presentar discrepancia y evidencia; no inferir autorización por el error.
 - NUNCA borrar migraciones existentes
 - NUNCA modificar migraciones ya aplicadas en producción
 
@@ -500,7 +499,8 @@ incluir en ese mismo commit un bump de la constante `CACHE_NAME` en su `sw.js`.*
 - Alterar datos de nómina, RRHH, ventas o configuración operativa
 
 ## Siempre hacer
-- Correr `python manage.py check` antes de cualquier commit
+- En cambios de aplicación, correr `python manage.py check` antes del commit;
+  documentación/instrucciones/configuración Codex usa validación documental
 - Correr `python manage.py migrate --check` antes de deploy
 - Usar ramas para cualquier cambio (`codex/<modulo>-<descripcion>` o `fix/<descripcion>`)
 - Commitear con mensajes descriptivos en español o inglés técnico
@@ -623,7 +623,8 @@ Estas reglas complementan las reglas existentes del proyecto. No sustituyen regl
 - Preview local, staging y producción son evidencias distintas. No presentar validación local como prueba de producción.
 - No desplegar desde una rama con cambios mezclados o no revisados.
 - Si cambian las reglas de trabajo, actualizar `AGENTS.md` y `CLAUDE.md` en el mismo cambio para mantenerlas alineadas (deben quedar con el mismo contenido).
-- Al cerrar un hilo: revisar el diff final, dejar estado limpio o documentado, ejecutar `git worktree prune --dry-run` y limpiar ramas/worktrees atorados que puedan obstruir otros hilos.
+- Al cerrar un hilo: revisar el diff final y usar el ciclo de vida registrado.
+  No limpiar ramas/worktrees ajenos ni hacer borrados manuales por antigüedad.
 
 ## Ciclo de vida obligatorio de ramas y worktrees
 
@@ -692,8 +693,10 @@ por sí solos un estado terminal.
 - GitHub Actions ejecuta `.github/workflows/ci.yml` al abrir o actualizar un PR y
   en cada push a `main`, incluidos cambios documentales para que el check requerido
   nunca quede pendiente por filtros de rutas. También admite ejecución manual.
-- Antes de subir cambios, Codex ejecuta checks, verificación de migraciones y las
-  pruebas locales del módulo afectado sobre PostgreSQL 16. El CI descubre la suite
+- Antes de subir cambios de aplicación, Codex ejecuta checks, migraciones y pruebas
+  del módulo afectado sobre PostgreSQL 16. En cambios exclusivos de documentación,
+  instrucciones o configuración Codex, valida contenido, enlaces, TOML y diff sin
+  levantar bases ni ejecutar Django; el CI remoto requerido se conserva. El CI descubre la suite
   completa y la reparte automáticamente en cuatro jobs aislados; las pruebas nuevas
   se incluyen sin mantener listas manuales de módulos. Las clases permanecen juntas.
 - Cada grupo prepara su base una sola vez. Las pruebas de cierre de inventario y
