@@ -306,6 +306,36 @@ def descargar_paquete(
     raise SatServiceError("Respuesta SAT de descarga sin Paquete")
 
 
+def _filas_metadata(reader, headers):
+    # SAT puede incluir saltos sin comillas únicamente dentro de los nombres.
+    pending = []
+    for fields in reader:
+        if not fields:
+            if pending:
+                pending[-1] += "\n"
+            continue
+        if pending:
+            try:
+                UUID(fields[0].strip())
+            except ValueError:
+                pass
+            else:
+                raise ValueError("Fila metadata truncada antes del siguiente UUID")
+            pending[-1] += "\n" + fields[0]
+            pending.extend(fields[1:])
+        else:
+            pending = fields
+        if len(pending) == len(headers):
+            yield dict(zip(headers, pending))
+            pending = []
+        elif len(pending) > len(headers) or headers[len(pending) - 1] not in {
+            "NombreEmisor", "NombreReceptor"
+        }:
+            raise ValueError("Fila metadata incompleta")
+    if pending:
+        raise ValueError("Fila metadata incompleta")
+
+
 def extraer_metadata(paquete_base64: str, *, rfc: str, direccion: str) -> list[dict]:
     """Inventario SAT fechado; no crea facturas sin su XML original."""
     rows = []
@@ -321,9 +351,13 @@ def extraer_metadata(paquete_base64: str, *, rfc: str, direccion: str) -> list[d
             if not names:
                 raise ValueError("Paquete sin TXT metadata")
             for name in names:
-                reader = csv.DictReader(
-                    io.StringIO(archive.read(name).decode("utf-8-sig")), delimiter="~"
+                reader = csv.reader(
+                    io.StringIO(
+                        archive.read(name).decode("utf-8-sig").replace("\r\n", "\n")
+                    ),
+                    delimiter="~",
                 )
+                headers = next(reader, [])
                 required = {
                     "Uuid",
                     "RfcEmisor",
@@ -332,11 +366,9 @@ def extraer_metadata(paquete_base64: str, *, rfc: str, direccion: str) -> list[d
                     "EfectoComprobante",
                     "Estatus",
                 }
-                if not required.issubset(reader.fieldnames or []):
+                if not required.issubset(headers):
                     raise ValueError("Cabecera metadata incompleta")
-                for row in reader:
-                    if None in row or any(row[k] is None for k in required):
-                        raise ValueError("Fila metadata incompleta")
+                for row in _filas_metadata(reader, headers):
                     uuid = str(UUID(row["Uuid"].strip())).upper()
                     side = "RfcEmisor" if direccion == "emitidos" else "RfcReceptor"
                     if row[side].strip().upper() != rfc.upper():

@@ -143,6 +143,61 @@ class SatMetadataTests(TestCase):
             extraer_metadata(base64.b64encode(b.getvalue()).decode(),
                              rfc="AAA010101AAA", direccion="emitidos")
 
+    def metadata_package(self, data):
+        import base64, io, zipfile
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("metadata.txt", data)
+        return base64.b64encode(buffer.getvalue()).decode()
+
+    def test_metadata_preserves_newlines_in_names_and_record_boundaries(self):
+        from sat_client.services.descarga import extraer_metadata
+
+        header = "Uuid~RfcEmisor~NombreEmisor~RfcReceptor~NombreReceptor~FechaEmision~EfectoComprobante~Estatus\n"
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                data = header + (
+                    "550E8400-E29B-41D4-A716-446655440000~AAA010101AAA~PROVEEDOR"
+                    + newline + "DOS" + newline + "TRES~BBB010101BBB~CLIENTE"
+                    + newline + "DOS~2023-02-01 12:00:00~I~1\n"
+                    "550E8400-E29B-41D4-A716-446655440001~AAA010101AAA~OTRO~BBB010101BBB~CLIENTE~2023-02-02 12:00:00~I~0\n"
+                )
+                rows = extraer_metadata(self.metadata_package(data), rfc="AAA010101AAA", direccion="emitidos")
+                self.assertEqual(len(rows), 2)
+                self.assertEqual(rows[0]["datos"]["NombreEmisor"], "PROVEEDOR\nDOS\nTRES")
+                self.assertEqual(rows[0]["datos"]["NombreReceptor"], "CLIENTE\nDOS")
+                self.assertEqual(rows[1]["uuid"], "550E8400-E29B-41D4-A716-446655440001")
+                self.assertEqual(rows[1]["estatus"], "cancelado")
+
+    def test_metadata_does_not_repair_truncated_or_foreign_records(self):
+        from sat_client.services.descarga import extraer_metadata
+        from sat_client.services.base import SatServiceError
+
+        header = "Uuid~RfcEmisor~NombreEmisor~RfcReceptor~NombreReceptor~FechaEmision~EfectoComprobante~Estatus\n"
+        valid = "550E8400-E29B-41D4-A716-446655440001~AAA010101AAA~NOMBRE~BBB010101BBB~CLIENTE~2023-02-02 12:00:00~I~1\n"
+        bad_records = [
+            "550E8400-E29B-41D4-A716-446655440000~AAA010101AAA~INCOMPLETO\n",
+            "550E8400-E29B-41D4-A716-446655440000~AAA010101AAA~INCOMPLETO\n" + valid,
+            valid.replace("2023-02-02 12:00:00~I~1", "2023-02-02\n12:00:00~I~1"),
+            valid.replace("~NOMBRE~", "~NOMBRE~EXTRA~"),
+            valid.replace("AAA010101AAA", "CCC010101CCC").replace("~NOMBRE~", "~NOMBRE\nDOS~"),
+            valid.replace("~I~1", "~I~desconocido").replace("~NOMBRE~", "~NOMBRE\nDOS~"),
+        ]
+        for data in bad_records:
+            with self.subTest(data=data), self.assertRaises(SatServiceError):
+                extraer_metadata(self.metadata_package(header + data), rfc="AAA010101AAA", direccion="emitidos")
+
+    def test_metadata_keeps_csv_quoted_multiline_names(self):
+        from sat_client.services.descarga import extraer_metadata
+
+        data = (
+            "Uuid~RfcEmisor~NombreEmisor~RfcReceptor~FechaEmision~EfectoComprobante~Estatus\n"
+            '550E8400-E29B-41D4-A716-446655440000~AAA010101AAA~"NOMBRE\nDOS"~BBB010101BBB~2023-02-01 12:00:00~I~1\n'
+        )
+        rows = extraer_metadata(self.metadata_package(data), rfc="AAA010101AAA", direccion="emitidos")
+        self.assertEqual(rows[0]["datos"]["NombreEmisor"], "NOMBRE\nDOS")
+
     def test_metadata_request_does_not_filter_cancelled(self):
         from lxml import etree
         from sat_client.services.solicitud import _build_solicitud_envelope
