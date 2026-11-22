@@ -16,7 +16,7 @@ class DecisionCostoMensualTests(TestCase):
             external_id="1062", sku="0306", name="Servicio a domicilio 4")
         self.metadata = {
             "cost_treatment": "UNALLOCATED_SERVICE",
-            "cost_treatment_period": "2026-10-01",
+            "unallocated_service_period": "2026-10-01",
             "authorization": "DG: servicio sin costo directo asignado en octubre",
             "point_external_id": self.producto.external_id,
             "point_name": self.producto.name,
@@ -49,15 +49,23 @@ class DecisionCostoMensualTests(TestCase):
     def test_periodo_malformado_no_se_interpreta_como_indefinido(self):
         for periodo in (None, "", "2026-10", "2026-10-02", 0):
             with self.subTest(periodo=periodo):
-                self.decision.metadata = {**self.metadata, "cost_treatment_period": periodo}
+                self.decision.metadata = {**self.metadata, "unallocated_service_period": periodo}
                 self.decision.save()
                 self.assertEqual(self.fuentes(10), {})
 
     def test_conserva_el_contrato_de_decisiones_sin_limite_mensual(self):
         self.decision.metadata = {k: v for k, v in self.metadata.items()
-                                  if k != "cost_treatment_period"}
+                                  if k != "unallocated_service_period"}
         self.decision.save()
         self.assertEqual(self.fuentes(11)[self.producto.pk]["treatment"], "UNALLOCATED_SERVICE")
+
+    def test_limite_de_servicio_no_redefine_decisiones_de_compra(self):
+        self.decision.metadata = {**self.metadata, "cost_treatment": "PURCHASE_REFERENCE"}
+        self.decision.costo_unitario = Decimal("12.50")
+        self.decision.save()
+        fuente = self.fuentes(11)[self.producto.pk]
+        self.assertEqual(fuente["cost"], Decimal("12.50"))
+        self.assertEqual(fuente["treatment"], "PURCHASE_REFERENCE")
 
     def test_periodo_correcto_no_sustituye_autorizacion_e_identidad(self):
         for key, value in (("authorization", ""), ("point_external_id", "otro"),
