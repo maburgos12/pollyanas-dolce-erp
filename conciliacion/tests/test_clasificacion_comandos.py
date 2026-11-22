@@ -119,7 +119,7 @@ class DesgloseCargosResumenTests(TestCase):
         self.assertEqual(r["resumen_ejecutivo"]["banco_cargos_proveedores"], Decimal("1000.00"))
         conceptos = {row["concepto"]: row for row in r["trabajo_conciliacion"]}
         self.assertEqual(
-            conceptos["Pagos a proveedores y gastos (esperan CFDI)"]["banco_total"], Decimal("1000.00")
+            conceptos["Pagos a proveedores y gastos (facturas menos notas de credito)"]["banco_total"], Decimal("1000.00")
         )
         self.assertEqual(
             conceptos["Traspasos entre cuentas propias"]["banco_total"], Decimal("5000.00")
