@@ -124,7 +124,7 @@ class Broker:
         self.inventory=inventory or self._inventory;self.parse=parse or self._parse
 
     def command(self,*args):
-        result=subprocess.run(['timeout','35','docker','exec','pastelerias-erp-worker-1','timeout','30','python','-B','manage.py','point_archive_inventory',*args],capture_output=True,text=True,timeout=40,check=True)
+        result=subprocess.run(['timeout','90','docker','exec','pastelerias-erp-worker-1','timeout','85','python','-B','manage.py','point_archive_inventory',*args],capture_output=True,text=True,timeout=95,check=True)
         return json.loads(result.stdout)
 
     def _inventory(self,name=None,after_id=0):

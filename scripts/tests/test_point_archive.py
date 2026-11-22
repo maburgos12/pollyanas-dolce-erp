@@ -104,6 +104,15 @@ class PointLifecycleFixture:
 
 
 class PointBrokerTests(unittest.TestCase):
+    def test_inventory_command_keeps_bounded_budget_for_measured_full_page(self):
+        with patch.object(archive.subprocess, 'run', return_value=Mock(stdout='{"entries":[]}')) as run:
+            self.assertEqual(archive.Broker().command('--after-id', '3395'), {'entries': []})
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ['timeout', '90'])
+        self.assertEqual(command[5:7], ['timeout', '85'])
+        self.assertEqual(run.call_args.kwargs['timeout'], 95)
+        self.assertTrue(run.call_args.kwargs['check'])
+
     def setUp(self):
         clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -158,8 +167,8 @@ class PointBrokerTests(unittest.TestCase):
         with patch.object(archive.subprocess, 'run', return_value=Mock(stdout='{}')) as run:
             self.assertEqual(f.broker.command('--after-id', '3295'), {})
         args = run.call_args.args[0]
-        self.assertEqual(args[3:8], ['exec', 'pastelerias-erp-worker-1', 'timeout', '30', 'python'])
-        self.assertGreater(run.call_args.kwargs['timeout'], 35)
+        self.assertEqual(args[3:8], ['exec', 'pastelerias-erp-worker-1', 'timeout', '85', 'python'])
+        self.assertGreater(run.call_args.kwargs['timeout'], 90)
 
     def test_old_installed_contract_waits_for_activation(self):
         f = self.fixture
