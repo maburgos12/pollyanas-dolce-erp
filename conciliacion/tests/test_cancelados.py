@@ -46,7 +46,7 @@ class CfdiCanceladosTests(TestCase):
         self.assertEqual(resumen["cfdi_emitidos"], {"conteo": 2, "total": Decimal("200")})
         self.assertEqual(resumen["cfdi_recibidos"], {"conteo": 1, "total": Decimal("100")})
         self.assertTrue(all(c.estatus == "vigente" for c in resumen["cfdi_rows"]))
-        self.assertEqual(sum(row["sat_total"] for row in resumen["canales_comparativo"]), Decimal("200"))
+        self.assertEqual(sum(row["sat_total"] for row in resumen["canales_comparativo"]), Decimal("100"))
         self.assertEqual(resumen["cfdi_sucursales"]["sucursales"][0]["total"], Decimal("100"))
         self.assertEqual(resumen["mesa_ingresos"]["total_sat"], Decimal("100"))
         nomina = next(row for row in resumen["trabajo_conciliacion"] if row["concepto"] == "Nomina pagada por banco vs timbrada")

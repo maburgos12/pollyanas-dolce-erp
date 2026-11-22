@@ -430,6 +430,7 @@ def _paquete_conciliacion(*, year: int, month: int) -> dict:
     return {
         "periodo_value": f"{year:04d}-{month:02d}",
         "periodo_label": inicio.strftime("%B %Y"),
+        "comparativo_sat": resumen_periodo_conciliacion(year=year, month=month)["resumen_ejecutivo"],
         "periodo_inicio": inicio,
         "periodo_fin": fin,
         "movimientos": documentos,
@@ -507,6 +508,21 @@ def _export_paquete_xlsx(paquete: dict) -> HttpResponse:
             row["monto"],
         ]
         for row in paquete["por_cuenta"]
+    ])
+
+    comparativo = workbook.create_sheet("Comparativo_SAT")
+    _write_table(comparativo, 1, ["Concepto", "Importe"], [
+        [label, paquete["comparativo_sat"][key]] for label, key in [
+            ("Ventas brutas (I)", "sat_ventas"),
+            ("Nomina timbrada (N)", "sat_nomina"),
+            ("Notas de credito emitidas (E)", "sat_notas_emitidas"),
+            ("Ventas netas (I - E)", "sat_ventas_netas"),
+            ("Facturas recibidas (I)", "sat_proveedores"),
+            ("Notas de credito recibidas (E)", "sat_notas_recibidas"),
+            ("Compras netas (I - E)", "sat_compras_netas"),
+            ("Diferencia abonos vs ventas netas", "diferencia_abonos_ventas"),
+            ("Diferencia pagos vs compras netas", "diferencia_cargos_proveedores"),
+        ]
     ])
 
     movimientos_sheet = workbook.create_sheet("Movimientos_Banco")

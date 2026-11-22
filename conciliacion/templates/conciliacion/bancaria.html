@@ -228,7 +228,7 @@
           <strong>${{ periodo_resumen.resumen_ejecutivo.banco_abonos|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Ventas SAT emitidas</span>
+          <span>Ventas brutas SAT (I)</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.sat_ventas|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
@@ -236,17 +236,42 @@
           <strong>${{ periodo_resumen.resumen_ejecutivo.banco_cargos_proveedores|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Gastos SAT recibidos</span>
+          <span>Facturas recibidas SAT (I)</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.sat_proveedores|floatformat:2|intcomma }}</strong>
         </div>
       </div>
       <div class="conc-mini-grid">
         <div class="conc-mini-card">
-          <span>Diferencia abonos vs ventas</span>
+          <span>Nómina timbrada (N)</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_nomina|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Notas de crédito emitidas (E)</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_notas_emitidas|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Notas de crédito recibidas (E)</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_notas_recibidas|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Ventas netas SAT (I − E)</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_ventas_netas|floatformat:2|intcomma }}</strong>
+        </div>
+        <div class="conc-mini-card">
+          <span>Compras netas SAT (I − E)</span>
+          <strong>${{ periodo_resumen.resumen_ejecutivo.sat_compras_netas|floatformat:2|intcomma }}</strong>
+        </div>
+      </div>
+      <p class="conc-note">Ventas y compras netas: facturas de ingreso (I) menos notas de crédito (E) del mes. La nómina y los complementos de pago no se suman a ventas. Las diferencias son referencias por revisar: pueden incluir desfases de pago y cobertura bancaria incompleta.</p>
+      <div class="conc-mini-grid">
+        <div class="conc-mini-card">
+          <span>Diferencia abonos vs ventas netas (I − E)</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_abonos_ventas|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
-          <span>Diferencia pagos c/factura vs gastos SAT</span>
+          <span>Diferencia pagos c/factura vs compras netas (I − E)</span>
           <strong>${{ periodo_resumen.resumen_ejecutivo.diferencia_cargos_proveedores|floatformat:2|intcomma }}</strong>
         </div>
         <div class="conc-mini-card">
@@ -421,7 +446,7 @@
     <div class="conc-subpanel pd-u-88b9d5c614">
       <h3>Banco contra SAT por canal</h3>
       <p class="conc-note">
-        Compara abonos del estado de cuenta contra CFDI emitidos según la regla fiscal de cada canal. La diferencia se calcula como banco menos SAT.
+        Compara abonos del estado de cuenta contra facturas de ingreso emitidas (I) según la regla fiscal de cada canal. Nómina y notas de crédito se muestran separadas en el resumen; las notas no se distribuyen entre canales sin revisar su factura relacionada. La diferencia se calcula como banco menos SAT.
       </p>
       <div class="table-responsive">
         <table class="conc-table">

@@ -509,6 +509,7 @@ class ConciliacionBancariaViewTests(TestCase):
             workbook.sheetnames,
             [
                 "Resumen",
+                "Comparativo_SAT",
                 "Movimientos_Banco",
                 "CFDI_Relacionados",
                 "Banco_vs_Factura",

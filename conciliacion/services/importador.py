@@ -300,6 +300,10 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
     cfdi_emitidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_EMITIDO)
     cfdi_recibidos = _aggregate_tipo_cfdi(cfdi_qs, CfdiDescargado.TIPO_RECIBIDO)
     cfdi_nomina = _aggregate_cfdi_nomina(cfdi_qs)
+    cfdi_ventas = _aggregate_tipo_cfdi(cfdi_qs.filter(tipo_comprobante="I"), CfdiDescargado.TIPO_EMITIDO)
+    cfdi_compras = _aggregate_tipo_cfdi(cfdi_qs.filter(tipo_comprobante="I"), CfdiDescargado.TIPO_RECIBIDO)
+    notas_emitidas = _aggregate_tipo_cfdi(cfdi_qs.filter(tipo_comprobante="E"), CfdiDescargado.TIPO_EMITIDO)
+    notas_recibidas = _aggregate_tipo_cfdi(cfdi_qs.filter(tipo_comprobante="E"), CfdiDescargado.TIPO_RECIBIDO)
     cargos_por_tipo = _aggregate_cargos_por_conciliacion(movimientos_qs)
     cfdi_sucursales = _resumen_cfdi_sucursales(inicio=inicio, fin=fin)
     alcance_fiscal = _resumen_alcance_fiscal(inicio=inicio, fin=fin)
@@ -310,15 +314,19 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         devoluciones=sum((r["banco_total"] for r in canales_comparativo if r["canal"] == "devoluciones"), Decimal("0")),
         movimientos_cargos=cargos,
         cargos_por_tipo=cargos_por_tipo,
-        cfdi_emitidos=cfdi_emitidos,
-        cfdi_recibidos=cfdi_recibidos,
+        cfdi_emitidos=cfdi_ventas,
+        cfdi_recibidos=cfdi_compras,
+        cfdi_nomina=cfdi_nomina,
+        notas_emitidas=notas_emitidas,
+        notas_recibidas=notas_recibidas,
         alcance_fiscal=alcance_fiscal,
     )
     trabajo_conciliacion = _trabajo_conciliacion_periodo(
         canales_comparativo=canales_comparativo,
         movimientos_cargos=cargos,
         cargos_por_tipo=cargos_por_tipo,
-        cfdi_recibidos=cfdi_recibidos,
+        cfdi_recibidos={"conteo": cfdi_compras["conteo"] + notas_recibidas["conteo"],
+                        "total": cfdi_compras["total"] - notas_recibidas["total"]},
         cfdi_nomina=cfdi_nomina,
         alcance_fiscal=alcance_fiscal,
     )
@@ -373,6 +381,9 @@ def _resumen_ejecutivo_periodo(
     cargos_por_tipo: dict[str, dict[str, Any]],
     cfdi_emitidos: dict[str, Any],
     cfdi_recibidos: dict[str, Any],
+    cfdi_nomina: dict[str, Any],
+    notas_emitidas: dict[str, Any],
+    notas_recibidas: dict[str, Any],
     alcance_fiscal: dict[str, Any],
     devoluciones: Decimal = Decimal("0"),
 ) -> dict[str, Any]:
@@ -391,8 +402,13 @@ def _resumen_ejecutivo_periodo(
         "banco_cargos_proveedores": cargos_proveedores["total"],
         "sat_ventas": sat_ventas,
         "sat_proveedores": sat_proveedores,
-        "diferencia_abonos_ventas": banco_abonos - devoluciones - sat_ventas,
-        "diferencia_cargos_proveedores": cargos_proveedores["total"] - sat_proveedores,
+        "sat_nomina": cfdi_nomina["total"],
+        "sat_notas_emitidas": notas_emitidas["total"],
+        "sat_notas_recibidas": notas_recibidas["total"],
+        "sat_ventas_netas": sat_ventas - notas_emitidas["total"],
+        "sat_compras_netas": sat_proveedores - notas_recibidas["total"],
+        "diferencia_abonos_ventas": banco_abonos - devoluciones - (sat_ventas - notas_emitidas["total"]),
+        "diferencia_cargos_proveedores": cargos_proveedores["total"] - (sat_proveedores - notas_recibidas["total"]),
         "pagos_cobrados": alcance_fiscal["pagos_emitidos"]["total"],
         "pagos_proveedores": alcance_fiscal["pagos_recibidos"]["total"],
         "credito_clientes_pendiente": alcance_fiscal["ppd_emitidos_abiertos"]["saldo"],
@@ -433,7 +449,7 @@ def _trabajo_conciliacion_periodo(
     estado_proveedores = _estado_diferencia(diferencia_proveedores)
     rows.append(
         {
-            "concepto": "Pagos a proveedores y gastos (esperan CFDI)",
+            "concepto": "Pagos a proveedores y gastos (facturas menos notas de credito)",
             "banco_conteo": proveedores["conteo"],
             "banco_total": proveedores["total"],
             "sat_conteo": cfdi_recibidos["conteo"],
@@ -441,7 +457,7 @@ def _trabajo_conciliacion_periodo(
             "diferencia": diferencia_proveedores,
             "estado": estado_proveedores,
             "accion": _accion_conciliacion(estado_proveedores, proveedores["total"], cfdi_recibidos["total"]),
-            "metodo": "Solo cargos clasificados como pago con CFDI o comision. Compras a credito se pagan en otro mes: cruzar con complementos REP.",
+            "metodo": "Facturas I menos notas E del mes; solo cargos clasificados como pago con CFDI o comision. Compras a credito se pagan en otro mes: cruzar con complementos REP.",
         }
     )
 
@@ -838,7 +854,7 @@ def _resumen_comparativo_canales(*, movimientos_qs, cfdi_qs) -> list[dict[str, A
         banco[canal]["conteo"] += 1
         banco[canal]["total"] += monto or Decimal("0.00")
 
-    cfdi_emitidos = cfdi_qs.filter(tipo_cfdi=CfdiDescargado.TIPO_EMITIDO)
+    cfdi_emitidos = cfdi_qs.filter(tipo_cfdi=CfdiDescargado.TIPO_EMITIDO, tipo_comprobante="I")
     sat = {
         "efectivo": _aggregate_cfdi_formas(cfdi_emitidos, ["01"]),
         "tarjeta": _aggregate_cfdi_formas(cfdi_emitidos, ["04", "28", "29"]),
