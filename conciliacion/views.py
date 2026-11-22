@@ -253,6 +253,8 @@ def _documento_conciliacion(movimiento: MovimientoBancario) -> dict:
         MovimientoBancario.CONCILIACION_SOPORTE,
     }:
         evidencia_pendiente.append("Requiere soporte documental externo para auditoria.")
+    if cfdi and cfdi.estatus != "vigente":
+        evidencia_pendiente.append(f"CFDI ligado no vigente ({cfdi.estatus}): {cfdi.uuid}.")
     estado_expediente = _estado_expediente(movimiento, evidencia_pendiente)
     relacion_contable = _relacion_contable(movimiento, cfdi, contraparte, cuenta_destino)
     return {
@@ -419,11 +421,11 @@ def _paquete_conciliacion(*, year: int, month: int) -> dict:
     )
     documentos = [_documento_conciliacion(mov) for mov in movimientos]
     cfdis = list(
-        CfdiDescargado.objects.filter(fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
+        CfdiDescargado.objects.filter(estatus="vigente", fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
         .order_by("fecha_emision", "uuid")
     )
     movimientos_qs = MovimientoBancario.objects.filter(fecha_transaccion__date__gte=inicio, fecha_transaccion__date__lte=fin)
-    cfdis_qs = CfdiDescargado.objects.filter(fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
+    cfdis_qs = CfdiDescargado.objects.filter(estatus="vigente", fecha_emision__date__gte=inicio, fecha_emision__date__lte=fin)
     excepciones = [doc for doc in documentos if doc["evidencia_pendiente"] or not doc["movimiento"].conciliado]
     return {
         "periodo_value": f"{year:04d}-{month:02d}",
@@ -631,6 +633,8 @@ def _paquete_cfdi_row(cfdi: CfdiDescargado) -> dict[str, str]:
 def _banco_factura_row(documento: dict) -> dict[str, str]:
     movimiento = documento["movimiento"]
     cfdi = documento["cfdi"]
+    if cfdi and cfdi.estatus != "vigente":
+        cfdi = None
     diferencia = movimiento.monto - cfdi.total if cfdi else None
     return {
         "FolioMovimientoERP": documento["folio"],
@@ -871,9 +875,9 @@ def _handle_conciliar_movimiento(request: HttpRequest) -> str:
     if tipo_conciliacion == MovimientoBancario.CONCILIACION_CFDI:
         cfdi_uuid = str(request.POST.get("cfdi_uuid") or "").strip()
         try:
-            cfdi = CfdiDescargado.objects.get(uuid=cfdi_uuid)
+            cfdi = CfdiDescargado.objects.get(uuid=cfdi_uuid, estatus="vigente")
         except CfdiDescargado.DoesNotExist:
-            messages.error(request, "Selecciona un CFDI valido para relacionar.")
+            messages.error(request, "Selecciona un CFDI vigente para relacionar.")
             return redirect_url
         _marcar_movimiento_conciliado(
             movimiento,

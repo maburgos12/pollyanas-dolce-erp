@@ -284,7 +284,7 @@ def resumen_periodo_conciliacion(*, year: int, month: int) -> dict[str, Any]:
         fecha_transaccion__gte=inicio,
         fecha_transaccion__lt=fin,
     )
-    cfdi_qs = CfdiDescargado.objects.filter(fecha_emision__gte=inicio, fecha_emision__lt=fin)
+    cfdi_qs = CfdiDescargado.objects.filter(estatus="vigente", fecha_emision__gte=inicio, fecha_emision__lt=fin)
 
     movimientos_agregado = movimientos_qs.aggregate(
         total=Count("id"),
@@ -616,6 +616,7 @@ def sugerir_cfdis_para_movimientos(movimientos: list[MovimientoBancario]) -> dic
         qs = (
             CfdiDescargado.objects.filter(
                 conciliado=False,
+                estatus="vigente",
                 tipo_cfdi=tipo_cfdi,
                 total__gte=movimiento.monto - Decimal("1.00"),
                 total__lte=movimiento.monto + Decimal("1.00"),
@@ -713,6 +714,7 @@ def _aggregate_pagos_relacionados(
     complemento_fin_exclusivo: datetime,
 ) -> dict[str, Any]:
     data = CfdiPagoRelacionado.objects.filter(
+        cfdi_pago__estatus="vigente",
         cfdi_pago__tipo_cfdi=tipo_cfdi,
         fecha_pago__gte=inicio,
         fecha_pago__lt=fin,
@@ -726,6 +728,7 @@ def _aggregate_ppd_abiertos(*, tipo_cfdi: str, inicio: datetime, fin: datetime) 
         CfdiDescargado.objects.filter(
             tipo_cfdi=tipo_cfdi,
             tipo_comprobante="I",
+            estatus="vigente",
             metodo_pago="PPD",
             fecha_emision__lt=inicio,
         ).values("uuid", "total")
@@ -736,6 +739,7 @@ def _aggregate_ppd_abiertos(*, tipo_cfdi: str, inicio: datetime, fin: datetime) 
     pagos = {
         row["uuid_relacionado"]: row["pagado"] or Decimal("0.00")
         for row in CfdiPagoRelacionado.objects.filter(
+            cfdi_pago__estatus="vigente",
             cfdi_pago__tipo_cfdi=tipo_cfdi,
             uuid_relacionado__in=[item["uuid"] for item in cfdis],
             fecha_pago__lt=fin,
@@ -764,6 +768,7 @@ def _resumen_cfdi_sucursales(*, inicio: datetime, fin: datetime) -> dict[str, An
         cfdi__fecha_emision__gte=inicio,
         cfdi__fecha_emision__lt=fin,
         cfdi__tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+        cfdi__estatus="vigente",
     )
     rows = (
         resoluciones_qs.filter(sucursal__isnull=False)
@@ -922,6 +927,7 @@ def _mesa_ingresos_sucursal(*, inicio: datetime, fin: datetime, movimientos_qs) 
             cfdi__fecha_emision__gte=inicio,
             cfdi__fecha_emision__lt=fin,
             cfdi__tipo_cfdi=CfdiDescargado.TIPO_EMITIDO,
+            cfdi__estatus="vigente",
         )
         .only("sucursal__codigo", "sucursal__nombre", "cfdi__forma_pago", "cfdi__total")
     )
