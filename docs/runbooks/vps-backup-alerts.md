@@ -270,3 +270,19 @@ El retiro Point exige respaldo y receptor de decisiones activos. El timer del
 publicador automático puede estar activo o pausado, pero su estado debe conservarse
 antes/después; no reactivarlo para pasar una guarda. Estados fallidos, transitorios
 o cambios de servicios/respaldos bloquean el retiro bajo el mutex de despliegue.
+
+La página nativa de 100 registros tardó 47.84 s en producción el 22 de noviembre
+(3.79 s de arranque y 43.96 s de elegibilidad). Su límite dentro del contenedor es
+85 s, con límites exteriores de 90/95 s; cada consulta conserva su límite de 10 s.
+Un timeout no autoriza reiniciar contadores ni omitir comprobaciones de integridad.
+
+Una referencia en `VentaAutoritativaPoint` conserva su ruta lógica y todas sus
+filas. El importador manual de categorías usa el mismo `open_source` y lease:
+una fuente ausente solicita recuperación y produce `ArchivePending` antes de
+escribir ventas; al restaurarse, lee los mismos bytes. Historial de productos y
+resúmenes mensuales siguen excluidos de este piloto.
+
+Al llenar el lote, el cursor queda antes del primer candidato aún no preparado;
+no avanza al final de una página con archivos pendientes. La vista previa completa
+de 100 registros produjo 89 candidatos íntegros en 55.30 s, incluido el parser.
+Esto no acredita su recepción en NAS ni autoriza retirarlos.
