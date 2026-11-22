@@ -199,12 +199,14 @@ class HostAdapter:
             images=sorted(set(self.command('docker','image','ls','-aq','--no-trunc').split())),
             volumes=sorted(self.command('docker','volume','ls','-q').split()),
             backups={p.name:[p.stat().st_ino,p.stat().st_size,p.stat().st_mtime_ns] for p in Path('/opt/backups/erp').iterdir() if p.is_file()},
-            monitors=self.command('systemctl','is-active','erp-backup-alerts.timer','erp-point-decision.service','erp-telegram-release.timer'),
+            monitors='\n'.join(self.command('systemctl','show','--property=ActiveState','--value',unit)
+                for unit in ('erp-backup-alerts.timer','erp-point-decision.service','erp-telegram-release.timer')),
             http=self.command('curl','--max-time','15','-sSL','-o','/dev/null','-w','%{http_code}','https://erp.pollyanasdolce.com/login/'))
 
     @staticmethod
     def verify_preserved(before, after):
-        if before['monitors'].splitlines() != ['active'] * 3 or before['http'] != '200' or after['http'] != '200' or any(after[k] != before[k] for k in ('containers','images','volumes','monitors')):
+        # The publisher may be deliberately paused; recovery and the decision receiver must be active.
+        if before['monitors'].splitlines() not in (['active','active','active'], ['active','active','inactive']) or before['http'] != '200' or after['http'] != '200' or any(after[k] != before[k] for k in ('containers','images','volumes','monitors')):
             raise ValueError('service_state_changed')
         if any(after['backups'].get(k) != v for k,v in before['backups'].items()):
             raise ValueError('backup_state_changed')

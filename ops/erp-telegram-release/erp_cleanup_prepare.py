@@ -300,7 +300,15 @@ def blocked(ledger, identity, now):
     with ledger.lock():
         for file in ledger.directory.glob('*.json'):
             row = ledger.read(file.stem)
-            if row['image_id'] == identity or row['state'] == 'notifying' or (row['state'] in {'pending', 'approved'} and row['expires'] > now):
+            if row['image_id'] == identity or row['state'] == 'notifying':
+                return True
+            if row['state'] == 'approved':
+                execution = cleanup.execution_state(ledger, row['nonce'])
+                if execution is not None:
+                    if execution['state'] == 'completed':
+                        continue
+                    return True
+            if row['state'] in {'pending', 'approved'} and row['expires'] > now:
                 return True
     for path in (ledger.directory / 'scheduled').glob('*.json'):
         item = cleanup.validate_intent(json.loads(path.read_text()))
