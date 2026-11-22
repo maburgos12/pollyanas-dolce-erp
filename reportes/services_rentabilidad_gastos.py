@@ -2,6 +2,7 @@
 from datetime import date, timedelta
 from calendar import monthrange
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+import re
 
 from django.db.models import Q
 from django.core.exceptions import ValidationError
@@ -179,6 +180,40 @@ def _importe_mensual(monto, inicio, fin, periodo):
     return monto - base * (meses - 1) if periodo == fin else base
 
 
+def _prorrateo_aprobado(gasto, reglas, periodo):
+    """Admite sólo la porción identificada y aprobada; conserva su carácter estimado."""
+    aprobaciones = [(r.filtros or {}).get("prorrateos_aprobados", {}).get(gasto.external_key)
+        for r in reglas if _vigente(r, periodo) and _coincide(r, gasto.centro_costo, gasto.categoria_gasto_id)
+        and isinstance((r.filtros or {}).get("prorrateos_aprobados"), dict)]
+    aprobaciones = [a for a in aprobaciones if isinstance(a, dict)]
+    if len(aprobaciones) != 1 or gasto.categoria_gasto.codigo != "LUZ_SUC":
+        return None
+    aprobacion = aprobaciones[0]
+    desde, hasta = gasto.servicio_desde, gasto.servicio_hasta
+    if (not aprobacion.get("aprobacion") or not re.fullmatch(r"[0-9a-f]{64}", str(aprobacion.get("sha256_pdf", "")))
+            or not desde or not hasta or not 1 <= (hasta - desde).days <= 75
+            or gasto.periodo != periodo or gasto.cobertura_mes_inicio != periodo or gasto.cobertura_mes_fin != periodo):
+        return None
+    try:
+        total = Decimal(str(aprobacion["importe_facturado"]))
+        if not total.is_finite() or total <= 0:
+            return None
+        mes, restante, parte = desde.replace(day=1), total, None
+        while mes < hasta:
+            siguiente = (mes + timedelta(days=32)).replace(day=1)
+            dias = (min(hasta, siguiente) - max(desde, mes)).days
+            importe = restante if siguiente >= hasta else (total * dias / (hasta - desde).days).quantize(CENTAVO, rounding=ROUND_HALF_UP)
+            restante -= importe
+            if mes == periodo:
+                parte = importe
+            mes = siguiente
+        if parte != gasto.monto:
+            return None
+    except (KeyError, TypeError, ValueError, InvalidOperation):
+        return None
+    return {"importe_facturado": total, "monto_mensual": parte}
+
+
 def _ciclos_cfe_intermedios(periodo, reglas):
     """Explica el mes intermedio; no genera consumo, devengo ni un importe cero."""
     from .services_gastos_compromisos import validar_cfdi_soporte
@@ -260,7 +295,11 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
         .order_by("gasto_recurrente_id", "-vigencia_inicio", "-pk").distinct("gasto_recurrente_id")
         .select_related("gasto_recurrente__area", "gasto_recurrente__rubro",
                         "gasto_recurrente__categoria_gasto", "gasto_recurrente__centro_costo"))
-    gastos = list(GastoOperativoMensual.objects.filter(tipo_dato="REAL", es_estimado=False)
+    claves_aprobadas = {clave for r in reglas if _vigente(r, periodo)
+        for clave in ((r.filtros or {}).get("prorrateos_aprobados", {})
+                      if isinstance((r.filtros or {}).get("prorrateos_aprobados"), dict) else {})}
+    gastos = list(GastoOperativoMensual.objects.filter(tipo_dato="REAL")
+                  .filter(Q(es_estimado=False) | Q(external_key__in=claves_aprobadas))
                   .filter(Q(periodo=periodo) | Q(cobertura_mes_inicio__lte=periodo, cobertura_mes_fin__gte=periodo))
                   .exclude(obligacion_gasto__estado="CANCELADO")
                   .select_related("categoria_gasto", "centro_costo", "obligacion_gasto__rubro",
@@ -275,6 +314,9 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
     vistas_reglas, vistas_versiones, rubros_con_fuente = set(), set(), set()
     destinos_cubiertos = set()
     for gasto, obligacion in fuentes:
+        periodificacion = _prorrateo_aprobado(gasto, reglas, periodo) if gasto and gasto.es_estimado else None
+        if gasto and gasto.es_estimado and not periodificacion:
+            continue
         fuente = gasto or obligacion
         categoria, centro = fuente.categoria_gasto, fuente.centro_costo
         cobertura_documentada = any(
@@ -396,11 +438,18 @@ def leer_gastos_mensuales(periodo, *, usar_reparto_consolidado=False, incluir_in
                 dias = (gasto.servicio_hasta - gasto.servicio_desde).days
                 if dias > 0:
                     dias_mes = monthrange(periodo.year, periodo.month)[1]
+                    if periodificacion:
+                        dias_mes = (min(gasto.servicio_hasta, (periodo + timedelta(days=32)).replace(day=1))
+                                    - max(gasto.servicio_desde, periodo)).days
                     salida['referencia_servicio'] = dict(gasto_id=gasto.pk,
                         centro=centro.nombre, concepto=fila['concepto'], cfdi=referencia_cfdi,
                         desde=gasto.servicio_desde, hasta=gasto.servicio_hasta,
-                        dias=dias, dias_mes=dias_mes, importe_facturado=monto,
-                        referencia_mensual=(monto * dias_mes / dias).quantize(CENTAVO, rounding=ROUND_HALF_UP))
+                        dias=dias, dias_mes=dias_mes,
+                        importe_facturado=periodificacion['importe_facturado'] if periodificacion else monto,
+                        referencia_mensual=mensual if periodificacion else (monto * dias_mes / dias).quantize(CENTAVO, rounding=ROUND_HALF_UP))
+            if periodificacion:
+                salida['detalle'] = (salida['detalle'] + " Consumo imputado por días con aprobación registrada; "
+                    "la distribución conserva su carácter estimado y el periodo original del recibo.").strip()
             if regla and salida['estado'] == 'COMPLETO':
                 destinos_cubiertos.add((regla.rubro_id, categoria.pk, area, salida['sucursal_id']))
             resultado["filas"].append(salida)
