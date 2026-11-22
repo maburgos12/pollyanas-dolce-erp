@@ -241,3 +241,27 @@ externo, para que agotar la espera del cliente Docker no deje el lector ejecutan
 sin control. No se reinician servicios, modifican datos ni omiten hashes. Para
 cerrar un incidente, acreditar inventario, copia y recuperación NAS, solicitud
 única con botones y aprobación vigente antes del retiro del lote exacto.
+
+
+### Archivado histórico Point: calidad conservada y continuidad de lotes
+
+Las incidencias de calidad y otros intentos fallidos de la misma sucursal/fecha
+se conservan en la base: no impiden por sí solos conservar una fuente íntegra en
+NAS. Siguen excluidas las referencias fallidas al mismo archivo, fuentes recientes,
+incompletas, con hashes/filas distintos o consumidores fuera del contrato de
+categorías. Copiar no certifica las cifras del reporte ni resuelve sus incidencias.
+
+El catálogo conserva todos los recibos históricos; el límite de diez archivos y
+100 MB se aplica al lote propuesto, no al total del catálogo. Cada lote requiere
+su aprobación exacta y vigente. Antes de retirar: lectura completa desde NAS,
+hash/tamaño/parser equivalentes, revalidación de referencias y lease exclusivo.
+No resetear contadores, cursores ni decisiones para avanzar.
+
+Una aprobación de otro lote ya completado no bloquea nuevas preparaciones si su
+recibo nativo valida nonce y digest. La misma identidad sigue bloqueada para no
+repetir retiros; ejecuciones parciales, inciertas, bloqueadas o en curso conservan
+el bloqueo y exigen revisión. No modificar la aprobación histórica.
+
+Entregar cantidad/bytes realmente retirados y espacio disponible antes/después en
+el mismo filesystem por separado. La variación concurrente de disco no equivale
+al ahorro atribuible a Point; ni el tamaño candidato ni el deploy acreditan retiro.

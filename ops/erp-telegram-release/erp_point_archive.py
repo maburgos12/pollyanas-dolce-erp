@@ -277,7 +277,7 @@ class Broker:
                     self.readback(entry)
                     entries.append(entry);total+=entry['bytes']
             for candidate in scan['entries']:
-                if len(entries)>=MAX_PILOT_FILES or len(catalog)>=MAX_PILOT_FILES or total+candidate['bytes']>MAX_PILOT_BYTES:
+                if len(entries)>=MAX_PILOT_FILES or total+candidate['bytes']>MAX_PILOT_BYTES:
                     break
                 try:
                     self.store.catalog_entry(relative_path=candidate['relative_path'])
