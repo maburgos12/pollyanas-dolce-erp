@@ -276,8 +276,10 @@ class Broker:
                 if self.matches_original(entry) and self.eligible(entry):
                     self.readback(entry)
                     entries.append(entry);total+=entry['bytes']
+            next_cursor=scan['next_id'] if scan['has_more'] else 0
             for candidate in scan['entries']:
                 if len(entries)>=MAX_PILOT_FILES or total+candidate['bytes']>MAX_PILOT_BYTES:
+                    next_cursor=candidate['task_id']-1
                     break
                 try:
                     self.store.catalog_entry(relative_path=candidate['relative_path'])
@@ -287,7 +289,7 @@ class Broker:
                 stage='copy_and_readback'
                 entry=self.prepare_entry(candidate)
                 entries.append(entry);total+=candidate['bytes'];catalog.append(entry)
-            status.update(cursor=scan['next_id'] if scan['has_more'] else 0,next_at=int(time.time())+300)
+            status.update(cursor=next_cursor,next_at=int(time.time())+300)
             prep.atomic_json(state_path,status)
             if not entries:
                 return 'no_eligible_point_sources'

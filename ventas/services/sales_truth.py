@@ -14,6 +14,7 @@ from unidecode import unidecode
 
 from core.models import Sucursal
 from pos_bridge.models import PointDailySale, PointSalesDailyProductFact
+from pos_bridge.services.archive_access import open_source
 from recetas.models import Receta, RecetaCodigoPointAlias, VentaHistorica, normalizar_codigo_point
 from ventas.models import VentaAutoritativaPoint
 
@@ -349,7 +350,9 @@ def import_authoritative_point_category_report(path: str) -> dict[str, Any]:
         DeprecationWarning,
         stacklevel=2,
     )
-    raw = pd.read_excel(path, header=None, sheet_name=0)
+    with open_source(path) as source:
+        raw = pd.read_excel(source.local_path, header=None, sheet_name=0)
+        df = pd.read_excel(source.local_path, header=5, sheet_name=0)
     title = ""
     for row_idx in range(min(6, len(raw.index))):
         for col_idx in range(min(6, len(raw.columns))):
@@ -377,7 +380,6 @@ def import_authoritative_point_category_report(path: str) -> dict[str, Any]:
     if branch is None:
         raise ValueError(f'Sucursal no encontrada para reporte autoritativo: {branch_name}')
 
-    df = pd.read_excel(path, header=5, sheet_name=0)
     current_category = ''
     created = 0
     updated = 0

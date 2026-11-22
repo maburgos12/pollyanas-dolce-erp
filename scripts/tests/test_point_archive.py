@@ -307,6 +307,32 @@ class PointBrokerTests(unittest.TestCase):
         self.assertTrue(f.source.exists())
         self.assertEqual(f.execute(), 'not_approved')
 
+    def test_bounded_lots_resume_at_first_unprepared_candidate(self):
+        f = self.fixture
+        candidates = []
+        for task_id in range(1, 16):
+            path = f.store.sources_root / f'20260101_010101_point_sales_category_{task_id}.xls'
+            path.write_bytes(f'workbook {task_id}'.encode())
+            candidates.append(dict(relative_path=path.name, task_id=task_id,
+                **f.store.snapshot(path), **f.parse(path)))
+        def inventory(name=None, after_id=0):
+            return {'entries':[x for x in candidates if x['relative_path']==name] if name else
+                [x for x in candidates if x['task_id']>after_id], 'next_id':15, 'has_more':False}
+        f.broker.inventory = inventory
+        self.assertEqual(f.prepare(), 'requested')
+        status = json.loads((f.broker.state/'status.json').read_text())
+        self.assertEqual(status['cursor'], 10)
+        first_paths = {p.name for p in f.broker.state.glob('*.proposal')}
+        f.decide(); self.assertEqual(f.execute(), 'completed')
+        with patch('time.time', return_value=time.time()+301):
+            self.assertEqual(f.prepare(), 'requested')
+        second = next(p for p in f.broker.state.glob('*.proposal') if p.name not in first_paths)
+        proposal, _ = cleanup.read_proposal(second)
+        self.assertEqual(len(proposal['delete_candidates'][0]['files']), 5)
+        self.assertEqual(json.loads((f.broker.state/'status.json').read_text())['cursor'], 0)
+        self.assertEqual(len(list((f.store.root/'catalog/objects').glob('*.json'))), 15)
+        self.assertTrue(all((f.store.sources_root/x['relative_path']).exists() for x in candidates[10:]))
+
     def test_nas_failure_prevents_catalog_and_proposal(self):
         f = self.fixture
         f.nas.fail_get = True

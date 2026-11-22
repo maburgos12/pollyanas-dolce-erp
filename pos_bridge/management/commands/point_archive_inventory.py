@@ -11,7 +11,6 @@ from django.db import connection, transaction
 from django.utils import timezone
 
 from pos_bridge.models import PointSalesExtractionTask, PointSalesNormalized, PointSalesRawStaging, PointSalesDailyProductFact, PointProductHistoryImport, PointMonthlySalesOfficial
-from ventas.models import VentaAutoritativaPoint
 from pos_bridge.services.archive_access import ArchiveStore
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 
@@ -39,10 +38,9 @@ def eligible_task(task):
         return False
     if PointSalesDailyProductFact.objects.filter(source_file=task.source_file).exclude(sync_job_id__in=refs.values('sync_job_id')).exists():
         return False
-    # Pilot excludes mixed-domain references until their closure contract is verified.
+    # Category sales readers share archive recovery; other report domains remain excluded.
     if (PointProductHistoryImport.objects.filter(report_path=task.source_file).exists()
-            or PointMonthlySalesOfficial.objects.filter(report_path=task.source_file).exists()
-            or VentaAutoritativaPoint.objects.filter(source_file=task.source_file).exists()):
+            or PointMonthlySalesOfficial.objects.filter(report_path=task.source_file).exists()):
         return False
     for other in refs:
         if not other.finished_at or other.finished_at > timezone.now()-timedelta(days=30) or not other.sync_job.finished_at or other.row_count<=0:

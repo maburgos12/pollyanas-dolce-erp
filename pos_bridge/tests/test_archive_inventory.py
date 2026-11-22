@@ -46,3 +46,27 @@ class ArchiveInventoryTests(TestCase):
     def test_missing_normalized_row_still_blocks(self):
         self.normal.delete()
         self.assertFalse(eligible_task(self.task))
+
+    def test_authoritative_reference_preserved_with_intact_category_source(self):
+        from core.models import Sucursal
+        from ventas.models import VentaAutoritativaPoint
+        branch = Sucursal.objects.create(codigo='ARCHIVE', nombre='ARCHIVE')
+        row = VentaAutoritativaPoint.objects.create(branch=branch, sale_date=self.old.date(),
+            product_code='100', source_file=self.task.source_file)
+        self.assertTrue(eligible_task(self.task))
+        row.refresh_from_db()
+        self.assertEqual(row.source_file, self.task.source_file)
+        self.assertEqual(VentaAutoritativaPoint.objects.count(), 1)
+        self.normal.delete()
+        self.assertFalse(eligible_task(self.task))
+        self.assertEqual(VentaAutoritativaPoint.objects.count(), 1)
+
+    def test_other_report_domains_remain_excluded(self):
+        from pos_bridge.models import PointProductHistoryImport, PointMonthlySalesOfficial
+        history = PointProductHistoryImport.objects.create(file_hash='e'*64, source_filename='test.xls',
+            report_path=self.task.source_file, product_name='Test')
+        self.assertFalse(eligible_task(self.task))
+        history.delete()
+        PointMonthlySalesOfficial.objects.create(month_start=self.old.date().replace(day=1),
+            month_end=self.old.date(), report_path=self.task.source_file)
+        self.assertFalse(eligible_task(self.task))

@@ -3,13 +3,51 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, TestCase
 
 from pos_bridge.services.archive_access import ArchiveStore, ArchivePending, entry_id
 from pos_bridge.services.product_history_import_service import PointProductHistoryImportService
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 from pos_bridge.services.sales_report_reconciliation_service import SalesReportReconciliationService
 from pos_bridge.tests.test_product_history_import_service import _build_history_workbook
+
+
+class AuthoritativeArchiveReaderTests(TestCase):
+    def test_restored_category_preserves_authoritative_rows_and_logical_source(self):
+        from core.models import Sucursal
+        from ventas.models import VentaAutoritativaPoint
+        from ventas.services.sales_truth import import_authoritative_point_category_report
+        Sucursal.objects.create(codigo='ARCHIVE', nombre='ARCHIVE')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            sources = root / 'raw_exports'; sources.mkdir()
+            original = sources / 'category.xls'; staged = root / 'restored.xlsx'
+            with pd.ExcelWriter(staged) as writer:
+                pd.DataFrame([['VENTA POR CATEGORÍA\nARCHIVE\n01/Jan/2026']]).to_excel(writer, header=False, index=False)
+                pd.DataFrame([['Pasteles', '100', 'Pastel', 2, 100, 0, 100, 0, 100]],
+                    columns=['CATEGORÍA','CÓDIGO','PRODUCTO','CANTIDAD','BRUTO','DESCUENTOS','VENTA','IMPUESTOS','VENTA NETA']).to_excel(writer, startrow=5, index=False)
+            original.write_bytes(staged.read_bytes())
+            store = ArchiveStore(root=root / 'archive', sources_root=sources, wait_seconds=0)
+            snap = store.snapshot(original)
+            entry = dict(schema=1, relative_path=original.name, **snap,
+                id=entry_id(original.name, snap['sha256']), nas_key=f"point-archive/objects/{snap['sha256']}.xls",
+                verified_at=1700000000, consumers=['category_report'])
+            store.register(entry)
+            with patch('ventas.services.sales_truth.open_source', store.open_source, create=True):
+                first = import_authoritative_point_category_report(str(original))
+                fields = ['branch_id','product_id','product_code','point_name','category','quantity','gross_amount',
+                    'discount_amount','total_amount','tax_amount','net_amount','source_file','source_sheet','raw_payload']
+                before = list(VentaAutoritativaPoint.objects.values(*fields))
+                self.assertEqual(first['created'], 1)
+                original.unlink()
+                with self.assertRaises(ArchivePending):
+                    import_authoritative_point_category_report(str(original))
+                self.assertEqual(list(VentaAutoritativaPoint.objects.values(*fields)), before)
+                store.publish_restored(entry, staged)
+                restored = import_authoritative_point_category_report(str(original))
+                self.assertEqual(restored['updated'], 1)
+                self.assertEqual(list(VentaAutoritativaPoint.objects.values(*fields)), before)
+                self.assertEqual(before[0]['source_file'], str(original))
 
 
 class ArchiveReaderTests(SimpleTestCase):
