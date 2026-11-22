@@ -192,6 +192,8 @@ def _prorrateo_aprobado(gasto, reglas, periodo):
     desde, hasta = gasto.servicio_desde, gasto.servicio_hasta
     if (not aprobacion.get("aprobacion") or not re.fullmatch(r"[0-9a-f]{64}", str(aprobacion.get("sha256_pdf", "")))
             or not desde or not hasta or not 1 <= (hasta - desde).days <= 75
+            or str(desde) != aprobacion.get("servicio_desde") or str(hasta) != aprobacion.get("servicio_hasta")
+            or gasto.archivo_soporte != aprobacion.get("archivo_soporte")
             or gasto.periodo != periodo or gasto.cobertura_mes_inicio != periodo or gasto.cobertura_mes_fin != periodo):
         return None
     try:

@@ -26,7 +26,8 @@ class PeriodificacionAprobadaTests(TestCase):
                 cobertura_mes_inicio=mes, cobertura_mes_fin=mes,
                 servicio_desde=date(2026, 9, 18), servicio_hasta=date(2026, 11, 18)))
             aprobadas[clave] = {"importe_facturado": "18510.86", "aprobacion": "DG-20261122",
-                "sha256_pdf": "a" * 64}
+                "sha256_pdf": "a" * 64, "servicio_desde": "2026-09-18", "servicio_hasta": "2026-11-18",
+                "archivo_soporte": "recibos/renta.pdf"}
         self.aprobacion = self.regla(centro_costo=self.centro,
             filtros={"desde": "2026-10-01", "hasta": "2026-11-30",
                      "prorrateos_aprobados": aprobadas})
@@ -64,3 +65,29 @@ class PeriodificacionAprobadaTests(TestCase):
         self.aprobacion.filtros["hasta"] = "2026-09-30"
         self.aprobacion.save(update_fields=["filtros"])
         self.assertFalse(self.leer(self.octubre)["filas"])
+
+    def test_cambiar_fecha_y_monto_no_reutiliza_aprobacion_del_recibo(self):
+        self.preparar()
+        gasto = self.partes[0]
+        gasto.servicio_desde = date(2026, 9, 19)
+        gasto.monto = Decimal("9563.94")
+        gasto.save(update_fields=["servicio_desde", "monto"])
+        self.assertFalse(self.leer(self.octubre)["filas"])
+
+    def test_cambiar_archivo_no_reutiliza_aprobacion(self):
+        self.preparar()
+        self.partes[0].archivo_soporte = "otro.pdf"
+        self.partes[0].save(update_fields=["archivo_soporte"])
+        self.assertFalse(self.leer(self.octubre)["filas"])
+
+    def test_presupuesto_y_lector_usan_la_misma_porcion(self):
+        from reportes.models import LineaPresupuestoMensual
+        from reportes.services_presupuesto_real import PresupuestoRealConsolidacionService
+        self.preparar()
+        for mes, importe in [(self.octubre, "9407.16"), (self.noviembre, "5158.76")]:
+            linea = LineaPresupuestoMensual.objects.create(rubro=self.rubro, periodo=mes)
+            resumen = PresupuestoRealConsolidacionService().consolidar(periodo=mes, rubro_ids=[self.rubro.pk])
+            self.assertFalse(resumen.errores)
+            linea.refresh_from_db()
+            self.assertEqual(linea.monto_real, Decimal(importe))
+            self.assertEqual(linea.monto_real, sum(f["monto_mensual"] for f in self.leer(mes)["filas"]))
