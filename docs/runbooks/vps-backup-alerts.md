@@ -265,3 +265,8 @@ el bloqueo y exigen revisión. No modificar la aprobación histórica.
 Entregar cantidad/bytes realmente retirados y espacio disponible antes/después en
 el mismo filesystem por separado. La variación concurrente de disco no equivale
 al ahorro atribuible a Point; ni el tamaño candidato ni el deploy acreditan retiro.
+
+El retiro Point exige respaldo y receptor de decisiones activos. El timer del
+publicador automático puede estar activo o pausado, pero su estado debe conservarse
+antes/después; no reactivarlo para pasar una guarda. Estados fallidos, transitorios
+o cambios de servicios/respaldos bloquean el retiro bajo el mutex de despliegue.
