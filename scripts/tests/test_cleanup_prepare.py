@@ -218,6 +218,35 @@ class PrepareTests(unittest.TestCase):
         self.row('approved', expired=True, identity='sha256:'+'b'*64)
         self.assertEqual(self.run_once(), 'requested')
 
+    def execution(self, state):
+        row=self.ledger.read('a'*24)
+        (self.ledger.directory/'executions').mkdir(mode=0o700,exist_ok=True)
+        p.atomic_json(self.ledger.directory/'executions'/('a'*24+'.json'),
+                      dict(nonce=row['nonce'],proposal_sha256=row['proposal_sha256'],state=state))
+
+    def test_completed_other_scope_unblocks_without_changing_approval(self):
+        self.row('approved',identity='sha256:'+'b'*64)
+        before=self.ledger.read('a'*24)
+        self.execution('completed')
+        self.assertFalse(p.blocked(self.ledger,None,1_800_000_000))
+        self.assertEqual(self.ledger.read('a'*24),before)
+        self.assertTrue(p.blocked(self.ledger,before['image_id'],1_800_000_000))
+
+    def test_unfinished_other_execution_blocks_even_after_expiry(self):
+        for state in ('executing','partial','uncertain','blocked'):
+            with self.subTest(state=state):
+                self.row('approved',expired=True,identity='sha256:'+'b'*64)
+                self.execution(state)
+                self.assertTrue(p.blocked(self.ledger,None,1_800_000_000))
+
+    def test_execution_with_wrong_digest_never_unblocks(self):
+        self.row('approved',identity='sha256:'+'b'*64)
+        path=self.ledger.directory/'executions'/('a'*24+'.json')
+        path.parent.mkdir(mode=0o700,exist_ok=True)
+        p.atomic_json(path,dict(nonce='a'*24,proposal_sha256='c'*64,state='completed'))
+        with self.assertRaisesRegex(ValueError,'execution_proposal_mismatch'):
+            p.blocked(self.ledger,None,1_800_000_000)
+
     def test_ambiguous_send_terminal_even_after_backoff(self):
         send = Mock(side_effect=TimeoutError())
         self.assertEqual(p.prepare(self.state, self.ledger, self.config, self.nas, send, 1_800_000_000), 'blocked')

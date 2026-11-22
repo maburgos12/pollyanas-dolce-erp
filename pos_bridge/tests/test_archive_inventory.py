@@ -15,9 +15,10 @@ class ArchiveInventoryTests(TestCase):
         self.normal=PointSalesNormalized.objects.create(sync_job=self.job,task=self.task,raw_row=self.raw,branch=self.branch,fecha=self.old.date(),source_file=self.task.source_file,source_hash=self.task.source_hash)
     def test_closed_matching_source_is_eligible_without_mutation(self):
         self.assertTrue(eligible_task(self.task));self.assertEqual(PointSalesRawStaging.objects.count(),1)
-    def test_job_level_alert_without_task_blocks(self):
+    def test_job_level_alert_preserved_without_blocking_intact_archive(self):
         PointSalesQualityAlert.objects.create(sync_job=self.job,task=None,severity='CRITICAL',fecha=self.old.date())
-        self.assertFalse(eligible_task(self.task))
+        self.assertTrue(eligible_task(self.task))
+        self.assertEqual(PointSalesQualityAlert.objects.get().severity, 'CRITICAL')
     def test_incomplete_reference_blocks(self):
         self.job.status='RUNNING';self.job.save();self.task.refresh_from_db()
         self.assertFalse(eligible_task(self.task))
@@ -26,4 +27,22 @@ class ArchiveInventoryTests(TestCase):
         self.assertFalse(eligible_task(self.task))
     def test_orphan_fact_blocks(self):
         PointSalesDailyProductFact.objects.create(source_file=self.task.source_file,source_hash=self.task.source_hash,sale_date=self.old.date(),sync_job=None)
+        self.assertFalse(eligible_task(self.task))
+
+    def test_failed_other_source_same_day_preserved_without_blocking_archive(self):
+        other_job=PointSyncJob.objects.create(job_type='SALES',status='FAILED',finished_at=self.old)
+        other=PointSalesExtractionTask.objects.create(sync_job=other_job,branch=self.branch,
+            sale_date=self.task.sale_date,status='FAILED',source_file='/app/storage/pos_bridge/raw_exports/other.xls')
+        self.assertTrue(eligible_task(self.task))
+        other.refresh_from_db()
+        self.assertEqual(other.status,'FAILED')
+
+    def test_failed_reference_to_same_source_still_blocks(self):
+        other_job=PointSyncJob.objects.create(job_type='SALES',status='FAILED',finished_at=self.old)
+        PointSalesExtractionTask.objects.create(sync_job=other_job,branch=self.branch,
+            sale_date=self.task.sale_date,status='FAILED',source_file=self.task.source_file,source_hash=self.task.source_hash)
+        self.assertFalse(eligible_task(self.task))
+
+    def test_missing_normalized_row_still_blocks(self):
+        self.normal.delete()
         self.assertFalse(eligible_task(self.task))

@@ -111,4 +111,36 @@ class ExecutionTests(unittest.TestCase):
         altered=copy.deepcopy(self.proposal);del altered['schema'];del altered['executor'];self.path.write_text(json.dumps(altered))
         with self.assertRaisesRegex(ValueError,'point_requires'):c.read_proposal(self.path)
 
+class HostPreservationTests(unittest.TestCase):
+    def state(self, publisher='inactive'):
+        return dict(monitors='active\nactive\n'+publisher, http='200',
+                    containers={'erp':'unchanged'}, images=[], volumes=[], backups={})
+
+    def test_paused_publisher_is_preserved_without_reactivation(self):
+        before=self.state()
+        e.HostAdapter.verify_preserved(before,copy.deepcopy(before))
+        for changed in ('active','failed','activating'):
+            after=self.state(changed)
+            with self.assertRaises(ValueError):e.HostAdapter.verify_preserved(before,after)
+
+    def test_recovery_and_receiver_must_stay_active(self):
+        for states in ('inactive\nactive\ninactive','active\ninactive\ninactive','active\nactive\nfailed'):
+            before=self.state();before['monitors']=states
+            with self.assertRaises(ValueError):e.HostAdapter.verify_preserved(before,before)
+
+    def test_measure_records_paused_publisher_via_show(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); real_path=Path
+            adapter=object.__new__(e.HostAdapter)
+            def command(*args):
+                if args[:2]==('systemctl','show'):
+                    return 'inactive' if args[-1]=='erp-telegram-release.timer' else 'active'
+                if args[:2]==('systemctl','is-active'):raise AssertionError('inactive is not command failure')
+                if args[0]=='df':return 'Filesystem blocks used available capacity mounted\nx 100 80 20 80% /'
+                if args[0]=='curl':return '200'
+                return ''
+            adapter.command=Mock(side_effect=command)
+            with patch.object(e,'Path',side_effect=lambda value:root if value=='/opt/backups/erp' else real_path(value)):
+                self.assertEqual(adapter.measure()['monitors'],'active\nactive\ninactive')
+
 if __name__=='__main__':unittest.main()

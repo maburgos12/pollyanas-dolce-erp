@@ -281,6 +281,23 @@ class PointBrokerTests(unittest.TestCase):
         self.assertEqual(f.source.read_bytes(), b'new original')
         self.assertEqual(cleanup.execution_state(f.ledger, f.row()['nonce'])['removed'], [])
 
+    def test_full_historical_catalog_does_not_block_next_bounded_lot(self):
+        f = self.fixture
+        for index in range(archive.MAX_PILOT_FILES):
+            name = f'20260101_010101_point_sales_category_old_{index}.xls'
+            old = dict(schema=1, id=archive.entry_id(name, 'a'*64), relative_path=name,
+                       sha256='a'*64, bytes=1, nas_key='point-archive/objects/'+'a'*64+'.xls',
+                       verified_at=int(time.time()), consumers=['category_report'])
+            f.store.register(old)
+        self.assertEqual(f.prepare(), 'requested')
+        proposal, _ = cleanup.read_proposal(next(f.broker.state.glob('*.proposal')))
+        entries = proposal['delete_candidates'][0]['files']
+        self.assertEqual([e['relative_path'] for e in entries], [f.source.name])
+        self.assertLessEqual(len(entries), archive.MAX_PILOT_FILES)
+        self.assertEqual(len(list((f.store.root/'catalog/objects').glob('*.json'))), archive.MAX_PILOT_FILES+1)
+        self.assertTrue(f.source.exists())
+        self.assertEqual(f.execute(), 'not_approved')
+
     def test_nas_failure_prevents_catalog_and_proposal(self):
         f = self.fixture
         f.nas.fail_get = True

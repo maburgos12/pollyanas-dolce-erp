@@ -8,10 +8,9 @@ from datetime import timedelta
 from django.core.management.base import BaseCommand, CommandError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db import connection, transaction
-from django.db.models import Q
 from django.utils import timezone
 
-from pos_bridge.models import PointSalesExtractionTask, PointSalesNormalized, PointSalesRawStaging, PointSalesQualityAlert, PointSalesDailyProductFact, PointProductHistoryImport, PointMonthlySalesOfficial
+from pos_bridge.models import PointSalesExtractionTask, PointSalesNormalized, PointSalesRawStaging, PointSalesDailyProductFact, PointProductHistoryImport, PointMonthlySalesOfficial
 from ventas.models import VentaAutoritativaPoint
 from pos_bridge.services.archive_access import ArchiveStore
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
@@ -33,10 +32,7 @@ def eligible_task(task):
     refs = PointSalesExtractionTask.objects.filter(source_file=task.source_file)
     if refs.exclude(status='SUCCESS').exists() or refs.exclude(sync_job__status='SUCCESS').exists() or refs.exclude(source_hash=task.source_hash).exists():
         return False
-    if PointSalesExtractionTask.objects.filter(branch_id=task.branch_id,sale_date=task.sale_date).exclude(status='SUCCESS').exists():
-        return False
-    if PointSalesQualityAlert.objects.filter(Q(task_id__in=refs.values('id')) | Q(sync_job_id__in=refs.values('sync_job_id')) | Q(branch_id=task.branch_id,fecha=task.sale_date)).exclude(severity='INFO').exists():
-        return False
+    # Report quality incidents stay recorded; only this source's integrity gates retirement.
     if PointSalesRawStaging.objects.filter(source_file=task.source_file).exclude(task_id__in=refs.values('id')).exists() or PointSalesNormalized.objects.filter(source_file=task.source_file).exclude(task_id__in=refs.values('id')).exists():
         return False
     if PointSalesDailyProductFact.objects.filter(source_file=task.source_file).exclude(source_hash=task.source_hash).exists():
