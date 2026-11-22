@@ -80,6 +80,10 @@ def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
     ).select_related("producto_point").order_by("producto_point_id", "-fecha_vigencia", "-id"):
         meta = row.metadata or {}
         treatment = meta.get("cost_treatment")
+        if (treatment == "UNALLOCATED_SERVICE" and row.costo_unitario == 0
+                and "unallocated_service_period" in meta
+                and meta["unallocated_service_period"] != periodo.isoformat()):
+            continue
         if (row.producto_point_id not in decisiones
                 and treatment in {"NO_DIRECT_COST", "SUPPLIER_GIFT", "UNALLOCATED_SERVICE", "PURCHASE_REFERENCE"}
                 and meta.get("authorization")
