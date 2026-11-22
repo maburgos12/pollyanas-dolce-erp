@@ -79,6 +79,8 @@ def _fuentes_reventa_para_periodo(producto_ids, periodo, fin_periodo):
         fuente=ProductoReventaCosto.FUENTE_MANUAL,
     ).select_related("producto_point").order_by("producto_point_id", "-fecha_vigencia", "-id"):
         meta = row.metadata or {}
+        if "cost_treatment_period" in meta and meta["cost_treatment_period"] != periodo.isoformat():
+            continue
         treatment = meta.get("cost_treatment")
         if (row.producto_point_id not in decisiones
                 and treatment in {"NO_DIRECT_COST", "SUPPLIER_GIFT", "UNALLOCATED_SERVICE", "PURCHASE_REFERENCE"}
