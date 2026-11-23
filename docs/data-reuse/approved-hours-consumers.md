@@ -3,7 +3,9 @@
 Fuente única de intención: SolicitudHorarioEspecial v2 aprobada + bitácora de revisión.
 No se crean tablas, maestros, horarios habituales ni equivalencias por semejanza.
 Los resolutores conservan precedencia fecha > rango > semanal y reglas legacy conservadoras.
-La lectura pública se limita a 100 solicitudes por sucursal; al excederse queda UNKNOWN.
+La lectura recorre páginas de 100 solicitudes, con tope seguro de 10 000 históricas
+y 100 aplicables por sucursal/fecha; sólo las aplicables consumen este último límite.
+Al exceder cualquiera de esos topes queda UNKNOWN.
 
 ## Contratos
 
@@ -31,11 +33,13 @@ URLs fijas, sin redirects, cuerpos <=64KiB, timeouts 3s conexión/5s lectura y l
 8s entre fragmentos. Guarda recibos dentro del resumen existente, espera 30s entre
 lotes y 5m tras confirmación, evidencia <=15m. Revalida revisión central incluso con
 caché para impedir Finalizado de una intención sustituida. Google conserva recibos
-concurrentes al reconciliar. El bot sondea sólo últimos 20 registros de últimos siete días.
+concurrentes al reconciliar. El bot sondea hasta 20 registros QUEUED por ciclo, priorizando los nunca comprobados
+y después los menos recientemente comprobados. Conserva solicitudes futuras sin límite
+por antigüedad y termina el seguimiento sólo cuando se cancela o concluye su vigencia.
 
 La comprobación cubre fechas aplicables de los próximos siete días; rangos más largos
 u órdenes futuras dicen programado, nunca Finalizado de una cobertura parcial. Recurrencia
-semanal vigente verifica los días aplicables de esa semana. Finalizado exige lecturas de
+semanal sin fecha final permanece programada aunque haya lecturas de la semana actual. Finalizado exige lecturas de
 Google, tienda y Maya; no afirma prueba visual de Maps ni todos los días futuros indefinidos.
 
 Preview y botón de aprobación hacen preflight Google GET-only con candidato aún no aprobado,
@@ -50,5 +54,5 @@ Pruebas PostgreSQL aisladas usan fixtures; las pruebas de transporte mockean con
 No confundir esa evidencia con producción. Responsable raíz validó ERP Sinaloa id18/código
 SINALOA_LEYVA y tienda id31/slug sucursal-sinaloa-de-leyva; vínculo exacto de código en tienda
 requiere respaldo y operación puntual documentada en repo tienda. Ninguna bandera cambia.
-No se importó la base habitual Google/web: hay diferencias conocidas cuya fuente debe
-resolver Mauricio antes de cualquier bootstrap. No se activó el bot ni se desplegó.
+Mauricio eligió Google publicado como base inicial. No se importó todavía; el bootstrap
+y la verificación del corte inicial quedan a cargo del responsable raíz. No se activó el bot ni se desplegó.

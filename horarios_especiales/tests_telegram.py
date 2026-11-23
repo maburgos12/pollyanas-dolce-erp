@@ -66,6 +66,28 @@ class TelegramHoursTests(TestCase):
         persist_updates(self.config, [payload])
         return TelegramHoursUpdate.objects.get(update_id=id)
 
+    def test_status_rotation_keeps_old_future_requests_and_reaches_all_pending(self):
+        day = timezone.localdate()
+        obj, payload = create_request_from_rules(raw_text='future', actor=self.user,
+            branch_ids=[self.branches['MATRIZ'].pk], rules=[{'kind':'date',
+            'start_date':(day + timedelta(days=20)).isoformat(), 'closed_all_day':True, 'time_windows':[]}])
+        approve_request(request_obj=obj, actor=self.user, expected_revision=payload['revision'])
+        rows = [TelegramHoursUpdate.objects.create(bot_id=12345, update_id=100+i,
+            telegram_user_id=777, chat_id=777, request=obj, state='QUEUED',
+            created_at=timezone.now()-timedelta(days=30)) for i in range(23)]
+        with patch('horarios_especiales.services.telegram_bot.status_text', return_value='Programado, pendiente') as status:
+            poll_once(self.config, FakeTelegram())
+            self.assertEqual(status.call_count, 20)
+            self.assertEqual(TelegramHoursUpdate.objects.filter(receipt__has_key='status_checked_at').count(),20)
+            poll_once(self.config, FakeTelegram())
+        self.assertEqual(TelegramHoursUpdate.objects.filter(receipt__has_key='status_checked_at').count(),23)
+        self.assertEqual(TelegramHoursUpdate.objects.filter(pk__in=[row.pk for row in rows], state='QUEUED').count(),23)
+        with patch('horarios_especiales.services.telegram_bot.status_text', return_value='Vigencia concluida'), \
+                patch('horarios_especiales.services.telegram_bot.timezone.localdate', return_value=day+timedelta(days=21)):
+            poll_once(self.config, FakeTelegram())
+            poll_once(self.config, FakeTelegram())
+        self.assertFalse(TelegramHoursUpdate.objects.filter(pk__in=[row.pk for row in rows],state='QUEUED').exists())
+
     def test_parser_relative_date_frozen_in_mazatlan_and_all_ten(self):
         ids, rules = parse_instruction('Todas hoy cerradas', STAMP)
         self.assertEqual(set(ids), {b.pk for b in self.branches.values()})

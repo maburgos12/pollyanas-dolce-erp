@@ -81,10 +81,13 @@ def consumer_receipts(obj):
     # shortcut: readback covers seven days per run; longer/future periods stay programmed.
     dates = [today + timedelta(days=i) for i in range(7)]
     rules = payload['rules']
-    programmed = any(r['start_date'] > today.isoformat() or
+    programmed = any((r['kind'] == 'weekly' and not r.get('end_date')) or r['start_date'] > today.isoformat() or
                      (r.get('end_date') or (r['start_date'] if r['kind'] == 'date' else today.isoformat())) > dates[-1].isoformat()
                      for r in rules)
     if not any(rule_applies(r, d) for r in rules for d in dates):
+        if all(not (r['kind'] == 'weekly' and not r.get('end_date')) and
+               (r.get('end_date') or r['start_date']) < today.isoformat() for r in rules):
+            return ['Tienda: vigencia concluida; sin lectura vigente.', 'Maya: vigencia concluida; sin lectura vigente.']
         return ['Tienda: programado; sin fecha vigente verificable esta semana.', 'Maya: programado; sin fecha vigente verificable esta semana.']
     pairs = {}
     superseded = False

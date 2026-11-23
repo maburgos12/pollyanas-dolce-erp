@@ -119,3 +119,15 @@ class ConsumerReceiptsTests(TestCase):
         self.assertEqual(len(saved), 6)
         self.assertTrue(all(pair['store']['confirmed'] for pair in saved.values()))
         self.assertEqual(sum(pair.get('maya', {}).get('confirmed', False) for pair in saved.values()), 2)
+
+    def test_indefinite_weekly_never_finishes_from_seven_day_readback(self):
+        self.obj.cancelled_at = timezone.now()
+        self.obj.save(update_fields=['cancelled_at'])
+        obj = self.create({**self.rule, 'kind':'weekly', 'weekdays':[self.day.weekday()]})
+        obj.execution_summary_json = {'details':[{'branch_code':'EL_TUNEL','status':'GOOGLE_CONFIRMED'}]}
+        obj.save()
+        result = {dest:{'confirmed':True,'checked_at':timezone.now().isoformat()} for dest in ('store','maya')}
+        with patch('horarios_especiales.services.consumer_receipts.check_pair',return_value=result):
+            labels = consumer_receipts(obj)
+        self.assertTrue(all('programado' in label for label in labels))
+        self.assertNotIn('Finalizado',' '.join(labels))

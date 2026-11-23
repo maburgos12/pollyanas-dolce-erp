@@ -82,18 +82,22 @@ def resolve_approved_rule(branch, target_date):
         status__in=["APROBADO", "EJECUTADO", "FALLIDO"],
         approved_at__isnull=False, cancelled_at__isnull=True,
     )
-    requests = list(requests[:101])
-    if len(requests) > 100:
-        return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
-    for request in requests:
+    relevant = 0
+    # Bound scanning separately from applicable requests so expired history cannot fill the active budget.
+    for scanned, request in enumerate(requests.iterator(chunk_size=100), start=1):
+        if scanned > 10000:
+            return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
         payload = request.canonical_payload
         if validate_rule_payload(payload) or not request.audit_entries.filter(
             action="APPROVED", payload_json__revision=payload.get("revision"),
         ).exists():
             return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
-        for index, rule in enumerate(payload["rules"]):
-            if rule_applies(rule, target_date):
-                candidates.append(((PRECEDENCE[rule["kind"]], request.approved_at, request.id, index), request, rule))
+        applicable = [(index, rule) for index, rule in enumerate(payload["rules"]) if rule_applies(rule, target_date)]
+        relevant += bool(applicable)
+        if relevant > 100:
+            return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
+        for index, rule in applicable:
+            candidates.append(((PRECEDENCE[rule["kind"]], request.approved_at, request.id, index), request, rule))
     if not candidates:
         return None
     _, request, rule = max(candidates, key=lambda candidate: candidate[0])

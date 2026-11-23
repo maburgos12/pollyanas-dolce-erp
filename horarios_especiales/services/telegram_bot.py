@@ -9,11 +9,12 @@ import time
 from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import requests
 from django.contrib.auth import get_user_model
 from django.db import connection, transaction
-from django.db.models import Q
+from django.db.models import F, Q
 from django.core.exceptions import PermissionDenied
 from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
 from django.utils import timezone
@@ -377,12 +378,21 @@ def poll_once(config=None, client=None):
             if row.state in ('PREPARED', 'REPLY'):
                 deliver(row, client, config)
         recover_approved(config)
-        for row in owner_updates(config).filter(state='QUEUED', created_at__gte=timezone.now() - timedelta(days=7)).select_related('request').order_by('-pk')[:20]:
+        for row in owner_updates(config).filter(state='QUEUED').select_related('request').order_by(F('receipt__status_checked_at').asc(nulls_first=True), 'pk')[:20]:
             if time.monotonic() > deadline:
                 break
+            row.receipt['status_checked_at'] = timezone.now().isoformat()
+            row.save(update_fields=['receipt'])
             text = status_text(row.request)
             if row.receipt.get('last_status') != text:
                 client.call('sendMessage', chat_id=row.chat_id, text=text)
                 row.receipt['last_status'] = text
                 row.save(update_fields=['receipt'])
+            rules = row.request.canonical_payload.get('rules', [])
+            today = timezone.localdate(timezone=ZoneInfo("America/Mazatlan")).isoformat()
+            expired = bool(rules) and all(not (rule['kind'] == 'weekly' and not rule.get('end_date')) and
+                                         (rule.get('end_date') or rule['start_date']) < today for rule in rules)
+            if row.request.cancelled_at or expired:
+                row.state = 'DONE'
+                row.save(update_fields=['state'])
     return {'polled': True}

@@ -33,6 +33,17 @@ class ScheduleRuleTests(TestCase):
     def approve(self, obj):
         return approve_request(request_obj=obj, actor=self.user, expected_revision=obj.canonical_payload["revision"])
 
+    def test_expired_history_does_not_fill_applicable_rule_limit(self):
+        for _ in range(101):
+            obj = self.create(self.rule(start_date="2026-01-01"))
+            self.approve(obj)
+        self.assertIsNone(resolve_approved_rule(self.branch, date(2026, 11, 22)))
+        current = self.create(self.rule())
+        self.approve(current)
+        result = resolve_approved_rule(self.branch, date(2026, 11, 22))
+        self.assertEqual(result["status"], "VERIFIED")
+        self.assertEqual(result["request_id"], current.pk)
+
     def test_exact_preview_binding_and_cancelled_revision_cannot_reapprove(self):
         obj = self.create(self.rule())
         for revision in (None, "stale"):
