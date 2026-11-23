@@ -251,7 +251,7 @@ NAS. Siguen excluidas las referencias fallidas al mismo archivo, fuentes recient
 incompletas, con hashes/filas distintos o consumidores fuera del contrato de
 categorías. Copiar no certifica las cifras del reporte ni resuelve sus incidencias.
 
-El catálogo conserva todos los recibos históricos; el límite de diez archivos y
+El catálogo conserva todos los recibos históricos; el límite de cien archivos y
 100 MB se aplica al lote propuesto, no al total del catálogo. Cada lote requiere
 su aprobación exacta y vigente. Antes de retirar: lectura completa desde NAS,
 hash/tamaño/parser equivalentes, revalidación de referencias y lease exclusivo.
@@ -272,8 +272,9 @@ antes/después; no reactivarlo para pasar una guarda. Estados fallidos, transito
 o cambios de servicios/respaldos bloquean el retiro bajo el mutex de despliegue.
 
 La página nativa de 100 registros tardó 47.84 s en producción el 22 de noviembre
-(3.79 s de arranque y 43.96 s de elegibilidad). Su límite dentro del contenedor es
-85 s, con límites exteriores de 90/95 s; cada consulta conserva su límite de 10 s.
+(3.79 s de arranque y 43.96 s de elegibilidad). Cada petición conserva un límite de
+85 s dentro del contenedor y 95 s para la respuesta; cada consulta SQL conserva
+su límite de 10 s.
 Un timeout no autoriza reiniciar contadores ni omitir comprobaciones de integridad.
 
 Una referencia en `VentaAutoritativaPoint` conserva su ruta lógica y todas sus
@@ -286,3 +287,21 @@ Al llenar el lote, el cursor queda antes del primer candidato aún no preparado;
 no avanza al final de una página con archivos pendientes. La vista previa completa
 de 100 registros produjo 89 candidatos íntegros en 55.30 s, incluido el parser.
 Esto no acredita su recepción en NAS ni autoriza retirarlos.
+
+El Broker reutiliza un proceso del mismo comando durante una operación. Django y
+sus checks completos arrancan una vez; cada petición vuelve a ejecutar el handler
+nativo con transacción RRO y conexión nueva. No se cachea elegibilidad y ambas
+verificaciones bajo lease inmediatamente antes del retiro se conservan.
+El proceso tiene límite duro de 900 s, se sustituye entre peticiones antes de
+700 s o 480 respuestas, y su cierre ocurre bajo los locks del ejecutor. Peticiones
+de 4 KiB, respuestas de 1 MiB y stderr acumulado de 16 KiB son máximos efectivos.
+Salida inesperada, EOF o timeout producen HOLD sin reenviar una petición ambigua.
+Un cierre no acreditado conserva el resultado del retiro en `retirement_state`,
+marca la ejecución global `uncertain` y envía un aviso separado; no repite el lote.
+
+Antes de proponer cien archivos, activar coherentemente productor y validador
+instalado mediante el refresh oficial de la revisión publicada, conservando el
+receptor y la pausa del publicador. Permanecen 100 MB por lote y 128 KiB por
+propuesta, además de aprobación exacta por nonce/digest. Las aprobaciones anteriores
+no amplían su alcance. Medir el recorrido real antes de atribuir una mejora de
+tiempo o espacio; una base local vacía sólo comprueba la reutilización del arranque.

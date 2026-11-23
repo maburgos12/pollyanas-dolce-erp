@@ -24,6 +24,7 @@ class Adapter:
     def measure(self):return dict(free_bytes=100 if self.file.exists() else 108,percent=77 if self.file.exists() else 75,backups='unchanged')
     def verify_preserved(self,before,after):assert before['backups']==after['backups']
     def identity(self,entry):return entry['id']
+    def close(self):pass
     @contextmanager
     def lease(self,entry):yield
     def verify(self,entry):return self.file.exists() and hashlib.sha256(self.file.read_bytes()).hexdigest()==entry['sha256']
@@ -34,6 +35,27 @@ class Adapter:
 
 
 class ExecutionTests(unittest.TestCase):
+    def test_close_failure_keeps_completed_retirement_and_holds_future_execution(self):
+        self.approve()
+        self.adapter.close=Mock(side_effect=RuntimeError('PRIVATE-DETAIL'))
+        with self.assertRaises(RuntimeError):e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time)
+        result=c.execution_state(self.ledger,self.row['nonce'])
+        self.assertEqual(result['state'],'uncertain')
+        self.assertEqual(result['retirement_state'],'completed')
+        self.assertEqual(result['removed'],[self.entry['id']])
+        self.assertEqual(result['freed_bytes'],8)
+        self.assertNotIn('PRIVATE-DETAIL',json.dumps(result))
+        self.assertFalse(self.adapter.file.exists())
+
+    def test_once_flushes_when_completed_retirement_has_close_failure(self):
+        self.approve();self.adapter.close=Mock(side_effect=RuntimeError('PRIVATE'))
+        execute=e.execute
+        with patch.object(e,'execute',side_effect=lambda *a:execute(*a,now=time.time)),patch.object(e,'HostAdapter',return_value=self.adapter),patch.object(c,'flush') as flush,patch.object(e,'telegram'):
+            result=e.once(self.ledger,self.config)
+        self.assertEqual(result[self.row['nonce']],'RuntimeError')
+        self.assertEqual(flush.call_count,2)
+        self.assertEqual(c.execution_state(self.ledger,self.row['nonce'])['retirement_state'],'completed')
+
     def setUp(self):
         clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
         health = patch.object(c, 'require_recovery', create=True)

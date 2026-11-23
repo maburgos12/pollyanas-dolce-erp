@@ -75,7 +75,7 @@ def point_manifest_id(files):
 
 
 def validate_point_manifest(item):
-    if set(item) != {'type', 'id', 'files', 'recovery'} or not isinstance(item['files'], list) or not 1 <= len(item['files']) <= 10:
+    if set(item) != {'type', 'id', 'files', 'recovery'} or not isinstance(item['files'], list) or not 1 <= len(item['files']) <= 100:
         raise ValueError('invalid_point_manifest')
     seen = set()
     for entry in item['files']:
@@ -224,7 +224,8 @@ def revalidate_proposal(proposal, state):
     require_recovery()
     item = proposal['delete_candidates'][0]
     if item['type'] == 'point_archive_manifest':
-        operational_module('erp_point_archive').Broker().verify_batch(item['files'])
+        with operational_module('erp_point_archive').Broker() as broker:
+            broker.verify_batch(item['files'])
         return
     # Legacy image/cache proposals lack a restorable identity contract: require operator review.
     if item['type'] != 'cache_log_manifest' or item['build_cache']:

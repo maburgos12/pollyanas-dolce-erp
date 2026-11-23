@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+import subprocess
 from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -104,14 +105,15 @@ class PointLifecycleFixture:
 
 
 class PointBrokerTests(unittest.TestCase):
-    def test_inventory_command_keeps_bounded_budget_for_measured_full_page(self):
-        with patch.object(archive.subprocess, 'run', return_value=Mock(stdout='{"entries":[]}')) as run:
-            self.assertEqual(archive.Broker().command('--after-id', '3395'), {'entries': []})
-        command = run.call_args.args[0]
-        self.assertEqual(command[:2], ['timeout', '90'])
-        self.assertEqual(command[5:7], ['timeout', '85'])
-        self.assertEqual(run.call_args.kwargs['timeout'], 95)
-        self.assertTrue(run.call_args.kwargs['check'])
+    def test_inventory_command_reuses_session_and_closes(self):
+        session=Mock()
+        session.request.return_value={'entries':[]}
+        with patch.object(archive,'InventorySession',return_value=session,create=True):
+            with archive.Broker() as broker:
+                broker.command('--after-id','3395')
+                self.assertEqual(broker.command('--name','source.xls'),{'entries':[]})
+        self.assertEqual(session.request.call_count,2)
+        session.close.assert_called_once()
 
     def setUp(self):
         clock=patch('time.time',return_value=1794938400);clock.start();self.addCleanup(clock.stop)
@@ -163,12 +165,10 @@ class PointBrokerTests(unittest.TestCase):
                 self.assertNotIn('stderr', detail)
 
     def test_inventory_timeout_is_inside_container(self):
-        f = self.fixture
-        with patch.object(archive.subprocess, 'run', return_value=Mock(stdout='{}')) as run:
-            self.assertEqual(f.broker.command('--after-id', '3295'), {})
-        args = run.call_args.args[0]
-        self.assertEqual(args[3:8], ['exec', 'pastelerias-erp-worker-1', 'timeout', '85', 'python'])
-        self.assertGreater(run.call_args.kwargs['timeout'], 90)
+        args=archive.InventorySession.argv()
+        index=args.index('pastelerias-erp-worker-1')
+        self.assertEqual(args[index+1:index+6],['timeout','--signal=KILL','900','python','-B'])
+        self.assertIn('signal.alarm(85)',args[-1])
 
     def test_old_installed_contract_waits_for_activation(self):
         f = self.fixture
@@ -310,18 +310,19 @@ class PointBrokerTests(unittest.TestCase):
     def test_bounded_lots_resume_at_first_unprepared_candidate(self):
         f = self.fixture
         candidates = []
-        for task_id in range(1, 16):
+        last_id=archive.MAX_PILOT_FILES+5
+        for task_id in range(1, last_id+1):
             path = f.store.sources_root / f'20260101_010101_point_sales_category_{task_id}.xls'
             path.write_bytes(f'workbook {task_id}'.encode())
             candidates.append(dict(relative_path=path.name, task_id=task_id,
                 **f.store.snapshot(path), **f.parse(path)))
         def inventory(name=None, after_id=0):
             return {'entries':[x for x in candidates if x['relative_path']==name] if name else
-                [x for x in candidates if x['task_id']>after_id], 'next_id':15, 'has_more':False}
+                [x for x in candidates if x['task_id']>after_id], 'next_id':last_id, 'has_more':False}
         f.broker.inventory = inventory
         self.assertEqual(f.prepare(), 'requested')
         status = json.loads((f.broker.state/'status.json').read_text())
-        self.assertEqual(status['cursor'], 10)
+        self.assertEqual(status['cursor'], archive.MAX_PILOT_FILES)
         first_paths = {p.name for p in f.broker.state.glob('*.proposal')}
         f.decide(); self.assertEqual(f.execute(), 'completed')
         with patch('time.time', return_value=time.time()+301):
@@ -330,8 +331,8 @@ class PointBrokerTests(unittest.TestCase):
         proposal, _ = cleanup.read_proposal(second)
         self.assertEqual(len(proposal['delete_candidates'][0]['files']), 5)
         self.assertEqual(json.loads((f.broker.state/'status.json').read_text())['cursor'], 0)
-        self.assertEqual(len(list((f.store.root/'catalog/objects').glob('*.json'))), 15)
-        self.assertTrue(all((f.store.sources_root/x['relative_path']).exists() for x in candidates[10:]))
+        self.assertEqual(len(list((f.store.root/'catalog/objects').glob('*.json'))), last_id)
+        self.assertTrue(all((f.store.sources_root/x['relative_path']).exists() for x in candidates[archive.MAX_PILOT_FILES:]))
 
     def test_nas_failure_prevents_catalog_and_proposal(self):
         f = self.fixture
