@@ -210,7 +210,7 @@ class AudioBudgetConcurrencyTests(TransactionTestCase):
         config = dict(bot_id=45678, telegram_user_id=777, telegram_chat_id=777, erp_user_id=user.pk)
         TelegramHoursCursor.objects.create(bot_id=config['bot_id'], audio_reserved_cents=496)
         row = TelegramHoursUpdate.objects.create(bot_id=config['bot_id'], update_id=1,
-            telegram_user_id=777, chat_id=777, state='AUDIO_WAIT')
+            telegram_user_id=777, chat_id=777, erp_user=user, state='AUDIO_WAIT')
         barrier = Barrier(2)
         def reserve():
             close_old_connections()

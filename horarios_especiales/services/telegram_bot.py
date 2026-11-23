@@ -29,14 +29,107 @@ class TelegramUnavailable(Exception):
     pass
 
 
-def require_approver(actor):
-    if not actor or not actor.is_active or not has_any_role(actor, ROLE_DG, ROLE_ADMIN):
-        raise PermissionDenied('El propietario ERP ya no tiene permiso para aprobar y ejecutar horarios.')
+IDENTITY_KEYS = ('telegram_user_id', 'telegram_chat_id', 'erp_user_id')
+
+
+def members(config):
+    """The original owner keeps its role requirement; delegates get only own hours."""
+    yield {key: config[key] for key in IDENTITY_KEYS}
+    yield from config.get('users', [])
+
+
+def current_config(config):
+    root = config.get('_root_config', config)
+    return load_config(root['_config_dir']) if root.get('_config_dir') else root
+
+
+def scoped_config(config, identity):
+    return {**{key: value for key, value in config.items() if key not in ('users', '_root_config')},
+            **identity, '_root_config': config}
+
+
+def require_approver(actor, config=None):
+    if config and 'approve_own' in config and config['approve_own'] is not True:
+        raise PermissionDenied('El acceso a horarios fue deshabilitado.')
+    scoped = bool(config and config.get('approve_own') is True and actor and actor.pk == config['erp_user_id'])
+    if not actor or not actor.is_active or not (scoped or has_any_role(actor, ROLE_DG, ROLE_ADMIN)):
+        raise PermissionDenied('El usuario ERP ya no tiene permiso para aprobar y ejecutar sus horarios.')
+
+
+def actor_for(config):
+    root = current_config(config)
+    identity = next((member for member in members(root) if all(member[key] == config[key] for key in IDENTITY_KEYS)), None)
+    if identity is None:
+        raise PermissionDenied('La vinculación Telegram fue retirada o cambió.')
+    actor = get_user_model().objects.filter(pk=identity['erp_user_id']).first()
+    require_approver(actor, identity)
+    return actor
+
+
+def active_configs(config):
+    root = current_config(config)
+    result = []
+    for identity in members(root):
+        scoped = scoped_config(root, identity)
+        try:
+            actor_for(scoped)
+        except PermissionDenied:
+            continue
+        result.append(scoped)
+    return result
 
 
 def owner_updates(config):
     return TelegramHoursUpdate.objects.filter(bot_id=config['bot_id'], chat_id=config['telegram_chat_id'],
-        telegram_user_id=config['telegram_user_id']).filter(Q(request__isnull=True) | Q(request__requested_by_id=config['erp_user_id']))
+        telegram_user_id=config['telegram_user_id']).filter(
+            Q(erp_user_id=config['erp_user_id']) | Q(erp_user__isnull=True, request__requested_by_id=config['erp_user_id'])
+        ).filter(Q(request__isnull=True) | Q(request__requested_by_id=config['erp_user_id']))
+
+
+def active_updates(config):
+    allowed = Q(pk__in=[])
+    for scoped in active_configs(config):
+        allowed |= Q(pk__in=owner_updates(scoped).values('pk'))
+    return TelegramHoursUpdate.objects.filter(allowed)
+
+
+@transaction.atomic
+def discard_revoked_pending(config):
+    """Drop leases/buttons of removed identities without changing approved schedules."""
+    allowed = active_updates(config).values('pk')
+    for row in TelegramHoursUpdate.objects.filter(bot_id=config['bot_id'],
+            state__in=['RECEIVED', 'PREPARED', 'PREVIEW', 'REPLY', 'AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID']
+            ).exclude(pk__in=allowed).select_for_update():
+        row.state, row.nonce, row.expires_at = 'CANCELLED', '', None
+        row.receipt = {key: value for key, value in row.receipt.items() if key in ('reserved_cents', 'sha256')}
+        row.save(update_fields=['state', 'nonce', 'expires_at', 'receipt'])
+
+
+def config_for_row(config, row):
+    for scoped in active_configs(config):
+        if (row.bot_id == scoped['bot_id'] and row.telegram_user_id == scoped['telegram_user_id']
+                and row.chat_id == scoped['telegram_chat_id'] and
+                (row.erp_user_id or (row.request.requested_by_id if row.request_id else None)) == scoped['erp_user_id']
+                and (not row.request_id or row.request.requested_by_id == scoped['erp_user_id'])):
+            return scoped
+    raise PermissionDenied('La vinculación de esta solicitud ya no está autorizada.')
+
+
+def require_request_approver(request_obj):
+    """Re-read the private allowlist at execution, including winning contributors."""
+    try:
+        config = load_config()
+    except (OSError, ValueError, KeyError):
+        raise PermissionDenied('Configuración Telegram no disponible; publicación detenida.') from None
+    for row in request_obj.telegramhoursupdate_set.all():
+        try:
+            scoped = config_for_row(config, row)
+        except PermissionDenied:
+            continue
+        actor = actor_for(scoped)
+        if actor.pk == request_obj.approved_by_id == request_obj.requested_by_id:
+            return actor
+    raise PermissionDenied('El aprobador original ya no tiene una vinculación Telegram vigente.')
 
 
 def load_config(directory=None):
@@ -50,15 +143,29 @@ def load_config(directory=None):
         values.append(path.read_text().strip())
     owner = json.loads(values[0])
     token = values[1]
-    if not re.fullmatch(r'\d{5,20}:[A-Za-z0-9_-]{20,100}', token):
-        raise ValueError('Token del bot inválido.')
-    config = {key: owner[key] for key in ('telegram_user_id', 'telegram_chat_id', 'erp_user_id')}
-    if any(type(value) is not int or not 0 < value < 2**63 for value in config.values()):
-        raise ValueError('Propietario privado no configurado.')
+    if not isinstance(owner, dict) or not re.fullmatch(r'\d{5,20}:[A-Za-z0-9_-]{20,100}', token):
+        raise ValueError('Configuración del bot inválida.')
+    config = {key: owner[key] for key in IDENTITY_KEYS}
+    users = owner.get('users', [])
+    if not isinstance(users, list) or len(users) > 32:
+        raise ValueError('Lista de usuarios inválida.')
+    config['users'] = users
+    seen = {key: set() for key in IDENTITY_KEYS}
+    for index, identity in enumerate(members(config)):
+        if (not isinstance(identity, dict) or
+                (index and (set(identity) != set(IDENTITY_KEYS) | {'approve_own'} or type(identity['approve_own']) is not bool))):
+            raise ValueError('Vinculación explícita inválida.')
+        for key in IDENTITY_KEYS:
+            value = identity.get(key)
+            if type(value) is not int or not 0 < value < 2**63 or value in seen[key]:
+                raise ValueError('Identidad inválida o duplicada.')
+            seen[key].add(value)
+        if identity['telegram_chat_id'] != identity['telegram_user_id']:
+            raise ValueError('Se requiere el chat privado de la persona vinculada.')
     bot_id = int(token.split(':')[0])
     if not 0 < bot_id < 2**63:
         raise ValueError('Bot ID inválido.')
-    config.update(bot_id=bot_id, token=token)
+    config.update(bot_id=bot_id, token=token, _config_dir=str(root))
     return config
 
 
@@ -159,11 +266,13 @@ def persist_updates(config, updates):
         update_id = payload.get('update_id')
         if type(update_id) is not int or not 0 <= update_id < 2**63 - 1 or update_id < cursor.next_update_id:
             continue
-        if authorized(payload, config):
+        scoped = next((item for item in active_configs(config) if authorized(payload, item)), None)
+        if scoped:
             message = payload.get('message') or payload.get('callback_query', {}).get('message', {})
             # Telegram inputs are bounded by the transport; keep voice metadata for later transcription.
             TelegramHoursUpdate.objects.get_or_create(bot_id=config['bot_id'], update_id=update_id,
-                defaults={'telegram_user_id': config['telegram_user_id'], 'chat_id': config['telegram_chat_id'],
+                defaults={'telegram_user_id': scoped['telegram_user_id'], 'chat_id': scoped['telegram_chat_id'],
+                          'erp_user_id': scoped['erp_user_id'],
                           'message_id': message.get('message_id', 0), 'payload': bounded_input(payload)})
         cursor.next_update_id = max(cursor.next_update_id, update_id + 1)
     cursor.save(update_fields=['next_update_id'])
@@ -190,6 +299,38 @@ def higher_priority_conflicts(branch_ids, rule):
                 for i in range(min(7, (date.fromisoformat(end) - date.fromisoformat(start)).days + 1)))):
                 conflicts.append(obj.request_code)
     return sorted(set(conflicts))
+
+
+def rules_overlap(left, right):
+    start = max(date.fromisoformat(left['start_date']), date.fromisoformat(right['start_date']))
+    def end(rule):
+        return date.fromisoformat(rule.get('end_date') or rule['start_date']) if rule['kind'] != 'weekly' or rule.get('end_date') else date.max
+    finish = min(end(left), end(right))
+    if start > finish:
+        return False
+    from horarios_especiales.services.rules import rule_applies
+    return any(rule_applies(left, start + timedelta(days=offset)) and rule_applies(right, start + timedelta(days=offset))
+               for offset in range(min(7, (finish - start).days + 1)))
+
+
+def approval_snapshot(obj):
+    """Relevant approved rules, not projection receipts or unrelated branches/dates."""
+    ids = {row['branch_id'] for row in obj.canonical_payload['locations']}
+    snapshot = []
+    for old in SolicitudHorarioEspecial.objects.filter(approved_at__isnull=False, cancelled_at__isnull=True,
+            status__in=['APROBADO', 'EJECUTADO', 'FALLIDO']).exclude(pk=obj.pk).order_by('pk'):
+        payload = old.canonical_payload
+        if payload.get('schema_version') == 2:
+            if not ids.intersection(row['branch_id'] for row in payload['locations']):
+                continue
+            old_rules = payload['rules']
+        else:
+            old_rules = [{'kind': 'date', 'start_date': day.isoformat()} for day in
+                         old.details.filter(sucursal_id__in=ids).values_list('target_date', flat=True)]
+        if any(rules_overlap(new, prior) for new in obj.canonical_payload['rules'] for prior in old_rules):
+            snapshot.append({'id': old.pk, 'code': old.request_code, 'approved_at': old.approved_at.isoformat(),
+                             'revision': hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()})
+    return snapshot
 
 
 def preview_text(obj):
@@ -244,6 +385,8 @@ def invalidate_pending(config, actor):
 
 @transaction.atomic
 def prepare_text(row, text, config, actor, *, strict_branches=False):
+    config = config_for_row(config, row)
+    actor = actor_for(config)
     # Invalidating first prevents old buttons from approving after an ambiguous correction.
     invalidate_pending(config, actor)
     try:
@@ -253,6 +396,9 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
             raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
         obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
         from horarios_especiales.services.google_projection import preview_google_conflicts
+        from horarios_especiales.services.requests import _lock_request_branches
+        _lock_request_branches(obj)
+        snapshot = approval_snapshot(obj)
         obj.execution_summary_json['google_preflight'] = preview_google_conflicts(obj)
         obj.save(update_fields=['execution_summary_json'])
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
@@ -263,27 +409,31 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
         row.revision = payload['revision']
         row.nonce = secrets.token_hex(16)
         row.expires_at = timezone.now() + timedelta(minutes=20)
-        row.receipt = {'text': preview_text(obj)}
+        warning = ('\nPuede reemplazar horarios aprobados en fechas coincidentes: ' + ', '.join(item['code'] for item in snapshot) + '. Revisa antes de aprobar.') if snapshot else ''
+        row.receipt = {'text': preview_text(obj) + warning, 'approval_snapshot': snapshot}
         row.state = 'PREPARED'
     row.save()
 
 
 @transaction.atomic
 def process_callback(row, config, actor):
-    actor = get_user_model().objects.get(pk=config['erp_user_id'])
-    require_approver(actor)
+    config = config_for_row(config, row)
+    actor = actor_for(config)
     callback = row.payload['callback_query']
     match = re.fullmatch(r'approve:(\d+):([a-f0-9]{32})', callback.get('data', ''))
     old = TelegramHoursUpdate.objects.select_for_update().filter(pk=int(match[1])).first() if match and 0 < int(match[1]) < 2**63 else None
-    valid = authorized(row.payload, config) and old and old.request_id and old.request.requested_by_id == actor.pk and old.bot_id == config['bot_id'] and old.telegram_user_id == row.telegram_user_id and old.chat_id == row.chat_id and old.preview_message_id == row.message_id and secrets.compare_digest(old.nonce, match[2])
+    valid = authorized(row.payload, config) and old and old.request_id and old.request.requested_by_id == actor.pk and old.erp_user_id in (None, actor.pk) and old.bot_id == config['bot_id'] and old.telegram_user_id == row.telegram_user_id and old.chat_id == row.chat_id and old.preview_message_id == row.message_id and secrets.compare_digest(old.nonce, match[2])
     if valid and old.state == 'PREVIEW' and old.expires_at and old.expires_at > timezone.now():
         try:
             from horarios_especiales.services.requests import _lock_request_branches
             _lock_request_branches(old.request)
+            if old.receipt.get('approval_snapshot') != approval_snapshot(old.request):
+                raise ValueError('El horario aprobado cambió después de preparar la vista previa.')
             if higher_priority_conflicts([item['branch_id'] for item in old.request.canonical_payload['locations']], old.request.canonical_payload['rules'][0]):
                 raise ValueError('La prioridad cambió después de preparar la vista.')
             from horarios_especiales.services.google_projection import preview_google_conflicts
             preview_google_conflicts(old.request)
+            actor = actor_for(config)
             approve_request(request_obj=old.request, actor=actor, expected_revision=old.revision)
         except ValueError as exc:
             text = 'No se aprobó: ' + str(exc) + ' Envía de nuevo la instrucción completa.'
@@ -298,6 +448,8 @@ def process_callback(row, config, actor):
 
 
 def process_received(row, config, actor):
+    config = config_for_row(config, row)
+    actor = actor_for(config)
     if not authorized(row.payload, config):
         row.state = 'REJECTED'
         row.save(update_fields=['state'])
@@ -330,6 +482,8 @@ def process_received(row, config, actor):
 
 
 def deliver(row, client, config):
+    config = config_for_row(config, row)
+    actor_for(config)
     if row.telegram_user_id != config['telegram_user_id'] or row.chat_id != config['telegram_chat_id'] or row.bot_id != config['bot_id']:
         raise PermissionDenied('El propietario Telegram cambió.')
     payload = {'chat_id': row.chat_id, 'text': row.receipt['text']}
@@ -353,12 +507,15 @@ def deliver(row, client, config):
 
 def recover_approved(config):
     from horarios_especiales.tasks import execute_special_hours_request_task
-    require_approver(get_user_model().objects.get(pk=config['erp_user_id']))
-    for row in owner_updates(config).filter(state='APPROVED').select_related('request')[:20]:
+    if not active_configs(config):
+        actor_for(config)
+    for row in active_updates(config).filter(state='APPROVED').select_related('request')[:20]:
+        scoped = config_for_row(config, row)
+        actor = actor_for(scoped)
         if not row.request.cancelled_at:
             # Crash after enqueue may enqueue again; the publisher locks and reconciles against readback.
             try:
-                execute_special_hours_request_task.delay(request_id=row.request_id, actor_id=config['erp_user_id'])
+                execute_special_hours_request_task.delay(request_id=row.request_id, actor_id=actor.pk)
             except Exception:
                 continue
         row.state = 'QUEUED'
@@ -368,34 +525,39 @@ def recover_approved(config):
 def poll_once(config=None, client=None):
     deadline = time.monotonic() + 25
     config = config or load_config()
-    actor = get_user_model().objects.get(pk=config['erp_user_id'], is_active=True)
-    require_approver(actor)
+    if not active_configs(config):
+        actor_for(config)
     client = client or TelegramClient(config)
     with consumer_lock(config['bot_id']) as locked:
         if not locked:
             return {'busy': True}
+        discard_revoked_pending(config)
         recover_approved(config)
         cursor, _ = TelegramHoursCursor.objects.get_or_create(bot_id=config['bot_id'])
         updates = client.call('getUpdates', offset=cursor.next_update_id, timeout=0, limit=20, allowed_updates=['message', 'callback_query'])
         persist_updates(config, updates)
-        for row in owner_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY', 'AUDIO_WAIT']).order_by('update_id')[:20]:
+        for row in active_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY', 'AUDIO_WAIT']).order_by('update_id')[:20]:
             if time.monotonic() > deadline:
                 break
             if row.state == 'RECEIVED':
-                process_received(row, config, actor)
+                scoped = config_for_row(config, row)
+                process_received(row, scoped, actor_for(scoped))
             if row.state in ('PREPARED', 'REPLY') or row.state == 'AUDIO_WAIT' and not row.receipt.get('acknowledged'):
                 deliver(row, client, config)
         from horarios_especiales.services.telegram_audio import advance
         if time.monotonic() <= deadline:
             advance(config)
         recover_approved(config)
-        for row in owner_updates(config).filter(state='QUEUED').select_related('request').order_by(F('receipt__status_checked_at').asc(nulls_first=True), 'pk')[:20]:
+        for row in active_updates(config).filter(state='QUEUED').select_related('request').order_by(F('receipt__status_checked_at').asc(nulls_first=True), 'pk')[:20]:
             if time.monotonic() > deadline:
                 break
             row.receipt['status_checked_at'] = timezone.now().isoformat()
             row.save(update_fields=['receipt'])
+            scoped = config_for_row(config, row)
+            actor_for(scoped)
             text = status_text(row.request)
             if row.receipt.get('last_status') != text:
+                actor_for(scoped)
                 client.call('sendMessage', chat_id=row.chat_id, text=text)
                 row.receipt['last_status'] = text
                 row.save(update_fields=['receipt'])

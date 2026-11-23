@@ -358,6 +358,7 @@ class TelegramHoursCursor(models.Model):
 
 
 class TelegramHoursUpdate(models.Model):
+    erp_user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
     bot_id = models.BigIntegerField()
     update_id = models.BigIntegerField()
     telegram_user_id = models.BigIntegerField(default=0)

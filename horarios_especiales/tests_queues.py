@@ -33,7 +33,7 @@ class HoursQueueTests(TestCase):
         self.assertEqual(settings.CELERY_TASK_ROUTES['horarios_especiales.execute_request']['queue'], 'hours_publish')
 
     def test_configuration_replaces_legacy_delivery_overrides(self):
-        config = {'erp_user_id': self.actor.pk}
+        config = dict(bot_id=12345, telegram_user_id=777, telegram_chat_id=777, erp_user_id=self.actor.pk)
         with patch('horarios_especiales.management.commands.configure_hours_telegram.load_config', return_value=config):
             call_command('configure_hours_telegram')
             PeriodicTask.objects.filter(name__startswith='hours-').update(
@@ -136,12 +136,15 @@ class HoursQueueTests(TestCase):
             self.assertIn('    build: .', block)
             self.assertIn('--pool=prefork --concurrency=1 --prefetch-multiplier=1', block)
             self.assertIn('-Q ' + queue + ' ', block)
-            self.assertEqual('/etc/pollyanas-hours:ro' in block, name == 'worker_hours_control')
+            self.assertIn('${HOURS_TELEGRAM_CONFIG_DIR_HOST:-./.hours-agent}:/etc/pollyanas-hours:ro', block)
 
 
 class HoursPublicationQueueTests(TransactionTestCase):
     def setUp(self):
         self.actor = User.objects.create_user('queue-owner', is_superuser=True)
+        runtime = patch('horarios_especiales.services.telegram_bot.load_config', return_value=dict(bot_id=12345, telegram_user_id=777, telegram_chat_id=777, erp_user_id=self.actor.pk))
+        runtime.start()
+        self.addCleanup(runtime.stop)
 
     def test_publication_task_keeps_owner_fence_and_weekly_readback_idempotency(self):
         from django.core.exceptions import PermissionDenied

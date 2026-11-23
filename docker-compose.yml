@@ -157,6 +157,7 @@ services:
     command: /opt/venv/bin/python -m celery -A config worker -l info --pool=prefork --concurrency=1 --prefetch-multiplier=1 -Q hours_publish --hostname=hours_publish@%h
     volumes:
       - .:/app
+      - ${HOURS_TELEGRAM_CONFIG_DIR_HOST:-./.hours-agent}:/etc/pollyanas-hours:ro
     depends_on:
       db:
         condition: service_healthy

@@ -2,8 +2,9 @@
 
 El bot reutiliza solicitudes v2 del ERP, aprobación exacta y publicación Google existente.
 No tiene credenciales del bot de releases ni admite automáticamente al primer remitente.
-Sólo el usuario y chat privado vinculados previamente a un usuario ERP DG/Admin activo
-pueden preparar y aprobar. Revocar ese permiso también detiene ejecución/reconciliación
+El propietario original conserva su requisito DG/Admin activo. Las personas adicionales
+requieren vinculación explícita entre ID Telegram, chat privado e identidad ERP activa,
+y permiso `approve_own=true` exclusivo de este bot; sólo preparan y aprueban solicitudes propias. Revocar ese permiso también detiene ejecución/reconciliación
 Telegram. No se habilitó producción durante esta implementación.
 
 ## Entrada y confirmación
@@ -71,3 +72,85 @@ No hay comprobación real del bot ni de interfaces externas en estas pruebas ais
 Worktree `telegram-hours-agent-20261122`, Compose `erp_telegram_hours_agent_20261122`,
 PostgreSQL 16 local puerto 55648: recursos heredados de la misma tarea, conservados para
 la siguiente fase de audio y validación. No se crearon recursos adicionales de runtime.
+
+
+## Varias personas verificadas (2026-11-23)
+
+`owner.json` conserva las tres claves originales y admite `users` opcional (máximo 32).
+Ejemplo ficticio, sin token ni datos personales reales:
+
+```json
+{
+  "telegram_user_id": 100001,
+  "telegram_chat_id": 100001,
+  "erp_user_id": 1,
+  "users": [
+    {"telegram_user_id": 100002, "telegram_chat_id": 100002, "erp_user_id": 2, "approve_own": true}
+  ]
+}
+```
+
+Los tres IDs son enteros positivos, únicos por campo; el chat privado coincide con el
+ID Telegram. `approve_own` exige booleano: `false` deshabilita al miembro. Nunca asignar
+la identidad ERP de otra persona, promover DG/Admin, aceptar el primer `/start`, ni
+inferir identidad por nombre, teléfono o @usuario. Verificar con el responsable qué
+usuario ERP activo corresponde a cada ID Telegram antes de editar la lista.
+
+El operador autorizado respalda el archivo privado fuera del repo, prepara el JSON
+completo en un temporal 0600 del mismo directorio y lo reemplaza atómicamente conservando
+propietario/permisos. No imprimir tokens ni copiar `.env`. El montaje sigue siendo RO; también se monta en `worker_hours_publish` para que
+revalide la lista vigente antes de publicar. El despliegue oficial debe recrear los
+contenedores por este cambio Compose; no basta reiniciar el proceso viejo.
+No cambia el bot, su cursor ni la reserva global de audio de 500 centavos. La lista se
+relee al actuar; no hace falta reiniciar ni ejecutar `--enable` para añadir o retirar
+una vinculación. Validación de sólo lectura, antes/después de activar usuarios:
+
+```sh
+python manage.py configure_hours_telegram --config /etc/pollyanas-hours --validate-only
+```
+
+Este comando valida todos los usuarios habilitados y cuenta identidades, sin imprimir
+sus datos, enviar mensajes ni modificar Beat. Un usuario inactivo o un miembro sin
+permiso no procesa trabajo; una vinculación duplicada invalida la configuración.
+`/status`, `/cancel`, correcciones y avisos están aislados por identidad recibida, no
+sólo por chat. Texto y audio conservan `requested_by`, `approved_by`, `executed_by` y
+bitácora con la persona real. Los callbacks ajenos nunca aprueban.
+
+Aplicar migración 0004 antes del código consumidor: vincula inbox histórico únicamente
+cuando existe una solicitud con autor ERP. Entradas/audio heredados sin autor verificable
+se cancelan y purgan PCM; pedir que la persona reenvíe su instrucción. Las vistas antiguas
+sin snapshot requieren una nueva vista. No modifica horarios aprobados, cursor ni gasto.
+El polling y el RPC purgan leases/botones de identidades retiradas. Antes de ejecutar o
+reconciliar se revalida el vínculo actual de cada revisión ganadora; retirar acceso no
+cancela ni borra horarios centrales ya aprobados.
+
+La vista nueva advierte qué solicitudes aprobadas solapan sus sucursales/fechas. La
+aprobación compara esas revisiones bajo el mismo lock de sucursal del publicador: si
+otra persona aprobó/canceló/cambió una regla coincidente, exige reenviar la instrucción
+y revisar otra vista. No se reemplazan silenciosamente horarios sobre una vista vieja.
+La comprobación incluye reglas de igual prioridad, rangos y semanas sin fecha final;
+fechas/sucursales sin solapamiento no bloquean.
+
+Verificación productiva pendiente del operador: código/migración vigentes en web y
+workers, validación privada sin escrituras, bienvenida al chat verificado y flujo real
+por cada persona. No crear actualizaciones Telegram ficticias ni aprobar horarios reales
+como prueba técnica. Las pruebas locales usan Google/Telegram/OpenAI simulados.
+
+### Fuentes y límites de la validación local
+
+Ficha de reutilización, 2026-11-23: PostgreSQL 16 aislado de
+`telegram-hours-multiuser-20261123`, sin datos operativos.
+
+| Concepto | Fuente oficial y clave | Decisión y consumidores |
+| --- | --- | --- |
+| Persona/autorización ERP | `auth.User`, PK estable y `is_active`; roles del owner | Reutilizar usuarios; no crear identidades, grupos ni permisos globales. |
+| Vínculo Telegram | `owner.json` 0600, IDs numéricos explícitos | Extender con `users`; humano verifica equivalencias, no inferir por nombres. |
+| Autor recibido | `TelegramHoursUpdate.erp_user_id` | Guardar FK del vínculo al recibir; texto, audio, entrega y recuperación. |
+| Solicitud/aprobación/auditoría | `SolicitudHorarioEspecial`, `HorarioEspecialBitacora` | Reutilizar autor/aprobador/ejecutor y revisión; API, tienda, Maya y Google conservan la misma fuente. |
+| Cursor y gasto de voz | `TelegramHoursCursor.bot_id` | Reutilizar una fila por bot; no duplicar ni reiniciar presupuesto por usuario. |
+
+Evidencia reproducible: `inventario_fuentes_datos --term telegram --term horario`,
+inspección del grafo/contratos, y `count(*)` local acotado en auth_user, inbox,
+solicitudes y cursor: 0/0/0/0 antes de fixtures. Las pruebas usan identidades ficticias
+777/888. La equivalencia real queda documentada fuera del repo por el coordinador;
+ningún teléfono, usuario real ni token forma parte de estos ejemplos o tests.

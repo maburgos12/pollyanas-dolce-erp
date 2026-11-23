@@ -148,8 +148,8 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
     today = today or timezone.localdate(timezone=ZoneInfo("America/Mazatlan"))
     request_obj.refresh_from_db()
     if request_obj.telegramhoursupdate_set.exists():
-        from horarios_especiales.services.telegram_bot import require_approver
-        require_approver(request_obj.approved_by)
+        from horarios_especiales.services.telegram_bot import require_request_approver
+        actor = require_request_approver(request_obj)
     if request_obj.status not in {"APROBADO", "FALLIDO", "EJECUTADO"} or request_obj.cancelled_at or not request_obj.approved_at:
         raise ValueError("La solicitud debe estar aprobada antes de ejecutarse.")
     if validate_rule_payload(request_obj.canonical_payload) or not request_obj.audit_entries.filter(
@@ -207,8 +207,8 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
             for contributing in SolicitudHorarioEspecial.objects.filter(
                     pk__in=[row['request_id'] for row in covered_revisions]).select_related('approved_by'):
                 if contributing.telegramhoursupdate_set.exists():
-                    from horarios_especiales.services.telegram_bot import require_approver
-                    require_approver(contributing.approved_by)
+                    from horarios_especiales.services.telegram_bot import require_request_approver
+                    require_request_approver(contributing)
             attempt.error_payload_json = {"intended_owned": owned, "covered_revisions": covered_revisions}
             attempt.save(update_fields=["error_payload_json"])
             if fields and HorarioEspecialDetalle.objects.filter(sucursal_id=branch_id,

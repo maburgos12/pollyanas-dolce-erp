@@ -43,6 +43,12 @@ class TelegramHoursTests(TestCase):
         self.addCleanup(self.consumer_mock.stop)
         self.user = User.objects.create_user(username='hours_owner', is_superuser=True)
         self.config = dict(bot_id=12345, telegram_user_id=777, telegram_chat_id=777, erp_user_id=self.user.pk)
+        runtime = patch('horarios_especiales.services.telegram_bot.load_config', side_effect=lambda *a: self.config)
+        runtime.start()
+        self.addCleanup(runtime.stop)
+        clock = patch('horarios_especiales.services.telegram_bot.timezone.localdate', return_value=datetime.fromtimestamp(STAMP, ZoneInfo('America/Mazatlan')).date())
+        clock.start()
+        self.addCleanup(clock.stop)
         self.branches = {}
         for code in CODES:
             branch = Sucursal.objects.create(codigo=code, nombre=code.replace('_', ' '), activa=True)
@@ -366,6 +372,9 @@ class TelegramProjectionReceiptTests(TransactionTestCase):
         read.start()
         self.addCleanup(read.stop)
         self.user = User.objects.create_user(username='hours_owner', is_superuser=True)
+        runtime = patch('horarios_especiales.services.telegram_bot.load_config', return_value=dict(bot_id=12345, telegram_user_id=777, telegram_chat_id=777, erp_user_id=self.user.pk))
+        runtime.start()
+        self.addCleanup(runtime.stop)
         branch = Sucursal.objects.create(codigo='MATRIZ', nombre='Matriz', activa=True)
         self.branches = {'MATRIZ': branch}
         SucursalPlataformaExterna.objects.create(sucursal=branch, external_location_name='locations/qa')
