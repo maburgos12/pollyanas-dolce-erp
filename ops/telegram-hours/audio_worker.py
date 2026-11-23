@@ -27,7 +27,8 @@ def validate_job(job):
 
 def rpc(payload):
     result = subprocess.run(['/usr/bin/ssh', '-T', '-F', str(ROOT / 'ssh_config'), 'hours-audio'],
-        input=json.dumps(payload).encode(), capture_output=True, timeout=45, check=True)
+        input=json.dumps(payload).encode(), capture_output=True, timeout=45, check=True,
+        env={'PATH':'/usr/bin:/bin', 'LANG':'C'})
     if len(result.stdout) > 7_700_000:
         raise ValueError('invalid_output')
     value = json.loads(result.stdout)
@@ -63,7 +64,8 @@ def work():
         return
     validate_job(job)
     child = subprocess.run([sys.executable, str(Path(__file__).resolve()), '--transcribe'],
-        input=json.dumps(job).encode(), capture_output=True, timeout=60, check=True)
+        input=json.dumps(job).encode(), capture_output=True, timeout=60, check=True,
+        env={'PATH':'/usr/bin:/bin', 'LANG':'C', 'HOME':str(Path.home())})
     if len(child.stdout) > 8192:
         raise ValueError('invalid_text')
     text = json.loads(child.stdout)['text']

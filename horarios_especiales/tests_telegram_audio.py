@@ -147,6 +147,14 @@ class AudioTests(TestCase):
 
 
 class AudioDecodeTests(SimpleTestCase):
+    def test_decoder_has_explicit_secret_free_environment(self):
+        import os
+        from types import SimpleNamespace
+        from horarios_especiales.services import telegram_audio as audio
+        with patch.dict(os.environ, {'ERP_AUDIO_SECRET_SENTINEL':'must-not-leak'}), patch.object(audio.shutil, 'which', return_value='/usr/bin/ffmpeg'), patch.object(audio.subprocess, 'run', return_value=SimpleNamespace(stdout=pcm())) as run:
+            audio.decode_pcm(b'fixture')
+        self.assertEqual(run.call_args.kwargs.get('env'), {'PATH':'/usr/bin:/bin', 'LANG':'C'})
+
     def test_real_duration_not_metadata(self):
         from horarios_especiales.services import telegram_audio as audio
         if not shutil.which('ffmpeg'):

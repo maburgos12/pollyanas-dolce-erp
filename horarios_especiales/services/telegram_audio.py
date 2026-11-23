@@ -60,7 +60,7 @@ def queue(row, config):
 def decode_pcm(data):
     if not data or len(data) > MAX_DOWNLOAD:
         raise ValueError('audio inválido')
-    executable = shutil.which('ffmpeg')
+    executable = shutil.which('ffmpeg', path='/usr/bin:/bin:/opt/homebrew/bin')
     if not executable:
         raise ValueError('decodificador no disponible')
     try:
@@ -69,7 +69,7 @@ def decode_pcm(data):
             '-protocol_whitelist', 'pipe', '-format_whitelist', 'ogg,mp3,wav,flac,mov,aac,matroska,webm',
             '-i', 'pipe:0', '-map', '0:a:0', '-vn', '-sn', '-dn', '-t', '181',
             '-threads', '1', '-ac', '1', '-ar', '16000', '-f', 's16le', 'pipe:1'],
-            input=data, capture_output=True, timeout=15, check=True)
+            input=data, capture_output=True, timeout=15, check=True, env={'PATH':'/usr/bin:/bin', 'LANG':'C'})
     except (OSError, subprocess.SubprocessError):
         raise ValueError('audio no decodificable') from None
     # Decode one second beyond the maximum: never accept a truncated long recording.

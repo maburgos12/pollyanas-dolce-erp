@@ -1,6 +1,10 @@
 import base64
 import hashlib
 import importlib.util
+import json
+import os
+from types import SimpleNamespace
+from unittest.mock import patch
 from pathlib import Path
 import subprocess
 import sys
@@ -22,6 +26,16 @@ class WorkerTests(unittest.TestCase):
             job = self.job(); job[key] = value
             with self.subTest(key=key), self.assertRaises(ValueError):
                 worker.validate_job(job)
+
+    def test_ssh_has_explicit_secret_free_environment(self):
+        with patch.dict(os.environ, {'ERP_AUDIO_SECRET_SENTINEL':'must-not-leak'}), patch.object(worker.subprocess, 'run', return_value=SimpleNamespace(stdout=b'{}')) as run:
+            worker.rpc({'action':'claim'})
+        self.assertEqual(run.call_args.kwargs.get('env'), {'PATH':'/usr/bin:/bin', 'LANG':'C'})
+
+    def test_whisper_child_only_receives_cache_home_and_fixed_environment(self):
+        with patch.dict(os.environ, {'ERP_AUDIO_SECRET_SENTINEL':'must-not-leak'}), patch.object(worker, 'rpc', side_effect=[self.job(), {'accepted':True}]), patch.object(worker.subprocess, 'run', return_value=SimpleNamespace(stdout=json.dumps({'text':'Todas hoy cerradas'}).encode())) as run:
+            worker.work()
+        self.assertEqual(run.call_args.kwargs.get('env'), {'PATH':'/usr/bin:/bin', 'LANG':'C', 'HOME':str(Path.home())})
 
     def test_forced_wrapper_rejects_commands_and_sanitizes(self):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name('audio_rpc.py'))],

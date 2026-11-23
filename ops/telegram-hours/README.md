@@ -145,3 +145,9 @@ se usa la DB aislada de la tarea telegram-hours-agent-20261122, propiedad del co
 - Sin gasto OpenAI, envíos Telegram, llave nueva, instalación de SSH/LaunchAgent,
   contenedores nuevos ni cambios de producción. Worktree y DB siguen a cargo del
   coordinador para revisión/CI/despliegue; no se retiraron recursos compartidos activos.
+
+Revisión de aislamiento de entorno: ffmpeg y SSH reciben únicamente PATH fijo y
+LANG=C; el hijo Whisper añade HOME sólo para el modelo cacheado. No se copia el
+entorno del ERP/Mac. Pruebas centinela: 39 pruebas audio+Telegram y 4 worker verdes;
+smoke `work()` con Whisper real y SSH simulado transcribió la misma voz sintética
+en 4.34 s bajo el entorno explícito. Check sin errores; temporales eliminados.
