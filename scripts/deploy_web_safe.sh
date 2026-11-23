@@ -28,29 +28,51 @@ build_application_images() {
   done
 }
 
+require_free_kib() {
+  local path="$1" minimum="$2" available
+  available="$(LC_ALL=C df -Pk -- "$path" | awk 'NR == 2 {print $4}')" || return 1
+  if [[ ! "$available" =~ ^[0-9]+$ ]] || (( available < minimum )); then
+    echo "deployment build blocked: $path has ${available:-unknown} KiB free; needs $minimum KiB" >&2
+    return 1
+  fi
+}
+
+verify_build_space() {
+  local docker_root
+  require_free_kib / 5242880 || return 1
+  docker_root="$(docker info --format '{{.DockerRootDir}}')" || return 1
+  [[ "$docker_root" == /* ]] || return 1
+  # The incident consumed several GiB during the build; keep margin for both versions.
+  require_free_kib "$docker_root" 12582912
+}
+
 # Called under the common deployment lock. Fetching main proves membership;
-# pulling the immutable SHA prevents a later main update from changing release.
+# the immutable target prevents a later main update from changing release.
 # Checkout files must remain readable by the app despite the publisher umask 0077.
 update_checkout() {
-  local expected_sha="${1:-}" expected_base="${2:-}"
+  local expected_sha="${1:-}" expected_base="${2:-}" current target changed_files
   [[ "$(git branch --show-current)" == main && -z "$(git status --porcelain)" ]] || {
     echo "deployment checkout must be clean main" >&2; return 1;
   }
+  current="$(git rev-parse HEAD)" || return 1
   if [[ -n "$expected_sha" || -n "$expected_base" ]]; then
     [[ "$expected_sha" =~ ^[0-9a-f]{40}$ && "$expected_base" =~ ^[0-9a-f]{40}$ ]] || {
       echo "invalid expected revision" >&2; return 1;
     }
-    [[ "$(git rev-parse HEAD)" == "$expected_base" ]] || {
+    [[ "$current" == "$expected_base" ]] || {
       echo "production revision changed" >&2; return 1;
     }
-    git fetch origin main || return 1
-    git merge-base --is-ancestor "$expected_base" "$expected_sha" || return 1
-    git merge-base --is-ancestor "$expected_sha" FETCH_HEAD || return 1
-    (umask 022; git pull --ff-only origin "$expected_sha") || return 1
-    [[ "$(git rev-parse HEAD)" == "$expected_sha" ]] || return 1
-  else
-    (umask 022; git pull --ff-only origin main)
   fi
+  git fetch origin main || return 1
+  target="${expected_sha:-$(git rev-parse FETCH_HEAD)}"
+  git merge-base --is-ancestor "$current" "$target" || return 1
+  git merge-base --is-ancestor "$target" FETCH_HEAD || return 1
+  changed_files="$(git diff --name-only "$current" "$target")" || return 1
+  if requires_image_rebuild "$changed_files" || requires_compose_recreate "$changed_files"; then
+    verify_build_space || return 1
+  fi
+  (umask 022; git merge --ff-only "$target") || return 1
+  [[ "$(git rev-parse HEAD)" == "$target" ]]
 }
 
 verify_processes() {

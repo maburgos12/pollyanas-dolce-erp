@@ -156,6 +156,37 @@ fi
 echo "deploy-preflight-before-docker-tests-ok"
 
 (
+  cd "$tmp_dir/author"
+  printf '# rebuild\n' > requirements.txt
+  git add requirements.txt
+  git commit --quiet -m rebuild
+  git push --quiet origin main
+)
+rebuild=$(git -C "$tmp_dir/author" rev-parse HEAD)
+(
+  cd "$tmp_dir/production"
+  docker() {
+    test "$1" = info || return 1
+    echo /var/lib/docker
+  }
+  df() {
+    printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+    printf 'fixture 20000000 1 %s 80%% /\n' "${free_kib:-8388608}"
+  }
+  if update_checkout "$rebuild" "$approved"; then exit 1; fi
+  if update_checkout; then exit 1; fi
+  test "$(git rev-parse HEAD)" = "$approved"
+  test ! -e requirements.txt
+  free_kib=4194304
+  if update_checkout "$rebuild" "$approved"; then exit 1; fi
+  test "$(git rev-parse HEAD)" = "$approved"
+  export free_kib=12582912
+  update_checkout "$rebuild" "$approved"
+  test "$(git rev-parse HEAD)" = "$rebuild"
+)
+echo "deploy-space-before-checkout-tests-ok"
+
+(
   docker() {
     if [[ "$1" == compose ]]; then
       echo "container-${*: -1}"

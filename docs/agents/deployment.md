@@ -34,6 +34,16 @@ Compose, reinicia procesos por Python y usa HUP en los demás casos. Gunicorn us
 `--preload`: HUP no sustituye un reinicio cuando cambió código Python.
 No hacer pull previo ni sustituir esa selección por reinicios manuales.
 
+Si la revisión puede compilar imágenes, el script verifica antes de actualizar
+el checkout que haya 5 GiB libres en `/` y 12 GiB en el almacenamiento real de
+Docker; en un solo sistema de archivos se aplica el mayor umbral. Si no hay
+margen, conserva la revisión y los contenedores vigentes. No forzar la
+compilación ni usar un prune general para pasar la guarda.
+
+El workflow `ERP image build pilot` prueba el Dockerfile completo de
+`linux/amd64` fuera del VPS en GitHub Actions. No publica imágenes ni cambia el
+despliegue: el registro privado y la prueba de reversión son pasos separados.
+
 Verificar la revisión realmente servida y el flujo afectado; un `git log` del VPS
 sólo prueba filesystem. Si falla el deploy o persiste comportamiento anterior,
 diagnosticar servicios, versión en ejecución y respuestas, y presentar recuperación
