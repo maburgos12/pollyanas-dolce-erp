@@ -20,6 +20,8 @@ compose -f /tmp/docker-compose-test.yml build worker_notificaciones
 compose -f /tmp/docker-compose-test.yml build worker_sat
 compose -f /tmp/docker-compose-test.yml build worker_recetas
 compose -f /tmp/docker-compose-test.yml build worker_logistica_point
+compose -f /tmp/docker-compose-test.yml build worker_hours_control
+compose -f /tmp/docker-compose-test.yml build worker_hours_publish
 compose -f /tmp/docker-compose-test.yml build recetas_watchdog
 compose -f /tmp/docker-compose-test.yml build beat
 EOF
@@ -158,9 +160,10 @@ echo "deploy-preflight-before-docker-tests-ok"
 (
   docker() {
     if [[ "$1" == compose ]]; then
+      [[ "${missing_service:-}" != "${*: -1}" ]] || return 0
       echo "container-${*: -1}"
     elif [[ "$1" == inspect ]]; then
-      for _ in {1..8}; do echo "${process_running:-true} 2026-01-01T00:00:00Z"; done
+      for _ in {1..10}; do echo "${process_running:-true} 2026-01-01T00:00:00Z"; done
     else return 1
     fi
   }
@@ -168,6 +171,12 @@ echo "deploy-preflight-before-docker-tests-ok"
   if verify_processes /tmp/compose.yml 1767225601 2>/dev/null; then
     echo 'stale process accepted' >&2; exit 1
   fi
+  for missing_service in worker_hours_control worker_hours_publish; do
+    if verify_processes /tmp/compose.yml 0 2>/dev/null; then
+      echo "missing hours worker accepted: $missing_service" >&2; exit 1
+    fi
+  done
+  unset missing_service
   process_running=false
   if verify_processes /tmp/compose.yml 0 2>/dev/null; then
     echo 'stopped process accepted' >&2; exit 1

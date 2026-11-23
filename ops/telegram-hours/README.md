@@ -186,3 +186,56 @@ real read-only del probe enviado por stdin a web, sin escribir archivos del VPS:
 muestras de vacío; no prueban el wrapper SSH dedicado actualizado ni latencia con voz.
 No se creó Docker/DB nuevo; check/migrate-check usan el entorno aislado de la tarea
 principal con PGOPTIONS read-only. El CI completo requerido permanece sin cambios.
+
+## Aislamiento de colas de horarios
+
+`worker_hours_control` consume exclusivamente `hours_control` (polling y despacho
+periódico). `worker_hours_publish` consume exclusivamente `hours_publish` (Google).
+Ambos usan el Dockerfile ERP, PostgreSQL y Redis existentes; prefork, concurrencia
+1 y prefetch 1. No crean otra base ni duplican los datos de horarios. El montaje
+privado de Telegram/OpenAI es de sólo lectura en control y web; publicación no lo
+necesita. Se conserva en el worker general mientras drenan mensajes antiguos.
+No purgar `celery`: contiene trabajo de otros módulos.
+
+Tras el despliegue autorizado, ejecutar `configure_hours_telegram --enable` desde
+web con el directorio privado vigente: reemplaza cualquier queue/exchange/routing_key/
+priority anterior de estas dos tareas Beat. Polling cada 15 s, expiración 30 s;
+reconciliación cada 900 s, expiración 840 s. Registrar sin `--enable` las desactiva,
+como antes. Verificar estos valores en PeriodicTask; las rutas Celery por sí solas
+no sustituyen overrides persistidos de Beat.
+
+El despacho periódico selecciona en PostgreSQL sólo v2 aprobadas, no canceladas,
+no expiradas y vencidas, antes de limitar a 100; trabaja como máximo 10 s entre
+solicitudes (soft limit 20 s, hard 30 s). Consulta la profundidad Redis sumando
+las prioridades y sólo llena los espacios libres hasta 100 mensajes; esto también
+limita mensajes expirados aún no consumidos. El broker usa conexión/socket de 2 s
+sin reintentos. Este límite afecta el despacho periódico, no las aprobaciones
+interactivas del propietario. Reserva `next_reconcile_at` por 900 s bajo
+bloqueo de fila y envía una ejecución por solicitud con expiración 840 s, prioridad
+9 (Redis; las aprobaciones interactivas mantienen prioridad por defecto 0), sin
+reintentos de envío al broker. Si falla el envío se revierte la reserva. Una caída
+entre envío/commit puede duplicar una entrega: se mantienen los locks de sucursal,
+readback, revisión aprobada y auditoría del publicador. La ejecución vuelve a
+programar el reintento o el horizonte diario normal. Si el worker no recibe el
+mensaje antes de expirar, la siguiente reconciliación recupera la intención.
+
+Se pasa el aprobador original a la tarea; sus permisos y propiedad se revalidan al
+consumir. La CLI `reconcile_special_hours [--request-id ID]` conserva su ejecución
+síncrona y selección explícita. No se añade timeout que mate publicaciones: la ruta
+legacy no acredita recuperación segura de toda mutación interrumpida. Una llamada
+Google lenta puede retrasar otras publicaciones, pero no ocupa el worker de control.
+Los límites 50/60 s y presupuesto interno de 25 s del polling no cambian.
+
+El deploy oficial incluye ambos workers en build, recreación, restart y validación
+de los diez procesos de aplicación. Para la primera actualización, el script viejo
+ya cargado antes del pull no conoce estos servicios: el operador debe ejecutar el
+script oficial de la revisión aprobada e inmutable, verificado contra el objeto Git,
+con APP_DIR y --expected-base/--expected-sha. Ese script conserva el lock, verifica
+main limpio y hace el único pull autorizado. No hacer pull manual previo ni editar
+el script instalado. Las siguientes actualizaciones usan el script ya integrado.
+
+Validación operativa después del deploy y reconfiguración: workers exclusivos
+activos, diez procesos con revisión vigente, expiraciones de Beat correctas, poll
+reciente mientras hay publicación pendiente; no confundir entrega al broker con
+publicación Google ni respuesta Telegram. Los tests locales usan proveedores falsos
+sin mensajes ni cambios Google; latencia y memoria reales se miden en producción.
