@@ -64,12 +64,12 @@ CATALOG = [
         "google_profile_fid": "1541831620857546731",
     },
     {
-        "codigo": "CRUCERO",
-        "aliases": ["crucero", "ninos heroes", "niños heroes"],
-        "google_address": "Calzada Niños Heroes #1000, Centro, 81000 Guasave, Sin.",
+        "codigo": "BAMOA",
+        "aliases": ["bamoa", "estacion bamoa"],
+        "google_address": "Bamoa, Sinaloa",
         "google_group_account_id": "113534506057208552108",
-        "google_location_id": "9407916755148967590",
-        "google_profile_fid": "15874636915267306704",
+        "google_location_id": "13371000475299078168",
+        "google_profile_fid": "9595260693465515630",
     },
     {
         "codigo": "GUAMUCHIL",
@@ -78,6 +78,14 @@ CATALOG = [
         "google_group_account_id": "113534506057208552108",
         "google_location_id": "13637818934523822761",
         "google_profile_fid": "8983561737164135539",
+    },
+    {
+        "codigo": "SINALOA_LEYVA",
+        "aliases": ["sinaloa de leyva", "sinaloa leyva"],
+        "google_address": "Sinaloa de Leyva, Sinaloa",
+        "google_group_account_id": "113534506057208552108",
+        "google_location_id": "7869510697191819884",
+        "google_profile_fid": "2942644759849906896",
     },
 ]
 

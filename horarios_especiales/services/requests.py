@@ -4,10 +4,10 @@ import hashlib
 from copy import deepcopy
 from datetime import date
 
-from django.db import transaction
+from django.db import connection, transaction
 from django.utils import timezone
 
-from horarios_especiales.models import HorarioEspecialDetalle, SolicitudHorarioEspecial
+from horarios_especiales.models import HorarioEspecialDetalle, HorarioEspecialIntentoPublicacion, SolicitudHorarioEspecial
 from horarios_especiales.services.audit import log_special_hours_event
 from horarios_especiales.services.command_parser import build_preview_from_command
 from horarios_especiales.services.validation import validate_canonical_payload
@@ -85,10 +85,21 @@ def validate_request(*, request_obj: SolicitudHorarioEspecial, actor=None):
     return errors
 
 
+def _lock_request_branches(request_obj):
+    branch_ids = {row["branch_id"] for row in request_obj.canonical_payload.get("locations", [])}
+    branch_ids.update(request_obj.details.values_list("sucursal_id", flat=True))
+    for branch_id in sorted(branch_ids):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", [72419, branch_id])
+            if not cursor.fetchone()[0]:
+                raise ValueError("Hay una publicación en curso; reintenta al terminar.")
+
+
 @transaction.atomic
 def approve_request(*, request_obj: SolicitudHorarioEspecial, actor=None, expected_revision=None):
     SolicitudHorarioEspecial.objects.select_for_update().get(pk=request_obj.pk)
     request_obj.refresh_from_db()
+    _lock_request_branches(request_obj)
     if request_obj.canonical_payload.get("schema_version") == 2:
         if not expected_revision or expected_revision != request_obj.canonical_payload.get("revision"):
             raise ValueError("Debes aprobar la revisión exacta de la vista previa.")
@@ -107,6 +118,23 @@ def approve_request(*, request_obj: SolicitudHorarioEspecial, actor=None, expect
 
 @transaction.atomic
 def cancel_request(*, request_obj: SolicitudHorarioEspecial, actor=None, reason: str = ""):
+    SolicitudHorarioEspecial.objects.select_for_update().get(pk=request_obj.pk)
+    request_obj.refresh_from_db()
+    _lock_request_branches(request_obj)
+    covered_elsewhere = False
+    if request_obj.canonical_payload.get("schema_version") == 2:
+        covered_elsewhere = HorarioEspecialIntentoPublicacion.objects.filter(
+            detail__sucursal_id__in=[row["branch_id"] for row in request_obj.canonical_payload["locations"]],
+            response_payload_json__mutation_started=True,
+            error_payload_json__covered_revisions__contains=[{
+                "request_id": request_obj.pk, "revision": request_obj.canonical_payload["revision"],
+            }],
+        ).exists()
+    legacy_published = request_obj.canonical_payload.get("schema_version") != 2 and request_obj.details.filter(
+        publication_attempts__response_payload_json__mutation_started=True,
+    ).exists()
+    if covered_elsewhere or legacy_published:
+        raise ValueError("Ya se envió a Google; la reversión requiere una nueva solicitud aprobada.")
     request_obj.status = SolicitudHorarioEspecial.STATUS_CANCELADO
     request_obj.cancelled_at = timezone.now()
     request_obj.save(update_fields=["status", "cancelled_at", "updated_at"])

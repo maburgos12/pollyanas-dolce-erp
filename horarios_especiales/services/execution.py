@@ -23,12 +23,28 @@ def _next_attempt_number(detail: HorarioEspecialDetalle, platform: str) -> int:
 
 
 def execute_request(*, request_obj: SolicitudHorarioEspecial, actor=None) -> dict:
-    if request_obj.status != SolicitudHorarioEspecial.STATUS_APROBADO:
-        raise ValueError("La solicitud debe estar aprobada antes de ejecutarse.")
+    from contextlib import ExitStack
+    from horarios_especiales.services.google_projection import branch_lock, execute_rules
 
+    request_obj.refresh_from_db()
     if request_obj.canonical_payload.get("schema_version") == 2:
-        raise ValueError("La publicación de reglas requiere un horizonte de ejecución explícito.")
+        return execute_rules(request_obj=request_obj, actor=actor)
+    with ExitStack() as locks:
+        for branch_id in sorted(set(request_obj.details.values_list("sucursal_id", flat=True))):
+            locks.enter_context(branch_lock(branch_id))
+        request_obj.refresh_from_db()
+        if request_obj.cancelled_at or not request_obj.approved_at:
+            raise ValueError("La solicitud debe estar aprobada y no cancelada.")
+        if request_obj.status == SolicitudHorarioEspecial.STATUS_EJECUTADO:
+            return request_obj.execution_summary_json
+        if request_obj.status not in {SolicitudHorarioEspecial.STATUS_APROBADO, SolicitudHorarioEspecial.STATUS_FALLIDO}:
+            raise ValueError("La solicitud debe estar aprobada antes de ejecutarse.")
+        if not request_obj.details.exists():
+            raise ValueError("La solicitud no contiene detalles publicables.")
+        return _execute_legacy(request_obj=request_obj, actor=actor)
 
+
+def _execute_legacy(*, request_obj, actor=None):
     publisher = GoogleBusinessProfilePublisher()
     execution_summary = {"details": [], "success": 0, "failed": 0, "skipped": 0}
 
@@ -69,7 +85,9 @@ def execute_request(*, request_obj: SolicitudHorarioEspecial, actor=None) -> dic
             executed_by=actor if getattr(actor, "is_authenticated", False) else None,
         )
         try:
-            result = publisher.publish_detail(detail=detail, config=config)
+            result = publisher.publish_detail(detail=detail, config=config, attempt=attempt)
+            if result.get("receipt") == "READBACK_MISMATCH":
+                raise ValueError("READBACK_MISMATCH: Google no devolvió los horarios enviados.")
         except Exception as exc:
             attempt.status = HorarioEspecialIntentoPublicacion.STATUS_FAILED
             attempt.error_message = str(exc)
@@ -138,7 +156,8 @@ def execute_request(*, request_obj: SolicitudHorarioEspecial, actor=None) -> dic
             {
                 "detail_id": detail.id,
                 "branch_code": detail.sucursal.codigo,
-                "status": "SKIPPED" if result.get("noop") else "SUCCESS",
+                "status": result.get("receipt", "API_ACCEPTED"),
+                "public_confirmed": result.get("public_confirmed", False),
             }
         )
         log_special_hours_event(

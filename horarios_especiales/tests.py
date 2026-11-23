@@ -16,7 +16,7 @@ from horarios_especiales.models import (
 )
 from horarios_especiales.services.command_parser import build_preview_from_command
 from horarios_especiales.services.execution import execute_request
-from horarios_especiales.services.requests import approve_request, create_request_from_text, validate_request
+from horarios_especiales.services.requests import approve_request, cancel_request, create_request_from_text, validate_request
 
 
 class SpecialHoursParsingTests(TestCase):
@@ -93,6 +93,50 @@ class SpecialHoursWorkflowTests(TestCase):
         self.assertEqual(summary["failed"], 0)
         self.assertEqual(request_obj.status, SolicitudHorarioEspecial.STATUS_EJECUTADO)
         self.assertEqual(detail.execution_status, HorarioEspecialDetalle.EXEC_STATUS_SUCCESS)
+
+    @patch("horarios_especiales.services.execution.GoogleBusinessProfilePublisher")
+    def test_legacy_execution_rejects_cancelled_or_unapproved_even_with_approved_status(self, publisher):
+        from django.utils import timezone
+        for approved_at, cancelled_at in ((timezone.now(), timezone.now()), (None, None)):
+            obj = SolicitudHorarioEspecial.objects.create(raw_command="fixture", status="APROBADO",
+                                                          approved_at=approved_at, cancelled_at=cancelled_at)
+            HorarioEspecialDetalle.objects.create(request=obj, sucursal=self.branch, target_date=date(2026, 11, 23))
+            with self.assertRaises(ValueError):
+                execute_request(request_obj=obj)
+        publisher.assert_not_called()
+
+    def test_stale_retry_does_not_resurrect_cancelled_legacy_request(self):
+        from rest_framework.test import APIClient
+        from django.utils import timezone
+        obj = SolicitudHorarioEspecial.objects.create(raw_command="fixture", status="APROBADO", approved_at=timezone.now())
+        HorarioEspecialDetalle.objects.create(request=obj, sucursal=self.branch, target_date=date(2026, 11, 23))
+        stale = SolicitudHorarioEspecial.objects.get(pk=obj.pk)
+        cancel_request(request_obj=obj)
+        client = APIClient()
+        client.force_authenticate(self.user)
+        with patch("api.special_hours_views.get_object_or_404", return_value=stale), patch(
+            "api.special_hours_views.execute_special_hours_request_task.delay",
+        ) as queued:
+            queued.return_value.id = "stale-retry"
+            response = client.post(f"/api/integraciones/horarios-especiales/{obj.pk}/retry/", {}, format="json")
+        self.assertEqual(response.status_code, 202)
+        obj.refresh_from_db()
+        self.assertEqual(obj.status, "CANCELADO")
+        self.assertIsNotNone(obj.cancelled_at)
+        with patch("horarios_especiales.services.execution.GoogleBusinessProfilePublisher") as publisher:
+            with self.assertRaises(ValueError):
+                execute_request(request_obj=stale)
+            publisher.assert_not_called()
+
+    @patch("horarios_especiales.services.execution.GoogleBusinessProfilePublisher")
+    def test_legacy_failed_approved_request_retries_without_resetting_approval(self, publisher):
+        from django.utils import timezone
+        obj = SolicitudHorarioEspecial.objects.create(raw_command="fixture", status="FALLIDO", approved_at=timezone.now())
+        HorarioEspecialDetalle.objects.create(request=obj, sucursal=self.branch, target_date=date(2026, 11, 23))
+        publisher.return_value.publish_detail.return_value = {"noop": False, "receipt": "API_ACCEPTED"}
+        result = execute_request(request_obj=obj)
+        self.assertEqual(result["failed"], 0)
+        publisher.return_value.publish_detail.assert_called_once()
 
 
 class SpecialHoursBootstrapCommandTests(TestCase):

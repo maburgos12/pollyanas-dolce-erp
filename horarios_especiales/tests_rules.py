@@ -107,16 +107,12 @@ class ScheduleRuleTests(TestCase):
         with self.assertRaises(ValueError):
             validate_request(request_obj=obj)
 
-    def test_rules_not_silently_executed_as_one_day(self):
+    def test_rules_execution_routes_to_bounded_projection(self):
         obj = self.create(self.rule("weekly"))
         self.approve(obj)
-        with patch("horarios_especiales.services.execution.GoogleBusinessProfilePublisher") as publisher:
-            with self.assertRaises(ValueError):
-                execute_request(request_obj=obj)
-            publisher.assert_not_called()
-        obj.refresh_from_db()
-        self.assertEqual(obj.status, "APROBADO")
-        self.assertIsNone(obj.executed_at)
+        with patch("horarios_especiales.services.google_projection.execute_rules", return_value={"programmed": True}) as projection:
+            self.assertEqual(execute_request(request_obj=obj), {"programmed": True})
+            projection.assert_called_once_with(request_obj=obj, actor=None)
 
     def test_invalid_rules_and_branch_ids_fail_before_any_write(self):
         invalid = [self.rule(start_date="2026-02-30"), self.rule(kind="unknown"),
@@ -145,7 +141,7 @@ class ScheduleRuleTests(TestCase):
         obj.save()
         self.assertEqual(resolve_approved_rule(self.branch, date(2026, 11, 22))["status"], "UNKNOWN")
 
-    def test_api_requires_revision_and_rejects_unimplemented_publication(self):
+    def test_api_requires_revision_and_routes_approved_publication(self):
         from rest_framework.test import APIClient
         self.user.is_superuser = True
         self.user.save()
@@ -155,8 +151,11 @@ class ScheduleRuleTests(TestCase):
         url = f"/api/integraciones/horarios-especiales/{obj.pk}/"
         self.assertEqual(client.post(url + "approve/", {}, format="json").status_code, 400)
         self.assertEqual(client.post(url + "approve/", {"expected_revision": obj.canonical_payload["revision"]}, format="json").status_code, 200)
-        for action in ("validate", "execute", "retry"):
-            self.assertEqual(client.post(url + action + "/", {}, format="json").status_code, 400)
+        self.assertEqual(client.post(url + "validate/", {}, format="json").status_code, 400)
+        with patch("api.special_hours_views.execute_special_hours_request_task.delay") as queued:
+            queued.return_value.id = "fixture-task"
+            for action in ("execute", "retry"):
+                self.assertEqual(client.post(url + action + "/", {}, format="json").status_code, 202)
 
     def test_api_rejects_nonobject_or_malformed_approval_body(self):
         import json

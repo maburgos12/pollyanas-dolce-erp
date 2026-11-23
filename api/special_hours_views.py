@@ -194,8 +194,8 @@ class SpecialHoursExecuteView(APIView):
         serializer = SpecialHoursActionSerializer(data=request.data or {})
         serializer.is_valid(raise_exception=True)
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
-        if obj.canonical_payload.get("schema_version") == 2:
-            return Response({"detail": "La publicación de reglas requiere un horizonte de ejecución explícito."}, status=400)
+        if obj.cancelled_at or not obj.approved_at or obj.status not in {"APROBADO", "EJECUTADO", "FALLIDO"}:
+            return Response({"detail": "La solicitud debe estar aprobada y no cancelada."}, status=400)
         if serializer.validated_data.get("async_execute", True):
             try:
                 task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
@@ -217,7 +217,10 @@ class SpecialHoursExecuteView(APIView):
                 },
                 status=status.HTTP_202_ACCEPTED,
             )
-        summary = execute_request(request_obj=obj, actor=request.user)
+        try:
+            summary = execute_request(request_obj=obj, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         obj.refresh_from_db()
         return Response({"request": _serialize_request(obj), "summary": summary}, status=status.HTTP_200_OK)
 
@@ -229,19 +232,12 @@ class SpecialHoursRetryView(APIView):
         if not _can_approve_special_hours(request.user):
             raise PermissionDenied("No tienes permisos para reintentar horarios especiales.")
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
-        if obj.canonical_payload.get("schema_version") == 2:
-            return Response({"detail": "La publicación de reglas requiere un horizonte de ejecución explícito."}, status=400)
-        status_previo = obj.status
-        obj.status = SolicitudHorarioEspecial.STATUS_APROBADO
-        obj.save(update_fields=["status", "updated_at"])
+        if obj.cancelled_at or not obj.approved_at or obj.status not in {"APROBADO", "EJECUTADO", "FALLIDO"}:
+            return Response({"detail": "La solicitud debe estar aprobada y no cancelada."}, status=400)
         try:
             task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
         except Exception as exc:
-            # Sin esto la solicitud quedaba APROBADA sin nada encolado que la
-            # ejecutara: en la pantalla se ve en curso y nunca avanza.
             logger.warning("[horarios] No se pudo encolar el reintento de %s: %s", obj.id, exc)
-            obj.status = status_previo
-            obj.save(update_fields=["status", "updated_at"])
             return Response(
                 {
                     "status": "unavailable",
@@ -261,6 +257,9 @@ class SpecialHoursCancelView(APIView):
         serializer = SpecialHoursActionSerializer(data=request.data or {})
         serializer.is_valid(raise_exception=True)
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
-        cancel_request(request_obj=obj, actor=request.user, reason=serializer.validated_data.get("comment") or "")
+        try:
+            cancel_request(request_obj=obj, actor=request.user, reason=serializer.validated_data.get("comment") or "")
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         obj.refresh_from_db()
         return Response({"request": _serialize_request(obj)}, status=status.HTTP_200_OK)

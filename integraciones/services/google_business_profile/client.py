@@ -57,3 +57,14 @@ class GoogleBusinessProfileClient:
             .execute()
         )
 
+
+    def patch_hours(self, *, location_name: str, fields: dict, validate_only: bool = False) -> dict:
+        return self._service.locations().patch(
+            name=location_name, updateMask=",".join(sorted(fields)),
+            validateOnly=validate_only, body={"name": location_name, **fields},
+        ).execute()
+
+    def get_google_updated(self, *, location_name: str) -> dict:
+        return self._service.locations().getGoogleUpdated(
+            name=location_name, readMask="regularHours,specialHours",
+        ).execute()
