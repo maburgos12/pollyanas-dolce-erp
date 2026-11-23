@@ -104,17 +104,28 @@ def consumer_receipts(obj):
     verified = {}
     for key in pairs:
         evidence = prior.get(key, {})
-        try:
-            if all(evidence.get(dest, {}).get('confirmed') is True and
-                   timedelta(0) <= now - datetime.fromisoformat(evidence[dest]['checked_at']) <= timedelta(minutes=15)
-                   for dest in ('store', 'maya')):
-                verified[key] = evidence
-        except (ValueError, TypeError, KeyError):
-            pass
-    batch = [] if wait_for_check else [key for key in pairs if key not in verified][:4]
+        verified[key] = {}
+        for dest in ('store', 'maya'):
+            try:
+                if (evidence.get(dest, {}).get('confirmed') is True and
+                        timedelta(0) <= now - datetime.fromisoformat(evidence[dest]['checked_at']) <= timedelta(minutes=15)):
+                    verified[key][dest] = evidence[dest]
+            except (ValueError, TypeError, KeyError):
+                pass
+    keys = list(pairs)
+    cursor = cached.get('cursor', 0) if cached.get('revision') == payload['revision'] else 0
+    cursor = cursor % len(keys) if keys and type(cursor) is int else 0
+    rotated = keys[cursor:] + keys[:cursor]
+    batch = [] if wait_for_check else [key for key in rotated if len(verified[key]) < 2][:4]
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(check_pair, [pairs[key] for key in batch]))
-    verified.update(zip(batch, results))
+    for key, result in zip(batch, results):
+        for dest, evidence in result.items():
+            # A retry failure in one destination does not erase the other's fresh proof.
+            if evidence.get('confirmed') is True or dest not in verified[key]:
+                verified[key][dest] = evidence
+    if batch:
+        cursor = (keys.index(batch[-1]) + 1) % len(keys)
     labels = []
     for dest, name in [('store', 'Tienda'), ('maya', 'Maya')]:
         complete = bool(pairs) and all(verified.get(key, {}).get(dest, {}).get('confirmed') for key in pairs)
@@ -127,7 +138,7 @@ def consumer_receipts(obj):
             all(row.get('status') == 'GOOGLE_CONFIRMED' for row in google) and
             all('confirmado por lectura' in label for label in labels)):
         labels.append('Finalizado: lectura Google, tienda y Maya verificada. Google Maps visual no comprobado.')
-    receipt = {'revision': payload['revision'], 'pairs': verified, 'labels': labels,
+    receipt = {'revision': payload['revision'], 'pairs': verified, 'labels': labels, 'cursor': cursor,
                'next_check_at': cached['next_check_at'] if wait_for_check else (now + timedelta(seconds=300 if not batch or all('confirmado por lectura' in label for label in labels[:2]) else 30)).isoformat()}
     # Update only our summary key so a concurrent Google reconciliation is not overwritten.
     from django.db import transaction

@@ -85,3 +85,37 @@ class ConsumerReceiptsTests(TestCase):
         self.assertEqual(obj.status,'BORRADOR')
         with patch('integraciones.services.google_business_profile.client.GoogleBusinessProfileClient',side_effect=RuntimeError('outage')):
             self.assertIn('pendiente',preview_google_conflicts(obj))
+
+
+    def test_one_destination_failure_keeps_other_receipts_and_rotates_past_first_four(self):
+        branches = [self.branch] + [Sucursal.objects.create(codigo=f'QA{i}', nombre=f'QA {i}', activa=True) for i in range(5)]
+        obj, _ = create_request_from_rules(raw_text='six branches', branch_ids=[b.pk for b in branches],
+                                          rules=[self.rule], actor=self.user)
+        approve_request(request_obj=obj, actor=self.user, expected_revision=obj.canonical_payload['revision'])
+        codes = [location['branch_code'] for location in obj.canonical_payload['locations']]
+        failing_maya = set(codes[:4])
+        attempts = []
+        first_checked = timezone.now()
+
+        def read(expected):
+            code = expected['branch_code']
+            first_attempt = code not in attempts
+            attempts.append(code)
+            return {'store': {'confirmed': first_attempt, 'checked_at': first_checked.isoformat()},
+                    'maya': {'confirmed': code not in failing_maya, 'checked_at': first_checked.isoformat()}}
+
+        with patch('horarios_especiales.services.consumer_receipts.check_pair', side_effect=read), \
+                patch('horarios_especiales.services.consumer_receipts.timezone.now', return_value=first_checked):
+            consumer_receipts(obj)
+        self.assertEqual(set(attempts), failing_maya)
+        with patch('horarios_especiales.services.consumer_receipts.check_pair', side_effect=read), \
+                patch('horarios_especiales.services.consumer_receipts.timezone.now', return_value=first_checked + timedelta(seconds=31)):
+            labels = consumer_receipts(obj)
+        self.assertEqual(set(attempts), set(codes))
+        self.assertIn('confirmado por lectura', labels[0])
+        self.assertIn('pendiente', labels[1])
+        self.assertNotIn('Finalizado', ' '.join(labels))
+        saved = obj.execution_summary_json['consumer_readback']['pairs']
+        self.assertEqual(len(saved), 6)
+        self.assertTrue(all(pair['store']['confirmed'] for pair in saved.values()))
+        self.assertEqual(sum(pair.get('maya', {}).get('confirmed', False) for pair in saved.values()), 2)
