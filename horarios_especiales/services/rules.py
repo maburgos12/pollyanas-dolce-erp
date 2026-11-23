@@ -82,7 +82,10 @@ def resolve_approved_rule(branch, target_date):
         status__in=["APROBADO", "EJECUTADO", "FALLIDO"],
         approved_at__isnull=False, cancelled_at__isnull=True,
     )
-    for request in requests.iterator():
+    requests = list(requests[:101])
+    if len(requests) > 100:
+        return {"status": "UNKNOWN", "reason": "SPECIAL_HOURS_CONFLICT_OR_INVALID"}
+    for request in requests:
         payload = request.canonical_payload
         if validate_rule_payload(payload) or not request.audit_entries.filter(
             action="APPROVED", payload_json__revision=payload.get("revision"),

@@ -204,13 +204,15 @@ def preview_text(obj):
             dates += ' sin fecha final'
         hours = 'CERRADO todo el día' if rule['closed_all_day'] else ', '.join(w['open'] + '–' + w['close'] for w in rule['time_windows'])
         lines.append(dates + ': ' + hours)
-    lines.extend(['Zona: America/Mazatlan.', 'Aprobar registra en ERP y solicita publicación Google. Tienda y Maya: pendiente de verificación.',
+    lines.extend(['Zona: America/Mazatlan.', 'Aprobar actualiza el horario central para Google, tienda y Maya. Cada destino se confirma con su propia lectura.',
+                  obj.execution_summary_json.get('google_preflight', 'Google: comprobación previa pendiente.'),
                   'Vence en 20 minutos. Para corregir envía la instrucción completa.', 'Revisión: ' + payload['revision']])
     return '\n'.join(lines)
 
 
 def consumer_receipts(obj):
-    return ['Tienda: pendiente de verificación.', 'Maya: pendiente de verificación.']
+    from horarios_especiales.services.consumer_receipts import consumer_receipts as read_receipts
+    return read_receipts(obj)
 
 
 def status_text(obj):
@@ -245,6 +247,9 @@ def prepare_text(row, text, config, actor):
         if conflicts:
             raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
         obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
+        from horarios_especiales.services.google_projection import preview_google_conflicts
+        obj.execution_summary_json['google_preflight'] = preview_google_conflicts(obj)
+        obj.save(update_fields=['execution_summary_json'])
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         row.receipt = {'text': 'No preparé una aprobación. ' + (str(exc) if isinstance(exc, ValueError) else EXAMPLES)}
         row.state = 'REPLY'
@@ -272,9 +277,11 @@ def process_callback(row, config, actor):
             _lock_request_branches(old.request)
             if higher_priority_conflicts([item['branch_id'] for item in old.request.canonical_payload['locations']], old.request.canonical_payload['rules'][0]):
                 raise ValueError('La prioridad cambió después de preparar la vista.')
+            from horarios_especiales.services.google_projection import preview_google_conflicts
+            preview_google_conflicts(old.request)
             approve_request(request_obj=old.request, actor=actor, expected_revision=old.revision)
-        except ValueError:
-            text = 'No se aprobó: la revisión cambió, venció o está ocupada. Envía de nuevo la instrucción completa.'
+        except ValueError as exc:
+            text = 'No se aprobó: ' + str(exc) + ' Envía de nuevo la instrucción completa.'
         else:
             old.state = 'APPROVED'
             old.save(update_fields=['state'])
@@ -370,7 +377,7 @@ def poll_once(config=None, client=None):
             if row.state in ('PREPARED', 'REPLY'):
                 deliver(row, client, config)
         recover_approved(config)
-        for row in owner_updates(config).filter(state='QUEUED').select_related('request').order_by('-pk')[:20]:
+        for row in owner_updates(config).filter(state='QUEUED', created_at__gte=timezone.now() - timedelta(days=7)).select_related('request').order_by('-pk')[:20]:
             if time.monotonic() > deadline:
                 break
             text = status_text(row.request)

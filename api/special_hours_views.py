@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
+import re
+
+from django.utils import timezone
 
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -68,6 +72,42 @@ def _serialize_request(obj: SolicitudHorarioEspecial) -> dict:
 
 
 logger = logging.getLogger(__name__)
+
+
+class PublicBranchHoursView(APIView):
+    """Public business hours only; never fetch the website's regular schedule."""
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        from horarios_especiales.services.effective_hours import read_effective_hours
+        from core.models import sucursales_operativas
+
+        today = timezone.now().astimezone(ZoneInfo("America/Mazatlan")).date()
+        raw_date = request.query_params.get("target_date", today.isoformat())
+        codes = request.query_params.get("branch_codes", "").split(",")
+        try:
+            target = date.fromisoformat(raw_date)
+            if (raw_date != target.isoformat() or not today - timedelta(days=1) <= target <= today + timedelta(days=366)
+                    or not 1 <= len(codes) <= 10 or len(set(codes)) != len(codes)
+                    or any(not re.fullmatch(r"[A-Z][A-Z0-9_]{0,39}", code) for code in codes)):
+                raise ValueError
+            branches = list(sucursales_operativas(reference_date=target).filter(codigo__in=codes))
+            if {branch.codigo for branch in branches} != set(codes):
+                raise ValueError
+            rows = []
+            for branch in branches:
+                payload = read_effective_hours(branch.codigo, target, include_regular=False)
+                effective = payload["effective"]
+                rows.append({"branch_code": branch.codigo, "branch_name": branch.nombre,
+                    "target_date": raw_date, "timezone": "America/Mazatlan", "checked_at": payload["checked_at"],
+                    "status": ("NO_OVERRIDE" if effective.get("reason") == "SPECIAL_HOURS_NOT_CONFIRMED" else effective["status"]),
+                    "source": effective.get("source"), "revision": effective.get("revision"),
+                    "closed_all_day": effective.get("closed_all_day"), "windows": effective["windows"]})
+        except (ValueError, OverflowError):
+            return Response({"detail": "Se requieren códigos exactos (máximo 10) y fecha ISO entre ayer y 366 días."}, status=400)
+        return Response({"target_date": raw_date, "timezone": "America/Mazatlan", "branches": rows},
+                        headers={"Cache-Control": "no-store"})
 
 
 class SpecialHoursEffectiveView(APIView):

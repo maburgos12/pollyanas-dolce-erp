@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
-from django.db import connection
+from django.db import connection, transaction
 from django.utils import timezone
 
 from core.models import Sucursal
@@ -279,8 +279,60 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
     elif summary["public_confirmed"] or all(d["status"] == "PROGRAMMED" for d in summary["details"]):
         summary["next_reconcile_at"] = (timezone.now() + timedelta(days=1)).isoformat()
     # ERP approval remains authoritative even when Google is unavailable or pending.
-    SolicitudHorarioEspecial.objects.filter(pk=request_obj.pk, cancelled_at__isnull=True).update(
-        execution_summary_json=summary, executed_at=timezone.now(),
-        executed_by=actor if getattr(actor, "is_authenticated", False) else None)
+    with transaction.atomic():
+        locked = SolicitudHorarioEspecial.objects.select_for_update().get(pk=request_obj.pk)
+        if not locked.cancelled_at:
+            if 'consumer_readback' in locked.execution_summary_json:
+                summary['consumer_readback'] = locked.execution_summary_json['consumer_readback']
+            SolicitudHorarioEspecial.objects.filter(pk=locked.pk).update(
+                execution_summary_json=summary, executed_at=timezone.now(),
+                executed_by=actor if getattr(actor, "is_authenticated", False) else None)
     request_obj.refresh_from_db()
     return summary
+
+
+def preview_google_conflicts(request_obj):
+    """Read current Google hours against a hypothetical candidate, without approval or PATCH."""
+    from concurrent.futures import ThreadPoolExecutor
+    from integraciones.services.google_business_profile.client import GoogleBusinessProfileClient
+
+    payload = request_obj.canonical_payload
+    now = timezone.now()
+    today = now.astimezone(ZoneInfo("America/Mazatlan")).date()
+    inputs, pending = [], []
+    for location in payload['locations'][:10]:
+        config = SucursalPlataformaExterna.objects.filter(sucursal_id=location['branch_id'], is_active=True,
+            platform=SucursalPlataformaExterna.PLATFORM_GOOGLE).first()
+        if not config:
+            pending.append(location['branch_code'])
+            continue
+        rows = approved_rules(location['branch_id'])
+        rows.extend(((PRECEDENCE[rule['kind']], now, request_obj.pk, index), rule, payload['revision'])
+                    for index, rule in enumerate(payload['rules']))
+        inputs.append((location['branch_code'], config.external_location_name,
+                       config.settings_json.get('hours_agent_owned_specials', {}), rows))
+
+    def read(item):
+        code, name, owned, rows = item
+        try:
+            current = GoogleBusinessProfileClient(timeout_seconds=5).get_location(location_name=name)
+            projection_fields(current=current, rows=rows, today=today, owned=owned)
+            for start in {r['start_date'] for r in payload['rules'] if r['kind'] == 'weekly' and r['start_date'] > today.isoformat()}:
+                projection_fields(current=current, rows=rows, today=date.fromisoformat(start), owned=owned)
+            return code, 'CHECKED'
+        except ValueError as exc:
+            if str(exc).startswith('MANUAL_EXCEPTION_CONFLICT:'):
+                return code, str(exc)
+            return code, 'PENDING'
+        except Exception:
+            return code, 'PENDING'
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(read, inputs))
+    conflicts = [code + ': ' + state for code, state in results if state.startswith('MANUAL_EXCEPTION_CONFLICT:')]
+    if conflicts:
+        raise ValueError('Google conserva excepciones manuales incompatibles: ' + '; '.join(conflicts) + '. Revisa esas fechas antes de aprobar.')
+    pending.extend(code for code, state in results if state == 'PENDING')
+    return ('Google: comprobación previa pendiente en ' + ', '.join(pending) +
+            '; la aprobación ERP puede llegar a tienda y Maya aunque Google requiera revisión.' if pending else
+            'Google: lectura previa sin conflictos manuales detectados; publicación y verificación aún pendientes.')

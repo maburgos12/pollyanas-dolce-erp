@@ -125,12 +125,14 @@ def _read_regular(branch, target_date):
     return regular, public_code
 
 
-def read_effective_hours(branch_name, target_date):
+def read_effective_hours(branch_name, target_date, *, include_regular=True):
     matches, errors = resolve_branch_token(branch_name, reference_date=target_date)
     if errors or len(matches) != 1:
         raise ValueError("No se pudo identificar una sucursal operativa única.")
     branch = matches[0].branch
-    regular, public_code = _read_regular(branch, target_date)
+    regular, public_code = (_read_regular(branch, target_date) if include_regular else
+                            ({"status": "UNKNOWN", "source": "OFFICIAL_WEBSITE",
+                              "source_url": OFFICIAL_BRANCHES_URL, "windows": []}, None))
     effective = {"status": "REGULAR_ONLY" if regular["status"] == "VERIFIED" else "UNKNOWN",
                  "source": None, "closed_all_day": None, "windows": [],
                  "reason": "SPECIAL_HOURS_NOT_CONFIRMED"}

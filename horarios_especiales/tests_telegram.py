@@ -35,6 +35,12 @@ class FakeTelegram:
 
 class TelegramHoursTests(TestCase):
     def setUp(self):
+        self.google_preflight = patch('horarios_especiales.services.google_projection.preview_google_conflicts', return_value='Google: comprobación previa pendiente.')
+        self.google_preflight.start()
+        self.addCleanup(self.google_preflight.stop)
+        self.consumer_mock = patch('horarios_especiales.services.consumer_receipts.check_pair', return_value={})
+        self.consumer_mock.start()
+        self.addCleanup(self.consumer_mock.stop)
         self.user = User.objects.create_user(username='hours_owner', is_superuser=True)
         self.config = dict(bot_id=12345, telegram_user_id=777, telegram_chat_id=777, erp_user_id=self.user.pk)
         self.branches = {}
@@ -334,6 +340,9 @@ class TelegramTransportTests(TestCase):
 
 class TelegramProjectionReceiptTests(TransactionTestCase):
     def setUp(self):
+        read = patch('horarios_especiales.services.consumer_receipts.check_pair', return_value={})
+        read.start()
+        self.addCleanup(read.stop)
         self.user = User.objects.create_user(username='hours_owner', is_superuser=True)
         branch = Sucursal.objects.create(codigo='MATRIZ', nombre='Matriz', activa=True)
         self.branches = {'MATRIZ': branch}
