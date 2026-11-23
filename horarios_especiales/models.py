@@ -350,3 +350,28 @@ class HorarioEspecialBitacora(models.Model):
     def __str__(self) -> str:
         return f"{self.request.request_code} · {self.action}"
 
+
+class TelegramHoursCursor(models.Model):
+    bot_id = models.BigIntegerField(unique=True)
+    next_update_id = models.BigIntegerField(default=0)
+    audio_reserved_cents = models.PositiveIntegerField(default=0)
+
+
+class TelegramHoursUpdate(models.Model):
+    bot_id = models.BigIntegerField()
+    update_id = models.BigIntegerField()
+    telegram_user_id = models.BigIntegerField(default=0)
+    chat_id = models.BigIntegerField(default=0)
+    message_id = models.BigIntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    request = models.ForeignKey(SolicitudHorarioEspecial, null=True, on_delete=models.PROTECT)
+    preview_message_id = models.BigIntegerField(null=True)
+    revision = models.CharField(max_length=64, blank=True)
+    nonce = models.CharField(max_length=32, blank=True)
+    expires_at = models.DateTimeField(null=True)
+    state = models.CharField(max_length=24, default="RECEIVED", db_index=True)
+    receipt = models.JSONField(default=dict)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["bot_id", "update_id"], name="he_telegram_update_unique")]

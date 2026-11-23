@@ -30,6 +30,7 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --home-dir /home/appuser --shell /bin/bash appuser
 

@@ -11,7 +11,7 @@ GOOGLE_BUSINESS_MANAGE_SCOPE = "https://www.googleapis.com/auth/business.manage"
 
 
 class GoogleBusinessProfileClient:
-    def __init__(self):
+    def __init__(self, *, timeout_seconds=None):
         client_id = str(os.getenv("GOOGLE_BUSINESS_PROFILE_CLIENT_ID") or "").strip()
         client_secret = str(os.getenv("GOOGLE_BUSINESS_PROFILE_CLIENT_SECRET") or "").strip()
         refresh_token = str(os.getenv("GOOGLE_BUSINESS_PROFILE_REFRESH_TOKEN") or "").strip()
@@ -29,10 +29,15 @@ class GoogleBusinessProfileClient:
             client_secret=client_secret,
             scopes=[GOOGLE_BUSINESS_MANAGE_SCOPE],
         )
+        transport = {"credentials": self._credentials}
+        if timeout_seconds is not None:
+            import httplib2
+            from google_auth_httplib2 import AuthorizedHttp
+            transport = {"http": AuthorizedHttp(self._credentials, http=httplib2.Http(timeout=timeout_seconds))}
         self._service = build(
             "mybusinessbusinessinformation",
             "v1",
-            credentials=self._credentials,
+            **transport,
             cache_discovery=False,
         )
 
@@ -57,3 +62,14 @@ class GoogleBusinessProfileClient:
             .execute()
         )
 
+
+    def patch_hours(self, *, location_name: str, fields: dict, validate_only: bool = False) -> dict:
+        return self._service.locations().patch(
+            name=location_name, updateMask=",".join(sorted(fields)),
+            validateOnly=validate_only, body={"name": location_name, **fields},
+        ).execute()
+
+    def get_google_updated(self, *, location_name: str) -> dict:
+        return self._service.locations().getGoogleUpdated(
+            name=location_name, readMask="regularHours,specialHours",
+        ).execute()
