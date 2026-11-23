@@ -96,7 +96,7 @@ class RestoreGatesTests(unittest.TestCase):
                          postgresql_major=16, sql_restore_exit=0, media_restore_exit=0,
                          verified_references=1, media_generations=['latest'], media_aliases={})
             payload = json.dumps(dict(receipt=proof, evidence=evidence))
-            with patch.object(health, 'STATE', state), patch.object(rotator, 'BACKUPS', root), patch.object(rotator, 'RECEIPTS', canonical), patch.object(rotator, 'local_set', return_value=(stem + '.manifest', 'a' * 64, {})), patch.object(rotator, 'bounded_check_proof') as probe, patch.object(health, 'run', side_effect=lambda args: payload if health.NAS_RUNNER in args else '') as run, patch.object(health, 'atomic', wraps=health.atomic) as publish:
+            with patch.object(health, 'STATE', state), patch.object(rotator, 'BACKUPS', root), patch.object(rotator, 'RECEIPTS', canonical), patch.object(rotator, 'local_set', return_value=(stem + '.manifest', 'a' * 64, {})), patch.object(rotator, 'bounded_check_proof') as probe, patch.object(health, 'run', side_effect=lambda args: payload if 'restore' in args else '') as run, patch.object(health, 'atomic', wraps=health.atomic) as publish:
                 health.maintain(rotator, verify_only=True)
                 private = state / 'verification-receipts'
                 self.assertEqual(len(publish.call_args_list), 2)
@@ -109,7 +109,7 @@ class RestoreGatesTests(unittest.TestCase):
                 publish.reset_mock()
                 health.maintain(rotator, verify_only=True)
                 self.assertEqual(len(run.call_args_list), 1)
-                self.assertEqual(run.call_args.args[0][-1], 'true')
+                self.assertEqual(run.call_args.args[0][-2:], [health.NAS_ALIAS, 'status'])
                 publish.assert_not_called()
                 self.assertEqual(probe.call_count, 2)
 

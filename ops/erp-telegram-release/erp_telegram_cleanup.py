@@ -12,6 +12,7 @@ import secrets
 import time
 import tempfile
 import shutil
+import stat
 import subprocess
 
 from erp_telegram_release import (Ledger, NONCE, telegram, verify_message, schedule_request,
@@ -75,7 +76,7 @@ def point_manifest_id(files):
 
 
 def validate_point_manifest(item):
-    if set(item) != {'type', 'id', 'files', 'recovery'} or not isinstance(item['files'], list) or not 1 <= len(item['files']) <= 10:
+    if set(item) != {'type', 'id', 'files', 'recovery'} or not isinstance(item['files'], list) or not 1 <= len(item['files']) <= 100:
         raise ValueError('invalid_point_manifest')
     seen = set()
     for entry in item['files']:
@@ -109,7 +110,7 @@ def read_proposal(path):
     proposal = json.loads(raw)
     fields = {'delete_candidates', 'execution', 'expected_recovery', 'expected_usage', 'host',
               'id', 'preconditions', 'preserve', 'risk', 'status'}
-    if not isinstance(proposal, dict) or set(proposal) not in (fields, fields | {'schema', 'executor'}):
+    if not isinstance(proposal, dict) or set(proposal) not in (fields, fields | {'schema', 'executor'}, fields | {'schema', 'executor', 'predecessor'}):
         raise ValueError('invalid_proposal_schema')
     if (proposal['host'] != '68.183.165.47' or not isinstance(proposal['id'], str)
             or not PROPOSAL_ID.fullmatch(proposal['id']) or proposal['status'] != 'awaiting_explicit_approval'):
@@ -125,6 +126,12 @@ def read_proposal(path):
         if not resident:
             raise ValueError('point_requires_resident_contract')
         validate_point_manifest(item)
+        if 'predecessor' in proposal:
+            link = proposal['predecessor']
+            if (not isinstance(link, dict) or set(link) != {'nonce', 'proposal_sha256', 'execution_sha256', 'attempts_sha256'}
+                    or not isinstance(link['nonce'], str) or not NONCE.fullmatch(link['nonce'])
+                    or any(not isinstance(link[k], str) or not DIGEST.fullmatch(link[k]) for k in link if k != 'nonce')):
+                raise ValueError('invalid_predecessor')
     elif isinstance(item, dict) and item.get('type') == 'cache_log_manifest':
         validate_manifest(item, proposal['id'])
         if resident:
@@ -137,6 +144,8 @@ def read_proposal(path):
                 or type(item['bytes_logical']) is not int or not 0 < item['bytes_logical'] < 100_000_000_000
                 or type(item['container_references']) is not int or item['container_references'] != 0):
             raise ValueError('invalid_image_candidate')
+    if 'predecessor' in proposal and item['type'] != 'point_archive_manifest':
+        raise ValueError('point_predecessor_only')
     texts = [proposal[k] for k in ('execution', 'expected_recovery', 'expected_usage', 'risk')]
     if item['type'] == 'docker_image':
         texts.append(item['unique_size_docker_report'])
@@ -197,6 +206,7 @@ def request(path, ledger, config, send=telegram):
     if hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError('proposal_changed')
     with ledger.lock():
+        validate_predecessor(proposal, ledger)
         if not frozen.exists():
             fd = os.open(frozen, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, 'wb') as stream:
@@ -214,9 +224,11 @@ def request(path, ledger, config, send=telegram):
         current, current_digest = read_proposal(frozen)
         if current_digest != digest:
             raise ValueError('proposal_changed')
+        validate_predecessor(current, ledger)
         revalidate_proposal(current, ledger.directory)
     return schedule_request('cleanup', {'digest': digest, 'proposal_id': proposal['id']}, ledger,
-        lambda row: row['proposal_id'] == proposal['id'] or row['image_id'] == proposal['delete_candidates'][0]['id'],
+        lambda row: row['nonce'] != proposal.get('predecessor', {}).get('nonce') and
+            (row['proposal_id'] == proposal['id'] or row['image_id'] == proposal['delete_candidates'][0]['id']),
         lambda: _request(frozen, ledger, config, send), check)
 
 
@@ -224,7 +236,8 @@ def revalidate_proposal(proposal, state):
     require_recovery()
     item = proposal['delete_candidates'][0]
     if item['type'] == 'point_archive_manifest':
-        operational_module('erp_point_archive').Broker().verify_batch(item['files'])
+        with operational_module('erp_point_archive').Broker() as broker:
+            broker.verify_batch(item['files'])
         return
     # Legacy image/cache proposals lack a restorable identity contract: require operator review.
     if item['type'] != 'cache_log_manifest' or item['build_cache']:
@@ -299,8 +312,17 @@ def _request(path, ledger, config, send=telegram):
                nonce=secrets.token_hex(12), expires=int(time.time()) + APPROVAL_TTL_SECONDS, chat_id=config['chat_id'],
                message_id=None, state='notifying', decision_at=None)
     with ledger.lock():
+        predecessor = validate_predecessor(proposal, ledger)
         for file in ledger.directory.glob('*.json'):
             old = ledger.read(file.stem)
+            if predecessor and old['nonce'] == predecessor['nonce']:
+                continue
+            if predecessor and old['image_id'] == row['image_id']:
+                raise ValueError('existing_successor_requires_resolution')
+            if predecessor and old['state'] == 'approved':
+                prior_execution = execution_state(ledger, old['nonce'])
+                if prior_execution and prior_execution['state'] != 'completed' and not predecessor_resolved(ledger, old):
+                    raise ValueError('unresolved_other_execution')
             if old['state']=='notifying' or (old['state'] in {'pending','approved'} and int(time.time())<old['expires'] and not execution_state(ledger,old['nonce'])):
                 raise ValueError('existing_request_requires_resolution')
             if ((old['proposal_id'] == row['proposal_id'] or old['image_id'] == row['image_id'])
@@ -338,6 +360,9 @@ def _request(path, ledger, config, send=telegram):
                     'Conservar todos los respaldos, bases, servicios y archivos fuera de este lote. '
                     'El ejecutor residente retirará sólo estos originales tras aprobación vigente y nueva comprobación. '
                     'Vence en 12 horas. Rechazar revoca hasta que comience la ejecución; al vencer se detienen los retiros pendientes.')
+            if predecessor:
+                text += ('\nSucesora del lote bloqueado ' + predecessor['nonce'] +
+                         '. Se conservan sus tres intentos y su incidencia. Esta es una autorización nueva del mismo manifiesto exacto.')
         else:
             file_bytes = sum(entry['bytes'] for entry in item['files'])
             cache_bytes = sum(entry['bytes'] for entry in item['build_cache'])
@@ -419,6 +444,7 @@ def decide(query, config, ledger, now=None):
 def status(path, nonce, ledger, now=None):
     proposal, digest = read_proposal(path)
     with ledger.lock():
+        validate_predecessor(proposal, ledger)
         row = ledger.read(nonce)
         if (row['proposal_sha256'] != digest or row['proposal_id'] != proposal['id']
                 or row['image_id'] != proposal['delete_candidates'][0]['id']):
@@ -446,6 +472,78 @@ def execution_state(ledger, nonce):
     if value.get('proposal_sha256') != ledger.read(nonce)['proposal_sha256']:
         raise ValueError('execution_proposal_mismatch')
     return value
+
+
+def recovery_evidence(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            raise ValueError('unsafe_predecessor_evidence')
+        raw = stream.read(131073)
+    if len(raw) > 131072:
+        raise ValueError('predecessor_evidence_limit')
+    return raw, hashlib.sha256(raw).hexdigest()
+
+
+def validate_predecessor(proposal, ledger):
+    link = proposal.get('predecessor')
+    if link is None:
+        return None
+    row = ledger.read(link['nonce'])
+    frozen = ledger.directory / 'proposals' / (row['nonce'] + '.json')
+    _, digest = recovery_evidence(frozen)
+    parent, current = read_proposal(frozen)
+    execution_raw, execution_digest = recovery_evidence(ledger.directory / 'executions' / (row['nonce'] + '.json'))
+    attempts_raw, attempts_digest = recovery_evidence(ledger.directory / 'executions' / (row['nonce'] + '.attempts'))
+    record, attempts = json.loads(execution_raw), json.loads(attempts_raw)
+    if (row['state'] != 'approved' or row['decision_at'] is None
+            or digest != current or digest != row['proposal_sha256'] or digest != link['proposal_sha256']
+            or execution_digest != link['execution_sha256'] or attempts_digest != link['attempts_sha256']
+            or parent.get('predecessor') is not None or parent['delete_candidates'][0]['type'] != 'point_archive_manifest'
+            or parent['delete_candidates'] != proposal['delete_candidates'] or parent['id'] == proposal['id']
+            or row['image_id'] != parent['delete_candidates'][0]['id'] or row['proposal_id'] != parent['id']
+            or record.get('nonce') != row['nonce'] or record.get('proposal_sha256') != digest
+            or record.get('state') != 'blocked' or record.get('reason') != 'preflight_attempt_limit'
+            or record.get('removed') != [] or record.get('skipped') != [] or record.get('intent') is not None
+            or type(attempts.get('count')) is not int or attempts['count'] != 3):
+        raise ValueError('predecessor_not_recoverable')
+    return row
+
+
+def successor_proposal(ledger, nonce, proposal_id):
+    # Explicit operator preparation only: never invoked by the periodic producer.
+    if not isinstance(proposal_id, str) or not PROPOSAL_ID.fullmatch(proposal_id):
+        raise ValueError('invalid_proposal_id')
+    with ledger.lock():
+        row = ledger.read(nonce)
+        path = ledger.directory / 'proposals' / (row['nonce'] + '.json')
+        _, digest = recovery_evidence(path)
+        proposal, _ = read_proposal(path)
+        root = ledger.directory / 'executions'
+        proposal.update(id=proposal_id, predecessor=dict(nonce=row['nonce'], proposal_sha256=digest,
+            execution_sha256=recovery_evidence(root / (row['nonce'] + '.json'))[1],
+            attempts_sha256=recovery_evidence(root / (row['nonce'] + '.attempts'))[1]))
+        validate_predecessor(proposal, ledger)
+        return proposal
+
+
+def predecessor_resolved(ledger, row):
+    for path in (ledger.directory / 'proposals').glob('*.json'):
+        child, digest = read_proposal(path)
+        if child.get('predecessor', {}).get('nonce') != row['nonce']:
+            continue
+        successor = ledger.read(path.stem)
+        if successor['proposal_sha256'] != digest or successor['image_id'] != child['delete_candidates'][0]['id']:
+            raise ValueError('successor_proposal_changed')
+        if successor['state'] != 'approved':
+            continue
+        validate_predecessor(child, ledger)
+        record = execution_state(ledger, successor['nonce'])
+        expected = {entry['id'] for entry in child['delete_candidates'][0]['files']}
+        if (record and record['state'] == 'completed' and record.get('intent') is None
+                and record.get('skipped') == [] and sorted(record.get('removed', [])) == sorted(expected)):
+            return True
+    return False
 
 
 def decision_text(state):

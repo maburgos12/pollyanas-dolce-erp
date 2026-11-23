@@ -307,6 +307,8 @@ def blocked(ledger, identity, now):
                 if execution is not None:
                     if execution['state'] == 'completed':
                         continue
+                    if cleanup.predecessor_resolved(ledger, row):
+                        continue
                     return True
             if row['state'] in {'pending', 'approved'} and row['expires'] > now:
                 return True

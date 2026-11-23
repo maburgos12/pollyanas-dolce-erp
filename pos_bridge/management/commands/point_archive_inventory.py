@@ -1,13 +1,17 @@
 """Bounded read-only eligibility and semantic verification for category XLS archives."""
 import hashlib
 import json
+from contextlib import redirect_stdout, redirect_stderr
+from io import StringIO
 from pathlib import Path
 import re
+import signal
+import sys
 from datetime import timedelta
 
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand, CommandError, OutputWrapper
 from django.core.serializers.json import DjangoJSONEncoder
-from django.db import connection, transaction
+from django.db import connection, connections, transaction
 from django.utils import timezone
 
 from pos_bridge.models import PointSalesExtractionTask, PointSalesNormalized, PointSalesRawStaging, PointSalesDailyProductFact, PointProductHistoryImport, PointMonthlySalesOfficial
@@ -15,6 +19,16 @@ from pos_bridge.services.archive_access import ArchiveStore
 from pos_bridge.services.sales_category_report_service import PointSalesCategoryReportService
 
 NAME = re.compile(r'[0-9]{8}_[0-9]{6}_point_sales_category_[A-Za-z0-9_-]+\.xls')
+
+
+class BoundedText(StringIO):
+    def __init__(self,limit):
+        super().__init__();self.limit=limit;self.size=0
+
+    def write(self,value):
+        self.size+=len(value.encode('utf-8'))
+        if self.size>self.limit:raise ValueError('inventory_output_limit')
+        return super().write(value)
 
 
 def semantic_digest(path):
@@ -61,8 +75,55 @@ class Command(BaseCommand):
         parser.add_argument('--after-id',type=int,default=0)
         parser.add_argument('--name')
         parser.add_argument('--parse')
+        parser.add_argument('--stream',action='store_true')
+
+    def stream(self):
+        output=self.stdout;previous=signal.signal(signal.SIGALRM,signal.SIG_DFL)
+        signal.alarm(0)
+        try:
+            for sequence in range(1,513):
+                line=sys.stdin.buffer.readline(4097)
+                if not line:return
+                if len(line)>4096 or not line.endswith(b'\n'):
+                    raise CommandError('inventory_stream_request_limit')
+                try:
+                    request=json.loads(line)
+                    if (not isinstance(request,dict) or set(request)!={'id','args'}
+                            or type(request['id']) is not int or request['id']!=sequence
+                            or not isinstance(request['args'],list) or len(request['args'])!=2
+                            or any(not isinstance(x,str) for x in request['args'])):
+                        raise ValueError()
+                    key,value=request['args'];options=dict(name=None,parse=None,after_id=0,stream=False)
+                    if key=='--after-id' and re.fullmatch('[0-9]{1,19}',value) and int(value)<=9223372036854775807:
+                        options['after_id']=int(value)
+                    elif key in ('--name','--parse') and value:
+                        options[key[2:]]=value
+                    else:raise ValueError()
+                except (ValueError,TypeError,UnicodeError):
+                    raise CommandError('inventory_stream_request_invalid') from None
+                signal.alarm(85)
+                result=BoundedText(1048576);warnings=BoundedText(16384)
+                try:
+                    self.stdout=OutputWrapper(result)
+                    with redirect_stdout(warnings),redirect_stderr(warnings):
+                        self.handle(**options)
+                    response=json.dumps({'id':sequence,'result':json.loads(result.getvalue())},separators=(',',':'))
+                    if len(response.encode('utf-8'))+1>1048576:
+                        raise ValueError('inventory_response_limit')
+                except Exception:
+                    raise CommandError('inventory_stream_request_failed') from None
+                finally:
+                    self.stdout=output
+                    connections.close_all()
+                    signal.alarm(0)
+                output.write(response);output.flush()
+        finally:
+            self.stdout=output
+            signal.alarm(0);signal.signal(signal.SIGALRM,previous)
 
     def handle(self,*args,**options):
+        if options.get('stream'):
+            return self.stream()
         if connection.vendor != 'postgresql':
             raise CommandError('PostgreSQL required')
         store=ArchiveStore()

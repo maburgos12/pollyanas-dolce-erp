@@ -30,6 +30,25 @@ def deployment_lock(path=Path('/run/lock/erp-deploy.lock')):
         yield
 
 
+@contextmanager
+def close_after_execution(adapter,ledger,nonce,digest):
+    try:
+        yield
+    finally:
+        try:
+            adapter.close()
+        except Exception:
+            record=cleanup.execution_state(ledger,nonce) or dict(nonce=nonce,proposal_sha256=digest,
+                state='not_started',removed=[],skipped=[],intent=None)
+            record.setdefault('retirement_state',record['state'])
+            record.update(state='uncertain',reason='inventory_closure_unknown')
+            atomic_json(execution_path(ledger,nonce),record)
+            cleanup.enqueue(ledger,ledger.read(nonce),'execution-closure-hold',
+                'Cierre del proceso de verificación no acreditado; requiere revisión. '
+                'Estado del retiro conservado: '+record['retirement_state']+'. No se repetirá el lote.')
+            raise RuntimeError('inventory_closure_unknown') from None
+
+
 def execute(nonce, ledger, adapter, now=time.time):
     """Adapter owns bounded recovery/leases. Decisions and execution evidence stay separate."""
     proposal_path = ledger.directory / 'proposals' / (nonce + '.json')
@@ -38,7 +57,7 @@ def execute(nonce, ledger, adapter, now=time.time):
         return 'legacy_manual_only'
     item = proposal['delete_candidates'][0]
     record_path = execution_path(ledger, nonce)
-    with deployment_lock(adapter.deploy_lock), ledger.lock(worker=True):
+    with deployment_lock(adapter.deploy_lock), ledger.lock(worker=True), close_after_execution(adapter,ledger,nonce,digest):
         old = cleanup.execution_state(ledger, nonce)
         if old and old['state'] != 'executing':
             notify_result(ledger, ledger.read(nonce), old)
@@ -144,6 +163,9 @@ class HostAdapter:
             raise ValueError('unsupported_resident_scope')
         from erp_point_archive import Broker
         self.point = Broker()
+
+    def close(self):
+        self.point.close()
 
     @staticmethod
     def command(*args):

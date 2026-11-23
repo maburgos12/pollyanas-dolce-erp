@@ -251,7 +251,7 @@ NAS. Siguen excluidas las referencias fallidas al mismo archivo, fuentes recient
 incompletas, con hashes/filas distintos o consumidores fuera del contrato de
 categorías. Copiar no certifica las cifras del reporte ni resuelve sus incidencias.
 
-El catálogo conserva todos los recibos históricos; el límite de diez archivos y
+El catálogo conserva todos los recibos históricos; el límite de cien archivos y
 100 MB se aplica al lote propuesto, no al total del catálogo. Cada lote requiere
 su aprobación exacta y vigente. Antes de retirar: lectura completa desde NAS,
 hash/tamaño/parser equivalentes, revalidación de referencias y lease exclusivo.
@@ -272,8 +272,9 @@ antes/después; no reactivarlo para pasar una guarda. Estados fallidos, transito
 o cambios de servicios/respaldos bloquean el retiro bajo el mutex de despliegue.
 
 La página nativa de 100 registros tardó 47.84 s en producción el 22 de noviembre
-(3.79 s de arranque y 43.96 s de elegibilidad). Su límite dentro del contenedor es
-85 s, con límites exteriores de 90/95 s; cada consulta conserva su límite de 10 s.
+(3.79 s de arranque y 43.96 s de elegibilidad). Cada petición conserva un límite de
+85 s dentro del contenedor y 95 s para la respuesta; cada consulta SQL conserva
+su límite de 10 s.
 Un timeout no autoriza reiniciar contadores ni omitir comprobaciones de integridad.
 
 Una referencia en `VentaAutoritativaPoint` conserva su ruta lógica y todas sus
@@ -286,3 +287,83 @@ Al llenar el lote, el cursor queda antes del primer candidato aún no preparado;
 no avanza al final de una página con archivos pendientes. La vista previa completa
 de 100 registros produjo 89 candidatos íntegros en 55.30 s, incluido el parser.
 Esto no acredita su recepción en NAS ni autoriza retirarlos.
+
+El Broker reutiliza un proceso del mismo comando durante una operación. Django y
+sus checks completos arrancan una vez; cada petición vuelve a ejecutar el handler
+nativo con transacción RRO y conexión nueva. No se cachea elegibilidad y ambas
+verificaciones bajo lease inmediatamente antes del retiro se conservan.
+El proceso tiene límite duro de 900 s, se sustituye entre peticiones antes de
+700 s o 480 respuestas, y su cierre ocurre bajo los locks del ejecutor. Peticiones
+de 4 KiB, respuestas de 1 MiB y stderr acumulado de 16 KiB son máximos efectivos.
+Salida inesperada, EOF o timeout producen HOLD sin reenviar una petición ambigua.
+Un cierre no acreditado conserva el resultado del retiro en `retirement_state`,
+marca la ejecución global `uncertain` y envía un aviso separado; no repite el lote.
+
+Antes de proponer cien archivos, activar coherentemente productor y validador
+instalado mediante el refresh oficial de la revisión publicada, conservando el
+receptor y la pausa del publicador. Permanecen 100 MB por lote y 128 KiB por
+propuesta, además de aprobación exacta por nonce/digest. Las aprobaciones anteriores
+no amplían su alcance. Medir el recorrido real antes de atribuir una mejora de
+tiempo o espacio; una base local vacía sólo comprueba la reutilización del arranque.
+
+### Sucesora supervisada de un lote Point bloqueado sin retiros
+
+Un `blocked/preflight_attempt_limit` con tres intentos, `removed=[]`,
+`skipped=[]` y sin intención no se reinicia. Un operador puede preparar
+`erp_telegram_cleanup.successor_proposal(ledger, nonce_anterior, id_nuevo)`
+y guardar su resultado como propuesta privada nueva. El contrato enlaza el
+nonce y los SHA de propuesta, ejecución y contador anteriores; conserva el
+manifiesto exactamente y rechaza padres parciales, inciertos o ya sucesores.
+El padre y sus tres intentos permanecen inmutables. No es una acción periódica.
+
+La solicitud usa `request` normal: exige recuperación actual completa, nueva
+aprobación firmada del lote exacto y prevalidación residente. La aprobación
+anterior no sirve para la sucesora. Sólo una sucesora `completed`, sin intención,
+sin excluidos y con todos los IDs retirados resuelve el bloqueo ancestral para
+el productor; un cierre incierto mantiene HOLD. Los demás bloqueos se conservan.
+No editar recibos, contadores, decisiones ni cursores para avanzar.
+
+
+## Acceso NAS de servicio, sin sesión humana por ejecución
+
+La cuenta verificadora conserva su UID/HOME. La identidad nueva es una clave
+Ed25519 exclusiva: `/etc/erp-nas-access/id_ed25519`, root0600 y carpeta0700.
+La configuración aislada `/etc/erp-nas-access/ssh_config` fija la host key,
+identidad única, origen privado y ausencia de autenticación por contraseña,
+agente, TTY y forwarding. No hereda claves de los `Host *` del administrador.
+
+El NAS fuerza `nas_restore_daily.py --ssh-command`; sólo admite `status`,
+`preflight PUNTO SHA256` o `restore PUNTO SHA256`. El estado READY prueba el
+acceso, no recuperación. El preflight abre todos los medios antes del SQL; el
+recibo completo conserva restauración SQL, medios, hashes y cierre del scratch.
+Los comandos arbitrarios y la instalación quedan fuera de esa clave.
+
+La instalación requiere una copia cifrada recuperable y comprobada: el operador
+crea la clave con OpenSSH, cifra el respaldo con OpenSSL/PBKDF2 y guarda su
+contraseña de recuperación en el Llavero de macOS. El expediente guarda sólo
+ubicación, huella pública y hashes. Se comprueba descifrado, hash de la clave y
+clave pública antes de publicar `/etc/erp-nas-access/recovery-proof.json` privado.
+No pasar secretos por argumentos ni imprimirlos, añadirlos a Git o volcarlos a
+logs. La recuperación no depende de que la Mac esté encendida durante cada
+verificación; la Mac custodia sólo la copia de emergencia.
+
+Tras aprobación del SHA integrado y antes de habilitar el consumidor nuevo,
+publicar el recuperador revisado con `install_backup_health.sh` (archivo NAS0600)
+y ejecutar como root `python3 scripts/ops/install_nas_service_access.py SHA_RELEASE`.
+El instalador comprueba Git limpio/revisión exacta, fuente NAS idéntica y copia
+cifrada validada; preserva las claves existentes, respalda authorized_keys y
+agrega exclusivamente su entrada restringida mediante CAS y fsync. Comprueba
+acceso por la clave nueva y rechazo de shell. Si falla, HOLD sin reintento ciego.
+
+El alias anterior `qnap-nasdolce-archive` sigue disponible para instalación y para
+consumidores aún no migrados, incluidos recepción de archivos de limpieza y
+alertas. Esto limita la clave nueva, no todo el acceso existente VPS→NAS. No
+revocar la anterior ni cambiar su alcance hasta inventariar esos consumidores y
+probar la recuperación de emergencia. No activar ni pausar timers ajenos como
+atajo de aceptación.
+
+Si los archivos vuelven a perder lectura, registrar el cambio de metadatos y
+verificar el trabajo receptor exacto. No atribuir actor sólo por proximidad de
+horarios. No abrir permisos globales ni repetir importaciones SQL largas sin
+preflight. La pulsación exacta del lote sigue siendo obligatoria antes de retirar
+originales; el acceso por clave no cambia ese límite.

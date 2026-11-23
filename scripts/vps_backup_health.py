@@ -13,8 +13,8 @@ import sys
 import time
 
 STATE = Path('/var/lib/erp-backup-restore')
-NAS_PYTHON = '/share/CACHEDEV1_DATA/.qpkg/HybridBackup/CloudConnector3/python/bin/python3'
-NAS_RUNNER = '/share/homes/DolcePasteleria/.erp-backup-verifier/nas_restore_daily.py'
+NAS_ALIAS = 'qnap-nasdolce-verify'
+NAS_CONFIG = '/etc/erp-nas-access/ssh_config'
 ROTATOR = str(Path(__file__).with_name('rotate_verified_backups.py'))
 DOCKER_MAINTENANCE = Path('/usr/local/sbin/docker-disk-maintenance.sh')
 DOCKER_MAINTENANCE_SHA = '06e7e1dab800f2a7c92cf33a71c79f3535a1cfbfa03e12a1c57f4dfb1d229799'
@@ -54,9 +54,8 @@ def verify_point(rotator, stem, receipts=None):
         except (OSError, ValueError, KeyError, TypeError):
             continue
     if proof is None:
-        payload = json.loads(run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-                                  '-o', 'ConnectTimeout=20', 'qnap-nasdolce-archive',
-                                  NAS_PYTHON, NAS_RUNNER, stem, checksum]))
+        payload = json.loads(run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+                                  '-o', 'ConnectTimeout=20', NAS_ALIAS, 'restore', stem, checksum]))
         proof, evidence = payload['receipt'], payload['evidence']
         rotator.require(proof['point'] == stem and proof['manifest_sha256'] == checksum, 'Wrong remote proof')
         rotator.require(hashlib.sha256(evidence.encode()).hexdigest() == proof['evidence_sha256'], 'Changed remote log')
@@ -100,8 +99,8 @@ def maintain(rotator, verify_only=False):
         newest = points[-1]
         rotator.require(time.time() - (rotator.BACKUPS / (newest + '.manifest')).stat().st_mtime < 48 * 3600,
                         'Newest backup is over 48 hours old')
-        run(['ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
-             'qnap-nasdolce-archive', 'true'])
+        run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=20',
+             NAS_ALIAS, 'status'])
         verified = [verify_point(rotator, point, receipts=receipts) for point in points]
     if verify_only:
         return dict(verified=verified, retained=newest, rotation="Not requested (verify-only)")

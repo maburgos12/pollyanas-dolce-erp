@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
+import signal
 import shutil
 import subprocess
 import sys
@@ -20,8 +22,100 @@ from erp_telegram_release import Ledger, telegram, approval_window
 
 APP=Path('/opt/pastelerias-erp')
 STATE=Path('/var/lib/erp-point-archive')
-MAX_PILOT_FILES=10
+MAX_PILOT_FILES=100
 MAX_PILOT_BYTES=100_000_000
+SESSION_REPLY_SECONDS=95
+
+
+class InventorySession:
+    """One bounded child; every request still runs fresh native integrity checks."""
+    def __init__(self):
+        self.proc=None;self.failed=False;self.count=0;self.started=0;self.stderr_bytes=0
+
+    @staticmethod
+    def argv():
+        boot=("import os,signal;signal.signal(signal.SIGALRM,signal.SIG_DFL);signal.alarm(85);"
+              "os.environ.setdefault('DJANGO_SETTINGS_MODULE','config.settings');"
+              "from django.core.management import execute_from_command_line;"
+              "execute_from_command_line(['manage.py','point_archive_inventory','--stream'])")
+        return ['timeout','--signal=KILL','910','docker','exec','-i','pastelerias-erp-worker-1',
+                'timeout','--signal=KILL','900','python','-B','-c',boot]
+
+    def request(self,args):
+        if self.failed:
+            raise RuntimeError('inventory_session_failed')
+        try:
+            if self.proc is not None and (self.count>=480 or time.monotonic()-self.started>=700):
+                self.close()
+            if self.proc is None:
+                self.proc=subprocess.Popen(self.argv(),stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+                self.count=0;self.started=time.monotonic();self.stderr_bytes=0
+            if self.proc.poll() is not None:
+                raise RuntimeError('inventory_session_exited')
+            request=json.dumps({'id':self.count+1,'args':list(args)},separators=(',',':')).encode()+b'\n'
+            if len(request)>4096:
+                raise ValueError('inventory_request_limit')
+            self.proc.stdin.write(request);self.proc.stdin.flush()
+            deadline=time.monotonic()+SESSION_REPLY_SECONDS;output=bytearray()
+            with selectors.DefaultSelector() as selector:
+                selector.register(self.proc.stdout,selectors.EVENT_READ,'stdout')
+                selector.register(self.proc.stderr,selectors.EVENT_READ,'stderr')
+                while True:
+                    remaining=deadline-time.monotonic()
+                    if remaining<=0:
+                        raise TimeoutError('inventory_reply_timeout')
+                    for key,_ in selector.select(remaining):
+                        data=os.read(key.fileobj.fileno(),65536)
+                        if key.data=='stderr':
+                            self.stderr_bytes+=len(data)
+                            if self.stderr_bytes>16384:
+                                raise ValueError('inventory_stderr_limit')
+                            if not data:selector.unregister(key.fileobj)
+                        else:
+                            if not data:
+                                raise RuntimeError('inventory_reply_eof')
+                            output.extend(data)
+                            if len(output)>1048576:
+                                raise ValueError('inventory_reply_limit')
+                    if b'\n' in output:
+                        line,extra=output.split(b'\n',1)
+                        if extra:
+                            raise ValueError('inventory_extra_output')
+                        response=json.loads(line)
+                        if (not isinstance(response,dict) or set(response)!={'id','result'}
+                                or type(response['id']) is not int or response['id']!=self.count+1
+                                or not isinstance(response['result'],dict)):
+                            raise ValueError('inventory_reply_invalid')
+                        self.count+=1
+                        return response['result']
+        except BaseException as exc:
+            self.failed=True
+            proc=self.proc
+            self.close()
+            if (isinstance(exc,RuntimeError) and str(exc) in {'inventory_reply_eof','inventory_session_exited'}
+                    and proc is not None and proc.returncode in (-signal.SIGALRM,128+signal.SIGALRM)):
+                raise subprocess.TimeoutExpired('point_archive_inventory',85) from None
+            raise
+
+    def close(self):
+        proc=self.proc
+        if proc is None:return
+        self.proc=None
+        try:
+            try:proc.stdin.close()
+            except BrokenPipeError:pass
+            try:
+                proc.wait(timeout=95)
+            except subprocess.TimeoutExpired:
+                proc.kill();proc.wait(timeout=5)
+                self.failed=True
+                raise RuntimeError('inventory_remote_closure_unknown')
+            if proc.returncode!=0 and not self.failed:
+                self.failed=True
+                raise RuntimeError('inventory_session_exit_failed')
+        finally:
+            for pipe in (proc.stdin,proc.stdout,proc.stderr):
+                pipe.close()
 
 
 def failure_detail(exc, stage):
@@ -32,7 +126,7 @@ def failure_detail(exc, stage):
     raw = raw[:8192]
     code = getattr(exc, 'returncode', None)
     reason = 'command_failed' if isinstance(exc, subprocess.CalledProcessError) else type(exc).__name__
-    transient = isinstance(exc, subprocess.TimeoutExpired) or code == 124
+    transient = isinstance(exc, (subprocess.TimeoutExpired,TimeoutError)) or code == 124
     if transient:
         reason = 'command_timeout'
     elif isinstance(exc, subprocess.CalledProcessError):
@@ -122,10 +216,20 @@ class Broker:
         self.store=store or ArchiveStore(APP/'storage/pos_bridge/archive',APP/'storage/pos_bridge/raw_exports')
         self.nas=nas or ObjectNAS();self.state=Path(state)
         self.inventory=inventory or self._inventory;self.parse=parse or self._parse
+        self.session=None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self,*exc):
+        self.close()
+
+    def close(self):
+        if self.session is not None:self.session.close()
 
     def command(self,*args):
-        result=subprocess.run(['timeout','90','docker','exec','pastelerias-erp-worker-1','timeout','85','python','-B','manage.py','point_archive_inventory',*args],capture_output=True,text=True,timeout=95,check=True)
-        return json.loads(result.stdout)
+        if self.session is None:self.session=InventorySession()
+        return self.session.request(args)
 
     def _inventory(self,name=None,after_id=0):
         return self.command('--name',name) if name else self.command('--after-id',str(after_id))
@@ -334,8 +438,8 @@ def main():
         parser.error('root required')
     os.umask(0o077);STATE.mkdir(mode=0o700,parents=True,exist_ok=True)
     config=json.loads((Path(os.environ['CREDENTIALS_DIRECTORY'])/'telegram.json').read_text());ledger=Ledger(cleanup.STATE,validator=cleanup.validate)
-    with Ledger(STATE).lock(worker=True):
-        broker=Broker();recoveries=broker.recover_requests()
+    with Ledger(STATE).lock(worker=True), Broker() as broker:
+        recoveries=broker.recover_requests()
         for result in recoveries:
             if result['state']=='blocked':
                 cleanup.enqueue(ledger,{'nonce':result['id'][:24],'proposal_id':'Recuperación Point '+result['id'][:12]},'recovery-blocked','Tres intentos fallaron. La fuente sigue pendiente; revisar NAS y espacio. No se devolverán datos vacíos.')
