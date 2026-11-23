@@ -628,3 +628,54 @@ Rollback seguro:
 - Desinstalar `launchd` de inventario con `./scripts/uninstall_pos_bridge_inventory_launchd.sh`.
 - Revertir migración `pos_bridge`.
 - Quitar `pos_bridge` de `INSTALLED_APPS` si se decide retirar el módulo completo.
+
+### Catálogo comercial de lectura para Maya
+
+`GET /api/pos-bridge/products/customer-catalog/?q=texto` admite la credencial
+existente del grupo `maya_sales_readonly`. `q` es opcional y tiene un máximo de
+120 caracteres. La frontera permite únicamente GET de esta ruta; no habilita
+la lista interna, detalle, recetas ni escrituras.
+
+Se consulta en vivo el catálogo oficial de **productos finales activos** de Point
+(`/Catalogos/get_productos`, `activo=true`), separado de su catálogo de insumos.
+Los productos de reventa, accesorios o empaques clasificados como productos finales
+pueden ser comerciales; no se infiere elegibilidad por nombre ni precio. Se omiten
+filas explícitamente inactivas, insumos, servicios y complementos. Clasificaciones
+inválidas o identidades duplicadas/contradictorias fallan sin publicar resultados.
+
+Respuesta verificada:
+
+```json
+{
+  "status": "VERIFIED",
+  "source": "ERP_POS_BRIDGE_LIVE_POINT",
+  "is_fresh": true,
+  "checked_at": "2026-11-23T01:00:00+00:00",
+  "query": "galletas",
+  "complete": true,
+  "products": [{
+    "point_product_id": "901",
+    "product_code": "NEW901",
+    "product_name": "Galletas surtidas",
+    "category": "Galletas",
+    "presentation": null
+  }]
+}
+```
+
+La fecha corresponde a la lectura real, sin fallback de réplica ni caché.
+Point limita cada búsqueda a 150 filas: `complete=false` al alcanzar ese límite;
+el consumidor debe buscar un término más específico y no afirmar ausencia con
+resultados parciales. Se devuelve como máximo 150 filas. `presentation` queda
+nula mientras Point no proporcione un campo comercial explícito; categoría,
+unidad y nombre no se convierten en tamaños. No se devuelven costos, metadata,
+recetas, proveedores, ventas internas ni cantidades de stock. Errores devuelven
+`UNKNOWN`, `is_fresh=false`, fecha nula y lista vacía.
+
+`GET /api/pos-bridge/products/sale-price/?product_code=SKU` conserva sus validaciones
+para mapeos locales existentes. Si no existe `PointProduct`, resuelve un único SKU
+exacto en ese mismo catálogo y verifica identidad, actividad y precio en el detalle
+vivo de Point, dentro del mismo bloqueo/deadline de sesión; no crea datos maestros.
+La disponibilidad conserva el contrato público previo: si falta su equivalencia
+aprobada con receta/Point, el consumidor debe reportar existencia no confirmada.
+Descubrir un producto o verificar precio no acredita stock, reserva ni novedad.
