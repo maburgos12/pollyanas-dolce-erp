@@ -75,9 +75,18 @@ Match all
 ```
 
 La cuenta NO pertenece al grupo docker ni tiene otros sudoers. Instalar únicamente
-su clave pública dedicada en `/etc/ssh/authorized_keys/hours-audio`, root:root 0600,
-una línea `restrict ssh-ed25519 CLAVE_PUBLICA...`. `sshd -t` antes de recargar SSH;
-conservar la sesión administrativa para probar. El wrapper ignora argumentos y
+su clave pública dedicada en `/etc/ssh/authorized_keys/hours-audio`, root:root 0644,
+una línea `restrict ssh-ed25519 CLAVE_PUBLICA...`. El directorio root:root 0755 y
+el archivo 0644 permiten que sshd lea la clave pública como hours-audio sin que
+esa cuenta pueda modificarla. Antes del claim SSH real, comprobar:
+
+```sh
+sudo -u hours-audio test -r /etc/ssh/authorized_keys/hours-audio
+sshd -t
+```
+
+Ambas comprobaciones deben terminar correctamente antes de recargar SSH; conservar
+la sesión administrativa para probar. El wrapper ignora argumentos y
 SSH_ORIGINAL_COMMAND; ejecuta sólo el comando Django fijo en web, stdin JSON <=8 KiB.
 La cuenta no puede elegir shell, archivo, contenedor, ruta o comando. El wrapper
 limpia el ambiente, limita tiempo/salida y nunca devuelve stderr de Docker/Django.
