@@ -88,6 +88,10 @@ def validate_request(*, request_obj: SolicitudHorarioEspecial, actor=None):
 def _lock_request_branches(request_obj):
     branch_ids = {row["branch_id"] for row in request_obj.canonical_payload.get("locations", [])}
     branch_ids.update(request_obj.details.values_list("sucursal_id", flat=True))
+    lock_branch_ids(branch_ids)
+
+
+def lock_branch_ids(branch_ids):
     for branch_id in sorted(branch_ids):
         with connection.cursor() as cursor:
             cursor.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", [72419, branch_id])
@@ -161,11 +165,12 @@ def create_request_from_rules(*, raw_text, branch_ids, rules, actor=None, reason
             or not isinstance(reason, str) or len(reason) > 255
             or source_channel not in dict(SolicitudHorarioEspecial.SOURCE_CHOICES)):
         raise ValueError("Texto, motivo o canal inválido.")
-    rules = deepcopy(validate_rules(rules))
+    rules = deepcopy(validate_rules(rules, branch_ids=branch_ids))
     for rule in rules:
+        targets = rule.get("branch_ids", branch_ids)
         eligible = set(sucursales_operativas(reference_date=date.fromisoformat(rule["start_date"]))
-                       .filter(pk__in=branch_ids).values_list("pk", flat=True))
-        if eligible != set(branch_ids):
+                       .filter(pk__in=targets).values_list("pk", flat=True))
+        if eligible != set(targets):
             raise ValueError("La solicitud contiene una sucursal no operativa o inexistente.")
     branches = sucursales_operativas(reference_date=date.fromisoformat(rules[0]["start_date"]))
     locations = [{"branch_id": b.pk, "branch_code": b.codigo, "branch_name": b.nombre}
