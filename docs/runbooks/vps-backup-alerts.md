@@ -305,3 +305,20 @@ receptor y la pausa del publicador. Permanecen 100 MB por lote y 128 KiB por
 propuesta, además de aprobación exacta por nonce/digest. Las aprobaciones anteriores
 no amplían su alcance. Medir el recorrido real antes de atribuir una mejora de
 tiempo o espacio; una base local vacía sólo comprueba la reutilización del arranque.
+
+### Sucesora supervisada de un lote Point bloqueado sin retiros
+
+Un `blocked/preflight_attempt_limit` con tres intentos, `removed=[]`,
+`skipped=[]` y sin intención no se reinicia. Un operador puede preparar
+`erp_telegram_cleanup.successor_proposal(ledger, nonce_anterior, id_nuevo)`
+y guardar su resultado como propuesta privada nueva. El contrato enlaza el
+nonce y los SHA de propuesta, ejecución y contador anteriores; conserva el
+manifiesto exactamente y rechaza padres parciales, inciertos o ya sucesores.
+El padre y sus tres intentos permanecen inmutables. No es una acción periódica.
+
+La solicitud usa `request` normal: exige recuperación actual completa, nueva
+aprobación firmada del lote exacto y prevalidación residente. La aprobación
+anterior no sirve para la sucesora. Sólo una sucesora `completed`, sin intención,
+sin excluidos y con todos los IDs retirados resuelve el bloqueo ancestral para
+el productor; un cierre incierto mantiene HOLD. Los demás bloqueos se conservan.
+No editar recibos, contadores, decisiones ni cursores para avanzar.

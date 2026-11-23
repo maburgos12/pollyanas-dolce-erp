@@ -31,3 +31,7 @@ Safety acceptance: no cached eligibility, fresh transaction under lease before u
 ## Approved design
 
 User “ya” follows the concrete proposal to reuse the bounded session and allow at most100 files. Each actual removal still requires approval of its exact frozen Telegram manifest. Full design is retained in private task artifact throughput-design-proposed.md; no model/schema/eligibility changes.
+
+## Ampliación autorizada: sucesora supervisada
+
+Mauricio autorizó expresamente una nueva aprobación exacta para el mismo lote bloqueado, conservando sus tres intentos. Se integra en este PR antes del despliegue: vínculo de hashes al padre inmutable, manifiesto idéntico, ninguna solicitud automática y resolución ancestral sólo después de completed con cierre confirmado. Revisión del delta y CI del SHA conjunto sustituyen los anteriores.
