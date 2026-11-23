@@ -1,4 +1,4 @@
-"""Owner-only audio. One durable reservation per job; uncertain paid attempts never retry."""
+"""Explicitly linked private audio. One durable reservation per job; uncertain paid attempts never retry."""
 import base64
 import hashlib
 import io
@@ -14,7 +14,6 @@ from datetime import timedelta
 from pathlib import Path
 
 import requests
-from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.utils import timezone
@@ -28,9 +27,7 @@ AUDIO_STATES = ('AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID')
 
 
 def actor_for(config):
-    actor = get_user_model().objects.filter(pk=config['erp_user_id']).first()
-    bot.require_approver(actor)
-    return actor
+    return bot.actor_for(config)
 
 
 def reject(row, reason):
@@ -44,6 +41,7 @@ def reject(row, reason):
 
 @transaction.atomic
 def queue(row, config):
+    config = bot.config_for_row(config, row)
     actor = actor_for(config)
     bot.invalidate_pending(config, actor)
     media = row.payload['message'].get('voice') or row.payload['message'].get('audio') or {}
@@ -132,6 +130,7 @@ def normalize_spoken(text):
 
 
 def prepare_result(row, text, config, source):
+    config = bot.config_for_row(config, row)
     actor = actor_for(config)
     if not isinstance(text, str) or not text.strip() or len(text) > 2000 or any(ord(c) < 32 and c not in '\n\t' for c in text):
         reject(row, 'No pude transcribir el audio con claridad.')
@@ -144,13 +143,16 @@ def prepare_result(row, text, config, source):
 
 
 def claim(config):
-    actor_for(config)
+    if not bot.active_configs(config):
+        actor_for(config)
     with bot.consumer_lock(config['bot_id']) as locked:
         if not locked:
             return {}
-        row = bot.owner_updates(config).filter(state='AUDIO_WAIT').order_by('update_id').first()
+        bot.discard_revoked_pending(config)
+        row = bot.active_updates(config).filter(state='AUDIO_WAIT').order_by('update_id').first()
         if not row:
             return {}
+        config = bot.config_for_row(config, row)
         if stale(row, config):
             reject(row, 'Audio reemplazado por una instrucción nueva.')
             return {}
@@ -169,7 +171,8 @@ def claim(config):
 
 
 def finish(config, payload):
-    actor_for(config)
+    if not bot.active_configs(config):
+        actor_for(config)
     if (not isinstance(payload, dict) or set(payload) != {'id', 'lease', 'sha256', 'text'} or
             type(payload['id']) is not int or not 0 < payload['id'] < 2**63 or
             not isinstance(payload['lease'], str) or not re.fullmatch('[a-f0-9]{32}', payload['lease']) or
@@ -178,7 +181,10 @@ def finish(config, payload):
     with bot.consumer_lock(config['bot_id']) as locked:
         if not locked:
             return {'accepted':False, 'busy':True}
-        row = bot.owner_updates(config).filter(pk=payload['id'], state='AUDIO_LOCAL').first()
+        bot.discard_revoked_pending(config)
+        row = bot.active_updates(config).filter(pk=payload['id'], state='AUDIO_LOCAL').first()
+        if row:
+            config = bot.config_for_row(config, row)
         if (not row or not row.expires_at or row.expires_at <= timezone.now() or
                 not secrets.compare_digest(row.nonce, payload['lease']) or
                 not secrets.compare_digest(row.receipt.get('sha256', ''), payload['sha256']) or stale(row, config)):
@@ -189,6 +195,7 @@ def finish(config, payload):
 
 @transaction.atomic
 def reserve(row, config):
+    config = bot.config_for_row(config, row)
     actor_for(config)
     cursor = TelegramHoursCursor.objects.select_for_update().get(bot_id=config['bot_id'])
     row.refresh_from_db()
@@ -225,10 +232,12 @@ def paid_transcribe(data):
 
 def advance(config):
     """Run under the polling consumer lock; at most one paid request per tick."""
-    actor_for(config)
-    row = bot.owner_updates(config).filter(state__in=AUDIO_STATES, expires_at__lte=timezone.now()).order_by('update_id').first()
+    if not bot.active_configs(config):
+        actor_for(config)
+    row = bot.active_updates(config).filter(state__in=AUDIO_STATES, expires_at__lte=timezone.now()).order_by('update_id').first()
     if not row:
         return
+    config = bot.config_for_row(config, row)
     if stale(row, config):
         reject(row, 'Audio reemplazado por una instrucción nueva.')
         return

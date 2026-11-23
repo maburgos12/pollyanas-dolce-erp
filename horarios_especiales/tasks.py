@@ -22,9 +22,9 @@ def execute_special_hours_request_task(self, *, request_id: int, actor_id: int |
         actor = get_user_model().objects.filter(id=actor_id).first()
     request_obj = SolicitudHorarioEspecial.objects.get(id=request_id)
     if request_obj.telegramhoursupdate_set.exists():
-        from horarios_especiales.services.telegram_bot import require_approver
-        require_approver(actor)
-        if request_obj.approved_by_id != actor.pk:
+        from horarios_especiales.services.telegram_bot import require_request_approver
+        approved_actor = require_request_approver(request_obj)
+        if actor is None or approved_actor.pk != actor.pk:
             from django.core.exceptions import PermissionDenied
             raise PermissionDenied("La ejecución requiere al aprobador Telegram original.")
     return execute_request(request_obj=request_obj, actor=actor)

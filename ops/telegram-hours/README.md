@@ -193,8 +193,8 @@ principal con PGOPTIONS read-only. El CI completo requerido permanece sin cambio
 periódico). `worker_hours_publish` consume exclusivamente `hours_publish` (Google).
 Ambos usan el Dockerfile ERP, PostgreSQL y Redis existentes; prefork, concurrencia
 1 y prefetch 1. No crean otra base ni duplican los datos de horarios. El montaje
-privado de Telegram/OpenAI es de sólo lectura en control y web; publicación no lo
-necesita. Se conserva en el worker general mientras drenan mensajes antiguos.
+privado de Telegram/OpenAI es de sólo lectura en control, publicación y web;
+publicación lo requiere para revalidar las vinculaciones vigentes antes de escribir. Se conserva en el worker general mientras drenan mensajes antiguos.
 No purgar `celery`: contiene trabajo de otros módulos.
 
 Tras el despliegue autorizado, ejecutar `configure_hours_telegram --enable` desde
@@ -239,3 +239,17 @@ activos, diez procesos con revisión vigente, expiraciones de Beat correctas, po
 reciente mientras hay publicación pendiente; no confundir entrega al broker con
 publicación Google ni respuesta Telegram. Los tests locales usan proveedores falsos
 sin mensajes ni cambios Google; latencia y memoria reales se miden en producción.
+
+
+## Audio con varias identidades verificadas
+
+El formato ampliado y la activación están en
+[agente Telegram](../../docs/horarios/telegram-agent.md#varias-personas-verificadas-2026-11-23).
+Aplicar migración 0004 y validar el archivo privado antes de habilitar miembros.
+No cambiar SSH, LaunchAgent, wrapper, queues ni presupuesto. Compose añade el mismo
+directorio privado RO a publicación para revalidar revocaciones, sin otro servicio: el RPC selecciona
+el audio más antiguo entre vinculaciones vigentes y devuelve el mismo contrato
+`id/lease/sha256/pcm`. El resultado se vincula a su identidad ERP recibida; una corrección
+de otra persona no invalida su audio. Retirar/revincular a esa persona invalida el lease,
+y sus resultados tardíos no crean vistas ni consumen otra reserva. El contador único del
+bot sigue siendo acumulativo, 500 centavos para todas las personas juntas.
