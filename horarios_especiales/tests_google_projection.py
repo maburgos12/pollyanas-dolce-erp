@@ -264,7 +264,10 @@ class GoogleProjectionTests(TransactionTestCase):
         result = self.execute(obj)
         self.assertEqual(result["details"][0]["status"], "PENDING_RECONCILE")
         self.assertFalse(result["public_confirmed"])
-        self.assertTrue(self.execute(obj)["public_confirmed"])
+        reconciled = self.execute(obj)
+        self.assertFalse(reconciled["public_confirmed"])
+        self.assertEqual(reconciled["details"][0]["status"], "SUPERSEDED")
+        self.assertEqual(reconciled["details"][0]["projection_receipt"], "GOOGLE_CONFIRMED")
         periods = self.client.writes[-1][1]["specialHours"]["specialHourPeriods"]
         self.assertTrue(periods[0]["closed"])
 

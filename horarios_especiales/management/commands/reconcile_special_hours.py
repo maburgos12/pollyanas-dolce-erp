@@ -1,6 +1,7 @@
 import json
 
 from django.core.management.base import BaseCommand
+from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -33,7 +34,7 @@ class Command(BaseCommand):
                 failed += summary["failed"]
                 count += 1
                 self.stdout.write(json.dumps({"request_id": obj.pk, **summary}, ensure_ascii=False))
-            except ValueError as exc:
+            except (ValueError, PermissionDenied) as exc:
                 failed += 1
                 self.stderr.write(f"Solicitud {obj.pk}: {exc}")
         self.stdout.write(json.dumps({"processed": count, "failed": failed}))

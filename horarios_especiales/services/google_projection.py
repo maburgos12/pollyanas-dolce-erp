@@ -131,9 +131,25 @@ def projection_fields(*, current, rows, today, owned):
     ]
 
 
+def replacement_receipt(rows, request_id, today, covered_revisions):
+    own = [rule for key, rule, _ in rows if key[2] == request_id]
+    for offset in range(HORIZON_DAYS):
+        day = today + timedelta(days=offset)
+        if not any(rule_applies(rule, day) for rule in own):
+            continue
+        winner = max((row for row in rows if rule_applies(row[1], day)), key=lambda row: row[0])
+        if winner[0][2] != request_id:
+            covered = any(row['request_id'] == request_id for row in covered_revisions)
+            return 'PARTIALLY_SUPERSEDED' if covered else 'SUPERSEDED'
+    return None
+
+
 def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
     today = today or timezone.localdate(timezone=ZoneInfo("America/Mazatlan"))
     request_obj.refresh_from_db()
+    if request_obj.telegramhoursupdate_set.exists():
+        from horarios_especiales.services.telegram_bot import require_approver
+        require_approver(request_obj.approved_by)
     if request_obj.status not in {"APROBADO", "FALLIDO", "EJECUTADO"} or request_obj.cancelled_at or not request_obj.approved_at:
         raise ValueError("La solicitud debe estar aprobada antes de ejecutarse.")
     if validate_rule_payload(request_obj.canonical_payload) or not request_obj.audit_entries.filter(
@@ -187,6 +203,12 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
             for previous in recovery.order_by("pk").iterator():
                 owned.update(previous.error_payload_json.get("intended_owned", {}))
             fields, owned, end, ongoing, covered_revisions = projection_fields(current=current, rows=rows, today=today, owned=owned)
+            # Only winning revisions contribute; revoked historical rules do not block their replacements.
+            for contributing in SolicitudHorarioEspecial.objects.filter(
+                    pk__in=[row['request_id'] for row in covered_revisions]).select_related('approved_by'):
+                if contributing.telegramhoursupdate_set.exists():
+                    from horarios_especiales.services.telegram_bot import require_approver
+                    require_approver(contributing.approved_by)
             attempt.error_payload_json = {"intended_owned": owned, "covered_revisions": covered_revisions}
             attempt.save(update_fields=["error_payload_json"])
             if fields and HorarioEspecialDetalle.objects.filter(sucursal_id=branch_id,
@@ -213,6 +235,8 @@ def execute_rules(*, request_obj, actor=None, today=None, publisher=None):
                 or (r.get("end_date") or r["start_date"]) > end.isoformat()
                 for r in request_obj.canonical_payload["rules"])
             receipt = "PROGRAMMED" if future_pending and projection_receipt == "GOOGLE_CONFIRMED" else projection_receipt
+            if receipt == "GOOGLE_CONFIRMED":
+                receipt = replacement_receipt(rows, request_obj.pk, today, covered_revisions) or receipt
             result["response_payload"].update(receipt=receipt, projection_receipt=projection_receipt,
                                                future_pending=future_pending)
             attempt.status = "FAILED" if receipt == "READBACK_MISMATCH" else "SKIPPED" if result["noop"] else "SUCCESS"
