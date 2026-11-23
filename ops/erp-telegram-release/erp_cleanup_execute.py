@@ -54,6 +54,8 @@ def execute(nonce, ledger, adapter, now=time.time):
             adapter.preflight(item)
             before = adapter.measure()
             adapter.verify_preserved(before,before)
+        except cleanup.RecoveryPending:
+            return 'recovery_pending'
         except Exception as exc:
             retry.update(count=retry['count']+1,next_at=int(now())+[60,300,900][min(retry['count'],2)],reason=type(exc).__name__)
             atomic_json(retry_path,retry)
@@ -152,10 +154,10 @@ class HostAdapter:
     def preflight(self, item):
         health = json.loads(Path('/var/lib/erp-backup-restore/health-latest.json').read_text())
         if not health.get('success') or not 0 <= time.time() - health['finished_epoch'] < 36 * 3600:
-            raise ValueError('backup_recovery_not_current')
+            raise cleanup.RecoveryPending('backup_recovery_not_current')
         latest = max(p.name[:-9] for p in Path('/opt/backups/erp').glob('backup_*.manifest'))
         if latest != health['retained']:
-            raise ValueError('latest_backup_not_verified')
+            raise cleanup.RecoveryPending('latest_backup_not_verified')
         digest=hashlib.sha256((Path('/opt/backups/erp')/(latest+'.manifest')).read_bytes()).hexdigest()
         if not any(p['point']==latest and p['manifest_sha256']==digest for p in health['verified']):
             raise ValueError('backup_manifest_changed')
@@ -239,15 +241,36 @@ def once(ledger, config):
     return outcomes
 
 
+def reissue_expired(nonce, ledger, config):
+    ledger.path(nonce)
+    path = ledger.directory / 'proposals' / (nonce + '.json')
+    proposal, digest = cleanup.read_proposal(path)
+    item = proposal['delete_candidates'][0]
+    adapter = HostAdapter(item)
+    with deployment_lock(adapter.deploy_lock), ledger.lock(worker=True):
+        cleanup.check_replacement(ledger, nonce, proposal, digest)
+        adapter.preflight(item)
+        if not all(adapter.point.matches_original(entry) for entry in item['files']):
+            raise ValueError('candidate_changed')
+        return cleanup._request(path, ledger, config, replaces=nonce)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--once', action='store_true', required=True)
-    parser.parse_args()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--once', action='store_true')
+    mode.add_argument('--reissue-expired', metavar='NONCE')
+    args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error('root required')
     os.umask(0o077)
     config = json.loads((Path(os.environ['CREDENTIALS_DIRECTORY'])/'telegram.json').read_text())
-    print(json.dumps(once(Ledger(cleanup.STATE, validator=cleanup.validate), config)))
+    ledger = Ledger(cleanup.STATE, validator=cleanup.validate)
+    if args.reissue_expired:
+        row = reissue_expired(args.reissue_expired, ledger, config)
+        print(json.dumps({key: row[key] for key in ('nonce', 'state', 'message_id', 'expires')}))
+    else:
+        print(json.dumps(once(ledger, config)))
 
 
 if __name__ == '__main__':

@@ -58,6 +58,13 @@ adaptar y revisar la correspondencia host/contenedor antes de activar.
   ejecución detiene retiros restantes. Cada archivo lleva intención fsync y resultado.
 - Tras caída, el journal se reconcilia con existencia/hash; nunca se reinicia el lote
   ignorando retiros previos. Tres fallas previas bloquean y conservan el journal.
+- Si el respaldo ERP local más reciente todavía no está verificado en el NAS, el
+  ejecutor espera sin consumir intentos. Mantiene la caducidad de la aprobación.
+- Para un lote expirado de Point bloqueado por intentos previos sin haber iniciado
+  retiros, el operador autorizado puede solicitar una aprobación nueva para el
+  mismo manifiesto con `erp_cleanup_execute.py --reissue-expired NONCE`. Usar las
+  credenciales del servicio y el horario normal. Se verifica el respaldo más
+  reciente y se vuelve a leer el lote del NAS; no se altera el registro anterior.
 - Recuperación: tres intentos (1/5/15 min), luego intervención; originales de fuentes
   nuevas se conservan si falla preparación. Preparación falla como máximo tres veces
   por estado persistente, sin reiniciar el contador creando propuestas distintas.

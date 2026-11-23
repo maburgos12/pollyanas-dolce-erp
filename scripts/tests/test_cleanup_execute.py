@@ -61,6 +61,9 @@ class ExecutionTests(unittest.TestCase):
             adapter.preflight(self.item);adapter.point.verify_batch.assert_called_once_with(self.item['files'])
             manifest.write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError,'manifest_changed'):adapter.preflight(self.item)
+            (backups/'backup_20261117_020000.manifest').write_bytes(b'new point')
+            with self.assertRaisesRegex(c.RecoveryPending,'latest_backup_not_verified'):
+                adapter.preflight(self.item)
     def test_pending_rejected_do_not_delete(self):
         self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'not_approved');c.decide(self.query('r'),self.config,self.ledger);self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=time.time),'not_approved');self.assertTrue(self.adapter.file.exists())
     def test_approve_executes_once_and_keeps_decision(self):
@@ -95,6 +98,45 @@ class ExecutionTests(unittest.TestCase):
         self.approve();self.adapter.fail=True;t=time.time()
         for offset,expected in [(0,'retry'),(1,'backoff'),(61,'retry'),(362,'blocked'),(1000,'blocked')]:self.assertEqual(e.execute(self.row['nonce'],self.ledger,self.adapter,now=lambda:t+offset),expected)
         self.assertTrue(self.adapter.file.exists())
+    def test_pending_backup_never_consumes_attempts_and_resumes(self):
+        self.approve()
+        nonce=self.row['nonce']; t=time.time()
+        with patch.object(self.adapter,'preflight',side_effect=c.RecoveryPending('latest_backup_not_verified')):
+            for offset in (0,61,362,900):
+                self.assertEqual(e.execute(nonce,self.ledger,self.adapter,now=lambda:t+offset),'recovery_pending')
+        self.assertIsNone(c.execution_state(self.ledger,nonce))
+        self.assertFalse((self.ledger.directory/'executions'/(nonce+'.attempts')).exists())
+        self.assertTrue(self.adapter.file.exists())
+        self.assertEqual(e.execute(nonce,self.ledger,self.adapter,now=lambda:self.row['expires']),'not_approved')
+        self.assertTrue(self.adapter.file.exists())
+        self.assertEqual(e.execute(nonce,self.ledger,self.adapter,now=lambda:t+901),'completed')
+
+    def test_expired_preflight_block_can_request_exact_batch_once(self):
+        self.approve()
+        nonce=self.row['nonce']; frozen=self.ledger.directory/'proposals'/(nonce+'.json')
+        path=e.execution_path(self.ledger,nonce)
+        e.atomic_json(path,dict(nonce=nonce,proposal_sha256=self.row['proposal_sha256'],
+                               state='blocked',reason='preflight_attempt_limit',removed=[],skipped=[]))
+        original=path.read_bytes()
+        with self.assertRaisesRegex(ValueError,'replacement_not_allowed'):
+            c._request(frozen,self.ledger,self.config,self.send,replaces=nonce)
+        with patch('time.time',return_value=self.row['expires']+8*3600), patch.object(c,'approval_window',return_value=(True,None)):
+            self.path.write_text(json.dumps({**self.proposal,'risk':'changed'}))
+            with self.assertRaisesRegex(ValueError,'proposal_changed'):
+                c._request(self.path,self.ledger,self.config,self.send,replaces=nonce)
+            adapter=Mock(deploy_lock=self.adapter.deploy_lock)
+            adapter.preflight.side_effect=c.RecoveryPending('latest_backup_not_verified')
+            with patch.object(e,'HostAdapter',return_value=adapter), patch.object(c,'_request',wraps=c._request) as request:
+                with self.assertRaises(c.RecoveryPending):
+                    e.reissue_expired(nonce,self.ledger,self.config)
+                request.assert_not_called()
+            new=c._request(frozen,self.ledger,self.config,self.send,replaces=nonce)
+            with self.assertRaisesRegex(ValueError,'existing_request_requires_resolution'):
+                c._request(frozen,self.ledger,self.config,self.send,replaces=nonce)
+        self.assertNotEqual(new['nonce'],nonce)
+        self.assertEqual(new['proposal_sha256'],self.row['proposal_sha256'])
+        self.assertEqual(new['state'],'pending')
+        self.assertEqual(path.read_bytes(),original)
     def test_manifest_change_or_other_chat_no_authority(self):
         q=self.query();q['from']['id']=18
         with self.assertRaises(ValueError):c.decide(q,self.config,self.ledger)
