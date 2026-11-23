@@ -113,3 +113,6 @@ storage/dg_reports/logs/*.log
 
 # Point archive catalog, requests, staging and persistent coordination locks.
 /storage/pos_bridge/archive/
+
+# Dedicated hours bot private runtime configuration
+.hours-agent/

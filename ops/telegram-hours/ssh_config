@@ -1,0 +1,13 @@
+Host hours-audio
+    HostName 68.183.165.47
+    User hours-audio
+    IdentityFile ~/.ssh/pollyanas_hours_audio
+    IdentitiesOnly yes
+    BatchMode yes
+    StrictHostKeyChecking yes
+    UserKnownHostsFile ~/.local/share/pollyanas-hours/known_hosts
+    ConnectTimeout 5
+    ServerAliveInterval 10
+    ServerAliveCountMax 2
+    RequestTTY no
+    ClearAllForwardings yes

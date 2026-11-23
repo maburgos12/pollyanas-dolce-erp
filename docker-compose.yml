@@ -48,6 +48,7 @@ services:
       --error-logfile -"
     volumes:
       - .:/app:${ERP_BIND_PROPAGATION:-rprivate}
+      - ${HOURS_TELEGRAM_CONFIG_DIR_HOST:-./.hours-agent}:/etc/pollyanas-hours:ro
     ports:
       - "${WEB_HOST_PORT:-8011}:8000"
     restart: unless-stopped
@@ -75,6 +76,7 @@ services:
     command: /opt/venv/bin/python -m celery -A config worker -l info --pool=solo --concurrency=1 -Q celery
     volumes:
       - .:/app:${ERP_BIND_PROPAGATION:-rprivate}
+      - ${HOURS_TELEGRAM_CONFIG_DIR_HOST:-./.hours-agent}:/etc/pollyanas-hours:ro
     depends_on:
       db:
         condition: service_healthy

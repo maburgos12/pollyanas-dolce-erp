@@ -14,6 +14,7 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 from kombu.exceptions import OperationalError
 
 from core.access import ACCESS_MANAGE
@@ -124,6 +125,8 @@ class HorarioEspecialSinBrokerTests(TestCase):
             reason="Nochebuena",
             status=SolicitudHorarioEspecial.STATUS_FALLIDO,
             requested_by=self.user,
+            approved_by=self.user,
+            approved_at=timezone.now(),
         )
         encolar = mock.Mock(side_effect=BROKER_CAIDO)
         with mock.patch("api.special_hours_views.execute_special_hours_request_task.delay", encolar):
@@ -133,9 +136,9 @@ class HorarioEspecialSinBrokerTests(TestCase):
 
         obj.refresh_from_db()
         self.assertTrue(encolar.called, "La prueba no ejercitó el encolado; revisa el mock.")
-        if response.status_code >= 400:
-            self.assertNotEqual(
-                obj.status,
-                SolicitudHorarioEspecial.STATUS_APROBADO,
-                "Quedó aprobada sin nada encolado que la ejecute.",
-            )
+        self.assertEqual(response.status_code, 503, response.content)
+        self.assertEqual(
+            obj.status,
+            SolicitudHorarioEspecial.STATUS_FALLIDO,
+            "El fallo del broker debe conservar el estado previo de la solicitud.",
+        )

@@ -125,12 +125,14 @@ def _read_regular(branch, target_date):
     return regular, public_code
 
 
-def read_effective_hours(branch_name, target_date):
+def read_effective_hours(branch_name, target_date, *, include_regular=True):
     matches, errors = resolve_branch_token(branch_name, reference_date=target_date)
     if errors or len(matches) != 1:
         raise ValueError("No se pudo identificar una sucursal operativa única.")
     branch = matches[0].branch
-    regular, public_code = _read_regular(branch, target_date)
+    regular, public_code = (_read_regular(branch, target_date) if include_regular else
+                            ({"status": "UNKNOWN", "source": "OFFICIAL_WEBSITE",
+                              "source_url": OFFICIAL_BRANCHES_URL, "windows": []}, None))
     effective = {"status": "REGULAR_ONLY" if regular["status"] == "VERIFIED" else "UNKNOWN",
                  "source": None, "closed_all_day": None, "windows": [],
                  "reason": "SPECIAL_HOURS_NOT_CONFIRMED"}
@@ -138,7 +140,9 @@ def read_effective_hours(branch_name, target_date):
     details = list(HorarioEspecialDetalle.objects.filter(
         sucursal=branch, target_date=target_date,
         request__status__in=["APROBADO", "EJECUTADO", "FALLIDO"],
-    ).exclude(execution_status="CANCELADO").select_related("request")[:101])
+    ).exclude(execution_status="CANCELADO").exclude(
+        request__canonical_payload__contains={"schema_version": 2},
+    ).select_related("request")[:101])
     candidates = []
     invalid = len(details) > 100
     for detail in details:
@@ -156,6 +160,11 @@ def read_effective_hours(branch_name, target_date):
         effective.update(status="UNKNOWN", reason="SPECIAL_HOURS_CONFLICT_OR_INVALID")
     elif candidates:
         effective.update(status="VERIFIED", source="ERP_APPROVED_SPECIAL_HOURS", reason=None, **candidates[0])
+    from horarios_especiales.services.rules import resolve_approved_rule
+    rule = resolve_approved_rule(branch, target_date)
+    # Legacy exact-date exceptions retain their conservative conflict checks.
+    if rule is not None and not details:
+        effective.update(rule)
     return {"branch_id": str(branch.id), "branch_code": branch.codigo, "branch_name": branch.nombre,
             "public_branch_code": public_code, "target_date": target_date.isoformat(), "timezone": settings.TIME_ZONE,
             "checked_at": timezone.now().isoformat(), "regular": regular, "effective": effective}

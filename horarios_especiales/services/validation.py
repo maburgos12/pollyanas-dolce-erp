@@ -4,6 +4,9 @@ from datetime import datetime
 
 
 def validate_canonical_payload(payload: dict) -> list[str]:
+    if payload.get("schema_version") == 2:
+        from horarios_especiales.services.rules import validate_rule_payload
+        return validate_rule_payload(payload)
     errors = list(payload.get("validation_errors") or [])
     locations = list(payload.get("locations") or [])
     if not locations:
