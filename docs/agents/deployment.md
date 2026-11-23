@@ -51,6 +51,29 @@ dentro de la autorización vigente. No forzar reinicios o fake por intuición.
 Para interfaz/PWA verificar también estáticos, `collectstatic` y caché según
 [validación UI](ui.md). No declarar listo antes de comprobar el consumidor real.
 
+### Cierre de imágenes tras un despliegue
+
+1. Tras verificar la versión en producción, registrar la revisión y los IDs
+   completos de las imágenes activas y de la reversión inmediata. Conservar
+   ambas generaciones, cualquier imagen referenciada por un contenedor (aunque
+   esté detenido) y toda imagen reservada por su operador.
+2. Si quedan generaciones anteriores sin referencias, proponer un lote por IDs
+   exactos. Al estimar el ahorro, contar una sola vez las capas compartidas. No
+   usar edad, falta de etiqueta ni `docker system df` como evidencia suficiente.
+3. Archivar el lote en una ruta privada del NAS que no altere HBS. Antes de
+   exportar, comprobar que el espacio temporal del daemon Docker admite todo el
+   lote sin consumir la reserva de 5 GiB. Canalizar la salida al NAS no sustituye
+   esta comprobación. No compilar ni exportar en paralelo con otra operación
+   que necesite ese espacio.
+4. Leer y comprobar el SHA-256 desde el NAS, cargar el archivo fuera de
+   producción y comprobar que recupera todos los IDs del lote. Sólo después,
+   con aprobación vigente, revalidar IDs y referencias bajo el bloqueo de
+   despliegue; retirar sólo esos IDs, sin `--force` ni `prune`.
+5. Registrar en el cierre los IDs retirados y conservados, la ruta y prueba de
+   recuperación, el espacio neto con `df -B1 /` y el estado del ERP. Si falla el
+   NAS o no hay margen de exportación, conservar las imágenes, dejar el lote
+   pendiente y no iniciar una compilación que incumpla la guarda.
+
 ## Migraciones: evidencia antes de actuar
 
 Un `AttributeError` no demuestra que falte una migración. Cotejar código cargado,
