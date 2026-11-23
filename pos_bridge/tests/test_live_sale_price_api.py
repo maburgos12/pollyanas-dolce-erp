@@ -131,7 +131,8 @@ class LiveSalePriceApiTests(APITestCase):
         self.get_detail.assert_not_called()
 
     def test_unknown_inactive_and_duplicate_mappings_fail_closed(self):
-        self.assert_unknown(self.read(product_code="absent"), 404)
+        with patch("pos_bridge.services.point_http_client.PointHttpSessionClient.get_products", return_value=[]):
+            self.assert_unknown(self.read(product_code="absent"), 404)
         self.product.active = False
         self.product.save()
         self.assert_unknown(self.read(), 404)
