@@ -68,7 +68,7 @@ class TelegramClient:
 
     def call(self, method, **payload):
         deadline = time.monotonic() + 8
-        if method not in {'getUpdates', 'sendMessage', 'answerCallbackQuery'}:
+        if method not in {'getUpdates', 'sendMessage', 'answerCallbackQuery', 'getFile'}:
             raise ValueError('Método no permitido.')
         try:
             with requests.Session() as session:
@@ -231,6 +231,10 @@ def status_text(obj):
 
 
 def invalidate_pending(config, actor):
+    for audio in owner_updates(config).select_for_update(of=('self',)).filter(state__in=['AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID']):
+        audio.state, audio.nonce, audio.expires_at = 'CANCELLED', '', None
+        audio.receipt = {key: value for key, value in audio.receipt.items() if key in ('reserved_cents', 'sha256')}
+        audio.save(update_fields=['state', 'nonce', 'expires_at', 'receipt'])
     for old in owner_updates(config).select_for_update(of=('self',)).filter(state__in=['PREVIEW', 'PREPARED']):
         cancel_request(request_obj=old.request, actor=actor, reason='Reemplazada o cancelada desde Telegram')
         old.state = 'CANCELLED'
@@ -239,11 +243,11 @@ def invalidate_pending(config, actor):
 
 
 @transaction.atomic
-def prepare_text(row, text, config, actor):
+def prepare_text(row, text, config, actor, *, strict_branches=False):
     # Invalidating first prevents old buttons from approving after an ambiguous correction.
     invalidate_pending(config, actor)
     try:
-        ids, rules = parse_instruction(text, row.payload['message']['date'])
+        ids, rules = parse_instruction(text, row.payload['message']['date'], strict_branches=strict_branches)
         conflicts = higher_priority_conflicts(ids, rules[0])
         if conflicts:
             raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
@@ -316,7 +320,9 @@ def process_received(row, config, actor):
         last = owner_updates(config).filter(request__isnull=False).order_by('-pk').first()
         reply = status_text(last.request) if last else 'Sin solicitudes todavía.'
     elif message.get('voice') or message.get('audio'):
-        reply = 'Recibí el audio. La transcripción está en preparación; todavía no creé una solicitud. Por ahora envía texto. ' + EXAMPLES
+        from horarios_especiales.services.telegram_audio import queue
+        queue(row, config)
+        return
     else:
         reply = EXAMPLES
     row.state, row.receipt = 'REPLY', {'text': reply}
@@ -338,9 +344,11 @@ def deliver(row, client, config):
     if row.state == 'PREPARED':
         row.preview_message_id = result['message_id']
         row.state = 'PREVIEW'
+    elif row.state == 'AUDIO_WAIT':
+        row.receipt['acknowledged'] = True
     else:
         row.state = 'DONE'
-    row.save(update_fields=['state', 'preview_message_id'])
+    row.save(update_fields=['state', 'preview_message_id', 'receipt'])
 
 
 def recover_approved(config):
@@ -370,13 +378,16 @@ def poll_once(config=None, client=None):
         cursor, _ = TelegramHoursCursor.objects.get_or_create(bot_id=config['bot_id'])
         updates = client.call('getUpdates', offset=cursor.next_update_id, timeout=0, limit=20, allowed_updates=['message', 'callback_query'])
         persist_updates(config, updates)
-        for row in owner_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY']).order_by('update_id')[:20]:
+        for row in owner_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY', 'AUDIO_WAIT']).order_by('update_id')[:20]:
             if time.monotonic() > deadline:
                 break
             if row.state == 'RECEIVED':
                 process_received(row, config, actor)
-            if row.state in ('PREPARED', 'REPLY'):
+            if row.state in ('PREPARED', 'REPLY') or row.state == 'AUDIO_WAIT' and not row.receipt.get('acknowledged'):
                 deliver(row, client, config)
+        from horarios_especiales.services.telegram_audio import advance
+        if time.monotonic() <= deadline:
+            advance(config)
         recover_approved(config)
         for row in owner_updates(config).filter(state='QUEUED').select_related('request').order_by(F('receipt__status_checked_at').asc(nulls_first=True), 'pk')[:20]:
             if time.monotonic() > deadline:

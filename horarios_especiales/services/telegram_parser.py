@@ -15,7 +15,7 @@ TIME = r'\d{1,2}(?::\d{2})?\s*(?:am|pm)?'
 EXAMPLES = 'Ejemplos: Todas hoy cerradas; Plaza Nio mañana de 1 pm a 9 pm; Túnel todos los miércoles cerrado. Envía la instrucción completa.'
 
 
-def parse_instruction(text, timestamp):
+def parse_instruction(text, timestamp, *, strict_branches=False):
     if not isinstance(text, str) or not 1 <= len(text) <= 2000:
         raise ValueError(EXAMPLES)
     today = datetime.fromtimestamp(timestamp, ZoneInfo('America/Mazatlan')).date()
@@ -71,7 +71,7 @@ def parse_instruction(text, timestamp):
         ids = []
         for token in split_branch_tokens(remaining):
             matches, errors = resolve_branch_token(token, reference_date=date.fromisoformat(rule['start_date']))
-            if errors or len(matches) != 1 or matches[0].branch.pk not in allowed:
+            if errors or len(matches) != 1 or matches[0].branch.pk not in allowed or (strict_branches and matches[0].matched_by not in {'codigo_exacto', 'nombre_exacto', 'alias_exacto'}):
                 raise ValueError('Sucursal no configurada o ambigua. ' + EXAMPLES)
             ids.append(matches[0].branch.pk)
     if not ids or len(ids) > 10 or len(set(ids)) != len(ids):

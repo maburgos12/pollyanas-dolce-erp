@@ -354,6 +354,7 @@ class HorarioEspecialBitacora(models.Model):
 class TelegramHoursCursor(models.Model):
     bot_id = models.BigIntegerField(unique=True)
     next_update_id = models.BigIntegerField(default=0)
+    audio_reserved_cents = models.PositiveIntegerField(default=0)
 
 
 class TelegramHoursUpdate(models.Model):
