@@ -160,3 +160,29 @@ LANG=C; el hijo Whisper añade HOME sólo para el modelo cacheado. No se copia e
 entorno del ERP/Mac. Pruebas centinela: 39 pruebas audio+Telegram y 4 worker verdes;
 smoke `work()` con Whisper real y SSH simulado transcribió la misma voz sintética
 en 4.34 s bajo el entorno explícito. Check sin errores; temporales eliminados.
+
+## Claim vacío sin arranque Django
+
+El wrapper consulta primero `audio_probe.py` dentro de web únicamente para `claim`.
+El probe usa la DATABASE_URL ya presente, psycopg2 y una consulta literal de sólo
+lectura sobre `horarios_especiales_telegramhoursupdate`, estado `AUDIO_WAIT` (índice
+existente). No recibe SQL, ruta, credenciales ni opciones del cliente. Conexión 2 s,
+statement_timeout 1 s, lock_timeout 0.5 s y límite exterior 5 s; salida exacta 0/1.
+Vacío devuelve `{}` sin Django; pendiente conserva el RPC Django original con todos
+sus permisos, propietario y lease. `finish` siempre pasa por Django. La consulta no
+reserva trabajos ni cambia leases: `AUDIO_LOCAL` vencido y `AUDIO_PAID` siguen a cargo
+del polling/fallback existente. Una voz que llegue después del probe se toma en el
+siguiente ciclo de 5 s; no cambia la espera local de 30 s ni el presupuesto.
+
+Error/timeout/salida extra produce `unavailable`, sin filtrar errores ni tomar trabajo.
+El probe sólo evita trabajo en vacío; no autoriza acciones. Tras el deploy oficial,
+reinstalar el wrapper root-owned con el comando de instalación anterior y verificar
+claim vacío real antes de reanudar LaunchAgent. No basta actualizar el archivo Git.
+
+Validación previa al despliegue del filtro: 80 tests `scripts/tests/test_telegram*.py`
+(incluidos 7 del probe/routing) y 4 worker; Python compilado y diff válidos. Ejecución
+real read-only del probe enviado por stdin a web, sin escribir archivos del VPS:
+1.829 / 1.298 / 1.374 s incluyendo SSH administrativo, Docker y Python. Son tres
+muestras de vacío; no prueban el wrapper SSH dedicado actualizado ni latencia con voz.
+No se creó Docker/DB nuevo; check/migrate-check usan el entorno aislado de la tarea
+principal con PGOPTIONS read-only. El CI completo requerido permanece sin cambios.

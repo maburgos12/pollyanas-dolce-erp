@@ -17,6 +17,15 @@ def main():
         if not isinstance(payload, dict) or not (payload == {'action':'claim'} or
                 payload.get('action') == 'finish' and set(payload) == {'action','id','lease','sha256','text'}):
             raise ValueError()
+        if payload == {'action':'claim'}:
+            probe = subprocess.run(['/usr/bin/docker', 'compose', 'exec', '-T', 'web', 'python', '/app/ops/telegram-hours/audio_probe.py'],
+                cwd='/opt/pastelerias-erp', input=b'', capture_output=True, timeout=5,
+                env={'PATH':'/usr/bin:/bin', 'HOME':'/root'}, check=True)
+            if probe.stdout not in (b'0\n', b'1\n'):
+                raise ValueError()
+            if probe.stdout == b'0\n':
+                sys.stdout.write('{}')
+                return 0
         result = subprocess.run(['/usr/bin/docker', 'compose', 'exec', '-T', 'web', 'python', 'manage.py', 'hours_audio_rpc'],
             cwd='/opt/pastelerias-erp', input=raw, capture_output=True, timeout=40,
             env={'PATH':'/usr/bin:/bin', 'HOME':'/root'}, check=True)
