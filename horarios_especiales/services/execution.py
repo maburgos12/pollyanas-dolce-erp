@@ -26,6 +26,9 @@ def execute_request(*, request_obj: SolicitudHorarioEspecial, actor=None) -> dic
     if request_obj.status != SolicitudHorarioEspecial.STATUS_APROBADO:
         raise ValueError("La solicitud debe estar aprobada antes de ejecutarse.")
 
+    if request_obj.canonical_payload.get("schema_version") == 2:
+        raise ValueError("La publicación de reglas requiere un horizonte de ejecución explícito.")
+
     publisher = GoogleBusinessProfilePublisher()
     execution_summary = {"details": [], "success": 0, "failed": 0, "skipped": 0}
 

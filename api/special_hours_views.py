@@ -22,7 +22,7 @@ from horarios_especiales.services.requests import (
 )
 from horarios_especiales.tasks import execute_special_hours_request_task
 
-from .special_hours_serializers import SpecialHoursActionSerializer, SpecialHoursPreviewSerializer
+from .special_hours_serializers import SpecialHoursActionSerializer, SpecialHoursApprovalSerializer, SpecialHoursPreviewSerializer
 
 
 def _can_manage_special_hours(user) -> bool:
@@ -160,7 +160,10 @@ class SpecialHoursValidateView(APIView):
         if not _can_manage_special_hours(request.user):
             raise PermissionDenied("No tienes permisos para validar horarios especiales.")
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
-        errors = validate_request(request_obj=obj, actor=request.user)
+        try:
+            errors = validate_request(request_obj=obj, actor=request.user)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         obj.refresh_from_db()
         return Response({"request": _serialize_request(obj), "validation_errors": errors}, status=status.HTTP_200_OK)
 
@@ -171,8 +174,13 @@ class SpecialHoursApproveView(APIView):
     def post(self, request, request_id: int):
         if not _can_approve_special_hours(request.user):
             raise PermissionDenied("No tienes permisos para aprobar horarios especiales.")
+        serializer = SpecialHoursApprovalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
-        approve_request(request_obj=obj, actor=request.user)
+        try:
+            approve_request(request_obj=obj, actor=request.user, expected_revision=serializer.validated_data.get("expected_revision"))
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=400)
         obj.refresh_from_db()
         return Response({"request": _serialize_request(obj)}, status=status.HTTP_200_OK)
 
@@ -186,6 +194,8 @@ class SpecialHoursExecuteView(APIView):
         serializer = SpecialHoursActionSerializer(data=request.data or {})
         serializer.is_valid(raise_exception=True)
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
+        if obj.canonical_payload.get("schema_version") == 2:
+            return Response({"detail": "La publicación de reglas requiere un horizonte de ejecución explícito."}, status=400)
         if serializer.validated_data.get("async_execute", True):
             try:
                 task = execute_special_hours_request_task.delay(request_id=obj.id, actor_id=request.user.id)
@@ -219,6 +229,8 @@ class SpecialHoursRetryView(APIView):
         if not _can_approve_special_hours(request.user):
             raise PermissionDenied("No tienes permisos para reintentar horarios especiales.")
         obj = get_object_or_404(SolicitudHorarioEspecial, id=request_id)
+        if obj.canonical_payload.get("schema_version") == 2:
+            return Response({"detail": "La publicación de reglas requiere un horizonte de ejecución explícito."}, status=400)
         status_previo = obj.status
         obj.status = SolicitudHorarioEspecial.STATUS_APROBADO
         obj.save(update_fields=["status", "updated_at"])
