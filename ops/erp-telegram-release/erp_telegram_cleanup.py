@@ -287,7 +287,23 @@ def process_scheduled(ledger, config, send=telegram):
             print('Scheduled cleanup recovery could not be confirmed; no authorization sent.', flush=True)
 
 
-def _request(path, ledger, config, send=telegram):
+def check_replacement(ledger, nonce, proposal, digest):
+    old = ledger.read(nonce)
+    record = execution_state(ledger, nonce)
+    if (old['proposal_sha256'] != digest or old['proposal_id'] != proposal['id']
+            or old['image_id'] != proposal['delete_candidates'][0]['id']):
+        raise ValueError('proposal_changed')
+    if (proposal.get('executor') != 'resident-v1'
+            or old['state'] != 'approved' or old['expires'] > time.time()
+            or not record or record['state'] != 'blocked'
+            or record.get('proposal_sha256') != digest
+            or record.get('reason') != 'preflight_attempt_limit'
+            or record.get('removed') != [] or record.get('skipped') != []
+            or record.get('started_at') is not None or record.get('intent') is not None):
+        raise ValueError('replacement_not_allowed')
+
+
+def _request(path, ledger, config, send=telegram, *, replaces=None):
     if not approval_window()[0]:
         raise ValueError('outside_approval_hours')
     require_recovery()
@@ -299,8 +315,12 @@ def _request(path, ledger, config, send=telegram):
                nonce=secrets.token_hex(12), expires=int(time.time()) + APPROVAL_TTL_SECONDS, chat_id=config['chat_id'],
                message_id=None, state='notifying', decision_at=None)
     with ledger.lock():
+        if replaces is not None:
+            check_replacement(ledger, replaces, proposal, digest)
         for file in ledger.directory.glob('*.json'):
             old = ledger.read(file.stem)
+            if old['nonce'] == replaces:
+                continue
             if old['state']=='notifying' or (old['state'] in {'pending','approved'} and int(time.time())<old['expires'] and not execution_state(ledger,old['nonce'])):
                 raise ValueError('existing_request_requires_resolution')
             if ((old['proposal_id'] == row['proposal_id'] or old['image_id'] == row['image_id'])
