@@ -1730,7 +1730,9 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
         carga_tras_recarga = ruta.estatus == RutaEntrega.ESTATUS_EN_RUTA and bool(recarga_cedis_parada_ids)
         hidratar_checklist = tiene_paradas_sucursal and not carga_tras_recarga
         if hidratar_checklist and not checklist.lineas.exists():
-            sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+            sincronizar_checklist_carga_desde_point(
+                ruta=ruta, user=request.user, ejecutar_sync=False, solo_tramo_vigente=True,
+            )
             checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
         elif hidratar_checklist:
             pendientes_point = checklist.lineas.filter(
@@ -1741,7 +1743,9 @@ class LogisticaRutaActivaView(_LogisticaBaseView):
             sync_stale = not checklist.sincronizado_en or checklist.sincronizado_en <= timezone.now() - timedelta(minutes=2)
             if pendientes_point.exists() and sync_stale:
                 try:
-                    sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=False)
+                    sincronizar_checklist_carga_desde_point(
+                        ruta=ruta, user=request.user, ejecutar_sync=False, solo_tramo_vigente=True,
+                    )
                     checklist = obtener_checklist_carga_detallado(ruta, solo_tramo_actual=False, excluir_superadas=True)
                 except ValidationError:
                     logger.warning("No se pudo refrescar checklist Point para ruta activa %s", ruta.folio, exc_info=True)
@@ -1932,7 +1936,9 @@ class LogisticaRutaCargaChecklistSyncView(_LogisticaBaseView):
             return Response({"detail": "No tienes permisos para sincronizar carga desde Point."}, status=status.HTTP_403_FORBIDDEN)
         ruta = get_object_or_404(RutaEntrega, pk=ruta_id)
         try:
-            resumen = sincronizar_checklist_carga_desde_point(ruta=ruta, user=request.user, ejecutar_sync=True)
+            resumen = sincronizar_checklist_carga_desde_point(
+                ruta=ruta, user=request.user, ejecutar_sync=True, solo_tramo_vigente=True,
+            )
         except ValidationError as exc:
             return Response({"detail": exc.message if hasattr(exc, "message") else exc.messages}, status=status.HTTP_400_BAD_REQUEST)
         checklist = obtener_checklist_carga_detallado(ruta, excluir_superadas=True)

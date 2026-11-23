@@ -50,25 +50,49 @@ class AlertaCargaPointTests(TestCase):
         solicitud(PointSyncJob.STATUS_PENDING, vencimiento, parameters={"mode": "open_transfers"})
         solicitud(
             PointSyncJob.STATUS_SUCCESS, vencimiento + timedelta(minutes=1), finished_at=timezone.now(),
+            result_summary={"estado": "ACTUALIZADA"},
         )
         otra_recarga = solicitud(
             PointSyncJob.STATUS_PENDING, vencimiento, parameters={**parametros, "recarga_cedis_id": 43},
         )
-        solicitud(PointSyncJob.STATUS_FAILED, vencimiento, error_message="El tramo cambió.")
+        fallida = solicitud(PointSyncJob.STATUS_FAILED, vencimiento, error_message="El tramo cambió.")
 
         output = StringIO()
         call_command("listar_cargas_point_vencidas", stdout=output)
         alertas = json.loads(output.getvalue())
         self.assertEqual(
-            [item["id"] for item in alertas], [pendiente.id, ejecutando.id, reintento.id, otra_recarga.id],
+            [item["id"] for item in alertas], [pendiente.id, ejecutando.id, reintento.id, otra_recarga.id, fallida.id],
         )
         self.assertTrue(alertas[0]["sync_posterior"])
-        self.assertFalse(alertas[-1]["sync_posterior"])
+        self.assertFalse(alertas[-2]["sync_posterior"])
         self.assertEqual(alertas[0]["folio"], ruta.folio)
         self.assertEqual(alertas[0]["recarga_id"], 42)
         pendiente.refresh_from_db()
         self.assertEqual(pendiente.status, PointSyncJob.STATUS_PENDING)
 
+
+    def test_alerta_errores_y_resultados_sin_carga_aunque_terminen(self):
+        ruta = RutaEntrega.objects.create(nombre="Ruta alerta operativa")
+        parametros = {"mode": MODO_SYNC_CARGA_REPARTIDOR, "ruta_id": ruta.pk}
+        jobs = [
+            PointSyncJob.objects.create(
+                job_type=PointSyncJob.JOB_TYPE_TRANSFERS, parameters=parametros,
+                status=status, result_summary=result, error_message=error,
+                finished_at=timezone.now(),
+            )
+            for status, result, error in [
+                (PointSyncJob.STATUS_FAILED, {}, "No se pudo conectar con Point."),
+                (PointSyncJob.STATUS_SUCCESS, {"estado": "SIN_CARGA"}, ""),
+                (PointSyncJob.STATUS_SUCCESS, {"estado": "PENDIENTE_ENVIO"}, ""),
+                (PointSyncJob.STATUS_SUCCESS, {"estado": "ACTUALIZADA"}, ""),
+            ]
+        ]
+        output = StringIO()
+        call_command("listar_cargas_point_vencidas", stdout=output)
+        alertas = json.loads(output.getvalue())
+        self.assertEqual([a["id"] for a in alertas], [j.pk for j in jobs[:3]])
+        self.assertEqual([a["estado"] for a in alertas], ["ERROR", "SIN_CARGA", "PENDIENTE_ENVIO"])
+        self.assertEqual(len({a["clave"] for a in alertas}), 3)
 
     def test_carga_vencida_esperando_sesion_no_consulta_point(self):
         ruta = RutaEntrega.objects.create(nombre="Ruta prueba")
