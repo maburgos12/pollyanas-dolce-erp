@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Recover one immutable daily ERP point on the NAS; never remove source backups."""
+import base64
 import fcntl
 import gzip
 import hashlib
@@ -9,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -41,6 +43,69 @@ def relative(value):
     return path
 
 
+def private_bytes(path):
+    with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.getuid()
+                and info.st_nlink == 1 and not info.st_mode & 0o077, 'Unsafe private file')
+        return stream.read()
+
+
+def private_replace(path, data, expected):
+    parent = path.parent.lstat()
+    require(stat.S_ISDIR(parent.st_mode) and parent.st_uid == os.getuid()
+            and not parent.st_mode & 0o022, 'Unsafe credential directory')
+    def unchanged():
+        if expected is None:
+            require(not path.exists() and not path.is_symlink(), 'Credential already exists')
+        else:
+            require(hashlib.sha256(private_bytes(path)).hexdigest() == expected, 'Credential changed')
+    unchanged()
+    descriptor, name = tempfile.mkstemp(prefix='.' + path.name + '.', dir=path.parent)
+    try:
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        unchanged()
+        os.replace(name, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
+
+
+def install_service_key(key, expected):
+    wire = base64.b64decode(key, validate=True)
+    require(len(wire) == 51 and wire.startswith(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20')
+            and re.fullmatch('[a-f0-9]{64}', expected), 'Invalid service key')
+    folder = HOME.parent / '.ssh'
+    info = folder.lstat()
+    require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
+            and not info.st_mode & 0o077, 'Unsafe SSH directory')
+    command = ('/share/CACHEDEV1_DATA/.qpkg/HybridBackup/CloudConnector3/python/bin/python3'
+               ' -I -B ' + str(HOME / 'nas_restore_daily.py') + ' --ssh-command')
+    line = ('from="10.77.216.1",command="' + command + '",'
+            'no-user-rc,no-agent-forwarding,no-port-forwarding,no-pty,no-X11-forwarding'
+            ' ssh-ed25519 ' + key + ' erp-nas-verify-v1').encode()
+    target = folder / 'authorized_keys'
+    old = private_bytes(target)
+    if line in old.splitlines():
+        return
+    require(key.encode() not in old, 'Key already has another access policy')
+    require(hashlib.sha256(old).hexdigest() == expected, 'Authorized keys changed')
+    backup = folder / ('authorized_keys.before-erp-verify-' + expected)
+    if backup.exists() or backup.is_symlink():
+        require(private_bytes(backup) == old, 'Authorized keys backup differs')
+    else:
+        private_replace(backup, old, None)
+    private_replace(target, old.rstrip(b'\n') + b'\n' + line + b'\n', expected)
+
+
 def manifest(point, expected):
     require(POINT.fullmatch(point), 'Invalid point')
     path = NAS / (point + '.manifest')
@@ -56,20 +121,60 @@ def manifest(point, expected):
     return hashes
 
 
-def recover_files(point, scratch):
+def media_sources(point):
     inventory = json.loads((NAS / (point + '.media.json')).read_text())
     require(inventory['version'] == 1, 'Unsupported media inventory')
     versions = NAS / 'ERP_ACTIVE_MEDIA_VERSIONS/ERP medios activos - 7 versiones'
     source = (versions / 'latest/ERP_BACKUPS/ERP_ACTIVE_MEDIA_STAGING').resolve()
     require(source.is_relative_to(versions.resolve()), 'Unsafe generation')
-    target = scratch / 'media'
-    target.mkdir()
     seen = set()
     for row in inventory['files']:
         name = str(relative(row['path']))
         require(name not in seen, 'Duplicate media path')
         original = source / name
         require(original.resolve().is_relative_to(source) and original.is_file(), 'Missing/unsafe media')
+        seen.add(name)
+        yield row, original
+
+
+def preflight(point, expected):
+    manifest(point, expected)
+    count = 0
+    for row, original in media_sources(point):
+        with original.open('rb') as stream:
+            require(os.fstat(stream.fileno()).st_size == row['bytes'], 'Media size differs')
+            stream.read(1)
+        count += 1
+    require(count, 'Empty media inventory')
+    return count
+
+
+def ssh_command(value):
+    if value == 'status':
+        print(json.dumps(dict(version=1, state='READY')), flush=True)
+        return
+    require(isinstance(value, str) and re.fullmatch(
+        r'(preflight|restore) backup_[0-9]{8}_[0-9]{6} [a-f0-9]{64}', value),
+        'Unsupported service command')
+    action, point, expected = value.split(' ')
+    if action == 'preflight':
+        with (HOME / 'restore.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            signal.alarm(3600)
+            try:
+                print(json.dumps(dict(version=1, state='READABLE', media=preflight(point, expected))), flush=True)
+            finally:
+                signal.alarm(0)
+    else:
+        restore(point, expected)
+
+
+def recover_files(point, scratch):
+    target = scratch / 'media'
+    target.mkdir()
+    seen = set()
+    for row, original in media_sources(point):
+        name = str(relative(row['path']))
         restored = target / name
         restored.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(original, restored)
@@ -106,7 +211,7 @@ def restore(point, expected):
     with (HOME / 'restore.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         require(not list(HOME.glob('restore-*')), 'Previous scratch requires ownership/process review')
-        manifest(point, expected)
+        preflight(point, expected)
         require(shutil.disk_usage(HOME).free >= 80 * 1024**3, 'Less than 80 GiB restore space')
         run = HOME / 'evidence' / (point + '-' + str(time.time_ns()))
         run.mkdir(parents=True)
@@ -189,7 +294,15 @@ def prepare_runtime():
 
 
 if __name__ == '__main__':
-    if sys.argv[1:] == ['--prepare-runtime']:
+    if sys.argv[1:] == ['--ssh-command']:
+        try:
+            ssh_command(os.environ.get('SSH_ORIGINAL_COMMAND', ''))
+        except Exception as exc:
+            print(json.dumps(dict(state='FAILED', error_class=type(exc).__name__)), file=sys.stderr)
+            raise SystemExit(2)
+    elif len(sys.argv) == 4 and sys.argv[1] == '--install-service-key':
+        install_service_key(*sys.argv[2:])
+    elif sys.argv[1:] == ['--prepare-runtime']:
         prepare_runtime()
     else:
         restore(*sys.argv[1:])

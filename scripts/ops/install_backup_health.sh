@@ -26,7 +26,7 @@ test "$(sha256sum "$baseline" | cut -d ' ' -f 1)" = "$original_sha"
 ssh -o BatchMode=yes -o StrictHostKeyChecking=yes qnap-nasdolce-archive \
   "test -d $nas_home/runtime && test -O $nas_home && chmod 700 $nas_home"
 # Deploy only the reviewed revision already delivered through Git to this VPS.
-ssh qnap-nasdolce-archive "umask 077; cat > $nas_home/nas_restore_daily.py.next && mv $nas_home/nas_restore_daily.py.next $nas_home/nas_restore_daily.py" < "$repo/scripts/nas_restore_daily.py"
+ssh qnap-nasdolce-archive "umask 077; cat > $nas_home/nas_restore_daily.py.next && chmod 600 $nas_home/nas_restore_daily.py.next && mv $nas_home/nas_restore_daily.py.next $nas_home/nas_restore_daily.py" < "$repo/scripts/nas_restore_daily.py"
 ssh qnap-nasdolce-archive "$nas_python $nas_home/nas_restore_daily.py --prepare-runtime"
 install -m 644 "$repo/scripts/ops/erp-backup-health.service" /etc/systemd/system/
 install -m 644 "$repo/scripts/ops/erp-backup-health.timer" /etc/systemd/system/
@@ -36,4 +36,4 @@ chmod 700 "$rotator.next"
 mv "$rotator.next" "$rotator"
 systemctl daemon-reload
 # Enable the timer only after the first successful service run has been inspected.
-echo 'Installed; run python3 scripts/vps_backup_health.py --verify-only and inspect health-latest.json before enabling the timer. The service verifies recovery without cleanup; the existing cron rotator remains separate.'
+echo 'Installed; activate the backed-up restricted NAS service key before running vps_backup_health.py --verify-only. Inspect health-latest.json before enabling the timer. Verification never requests cleanup; the existing cron rotator remains separate.'
