@@ -23,6 +23,7 @@ class SalesReadBoundaryTests(TestCase):
     token_paths = (
         "/api/pos-bridge/products/sale-price/",
         "/api/integraciones/horarios-especiales/effective/",
+        "/api/pos-bridge/products/customer-catalog/",
     )
     pickup_path = "/api/public/v1/pickup-availability/"
     forbidden_paths = (
@@ -83,7 +84,7 @@ class SalesReadBoundaryTests(TestCase):
                 for method in ("HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE", "TRACE", "CONNECT", "CUSTOM"):
                     with self.subTest(method=method):
                         self.assert_denied(self.invoke(path, method, HTTP_X_HTTP_METHOD_OVERRIDE="GET", **headers))
-        self.assertEqual(self.downstream_calls, 3)
+        self.assertEqual(self.downstream_calls, 4)
 
     def test_credentials_intersect_and_privileged_principals_cannot_override(self):
         combinations = (
@@ -352,6 +353,7 @@ class SalesReadPolicyTests(SimpleTestCase):
     token_paths = (
         "/api/pos-bridge/products/sale-price/",
         "/api/integraciones/horarios-especiales/effective/",
+        "/api/pos-bridge/products/customer-catalog/",
     )
     public_key_paths = ("/api/public/v1/pickup-availability/",)
 

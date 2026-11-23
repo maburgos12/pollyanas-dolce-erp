@@ -3,6 +3,7 @@ SALES_CAPABILITY = "SALES_READ_ONLY"
 
 ALLOWED_PATHS = {
     "token": frozenset({
+        "/api/pos-bridge/products/customer-catalog/",
         "/api/pos-bridge/products/sale-price/",
         "/api/integraciones/horarios-especiales/effective/",
     }),
