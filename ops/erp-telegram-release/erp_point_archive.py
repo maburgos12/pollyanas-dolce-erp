@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import signal
 import shutil
 import subprocess
 import sys
@@ -87,9 +88,13 @@ class InventorySession:
                             raise ValueError('inventory_reply_invalid')
                         self.count+=1
                         return response['result']
-        except BaseException:
+        except BaseException as exc:
             self.failed=True
+            proc=self.proc
             self.close()
+            if (isinstance(exc,RuntimeError) and str(exc) in {'inventory_reply_eof','inventory_session_exited'}
+                    and proc is not None and proc.returncode in (-signal.SIGALRM,128+signal.SIGALRM)):
+                raise subprocess.TimeoutExpired('point_archive_inventory',85) from None
             raise
 
     def close(self):
@@ -121,7 +126,7 @@ def failure_detail(exc, stage):
     raw = raw[:8192]
     code = getattr(exc, 'returncode', None)
     reason = 'command_failed' if isinstance(exc, subprocess.CalledProcessError) else type(exc).__name__
-    transient = isinstance(exc, subprocess.TimeoutExpired) or code == 124
+    transient = isinstance(exc, (subprocess.TimeoutExpired,TimeoutError)) or code == 124
     if transient:
         reason = 'command_timeout'
     elif isinstance(exc, subprocess.CalledProcessError):

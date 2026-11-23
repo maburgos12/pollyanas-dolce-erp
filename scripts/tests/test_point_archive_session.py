@@ -98,6 +98,16 @@ class InventorySessionTests(unittest.TestCase):
         self.assertLess(children[0].returncode,0)
         self.assertEqual(len(children),1)
 
+    def test_inner_alarm_eof_retains_existing_transient_timeout_policy(self):
+        script="import signal,time;signal.signal(signal.SIGALRM,signal.SIG_DFL);signal.alarm(1);time.sleep(20)"
+        session,children=self.session(script)
+        with self.assertRaises(subprocess.TimeoutExpired) as caught:
+            session.request(['--after-id','0'])
+        self.assertTrue(archive.failure_detail(caught.exception,'inventory')['transient'])
+        self.assertTrue(archive.failure_detail(TimeoutError(),'inventory')['transient'])
+        self.assertEqual(len(children),1)
+        self.assertIsNotNone(children[0].returncode)
+
     def test_command_contains_inner_hard_lifetime_and_pre_django_alarm(self):
         session,children=self.session()
         self.assertEqual(session.request(['--after-id','0']),{'entries':[]})
