@@ -21,11 +21,12 @@ class Command(BaseCommand):
         if not get_user_model().objects.filter(pk=config['erp_user_id'], is_active=True).exists():
             raise CommandError('El propietario ERP debe existir y estar activo.')
         # One runtime directory per worker; --config never serializes credentials into beat.
-        for name, task, seconds in [
-            ('hours-private-telegram-poll', 'horarios_especiales.telegram_poll', 15),
-            ('hours-approved-reconcile', 'horarios_especiales.reconcile_approved', 900),
+        for name, task, seconds, expires in [
+            ('hours-private-telegram-poll', 'horarios_especiales.telegram_poll', 15, 30),
+            ('hours-approved-reconcile', 'horarios_especiales.reconcile_approved', 900, 840),
         ]:
             interval, _ = IntervalSchedule.objects.get_or_create(every=seconds, period=IntervalSchedule.SECONDS)
             PeriodicTask.objects.update_or_create(name=name, defaults={'task': task, 'interval': interval,
-                'crontab': None, 'solar': None, 'clocked': None, 'enabled': options['enable'], 'kwargs': json.dumps({'config_dir': options['config']}) if task.endswith('telegram_poll') and options['config'] else '{}'})
+                'queue': 'hours_control', 'exchange': None, 'routing_key': None, 'priority': None,
+                'expires': None, 'expire_seconds': expires, 'crontab': None, 'solar': None, 'clocked': None, 'enabled': options['enable'], 'kwargs': json.dumps({'config_dir': options['config']}) if task.endswith('telegram_poll') and options['config'] else '{}'})
         self.stdout.write('Horarios Telegram: ' + ('activado explícitamente.' if options['enable'] else 'registrado DESACTIVADO.'))

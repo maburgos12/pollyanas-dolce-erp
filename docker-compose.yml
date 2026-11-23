@@ -127,6 +127,43 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  worker_hours_control:
+    build: .
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
+    command: /opt/venv/bin/python -m celery -A config worker -l info --pool=prefork --concurrency=1 --prefetch-multiplier=1 -Q hours_control --hostname=hours_control@%h
+    volumes:
+      - .:/app
+      - ${HOURS_TELEGRAM_CONFIG_DIR_HOST:-./.hours-agent}:/etc/pollyanas-hours:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker_hours_publish:
+    build: .
+    env_file:
+      - .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-pastelerias_erp}
+      REDIS_URL: redis://redis:6379/0
+    command: /opt/venv/bin/python -m celery -A config worker -l info --pool=prefork --concurrency=1 --prefetch-multiplier=1 -Q hours_publish --hostname=hours_publish@%h
+    volumes:
+      - .:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   worker_logistica_point:
     build: .
     env_file:

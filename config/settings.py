@@ -351,6 +351,9 @@ CELERY_VISIBILITY_TIMEOUT = 24 * 60 * 60
 CELERY_BROKER_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_RESULT_BACKEND_TRANSPORT_OPTIONS = {"visibility_timeout": CELERY_VISIBILITY_TIMEOUT}
 CELERY_TASK_ROUTES = {
+    "horarios_especiales.telegram_poll": {"queue": "hours_control"},
+    "horarios_especiales.reconcile_approved": {"queue": "hours_control"},
+    "horarios_especiales.execute_request": {"queue": "hours_publish"},
     "rrhh.procesar_avisos_clima": {"queue": "notificaciones"},
     "rrhh.enviar_confirmacion_clima": {"queue": "notificaciones"},
     "sat_client.ejecutar_descarga_sat_nocturna": {"queue": "sat"},
