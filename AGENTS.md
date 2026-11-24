@@ -46,6 +46,7 @@ Para módulos no listados, aplicar este archivo y las guías transversales sigui
 | Disparador transversal | Guía obligatoria |
 |---|---|
 | Toda modificación, commit, PR o cierre | [Ciclo de trabajo](docs/agents/workflow.md) |
+| Segunda revisión de cambios de datos, concurrencia o integraciones | [OCR delegado](docs/agents/code-review.md) y [skill erp-code-review](.agents/skills/erp-code-review/SKILL.md) |
 | Despliegue, migraciones o diagnóstico productivo | [Producción](docs/agents/deployment.md) |
 | UI, formularios, navegación, autenticación, PWA, móvil, diseño, branding, tienda online o marketing | [Validación UI](docs/agents/ui.md), [PRODUCT](PRODUCT.md) y [DESIGN_STACK](DESIGN_STACK.md) |
 | Capturar, importar o calcular datos compartidos | [Skill erp-data-reuse](.agents/skills/erp-data-reuse/SKILL.md) y [ficha de fuentes](docs/data-reuse/ficha-fuentes-template.md) |

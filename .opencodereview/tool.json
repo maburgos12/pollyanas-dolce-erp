@@ -1,0 +1,8 @@
+{
+  "version": "v1.14.3",
+  "source_commit": "f6379f71edba1e59dbc056e8f455df1f84396498",
+  "mode": "delegate",
+  "asset": "opencodereview-darwin-arm64",
+  "url": "https://github.com/alibaba/open-code-review/releases/download/v1.14.3/opencodereview-darwin-arm64",
+  "sha256": "76c78dcc108a7c46249fef6ea572ae3b188a93bfa35a0b149bd49a0dad221d35"
+}
