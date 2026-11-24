@@ -262,7 +262,10 @@ def _calcular_resumen_empleado(
             fechas_incapacidad.add(cursor)
             cursor += timedelta(days=1)
 
+    from .services_cobertura_permisos import falta_justificada
     for incidencia in incidencias:
+        if falta_justificada(incidencia):
+            continue
         if empleado.fecha_ingreso and incidencia.fecha < empleado.fecha_ingreso:
             continue
         if incidencia.fecha in fechas_incapacidad:

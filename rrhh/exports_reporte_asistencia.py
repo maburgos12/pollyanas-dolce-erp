@@ -204,7 +204,7 @@ def exportar_pdf_reporte(data, *, titulo='Reporte de asistencia'):
                     horario = f'{interval[0][-5:]}–{interval[1][-5:]} por día: ' + ', '.join(permit['fechas_laborables'])
                 story.append(p(f'Folio {permit.get("folio") or permit.get("id", "N/D")}: '
                                f'{permit.get("tipo", "")} | {permit.get("estado", "")} | '
-                               f'{"CG" if permit.get("goce_sueldo") else "SG"} | '
+                               f'{permit.get("tratamiento_salarial_label") or ("CG" if permit.get("goce_sueldo") else "SG")} | '
                                f'{horario} | Duración en periodo: {duration} | '
                                f'Motivo: {permit.get("motivo", "")}'))
                 for observation in permit.get('observaciones', []):

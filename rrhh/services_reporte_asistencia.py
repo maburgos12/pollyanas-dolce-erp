@@ -9,6 +9,7 @@ from django.utils import timezone
 from core.access import can_view_rrhh
 from .models import AsistenciaEmpleado, Empleado, EmpleadoBaja, HoraExtra, IncidenciaAsistencia, PermisoSalida, SolicitudVacaciones
 from .services_extra_conciliacion import conciliar_extra_diario, formato_minutos
+from .services_cobertura_permisos import contingencias_en_rango, tiene_actividad_real
 
 EXTRA_KEYS = ('detectado', 'autorizado', 'pendiente', 'rechazado', 'solicitado')
 from .services_permisos_repetidos import ventana_permiso_repetido
@@ -77,6 +78,12 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
     candidates = list(empleados_qs)
     ids = [employee.id for employee in candidates]
     window = fecha_fin-timedelta(days=29)
+    contingencias = contingencias_en_rango(ids, min(window, fecha_inicio), fecha_fin)
+    actividad_real = set(AsistenciaEmpleado.objects.filter(
+        empleado_id__in=ids, fecha__range=(window, fecha_fin),
+    ).filter(Q(entrada__isnull=False) | Q(salida_comida__isnull=False)
+             | Q(regreso_comida__isnull=False) | Q(salida__isnull=False))
+      .values_list('empleado_id', 'fecha')) if contingencias else set()
     start_dt, end_dt = _midnight(fecha_inicio), _midnight(fecha_fin+timedelta(days=1))
     attendance = {(a.empleado_id,a.fecha): a for a in AsistenciaEmpleado.objects.filter(empleado_id__in=ids,fecha__range=(fecha_inicio,fecha_fin)).select_related('turno','sucursal','empleado')}
     extras = defaultdict(list)
@@ -99,6 +106,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
     event_employee_ids.update(eid for eid, items in incidences.items() if any(fecha_inicio <= i.fecha <= fecha_fin for i in items))
     event_employee_ids.update(eid for eid, items in permissions.items() if items)
     event_employee_ids.update(eid for eid, items in vacations.items() if items)
+    event_employee_ids.update(eid for eid, day in contingencias if fecha_inicio <= day <= fecha_fin)
     reports = []
     dates = [fecha_inicio+timedelta(days=n) for n in range((fecha_fin-fecha_inicio).days+1)]
     for employee in candidates:
@@ -110,7 +118,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
             continue
         summary = dict.fromkeys(SUMMARY_KEYS,0)
         valid_inc = [i for i in incidences[eid] if i.fecha>=employee.fecha_ingreso and (baja is None or i.fecha<=baja)]
-        summary['faltas_30d'] = sum(i.tipo=='falta' and i.estado=='pendiente' and window<=i.fecha<=fecha_fin for i in valid_inc)
+        summary['faltas_30d'] = sum(i.tipo=='falta' and i.estado=='pendiente' and window<=i.fecha<=fecha_fin and (not contingencias.get((eid, i.fecha)) or (eid, i.fecha) in actividad_real) for i in valid_inc)
         avisos = [_incidence(i) for i in valid_inc if i.tipo in ('aviso_baja_faltas','baja_faltas') and window<=i.fecha<=fecha_fin and i.estado!='resuelto']
         summary['avisos_baja_30d'] = len(avisos)
         by_day = defaultdict(list)
@@ -122,6 +130,8 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
                 if item.fecha < employee.fecha_ingreso or (baja and item.fecha > baja) or item.estado=='resuelto':
                     continue
                 pending = item.estado=='pendiente'
+                if item.tipo == 'falta' and contingencias.get((eid, item.fecha)) and not tiene_actividad_real(attendance.get((eid, item.fecha))):
+                    continue
                 key = {'falta': 'faltas' if pending else 'faltas_conciliadas','falta_retardos':'falta_retardos','retardo':'retardos','retardo_tolerancia':'retardos','comida_excedida':'comida_excedida','jornada_incompleta':'jornada_incompleta','hora_extra_pendiente':'hora_extra','aviso_baja_faltas':'avisos_baja','baja_faltas':'avisos_baja','suspension':'suspensiones'}.get(item.tipo)
                 if key and (pending or key in ('faltas_conciliadas','hora_extra','suspensiones')):
                     summary[key]+=1
@@ -184,6 +194,23 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
                 summary['duracion_desconocida']+=int(applicable_permission)
                 observations.append('Permiso por horas con duración N/D')
             permiso_report.append({'id':permiso.id,'folio':permiso.folio,'tipo':permiso.get_tipo_display(),'tipo_codigo':permiso.tipo,'estado':permiso.get_estado_display(),'goce_sueldo':permiso.goce_sueldo,'fecha_inicio':permiso.fecha_inicio,'fecha_fin':permiso.fecha_fin,'minutos':int(minutes) if minutes is not None else None,'dias':days_count,'fechas_laborables': [day.isoformat() for day in matched_days] if permiso.fechas_laborables else [],'observaciones':observations,'motivo':permiso.motivo,'aplicable_laboral':applicable_permission})
+        empresariales = {}
+        for day in dates:
+            for item in contingencias.get((eid, day), ()):
+                empresariales[item.permiso_id] = item
+        for item in empresariales.values():
+            permiso = item.permiso
+            permiso_report.append({
+                'id': permiso.pk, 'folio': permiso.clave, 'tipo': 'Permiso empresarial por contingencia',
+                'tipo_codigo': 'permiso_contingencia', 'estado': 'Aprobado', 'goce_sueldo': None,
+                'tratamiento_salarial_label': permiso.get_tratamiento_salarial_display(),
+                'fecha_inicio': _midnight(max(fecha_inicio, item.fecha_inicio)),
+                'fecha_fin': _midnight(min(fecha_fin, item.fecha_fin)+timedelta(days=1))-timedelta(microseconds=1),
+                'minutos': None, 'dias': (min(fecha_fin, item.fecha_fin)-max(fecha_inicio, item.fecha_inicio)).days+1,
+                'fechas_laborables': [], 'motivo': permiso.descripcion,
+                'observaciones': ['Ausencia justificada no penalizable; no acredita horas trabajadas ni modifica pagos.'],
+                'aplicable_laboral': True,
+            })
         summary['permisos']=len(permiso_report)
         summary['permisos_aplicables']=sum(p['aplicable_laboral'] for p in permiso_report)
         conflict_days = set()
@@ -202,7 +229,8 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
         for day in dates:
             a=attendance.get((eid,day))
             records=extras[(eid,day)]
-            events=bool(a or records or by_day[day] or permiso_days[day] or vacation_days[day])
+            empresarial = contingencias.get((eid, day), ())
+            events=bool(a or records or by_day[day] or permiso_days[day] or vacation_days[day] or empresarial)
             pre=day<employee.fecha_ingreso
             post=bool(baja and day>baja)
             observations=[]
@@ -225,6 +253,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
                 scheduled=timezone.make_aware(datetime.combine(day,a.turno.hora_entrada))
                 late=max(0,int((a.entrada-scheduled).total_seconds()//60))
             permission_parts = ['Vacaciones aprobadas'] if vacation_days[day] else []
+            permission_parts.extend(f'Permiso empresarial · {item.permiso.clave}' for item in empresarial)
             for goce in (True, False):
                 suffix = 'CG' if goce else 'SG'
                 if goce in full_days[day]:
@@ -239,7 +268,7 @@ def build_reporte_departamento(fecha_inicio, fecha_fin, *, departamento='', area
                 if permiso.fechas_laborables:
                     desde, hasta = ventana_permiso_repetido(permiso, day)
                     permission_parts.append(f'{permiso.folio} · {desde:%H:%M}–{hasta:%H:%M}')
-            rows.append({'fecha':day,'asistencia':a,'vacaciones':vacation_days[day],'incidencias':by_day[day],'extra':extra,'tarde_minutos':late,'retardos_registrados':0 if pre or post else sum(i['tipo_codigo'] in ('retardo','retardo_tolerancia') and i['estado_codigo']=='pendiente' for i in by_day[day]),'permiso_texto':'; '.join(permission_parts),'permiso_folios':[p.folio for p in permiso_days[day]],'estado_laboral':'pre_ingreso' if pre else ('post_baja' if post else 'activo' if employee.activo else 'inactivo'),'estado_laboral_label':label,'aplicable_laboral':not (pre or post),'observaciones':observations})
+            rows.append({'fecha':day,'asistencia':a,'vacaciones':vacation_days[day],'incidencias':by_day[day],'extra':extra,'tarde_minutos':late,'retardos_registrados':0 if pre or post else sum(i['tipo_codigo'] in ('retardo','retardo_tolerancia') and i['estado_codigo']=='pendiente' for i in by_day[day]),'permiso_texto':'; '.join(permission_parts),'permiso_folios':[p.folio for p in permiso_days[day]]+[item.permiso.clave for item in empresarial],'estado_laboral':'pre_ingreso' if pre else ('post_baja' if post else 'activo' if employee.activo else 'inactivo'),'estado_laboral_label':label,'aplicable_laboral':not (pre or post),'observaciones':observations})
         reports.append({'empleado':employee,'datos':{'id':eid,'nombre':employee.nombre,'codigo':employee.codigo,'puesto':employee.puesto,'sucursal':employee.sucursal_display,'departamento':employee.get_departamento_display(),'departamento_codigo':employee.departamento,'area':employee.area},'resumen':summary,'extra_resumen':_extra_summary(rows),'filas':rows,'permisos':permiso_report,'permisos_resumen':{key:summary[key] for key in PERMISSION_KEYS},'faltas_30d':summary['faltas_30d'],'avisos_30d':avisos,'observaciones_resumen':['Evidencia fuera del periodo laboral no incluida en KPIs de tiempo, extra o incidencias; permisos cuenta folios, permisos_aplicables cuenta los que intersectan el periodo laboral.'] if any(not row['aplicable_laboral'] and (row['asistencia'] or row['incidencias'] or row['extra']['registros'] or row['permiso_folios'] or row['vacaciones']) for row in rows) else []})
     global_summary={key:sum(r['resumen'][key] for r in reports) for key in SUMMARY_KEYS}
     global_summary['empleados']=len(reports)

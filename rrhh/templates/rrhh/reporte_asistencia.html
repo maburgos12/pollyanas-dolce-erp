@@ -161,6 +161,7 @@
                 <td>{{ fila.extra.pendiente|default:"No aplica" }}</td>
                 <td>{{ fila.extra.estado|default:"No aplica" }}{% if fila.extra.base %}<br><small>{{ fila.extra.base }}</small>{% endif %}</td>
                 <td>
+                  {% if fila.permiso_texto %}<div class="badge bg-primary">{{ fila.permiso_texto }}</div>{% endif %}
                   {% if fila.estado_laboral_label %}
                     <span class="badge bg-primary">{{ fila.estado_laboral_label }}</span>
                   {% else %}
