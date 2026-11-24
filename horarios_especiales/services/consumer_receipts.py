@@ -14,6 +14,7 @@ from core.models import Sucursal
 
 STORE_URL = 'https://www.pollyanasdolce.com/api/branch-hours'
 MAYA_URL = 'https://api.pollyanasdolce.com/branches/hours-status'
+FINALIZED_LABEL = 'Finalizado: lectura Google, tienda y Maya verificada. Google Maps visual no comprobado.'
 
 
 def read_json(url, params):
@@ -141,7 +142,7 @@ def consumer_receipts(obj):
     if (not superseded and not programmed and len(google) == len(payload['locations']) and
             all(row.get('status') == 'GOOGLE_CONFIRMED' for row in google) and
             all('confirmado por lectura' in label for label in labels)):
-        labels.append('Finalizado: lectura Google, tienda y Maya verificada. Google Maps visual no comprobado.')
+        labels.append(FINALIZED_LABEL)
     receipt = {'revision': payload['revision'], 'pairs': verified, 'labels': labels, 'cursor': cursor,
                'next_check_at': cached['next_check_at'] if wait_for_check else (now + timedelta(seconds=300 if not batch or all('confirmado por lectura' in label for label in labels[:2]) else 30)).isoformat()}
     # Update only our summary key so a concurrent Google reconciliation is not overwritten.

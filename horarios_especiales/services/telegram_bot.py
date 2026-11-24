@@ -21,6 +21,7 @@ from core.access import ROLE_ADMIN, ROLE_DG, has_any_role
 from django.utils import timezone
 
 from horarios_especiales.models import SolicitudHorarioEspecial, TelegramHoursCursor, TelegramHoursUpdate
+from horarios_especiales.services.consumer_receipts import FINALIZED_LABEL
 from horarios_especiales.services.requests import approve_request, cancel_request, create_request_from_rules
 from horarios_especiales.services.rules import PRECEDENCE, indexed_branch_rules, projection_rank, rule_applies, rule_priority
 from horarios_especiales.services.telegram_parser import EXAMPLES, WEEKDAYS, parse_grouped_instruction, parse_instruction
@@ -765,17 +766,28 @@ def poll_once(config=None, client=None):
             row.save(update_fields=['receipt'])
             scoped = config_for_row(config, row)
             actor_for(scoped)
-            text = status_text(row.request)
-            if row.receipt.get('last_status') != text:
-                actor_for(scoped)
-                client.call('sendMessage', chat_id=row.chat_id, text=formatted_status(text), parse_mode='HTML')
-                row.receipt['last_status'] = text
-                row.save(update_fields=['receipt'])
+            if row.request.cancelled_at or FINALIZED_LABEL in str(row.receipt.get('last_status', '')).splitlines():
+                row.state = 'DONE'
+                row.save(update_fields=['state'])
+                continue
             rules = row.request.canonical_payload.get('rules', [])
             today = timezone.localdate(timezone=ZoneInfo("America/Mazatlan")).isoformat()
             expired = bool(rules) and all(not (rule['kind'] == 'weekly' and not rule.get('end_date')) and
                                          (rule.get('end_date') or rule['start_date']) < today for rule in rules)
-            if row.request.cancelled_at or expired:
-                row.state = 'DONE'
-                row.save(update_fields=['state'])
+            if expired:
+                text = f'{row.request.request_code}\nEl periodo de la solicitud terminó. Consulta /status para ver el último estado.'
+            else:
+                text = status_text(row.request)
+                if FINALIZED_LABEL not in text.splitlines():
+                    continue
+            # Telegram cannot deduplicate a send after an ambiguous timeout.
+            # Stop automatic tracking before sending. The result is still available via /status.
+            row.state = 'DONE'
+            row.receipt['terminal_notice_attempted_at'] = timezone.now().isoformat()
+            row.save(update_fields=['state', 'receipt'])
+            actor_for(scoped)
+            client.call('sendMessage', chat_id=row.chat_id, text=formatted_status(text), parse_mode='HTML',
+                        disable_notification=True)
+            row.receipt['last_status'] = text
+            row.save(update_fields=['receipt'])
     return {'polled': True}
