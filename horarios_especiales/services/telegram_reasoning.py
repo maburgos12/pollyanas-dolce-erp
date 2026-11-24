@@ -9,7 +9,7 @@ from django.utils.dateparse import parse_datetime
 
 from horarios_especiales.models import SucursalAlias, normalize_text
 from horarios_especiales.services.branch_resolution import resolve_branch_token
-from horarios_especiales.services.command_parser import _parse_time_value
+from horarios_especiales.services.command_parser import MONTHS, _parse_time_value
 from horarios_especiales.services.google_projection import approved_rules
 from horarios_especiales.services.rules import indexed_branch_rules, projection_rank, rule_applies, validate_rule_payload
 from horarios_especiales.services.telegram_parser import WEEKDAYS
@@ -20,6 +20,23 @@ CLARIFY = (
     'Conservé tu borrador y pausé su botón. Indica la sucursal y la corrección. '
     'Por ejemplo, «El Túnel sigue cerrado los miércoles» o «Bamoa cierra a las 6 p. m.».'
 )
+
+
+MONTH_LABELS = {**MONTHS, **dict(zip(
+    ('ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'), range(1, 13)
+)), 'sept': 9, 'set': 9}
+WEEKDAY_PATTERN = '|'.join(WEEKDAYS)
+MONTH_PATTERN = '|'.join(sorted(MONTH_LABELS, key=len, reverse=True))
+DATE_REFERENCE = re.compile(
+    rf'\b(?:(?P<weekday>{WEEKDAY_PATTERN})\s*,?\s+)?'
+    rf'(?:(?P<iso>\d{{4}}-\d{{2}}-\d{{2}})|'
+    rf'(?P<day>\d{{1,2}})\s+(?:de\s+)?(?P<month>{MONTH_PATTERN})\b\.?'
+    rf'(?:\s+(?:de\s+)?(?P<year>\d{{4}}))?|(?P<bare>\d{{1,2}}))\b'
+)
+
+
+class CorrectionNeedsInterpretation(ValueError):
+    """A correction that could not be mapped to a unique allowed scope."""
 
 
 def enabled():
@@ -57,7 +74,7 @@ def queue(row, text, draft):
     else:
         row.state = 'IA_WAIT'
         row.receipt = {'task_id': result['id'], 'draft_id': draft.pk, 'draft_revision': draft.revision,
-                       'text': 'Recibí tu corrección. Estoy revisándola con el borrador que ya teníamos.'}
+                       'text': 'Recibí tu corrección. La IA local está revisándola junto con tu borrador.'}
         row.expires_at = min(draft.expires_at, timezone.now() + hours_intent.MAX_WAIT)
     row.save()
 
@@ -120,6 +137,40 @@ def explicit_replacement(payload, text):
             'detail': next(iter(days.values()))}
 
 
+def calendar_references(source, period):
+    """Bind recognizable calendar dates to the draft before checking bare day numbers."""
+    retained, replaced, residual = set(), set(), []
+    cursor = 0
+    for match in DATE_REFERENCE.finditer(source):
+        label = match['weekday']
+        if match['bare'] and not label:
+            continue
+        if match['bare'] and re.match(r'\s+de\s+\w+', source[match.end():]):
+            raise CorrectionNeedsInterpretation('No pude identificar el mes de la fecha que indicas.')
+        if match['iso']:
+            try:
+                candidates = [date.fromisoformat(match['iso'])]
+            except ValueError as exc:
+                raise ValueError('La fecha indicada no existe en el calendario.') from exc
+        else:
+            day = int(match['bare'] or match['day'])
+            month = MONTH_LABELS.get(match['month'])
+            year = int(match['year']) if match['year'] else None
+            candidates = [d for d in period if d.day == day
+                          and (month is None or d.month == month) and (year is None or d.year == year)]
+        if len(candidates) != 1 or candidates[0] not in period:
+            raise ValueError('La fecha indicada no corresponde a un solo día del periodo del borrador.')
+        day = candidates[0]
+        if label and day.weekday() != WEEKDAYS.index(label):
+            raise ValueError('El día de la semana no coincide con la fecha indicada.')
+        (retained if label else replaced).add(day.isoformat())
+        residual.append(source[cursor:match.start()])
+        residual.append(' ')
+        cursor = match.end()
+    residual.append(source[cursor:])
+    return retained, replaced, ''.join(residual)
+
+
 def replace_dates(rule, source, weekday, approved):
     mode = replacement_mode(source)
     if not mode or rule['kind'] != 'range' or 'branch_ids' not in rule or rule['closed_all_day']:
@@ -128,7 +179,8 @@ def replace_dates(rule, source, weekday, approved):
     period = [start + timedelta(days=i) for i in range((end - start).days + 1)]
     if {day for day in WEEKDAYS if re.search(r'\b' + day + r'\b', source)} != {weekday}:
         raise ValueError('Indica un solo día de cierre que se conserva.')
-    keep = {day.isoformat() for day in period if day.weekday() == WEEKDAYS.index(weekday)}
+    dated_keep, dated_replace, remainder = calendar_references(source, period)
+    keep = dated_keep or {day.isoformat() for day in period if day.weekday() == WEEKDAYS.index(weekday)}
     for value in keep:
         day = date.fromisoformat(value)
         winner = max((row for row in approved if rule_applies(row[1], day)),
@@ -140,16 +192,18 @@ def replace_dates(rule, source, weekday, approved):
     previous = set(rule.get('excluded_dates', ()))
     overridden = set(rule.get('override_dates', ()))
     candidates = previous - keep
-    numbers = {int(raw) for raw in re.findall(r'\b\d+\b', source)}
+    numbers = {int(raw) for raw in re.findall(r'\b\d+\b', remainder)}
     if mode == 'dates':
         mapped = {number: [day.isoformat() for day in period if day.day == number] for number in numbers}
-        if not mapped or any(len(values) != 1 or values[0] not in candidates | overridden for values in mapped.values()):
-            raise ValueError('Indica fechas únicas dentro del periodo que la tarjeta marca como conservadas.')
-        replace = {values[0] for values in mapped.values()}
+        if any(len(values) != 1 for values in mapped.values()):
+            raise CorrectionNeedsInterpretation('Indica fechas únicas dentro del periodo.')
+        replace = dated_replace | {values[0] for values in mapped.values()}
+        if not replace or not replace <= candidates | overridden:
+            raise CorrectionNeedsInterpretation('Indica qué fechas conservadas deben tomar el horario nuevo.')
     else:
         named_days = {date.fromisoformat(value).day for value in candidates | overridden} | {start.day}
-        if numbers - named_days:
-            raise ValueError('Para aplicar el horario en todos los demás días, indica solo el cierre que se conserva.')
+        if numbers - named_days or dated_replace - (candidates | overridden | {start.isoformat()}):
+            raise CorrectionNeedsInterpretation('Identifica el cierre que se conserva y las fechas que toman el horario nuevo.')
         replace = candidates
     updated = {**rule, 'excluded_dates': sorted((previous | keep) - replace)}
     overrides = sorted((overridden | replace) - keep)
@@ -168,6 +222,9 @@ def revise(payload, data, result):
     source = normalize_text(data['text'])
     if action == 'clarify':
         raise ValueError('Necesito una corrección específica.')
+    replacement = explicit_replacement(payload, data['text'])
+    if replacement and action != 'replace_with_draft':
+        raise ValueError('No pude comprobar la sustitución de fechas. El borrador sigue pendiente.')
     locations = {item['branch_id']: item for item in payload['locations']}
     all_ids = list(locations)
     reference = date.fromisoformat(payload['rules'][0]['start_date'])
@@ -181,8 +238,10 @@ def revise(payload, data, result):
     index, rule = scoped[0]
     rules = list(payload['rules'])
     if action == 'replace_with_draft':
-        verified = explicit_replacement(payload, data['text'])
-        weekday = normalize_text(result['detail'])
+        verified = replacement
+        detail = normalize_text(result['detail'])
+        labels = set(re.findall(rf'\b(?:{WEEKDAY_PATTERN})\b', detail))
+        weekday = next(iter(labels)) if len(labels) == 1 else None
         if not verified or normalize_text(verified['detail']) != weekday:
             raise ValueError('Indica una sola sucursal, las fechas que cambian y el día que se conserva.')
         named, name_errors = resolve_branch_token(verified['branch'], reference_date=reference)
@@ -197,7 +256,7 @@ def revise(payload, data, result):
             rules.insert(index + 1, {**changed, 'branch_ids': [branch.pk]})
         else:
             rules[index] = changed
-        note = f'{branch.nombre} toma el horario nuevo en las fechas indicadas. Se conserva el cierre del {result["detail"].lower()}.'
+        note = f'{branch.nombre} toma el horario nuevo en las fechas indicadas. Se conserva el cierre del {verified["detail"].lower()}.'
         return all_ids, rules, note
     if action == 'keep_closed':
         weekday = normalize_text(result['detail'])

@@ -260,7 +260,9 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         notice = 'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm del 23 al 29 de noviembre'
         first = 'Los 23 y 24, en el túnel, deben de reemplazarse con el nuevo horario que se propone y el día miércoles se mantiene igual'
         second = 'El único horario que se conserva de el túnel es el miércoles que es cerrado'
-        for index, correction in ((1, first), (3, second)):
+        with_date = ('Sucursal el túnel solo debe conservar miércoles 25 de nov 2026 como cerrado. '
+                     'Los días 23 y 24 deben ajustas al nuevo horario')
+        for index, correction in ((1, first), (3, second), (5, with_date)):
             client = FakeTelegram([self.update(notice, id=index), self.update(correction, id=index+1)])
             poll_once(self.config, client)
             row = TelegramHoursUpdate.objects.get(update_id=index+1)
@@ -271,7 +273,7 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
             self.assertIn('23 nov 2026 al 24 nov 2026', row.receipt['text'])
             self.assertIsNone(row.request.approved_at)
         self.assertEqual(resolve_approved_rule(tunnel, date(2026, 11, 23))['request_id'], prior.pk)
-        process_callback(self.callback(row, id=5), self.config, self.user)
+        process_callback(self.callback(row, id=7), self.config, self.user)
         row.request.refresh_from_db()
         self.assertEqual(row.request.approved_by, self.user)
         for day in (23, 24, 26, 27, 28, 29):
@@ -285,6 +287,49 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         self.assertEqual(owned['2026-11-23'][0]['closeTime']['hours'], 19)
         self.assertEqual(owned['2026-11-24'][0]['closeTime']['hours'], 19)
         self.assertNotIn('2026-11-25', owned)
+
+    def test_ambiguous_replacement_uses_ai_and_does_not_reissue_wrong_card(self):
+        from django.core.management import call_command
+        from orquestacion.services import local_router
+
+        local_router.configure(enabled=True)
+        call_command('configure_hours_reasoning', 'enable')
+        tunnel = self.branches['EL_TUNEL']
+        SucursalAlias.objects.create(sucursal=tunnel, alias='Túnel')
+        prior, payload = create_request_from_rules(raw_text='Miércoles cerrado', actor=self.user,
+            branch_ids=[tunnel.pk], rules=[{'kind': 'weekly', 'start_date': '2026-11-22',
+                                          'weekdays': [2], 'closed_all_day': True, 'time_windows': []}])
+        approve_request(request_obj=prior, actor=self.user, expected_revision=payload['revision'])
+        notice = 'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm del 23 al 29 de noviembre'
+        client = FakeTelegram([self.update(notice)])
+        poll_once(self.config, client)
+        draft = TelegramHoursUpdate.objects.get(update_id=1)
+        wrong_date = 'El Túnel solo debe conservar miércoles 26 de nov 2026 como cerrado.'
+        client.updates.append(self.update(wrong_date, id=2))
+        poll_once(self.config, client)
+        rejected = TelegramHoursUpdate.objects.get(update_id=2)
+        self.assertIsNone(rejected.request_id)
+        self.assertIn('no coincide con la fecha', rejected.receipt['text'])
+        self.assertIsNone(local_router.claim('mac_ia_02'))
+
+        ambiguous = 'El Túnel solo debe conservar miércoles 25 de nov 2026 como cerrado. Cambia el 99.'
+        client.updates.append(self.update(ambiguous, id=3))
+        poll_once(self.config, client)
+        waiting = TelegramHoursUpdate.objects.get(update_id=3)
+        self.assertEqual(waiting.state, 'IA_WAIT')
+        self.assertIn('La IA local', client.sent[-1]['text'])
+        job = local_router.claim('mac_ia_02')
+        self.assertEqual(job['data']['text'], ambiguous)
+        local_router.finish(job['id'], job['lease'], result={
+            'action': 'keep_closed', 'branch': 'Túnel', 'detail': 'miércoles',
+        })
+        poll_once(self.config, client)
+        waiting.refresh_from_db()
+        draft.refresh_from_db()
+        self.assertIsNone(waiting.request_id)
+        self.assertNotIn('reply_markup', client.sent[-1])
+        self.assertEqual(draft.request.status, 'BORRADOR')
+        self.assertEqual(draft.nonce, '')
 
     def test_local_ai_ambiguous_hour_pauses_button_but_keeps_draft_for_next_edit(self):
         from django.core.management import call_command

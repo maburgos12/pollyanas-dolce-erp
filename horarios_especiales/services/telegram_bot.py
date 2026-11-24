@@ -581,6 +581,9 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
                 return
             try:
                 telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result)
+            except telegram_reasoning.CorrectionNeedsInterpretation:
+                telegram_reasoning.queue(row, text, draft)
+                return
             except ValueError as exc:
                 row.receipt = {'text': telegram_reasoning.CLARIFY + '\n' + str(exc)}
                 row.state = 'REPLY'
