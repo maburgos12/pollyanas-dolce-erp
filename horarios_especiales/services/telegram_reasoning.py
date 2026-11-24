@@ -97,14 +97,15 @@ def explicit_time(span):
 
 
 def replacement_mode(source):
-    if re.search(r'\b(?:no\s+(?:reemplaz\w*|sustitu\w*|conserv\w*|mantien\w*)|confirmar|verificar|preguntar)\b', source):
+    change = r'(?:reemplaz|sustitu|corrig|correg|ajust|modific|actualiz)\w*'
+    if re.search(rf'\b(?:no\s+(?:{change}|conserv\w*|mantien\w*)|confirmar|verificar|preguntar)\b', source):
         return None
     if ((re.search(r'\b(?:solo|solamente|unic[oa])\b.{0,80}\b(?:conserv\w*|mantien\w*)\b', source))
             or (re.search(r'\bresto\b', source) and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source))):
         return 'all'
-    if (re.search(r'\b(?:reemplaz\w*|sustitu\w*)\b', source)
+    if (re.search(rf'\b{change}\b', source)
             and re.search(r'\bnuevo horario\b|\bhorario (?:del borrador|propuesto|que se propone)\b', source)
-            and re.search(r'\b(?:conserv\w*|mantien\w*)\b', source)):
+            and re.search(r'\b(?:conserv\w*|mantien\w*|sigue\s+cerrad[oa])\b', source)):
         return 'dates'
     return None
 
@@ -216,9 +217,14 @@ def replace_dates(rule, source, weekday, approved):
 
 
 def copied_schedule_change(text):
-    """Read the preserved rows copied from Telegram and the requested new window."""
+    """Read preserved rows copied from Telegram and the instruction to change them."""
     head, *quotes = text.strip().split('•')
-    if head.strip() or not quotes:
+    use_proposed = re.fullmatch(
+        r'(?:(?:te\s+)?falta\s+modificar|(?:modifica|cambia)(?:\s+estas\s+fechas)?)'
+        r'(?:\s+horarios\s+que\s+se\s+conservan)?[:.]?',
+        normalize_text(head.replace('**', '')),
+    )
+    if (head.strip() and not use_proposed) or not quotes:
         return None
     rows = []
     for quote in quotes:
@@ -238,7 +244,11 @@ def copied_schedule_change(text):
         r'(?:(?:se|de)\s+)?(?:modifican|cambian|ajustan)\s+(?:de|a)\s+' + TIME_RANGE + r'\.?',
         correction,
     )
-    return (rows, {'open': new[1], 'close': new[2]}) if new else None
+    if new:
+        return rows, {'open': new[1], 'close': new[2]}
+    if use_proposed and not correction:
+        return rows, None
+    return None
 
 
 def revise_copied_dates(payload, copied):
@@ -260,7 +270,8 @@ def revise_copied_dates(payload, copied):
         raise ValueError('La sucursal necesita una instrucción completa para este periodo.')
     index, rule = scoped[0]
     if (rule['kind'] != 'range' or 'branch_ids' not in rule or rule['closed_all_day']
-            or rule['time_windows'] != [requested_window]):
+            or len(rule['time_windows']) != 1
+            or requested_window is not None and rule['time_windows'] != [requested_window]):
         raise ValueError('El horario nuevo debe coincidir con el horario propuesto para la sucursal.')
     start, end = (date.fromisoformat(rule[key]) for key in ('start_date', 'end_date'))
     period = [start + timedelta(days=i) for i in range((end - start).days + 1)]
