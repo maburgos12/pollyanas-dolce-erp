@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Case, Count, Q, When
 from django.utils import timezone
 
 from orquestacion.models import AgentDefinition, AgentTask, OrchestrationRule, OrchestrationRun
@@ -225,7 +225,8 @@ def claim(node):
     candidates = AgentTask.objects.filter(task_type=TASK, status="pending").filter(
         Q(input_payload__node=node) | Q(input_payload__kind=hours_intent.KIND),
     )
-    for task in candidates.select_related("run", "agent").order_by("id")[:16]:
+    priority = Case(When(input_payload__kind=hours_intent.KIND, then=0), default=1)
+    for task in candidates.select_related("run", "agent").order_by(priority, "id")[:16]:
         if task.due_at and task.due_at > now:
             continue
         if not _fresh(task):
@@ -329,9 +330,12 @@ def panel():
     pending = {row["input_payload__node"]: row["count"] for row in eligible.exclude(
         input_payload__kind=hours_intent.KIND,
     ).values("input_payload__node").annotate(count=Count("id"))}
+    hours_ready = False
     for attempted in eligible.filter(input_payload__kind=hours_intent.KIND).values_list(
             "output_payload__attempted_nodes", flat=True):
         for node in set(HOURS_MODELS) - set(attempted or ()):
             pending[node] = pending.get(node, 0) + 1
+            hours_ready = True
     return {"enabled": bool(rule and rule.is_active), "nodes": rule.condition_json if rule else {}, "ready_by_node": pending,
+            "hours_ready": hours_ready,
             "jobs": [receipt(t) for t in AgentTask.objects.select_related("agent").filter(task_type=TASK).order_by("-id")[:12]]}

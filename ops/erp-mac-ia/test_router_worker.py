@@ -1,4 +1,5 @@
 import unittest
+from threading import Event
 from unittest.mock import patch
 
 import router_worker
@@ -7,11 +8,13 @@ import router_worker
 class RouterWorkerTests(unittest.TestCase):
     def test_busy_node_is_not_given_a_lease(self):
         calls = []
+        first_claim = Event()
         def command(action, payload):
             calls.append((action, payload))
             return {"enabled": True}
         with patch.object(router_worker, "transport", return_value={"error": "busy"}), patch.object(router_worker, "command", side_effect=command):
-            self.assertEqual(router_worker.work("mac_ia")["state"], "busy")
+            self.assertEqual(router_worker.work("mac_ia", first_claim=first_claim)["state"], "busy")
+        self.assertTrue(first_claim.is_set())
         self.assertEqual([c[0] for c in calls], ["heartbeat"])
 
     def test_node_cannot_inject_command_parameters_or_replace_lease(self):

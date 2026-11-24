@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import time
+from functools import partial
+from threading import Event
 
 from worker import command as pilot_command
 
@@ -52,7 +54,7 @@ def command(action, payload=None):
 def transport(node, payload):
     timeout = 480
     if payload.get("kind") == "hours_draft_edit":
-        timeout = 225 if payload["data"].get("mode") == "initial" else 155
+        timeout = 255 if payload["data"].get("mode") == "initial" else 155
     proc = subprocess.run(["ssh", "-T", "-F", CONFIG, node], input=json.dumps(payload), capture_output=True,
                           text=True, timeout=timeout, check=True)
     if len(proc.stdout.encode()) > 16384:
@@ -63,7 +65,7 @@ def transport(node, payload):
     return value
 
 
-def work(node):
+def work(node, *, first_claim=None):
     job = None
     phase, detail = "probe", None
     try:
@@ -75,7 +77,11 @@ def work(node):
         if not status["enabled"] or state != "idle":
             return {"node": node, "state": state, **({"diagnostic": detail} if detail else {})}
         phase = "claim"
+        if first_claim is not None and node == "mac_ia_02":
+            first_claim.wait(timeout=12)
         job = command("claim", {"node": node})
+        if first_claim is not None and node == "mac_ia":
+            first_claim.set()
         if not job:
             return {"node": node, "state": "idle"}
         phase = "heartbeat"
@@ -105,14 +111,17 @@ def work(node):
         except (OSError, ValueError, KeyError, subprocess.SubprocessError):
             pass
         return {"node": node, "state": "offline", **({"id": job["id"], "model": job["model"]} if job else {}), "diagnostic": detail}
+    finally:
+        if first_claim is not None and node == "mac_ia":
+            first_claim.set()
 
 
-def drain(node):
+def drain(node, *, first_claim=None):
     started, results = time.monotonic(), []
     for _ in range(4):
         if time.monotonic() - started >= 120:
             break
-        value = work(node)
+        value = work(node, first_claim=first_claim) if first_claim is not None and not results else work(node)
         results.append(value)
         if value.get("status") not in {"resolved", "cancelled"}:
             break
@@ -132,8 +141,10 @@ def main():
         # Drain previously accepted pilot jobs before competing for this Mac.
         if any(j["status"] in {"pending", "running"} for j in pilot_command("status")["jobs"]):
             return
+        nodes = [node for node in ("mac_ia", "mac_ia_02") if status["ready_by_node"].get(node)]
+        first_claim = Event() if len(nodes) == 2 and status.get("hours_ready") else None
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            for results in pool.map(drain, [node for node in ("mac_ia", "mac_ia_02") if status["ready_by_node"].get(node)]):
+            for results in pool.map(partial(drain, first_claim=first_claim), nodes):
                 for value in results:
                     print(json.dumps(value), flush=True)
 

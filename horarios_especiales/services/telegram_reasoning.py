@@ -18,9 +18,9 @@ from orquestacion.models import AgentDefinition, AgentTask
 from orquestacion.services import hours_intent, local_router
 
 CLARIFY = (
-    'Conservé tu borrador y pausé su botón. Indica la sucursal y la corrección. '
-    'Por ejemplo, «El Túnel sigue cerrado los miércoles» o «Bamoa cierra a las 6 p. m.».'
+    'Tu borrador sigue pendiente y su botón está en pausa.'
 )
+INITIAL_CLARIFY = 'No pude preparar la vista previa. Confirma el periodo, las sucursales y los horarios.'
 
 
 MONTH_LABELS = {**MONTHS, **dict(zip(
@@ -91,7 +91,7 @@ def queue(row, text, draft=None):
         result = local_router.submit(agent=hours_intent.AGENT, kind=hours_intent.KIND, data=data,
             request_id=str(uuid5(NAMESPACE_URL, f'pollyanas-hours/{row.bot_id}/{row.update_id}')))
     except ValueError:
-        row.state, row.receipt = 'REPLY', {'text': CLARIFY + ' La IA local no está disponible para esta frase.'}
+        row.state, row.receipt = 'REPLY', {'text': (CLARIFY if draft else INITIAL_CLARIFY) + ' La IA local no está disponible en este momento.'}
     else:
         row.state = 'IA_WAIT'
         row.receipt = {'task_id': result['id'], 'draft_id': draft.pk if draft else None,
@@ -455,11 +455,12 @@ def advance(row, config):
                                    agent__code=hours_intent.AGENT, input_payload__kind=hours_intent.KIND).first()
     draft_id = row.receipt.get('draft_id')
     draft = draft_for(config, row) if draft_id else None
+    clarify = CLARIFY if draft else INITIAL_CLARIFY
     expired = (not row.expires_at or row.expires_at <= timezone.now()) and not timely_result(task, row.expires_at)
     if (not enabled() or expired or draft_id and (not draft or draft.pk != draft_id
             or draft.revision != row.receipt['draft_revision']) or not task
             or task.status in ('blocked', 'cancelled')):
-        row.state, row.receipt = 'REPLY', {'text': CLARIFY}
+        row.state, row.receipt = 'REPLY', {'text': clarify + ' No recibí una interpretación válida a tiempo.'}
     elif task.status != 'resolved':
         return
     else:
@@ -475,5 +476,5 @@ def advance(row, config):
             else:
                 raise ValueError('El borrador de la corrección perdió vigencia.')
         except ValueError as exc:
-            row.state, row.receipt = 'REPLY', {'text': CLARIFY + '\n' + str(exc)}
+            row.state, row.receipt = 'REPLY', {'text': clarify + '\n' + str(exc)}
     row.save()
