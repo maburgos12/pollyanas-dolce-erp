@@ -376,3 +376,25 @@ class TelegramHoursUpdate(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=["bot_id", "update_id"], name="he_telegram_update_unique")]
+
+
+class TelegramHoursStory(models.Model):
+    source = models.ForeignKey(TelegramHoursUpdate, on_delete=models.PROTECT)
+    request = models.ForeignKey(SolicitudHorarioEspecial, on_delete=models.PROTECT)
+    revision = models.CharField(max_length=64)
+    art_revision = models.PositiveIntegerField()
+    nonce = models.CharField(max_length=32)
+    snapshot = models.JSONField(default=list)
+    draft = models.JSONField(default=dict)
+    remote = models.JSONField(default=dict)
+    approval_body = models.TextField(blank=True)
+    preview_message_id = models.BigIntegerField(null=True)
+    state = models.CharField(max_length=20, db_index=True)
+    next_attempt_at = models.DateTimeField(default=timezone.now, db_index=True)
+    error_code = models.CharField(max_length=100, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=('request', 'revision', 'art_revision'), name='he_story_art_revision_unique'),
+        ]
