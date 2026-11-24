@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Q, Count
+from django.db.models import Case, Count, Q, When
 from django.utils import timezone
 
 from orquestacion.models import AgentDefinition, AgentTask, OrchestrationRule, OrchestrationRun
@@ -18,6 +18,7 @@ RULE = "local_ai_router"
 TASK = "local_ai_request"
 NODES = {"mac_ia", "mac_ia_02"}
 MODELS = {"qwen4b": "mac_ia", "python": "mac_ia", "qwen8b": "mac_ia_02", "nemotron": "mac_ia_02"}
+HOURS_MODELS = {"mac_ia": "qwen4b", "mac_ia_02": "qwen8b"}
 ERRORS = {"busy", "offline", "timeout", "invalid_output", "worker_error"}
 
 
@@ -193,6 +194,17 @@ def _fresh(task):
             and data["references"] == [references.get(c["key"]) for c in data["cases"]])
 
 
+def recover_expired(task):
+    previous = task.output_payload
+    retry = {"attempts": previous["attempts"], "error": "lease_expired"}
+    if task.input_payload["kind"] == hours_intent.KIND:
+        retry["attempted_nodes"] = previous.get("attempted_nodes", [task.input_payload["node"]])
+        blocked = set(HOURS_MODELS) <= set(retry["attempted_nodes"])
+    else:
+        blocked = previous["attempts"] >= 3
+    local_ai._save(task, "blocked" if blocked else "pending", retry)
+
+
 @transaction.atomic
 def claim(node):
     if node not in NODES:
@@ -206,18 +218,35 @@ def claim(node):
     if running:
         if running.due_at and running.due_at > now:
             return None
-        local_ai._save(running, "blocked" if running.output_payload["attempts"] >= 3 else "pending",
-                       {"attempts": running.output_payload["attempts"], "error": "lease_expired"})
-    for task in jobs.select_related("run", "agent").filter(status="pending").order_by("id")[:16]:
+        recover_expired(running)
+    for expired in AgentTask.objects.filter(task_type=TASK, status="running",
+            input_payload__kind=hours_intent.KIND, due_at__lte=now).exclude(input_payload__node=node):
+        recover_expired(expired)
+    candidates = AgentTask.objects.filter(task_type=TASK, status="pending").filter(
+        Q(input_payload__node=node) | Q(input_payload__kind=hours_intent.KIND),
+    )
+    priority = Case(When(input_payload__kind=hours_intent.KIND, then=0), default=1)
+    for task in candidates.select_related("run", "agent").order_by(priority, "id")[:16]:
         if task.due_at and task.due_at > now:
             continue
         if not _fresh(task):
             local_ai._save(task, "cancelled", {"error": "source_changed"})
             continue
+        is_hours = task.input_payload["kind"] == hours_intent.KIND
+        attempted = task.output_payload.get("attempted_nodes", [])
+        if is_hours and node in attempted:
+            continue
+        if is_hours and task.input_payload["node"] != node:
+            task.input_payload = {**task.input_payload, "node": node, "model": HOURS_MODELS[node]}
+            task.save(update_fields=["input_payload"])
         lease = secrets.token_hex(24)
-        task.due_at = now + timedelta(minutes=12)
-        local_ai._save(task, "running", {"lease": lease, "attempts": task.output_payload.get("attempts", 0) + 1,
-                                        "started_at": now.isoformat()})
+        lease_minutes = 5 if task.input_payload["data"].get("mode") == "initial" else 3
+        task.due_at = now + timedelta(minutes=lease_minutes if is_hours else 12)
+        claim_payload = {"lease": lease, "attempts": task.output_payload.get("attempts", 0) + 1,
+                         "started_at": now.isoformat()}
+        if is_hours:
+            claim_payload["attempted_nodes"] = [*attempted, node]
+        local_ai._save(task, "running", claim_payload)
         return {"id": task.id, "lease": lease, **task.input_payload}
     return None
 
@@ -257,12 +286,19 @@ def finish(task_id, lease, *, result=None, usage=None, duration=0, error=None):
         local_ai._save(task, "cancelled", {"error": "source_changed"})
         return receipt(task)
     payload = {"attempts": previous["attempts"]}
+    is_hours = task.input_payload["kind"] == hours_intent.KIND
+    if is_hours:
+        payload["attempted_nodes"] = previous.get("attempted_nodes", [task.input_payload["node"]])
     if error is not None:
         if error not in ERRORS:
             raise ValueError("invalid_error")
         payload["error"] = error
-        task.due_at = timezone.now() + timedelta(minutes=5 * previous["attempts"])
-        state = "blocked" if previous["attempts"] >= 3 else "pending"
+        if is_hours:
+            task.due_at = timezone.now()
+            state = "blocked" if set(HOURS_MODELS) <= set(payload["attempted_nodes"]) else "pending"
+        else:
+            task.due_at = timezone.now() + timedelta(minutes=5 * previous["attempts"])
+            state = "blocked" if previous["attempts"] >= 3 else "pending"
     else:
         validate_result(task, result)
         usage = usage or {}
@@ -291,6 +327,15 @@ def heartbeat(node, state):
 def panel():
     rule = OrchestrationRule.objects.filter(code=RULE).first()
     eligible = AgentTask.objects.filter(task_type=TASK, status__in=["pending", "running"]).filter(Q(due_at__isnull=True) | Q(due_at__lte=timezone.now()))
-    pending = {row["input_payload__node"]: row["count"] for row in eligible.values("input_payload__node").annotate(count=Count("id"))}
+    pending = {row["input_payload__node"]: row["count"] for row in eligible.exclude(
+        input_payload__kind=hours_intent.KIND,
+    ).values("input_payload__node").annotate(count=Count("id"))}
+    hours_ready = False
+    for attempted in eligible.filter(input_payload__kind=hours_intent.KIND).values_list(
+            "output_payload__attempted_nodes", flat=True):
+        for node in set(HOURS_MODELS) - set(attempted or ()):
+            pending[node] = pending.get(node, 0) + 1
+            hours_ready = True
     return {"enabled": bool(rule and rule.is_active), "nodes": rule.condition_json if rule else {}, "ready_by_node": pending,
+            "hours_ready": hours_ready,
             "jobs": [receipt(t) for t in AgentTask.objects.select_related("agent").filter(task_type=TASK).order_by("-id")[:12]]}

@@ -3,8 +3,8 @@ Description=Consume bounded local AI work without polling models continuously
 
 [Timer]
 OnBootSec=90
-OnUnitInactiveSec=60
-AccuracySec=10
+OnUnitInactiveSec=20
+AccuracySec=3
 Unit=pastelerias-local-router.service
 
 [Install]

@@ -117,7 +117,7 @@ instrumentación convierte una extracción inválida en resuelta.
 VPS: `/etc/pastelerias-local-router/` (root0700), dos llaves de ejecución propias,
 known_hosts fijado, ssh_config privado; ninguna credencial en Git/DB/panel.
 El trabajador corre desde el commit desplegado, no desde copias sueltas.
-`pastelerias-local-router.timer` activa un oneshot cada60s después de terminar.
+`pastelerias-local-router.timer` activa un oneshot 20 s después de terminar.
 Sin trabajo elegible no consulta modelos/nodos. Comparte
 `/run/pastelerias-mac-ia/worker.lock` con el piloto y puede usar ambos nodos en
 paralelo. Atiende hasta cuatro trabajos por nodo sin pausa intermedia; deja de

@@ -326,11 +326,12 @@ def preserve_approved_days(rules):
             groups.setdefault(retained_dates(branch_id, rule), []).append(branch_id)
         for kept, ids in groups.items():
             scoped = {**rule, 'branch_ids': ids}
-            if kept:
+            excluded = set(rule.get('excluded_dates', ())) | set(kept)
+            if excluded:
                 days = (date.fromisoformat(rule['end_date']) - date.fromisoformat(rule['start_date'])).days + 1
-                if len(kept) == days:
+                if len(excluded) == days:
                     raise ValueError('Una sucursal tiene horarios aprobados durante todo el periodo. Usa otra vigencia o indica las fechas concretas que quieres cambiar.')
-                scoped['excluded_dates'] = list(kept)
+                scoped['excluded_dates'] = sorted(excluded)
             result.append(scoped)
     return result
 
@@ -445,7 +446,7 @@ def preview_schedule(payload, *, formatted=False):
     return ('\n\n' if formatted else '\n').join(lines)
 
 
-def preserved_schedule(payload):
+def preserved_schedule(payload, *, iso_dates=False):
     from horarios_especiales.services.google_projection import approved_rules
 
     names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
@@ -457,10 +458,14 @@ def preserved_schedule(payload):
             approved = approved_rules(pk)
             for value in rule['excluded_dates']:
                 day = date.fromisoformat(value)
+                if any(other is not rule and rule_applies(other, day)
+                       for _, other in indexed_branch_rules(payload, pk)):
+                    continue
                 winner = max((row for row in approved if rule_applies(row[1], day)),
                              key=lambda row: projection_rank(row, day), default=None)
                 hours = schedule_hours(winner[1]) if winner else 'Horario vigente'
-                lines.append(f'• {names[pk]} · {schedule_date(value, weekday=True)} · {hours}')
+                label = f'{value} ({WEEKDAYS[day.weekday()]})' if iso_dates else schedule_date(value, weekday=True)
+                lines.append(f'• {names[pk]} · {label} · {hours}')
     return lines
 
 
@@ -559,7 +564,9 @@ def build_preview(row, text, config, actor, ids, rules, *, note='', after=None):
 @transaction.atomic
 def prepare_text(row, text, config, actor, *, strict_branches=False):
     from horarios_especiales.services import telegram_reasoning
+    from horarios_especiales.models import normalize_text
     from horarios_especiales.services.requests import lock_branch_ids
+    from horarios_especiales.services.telegram_parser import GROUP_HOURS
 
     config = config_for_row(config, row)
     actor = actor_for(config)
@@ -574,6 +581,11 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
             ids, rules = parse_instruction(text, timestamp, strict_branches=strict_branches)
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         draft = telegram_reasoning.draft_for(config, row) if contextual else None
+        source = normalize_text(text)
+        complete_notice = re.search(r'\btodas\b', source) and re.search(GROUP_HOURS, source)
+        if contextual and (not draft or complete_notice):
+            telegram_reasoning.queue(row, text)
+            return
         if draft:
             result = telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
             if result is None:
