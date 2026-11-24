@@ -44,11 +44,11 @@
         }
         const messages = {
           ACTUALIZADA: "Carga actualizada desde Point.",
-          PENDIENTE_ENVIO: "Consulta terminada. Point aún tiene solicitudes sin envío; se generará una alerta para revisión.",
+          PENDIENTE_ENVIO: "Este tramo aún no tiene carga enviada. Cuando CEDIS registre el despacho en Point, vuelve a actualizar desde aquí.",
           SIN_CARGA: "Point no mostró carga para este tramo; se generará una alerta para revisión."
         };
         if (!messages[data.estado]) throw new Error(data.detail || "No se pudo actualizar la carga.");
-        label.textContent = messages[data.estado];
+        label.textContent = data.mensaje || messages[data.estado];
         window.ERPActionUI?.showToast({type: data.estado === "ACTUALIZADA" ? "success" : "warning", message: label.textContent});
         const view = await fetch(routeUrl, {cache: "no-store"});
         if (!view.ok) throw new Error("La consulta terminó; vuelve a abrir la ruta para ver los datos.");

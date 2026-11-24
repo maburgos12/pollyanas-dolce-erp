@@ -1298,32 +1298,60 @@ def validar_producto_tramo_carga(
     return lineas
 
 
-def estado_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> str:
+def resumen_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> dict:
     ordenes = _ordenes_tramo_carga_actual(ruta)
-    lineas_tramo = lineas_tramo_operativo_actual(ruta).exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-    if solicitud.parameters.get("recarga_cedis_id"):
-        paradas = _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes)
-        lineas_tramo = lineas_tramo.filter(parada_id__in={parada.pk for parada in paradas.values()})
-        sucursales = set(paradas)
-    else:
-        sucursales = {
-            sucursal_id for sucursal_id, parada in _paradas_por_sucursal(ruta).items()
-            if ordenes is None or parada.orden in ordenes
-        }
-    lineas = list(lineas_tramo.select_related("point_transfer_line"))
-    if any(_linea_pendiente_envio_point(linea) for linea in lineas):
-        return "PENDIENTE_ENVIO"
-
-    # Las solicitudes sin Enviado se conservan en el espejo Point, fuera del checklist.
+    paradas = _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes)
+    sucursales = set(paradas)
+    lineas = list(
+        lineas_tramo_operativo_actual(ruta)
+        .filter(parada_id__in={parada.pk for parada in paradas.values()})
+        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
+        .select_related("point_transfer_line")
+    )
+    # Un pedido sin despacho no invalida la carga enviada ya disponible.
+    disponibles = [linea for linea in lineas if not _linea_pendiente_envio_point(linea)]
     solicitudes_point = PointTransferLine.objects.filter(
         erp_destination_branch_id__in=sucursales,
+        registered_at__date=ruta.fecha_ruta,
         is_open=True, is_cancelled=False, is_current_snapshot=True, sent_at__isnull=True,
         sync_job__started_at__gte=solicitud.started_at,
         sync_job__triggered_by_id=solicitud.triggered_by_id,
-    ).only("sent_at", "raw_payload")
-    if any(not point_transfer_enviada(linea) for linea in solicitudes_point):
-        return "PENDIENTE_ENVIO"
-    return "ACTUALIZADA" if lineas else "SIN_CARGA"
+    ).select_related("origin_branch", "erp_destination_branch")
+    pendientes = {}
+    for linea in solicitudes_point:
+        if point_transfer_enviada(linea) or not is_cedis_like_name(linea.origin_branch.name):
+            continue
+        clave = (linea.transfer_external_id, linea.erp_destination_branch_id)
+        if clave not in pendientes:
+            pendientes[clave] = {
+                "folio": linea.transfer_external_id,
+                "sucursal": linea.erp_destination_branch.nombre,
+                "fecha": str(ruta.fecha_ruta),
+                "renglones": 0,
+            }
+        pendientes[clave]["renglones"] += 1
+    pendientes = [pendientes[clave] for clave in sorted(pendientes)]
+    if disponibles:
+        estado = "ACTUALIZADA"
+        mensaje = "Carga actualizada desde Point. Puedes capturar la carga enviada de este tramo."
+    elif pendientes or any(_linea_pendiente_envio_point(linea) for linea in lineas):
+        estado = "PENDIENTE_ENVIO"
+        mensaje = "Este tramo aún no tiene carga enviada disponible para capturar."
+    else:
+        estado = "SIN_CARGA"
+        mensaje = "Point no mostró carga enviada para este tramo."
+    if pendientes:
+        folios = ", ".join(f"{item['folio']} ({item['sucursal']})" for item in pendientes)
+        mensaje += f" Pendientes de envío en CEDIS: {folios}."
+        mensaje += (
+            " No bloquean la captura de la carga disponible."
+            if disponibles else " Cuando CEDIS registre el despacho en Point, vuelve a actualizar desde aquí."
+        )
+    return {"estado": estado, "mensaje": mensaje, "pendientes_envio": pendientes}
+
+
+def estado_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> str:
+    return resumen_sync_carga_repartidor(ruta, solicitud=solicitud)["estado"]
 
 
 def checklist_bloquea_salida(ruta: RutaEntrega) -> str | None:
