@@ -71,6 +71,38 @@ class CargaPointErpColaTests(TestCase):
         self.assertEqual(job.status, "FAILED")
         self.assertIn("fecha cambiaron", job.error_message)
 
+    def test_cambio_de_punto_con_mismo_orden_no_actualiza_otra_planeacion(self):
+        from logistica.models import PuntoLogistico
+        with patch("logistica.tasks.actualizar_carga_point_repartidor.apply_async"):
+            response = self.client.post(self.url, {"action": "sync_carga_point"}, HTTP_ACCEPT="application/json")
+        punto = PuntoLogistico.objects.create(
+            sucursal=self.sucursal, nombre="Otro punto", tipo=PuntoLogistico.TIPO_SUCURSAL,
+            latitud="25.57", longitud="-108.47",
+        )
+        self.parada.punto = punto
+        self.parada.save(update_fields=["punto"])
+        with patch("logistica.services_carga_ruta.OpenTransferSyncService") as point:
+            actualizar_carga_point_repartidor.run(job_id=response.json()["solicitud_id"])
+        point.assert_not_called()
+        self.assertEqual(PointSyncJob.objects.get(pk=response.json()["solicitud_id"]).status, "FAILED")
+
+    def test_crear_ruta_hoy_no_requiere_modificar_la_ruta_de_ayer(self):
+        from logistica.models import RutaEntrega
+        self.ruta.fecha_ruta -= timedelta(days=1)
+        self.ruta.save(update_fields=["fecha_ruta"])
+        before = RutaEntrega.objects.filter(pk=self.ruta.pk).values().get()
+        with patch("logistica.views.recalcular_ruta_programada"):
+            response = self.client.post(reverse("logistica:rutas"), {
+                "nombre": "Salida real de hoy", "fecha_ruta": str(timezone.localdate()),
+                "repartidor": self.repartidor.pk, "unidad_operativa": self.unidad.pk,
+                "puntos_ruta": [self.punto_cedis.pk, self.punto.pk],
+            })
+        self.assertEqual(response.status_code, 302)
+        nueva = RutaEntrega.objects.exclude(pk=self.ruta.pk).get()
+        self.assertEqual(nueva.fecha_ruta, timezone.localdate())
+        self.assertEqual(nueva.paradas.count(), 2)
+        self.assertEqual(RutaEntrega.objects.filter(pk=self.ruta.pk).values().get(), before)
+
 
 class CargaPointContencionTests(TransactionTestCase):
     def setUp(self):

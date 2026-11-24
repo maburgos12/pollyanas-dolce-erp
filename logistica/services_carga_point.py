@@ -19,8 +19,12 @@ logger = logging.getLogger(__name__)
 
 def contexto_carga_point(ruta):
     recarga, ordenes = _tramo_carga_actual(ruta)
+    paradas = ruta.paradas.order_by("orden", "pk")
+    if ordenes is not None:
+        paradas = paradas.filter(orden__in=ordenes)
     return {"fecha": str(ruta.fecha_ruta), "recarga": recarga,
-            "ordenes": sorted(ordenes) if ordenes is not None else None}
+            "ordenes": sorted(ordenes) if ordenes is not None else None,
+            "paradas": [list(row) for row in paradas.values_list("pk", "orden", "punto_id", "punto__sucursal_id")]}
 
 
 def validar_contexto_carga_erp(*, ruta, user, contexto):

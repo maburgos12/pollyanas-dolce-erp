@@ -4653,7 +4653,7 @@ const storage = {
 const context = {
   console, URLSearchParams, URL, FormData: global.FormData, Blob: global.Blob, File: global.File, Response: global.Response,
   localStorage: storage, sessionStorage: storage,
-  document: {getElementById: () => ({}), addEventListener: () => {}, hidden: false},
+  document: {getElementById: () => ({}), querySelector: () => null, addEventListener: () => {}, hidden: false},
   window: {
     location: {search: ""}, addEventListener: () => {},
     PDLogisticaOfflineQueue: {prepareReplay: (item) => item}
