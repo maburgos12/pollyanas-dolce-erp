@@ -155,6 +155,7 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         self.assertIn('09:00–19:00', client.sent[0]['text'])
         self.assertIn('09:00–18:00', client.sent[0]['text'])
         self.assertIn('23 nov 2026', client.sent[0]['text'])
+        self.assertIn('26 nov 2026 al 29 nov 2026 · EL TUNEL', client.sent[0]['text'])
         self.assertIn('miércoles 25 nov 2026 · Cerrado', client.sent[0]['text'])
         self.assertIsNone(row.request.approved_at)
         callback = self.callback(row)

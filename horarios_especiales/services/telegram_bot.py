@@ -402,11 +402,29 @@ def schedule_period(rule):
     return f'{start} al {end}' if end and end != start else start
 
 
+def proposed_period(rule):
+    if not rule.get('excluded_dates'):
+        return schedule_period(rule)
+    first = date.fromisoformat(rule['start_date'])
+    last = date.fromisoformat(rule['end_date'])
+    spans = []
+    for offset in range((last - first).days + 1):
+        day = first + timedelta(days=offset)
+        if not rule_applies(rule, day):
+            continue
+        if spans and (day - spans[-1][1]).days == 1:
+            spans[-1][1] = day
+        else:
+            spans.append([day, day])
+    return ', '.join(schedule_period({'kind': 'range', 'start_date': start.isoformat(), 'end_date': end.isoformat()})
+                     for start, end in spans)
+
+
 def preview_schedule(payload):
     names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
     groups = {}
     for rule in payload['rules']:
-        key = (schedule_period(rule), schedule_hours(rule))
+        key = (proposed_period(rule), schedule_hours(rule))
         groups.setdefault(key, []).extend(names[pk] for pk in rule.get('branch_ids', names))
     periods = {period for period, hours in groups}
     lines = [next(iter(periods))] if len(periods) == 1 else []
