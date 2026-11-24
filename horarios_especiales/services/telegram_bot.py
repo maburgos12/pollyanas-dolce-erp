@@ -494,6 +494,7 @@ def consumer_receipts(obj):
 
 
 def status_text(obj):
+    readings = consumer_receipts(obj)
     lines = [f'{obj.request_code} · ERP: {obj.status}']
     details = obj.execution_summary_json.get('details', [])
     labels = {'GOOGLE_CONFIRMED': 'confirmado por lectura Google', 'PROGRAMMED': 'programado, aún pendiente',
@@ -504,7 +505,7 @@ def status_text(obj):
     lines += [f"Google {row.get('branch_code', '')}: {labels.get(row.get('status'), 'pendiente')}" for row in details]
     if not details:
         lines.append('Google: pendiente, sin recibo de publicación.')
-    return '\n'.join(lines + consumer_receipts(obj))
+    return '\n'.join(lines + readings)
 
 
 def formatted_status(text):
