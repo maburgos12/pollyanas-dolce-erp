@@ -98,7 +98,7 @@ def discard_revoked_pending(config):
     """Drop leases/buttons of removed identities without changing approved schedules."""
     allowed = active_updates(config).values('pk')
     for row in TelegramHoursUpdate.objects.filter(bot_id=config['bot_id'],
-            state__in=['RECEIVED', 'PREPARED', 'PREVIEW', 'REPLY', 'AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID']
+            state__in=['RECEIVED', 'PREPARED', 'PREVIEW', 'REPLY', 'AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID', 'IA_WAIT']
             ).exclude(pk__in=allowed).select_for_update():
         row.state, row.nonce, row.expires_at = 'CANCELLED', '', None
         row.receipt = {key: value for key, value in row.receipt.items() if key in ('reserved_cents', 'sha256')}
@@ -379,30 +379,74 @@ def approval_snapshot(obj):
     return snapshot
 
 
-def preview_text(obj):
-    payload = obj.canonical_payload
-    lines = ['Vista previa · NO aplicada']
-    locations = {row['branch_id']: row['branch_code'] for row in payload['locations']}
-    if not any('branch_ids' in rule for rule in payload['rules']):
-        lines.append('Sucursales: ' + ', '.join(locations.values()))
+def schedule_hours(rule):
+    if rule['closed_all_day']:
+        return 'Cerrado'
+    return ', '.join(window['open'] + '–' + window['close'] for window in rule['time_windows'])
+
+
+def schedule_date(value, *, weekday=False):
+    months = ('ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic')
+    day = date.fromisoformat(value)
+    weekdays = ('lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo')
+    prefix = weekdays[day.weekday()] + ' ' if weekday else ''
+    return f'{prefix}{day.day} {months[day.month - 1]} {day.year}'
+
+
+def schedule_period(rule):
+    start = schedule_date(rule['start_date'])
+    end = schedule_date(rule['end_date']) if rule.get('end_date') else ''
+    if rule['kind'] == 'weekly':
+        days = ', '.join(WEEKDAYS[day] for day in rule['weekdays'])
+        return f'{days.capitalize()} · desde {start}' + (f' hasta {end}' if end else '')
+    return f'{start} al {end}' if end and end != start else start
+
+
+def preview_schedule(payload):
+    names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
+    groups = {}
     for rule in payload['rules']:
-        if 'branch_ids' in rule:
-            lines.append('Sucursales: ' + ', '.join(locations[pk] for pk in rule['branch_ids']))
-        dates = rule['start_date']
-        if rule['kind'] == 'weekly':
-            dates = ', '.join(WEEKDAYS[d] for d in rule['weekdays']) + ' desde ' + dates
-        if rule.get('end_date'):
-            dates += ' hasta ' + rule['end_date'] + ' (inclusive)'
-        elif rule['kind'] == 'weekly':
-            dates += ' sin fecha final'
-        hours = 'CERRADO todo el día' if rule['closed_all_day'] else ', '.join(w['open'] + '–' + w['close'] for w in rule['time_windows'])
-        lines.append(dates + ': ' + hours)
-        if rule.get('excluded_dates'):
-            lines.append('Se conserva el horario aprobado en: ' + ', '.join(rule['excluded_dates']) + '.')
-    lines.extend(['Zona: America/Mazatlan.', 'Aprobar actualiza el horario central para Google, tienda y Maya. Cada destino se confirma con su propia lectura.',
-                  obj.execution_summary_json.get('google_preflight', 'Google: comprobación previa pendiente.'),
-                  'Vence en 20 minutos. Para corregir envía la instrucción completa.', 'Revisión: ' + payload['revision']])
+        key = (schedule_period(rule), schedule_hours(rule))
+        groups.setdefault(key, []).extend(names[pk] for pk in rule.get('branch_ids', names))
+    periods = {period for period, hours in groups}
+    lines = [next(iter(periods))] if len(periods) == 1 else []
+    for (period, hours), branches in groups.items():
+        when = f' · {period}' if len(periods) > 1 else ''
+        lines.append(f'• {hours}{when} · ' + ', '.join(branches))
     return '\n'.join(lines)
+
+
+def preserved_schedule(payload):
+    from horarios_especiales.services.google_projection import approved_rules
+
+    names = {row['branch_id']: row['branch_name'] for row in payload['locations']}
+    lines = []
+    for rule in payload['rules']:
+        if not rule.get('excluded_dates'):
+            continue
+        for pk in rule['branch_ids']:
+            approved = approved_rules(pk)
+            for value in rule['excluded_dates']:
+                day = date.fromisoformat(value)
+                winner = max((row for row in approved if rule_applies(row[1], day)),
+                             key=lambda row: row[0], default=None)
+                hours = schedule_hours(winner[1]) if winner else 'Horario vigente'
+                lines.append(f'• {names[pk]} · {schedule_date(value, weekday=True)} · {hours}')
+    return lines
+
+
+def preview_text(obj):
+    summary = obj.execution_summary_json
+    parts = ['Vista previa de horarios · NO aplicada', preview_schedule(obj.canonical_payload)]
+    preserved = summary.get('preserved', [])
+    if preserved:
+        parts.append('Horarios que se conservan\n' + '\n'.join(preserved))
+    if summary.get('correction'):
+        parts.append(summary['correction'])
+    parts.append('Revisa el periodo y las sucursales. Pulsa Aprobar para iniciar la actualización en Google, tienda y Maya.')
+    parts.append(summary.get('google_preflight', 'Google: comprobación previa pendiente.'))
+    parts.append('Vigencia del botón: 20 minutos. Para corregir, responde con el cambio.')
+    return '\n\n'.join(parts)
 
 
 def consumer_receipts(obj):
@@ -424,12 +468,19 @@ def status_text(obj):
     return '\n'.join(lines + consumer_receipts(obj))
 
 
-def invalidate_pending(config, actor):
-    for audio in owner_updates(config).select_for_update(of=('self',)).filter(state__in=['AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID']):
-        audio.state, audio.nonce, audio.expires_at = 'CANCELLED', '', None
-        audio.receipt = {key: value for key, value in audio.receipt.items() if key in ('reserved_cents', 'sha256')}
-        audio.save(update_fields=['state', 'nonce', 'expires_at', 'receipt'])
-    for old in owner_updates(config).select_for_update(of=('self',)).filter(state__in=['PREVIEW', 'PREPARED']):
+def invalidate_pending(config, actor, *, before=None, preserve_draft=False):
+    rows = owner_updates(config).select_for_update(of=('self',))
+    if before is not None:
+        rows = rows.filter(update_id__lt=before)
+    for pending in rows.filter(state__in=['AUDIO_WAIT', 'AUDIO_LOCAL', 'AUDIO_PAID', 'IA_WAIT']):
+        pending.state, pending.nonce, pending.expires_at = 'CANCELLED', '', None
+        pending.receipt = {key: value for key, value in pending.receipt.items() if key in ('reserved_cents', 'sha256')}
+        pending.save(update_fields=['state', 'nonce', 'expires_at', 'receipt'])
+    for old in rows.filter(state__in=['PREVIEW', 'PREPARED']).select_related('request'):
+        if preserve_draft:
+            from horarios_especiales.services.telegram_reasoning import hold
+            hold(old)
+            continue
         cancel_request(request_obj=old.request, actor=actor, reason='Reemplazada o cancelada desde Telegram')
         old.state = 'CANCELLED'
         old.nonce = ''
@@ -437,43 +488,67 @@ def invalidate_pending(config, actor):
 
 
 @transaction.atomic
+def build_preview(row, text, config, actor, ids, rules, *, note='', after=None):
+    from horarios_especiales.services.google_projection import preview_google_conflicts
+    from horarios_especiales.services.requests import _lock_request_branches
+
+    conflicts = request_conflicts({'locations': [{'branch_id': pk} for pk in ids], 'rules': rules})
+    if conflicts:
+        raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
+    obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
+    _lock_request_branches(obj)
+    snapshot = approval_snapshot(obj)
+    obj.execution_summary_json = {
+        'google_preflight': preview_google_conflicts(obj),
+        'preserved': preserved_schedule(payload),
+        'correction': note,
+    }
+    obj.save(update_fields=['execution_summary_json'])
+    invalidate_pending(config, actor, before=after)
+    row.request = obj
+    row.revision = payload['revision']
+    row.nonce = secrets.token_hex(16)
+    row.expires_at = timezone.now() + timedelta(minutes=20)
+    warning = ('\n\nPuede reemplazar horarios aprobados: ' + ', '.join(item['code'] for item in snapshot) + '. Revisa antes de aprobar.') if snapshot else ''
+    preview = preview_text(obj) + warning
+    if len(preview.encode('utf-16-le')) // 2 > 3800:
+        raise ValueError('La vista previa completa no cabe en un mensaje. Envía un periodo más corto.')
+    row.receipt = {'text': preview, 'approval_snapshot': snapshot}
+    row.state = 'PREPARED'
+
+
+@transaction.atomic
 def prepare_text(row, text, config, actor, *, strict_branches=False):
+    from horarios_especiales.services import telegram_reasoning
+    from horarios_especiales.services.requests import lock_branch_ids
+
     config = config_for_row(config, row)
     actor = actor_for(config)
-    # Invalidating first prevents old buttons from approving after an ambiguous correction.
-    invalidate_pending(config, actor)
+    contextual = telegram_reasoning.enabled()
+    invalidate_pending(config, actor, before=row.update_id, preserve_draft=contextual)
     try:
         timestamp = row.payload['message']['date']
         grouped = parse_grouped_instruction(text, timestamp)
         if grouped:
-            from horarios_especiales.services.requests import lock_branch_ids
             ids, rules = grouped
-            lock_branch_ids(ids)
-            rules = preserve_approved_days(rules)
         else:
             ids, rules = parse_instruction(text, timestamp, strict_branches=strict_branches)
-        conflicts = request_conflicts({'locations': [{'branch_id': pk} for pk in ids], 'rules': rules})
-        if conflicts:
-            raise ValueError('Hay excepciones de mayor prioridad: ' + ', '.join(conflicts) + '. Envía una instrucción con fecha exacta para cambiarlas.')
-        with transaction.atomic():
-            obj, payload = create_request_from_rules(raw_text=text, branch_ids=ids, rules=rules, actor=actor)
-            from horarios_especiales.services.google_projection import preview_google_conflicts
-            from horarios_especiales.services.requests import _lock_request_branches
-            _lock_request_branches(obj)
-            snapshot = approval_snapshot(obj)
-            obj.execution_summary_json['google_preflight'] = preview_google_conflicts(obj)
-            obj.save(update_fields=['execution_summary_json'])
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
+        draft = telegram_reasoning.draft_for(config, row) if contextual else None
+        if draft:
+            telegram_reasoning.queue(row, text, draft)
+            return
         row.receipt = {'text': 'No preparé una aprobación. ' + (str(exc) if isinstance(exc, ValueError) else EXAMPLES)}
         row.state = 'REPLY'
     else:
-        row.request = obj
-        row.revision = payload['revision']
-        row.nonce = secrets.token_hex(16)
-        row.expires_at = timezone.now() + timedelta(minutes=20)
-        warning = ('\nPuede reemplazar horarios aprobados en fechas coincidentes: ' + ', '.join(item['code'] for item in snapshot) + '. Revisa antes de aprobar.') if snapshot else ''
-        row.receipt = {'text': preview_text(obj) + warning, 'approval_snapshot': snapshot}
-        row.state = 'PREPARED'
+        try:
+            if grouped:
+                lock_branch_ids(ids)
+                rules = preserve_approved_days(rules)
+            build_preview(row, text, config, actor, ids, rules, after=row.update_id)
+        except (ValueError, OverflowError, KeyError, TypeError) as exc:
+            row.receipt = {'text': 'No preparé una aprobación. ' + (str(exc) if isinstance(exc, ValueError) else EXAMPLES)}
+            row.state = 'REPLY'
     row.save()
 
 
@@ -561,7 +636,7 @@ def deliver(row, client, config):
     if row.state == 'PREPARED':
         row.preview_message_id = result['message_id']
         row.state = 'PREVIEW'
-    elif row.state == 'AUDIO_WAIT':
+    elif row.state in ('AUDIO_WAIT', 'IA_WAIT'):
         row.receipt['acknowledged'] = True
     else:
         row.state = 'DONE'
@@ -599,13 +674,16 @@ def poll_once(config=None, client=None):
         cursor, _ = TelegramHoursCursor.objects.get_or_create(bot_id=config['bot_id'])
         updates = client.call('getUpdates', offset=cursor.next_update_id, timeout=0, limit=20, allowed_updates=['message', 'callback_query'])
         persist_updates(config, updates)
-        for row in active_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY', 'AUDIO_WAIT']).order_by('update_id')[:20]:
+        for row in active_updates(config).filter(state__in=['RECEIVED', 'PREPARED', 'REPLY', 'AUDIO_WAIT', 'IA_WAIT']).order_by('update_id')[:20]:
             if time.monotonic() > deadline:
                 break
             if row.state == 'RECEIVED':
                 scoped = config_for_row(config, row)
                 process_received(row, scoped, actor_for(scoped))
-            if row.state in ('PREPARED', 'REPLY') or row.state == 'AUDIO_WAIT' and not row.receipt.get('acknowledged'):
+            if row.state == 'IA_WAIT' and row.receipt.get('acknowledged'):
+                from horarios_especiales.services.telegram_reasoning import advance
+                advance(row, config)
+            if row.state in ('PREPARED', 'REPLY') or row.state in ('AUDIO_WAIT', 'IA_WAIT') and not row.receipt.get('acknowledged'):
                 deliver(row, client, config)
         from horarios_especiales.services.telegram_audio import advance
         if time.monotonic() <= deadline:

@@ -43,7 +43,8 @@ def reject(row, reason):
 def queue(row, config):
     config = bot.config_for_row(config, row)
     actor = actor_for(config)
-    bot.invalidate_pending(config, actor)
+    from horarios_especiales.services.telegram_reasoning import enabled
+    bot.invalidate_pending(config, actor, before=row.update_id, preserve_draft=enabled())
     media = row.payload['message'].get('voice') or row.payload['message'].get('audio') or {}
     if (not isinstance(media.get('file_id'), str) or not media['file_id'] or
             media.get('file_size', 0) > MAX_DOWNLOAD or media.get('duration', 0) > 180):

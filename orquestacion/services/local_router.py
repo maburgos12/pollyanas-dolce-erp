@@ -12,7 +12,7 @@ from django.db.models import Q, Count
 from django.utils import timezone
 
 from orquestacion.models import AgentDefinition, AgentTask, OrchestrationRule, OrchestrationRun
-from . import local_ai
+from . import hours_intent, local_ai
 
 RULE = "local_ai_router"
 TASK = "local_ai_request"
@@ -72,6 +72,9 @@ def verification(data):
 def route(kind, data):
     if not isinstance(data, dict) or len(json.dumps(data, allow_nan=False).encode()) > 12000:
         raise ValueError("invalid_data")
+    if kind == hours_intent.KIND:
+        hours_intent.validate_input(data)
+        return "qwen8b", "Interpretación de una corrección a un borrador de horarios"
     if kind in {"summary", "extract"}:
         expected = {"text", "fields"} if kind == "extract" else {"text"}
         if set(data) != expected:
@@ -117,6 +120,8 @@ def submit(*, agent, kind, data, request_id):
     caller = AgentDefinition.objects.filter(code=agent, status="active").first()
     if not caller or not isinstance(kind, str) or not 1 <= len(kind) <= 40:
         raise ValueError("invalid_agent_or_kind")
+    if kind == hours_intent.KIND and agent != hours_intent.AGENT:
+        raise ValueError("invalid_agent_or_kind")
     rule = OrchestrationRule.objects.select_for_update().filter(code=RULE, is_active=True).first()
     if not rule:
         raise ValueError("router_disabled")
@@ -156,12 +161,14 @@ def receipt(task):
     if value:
         if request["kind"] == "verify":
             display = f"{value['checked']} pares comprobados; {len(value['mismatch_indices'])} diferencias."
+        elif request["kind"] == hours_intent.KIND:
+            display = "Corrección interpretada; pendiente de validación del bot."
         elif request["kind"] == "extract":
             display = "\n".join(f"{field}: {item if item is not None else 'No aportado'}" for field, item in value.items())
         else:
             display = value["summary"]
     return {"id": task.id, "agent": task.agent.code, "agent_name": task.agent.name,
-            "kind_label": {"summary": "Resumen", "extract": "Extracción de campos", "verify": "Cotejo numérico", "summary_cases": "Resumen de expedientes"}.get(request["kind"], "Revisión requerida"),
+            "kind_label": {"summary": "Resumen", "extract": "Extracción de campos", "verify": "Cotejo numérico", "summary_cases": "Resumen de expedientes", hours_intent.KIND: "Corrección de horarios"}.get(request["kind"], "Revisión requerida"),
             "display_result": display, "references": request["data"].get("references", []), "kind": request["kind"], "node": request["node"],
             "model": request["model"], "reason": request["reason"], "status": task.status, "label": task.get_status_display(),
             "attempts": result.get("attempts", 0), "error": result.get("error", ""),
@@ -172,6 +179,12 @@ def receipt(task):
 def _fresh(task):
     if task.agent.status != "active":
         return False
+    if task.input_payload["kind"] == hours_intent.KIND:
+        from horarios_especiales.models import TelegramHoursUpdate
+
+        return TelegramHoursUpdate.objects.filter(
+            state='IA_WAIT', receipt__task_id=task.pk, expires_at__gt=timezone.now(),
+        ).exists()
     if task.input_payload["kind"] != "summary_cases":
         return True
     current, references, stats = local_ai._sources()
@@ -223,6 +236,8 @@ def validate_result(task, result):
                 or any(value is not None and (not isinstance(value, str) or not value or value not in data["text"])
                        for value in result.values())):
             raise ValueError("invalid_output")
+    elif kind == hours_intent.KIND:
+        hours_intent.validate_output(data, result)
     elif kind == "summary_cases":
         local_ai.validate_result(result, data["cases"])
     elif (not isinstance(result, dict) or set(result) != {"summary"}
