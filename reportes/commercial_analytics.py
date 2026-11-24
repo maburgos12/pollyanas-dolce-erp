@@ -204,6 +204,13 @@ def commercial_panel_from_request(request):
         panel = get_or_set_versioned_cache(key_parts=('commercial-iva-v1', year, month, branch_id, today.isoformat()),
             scopes=('ventas', 'dashboard'), builder=builder, timeout=300)
     panel = dict(panel)
+    # Documentary notes deliberately bypass the numeric panel's 300-second cache.
+    from calendar import monthrange
+    from ventas.services.operational_context import contexts_for_range
+    context_start = date(year, month or 1, 1)
+    context_end = date(year, month or 12, monthrange(year, month or 12)[1])
+    panel['operational_contexts'] = contexts_for_range(start_date=context_start, end_date=context_end)
+    panel['operational_context_period'] = f"{year}-{month:02d}" if month else str(year)
     panel['years'] = list(range(today.year, 2024, -1))
     panel['scope_label'] = next((b['sucursal__nombre'] for b in panel['branch_options'] if b['sucursal_id'] == branch_id), 'Sucursal seleccionada') if branch_id else 'Toda la red histórica'
     return panel

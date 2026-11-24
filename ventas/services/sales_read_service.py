@@ -1245,6 +1245,25 @@ def _legacy_product_rows_for_day(*, target_day: date, branch_ids: list[int] | No
     return payload
 
 
+def _with_operational_context(reader):
+    """Attach documentation only after source selection has finished."""
+    from functools import wraps
+    from inspect import signature
+    from ventas.services.operational_context import contexts_for_range
+    contract = signature(reader)
+
+    @wraps(reader)
+    def contextualized(*args, **kwargs):
+        arguments = contract.bind(*args, **kwargs).arguments
+        start = arguments.get("fecha", arguments.get("start_date"))
+        end = arguments.get("fecha", arguments.get("end_date"))
+        selected = reader(*args, **kwargs)
+        selected["operational_contexts"] = contexts_for_range(start_date=start, end_date=end)
+        return selected
+    return contextualized
+
+
+@_with_operational_context
 def get_daily_sales(sucursal: Sucursal | int, fecha: date, producto: Receta | int | None = None) -> dict[str, Any]:
     branch_id = _resolve_sucursal_id(sucursal)
     product_id = _resolve_producto_id(producto)
@@ -1268,6 +1287,7 @@ def get_daily_sales(sucursal: Sucursal | int, fecha: date, producto: Receta | in
     return _empty_response(branch_id=branch_id, target_day=fecha, product_id=product_id)
 
 
+@_with_operational_context
 def get_sales_range(
     *,
     start_date: date,
@@ -1367,6 +1387,7 @@ def get_daily_sales_bulk(
             sucursales=branch_ids,
             coverage_policy=coverage_policy,
         )
+        operational_contexts = selected["operational_contexts"]
         if dimension == "branch":
             analytic_rows = _analytic_branch_rows_for_day(target_day=target_day, branch_ids=branch_ids)
             if analytic_rows and _sales_facts_are_clean(start_date=target_day, end_date=target_day):
@@ -1403,6 +1424,7 @@ def get_daily_sales_bulk(
             "coverage_accepted": selected["coverage_accepted"],
             "coverage_reason": selected["coverage_reason"],
             "rows": rows,
+            "operational_contexts": operational_contexts,
         }
         if include_indicators and dimension == "branch":
             day_payload["indicator_map"] = _branch_indicator_map_for_day(target_day=target_day, branch_ids=branch_ids)
@@ -1763,4 +1785,5 @@ def get_sales_range_grouped(
         "coverage_accepted": selection["coverage_accepted"],
         "coverage_reason": selection["coverage_reason"],
         "rows": rows,
+        "operational_contexts": selection["operational_contexts"],
     }

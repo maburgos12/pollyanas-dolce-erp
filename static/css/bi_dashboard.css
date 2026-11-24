@@ -1496,3 +1496,8 @@
     font-size: 0.88rem;
   }
 }
+
+/* Documentary context remains readable alongside existing sales panels. */
+.operational-context { overflow-wrap: anywhere; min-width: 0; }
+.operational-context .bi-status-card { margin-top: 1rem; min-width: 0; }
+.operational-context input, .operational-context button { min-height: 44px; max-width: 100%; }
