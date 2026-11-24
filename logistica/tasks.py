@@ -36,7 +36,7 @@ from .services_carga_ruta import (
     MODO_SYNC_CARGA_REPARTIDOR,
     VIGENCIA_SYNC_CARGA_REPARTIDOR,
     PointSyncUnavailableError,
-    estado_sync_carga_repartidor,
+    resumen_sync_carga_repartidor,
     sincronizar_checklist_carga_desde_point,
     RecargaCedisPendienteEnviado,
     RecargaCedisPointError,
@@ -114,7 +114,7 @@ def actualizar_carga_point_repartidor(*, job_id):
                 recarga_cedis_id=job.parameters.get("recarga_cedis_id"),
                 **({"solo_tramo_vigente": True, "contexto_erp": job.parameters.get("contexto")} if desde_erp else {}),
             )
-        job.result_summary = {"estado": estado_sync_carga_repartidor(ruta, solicitud=job)}
+        job.result_summary = resumen_sync_carga_repartidor(ruta, solicitud=job)
         job.status = PointSyncJob.STATUS_SUCCESS
     except PointSyncUnavailableError:
         job.error_message = "No se pudo conectar con Point. Vuelve a intentar la actualización."

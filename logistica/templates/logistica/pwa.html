@@ -3676,7 +3676,7 @@
           const data = await response.json().catch(() => ({}));
           const mensajes = {
             ACTUALIZADA: "Carga actualizada. Revisa las cantidades por sucursal.",
-            PENDIENTE_ENVIO: "Point aún no marca toda la carga como Enviada. Se generará una alerta automática para revisión.",
+            PENDIENTE_ENVIO: "Este tramo aún no tiene carga enviada. Cuando CEDIS registre el despacho en Point, vuelve a actualizar desde aquí.",
             SIN_CARGA: "Point no mostró carga disponible para este tramo. Se generará una alerta automática para revisión.",
           };
           if (!response.ok || !mensajes[data.estado]) {
@@ -3688,7 +3688,7 @@
             mostrarEstado("Vuelve a Mi ruta para consultar tu asignación actual.");
             return;
           }
-          mostrarEstado(mensajes[data.estado]);
+          mostrarEstado(data.mensaje || mensajes[data.estado]);
         } catch (error) {
           mostrarEstado(error?.message === "Sesión expirada"
             ? "Tu sesión expiró. Vuelve a iniciar sesión."
@@ -5803,7 +5803,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v100-carga-point-controles", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v102-carga-disponible", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

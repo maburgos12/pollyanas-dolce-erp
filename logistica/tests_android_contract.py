@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 from django.test import SimpleTestCase
 
@@ -32,6 +33,36 @@ ANDROID_BUILD = ANDROID_APP / "build.gradle.kts"
 
 
 class AndroidPwaContractTests(SimpleTestCase):
+    def test_consulta_point_no_store_no_reutiliza_respuesta_202_cacheada(self):
+        script = r"""
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+let handler, networkCalls = 0, cacheReads = 0;
+const sandbox = {
+  URL, self: {addEventListener: (name, fn) => {if (name === 'fetch') handler = fn;}},
+  caches: {match: async () => {cacheReads++; return {status: 202};}},
+  fetch: async () => ({status: ++networkCalls === 1 ? 202 : 200})
+};
+vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), sandbox);
+async function consult(url) {
+  let result;
+  handler({request: {url, method: 'GET', mode: 'cors', cache: 'no-store'}, respondWith: p => result = p});
+  return (await result).status;
+}
+(async () => {
+  const url = 'https://erp.example/logistica/rutas/1/?carga_point_estado=7';
+  assert.equal(await consult(url), 202);
+  assert.equal(await consult(url), 200);
+  assert.equal(await consult('https://erp.example/logistica/rutas/1/'), 200);
+  assert.equal(cacheReads, 0);
+  assert.equal(networkCalls, 3);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+        result = subprocess.run(
+            ["node", "-e", script, str(PWA_SERVICE_WORKER)],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_pwa_invoca_el_puente_nativo_sin_romper_el_fallback_web(self):
         pwa_html = PWA_TEMPLATE.read_text(encoding="utf-8")
 
@@ -66,5 +97,5 @@ class AndroidPwaContractTests(SimpleTestCase):
 
         self.assertIn("versionCode = 3", build_gradle)
         self.assertIn('versionName = "1.0.3"', build_gradle)
-        self.assertIn("route-control-v100-carga-point-controles", pwa_html)
-        self.assertIn("pollyanas-logistica-pwa-v100-carga-point-controles", service_worker)
+        self.assertIn("route-control-v102-carga-disponible", pwa_html)
+        self.assertIn("pollyanas-logistica-pwa-v102-carga-disponible", service_worker)
