@@ -41,7 +41,7 @@ def atomic(path, text):
 
 
 def verify_point(rotator, stem, receipts=None):
-    manifest, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
+    _, checksum, _ = rotator.local_set(rotator.BACKUPS, stem)
     directories = list(dict.fromkeys([receipts or rotator.RECEIPTS, rotator.RECEIPTS]))
     path = directories[0] / (stem + '.json')
     proof = None
@@ -53,6 +53,27 @@ def verify_point(rotator, stem, receipts=None):
             break
         except (OSError, ValueError, KeyError, TypeError):
             continue
+    if proof is not None:
+        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+        return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
+
+    pending = None
+    if receipts is not None:
+        directory = receipts / 'pending-restores'
+        directory.mkdir(mode=0o700, exist_ok=True)
+        info = directory.lstat()
+        rotator.require(stat.S_ISDIR(info.st_mode) and info.st_uid == os.geteuid()
+                        and not info.st_mode & 0o077, 'Pending restores require a private owned directory')
+        pending = directory / path.name
+        try:
+            candidate = rotator.read_receipt(pending, stem)
+            rotator.require(candidate['manifest_sha256'] == checksum, 'Changed manifest')
+            evidence = pending.with_suffix('.restore.log').read_text(encoding='utf-8')
+            rotator.require(hashlib.sha256(evidence.encode()).hexdigest() == candidate['evidence_sha256'],
+                            'Changed pending restore log')
+            proof = candidate
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     if proof is None:
         payload = json.loads(run(['ssh', '-F', NAS_CONFIG, '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
                                   '-o', 'ConnectTimeout=20', NAS_ALIAS, 'restore', stem, checksum]))
@@ -70,12 +91,15 @@ def verify_point(rotator, stem, receipts=None):
             except (OSError, ValueError, KeyError, TypeError):
                 continue
         proof['media_aliases'] = aliases
-        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
-        atomic(path.with_suffix('.restore.log'), evidence)
-        atomic(path, json.dumps(proof, indent=2) + '\n')
-        rotator.require(rotator.read_receipt(path, stem) == proof, 'Published receipt changed')
-    else:
-        rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+        if pending is not None:
+            # Save the restore independently; only the full SMB probe can promote it.
+            atomic(pending.with_suffix('.restore.log'), evidence)
+            atomic(pending, json.dumps(proof, indent=2) + '\n')
+            rotator.require(rotator.read_receipt(pending, stem) == proof, 'Pending restore receipt changed')
+    rotator.bounded_check_proof(rotator.BACKUPS, rotator.NAS, stem, proof)
+    atomic(path.with_suffix('.restore.log'), evidence)
+    atomic(path, json.dumps(proof, indent=2) + '\n')
+    rotator.require(rotator.read_receipt(path, stem) == proof, 'Published receipt changed')
     return {'point': stem, 'manifest_sha256': checksum, 'media': proof['verified_media']}
 
 
