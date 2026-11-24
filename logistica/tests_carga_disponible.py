@@ -123,3 +123,8 @@ class CargaDisponiblePointTests(TestCase):
         self.pendiente.origin_branch.name = "Sucursal de origen ajena"
         self.pendiente.origin_branch.save(update_fields=["name"])
         self.assertEqual(estado_sync_carga_repartidor(self.ruta, solicitud=self.job), "SIN_CARGA")
+
+    def test_carga_ya_entregada_en_tramo_no_desaparece_del_resultado(self):
+        self.parada.entrega_estado = "ENTREGADA"
+        self.parada.save(update_fields=["entrega_estado"])
+        self.assertEqual(estado_sync_carga_repartidor(self.ruta, solicitud=self.job), "ACTUALIZADA")

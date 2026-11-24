@@ -1300,14 +1300,22 @@ def validar_producto_tramo_carga(
 
 def resumen_sync_carga_repartidor(ruta: RutaEntrega, *, solicitud) -> dict:
     ordenes = _ordenes_tramo_carga_actual(ruta)
-    paradas = _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes)
-    sucursales = set(paradas)
-    lineas = list(
-        lineas_tramo_operativo_actual(ruta)
-        .filter(parada_id__in={parada.pk for parada in paradas.values()})
-        .exclude(estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA)
-        .select_related("point_transfer_line")
+    lineas_tramo = lineas_tramo_operativo_actual(ruta).exclude(
+        estatus=RutaCargaChecklistLinea.ESTATUS_SUPERADA
     )
+    if solicitud.parameters.get("recarga_cedis_id"):
+        paradas = _paradas_por_sucursal(ruta, ordenes_abiertas=ordenes)
+        lineas_tramo = lineas_tramo.filter(
+            parada_id__in={parada.pk for parada in paradas.values()}
+        )
+        sucursales = set(paradas)
+    else:
+        sucursales = {
+            sucursal_id
+            for sucursal_id, parada in _paradas_por_sucursal(ruta).items()
+            if ordenes is None or parada.orden in ordenes
+        }
+    lineas = list(lineas_tramo.select_related("point_transfer_line"))
     # Un pedido sin despacho no invalida la carga enviada ya disponible.
     disponibles = [linea for linea in lineas if not _linea_pendiente_envio_point(linea)]
     solicitudes_point = PointTransferLine.objects.filter(
