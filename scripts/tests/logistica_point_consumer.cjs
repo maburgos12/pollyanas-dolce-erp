@@ -8,7 +8,7 @@ const root = path.resolve(__dirname, '../..');
 const workerSource = fs.readFileSync(process.argv[2] || path.join(root, 'logistica/static/logistica/pwa/sw.js'), 'utf8');
 const consumerSource = fs.readFileSync(path.join(root, 'logistica/static/logistica/pwa/carga_point_erp.js'), 'utf8');
 
-async function scenario({dirty = false, disconnect = false} = {}) {
+async function scenario({dirty = false, disconnect = false, resume = false} = {}) {
   let worker, tick = 0, network = 0, reads = 0, writes = 0, replaced = 0;
   let complete;
   const timers = [];
@@ -36,10 +36,12 @@ async function scenario({dirty = false, disconnect = false} = {}) {
   const button = {disabled: false};
   const label = {textContent: ''};
   const reload = {hidden: true};
-  const widget = {dataset: {solicitudId: '7'}, querySelector: selector => selector.includes('mensaje') ? label : reload};
+  const widget = {dataset: {solicitudId: resume ? '7' : '0'}, querySelector: selector => selector.includes('mensaje') ? label : reload};
   const operation = {draft: '7.5', replaceWith: () => {replaced++;}};
   const filter = {value: 'pastel'};
-  const form = {getAttribute: () => url, querySelector: () => button, addEventListener: () => {}};
+  let submitted;
+  const form = {getAttribute: () => url, querySelector: () => button,
+    addEventListener: (name, fn) => {if (name === 'erp:action-success') submitted = fn;}};
   const nodes = {'actualizar-carga-point': form, 'estado-carga-point': widget,
     'carga-operacion-point': operation, 'route-load-detail-search': filter};
   const toasts = [];
@@ -59,8 +61,13 @@ async function scenario({dirty = false, disconnect = false} = {}) {
     },
   };
   // Exponer la promesa sólo al ejecutor de pruebas, sin cambiar los fuentes.
-  vm.runInNewContext(consumerSource.replace('watch(Number(', 'complete = watch(Number('),
+  vm.runInNewContext(consumerSource.replace('watch(Number(', 'complete = watch(Number(')
+    .replace('watch(event.detail.solicitud_id);', 'complete = watch(event.detail.solicitud_id);'),
     vm.createContext({...sandbox, set complete(value) {complete = value;}}));
+  if (!resume) {
+    assert.equal(typeof submitted, 'function', 'Debe escuchar el recibo del POST real');
+    submitted({detail: {solicitud_id: 7}});
+  }
   assert.ok(complete && typeof complete.then === 'function', 'Debe observar el polling real');
   let settled = false, failure;
   complete.then(() => {settled = true;}, error => {settled = true; failure = error;});
@@ -82,7 +89,7 @@ async function scenario({dirty = false, disconnect = false} = {}) {
   assert.equal(filter.value, 'pastel');
   assert.equal(reload.hidden, false);
   assert.equal(toasts.at(-1).type, 'success');
-  console.log(JSON.stringify({dirty, disconnect, network, cacheReads: reads, cacheWrites: writes,
+  console.log(JSON.stringify({dirty, disconnect, resume, network, cacheReads: reads, cacheWrites: writes,
     formReplaced: replaced, draftPreserved: true, result: 'ACTUALIZADA'}));
 }
 
@@ -117,6 +124,7 @@ async function pwaScenario({status, recarga = null, preview = false, owner = 12}
   await scenario();
   await scenario({dirty: true});
   await scenario({disconnect: true});
+  await scenario({resume: true});
   for (const input of [{status: 'PLANEADA'}, {status: 'EN_RUTA'}, {status: 'EN_RUTA', recarga: 1408},
     {status: 'COMPLETADA'}, {status: 'EN_RUTA', preview: true}, {status: 'EN_RUTA', owner: 89}]) {
     await pwaScenario(input);

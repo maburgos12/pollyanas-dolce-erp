@@ -46,9 +46,9 @@ los defectos pasaron con cobertura insuficiente, no por un gate fallido ignorado
 `node scripts/tests/logistica_point_consumer.cjs` ejecuta juntos el JS real del
 ERP y el SW real con DOM/red/reloj aislados. Precarga202 y exige que llegue200,
 vuelva a habilitar el botón, no lea/escriba caché privada, conserve filtro y
-borrador y recupere una desconexión. Además ejecuta el render real de la PWA con
+borrador y recupere una desconexión. Cubre tanto el recibo del POST como la reanudación de un trabajo al abrir la página. Además ejecuta el render real de la PWA con
 sucursal seleccionada para PLANEADA, EN_RUTA sin recarga, EN_RUTA con recarga,
-ruta completada, preview y otro titular. Son nueve escenarios; no son navegador
+ruta completada, preview y otro titular. Son diez escenarios; no son navegador
 ni teléfono físico. Está conectado al job obligatorio checks; su fallo bloquea
 el agregado test, que requiere checks exitoso. No cambia permisos de GitHub.
 
