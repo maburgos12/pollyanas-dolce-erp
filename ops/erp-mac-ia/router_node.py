@@ -48,21 +48,54 @@ def verify(data):
              if Decimal(row["expected"]) != Decimal(row["actual"])]}
 
 
+def initial_hours_prompt(data):
+    iso = {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+    optional_date = {"anyOf": [iso, {"type": "null"}]}
+    window = ({"enum": [*data["windows"], "closed"]} if data["windows"] else
+              {"type": "string", "pattern": "^(closed|[0-9]{2}:[0-9]{2}-[0-9]{2}:[0-9]{2})$"})
+    group = {
+        "type": "object", "additionalProperties": False,
+        "required": ["branches", "start", "end", "hours"],
+        "properties": {"branches": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+                       "start": optional_date, "end": optional_date, "hours": window},
+    }
+    schema = {
+        "type": "object", "additionalProperties": False,
+        "required": ["start", "end", "general", "groups"],
+        "properties": {"start": optional_date, "end": optional_date, "general": {"anyOf": [window, {"type": "null"}]},
+                       "groups": {"type": "array", "items": group, "maxItems": 10}},
+    }
+    prompt = (
+        f"Extrae el horario solicitado. {data['draft']}. Traduce horas a 24 h. "
+        "start/end principales son fechas ISO del periodo entero; null si faltan. general es HH:MM-HH:MM cuando dice TODAS, o null. "
+        "Extrae todas las excepciones en groups, incluso cierres. branches copia nombres de la solicitud. "
+        "Para una excepción sin fechas, sus start/end son null; si es un día concreto, ambas son la misma fecha ISO. "
+        'hours: HH:MM-HH:MM o closed. Una excepción: {"branches":["Centro"],"start":null,"end":null,"hours":"08:00-15:00"}.'
+    )
+    return prompt + "\nSolicitud: " + data["text"], schema
+
+
 def prepare(job):
     if not isinstance(job, dict) or set(job) != {"model", "kind", "data"}:
         raise ValueError("invalid_output")
     kind, model, data = job["kind"], job["model"], job["data"]
     allowed = {"verify": {"python"}, "extract": {"nemotron"}, "summary": {"qwen4b", "qwen8b"},
-               "summary_cases": {"qwen4b", "qwen8b"}, "hours_draft_edit": {"qwen8b"}}
+               "summary_cases": {"qwen4b", "qwen8b"}, "hours_draft_edit": {"qwen4b", "qwen8b"}}
     if kind not in allowed or model not in allowed[kind] or not isinstance(data, dict):
         raise ValueError("invalid_output")
     if len(json.dumps(data, allow_nan=False).encode()) > 12000:
         raise ValueError("invalid_output")
     if kind == "hours_draft_edit":
-        if set(data) != {"text", "draft"} or any(
+        if set(data) not in ({"text", "draft"}, {"text", "draft", "mode", "windows"}) or data.get("mode", "initial") != "initial" or any(
                 not isinstance(data[key], str) or not data[key].strip() or len(data[key].encode()) > limit
                 for key, limit in (("text", 800), ("draft", 1600))):
             raise ValueError("invalid_output")
+        if data.get("mode") == "initial":
+            if (not isinstance(data["windows"], list) or len(data["windows"]) > 10
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[0-9]{2}:[0-9]{2}-[0-9]{2}:[0-9]{2}", value)
+                           for value in data["windows"])):
+                raise ValueError("invalid_output")
+            return initial_hours_prompt(data)
         schema = {"type": "object", "additionalProperties": False, "required": ["action", "branch", "detail"],
                   "properties": {
                       "action": {"enum": ["replace_draft_dates", "keep_closed", "replace_with_draft", "change_close", "change_open", "clarify"]},
@@ -237,14 +270,14 @@ def parse_cli(text):
     return json.loads(answer.strip())
 
 
-def debian_infer(prompt, schema, temp):
+def debian_infer(prompt, schema, temp, *, max_tokens=192):
     if other_model() or available_memory() < 4 * 1024 ** 3:
         raise RuntimeError("busy")
     formatted = "<|im_start|>user\n" + prompt + "\n/no_think<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
     (temp / "prompt").write_text(formatted)
     (temp / "schema").write_text(json.dumps(schema))
     args = ["/usr/bin/nice", "-n", "19", str(FOUR / "llama-b12211/llama-completion"), "-m", str(FOUR / "model.gguf"),
-            "--no-conversation", "--no-display-prompt", "-ngl", "0", "-t", "2", "-c", "2048", "-n", "192",
+            "--no-conversation", "--no-display-prompt", "-ngl", "0", "-t", "2", "-c", "2048", "-n", str(max_tokens),
             "--temp", "0", "--seed", "42", "-f", str(temp / "prompt"), "-jf", str(temp / "schema")]
     proc = None
     start = time.monotonic()
@@ -254,7 +287,7 @@ def debian_infer(prompt, schema, temp):
             while proc.poll() is None:
                 if other_model(proc.pid) or available_memory() < 1024 ** 3:
                     raise RuntimeError("busy")
-                if time.monotonic() - start > 150:
+                if time.monotonic() - start > (205 if max_tokens > 192 else 150):
                     raise RuntimeError("timeout")
                 if (temp / "out").stat().st_size > 32768 or (temp / "err").stat().st_size > 65536:
                     raise ValueError("invalid_output")
@@ -266,7 +299,7 @@ def debian_infer(prompt, schema, temp):
         terminate(proc)
 
 
-def mac_infer(model, prompt, schema, temp, grammar=None):
+def mac_infer(model, prompt, schema, temp, grammar=None, *, max_tokens=192):
     global PHASE
     PHASE = "guard"
     key_path = OP / "api.key"
@@ -321,7 +354,7 @@ def mac_infer(model, prompt, schema, temp, grammar=None):
             global PHASE
             PHASE = "generate"
             payload = {
-                "model": alias, "messages": [{"role": "user", "content": prompt}], "max_tokens": 192, "temperature": 0,
+                "model": alias, "messages": [{"role": "user", "content": prompt}], "max_tokens": max_tokens, "temperature": 0,
                 "response_format": {"type": "json_schema", "json_schema": {"name": "local_request", "strict": True, "schema": schema}}}
             if grammar is not None:
                 payload.pop("response_format")
@@ -389,14 +422,16 @@ def main():
             if job["model"] not in ({"qwen8b", "nemotron"} if MAC else {"python", "qwen4b"}):
                 raise ValueError("invalid_output")
             start = time.monotonic()
+            initial_hours = job["kind"] == "hours_draft_edit" and job["data"].get("mode") == "initial"
+            output_cap = 320 if initial_hours else 192
             with tempfile.TemporaryDirectory(prefix="job-", dir=ROOT) as directory:
                 if job["model"] == "python":
                     result = {"result": verify(job["data"]), "usage": {}}
                 elif MAC:
                     grammar = _source_grammar(job["data"]["text"], job["data"]["fields"]) if job["kind"] == "extract" else None
-                    result = mac_infer(job["model"], prompt, schema, Path(directory), grammar)
+                    result = mac_infer(job["model"], prompt, schema, Path(directory), grammar, max_tokens=output_cap)
                 else:
-                    result = debian_infer(prompt, schema, Path(directory))
+                    result = debian_infer(prompt, schema, Path(directory), max_tokens=output_cap)
             return {**result, "duration": round(time.monotonic() - start, 3)}
         finally:
             if op_lock:

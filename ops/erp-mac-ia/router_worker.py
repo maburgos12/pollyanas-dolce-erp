@@ -50,8 +50,11 @@ def command(action, payload=None):
 
 
 def transport(node, payload):
+    timeout = 480
+    if payload.get("kind") == "hours_draft_edit":
+        timeout = 225 if payload["data"].get("mode") == "initial" else 155
     proc = subprocess.run(["ssh", "-T", "-F", CONFIG, node], input=json.dumps(payload), capture_output=True,
-                          text=True, timeout=480, check=True)
+                          text=True, timeout=timeout, check=True)
     if len(proc.stdout.encode()) > 16384:
         raise ValueError("invalid_output")
     value = json.loads(proc.stdout)

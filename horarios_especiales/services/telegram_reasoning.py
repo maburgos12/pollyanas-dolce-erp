@@ -1,7 +1,8 @@
 """Interpret only edits to the sender's unapproved draft through the local router."""
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from uuid import NAMESPACE_URL, uuid5
+from zoneinfo import ZoneInfo
 
 from django.db import transaction
 from django.utils import timezone
@@ -61,16 +62,31 @@ def hold(draft):
         draft.save(update_fields=['state'])
 
 
-def queue(row, text, draft):
+def queue(row, text, draft=None):
     from horarios_especiales.services.telegram_bot import preserved_schedule, preview_schedule
+    from horarios_especiales.services.telegram_parser import GROUP_HOURS
 
-    hold(draft)
-    payload = draft.request.canonical_payload
-    schedule = preview_schedule(payload)
-    exceptions = preserved_schedule(payload, iso_dates=True)
-    if exceptions:
-        schedule += '\nExcepciones que conserva el borrador:\n' + '\n'.join(exceptions)
-    data = {'text': text, 'draft': schedule}
+    now = timezone.now()
+    if draft:
+        hold(draft)
+        payload = draft.request.canonical_payload
+        schedule = preview_schedule(payload)
+        exceptions = preserved_schedule(payload, iso_dates=True)
+        if exceptions:
+            schedule += '\nExcepciones que conserva el borrador:\n' + '\n'.join(exceptions)
+        data = {'text': text, 'draft': schedule}
+    else:
+        reference = datetime.fromtimestamp(row.payload['message']['date'], ZoneInfo('America/Mazatlan')).date()
+        windows = set()
+        for match in re.finditer(GROUP_HOURS, normalize_text(text)):
+            try:
+                window = f'{_parse_time_value(match[1])}-{_parse_time_value(match[2])}'
+                hours_intent.initial_window(window)
+            except ValueError:
+                continue
+            windows.add(window)
+        data = {'text': text, 'draft': f'Fecha de referencia en Sinaloa: {reference.isoformat()}',
+                'mode': 'initial', 'windows': sorted(windows)}
     try:
         result = local_router.submit(agent=hours_intent.AGENT, kind=hours_intent.KIND, data=data,
             request_id=str(uuid5(NAMESPACE_URL, f'pollyanas-hours/{row.bot_id}/{row.update_id}')))
@@ -78,9 +94,11 @@ def queue(row, text, draft):
         row.state, row.receipt = 'REPLY', {'text': CLARIFY + ' La IA local no está disponible para esta frase.'}
     else:
         row.state = 'IA_WAIT'
-        row.receipt = {'task_id': result['id'], 'draft_id': draft.pk, 'draft_revision': draft.revision,
-                       'text': 'Recibí tu corrección. La IA local está revisándola junto con tu borrador.'}
-        row.expires_at = min(draft.expires_at, timezone.now() + hours_intent.MAX_WAIT)
+        row.receipt = {'task_id': result['id'], 'draft_id': draft.pk if draft else None,
+                       'draft_revision': draft.revision if draft else '',
+                       'text': ('Recibí tu corrección. La IA local está revisándola junto con tu borrador.' if draft
+                                else 'Recibí tu solicitud. La IA local está preparando la vista previa.')}
+        row.expires_at = min(draft.expires_at, now + hours_intent.MAX_WAIT) if draft else now + hours_intent.INITIAL_WAIT
     row.save()
 
 
@@ -249,14 +267,19 @@ def revise(payload, data, result):
                     or not selected <= set(rule.get('excluded_dates', ()))):
                 raise ValueError('La IA indicó fechas que no son excepciones del borrador.')
             approved = approved_rules(branch.pk)
+            replaced = set()
             for value in sorted(selected):
                 day = date.fromisoformat(value)
                 winner = max((row for row in approved if rule_applies(row[1], day)),
                              key=lambda row: projection_rank(row, day), default=None)
-                if not winner or winner[1]['closed_all_day']:
-                    raise ValueError('La IA indicó un cierre que requiere una instrucción completa para cambiarse.')
-            changed = {**rule, 'excluded_dates': sorted(set(rule['excluded_dates']) - selected),
-                       'override_dates': sorted(set(rule.get('override_dates', ())) | selected)}
+                if not winner:
+                    raise ValueError('La IA indicó una fecha cuyo horario previo ya no está vigente.')
+                if not winner[1]['closed_all_day']:
+                    replaced.add(value)
+            if not replaced:
+                raise ValueError('Mantengo el cierre. Para abrir ese día, envía una instrucción completa.')
+            changed = {**rule, 'excluded_dates': sorted(set(rule['excluded_dates']) - replaced),
+                       'override_dates': sorted(set(rule.get('override_dates', ())) | replaced)}
             note = f'{branch.nombre} toma el horario propuesto en las fechas corregidas. Las demás excepciones se conservan.'
         else:
             verified = replacement
@@ -344,6 +367,79 @@ def timely_result(task, deadline):
         return False
 
 
+def initial_schedule(timestamp, data, result):
+    """Compile the model's branch/date assignments into the existing approval rules."""
+    from horarios_especiales.services.requests import lock_branch_ids
+    from horarios_especiales.services.telegram_bot import preserve_approved_days
+    from horarios_especiales.services.telegram_parser import parse_instruction
+
+    hours_intent.validate_output(data, result)
+    if result['start'] is None or result['end'] is None:
+        raise ValueError('Indica el periodo y el horario de cada grupo que cambia.')
+    first, last = hours_intent.initial_period(result['start'], result['end'])
+    source = normalize_text(data['text'])
+    cited_weekdays = {index for index, label in enumerate(WEEKDAYS) if re.search(rf'\b{label}s?\b', source)}
+    general = result['general']
+    plan = {}
+    days = [first + timedelta(days=offset) for offset in range((last - first).days + 1)]
+    if general is not None:
+        if not re.search(r'\btodas\b', source):
+            raise ValueError('La instrucción no confirma que el horario aplique a todas las sucursales.')
+        ids, _ = parse_instruction(f'todas del {first} al {last} cerradas', timestamp, strict_branches=True)
+        plan = {pk: {day: (32, general) for day in days} for pk in ids}
+    for group in result['groups']:
+        start, end = hours_intent.initial_period(group['start'] or result['start'], group['end'] or result['end'])
+        priority = (end - start).days
+        requested = (priority, group['hours'])
+        if group['hours'] == 'closed' and start == end and cited_weekdays and start.weekday() not in cited_weekdays:
+            raise ValueError('El cierre propuesto no coincide con el día de la semana indicado.')
+        for name in group['branches']:
+            name = re.sub(r'^sucursal ', '', normalize_text(name))
+            if name in {'todas', 'todas las sucursales'} or not re.search(rf'\b{re.escape(name)}\b', source):
+                raise ValueError('Confirma el nombre de cada sucursal de la excepción.')
+            ids, _ = parse_instruction(f'{name} del {start} al {end} cerrada', timestamp, strict_branches=True)
+            if len(ids) != 1:
+                raise ValueError('Una sucursal de la excepción es ambigua.')
+            selected = plan.setdefault(ids[0], {})
+            for day in days:
+                if not start <= day <= end:
+                    continue
+                if group['hours'] == 'closed' and cited_weekdays and start != end and day.weekday() not in cited_weekdays:
+                    continue
+                current = selected.get(day)
+                if current and current[0] == priority and current != requested:
+                    raise ValueError('Hay dos horarios distintos para una misma sucursal y fecha.')
+                if current is None or priority < current[0]:
+                    selected[day] = requested
+    lock_branch_ids(plan)
+    rules = []
+    for branch_id, selected in plan.items():
+        approved = approved_rules(branch_id)
+        by_window = {}
+        for day, (_, window) in selected.items():
+            winner = max((row for row in approved if rule_applies(row[1], day)),
+                         key=lambda row: projection_rank(row, day), default=None)
+            if window == 'closed' and winner and winner[1]['closed_all_day']:
+                continue
+            replace = bool(winner and not winner[1]['closed_all_day'])
+            by_window.setdefault(window, {})[day] = replace
+        for window, selected_dates in by_window.items():
+            start, end = min(selected_dates), max(selected_dates)
+            rule = {**hours_intent.initial_window(window), 'kind': 'range', 'branch_ids': [branch_id],
+                    'start_date': start.isoformat(), 'end_date': end.isoformat()}
+            excluded = [day.isoformat() for day in days if start <= day <= end and day not in selected_dates]
+            overrides = sorted(day.isoformat() for day, replace in selected_dates.items() if replace)
+            if excluded:
+                rule['excluded_dates'] = excluded
+            if overrides:
+                rule['override_dates'] = overrides
+            rules.append(rule)
+    ids = sorted({pk for rule in rules for pk in rule['branch_ids']})
+    if not ids:
+        raise ValueError('El horario indicado ya está registrado.')
+    return ids, preserve_approved_days(rules)
+
+
 @transaction.atomic
 def advance(row, config):
     from horarios_especiales.services import telegram_bot as bot
@@ -357,17 +453,27 @@ def advance(row, config):
     actor = bot.actor_for(config)
     task = AgentTask.objects.filter(pk=row.receipt['task_id'], task_type=local_router.TASK,
                                    agent__code=hours_intent.AGENT, input_payload__kind=hours_intent.KIND).first()
-    draft = draft_for(config, row)
+    draft_id = row.receipt.get('draft_id')
+    draft = draft_for(config, row) if draft_id else None
     expired = (not row.expires_at or row.expires_at <= timezone.now()) and not timely_result(task, row.expires_at)
-    if (not enabled() or expired or not draft or draft.pk != row.receipt['draft_id']
-            or draft.revision != row.receipt['draft_revision'] or not task
-            or task.status in ('blocked', 'cancelled') or task.output_payload.get('error')):
+    if (not enabled() or expired or draft_id and (not draft or draft.pk != draft_id
+            or draft.revision != row.receipt['draft_revision']) or not task
+            or task.status in ('blocked', 'cancelled')):
         row.state, row.receipt = 'REPLY', {'text': CLARIFY}
     elif task.status != 'resolved':
         return
     else:
         try:
-            apply_correction(row, config, actor, draft, task.input_payload['data'], task.output_payload.get('result'))
+            data = task.input_payload['data']
+            result = task.output_payload.get('result')
+            if data.get('mode') == 'initial' and draft is None:
+                timestamp = row.payload['message']['date']
+                ids, rules = initial_schedule(timestamp, data, result)
+                bot.build_preview(row, data['text'], config, actor, ids, rules, after=row.update_id)
+            elif draft:
+                apply_correction(row, config, actor, draft, data, result)
+            else:
+                raise ValueError('El borrador de la corrección perdió vigencia.')
         except ValueError as exc:
             row.state, row.receipt = 'REPLY', {'text': CLARIFY + '\n' + str(exc)}
     row.save()

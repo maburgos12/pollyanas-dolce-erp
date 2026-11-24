@@ -166,12 +166,14 @@ el periodo. El ERP valida sucursal, fechas, horas y reglas. Si falta un dato,
 conserva el borrador para otra aclaración. Sólo una vista previa validada emite
 un nuevo botón de aprobación.
 
-El contrato `hours_draft_edit` exige la identidad `telegram_hours`, usa Qwen 8B en
-Mac-IA-02 y sólo procesa una corrección viva vinculada a un mensaje en espera. No
+El contrato `hours_draft_edit` exige la identidad `telegram_hours` y sólo procesa
+una corrección viva vinculada a un mensaje en espera. Los dos nodos privados
+pueden tomarla, Qwen 4B en Mac-IA Debian y Qwen 8B en Mac-IA-02. Si el
+primero falla, el otro puede tomar la misma solicitud mientras siga vigente. No
 envía archivos, tokens ni audio al modelo de razonamiento. La corrección vence en
 cuatro minutos o al concluir la vigencia del borrador, lo que ocurra primero.
 
-Después del CI y del despliegue del ERP, publicar en Mac-IA-02 el archivo versionado
+Después del CI y del despliegue del ERP, publicar en ambos nodos el archivo versionado
 `ops/erp-mac-ia/router_node.py` en la ruta existente del comando forzado. Verificar
 hash, permisos 0600, sintaxis, probe y una inferencia sintética antes de activar
 `python manage.py configure_hours_reasoning enable`. Para pausar sólo la función
