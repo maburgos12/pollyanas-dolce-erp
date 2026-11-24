@@ -28,6 +28,7 @@ from core.access import can_manage_rrhh, can_view_rrhh
 from .models import (
     AjusteAsistencia,
     AsistenciaEmpleado,
+    BeneficiarioContingencia,
     Empleado,
     EmpleadoBaja,
     IncidenciaAsistencia,
@@ -38,6 +39,7 @@ from .models import (
 )
 from .services import can_edit_incidencia
 from .services_extra_conciliacion import conciliar_extra_diario, formato_minutos
+from .services_cobertura_permisos import contingencias_en_rango, tiene_actividad_real
 from .views import _module_tabs
 
 
@@ -73,13 +75,18 @@ def _empleados_reporte_asistencia(fecha_inicio: date, fecha_fin: date):
         .values("fecha_baja")[:1]
     )
     extras_en_rango = HoraExtra.objects.filter(empleado_id=OuterRef('pk'), fecha__range=(fecha_inicio, fecha_fin))
+    contingencias_en_periodo = BeneficiarioContingencia.objects.filter(
+        empleado_id=OuterRef('pk'), permiso__estado='aprobado',
+        fecha_inicio__lte=fecha_fin, fecha_fin__gte=fecha_inicio,
+    )
     return (
         Empleado.objects.alias(
             tiene_extra=Exists(extras_en_rango),
             tiene_asistencia=Exists(asistencias_en_rango),
             tiene_incidencia=Exists(incidencias_en_rango),
+            tiene_contingencia=Exists(contingencias_en_periodo),
         )
-        .filter(Q(activo=True) | Q(tiene_asistencia=True) | Q(tiene_incidencia=True) | Q(tiene_extra=True))
+        .filter(Q(activo=True) | Q(tiene_asistencia=True) | Q(tiene_incidencia=True) | Q(tiene_extra=True) | Q(tiene_contingencia=True))
         .annotate(fecha_baja_reporte=Subquery(ultima_baja))
         .order_by("nombre", "codigo")
     )
@@ -141,12 +148,16 @@ def _build_export_rows(reportes: list[dict]) -> list[list]:
                 extra.get('pendiente_minutos'), extra.get('rechazado_minutos'), extra.get('estado', 'No aplica'),
             ]
             incidencias = fila['incidencias'] or [{
-                'tipo': fila.get('estado_laboral_label', ''), 'estado': 'No aplica' if fila.get('estado_laboral_label') else '',
-                'severidad': '', 'minutos': 0, 'detalle': fila.get('detalle_laboral', ''),
+                'tipo': 'Permiso empresarial' if fila.get('permiso_texto') else fila.get('estado_laboral_label', ''),
+                'estado': 'Autorizado' if fila.get('permiso_texto') else ('No aplica' if fila.get('estado_laboral_label') else ''),
+                'severidad': '', 'minutos': 0, 'detalle': fila.get('permiso_texto') or fila.get('detalle_laboral', ''),
             }]
             for index, incidencia in enumerate(incidencias):
+                detalle = incidencia['detalle']
+                if index == 0 and fila.get('permiso_texto') and fila['incidencias']:
+                    detalle = f"{detalle} · {fila['permiso_texto']}" if detalle else fila['permiso_texto']
                 rows.append([datos['codigo'], datos['nombre'], datos['sucursal'], fila['fecha'].isoformat(),
-                    incidencia['tipo'], incidencia['estado'], incidencia['severidad'], incidencia['minutos'], incidencia['detalle'],
+                    incidencia['tipo'], incidencia['estado'], incidencia['severidad'], incidencia['minutos'], detalle,
                     *(suffix if index == 0 else [''] * len(suffix))])
     return rows
 
@@ -210,6 +221,7 @@ def _build_reporte_asistencia(
                 if sucursal_normalizada in (empleado.sucursal or "").casefold()
             ]
     empleado_ids = [empleado.id for empleado in empleados]
+    contingencias = contingencias_en_rango(empleado_ids, fecha_inicio, fecha_fin)
     empleados_por_id = {empleado.id: empleado for empleado in empleados}
     fechas = _date_range(fecha_inicio, fecha_fin)
     inicio_dt, fin_dt = _localized_range(fecha_inicio, fecha_fin)
@@ -256,7 +268,9 @@ def _build_reporte_asistencia(
         # conciliada (permiso/vacaciones) no debe sumar como sanción.
         pendiente = incidencia.estado == IncidenciaAsistencia.ESTADO_PENDIENTE
         if incidencia.tipo == IncidenciaAsistencia.TIPO_FALTA:
-            if pendiente:
+            if contingencias.get((incidencia.empleado_id, incidencia.fecha)) and not tiene_actividad_real(asistencias_por_dia.get((incidencia.empleado_id, incidencia.fecha))):
+                pass  # Se conserva la evidencia en la fila; el permiso excluye su sanción.
+            elif pendiente:
                 resumen["faltas"] += 1
             else:
                 resumen["faltas_conciliadas"] += 1
@@ -321,6 +335,7 @@ def _build_reporte_asistencia(
         jefe_usuario_id = getattr(getattr(empleado, "jefe_directo", None), "usuario_erp_id", None)
         puede_editar = bool(user and (puede_gestionar_rrhh or jefe_usuario_id == user.id))
         resumen = resumenes[empleado.id]
+        resumen['permisos'] += len({item.permiso_id for (eid, _day), items in contingencias.items() if eid == empleado.id for item in items})
         totales_extra = {'detectado_minutos': 0, 'autorizado_minutos': 0, 'pendiente_minutos': 0, 'rechazado_minutos': 0, 'dias_no_calculables': 0}
         filas = []
         for fecha in fechas:
@@ -332,8 +347,9 @@ def _build_reporte_asistencia(
             total_incidencias += len(incidencia_dia)
             asistencia = asistencias_por_dia.get((empleado.id, fecha))
             registros_extra = extras_por_dia.get((empleado.id, fecha), [])
+            permisos_empresa = contingencias.get((empleado.id, fecha), ())
             # Solo días con evento: registro de checador o incidencia.
-            if not incidencia_dia and not asistencia and not registros_extra:
+            if not incidencia_dia and not asistencia and not registros_extra and not permisos_empresa:
                 continue
             extra = conciliar_extra_diario(asistencia, registros_extra)
             for key in ('detectado_minutos', 'autorizado_minutos', 'pendiente_minutos', 'rechazado_minutos'):
@@ -345,6 +361,7 @@ def _build_reporte_asistencia(
                     "fecha": fecha,
                     "asistencia": asistencia,
                     "incidencias": incidencia_dia,
+                    "permiso_texto": '; '.join(f'Permiso empresarial · {item.permiso.clave}' for item in permisos_empresa),
                     "extra": extra,
                 }
             )

@@ -220,7 +220,8 @@ class ContextoAsistenciaTests(TestCase):
             nombre="Contexto Segundo",
             fecha_ingreso=date(2026, 1, 1),
         )
-        with self.assertNumQueries(9):
+        # Una consulta adicional fija carga los snapshots empresariales en lote.
+        with self.assertNumQueries(10):
             lote = cargar_contexto_asistencia(
                 empleados=[self.empleado, segundo],
                 fecha_inicio=date(2026, 9, 1),

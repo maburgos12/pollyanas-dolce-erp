@@ -91,6 +91,11 @@ def _evaluar_dia(
     asistencias: set[tuple[int, date]],
     incidencias: dict[tuple[int, date], set[tuple[str, str]]],
 ) -> tuple[bool, bool]:
+    from rrhh.models import Empleado
+    from rrhh.services_cobertura_permisos import contingencia_en_fecha, actividad_real_en_fecha
+    empleado = Empleado(pk=empleado_id)
+    if contingencia_en_fecha(empleado,fecha) and not actividad_real_en_fecha(empleado,fecha):
+        return False,False
     key = (empleado_id, fecha)
     incidencias_dia = incidencias.get(key, set())
     tipos_pendientes = {

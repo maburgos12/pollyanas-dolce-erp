@@ -36,6 +36,7 @@ CODIGO_INCAPACIDAD = "incapacidad"
 CODIGO_SUSPENSION = "suspension"
 CODIGO_VACACIONES = "vacaciones"
 CODIGO_PERMISO = "permiso"
+CODIGO_CONTINGENCIA = "permiso_contingencia"
 CODIGO_EXENTO = "exento"
 CODIGO_ASISTENCIA = "asistencia"
 CODIGO_RETARDO = "retardo"
@@ -91,6 +92,7 @@ class ContextoAsistenciaLote:
         bajas,
         jornadas,
         turnos_legacy,
+        contingencias=None,
     ):
         self.fecha_inicio = fecha_inicio
         self.fecha_fin = fecha_fin
@@ -103,6 +105,7 @@ class ContextoAsistenciaLote:
         self.bajas = bajas
         self.jornadas = jornadas
         self.turnos_legacy = turnos_legacy
+        self.contingencias = contingencias or {}
 
     @staticmethod
     def _vigente(registro, fecha: date) -> bool:
@@ -190,6 +193,15 @@ class ContextoAsistenciaLote:
                 fuente=suspension,
             )
 
+        coberturas = self.contingencias.get((empleado_id, fecha), ())
+        cobertura = coberturas[0] if coberturas else None
+        from .services_cobertura_permisos import tiene_actividad_real
+        if cobertura and not tiene_actividad_real(self.asistencias.get((empleado_id, fecha))):
+            return _resultado(
+                CODIGO_CONTINGENCIA, exigible=False, falta=False,
+                motivo=f"Permiso empresarial {cobertura.permiso.clave}; sin actividad acreditada.",
+                fuente=cobertura.permiso,
+            )
         key = (empleado_id, fecha)
         incidencias_dia = self.incidencias.get(key, ())
         suspension_conciliada = next(
@@ -370,7 +382,9 @@ def cargar_contexto_asistencia(
         fecha_inicio__lte=fecha_fin,
     ).filter(Q(fecha_fin__isnull=True) | Q(fecha_fin__gte=fecha_inicio)))
 
+    from .services_cobertura_permisos import contingencias_en_rango
     return ContextoAsistenciaLote(
+        contingencias=contingencias_en_rango(empleado_ids, fecha_inicio, fecha_fin),
         fecha_inicio=fecha_inicio,
         fecha_fin=fecha_fin,
         asistencias=asistencias,

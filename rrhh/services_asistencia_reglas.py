@@ -250,13 +250,16 @@ def _retardos_vigentes(empleado: Empleado, fecha: date) -> int:
 
 def _faltas_vigentes(empleado: Empleado, fecha: date) -> int:
     desde = fecha - timedelta(days=VENTANA_FALTAS_DIAS - 1)
-    return IncidenciaAsistencia.objects.filter(
-        empleado=empleado,
-        fecha__gte=desde,
-        fecha__lte=fecha,
-        tipo=IncidenciaAsistencia.TIPO_FALTA,
-        estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
-    ).count()
+    from .services_cobertura_permisos import contingencias_en_rango
+    cubiertas = contingencias_en_rango([empleado.pk], desde, fecha)
+    faltas = IncidenciaAsistencia.objects.filter(
+        empleado=empleado, fecha__gte=desde, fecha__lte=fecha,
+        tipo=IncidenciaAsistencia.TIPO_FALTA, estado=IncidenciaAsistencia.ESTADO_PENDIENTE,
+    )
+    con_marcas = set(AsistenciaEmpleado.objects.filter(empleado=empleado,fecha__range=(desde,fecha)).filter(
+        Q(entrada__isnull=False)|Q(salida_comida__isnull=False)|Q(regreso_comida__isnull=False)|Q(salida__isnull=False)
+    ).values_list('fecha',flat=True))
+    return sum((empleado.pk, item.fecha) not in cubiertas or item.fecha in con_marcas for item in faltas)
 
 
 def _emitidas_en_ventana(empleado: Empleado, tipo: str, desde: date, hasta_exclusiva: date) -> int:
@@ -796,6 +799,26 @@ def evaluar_dia_empleado(empleado: Empleado, fecha: date) -> ResultadoEvaluacion
         .filter(empleado=empleado, fecha=fecha)
         .first()
     )
+    from .services_cobertura_permisos import contingencia_en_fecha
+    cobertura = contingencia_en_fecha(empleado, fecha)
+    from .services_cobertura_permisos import tiene_actividad_real
+    if cobertura and not tiene_actividad_real(asistencia):
+        # No crea una checada, falta conciliada ni horas extra. Fuente independiente.
+        for incidencia in IncidenciaAsistencia.objects.filter(
+            empleado=empleado, fecha=fecha, tipo=IncidenciaAsistencia.TIPO_FALTA,
+            editado_manual=False, permiso__isnull=True, solicitud_vacaciones__isnull=True,
+        ).exclude(estado=IncidenciaAsistencia.ESTADO_RESUELTO):
+            anterior = incidencia.estado
+            incidencia.estado = IncidenciaAsistencia.ESTADO_RESUELTO
+            incidencia.severidad = IncidenciaAsistencia.SEVERIDAD_INFO
+            incidencia.metadata = {**incidencia.metadata, "contingencia_id": cobertura.permiso_id}
+            incidencia.save(update_fields=["estado", "severidad", "metadata", "actualizado_en"])
+            IncidenciaAsistenciaBitacora.objects.create(
+                incidencia=incidencia, campo="estado", valor_anterior=anterior,
+                valor_nuevo=incidencia.estado, comentario=f"Permiso empresarial {cobertura.permiso.clave}.",
+            )
+            resueltos += 1
+        return ResultadoEvaluacionAsistencia(evaluados=1, resueltos=resueltos)
     horario = horario_programado_para_fecha(empleado, fecha)
     if horario.estado == ESTADO_DESCANSO:
         tiene_marcas = bool(asistencia and any((
