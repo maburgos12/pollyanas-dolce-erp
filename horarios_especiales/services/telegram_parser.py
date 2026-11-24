@@ -77,3 +77,77 @@ def parse_instruction(text, timestamp, *, strict_branches=False):
     if not ids or len(ids) > 10 or len(set(ids)) != len(ids):
         raise ValueError('Indica sucursales únicas con Google configurado.')
     return ids, [rule]
+
+GROUP_SEPARATOR = r'\b(?:excepto|salvo|(?:en|con)\s+excepcion de)\s+'
+GROUP_PERIOD = rf'\bdel (?:dia )?(?P<start>{DATE}|\d{{1,2}}) al (?:dia )?(?P<end>{DATE})\b'
+GROUP_THIS_WEEK = r'(?:por|durante)\s+esta semana'
+GROUP_HOURS = rf'(?:abiert[oa]s?\s+)?(?:de(?:sde(?: las)?)?\s+)?({TIME})\s*(?:\ba\b|[-–—])\s*({TIME})'
+NOTICE_INTRO = (
+    r'^(?:aviso importante\s+)?'
+    r'(?:priorizando la integridad de nuestro equipo de trabajo y de quienes nos visitan,?\s+)?'
+    r'les informamos que durante esta semana contaremos con un horario temporal de atencion[.:]?\s+'
+)
+NOTICE_END = r'\s+seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario[.!]?\s+[¡!]?gracias por su comprension[!.]*$'
+
+
+def parse_grouped_instruction(text, timestamp):
+    """Return a bounded, fully consumed schedule for the general group and exceptions."""
+    if not isinstance(text, str) or not 1 <= len(text) <= 2000:
+        return None
+    normalized = normalize_text(text).strip(' .')
+    if not re.search(GROUP_SEPARATOR, normalized):
+        return None
+    today = datetime.fromtimestamp(timestamp, ZoneInfo('America/Mazatlan')).date()
+    normalized, notice = re.subn(NOTICE_INTRO, '', normalized, count=1)
+    if notice:
+        normalized = re.sub(NOTICE_END, '', normalized)
+    else:
+        normalized = re.sub(r'^aviso importante[.:]?\s+', '', normalized)
+    period = (
+        re.search(rf'\s+(?:por esta semana\s+)?{GROUP_PERIOD}$', normalized)
+        or re.match(rf'(?:horario temporal\s+)?{GROUP_PERIOD}[:,]?\s+', normalized)
+    )
+    if period:
+        start = period['start']
+        end = period['end']
+        if start.isdecimal():
+            month = re.fullmatch(r'\d{1,2} (de [a-z]+(?: de \d{4})?)', end)
+            if not month:
+                raise ValueError('Indica el mes de inicio del periodo.')
+            start = f'{start} {month[1]}'
+        normalized = (normalized[:period.start()] + normalized[period.end():]).strip()
+    elif notice or re.search(rf'\s+{GROUP_THIS_WEEK}$', normalized):
+        normalized = re.sub(rf'\s+{GROUP_THIS_WEEK}$', '', normalized)
+        monday = today - timedelta(days=today.weekday())
+        start, end = monday.isoformat(), (monday + timedelta(days=6)).isoformat()
+    else:
+        raise ValueError('Indica la fecha de inicio y fin, o escribe «durante esta semana» para el periodo de lunes a domingo.')
+    chunks = re.split(GROUP_SEPARATOR, normalized)
+    if not 2 <= len(chunks) <= 10:
+        raise ValueError('Indica un horario general y hasta nueve grupos de excepciones.')
+
+    def parse_chunk(chunk, general=False):
+        match = re.fullmatch(rf'(.+?)\s+{GROUP_HOURS}', chunk.strip(' ,;:.'))
+        if not match:
+            raise ValueError('Indica apertura y cierre para el horario general y cada grupo de excepciones.')
+        branches = match[1]
+        if general and branches not in ('todas', 'todas las sucursales'):
+            raise ValueError('Para usar excepciones, empieza con «Todas las sucursales» y su horario general.')
+        canonical = f'{branches} del {start} al {end} de {match[2]} a {match[3]}'
+        return parse_instruction(canonical, timestamp, strict_branches=True)
+
+    all_ids, [base_rule] = parse_chunk(chunks[0], general=True)
+    if (date.fromisoformat(base_rule['end_date']) - date.fromisoformat(base_rule['start_date'])).days >= 31:
+        raise ValueError('Los avisos con grupos de horarios admiten hasta 31 días. Indica un periodo más corto.')
+    exceptions = set()
+    rules = []
+    for chunk in chunks[1:]:
+        ids, [rule] = parse_chunk(chunk)
+        if set(ids) & exceptions:
+            raise ValueError('Cada sucursal puede aparecer en un solo grupo de excepciones.')
+        exceptions.update(ids)
+        rules.append({**rule, 'branch_ids': sorted(ids)})
+    default_ids = sorted(set(all_ids) - exceptions)
+    if not default_ids:
+        raise ValueError('Indica al menos una sucursal que conserve el horario general.')
+    return all_ids, [{**base_rule, 'branch_ids': default_ids}, *rules]

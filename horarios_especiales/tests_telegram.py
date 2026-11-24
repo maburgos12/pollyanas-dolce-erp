@@ -1,5 +1,5 @@
 import copy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
@@ -8,10 +8,10 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from core.models import Sucursal
-from horarios_especiales.models import SolicitudHorarioEspecial, SucursalPlataformaExterna, TelegramHoursCursor, TelegramHoursUpdate
+from horarios_especiales.models import SolicitudHorarioEspecial, SucursalAlias, SucursalPlataformaExterna, TelegramHoursCursor, TelegramHoursUpdate
 from horarios_especiales.services.telegram_bot import (TelegramUnavailable, consumer_lock, persist_updates, poll_once,
     prepare_text, process_callback, recover_approved, status_text)
-from horarios_especiales.services.telegram_parser import parse_instruction
+from horarios_especiales.services.telegram_parser import parse_grouped_instruction, parse_instruction
 from horarios_especiales.services.requests import approve_request, create_request_from_rules
 
 STAMP = int(datetime(2026, 11, 22, 23, 30, tzinfo=ZoneInfo('America/Mazatlan')).timestamp())
@@ -115,6 +115,87 @@ class TelegramHoursTests(TestCase):
                 ids, rules = parse_instruction(text, STAMP)
                 self.assertEqual((rules[0]['kind'], rules[0]['start_date'], rules[0].get('end_date')), (kind, start, end))
         self.assertEqual(rules[0]['weekdays'], [0, 2])
+
+
+    def test_one_preview_and_approval_for_notice_with_exceptions(self):
+        from horarios_especiales.services.consumer_receipts import consumer_receipts
+        from horarios_especiales.services.google_projection import approved_rules, projection_fields
+        from horarios_especiales.services.rules import resolve_approved_rule
+        from horarios_especiales.tests_google_projection import REGULAR
+
+        for label, code in [('Sinaloa de Leyva', 'SINALOA_LEYVA'), ('Estación Bamoa', 'BAMOA')]:
+            SucursalAlias.objects.create(alias=label, sucursal=self.branches[code])
+        tunnel = self.branches['EL_TUNEL']
+        prior, payload = create_request_from_rules(raw_text='Horario previo', actor=self.user,
+            branch_ids=[tunnel.pk], rules=[
+                {'kind': 'date', 'start_date': f'2026-11-{day}', 'closed_all_day': False,
+                 'time_windows': [{'open': '14:00', 'close': '22:00'}]} for day in (23, 24)
+            ] + [{'kind': 'weekly', 'start_date': '2026-11-22', 'weekdays': [2],
+                  'closed_all_day': True, 'time_windows': []}])
+        approve_request(request_obj=prior, actor=self.user, expected_revision=payload['revision'])
+        notice = """AVISO IMPORTANTE
+
+Priorizando la integridad de nuestro equipo de trabajo y de quienes nos visitan, les informamos
+que durante esta semana contaremos con un horario temporal de atención
+
+Todas las sucursales de 9:00AM – 7:00PM
+
+En excepción de Sinaloa de Leyva y Estacion Bamoa de 9:00AM A 6:00PM
+
+Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. ¡Gracias por su comprensión!"""
+        update = self.update(notice)
+        monday = datetime(2026, 11, 23, 16, tzinfo=ZoneInfo('America/Mazatlan'))
+        update['message']['date'] = int(monday.timestamp())
+        client = FakeTelegram([update])
+        poll_once(self.config, client)
+        row = TelegramHoursUpdate.objects.get(update_id=1)
+        self.assertEqual(row.state, 'PREVIEW', row.receipt)
+        self.assertEqual(len(client.sent), 1)
+        self.assertEqual(len(client.sent[0]['reply_markup']['inline_keyboard']), 1)
+        self.assertIn('09:00–19:00', client.sent[0]['text'])
+        self.assertIn('09:00–18:00', client.sent[0]['text'])
+        self.assertIn('2026-11-23, 2026-11-24, 2026-11-25', client.sent[0]['text'])
+        self.assertIsNone(row.request.approved_at)
+        callback = self.callback(row)
+        process_callback(callback, self.config, self.user)
+        row.request.refresh_from_db()
+        self.assertEqual(row.request.approved_by, self.user)
+
+        for code, close_hour in [('MATRIZ', 19), ('SINALOA_LEYVA', 18), ('BAMOA', 18), ('EL_TUNEL', 19)]:
+            with self.subTest(branch=code):
+                branch = self.branches[code]
+                target = date(2026, 11, 26)
+                effective = resolve_approved_rule(branch, target)
+                self.assertEqual(effective['request_id'], row.request.pk)
+                self.assertEqual(effective['windows'], [{'open': '09:00', 'close': f'{close_hour}:00'}])
+                _, owned, _, _, _ = projection_fields(current={'regularHours': REGULAR},
+                    rows=approved_rules(branch.pk), today=monday.date(), owned={})
+                self.assertEqual(owned[target.isoformat()][0]['closeTime']['hours'], close_hour)
+        self.assertEqual(resolve_approved_rule(tunnel, date(2026, 11, 23))['request_id'], prior.pk)
+        self.assertTrue(resolve_approved_rule(tunnel, date(2026, 11, 25))['closed_all_day'])
+        with patch('horarios_especiales.services.consumer_receipts.timezone.now', return_value=monday):
+            consumer_receipts(row.request)
+        checked = row.request.execution_summary_json['consumer_readback']['pairs']
+        self.assertEqual(len(checked), 67)
+        self.assertNotIn('EL_TUNEL:2026-11-25', checked)
+
+    def test_notice_requests_clarification_for_ambiguous_or_unparsed_qualifiers(self):
+        cases = (
+            'Todas las sucursales de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm por una semana',
+            'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm excepto BAMOA de 9 am a 5 pm durante esta semana',
+            'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm y el martes cerrado durante esta semana',
+        )
+        for message in cases:
+            with self.subTest(message=message), self.assertRaises(ValueError):
+                parse_grouped_instruction(message, STAMP)
+        ids, rules = parse_grouped_instruction(
+            'Todas de 9 am a 7 pm excepto BAMOA de 9 am a 6 pm por esta semana del día 23 al 29 de noviembre',
+            STAMP,
+        )
+        self.assertEqual(len(ids), 10)
+        self.assertEqual(rules[1]['branch_ids'], [self.branches['BAMOA'].pk])
+        self.assertEqual(rules[1]['start_date'], '2026-11-23')
+        self.assertEqual(rules[1]['end_date'], '2026-11-29')
 
     def test_parser_never_accepts_partial_instruction(self):
         for text in ['Matriz hoy de 1 a 9', 'Matriz hoy cerrado excepto de 1 pm a 9 pm',
