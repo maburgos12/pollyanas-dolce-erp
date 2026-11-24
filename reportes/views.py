@@ -1405,6 +1405,8 @@ def ventas(request: HttpRequest) -> HttpResponse:
             label_key="recipe_name",
         ),
     }
+    from reportes.operational_context import sales_context_from_request
+    context.update(sales_context_from_request(request, visible_date=visible_cut_date))
     return render(request, "reportes/ventas.html", context)
 
 

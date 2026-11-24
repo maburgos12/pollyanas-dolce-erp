@@ -6,7 +6,7 @@
 {% block body_class %}page-reportes-ventas{% endblock %}
 
 {% block extra_css %}
-<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20260526-word-guard-v1">
+<link rel="stylesheet" href="{% static 'css/bi_dashboard.css' %}?v=20261124-contexto-v1">
 {% endblock %}
 
 {% block content %}
@@ -21,6 +21,8 @@
     <a class="module-tab" href="{% url 'reportes:faltantes' %}">Faltantes</a>
     <a class="module-tab" href="{% url 'reportes:proyectos_inversion' %}">Proyectos inversión</a>
   </nav>
+
+  {% include "reportes/partials/operational_context.html" %}
 
   <section class="bi-hero">
     <div class="bi-hero-main">
