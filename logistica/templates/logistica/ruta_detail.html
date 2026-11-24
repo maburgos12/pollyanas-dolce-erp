@@ -508,8 +508,19 @@
     </div>
   </section>
 
-  <section class="card">
+  <section class="card" id="carga-ruta">
     <div class="card-header">Carga esperada CEDIS por parada</div>
+    {% include "logistica/partials/carga_point_estado.html" %}
+    {% if can_manage_logistica %}
+      {% if ruta.estatus == "PLANEADA" or ruta.estatus == "EN_RUTA" %}
+      <form method="post" data-async-action data-capture-snapshot="true" id="actualizar-carga-point" action="{% url 'logistica:ruta_detail' ruta.pk %}#carga-ruta">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="sync_carga_point">
+        <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
+      </form>
+      {% endif %}
+    {% endif %}
+    <div id="carga-operacion-point">
     <div class="point-reception-head">
       <div class="point-reception-copy">
         <p class="muted" style="margin:0;">
@@ -517,11 +528,6 @@
         </p>
       </div>
       {% if can_manage_logistica %}
-      <form method="post" data-route-loading-form data-loading-title="Actualizando carga esperada" data-loading-message="Consultando solicitudes, salidas Point y carga CEDIS...">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="sync_carga_point">
-        <button class="btn btn-secondary" type="submit">Actualizar carga esperada</button>
-      </form>
       {% if ruta.estatus in "EN_RUTA COMPLETADA" %}
       <form method="post" data-route-loading-form data-loading-title="Actualizando recepción Point" data-loading-message="Comparando lo entregado contra recepción de sucursal...">
         {% csrf_token %}
@@ -590,6 +596,7 @@
       </form>
       {% endif %}
     </div>
+    <div id="carga-datos-point">
     {% if recepcion_point_totales %}
     <div class="route-load-subsection">
       <h3 class="route-load-subtitle">Totales por producto</h3>
@@ -680,6 +687,8 @@
           </tbody>
         </table>
       </div>
+    </div>
+    </div>
     </div>
   </section>
 
@@ -931,7 +940,7 @@
     });
   })();
 
-  (function () {
+  window.bindCargaPointFilter = function () {
     const input = document.getElementById("route-load-detail-search");
     const count = document.getElementById("route-load-detail-count");
     const rows = Array.from(document.querySelectorAll("[data-route-load-detail-row]"));
@@ -956,7 +965,8 @@
 
     input.addEventListener("input", applyFilter);
     applyFilter();
-  })();
+  };
+  window.bindCargaPointFilter();
 
   (function () {
     const overlay = document.getElementById("route-loading-overlay");
@@ -976,7 +986,10 @@
       overlay.setAttribute("aria-hidden", "false");
     }
 
+    window.bindRouteLoading = function () {
     document.querySelectorAll("[data-route-loading-form]").forEach(function (form) {
+      if (form.dataset.routeLoadingBound) return;
+      form.dataset.routeLoadingBound = "true";
       form.querySelectorAll("[type=submit]").forEach(function (button) {
         button.addEventListener("click", function () {
           form._routeSubmitter = button;
@@ -988,10 +1001,14 @@
       });
     });
 
+    };
+    window.bindRouteLoading();
+
     window.addEventListener("pageshow", function () {
       overlay.classList.remove("active");
       overlay.setAttribute("aria-hidden", "true");
     });
   })();
 </script>
+<script src="{% static 'logistica/pwa/carga_point_erp.js' %}?v=20261124-cola-controles"></script>
 {% endblock %}

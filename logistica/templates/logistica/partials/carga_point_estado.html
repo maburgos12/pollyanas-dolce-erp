@@ -1,0 +1,4 @@
+<div id="estado-carga-point" data-solicitud-id="{{ carga_point_solicitud.pk|default:'' }}">
+  <p role="status" aria-live="polite" class="muted" data-carga-point-mensaje>{% if carga_point_solicitud %}Consultando el estado de la actualización de carga…{% endif %}</p>
+  <a href="#carga-ruta" data-carga-point-recargar hidden>Ver la carga actualizada</a>
+</div>

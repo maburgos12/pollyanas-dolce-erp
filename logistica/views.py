@@ -21,9 +21,11 @@ from django.utils import timezone
 from core.access import can_manage_submodule, can_view_logistica, can_view_submodule
 from core.audit import log_event
 from core.models import Sucursal
+from pos_bridge.models import PointSyncJob
 from crm.models import PedidoCliente
 
 from .domain_ruta import parada_resuelta_operativamente, point_transfer_enviada
+from .services_carga_point import respuesta_carga_point, solicitar_carga_point_erp
 from .exports_indicadores_abasto import build_indicadores_abasto_xlsx
 from .models import (
     BitacoraSalidaLlegada,
@@ -2237,6 +2239,19 @@ def ruta_detail(request, pk: int):
 
     ruta = get_object_or_404(RutaEntrega, pk=pk)
 
+    if request.method == "GET" and "carga_point_estado" in request.GET:
+        if not can_manage_submodule(request.user, "logistica", "rutas"):
+            raise PermissionDenied("No tienes permisos para gestionar Logística")
+        raw_id = request.GET.get("carga_point_estado", "")
+        job = get_object_or_404(
+            PointSyncJob, pk=int(raw_id) if raw_id.isdigit() else 0,
+            parameters__ruta_id=ruta.pk, parameters__origen="erp", triggered_by=request.user,
+        )
+        payload, status_code = respuesta_carga_point(job)
+        response = JsonResponse(payload, status=status_code)
+        response["Cache-Control"] = "no-store"
+        return response
+
     if request.method == "POST":
         if not can_manage_submodule(request.user, "logistica", "rutas"):
             raise PermissionDenied("No tienes permisos para gestionar Logística")
@@ -2891,9 +2906,7 @@ def ruta_detail(request, pk: int):
 
         if action == "sync_carga_point":
             try:
-                resumen = sincronizar_checklist_carga_desde_point(
-                    ruta=ruta, user=request.user, solo_tramo_vigente=True,
-                )
+                job = solicitar_carga_point_erp(ruta=ruta, user=request.user)
             except ValidationError as exc:
                 messages.error(request, "; ".join(exc.messages) if hasattr(exc, "messages") else str(exc))
             except OperationalError:
@@ -2902,14 +2915,15 @@ def ruta_detail(request, pk: int):
                     "La sincronización se cruzó con otra actualización. Recarga la ruta e intenta de nuevo.",
                 )
             else:
-                if resumen.creadas or resumen.actualizadas:
-                    messages.success(
-                        request,
-                        f"Carga esperada actualizada: {resumen.creadas} línea(s) nueva(s), {resumen.actualizadas} actualizada(s).",
-                    )
-                else:
-                    messages.warning(request, "No hay solicitudes CEDIS ni transferencias abiertas Point para las sucursales de esta ruta.")
-            return redirect("logistica:ruta_detail", pk=ruta.id)
+                payload, status_code = respuesta_carga_point(job)
+                if "application/json" in request.headers.get("Accept", ""):
+                    payload.update(ok=payload["estado"] != "ERROR", target="#estado-carga-point",
+                                   html=render_to_string("logistica/partials/carga_point_estado.html", {"carga_point_solicitud": job}),
+                                   toast={"type": "error" if payload["estado"] == "ERROR" else "info",
+                                          "message": payload.get("detail", "Solicitud registrada. Esperará su turno si Point está ocupado.")})
+                    return JsonResponse(payload, status=status_code)
+                return redirect(f"{reverse('logistica:ruta_detail', args=[ruta.pk])}?carga_point={job.pk}#carga-ruta")
+            return redirect(f"{reverse('logistica:ruta_detail', args=[ruta.pk])}#carga-ruta")
 
         if action == "ruta_status":
             estatus_nuevo = (request.POST.get("estatus") or "").strip().upper()
@@ -3189,6 +3203,10 @@ def ruta_detail(request, pk: int):
         "module_tabs": _module_tabs("rutas", request.user),
         "can_manage_logistica": can_manage_submodule(request.user, "logistica", "rutas"),
         "ruta": ruta,
+        "carga_point_solicitud": PointSyncJob.objects.filter(
+            triggered_by=request.user, parameters__ruta_id=ruta.pk,
+            parameters__mode="logistica_carga_repartidor", parameters__origen="erp",
+        ).first() if can_manage_submodule(request.user, "logistica", "rutas") else None,
         "today": timezone.localdate(),
         "entregas": entregas_qs,
         "pedidos": pedidos_disponibles,

@@ -106,16 +106,20 @@ def actualizar_carga_point_repartidor(*, job_id):
         with point_account_session_lock(wait=True, timeout_seconds=espera) as adquirido:
             if not adquirido or timezone.now() >= vence_en:
                 raise ValidationError(ERROR_SYNC_CARGA_VENCIDA)
+            desde_erp = job.parameters.get("origen") == "erp"
+            if desde_erp and not isinstance(job.parameters.get("contexto"), dict):
+                raise ValidationError("Falta el contexto de la carga. Solicita una nueva actualización.")
             sincronizar_checklist_carga_desde_point(
-                ruta=ruta, user=job.triggered_by, desde_repartidor=True,
+                ruta=ruta, user=job.triggered_by, desde_repartidor=not desde_erp,
                 recarga_cedis_id=job.parameters.get("recarga_cedis_id"),
+                **({"solo_tramo_vigente": True, "contexto_erp": job.parameters.get("contexto")} if desde_erp else {}),
             )
         job.result_summary = {"estado": estado_sync_carga_repartidor(ruta, solicitud=job)}
         job.status = PointSyncJob.STATUS_SUCCESS
     except PointSyncUnavailableError:
         job.error_message = "No se pudo conectar con Point. Vuelve a intentar la actualización."
     except ValidationError as exc:
-        job.error_message = exc.message
+        job.error_message = "; ".join(exc.messages)
     except (PermissionDenied, RutaEntrega.DoesNotExist):
         job.error_message = "La ruta ya no está disponible para actualizar la carga."
     except Exception:

@@ -900,9 +900,12 @@ def validar_ruta_sync_carga_repartidor(ruta: RutaEntrega, user) -> int | None:
 
 def sincronizar_checklist_carga_desde_point(
     *, ruta: RutaEntrega, user=None, ejecutar_sync: bool = True, desde_repartidor: bool = False,
-    recarga_cedis_id: int | None = None, solo_tramo_vigente: bool = False,
+    recarga_cedis_id: int | None = None, solo_tramo_vigente: bool = False, contexto_erp=None,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.get(pk=ruta.pk)
+    if contexto_erp is not None:
+        from .services_carga_point import validar_contexto_carga_erp
+        validar_contexto_carga_erp(ruta=ruta, user=user, contexto=contexto_erp)
     if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
         raise ValidationError("El tramo cambió. Abre Mi ruta y solicita una nueva actualización.")
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:
@@ -924,6 +927,7 @@ def sincronizar_checklist_carga_desde_point(
     return _actualizar_checklist_carga_desde_point(
         ruta=ruta, user=user, sync_job=sync_job, desde_repartidor=desde_repartidor,
         recarga_cedis_id=recarga_cedis_id, solo_tramo_vigente=solo_tramo_vigente,
+        contexto_erp=contexto_erp,
     )
 
 
@@ -971,8 +975,12 @@ def _actualizar_checklist_carga_desde_point(
     desde_repartidor: bool = False,
     recarga_cedis_id: int | None = None,
     solo_tramo_vigente: bool = False,
+    contexto_erp=None,
 ) -> ChecklistCargaResumen:
     ruta = RutaEntrega.objects.select_for_update().get(pk=ruta.pk)
+    if contexto_erp is not None:
+        from .services_carga_point import validar_contexto_carga_erp
+        validar_contexto_carga_erp(ruta=ruta, user=user, contexto=contexto_erp)
     if desde_repartidor and validar_ruta_sync_carga_repartidor(ruta, user) != recarga_cedis_id:
         raise ValidationError("El tramo cambió. Abre Mi ruta y solicita una nueva actualización.")
     if ruta.estatus not in {RutaEntrega.ESTATUS_PLANEADA, RutaEntrega.ESTATUS_EN_RUTA}:

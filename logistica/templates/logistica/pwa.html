@@ -3650,6 +3650,8 @@
         state.actualizandoCargaPoint = true;
         button.disabled = true;
         button.textContent = "Actualizando carga…";
+        const guardarButton = document.querySelector(".load-save-bar button");
+        if (guardarButton) guardarButton.disabled = true;
         const mostrarEstado = (texto) => {
           mensaje = texto;
           if (state.rutaActiva?.ruta?.id === rutaId) {
@@ -3660,7 +3662,7 @@
         mostrarEstado(mensaje);
         try {
           let response = await apiFetch(path, { method: "POST", skipOfflineQueue: true });
-          const limite = Date.now() + 120000;
+          const limite = Date.now() + 300000;
           while (response.status === 202) {
             const { estado } = await response.json();
             mostrarEstado(estado === "RUNNING" ? "Consultando transferencias en Point…" : "La actualización está en espera…");
@@ -5801,7 +5803,7 @@
 
       async function boot() {
         if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v98-carga-point-real", { scope: "/logistica/" }).catch(() => {});
+          navigator.serviceWorker.register("{% url 'logistica:pwa_sw' %}?v=route-control-v100-carga-point-controles", { scope: "/logistica/" }).catch(() => {});
         }
         window.addEventListener("online", () => {
           flushAllOfflineQueues();

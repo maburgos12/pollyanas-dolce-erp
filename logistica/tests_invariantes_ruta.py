@@ -4653,7 +4653,7 @@ const storage = {
 const context = {
   console, URLSearchParams, URL, FormData: global.FormData, Blob: global.Blob, File: global.File, Response: global.Response,
   localStorage: storage, sessionStorage: storage,
-  document: {getElementById: () => ({}), addEventListener: () => {}, hidden: false},
+  document: {getElementById: () => ({}), querySelector: () => null, addEventListener: () => {}, hidden: false},
   window: {
     location: {search: ""}, addEventListener: () => {},
     PDLogisticaOfflineQueue: {prepareReplay: (item) => item}
@@ -5310,8 +5310,8 @@ if (operation === "refresh-during-capture") {
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
         cache_match = re.search(r'const CACHE_NAME = "([^"]+)";', sw)
         self.assertIsNotNone(cache_match)
-        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v98-carga-point-real")
-        self.assertIn("?v=route-control-v98-carga-point-real", html)
+        self.assertEqual(cache_match.group(1), "pollyanas-logistica-pwa-v100-carga-point-controles")
+        self.assertIn("?v=route-control-v100-carga-point-controles", html)
 
     def test_pwa_carga_por_sucursal_usa_un_solo_guardado_atomico(self):
         html = Path("logistica/templates/logistica/pwa.html").read_text(encoding="utf-8")
