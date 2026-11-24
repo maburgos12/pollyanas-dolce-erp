@@ -72,6 +72,7 @@ class CargaDisponiblePointTests(TestCase):
         entrega = EntregaRuta.objects.create(ruta=self.ruta, estatus="ENTREGADA", cliente_nombre="Prueba previa")
         antes = RutaCargaChecklistLinea.objects.filter(pk=previa.pk).values().get()
         antes_entrega = EntregaRuta.objects.filter(pk=entrega.pk).values().get()
+        antes_parada = ParadaRuta.objects.filter(pk=anterior.pk).values().get()
         self.assertEqual(estado_sync_carga_repartidor(self.ruta, solicitud=self.job), "ACTUALIZADA")
         contexto = construir_contexto_operativo(ruta=self.ruta, actor=self.user)
         self.client.force_login(self.user)
@@ -87,6 +88,7 @@ class CargaDisponiblePointTests(TestCase):
         self.assertEqual(recibo["lineas_guardadas"], 1)
         self.assertEqual(RutaCargaChecklistLinea.objects.filter(pk=previa.pk).values().get(), antes)
         self.assertEqual(EntregaRuta.objects.filter(pk=entrega.pk).values().get(), antes_entrega)
+        self.assertEqual(ParadaRuta.objects.filter(pk=anterior.pk).values().get(), antes_parada)
         self.assertFalse(RutaCargaChecklistLinea.objects.filter(point_transfer_line=self.pendiente).exists())
 
     def test_erp_y_app_reciben_actualizada_con_folio_pendiente_sin_alerta_de_fallo(self):
