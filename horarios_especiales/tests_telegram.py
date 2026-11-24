@@ -262,7 +262,13 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
         second = 'El único horario que se conserva de el túnel es el miércoles que es cerrado'
         with_date = ('Sucursal el túnel solo debe conservar miércoles 25 de nov 2026 como cerrado. '
                      'Los días 23 y 24 deben ajustas al nuevo horario')
-        for index, correction in ((1, first), (3, second), (5, with_date)):
+        SucursalAlias.objects.create(sucursal=tunnel, alias='Sucursal El Tunel')
+        copied = (
+            '• Sucursal El Tunel · lunes 23 nov 2026 · 14:00–22:00\n'
+            '• Sucursal El Tunel · martes 24 nov 2026 · 14:00–22:00\n'
+            'No, esas también de modifican de 09:00–19:00'
+        )
+        for index, correction in ((1, first), (3, second), (5, with_date), (7, copied)):
             client = FakeTelegram([self.update(notice, id=index), self.update(correction, id=index+1)])
             poll_once(self.config, client)
             row = TelegramHoursUpdate.objects.get(update_id=index+1)
@@ -273,7 +279,7 @@ Seguimos atendiendo sus pedidos con el gusto de siempre dentro de este horario. 
             self.assertIn('23 nov 2026 al 24 nov 2026', row.receipt['text'])
             self.assertIsNone(row.request.approved_at)
         self.assertEqual(resolve_approved_rule(tunnel, date(2026, 11, 23))['request_id'], prior.pk)
-        process_callback(self.callback(row, id=7), self.config, self.user)
+        process_callback(self.callback(row, id=9), self.config, self.user)
         row.request.refresh_from_db()
         self.assertEqual(row.request.approved_by, self.user)
         for day in (23, 24, 26, 27, 28, 29):

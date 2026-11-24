@@ -575,12 +575,13 @@ def prepare_text(row, text, config, actor, *, strict_branches=False):
     except (ValueError, OverflowError, KeyError, TypeError) as exc:
         draft = telegram_reasoning.draft_for(config, row) if contextual else None
         if draft:
-            result = telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
-            if result is None:
+            copied = telegram_reasoning.copied_schedule_change(text)
+            result = None if copied else telegram_reasoning.explicit_replacement(draft.request.canonical_payload, text)
+            if result is None and copied is None:
                 telegram_reasoning.queue(row, text, draft)
                 return
             try:
-                telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result)
+                telegram_reasoning.apply_correction(row, config, actor, draft, {'text': text}, result, copied=copied)
             except telegram_reasoning.CorrectionNeedsInterpretation:
                 telegram_reasoning.queue(row, text, draft)
                 return
